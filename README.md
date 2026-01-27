@@ -3,7 +3,8 @@
 > A highly scalable, cloud-native integration hub designed to connect internal and external systems through a marketplace-driven ecosystem.
 
 ![Status](https://img.shields.io/badge/status-research-blue)
-![License](https://img.shields.io/badge/license-TBD-lightgrey)
+![License](https://img.shields.io/badge/license-Fair_Source-orange)
+![Commercial](https://img.shields.io/badge/commercial-license_required-red)
 
 ## Vision
 
@@ -126,7 +127,7 @@ We're currently in the research phase, evaluating technologies and designing the
 - Developer experience
 - Documentation
 
-**Estimated Timeline**: 4-6 months of research with 3-4 engineers
+**Estimated Timeline**: 2 weeks research + 9 weeks development = **11 weeks to POC**
 
 ## Getting Started (Coming Soon)
 
@@ -148,17 +149,46 @@ We're in the early research phase. If you'd like to contribute:
 
 ## Project Status
 
-| Milestone | Status | Target Date |
-|-----------|--------|-------------|
-| Research Phase | 🔵 In Progress | Q2 2026 |
-| Proof of Concept | ⚪ Planned | Q3 2026 |
-| Alpha Release | ⚪ Planned | Q4 2026 |
-| Beta Release | ⚪ Planned | Q1 2027 |
-| Production Release | ⚪ Planned | Q2 2027 |
+**🚀 Aggressive Timeline - POC by Mid-April 2026**
+
+| Milestone | Status | Target Date | Duration |
+|-----------|--------|-------------|----------|
+| Research Phase | 🔵 In Progress | Jan 27 - Feb 9 | **2 weeks** |
+| Core Development | ⚪ Planned | Feb 10 - Mar 23 | 6 weeks |
+| Integration & Testing | ⚪ Planned | Mar 24 - Apr 7 | 2 weeks |
+| Documentation & Polish | ⚪ Planned | Apr 8 - Apr 15 | 1 week |
+| **POC Release** | ⚪ Planned | **Apr 15, 2026** | **11 weeks total** |
+| Alpha Release | ⚪ Future | Q3 2026 | TBD |
+| Production Release | ⚪ Future | Q4 2026 | TBD |
+
+**See detailed timeline**: [docs/ACCELERATED_TIMELINE.md](docs/ACCELERATED_TIMELINE.md)
 
 ## License
 
-TBD (To Be Determined during research phase)
+VRSky is licensed under the **Fair Source License** (1 user).
+
+### Free Use ✅
+
+**FREE** for:
+- **Personal use** (1 user)
+- **Educational institutions** (unlimited)
+- **Non-profit organizations** (unlimited)
+
+### Commercial Use 💰
+
+**Commercial license required** for:
+- Companies with 2+ users
+- Production commercial deployments
+- Managed service offerings
+
+**[View Commercial License Details →](COMMERCIAL_LICENSE.md)**
+
+### Summary
+
+VRSky is **source-available** software. The code is publicly available on GitHub, but commercial use with multiple users requires a paid license. This ensures the project remains sustainable while being freely available for personal, educational, and non-profit use.
+
+**License**: [Fair Source License](LICENSE)  
+**Commercial**: Contact sales@valueretail.com
 
 ## Contact & Community
 
