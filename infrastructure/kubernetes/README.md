@@ -301,7 +301,7 @@ kubectl get networkpolicies -A
 kubectl logs -n vrsky-database postgresql-0
 
 # Test connection from another pod
-kubectl run -it --rm psql-test --image=postgres:15-alpine --restart=Never -n vrsky-database -- \
+kubectl run -it --rm psql-test --image=postgres:18-alpine --restart=Never -n vrsky-database -- \
   psql -h postgresql.vrsky-database.svc.cluster.local -U vrsky -d vrsky
 
 # Check secret

@@ -370,7 +370,7 @@ spec:
     spec:
       containers:
         - name: nats
-          image: nats:2.10-alpine
+          image: nats:2.12-alpine
           args:
             - "-js"
             - "-c"
@@ -421,7 +421,7 @@ spec:
     spec:
       containers:
         - name: nats
-          image: nats:2.10-alpine
+          image: nats:2.12-alpine
           args:
             - "-m"
             - "8222" # Monitoring port

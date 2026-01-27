@@ -29,7 +29,7 @@ VRSky is a highly scalable, cloud-native integration platform (iPaaS) currently 
 | --------------------- | -------------------------- | ------------------------------------------ |
 | **Backend**           | Go 1.21+                   | Core platform services, high concurrency   |
 | **Messaging**         | NATS + JetStream           | Message transport, 11M+ msgs/sec           |
-| **Database**          | PostgreSQL 15+             | Metadata, tenant config, integration state |
+| **Database**          | PostgreSQL 18+             | Metadata, tenant config, integration state |
 | **Object Storage**    | MinIO (local) / S3 (cloud) | Large payload temporary storage            |
 | **Container Runtime** | Docker + Kubernetes        | Orchestration and deployment               |
 | **API Gateway**       | Kong                       | API management and routing                 |

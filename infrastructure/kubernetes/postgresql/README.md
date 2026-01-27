@@ -1,11 +1,11 @@
 # PostgreSQL Deployment
 
-This directory contains Kubernetes manifests for deploying PostgreSQL 15 as the VRSky platform database.
+This directory contains Kubernetes manifests for deploying PostgreSQL 18 as the VRSky platform database.
 
 ## Architecture
 
 - **Type**: StatefulSet (1 replica for POC)
-- **Version**: PostgreSQL 15 Alpine
+- **Version**: PostgreSQL 18 Alpine
 - **Resources**: 4 CPU, 8GB RAM (requests: 2 CPU, 4GB RAM)
 - **Storage**: 50GB via Longhorn distributed storage
 - **Persistence**: Full durability via Longhorn replication
@@ -221,7 +221,7 @@ spec:
         spec:
           containers:
             - name: backup
-              image: postgres:15-alpine
+              image: postgres:18-alpine
               command:
                 - /bin/sh
                 - -c
@@ -314,7 +314,7 @@ kubectl exec -n vrsky-database postgresql-0 -- \
 kubectl get svc -n vrsky-database
 
 # Test connection from another pod
-kubectl run -it --rm pg-test --image=postgres:15-alpine --restart=Never -n vrsky-database -- \
+kubectl run -it --rm pg-test --image=postgres:18-alpine --restart=Never -n vrsky-database -- \
   psql -h postgresql.vrsky-database.svc.cluster.local -U vrsky -d vrsky
 ```
 

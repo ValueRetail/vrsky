@@ -28,7 +28,7 @@ This highly aggressive timeline achieves a working POC in **11 weeks** by making
 - **Messaging**: Hybrid NATS (Platform HA cluster + Tenant ephemeral instances)
 - **State Management**: NATS KV (no Redis)
 - **Object Storage**: MinIO (local) / S3 (cloud)
-- **Database**: PostgreSQL 15+
+- **Database**: PostgreSQL 18+
 - **Container Orchestration**: Kubernetes
 - **Multi-Tenancy**: Physical isolation via dedicated NATS instances
 - **Message Threshold**: 256KB (larger payloads → object storage)

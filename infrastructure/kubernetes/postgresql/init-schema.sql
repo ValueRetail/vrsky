@@ -1,5 +1,5 @@
 -- VRSky Platform Database Schema
--- PostgreSQL 15+
+-- PostgreSQL 18+
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

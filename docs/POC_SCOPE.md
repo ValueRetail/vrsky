@@ -158,7 +158,7 @@ This document clearly defines what features and capabilities **MUST** be include
 
 #### 10. Database
 
-- ✅ PostgreSQL 15+ for metadata
+- ✅ PostgreSQL 18+ for metadata
   - Tenant configuration
   - Integration definitions
   - Component registry
