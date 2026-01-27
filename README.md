@@ -170,18 +170,32 @@ VRSky is licensed under the **Fair Source License** (1 user).
 ### Free Use ✅
 
 **FREE** for:
-- **Personal use** (1 user)
-- **Educational institutions** (unlimited)
-- **Non-profit organizations** (unlimited)
+- **Personal use** (1 user, internal projects only)
+- **Educational institutions** (unlimited, internal use only)
+- **Non-profit organizations** (unlimited, internal use only)
+
+⚠️ **Internal Use Only** - Free licenses do NOT permit offering VRSky as a service to others.
 
 ### Commercial Use 💰
 
 **Commercial license required** for:
 - Companies with 2+ users
 - Production commercial deployments
-- Managed service offerings
+- Internal business integrations
+
+⚠️ **Service Provider Use Prohibited** - Standard commercial licenses are for internal use only.
+
+**Service Provider License required** for:
+- Offering VRSky as a managed/hosted service
+- Building SaaS/iPaaS platforms using VRSky
+- Multi-tenant service provider deployments
+- Reselling VRSky access to customers
 
 **[View Commercial License Details →](COMMERCIAL_LICENSE.md)**
+
+### Delayed Open Source Publication ⏰
+
+VRSky follows Fair Source principles: **each version becomes Open Source (Apache 2.0) two years after its release** or when discontinued. This ensures long-term community availability while supporting sustainable development.
 
 ### Summary
 

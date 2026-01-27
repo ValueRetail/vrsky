@@ -22,6 +22,28 @@ legal entities controlling, controlled by, or under common control with you.
 If you exceed the Use Limitation, your use is subject to payment of
 Licensor's then-current list price for licenses.
 
+Service Provider Restriction: You may NOT use the Software to provide any
+hosted, managed, or software-as-a-service (SaaS) offering to third parties,
+whether for a fee or free of charge. This restriction applies to both free
+and commercial license holders. You may only use the Software for your own
+internal business operations. Specifically prohibited uses include but are
+not limited to:
+- Offering VRSky as a managed service to customers
+- Providing integration-platform-as-a-service (iPaaS) using VRSky
+- Reselling access to VRSky infrastructure
+- Operating a multi-tenant SaaS platform based on VRSky
+- Any use where third parties directly interact with VRSky as a service
+
+For service provider or SaaS licensing, contact Licensor separately.
+
+Delayed Open Source Publication: On the second anniversary of each version's
+initial release, or upon discontinuation of the product, whichever occurs
+first, the Licensor will re-license that version under the Apache License 2.0
+or another Open Source Initiative (OSI) approved license. This ensures the
+Software will eventually become Open Source Software, providing long-term
+availability to the community while allowing the Licensor to maintain a
+sustainable business model during active development.
+
 Conditions: Redistribution in source code or other forms must include a copy
 of this license document to be provided in a reasonable manner. Any
 redistribution of the Software is only allowed subject to this license.
