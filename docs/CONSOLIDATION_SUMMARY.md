@@ -1,12 +1,13 @@
 # Issue Consolidation Complete - Summary
 
 **Date**: January 27, 2026  
+**Last Updated**: January 27, 2026 (Post-NATS Architecture)  
 **Status**: ✅ COMPLETE  
-**Result**: 17 issues → 9 issues (6 active build tasks + 3 deferred)
+**Result**: 17 issues → 10 issues (7 active build tasks + 3 deferred)
 
 ---
 
-## Active Build Issues (6)
+## Active Build Issues (7)
 
 These are the actionable tasks for POC development:
 
@@ -22,11 +23,11 @@ These are the actionable tasks for POC development:
 **Scope**: NATS accounts + API keys  
 **Merged**: #7
 
-### #18: Build Connector SDK & Essential Connectors (NEW)
-**Timeline**: Week 2-6 (Feb 3 - Mar 9)  
-**Team**: 2 engineers  
-**Scope**: SDK + 6 connectors (HTTP, File, DB, JSON/XML converters)  
-**Merged**: #6, part of #5
+### #8: API Gateway, Monitoring & Observability
+**Timeline**: Week 3-6 (Feb 10 - Mar 9)  
+**Team**: 1-2 engineers  
+**Scope**: Kong/Traefik + Prometheus + Grafana + Loki  
+**Merged**: #13
 
 ### #14: Infrastructure, Deployment & Developer Tools
 **Timeline**: Week 1-4 (Jan 27 - Feb 23)  
@@ -34,17 +35,43 @@ These are the actionable tasks for POC development:
 **Scope**: Docker Compose + K8s + CI/CD + CLI  
 **Merged**: #16
 
-### #8: API Gateway, Monitoring & Observability
-**Timeline**: Week 3-6 (Feb 10 - Mar 9)  
-**Team**: 1-2 engineers  
-**Scope**: Kong/Traefik + Prometheus + Grafana + Loki  
-**Merged**: #13
-
 ### #15: Integration Testing, Performance & Demo Scenarios
 **Timeline**: Week 9-11 (Mar 24 - Apr 15)  
 **Team**: 2-3 engineers  
 **Scope**: Testing + 4 demos + documentation  
 **Merged**: #17
+
+### #18: Build Connector SDK & Essential Connectors
+**Timeline**: Week 2-6 (Feb 3 - Mar 9)  
+**Team**: 2 engineers  
+**Scope**: SDK + 6 connectors (HTTP, File, DB, JSON/XML converters)  
+**Merged**: #6, part of #5
+
+### NATS Architecture Issues (Added Post-Architecture Decision)
+
+### #19: NATS Instance Auto-Scaling & Lifecycle Management
+**Timeline**: Week 5-7 (Feb 24 - Mar 16)  
+**Team**: 1 engineer (Backend/DevOps)  
+**Scope**: Auto-provision tenant NATS instances, lifecycle management, cleanup  
+**Priority**: P1-high
+
+### #20: NATS KV State Tracking & Retry Logic
+**Timeline**: Week 2-4 (Feb 3 - Feb 23)  
+**Team**: 1 engineer (Backend)  
+**Scope**: Message state tracking, retry queue, DLQ using NATS KV  
+**Priority**: P1-high
+
+### #21: Service Discovery for Tenant NATS Instances
+**Timeline**: Week 2-4 (Feb 3 - Feb 23)  
+**Team**: 1 engineer (Backend)  
+**Scope**: Worker discovery of tenant NATS, connection management  
+**Priority**: P1-high
+
+### #22: NATS Monitoring & Observability Dashboards
+**Timeline**: Week 5-7 (Feb 24 - Mar 16)  
+**Team**: 1 engineer (DevOps/Observability)  
+**Scope**: NATS-specific metrics, Grafana dashboards, alerts  
+**Priority**: P2-medium
 
 ---
 
@@ -89,8 +116,8 @@ These were merged into consolidated issues:
 
 ### 1. Reduced Overhead
 - **Before**: 17 issues to track and update
-- **After**: 6 active build issues
-- **Reduction**: 65% fewer issues
+- **After**: 10 total issues (7 active build issues + 3 deferred)
+- **Reduction**: 41% fewer issues (focused on actionable work)
 
 ### 2. Action-Oriented
 - Removed "Research:" prefix from all active issues
@@ -120,14 +147,20 @@ These were merged into consolidated issues:
 - #1: Core Platform (NATS, components)
 - #14: Infrastructure (Docker Compose, K8s)
 
-### Week 2-4 (Feb 3 - Feb 23): Core Services
+### Week 2-4 (Feb 3 - Feb 23): Core Services & NATS
 - #1: Orchestration, integration API
 - #4: Multi-tenant isolation & auth
 - #14: CI/CD pipeline
+- #20: NATS KV state tracking & retry logic
+- #21: Service discovery for tenant NATS
 
 ### Week 2-6 (Feb 3 - Mar 9): Connectors & Observability
 - #18: SDK + 6 connectors
 - #8: API Gateway + monitoring
+
+### Week 5-7 (Feb 24 - Mar 16): NATS Advanced Features
+- #19: NATS auto-scaling & lifecycle
+- #22: NATS monitoring dashboards
 
 ### Week 9-11 (Mar 24 - Apr 15): Testing & Launch
 - #15: Load testing, demos, documentation
@@ -150,11 +183,13 @@ These were merged into consolidated issues:
 ## Next Steps
 
 1. ✅ Issue consolidation complete
-2. [ ] Assign engineers to each consolidated issue
-3. [ ] Create GitHub Project board with 6 active issues
-4. [ ] Start building (#1 and #14 immediately)
-5. [ ] Daily standups at 9 AM
-6. [ ] Weekly demos every Friday at 4 PM
+2. ✅ NATS architecture finalized (hybrid model)
+3. ✅ 4 additional NATS-specific issues created (#19, #20, #21, #22)
+4. [ ] Assign engineers to each issue following execution order
+5. [ ] Create GitHub Project board with all 10 issues
+6. [ ] Start building (#1 and #14 in parallel)
+7. [ ] Daily standups at 9 AM
+8. [ ] Weekly demos every Friday at 4 PM
 
 ---
 
