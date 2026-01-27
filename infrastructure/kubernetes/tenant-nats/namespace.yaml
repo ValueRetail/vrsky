@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vrsky-tenants
+  labels:
+    name: vrsky-tenants
+    component: tenant-infrastructure

@@ -1,0 +1,128 @@
+# Prometheus Helm Chart Values
+# Install with: helm install prometheus prometheus-community/kube-prometheus-stack -n vrsky-monitoring -f prometheus-values.yaml
+
+# Global settings
+fullnameOverride: prometheus
+
+# Prometheus Configuration
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: "45GB"
+
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+    # Scrape interval
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+    # Service monitor selectors
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+    # Additional scrape configs for VRSky services
+    additionalScrapeConfigs:
+      # Platform NATS monitoring
+      - job_name: "platform-nats"
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - vrsky-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: nats-platform
+          - source_labels: [__address__]
+            target_label: __address__
+            replacement: $1:8222
+        metrics_path: /metrics
+
+      # Tenant NATS monitoring
+      - job_name: "tenant-nats"
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - vrsky-tenants
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: nats
+          - source_labels: [__meta_kubernetes_pod_label_tenant_id]
+            target_label: tenant_id
+          - source_labels: [__meta_kubernetes_pod_label_instance_num]
+            target_label: instance_num
+          - source_labels: [__address__]
+            target_label: __address__
+            replacement: $1:8222
+        metrics_path: /metrics
+
+      # PostgreSQL monitoring (requires postgres_exporter)
+      - job_name: "postgresql"
+        static_configs:
+          - targets: ["postgresql.vrsky-database.svc.cluster.local:9187"]
+
+      # MinIO monitoring
+      - job_name: "minio"
+        metrics_path: /minio/v2/metrics/cluster
+        static_configs:
+          - targets: ["minio.vrsky-storage.svc.cluster.local:9000"]
+
+# Alertmanager Configuration
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# Grafana (disabled - we'll install separately with custom values)
+grafana:
+  enabled: false
+
+# Node Exporter (enabled)
+nodeExporter:
+  enabled: true
+
+# Kube State Metrics (enabled)
+kubeStateMetrics:
+  enabled: true
+
+# Default alert rules
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false # Not using external etcd
+    kubeApiserver: true
+    kubeScheduler: true
+    node: true
+    prometheus: true

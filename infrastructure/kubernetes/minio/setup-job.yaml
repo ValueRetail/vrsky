@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-setup
+  namespace: vrsky-storage
+  labels:
+    app: minio-setup
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: minio-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for MinIO to be ready..."
+              sleep 20
+
+              # Configure mc client
+              mc alias set vrsky-minio http://minio.vrsky-storage.svc.cluster.local:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+
+              echo "Creating default bucket: vrsky-objects..."
+              mc mb --ignore-existing vrsky-minio/vrsky-objects
+
+              echo "Setting lifecycle policy (15 minute TTL for temp objects)..."
+              cat > /tmp/lifecycle.json <<EOF
+              {
+                "Rules": [
+                  {
+                    "ID": "DeleteTempObjects",
+                    "Status": "Enabled",
+                    "Filter": {
+                      "Prefix": "temp/"
+                    },
+                    "Expiration": {
+                      "Days": 1
+                    }
+                  }
+                ]
+              }
+              EOF
+              mc ilm import vrsky-minio/vrsky-objects < /tmp/lifecycle.json
+
+              echo "Setting bucket versioning to disabled (ephemeral storage)..."
+              mc version suspend vrsky-minio/vrsky-objects
+
+              echo "Creating tenant buckets structure..."
+              mc mb --ignore-existing vrsky-minio/vrsky-objects/tenants
+
+              echo "Setting public policy for webhook endpoints (if needed)..."
+              # mc anonymous set download vrsky-minio/vrsky-objects/public
+
+              echo "MinIO setup complete!"
+
+              # List buckets to verify
+              mc ls vrsky-minio
+
+              # Show bucket info
+              mc stat vrsky-minio/vrsky-objects
+
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey

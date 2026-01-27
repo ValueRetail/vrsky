@@ -1,0 +1,112 @@
+# Grafana Helm Chart Values
+# Install with: helm install grafana grafana/grafana -n vrsky-monitoring -f grafana-values.yaml
+
+# Admin credentials
+adminUser: admin
+# CHANGE THIS PASSWORD!
+adminPassword: "changeme-grafana-password"
+
+# Persistence
+persistence:
+  enabled: true
+  storageClassName: longhorn
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Resources
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+# Datasources
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-kube-prometheus-prometheus.vrsky-monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: 30s
+
+# Dashboard providers
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: "default"
+        orgId: 1
+        folder: "VRSky"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+# Pre-installed dashboards
+dashboards:
+  default:
+    # Kubernetes cluster monitoring
+    kubernetes-cluster:
+      gnetId: 7249
+      revision: 1
+      datasource: Prometheus
+
+    # Node Exporter Full
+    node-exporter:
+      gnetId: 1860
+      revision: 27
+      datasource: Prometheus
+
+    # NATS monitoring dashboard
+    nats-dashboard:
+      gnetId: 2279
+      revision: 3
+      datasource: Prometheus
+
+    # PostgreSQL dashboard
+    postgresql-dashboard:
+      gnetId: 9628
+      revision: 7
+      datasource: Prometheus
+
+    # MinIO dashboard
+    minio-dashboard:
+      gnetId: 13502
+      revision: 2
+      datasource: Prometheus
+
+# Ingress (optional - enable if you want external access)
+ingress:
+  enabled: false
+  # ingressClassName: nginx
+  # hosts:
+  #   - grafana.vrsky.example.com
+  # tls:
+  #   - secretName: grafana-tls
+  #     hosts:
+  #       - grafana.vrsky.example.com
+
+# Service
+service:
+  type: ClusterIP
+  port: 80
+
+# Environment variables
+env:
+  GF_SERVER_ROOT_URL: "http://grafana.vrsky.svc.cluster.local"
+  GF_SECURITY_ADMIN_USER: admin
+  GF_SECURITY_ADMIN_PASSWORD: changeme-grafana-password
+  GF_INSTALL_PLUGINS: ""
+# Enable anonymous auth for POC (DISABLE IN PRODUCTION!)
+# grafana.ini:
+#   auth.anonymous:
+#     enabled: true
+#     org_role: Viewer

@@ -1,0 +1,87 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrsky-ingress
+  namespace: vrsky-platform
+  annotations:
+    # Use nginx ingress controller
+    kubernetes.io/ingress.class: nginx
+
+    # Enable cert-manager for TLS
+    cert-manager.io/cluster-issuer: letsencrypt-staging # Change to letsencrypt-prod after testing
+
+    # Redirect HTTP to HTTPS
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Enable CORS (if needed for web UI)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+
+    # Increase body size for large payloads (before MinIO redirect)
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # Timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+spec:
+  tls:
+    - hosts:
+        - api.vrsky.example.com # CHANGE THIS to your domain!
+        - grafana.vrsky.example.com
+      secretName: vrsky-tls-cert
+
+  rules:
+    # API Gateway (Control Plane)
+    - host: api.vrsky.example.com # CHANGE THIS!
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-api-gateway # Will be created when API Gateway is deployed
+                port:
+                  number: 8080
+
+    # Grafana Dashboard
+    - host: grafana.vrsky.example.com # CHANGE THIS!
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 80
+---
+# Ingress for monitoring namespace (Grafana)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: vrsky-monitoring
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+spec:
+  tls:
+    - hosts:
+        - grafana.vrsky.example.com
+      secretName: grafana-tls-cert
+
+  rules:
+    - host: grafana.vrsky.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 80

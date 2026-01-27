@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats-${TENANT_ID}-${INSTANCE_NUM}
+  namespace: vrsky-tenants
+  labels:
+    app: nats
+    component: tenant-messaging
+    tenant-id: ${TENANT_ID}
+    instance-num: "${INSTANCE_NUM}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+      tenant-id: ${TENANT_ID}
+      instance-num: "${INSTANCE_NUM}"
+  template:
+    metadata:
+      labels:
+        app: nats
+        component: tenant-messaging
+        tenant-id: ${TENANT_ID}
+        instance-num: "${INSTANCE_NUM}"
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+
+          args:
+            - --port
+            - "4222"
+            - --http_port
+            - "8222"
+            - --server_name
+            - nats-${TENANT_ID}-${INSTANCE_NUM}
+            - --max_payload
+            - 8MB
+            - --max_connections
+            - "1000"
+
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 8222
+              name: monitor
+
+          env:
+            - name: TENANT_ID
+              value: "${TENANT_ID}"
+            - name: INSTANCE_NUM
+              value: "${INSTANCE_NUM}"
+
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - nats-server --signal quit

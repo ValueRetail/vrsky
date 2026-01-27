@@ -9,6 +9,7 @@
 ## Context
 
 VRSky requires a messaging infrastructure that supports:
+
 - High throughput (millions of messages per day)
 - Multi-tenant isolation
 - Ephemeral message transport (no long-term persistence in core platform)
@@ -81,16 +82,17 @@ We will implement a **hybrid dual-NATS architecture**:
 
 **Purpose**: Durable state tracking and platform-wide operations
 
-| Property | Value |
-|----------|-------|
-| **Deployment** | 3-5 node HA cluster (Kubernetes StatefulSet) |
-| **NATS Mode** | JetStream enabled + NATS KV |
-| **Replication** | R3 (3-way replication for durability) |
-| **Resources** | 4 CPU, 8GB RAM per node |
-| **Storage** | 100GB SSD per node (JetStream streams) |
-| **Uptime SLA** | 99.9% (HA with automatic failover) |
+| Property        | Value                                        |
+| --------------- | -------------------------------------------- |
+| **Deployment**  | 3-5 node HA cluster (Kubernetes StatefulSet) |
+| **NATS Mode**   | JetStream enabled + NATS KV                  |
+| **Replication** | R3 (3-way replication for durability)        |
+| **Resources**   | 4 CPU, 8GB RAM per node                      |
+| **Storage**     | 100GB SSD per node (JetStream streams)       |
+| **Uptime SLA**  | 99.9% (HA with automatic failover)           |
 
 **Use Cases**:
+
 - ✅ Message state tracking (processing status)
 - ✅ Dead letter queue (failed messages)
 - ✅ Retry queue (messages awaiting retry)
@@ -99,22 +101,23 @@ We will implement a **hybrid dual-NATS architecture**:
 - ✅ Cross-tenant integrations (future feature)
 
 **KV Bucket Schema**:
+
 ```yaml
 message_state:
   ttl: 15 minutes
   max_bytes: 10GB
   replicas: 3
-  
+
 integration_locks:
   ttl: 5 minutes
   max_bytes: 1GB
   replicas: 3
-  
+
 retry_queue:
   ttl: 1 hour
   max_bytes: 50GB
   replicas: 3
-  
+
 dead_letter_queue:
   ttl: 7 days
   max_bytes: 100GB
@@ -127,20 +130,22 @@ dead_letter_queue:
 
 **Purpose**: Fast, ephemeral message transport within tenant boundary
 
-| Property | Value |
-|----------|-------|
-| **Deployment** | Single-node NATS Core (Kubernetes Pod) |
-| **NATS Mode** | Core only (no JetStream, no KV) |
-| **Resources** | 2 CPU, 4GB RAM per instance |
-| **Storage** | None (ephemeral, in-memory only) |
+| Property       | Value                                       |
+| -------------- | ------------------------------------------- |
+| **Deployment** | Single-node NATS Core (Kubernetes Pod)      |
+| **NATS Mode**  | Core only (no JetStream, no KV)             |
+| **Resources**  | 2 CPU, 4GB RAM per instance                 |
+| **Storage**    | None (ephemeral, in-memory only)            |
 | **Uptime SLA** | 99% (Kubernetes auto-restart, 30s-2min gap) |
 
 **Capacity Limits per Instance**:
+
 - **Max Integrations**: 50-100 (scale at 50)
 - **Max Throughput**: 100K-500K msgs/sec
 - **Max Concurrent Connections**: 500-1000
 
 **Scaling Triggers**:
+
 ```
 if integrations >= 50:
     provision_new_nats_instance(tenant_id)
@@ -152,6 +157,7 @@ if msg_rate_sustained > 100K msgs/sec for 5 min:
 ```
 
 **Naming Convention**:
+
 ```
 nats-{tenant-id}-{instance-number}
 
@@ -170,6 +176,7 @@ Examples:
 When a new NATS instance is provisioned:
 
 1. **Kubernetes Service** created:
+
    ```yaml
    apiVersion: v1
    kind: Service
@@ -182,11 +189,12 @@ When a new NATS instance is provisioned:
        tenant: tenant-a
        instance: "1"
      ports:
-     - port: 4222
-       name: client
+       - port: 4222
+         name: client
    ```
 
 2. **Internal DNS entry** auto-registered:
+
    ```
    nats-tenant-a-1.vrsky-tenants.svc.cluster.local:4222
    ```
@@ -298,20 +306,20 @@ RECEIVED → PROCESSING → COMPLETED
 ```go
 func processMessage(msg *nats.Msg) {
     msgID := msg.Header.Get("Message-ID")
-    
+
     // Get current state from Platform NATS KV
     state := platformKV.Get(msgID)
-    
+
     if state.RetryCount >= 3 {
         // Move to dead letter queue
         deadLetterQueue.Publish(msg)
         platformKV.Put(msgID, {status: "dead_letter", retry_count: 3})
         return
     }
-    
+
     // Track processing
     platformKV.Put(msgID, {status: "processing", retry_count: state.RetryCount})
-    
+
     err := doWork(msg)
     if err != nil {
         // Schedule retry with exponential backoff
@@ -320,7 +328,7 @@ func processMessage(msg *nats.Msg) {
         platformKV.Put(msgID, {status: "retry", retry_count: state.RetryCount + 1})
         return
     }
-    
+
     // Success
     platformKV.Put(msgID, {status: "completed", retry_count: state.RetryCount})
 }
@@ -329,6 +337,7 @@ func processMessage(msg *nats.Msg) {
 ### Dead Letter Queue
 
 **After 3 failed retries**:
+
 1. Message moved to `dead_letter_queue` stream in Platform NATS
 2. Tenant notified via webhook/email
 3. Message retained for 7 days
@@ -341,6 +350,7 @@ func processMessage(msg *nats.Msg) {
 ### Kubernetes Manifests
 
 **Platform NATS** (StatefulSet):
+
 ```yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -359,35 +369,36 @@ spec:
         app: nats-platform
     spec:
       containers:
-      - name: nats
-        image: nats:2.10-alpine
-        args:
-        - "-js"
-        - "-c"
-        - "/etc/nats/nats.conf"
+        - name: nats
+          image: nats:2.10-alpine
+          args:
+            - "-js"
+            - "-c"
+            - "/etc/nats/nats.conf"
+          resources:
+            requests:
+              cpu: 2
+              memory: 4Gi
+            limits:
+              cpu: 4
+              memory: 8Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+            - name: jetstream
+              mountPath: /data/jetstream
+  volumeClaimTemplates:
+    - metadata:
+        name: jetstream
+      spec:
+        accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            cpu: 2
-            memory: 4Gi
-          limits:
-            cpu: 4
-            memory: 8Gi
-        volumeMounts:
-        - name: config
-          mountPath: /etc/nats
-        - name: jetstream
-          mountPath: /data/jetstream
-  volumeClaimTemplates:
-  - metadata:
-      name: jetstream
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 100Gi
+            storage: 100Gi
 ```
 
 **Tenant NATS** (Deployment, dynamically created):
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -409,18 +420,18 @@ spec:
         instance: "1"
     spec:
       containers:
-      - name: nats
-        image: nats:2.10-alpine
-        args:
-        - "-m"
-        - "8222"  # Monitoring port
-        resources:
-          requests:
-            cpu: 1
-            memory: 2Gi
-          limits:
-            cpu: 2
-            memory: 4Gi
+        - name: nats
+          image: nats:2.10-alpine
+          args:
+            - "-m"
+            - "8222" # Monitoring port
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
 ```
 
 ### Auto-Scaling Logic
@@ -429,23 +440,23 @@ spec:
 // Control Plane monitors tenant NATS instances
 func monitorTenantCapacity(tenantID string) {
     instances := getNATSInstances(tenantID)
-    
+
     for _, instance := range instances {
         metrics := getMetrics(instance)
-        
+
         // Check integration count
         if metrics.IntegrationCount >= 50 {
             provisionNewNATSInstance(tenantID)
-            log.Info("Scaling tenant NATS (integration limit)", 
-                "tenant", tenantID, 
+            log.Info("Scaling tenant NATS (integration limit)",
+                "tenant", tenantID,
                 "count", metrics.IntegrationCount)
         }
-        
+
         // Check throughput
         if metrics.MsgRateSustained > 100_000 {
             provisionNewNATSInstance(tenantID)
-            log.Info("Scaling tenant NATS (throughput limit)", 
-                "tenant", tenantID, 
+            log.Info("Scaling tenant NATS (throughput limit)",
+                "tenant", tenantID,
                 "rate", metrics.MsgRateSustained)
         }
     }
@@ -459,6 +470,7 @@ func monitorTenantCapacity(tenantID string) {
 ### Key Metrics
 
 **Platform NATS**:
+
 - JetStream stream size (GB)
 - KV bucket size (GB)
 - Message rate (msgs/sec)
@@ -466,6 +478,7 @@ func monitorTenantCapacity(tenantID string) {
 - Node health (up/down)
 
 **Tenant NATS**:
+
 - Integration count per instance
 - Message rate (msgs/sec)
 - Connection count
@@ -473,20 +486,21 @@ func monitorTenantCapacity(tenantID string) {
 - CPU usage (%)
 
 **Alerting Thresholds**:
+
 ```yaml
 alerts:
   - name: TenantNATSHighLoad
     condition: msg_rate > 80K msgs/sec for 5min
     action: Provision new instance
-    
+
   - name: TenantNATSMemoryHigh
     condition: memory > 3GB
     action: Alert + investigate
-    
+
   - name: PlatformNATSKVFull
     condition: kv_size > 80GB
     action: Alert + increase retention
-    
+
   - name: DeadLetterQueueGrowing
     condition: dlq_size > 10K messages
     action: Alert tenant + investigate
@@ -499,11 +513,13 @@ alerts:
 ### Authentication
 
 **Platform NATS**:
+
 - Service account credentials (control plane only)
 - TLS encryption (in-cluster)
 - No direct tenant access
 
 **Tenant NATS**:
+
 - Generated credentials per tenant
 - Workers authenticate via JWT tokens
 - Credentials rotated monthly
@@ -511,6 +527,7 @@ alerts:
 ### Isolation
 
 **Network Policies**:
+
 ```yaml
 # Tenant NATS can only be accessed by tenant's workers
 apiVersion: networking.k8s.io/v1
@@ -523,10 +540,10 @@ spec:
       app: nats
       tenant: tenant-a
   ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          tenant: tenant-a
+    - from:
+        - podSelector:
+            matchLabels:
+              tenant: tenant-a
 ```
 
 ---
@@ -536,17 +553,20 @@ spec:
 ### Resource Usage (Example: 100 Tenants)
 
 **Platform NATS** (shared):
+
 - 3 nodes × 4 CPU × 8GB = 12 CPU, 24GB RAM
 - Storage: 300GB SSD
 - **Cost**: ~$200-300/month (AWS EKS)
 
 **Tenant NATS** (100 tenants, avg 1.5 instances each):
+
 - 150 instances × 2 CPU × 4GB = 300 CPU, 600GB RAM
 - **Cost**: ~$2000-3000/month (AWS EKS)
 
 **Total**: ~$2500/month for 100 tenants = **$25/tenant/month**
 
 **Scaling Economics**:
+
 - Adding 1 tenant = ~$25/month incremental cost
 - Shared Platform NATS amortizes across all tenants
 - Linear scaling (predictable cost model)
@@ -556,12 +576,14 @@ spec:
 ## Future Enhancements
 
 ### Phase 2 (Post-POC)
+
 - [ ] Multi-region Platform NATS (geo-replication)
 - [ ] NATS super-cluster for cross-tenant integrations
 - [ ] Auto-scaling based on predictive load
 - [ ] NATS KV → PostgreSQL archival pipeline
 
 ### Phase 3 (Enterprise)
+
 - [ ] Dedicated Platform NATS per enterprise tenant
 - [ ] Custom retention policies per tenant
 - [ ] NATS leafnode support for edge deployments
@@ -580,15 +602,16 @@ spec:
 
 ## Decision History
 
-| Date | Version | Changes |
-|------|---------|---------|
-| 2026-01-27 | 1.0 | Initial hybrid NATS architecture approved |
+| Date       | Version | Changes                                   |
+| ---------- | ------- | ----------------------------------------- |
+| 2026-01-27 | 1.0     | Initial hybrid NATS architecture approved |
 
 ---
 
 **Status**: ✅ Approved - Ready for implementation
 
 **Next Steps**:
+
 1. Create GitHub issues for implementation tasks
 2. Set up NATS Helm chart repository
 3. Build control plane NATS provisioning API

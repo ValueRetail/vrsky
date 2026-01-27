@@ -1,0 +1,24 @@
+# VRSky Terraform Configuration
+# Copy this file to terraform.tfvars and fill in your values
+
+# Cluster Configuration
+cluster_name = "vrsky-prod"
+node_count   = 3
+
+# ServeTheWorld VPS IP Addresses
+# After ordering VPS instances from ServeTheWorld, add their IPs here
+master_node_ip = "1.2.3.4"  # Replace with actual master node IP
+worker_node_ips = [
+  "1.2.3.5",  # Worker 1 IP
+  "1.2.3.6",  # Worker 2 IP
+]
+
+# SSH Configuration
+ssh_user             = "root"
+ssh_private_key_path = "~/.ssh/id_rsa"
+
+# Cloudflare Configuration
+# Get these from your Cloudflare dashboard
+cloudflare_api_token = "your-cloudflare-api-token-here"
+cloudflare_zone_id   = "your-zone-id-here"
+domain_name          = "vrsky.example.com"  # Your domain

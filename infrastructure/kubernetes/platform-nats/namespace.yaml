@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vrsky-platform
+  labels:
+    name: vrsky-platform
+    component: platform-infrastructure

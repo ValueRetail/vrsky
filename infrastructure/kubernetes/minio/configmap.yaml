@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-config
+  namespace: vrsky-storage
+data:
+  # Default bucket name
+  MINIO_BROWSER: "on"
+  MINIO_DOMAIN: "minio.vrsky.svc.cluster.local"

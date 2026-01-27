@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-${TENANT_ID}-${INSTANCE_NUM}
+  namespace: vrsky-tenants
+  labels:
+    app: nats
+    tenant-id: ${TENANT_ID}
+    instance-num: "${INSTANCE_NUM}"
+spec:
+  selector:
+    app: nats
+    tenant-id: ${TENANT_ID}
+    instance-num: "${INSTANCE_NUM}"
+  type: ClusterIP
+  ports:
+    - port: 4222
+      targetPort: 4222
+      protocol: TCP
+      name: client
+    - port: 8222
+      targetPort: 8222
+      protocol: TCP
+      name: monitor

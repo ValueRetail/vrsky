@@ -9,12 +9,14 @@
 VRSky is a highly scalable, cloud-native integration platform (iPaaS) currently in the research phase. This is a **greenfield project** with no source code yet. Development begins February 10, 2026.
 
 **Core Principles**:
+
 - **Ephemeral by Design**: No persistent storage in platform core - messages live only during transit
 - **Reference-Based Messaging**: Large payloads (>256KB) stored in object storage, NATS carries references
 - **Multi-Tenant with Isolation**: Strong tenant isolation using NATS accounts
 - **Component-Based**: Consumers, Producers, Converters, Filters as composable building blocks
 
 **Key Documents**:
+
 - Architecture & Vision: `docs/PROJECT_INCEPTION.md`
 - Timeline & Milestones: `docs/ACCELERATED_TIMELINE.md`
 - Research Tasks: `docs/tasks/README.md`
@@ -23,24 +25,25 @@ VRSky is a highly scalable, cloud-native integration platform (iPaaS) currently 
 
 ## Technology Stack
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Backend** | Go 1.21+ | Core platform services, high concurrency |
-| **Messaging** | NATS + JetStream | Message transport, 11M+ msgs/sec |
-| **Database** | PostgreSQL 15+ | Metadata, tenant config, integration state |
-| **Object Storage** | MinIO (local) / S3 (cloud) | Large payload temporary storage |
-| **Container Runtime** | Docker + Kubernetes | Orchestration and deployment |
-| **API Gateway** | Kong | API management and routing |
-| **Monitoring** | Prometheus + Grafana | Metrics and dashboards |
-| **Logging** | Loki | Structured log aggregation |
-| **UI** | React + TailwindCSS | Admin dashboard |
-| **CI/CD** | GitHub Actions | Automated build, test, deploy |
+| Component             | Technology                 | Purpose                                    |
+| --------------------- | -------------------------- | ------------------------------------------ |
+| **Backend**           | Go 1.21+                   | Core platform services, high concurrency   |
+| **Messaging**         | NATS + JetStream           | Message transport, 11M+ msgs/sec           |
+| **Database**          | PostgreSQL 15+             | Metadata, tenant config, integration state |
+| **Object Storage**    | MinIO (local) / S3 (cloud) | Large payload temporary storage            |
+| **Container Runtime** | Docker + Kubernetes        | Orchestration and deployment               |
+| **API Gateway**       | Kong                       | API management and routing                 |
+| **Monitoring**        | Prometheus + Grafana       | Metrics and dashboards                     |
+| **Logging**           | Loki                       | Structured log aggregation                 |
+| **UI**                | React + TailwindCSS        | Admin dashboard                            |
+| **CI/CD**             | GitHub Actions             | Automated build, test, deploy              |
 
 ---
 
 ## Build, Test, and Lint Commands
 
 ### Prerequisites
+
 ```bash
 # Install Go 1.21+
 go version
@@ -51,6 +54,7 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ### Build Commands
+
 ```bash
 # Build all services
 make build
@@ -69,6 +73,7 @@ GOOS=linux GOARCH=amd64 go build -o bin/service-linux ./cmd/service
 ```
 
 ### Test Commands
+
 ```bash
 # Run all tests
 make test
@@ -106,6 +111,7 @@ go test -tags=integration ./...
 ```
 
 ### Lint and Format Commands
+
 ```bash
 # Format all code (REQUIRED before commit)
 gofmt -s -w .
@@ -127,6 +133,7 @@ go vet ./...
 ```
 
 ### Local Development
+
 ```bash
 # Start local environment (NATS, PostgreSQL, MinIO)
 docker-compose up -d
@@ -190,12 +197,14 @@ vrsky/
 ## Code Style Guidelines
 
 ### General Go Conventions
+
 - Follow [Effective Go](https://go.dev/doc/effective_go)
 - Use `gofmt` and `goimports` before every commit
 - Line length: 120 characters max (prefer 80-100)
 - Use tabs for indentation (Go standard)
 
 ### Imports Organization
+
 ```go
 import (
     // Standard library (alphabetical)
@@ -214,6 +223,7 @@ import (
 ```
 
 ### Naming Conventions
+
 - **Packages**: Short, lowercase, single word (e.g., `messaging`, `consumer`, not `message_handler`)
 - **Files**: Lowercase with underscores (e.g., `http_consumer.go`, `reference_message.go`)
 - **Interfaces**: Noun or adjective (e.g., `Consumer`, `MessageHandler`, `Runnable`)
@@ -223,6 +233,7 @@ import (
 - **Acronyms**: Keep consistent case (e.g., `HTTPConsumer`, `userID`, `apiURL`)
 
 ### Error Handling
+
 ```go
 // REQUIRED: Always check errors immediately
 data, err := fetchData()
@@ -234,7 +245,7 @@ if err != nil {
 var ErrTenantNotFound = errors.New("tenant not found")
 
 // Structured errors with context
-return fmt.Errorf("failed to process message (tenant=%s, integration=%s): %w", 
+return fmt.Errorf("failed to process message (tenant=%s, integration=%s): %w",
     tenantID, integrationID, err)
 
 // Don't ignore errors - use _ only if truly not needed
@@ -242,6 +253,7 @@ _ = file.Close()  // Document why error is ignored
 ```
 
 ### Type Usage
+
 ```go
 // Prefer explicit types over 'var'
 config := &IntegrationConfig{}  // Good
@@ -260,6 +272,7 @@ type ConsumerConfig struct {
 ```
 
 ### Documentation
+
 ```go
 // Package documentation (in doc.go or main file)
 // Package messaging provides NATS-based message transport with reference-based
@@ -272,7 +285,7 @@ package messaging
 type Consumer interface {
     // Start begins consuming messages and returns an error if startup fails.
     Start(ctx context.Context) error
-    
+
     // Stop gracefully shuts down the consumer.
     Stop(ctx context.Context) error
 }
@@ -283,6 +296,7 @@ func processLargePayload(data []byte) (string, error) { ... }
 ```
 
 ### Concurrency Patterns
+
 ```go
 // Use context for cancellation
 func (c *HTTPConsumer) Start(ctx context.Context) error {
@@ -313,12 +327,14 @@ wg.Wait()
 ## Development Workflow
 
 ### Git Workflow
+
 - **Main branch**: `main` (protected, requires PR)
 - **Feature branches**: `feature/short-description`
 - **Bug fixes**: `fix/issue-description`
 - **Commits**: Follow [Conventional Commits](https://www.conventionalcommits.org/)
 
 ### Commit Message Format
+
 ```
 <type>(<scope>): <subject>
 
@@ -330,6 +346,7 @@ wg.Wait()
 **Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 **Examples**:
+
 ```
 feat(messaging): add reference-based messaging for large payloads
 
@@ -340,6 +357,7 @@ Closes #12
 ```
 
 ### Pull Request Process
+
 1. Create feature branch from `main`
 2. Write tests for new functionality
 3. Ensure all tests pass: `make test`
@@ -355,10 +373,12 @@ Closes #12
 ## Testing Standards
 
 ### Test File Naming
+
 - Unit tests: `file_test.go` (same package)
 - Integration tests: `file_integration_test.go` (use build tag)
 
 ### Test Organization
+
 ```go
 func TestHTTPConsumer_Start(t *testing.T) {
     tests := []struct {
@@ -370,7 +390,7 @@ func TestHTTPConsumer_Start(t *testing.T) {
         {"valid webhook", "payload", "success", false},
         {"invalid json", "bad", "", true},
     }
-    
+
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             // Test implementation
@@ -380,11 +400,13 @@ func TestHTTPConsumer_Start(t *testing.T) {
 ```
 
 ### Coverage Requirements
+
 - **Minimum**: 70% overall coverage
 - **Target**: 80%+ for `pkg/` packages
 - **Critical paths**: 90%+ (auth, message routing, multi-tenancy)
 
 ### Integration Tests
+
 ```go
 // +build integration
 
@@ -401,16 +423,19 @@ func TestNATSReferenceMessaging(t *testing.T) {
 ## Architecture-Specific Guidelines
 
 ### Multi-Tenancy
+
 - Always validate `TenantID` in requests
 - Use NATS accounts for message isolation
 - Never leak data across tenants
 
 ### Reference-Based Messaging
+
 - Threshold: Messages >256KB go to object storage
 - Always set TTL on stored objects (default: 15 minutes)
 - Clean up references after successful delivery
 
 ### Error Handling & Retries
+
 - Use exponential backoff for retries (max 3 attempts)
 - Send failed messages to dead letter queue after max retries
 - Log all errors with structured context (tenant, integration, message ID)

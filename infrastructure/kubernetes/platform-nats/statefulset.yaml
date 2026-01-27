@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats-platform
+  namespace: vrsky-platform
+  labels:
+    app: nats-platform
+    component: messaging
+spec:
+  serviceName: nats-platform
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nats-platform
+  template:
+    metadata:
+      labels:
+        app: nats-platform
+        component: messaging
+    spec:
+      # Ensure pods spread across nodes for HA
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: nats-platform
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 6222
+              name: cluster
+            - containerPort: 8222
+              name: monitor
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CLUSTER_ADVERTISE
+              value: $(POD_NAME).nats-platform.$(POD_NAMESPACE).svc.cluster.local
+
+          command:
+            - nats-server
+            - --config
+            - /etc/nats-config/nats.conf
+            - --jetstream
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats-config
+            - name: jetstream
+              mountPath: /data/jetstream
+
+          resources:
+            requests:
+              cpu: 2
+              memory: 4Gi
+            limits:
+              cpu: 4
+              memory: 8Gi
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - nats-server --signal quit
+
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: jetstream
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 100Gi

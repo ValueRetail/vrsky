@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: vrsky-platform
+data:
+  nats.conf: |
+    # NATS Server Configuration for VRSky Platform
+    port: 4222
+    http_port: 8222
+
+    # Server name (will be overridden per pod)
+    server_name: $POD_NAME
+
+    # JetStream Configuration
+    jetstream {
+      store_dir: /data/jetstream
+      max_mem: 4G
+      max_file: 90G
+    }
+
+    # Cluster Configuration
+    cluster {
+      name: platform-cluster
+      port: 6222
+
+      routes = [
+        nats://nats-platform-0.nats-platform.vrsky-platform.svc.cluster.local:6222
+        nats://nats-platform-1.nats-platform.vrsky-platform.svc.cluster.local:6222
+        nats://nats-platform-2.nats-platform.vrsky-platform.svc.cluster.local:6222
+      ]
+    }
+
+    # Logging
+    debug: false
+    trace: false
+    logtime: true
+
+    # Limits
+    max_connections: 5000
+    max_payload: 8MB
+    max_pending: 128MB
+
+    # Timeouts
+    ping_interval: 30s
+    ping_max: 3
+    write_deadline: 10s

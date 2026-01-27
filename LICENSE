@@ -28,6 +28,7 @@ whether for a fee or free of charge. This restriction applies to both free
 and commercial license holders. You may only use the Software for your own
 internal business operations. Specifically prohibited uses include but are
 not limited to:
+
 - Offering VRSky as a managed service to customers
 - Providing integration-platform-as-a-service (iPaaS) using VRSky
 - Reselling access to VRSky infrastructure
@@ -64,15 +65,17 @@ consent of Licensor. Any such termination will not affect the right of
 others who may have received copies of the Software from you.
 
 Files: The following files are licensed under the Fair Source License:
-* All source code files in this repository
-* Documentation files
-* Configuration files
-* Build scripts and tooling
+
+- All source code files in this repository
+- Documentation files
+- Configuration files
+- Build scripts and tooling
 
 Exceptions: The following files are NOT covered by this license and may have
 different licenses:
-* Third-party dependencies (see package manifests)
-* Example data and fixtures (public domain)
+
+- Third-party dependencies (see package manifests)
+- Example data and fixtures (public domain)
 
 ---
 

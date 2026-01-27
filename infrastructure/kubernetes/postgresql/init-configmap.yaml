@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  namespace: vrsky-database
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "Running VRSky schema initialization..."
+
+    # Wait for PostgreSQL to be ready
+    until psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c '\q'; do
+      echo "Waiting for PostgreSQL to be ready..."
+      sleep 2
+    done
+
+    # Run schema initialization
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/init-schema.sql
+
+    echo "VRSky schema initialized successfully!"

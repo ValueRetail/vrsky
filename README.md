@@ -62,32 +62,37 @@ VRSky is an integration platform as a service (iPaaS) that revolutionizes how or
 
 ## Technology Stack (Proposed)
 
-| Component | Technology | Rationale |
-|-----------|------------|-----------|
-| **Backend** | Go | Superior concurrency, low footprint, cloud-native |
-| **Messaging** | NATS + JetStream | 11M+ msgs/sec, multi-tenancy, persistence options |
-| **Storage** | S3/GCS/Azure Blob | Scalable object storage for large payloads |
-| **Orchestration** | Kubernetes | Container orchestration, auto-scaling |
-| **Observability** | OpenTelemetry + Prometheus + Grafana | Metrics, logs, traces |
-| **API Gateway** | TBD (Kong/Envoy/Traefik) | Under research |
+| Component         | Technology                           | Rationale                                         |
+| ----------------- | ------------------------------------ | ------------------------------------------------- |
+| **Backend**       | Go                                   | Superior concurrency, low footprint, cloud-native |
+| **Messaging**     | NATS + JetStream                     | 11M+ msgs/sec, multi-tenancy, persistence options |
+| **Storage**       | S3/GCS/Azure Blob                    | Scalable object storage for large payloads        |
+| **Orchestration** | Kubernetes                           | Container orchestration, auto-scaling             |
+| **Observability** | OpenTelemetry + Prometheus + Grafana | Metrics, logs, traces                             |
+| **API Gateway**   | TBD (Kong/Envoy/Traefik)             | Under research                                    |
 
 > Note: These technologies are being validated through research. See [Research Tasks](#current-phase-research) below.
 
 ## Use Cases
 
 ### B2B Data Exchange
+
 Connect with suppliers, partners, and customers securely with fine-grained permissions and audit trails.
 
 ### Enterprise Integration
+
 Break down data silos by connecting legacy systems, SaaS applications, and modern microservices.
 
 ### Event-Driven Architecture
+
 Build reactive systems that respond to events across your entire technology stack.
 
 ### Marketplace Ecosystem
+
 Developers create and monetize connectors while enterprises benefit from pre-built integrations.
 
 ### Multi-Cloud Strategy
+
 Integrate applications across AWS, GCP, Azure, and on-premise infrastructure.
 
 ## Current Phase: Research
@@ -103,12 +108,14 @@ We're currently in the research phase, evaluating technologies and designing the
 ### Research Priorities
 
 **P0 - Critical Foundation**
+
 - Technology stack evaluation (.NET vs Go)
 - Message transport architecture (NATS design)
 - Core platform architecture
 - Multi-tenancy and data isolation
 
 **P1 - Core Platform**
+
 - Component model (consumers, producers, converters, filters)
 - Plugin/connector SDK design
 - Security and authentication
@@ -116,11 +123,13 @@ We're currently in the research phase, evaluating technologies and designing the
 - Orchestration engine
 
 **P2 - Business Layer**
+
 - Marketplace platform
 - Storage-as-a-Service
 - Cross-tenant collaboration
 
 **P3 - Operations & Quality**
+
 - Observability and monitoring
 - Deployment and infrastructure
 - Performance testing
@@ -132,6 +141,7 @@ We're currently in the research phase, evaluating technologies and designing the
 ## Getting Started (Coming Soon)
 
 Once we complete the research phase, we'll provide:
+
 - Quick start guide
 - Local development setup
 - SDK installation
@@ -151,15 +161,15 @@ We're in the early research phase. If you'd like to contribute:
 
 **🚀 Aggressive Timeline - POC by Mid-April 2026**
 
-| Milestone | Status | Target Date | Duration |
-|-----------|--------|-------------|----------|
-| Research Phase | 🔵 In Progress | Jan 27 - Feb 9 | **2 weeks** |
-| Core Development | ⚪ Planned | Feb 10 - Mar 23 | 6 weeks |
-| Integration & Testing | ⚪ Planned | Mar 24 - Apr 7 | 2 weeks |
-| Documentation & Polish | ⚪ Planned | Apr 8 - Apr 15 | 1 week |
-| **POC Release** | ⚪ Planned | **Apr 15, 2026** | **11 weeks total** |
-| Alpha Release | ⚪ Future | Q3 2026 | TBD |
-| Production Release | ⚪ Future | Q4 2026 | TBD |
+| Milestone              | Status         | Target Date      | Duration           |
+| ---------------------- | -------------- | ---------------- | ------------------ |
+| Research Phase         | 🔵 In Progress | Jan 27 - Feb 9   | **2 weeks**        |
+| Core Development       | ⚪ Planned     | Feb 10 - Mar 23  | 6 weeks            |
+| Integration & Testing  | ⚪ Planned     | Mar 24 - Apr 7   | 2 weeks            |
+| Documentation & Polish | ⚪ Planned     | Apr 8 - Apr 15   | 1 week             |
+| **POC Release**        | ⚪ Planned     | **Apr 15, 2026** | **11 weeks total** |
+| Alpha Release          | ⚪ Future      | Q3 2026          | TBD                |
+| Production Release     | ⚪ Future      | Q4 2026          | TBD                |
 
 **See detailed timeline**: [docs/ACCELERATED_TIMELINE.md](docs/ACCELERATED_TIMELINE.md)
 
@@ -170,6 +180,7 @@ VRSky is licensed under the **Fair Source License** (1 user).
 ### Free Use ✅
 
 **FREE** for:
+
 - **Personal use** (1 user, internal projects only)
 - **Educational institutions** (unlimited, internal use only)
 - **Non-profit organizations** (unlimited, internal use only)
@@ -179,6 +190,7 @@ VRSky is licensed under the **Fair Source License** (1 user).
 ### Commercial Use 💰
 
 **Commercial license required** for:
+
 - Companies with 2+ users
 - Production commercial deployments
 - Internal business integrations
@@ -186,6 +198,7 @@ VRSky is licensed under the **Fair Source License** (1 user).
 ⚠️ **Service Provider Use Prohibited** - Standard commercial licenses are for internal use only.
 
 **Service Provider License required** for:
+
 - Offering VRSky as a managed/hosted service
 - Building SaaS/iPaaS platforms using VRSky
 - Multi-tenant service provider deployments

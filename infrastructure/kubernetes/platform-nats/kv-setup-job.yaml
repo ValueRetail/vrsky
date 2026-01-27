@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-kv-setup
+  namespace: vrsky-platform
+  labels:
+    app: nats-kv-setup
+spec:
+  ttlSecondsAfterFinished: 300 # Clean up job after 5 minutes
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: nats-kv-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: nats-setup
+          image: natsio/nats-box:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for NATS platform to be ready..."
+              sleep 30
+
+              NATS_URL="nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+
+              # Create KV buckets with specified TTLs and replication
+
+              echo "Creating message_state KV bucket (TTL: 15min)..."
+              nats kv add message_state \
+                --server=$NATS_URL \
+                --replicas=3 \
+                --ttl=15m \
+                --max-bucket-size=10737418240 \
+                --description="Message processing state tracking" || true
+
+              echo "Creating integration_locks KV bucket (TTL: 5min)..."
+              nats kv add integration_locks \
+                --server=$NATS_URL \
+                --replicas=3 \
+                --ttl=5m \
+                --max-bucket-size=1073741824 \
+                --description="Integration processing locks" || true
+
+              echo "Creating retry_queue KV bucket (TTL: 1hr)..."
+              nats kv add retry_queue \
+                --server=$NATS_URL \
+                --replicas=3 \
+                --ttl=1h \
+                --max-bucket-size=53687091200 \
+                --description="Failed messages awaiting retry" || true
+
+              echo "Creating dead_letter_queue KV bucket (TTL: 7 days)..."
+              nats kv add dead_letter_queue \
+                --server=$NATS_URL \
+                --replicas=3 \
+                --ttl=168h \
+                --max-bucket-size=107374182400 \
+                --description="Failed messages after max retries" || true
+
+              echo "KV buckets created successfully!"
+
+              # List all buckets to verify
+              echo "Listing all KV buckets:"
+              nats kv ls --server=$NATS_URL

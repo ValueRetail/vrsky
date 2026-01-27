@@ -19,6 +19,7 @@ This document clearly defines what features and capabilities **MUST** be include
 ### Core Platform Components
 
 #### 1. Messaging Infrastructure
+
 - ✅ **Platform NATS Cluster** (3-node HA with JetStream)
   - State tracking using NATS KV
   - Retry queue (max 3 attempts, exponential backoff)
@@ -33,6 +34,7 @@ This document clearly defines what features and capabilities **MUST** be include
   - Automatic TTL cleanup (15 minutes default)
 
 #### 2. Multi-Tenancy
+
 - ✅ Tenant CRUD operations via API
 - ✅ API key authentication
 - ✅ Physical isolation (dedicated NATS instances)
@@ -42,6 +44,7 @@ This document clearly defines what features and capabilities **MUST** be include
 - ❌ SSO/SAML/OAuth (POST-POC)
 
 #### 3. Integration Management
+
 - ✅ Integration CRUD API (create, update, delete, start, stop)
 - ✅ Integration status monitoring
 - ✅ Simple workflow orchestration (consumer → converter → filter → producer)
@@ -52,6 +55,7 @@ This document clearly defines what features and capabilities **MUST** be include
 - ❌ Scheduled integrations with cron syntax (BASIC version in POC, ADVANCED post-POC)
 
 #### 4. Component Framework
+
 - ✅ **Consumer Interface** (data ingestion from external systems)
 - ✅ **Producer Interface** (data delivery to external systems)
 - ✅ **Converter Interface** (data transformation)
@@ -62,30 +66,36 @@ This document clearly defines what features and capabilities **MUST** be include
 #### 5. Connectors (Minimum 6)
 
 **Consumers** (3):
+
 - ✅ HTTP REST Consumer (webhook receiver)
 - ✅ File Consumer (directory watcher)
 - ✅ PostgreSQL Consumer (Change Data Capture using logical replication)
 
 **Producers** (3):
+
 - ✅ HTTP REST Producer (API caller with retry)
 - ✅ File Producer (write to filesystem)
 - ✅ PostgreSQL Producer (bulk insert/update)
 
 **Converters** (2):
+
 - ✅ JSON Converter (transformation, field mapping)
 - ✅ XML Converter (XML ↔ JSON)
 
 **Filters** (2):
+
 - ✅ Field Mapping Filter (rename, extract fields)
 - ✅ Conditional Routing Filter (if-then-else logic)
 
 **Out of Scope for POC**:
+
 - ❌ Kafka Consumer/Producer (POST-POC)
 - ❌ SFTP Consumer/Producer (POST-POC)
 - ❌ Database connectors beyond PostgreSQL (POST-POC)
 - ❌ Cloud service connectors (AWS S3, Azure, GCP) (POST-POC)
 
 #### 6. Connector SDK
+
 - ✅ Go interfaces for Consumer/Producer/Converter/Filter
 - ✅ Helper utilities (logging, config, error handling)
 - ✅ Documentation with examples
@@ -96,6 +106,7 @@ This document clearly defines what features and capabilities **MUST** be include
 ### Infrastructure & Operations
 
 #### 7. API Gateway
+
 - ✅ Kong or Traefik deployed
 - ✅ REST API routing
 - ✅ Basic rate limiting
@@ -103,6 +114,7 @@ This document clearly defines what features and capabilities **MUST** be include
 - ❌ gRPC gateway (POST-POC)
 
 #### 8. Observability
+
 - ✅ **Metrics** (Prometheus)
   - Platform health metrics
   - Integration execution metrics
@@ -125,6 +137,7 @@ This document clearly defines what features and capabilities **MUST** be include
 - ❌ Advanced anomaly detection (POST-POC)
 
 #### 9. Deployment
+
 - ✅ **Local Development** (Docker Compose)
   - NATS (Platform cluster + sample tenant instance)
   - PostgreSQL
@@ -144,6 +157,7 @@ This document clearly defines what features and capabilities **MUST** be include
 - ❌ Disaster recovery (POST-POC)
 
 #### 10. Database
+
 - ✅ PostgreSQL 15+ for metadata
   - Tenant configuration
   - Integration definitions
@@ -156,6 +170,7 @@ This document clearly defines what features and capabilities **MUST** be include
 ### User Interface
 
 #### 11. Web UI (Basic)
+
 - ✅ Admin dashboard (React + TailwindCSS)
 - ✅ Tenant management (create, view, configure)
 - ✅ Integration creation wizard
@@ -167,6 +182,7 @@ This document clearly defines what features and capabilities **MUST** be include
 ### Documentation
 
 #### 12. POC Documentation
+
 - ✅ **Getting Started Guide** (< 10 minutes to first integration)
 - ✅ **Architecture Overview** (with diagrams)
 - ✅ **NATS Architecture Guide** (hybrid model explained)
@@ -182,6 +198,7 @@ This document clearly defines what features and capabilities **MUST** be include
 ### Testing & Quality
 
 #### 13. Testing Scope
+
 - ✅ **Unit Tests** (70%+ coverage target)
 - ✅ **Integration Tests** (E2E for all connectors)
 - ✅ **Multi-Tenant Isolation Tests** (validate no cross-tenant leakage)
@@ -197,21 +214,25 @@ This document clearly defines what features and capabilities **MUST** be include
 #### 14. Required Demo Integrations (4)
 
 **Demo 1: Webhook to Slack** (Simple, Real-time)
+
 - GitHub webhook → JSON Converter → Slack Producer
 - **Use Case**: Real-time event notifications
 - **Validates**: HTTP Consumer, JSON transformation, HTTP Producer
 
 **Demo 2: CSV File to Database** (Batch Processing)
+
 - CSV File Consumer → CSV-to-JSON Converter → PostgreSQL Producer
 - **Use Case**: Automated data import from files
 - **Validates**: File Consumer, data transformation, bulk database insert
 
 **Demo 3: Database CDC to API** (Real-time Sync)
+
 - PostgreSQL Consumer (CDC) → JSON Transformer → HTTP REST Producer
 - **Use Case**: Real-time data synchronization to external API
 - **Validates**: Change Data Capture, real-time streaming, API integration
 
 **Demo 4: Multi-step Workflow** (Complex)
+
 - HTTP Consumer → JSON Converter → Filter (conditional routing) → PostgreSQL Producer + Slack Producer (parallel)
 - **Use Case**: Order processing with conditional routing and parallel execution
 - **Validates**: Orchestration, filtering, parallel execution, error handling, monitoring
@@ -223,9 +244,11 @@ This document clearly defines what features and capabilities **MUST** be include
 ### Features Deferred to Q3-Q4 2026
 
 #### 1. Marketplace Platform (Issue #10 - Deferred)
+
 **POC Scope**: Basic connector listing in UI only
 
 **Post-POC Features**:
+
 - Connector publishing workflow (developer portal)
 - Payment processing and revenue sharing
 - Connector ratings and reviews
@@ -234,9 +257,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Connector usage analytics
 
 #### 2. Storage-as-a-Service (Issue #11 - Deferred)
+
 **POC Scope**: Temporary storage only (ephemeral platform, 15-min TTL)
 
 **Post-POC Features**:
+
 - Long-term message archival (compliance, audit trails)
 - State persistence service (workflow checkpoints, batch processing state)
 - Replay capability (re-process historical messages)
@@ -245,9 +270,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Search and query capabilities
 
 #### 3. Cross-Tenant Integration & Permissions (Issue #12 - Deferred)
+
 **POC Scope**: Strong single-tenant isolation only
 
 **Post-POC Features**:
+
 - Cross-tenant data sharing (opt-in)
 - Partnership models (controlled collaboration)
 - B2B integration scenarios
@@ -256,9 +283,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Tenant identity verification
 
 #### 4. Advanced Security
+
 **POC Scope**: API key authentication, basic isolation
 
 **Post-POC Features**:
+
 - SSO (Single Sign-On) integration
 - SAML 2.0 support
 - OAuth 2.0 provider
@@ -268,9 +297,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Advanced audit logging
 
 #### 5. Advanced Orchestration
+
 **POC Scope**: Simple linear workflows (consumer → converter → filter → producer)
 
 **Post-POC Features**:
+
 - Complex branching logic
 - Loops and iterations
 - Sub-workflows
@@ -279,9 +310,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Workflow versioning
 
 #### 6. Performance & Scale
+
 **POC Scope**: 1,000+ msgs/sec validated
 
 **Post-POC Features**:
+
 - 10,000+ msgs/sec performance
 - Auto-scaling based on load (horizontal scaling)
 - Multi-region deployment
@@ -290,9 +323,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Connection pooling optimizations
 
 #### 7. Additional Connectors
+
 **POC Scope**: 6 connectors (HTTP, File, PostgreSQL + converters/filters)
 
 **Post-POC Connectors**:
+
 - Apache Kafka Consumer/Producer
 - RabbitMQ Consumer/Producer
 - SFTP/FTP Consumer/Producer
@@ -306,9 +341,11 @@ This document clearly defines what features and capabilities **MUST** be include
 - Email (SMTP/IMAP) Consumer/Producer
 
 #### 8. Operations & Reliability
+
 **POC Scope**: Basic deployment and monitoring
 
 **Post-POC Features**:
+
 - Disaster recovery procedures
 - Backup and restore capabilities
 - Blue-green deployments
@@ -324,6 +361,7 @@ This document clearly defines what features and capabilities **MUST** be include
 The POC is considered **successful** if by April 15, 2026, the following criteria are met:
 
 ### Functional Criteria
+
 1. ✅ **Demo-able**: All 4 demo integration scenarios working live without errors
 2. ✅ **Multi-tenant**: Multiple tenants (minimum 3) running integrations in isolation simultaneously
 3. ✅ **Reference-based**: Large files (>1MB) flow through object storage correctly
@@ -332,23 +370,27 @@ The POC is considered **successful** if by April 15, 2026, the following criteri
 6. ✅ **6 Connectors**: All 6 POC connectors working correctly
 
 ### Performance Criteria
+
 7. ✅ **Scalable**: Handles 1,000+ messages/second in load testing
 8. ✅ **Low Latency**: P99 latency < 100ms for small messages (<10KB)
 9. ✅ **Reliable**: 99%+ success rate for message delivery in testing
 10. ✅ **Auto-Scaling**: Tenant NATS instances auto-provision when thresholds reached
 
 ### Operational Criteria
+
 11. ✅ **Observable**: Metrics and logs available in Grafana/Loki dashboards
 12. ✅ **Deployed**: Running on Kubernetes in staging environment
 13. ✅ **Automated**: CI/CD pipeline builds, tests, and deploys automatically
 14. ✅ **Monitored**: Alerting operational for critical failures
 
 ### User Experience Criteria
+
 15. ✅ **Documented**: New user can create their first integration in < 30 minutes using documentation
 16. ✅ **Usable**: Web UI functional for tenant and integration management
 17. ✅ **Debuggable**: Clear error messages, logs, and debugging tools available
 
 ### Architecture Criteria
+
 18. ✅ **Isolated**: Multi-tenant isolation validated (no data leakage between tenants)
 19. ✅ **Resilient**: Platform survives single component failure (NATS node, worker, service)
 20. ✅ **Ephemeral**: Messages only stored during transit, automatic cleanup working

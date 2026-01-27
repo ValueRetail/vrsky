@@ -27,6 +27,7 @@ Build the foundational VRSky platform infrastructure with hybrid NATS architectu
 ### Objectives
 
 **Hybrid NATS Architecture**:
+
 - ✅ Deploy Platform NATS Cluster (3-node HA, JetStream + KV)
 - ✅ Deploy Tenant-scoped NATS instances (single-node, NATS Core)
 - ✅ Implement NATS service discovery (Kubernetes DNS)
@@ -34,23 +35,27 @@ Build the foundational VRSky platform infrastructure with hybrid NATS architectu
 - ✅ Round-robin publishing strategy
 
 **State Management**:
+
 - ✅ NATS KV for message state tracking
 - ✅ Retry queue implementation
 - ✅ Dead letter queue implementation
 - ✅ TTL-based cleanup (15min for messages, 7 days for DLQ)
 
 **Reference-Based Messaging**:
+
 - ✅ MinIO/S3 integration for large payloads (>256KB)
 - ✅ Presigned URL generation
 - ✅ Automatic cleanup after TTL
 
 **Component Interfaces**:
+
 - ✅ Consumer interface (Go)
 - ✅ Producer interface (Go)
 - ✅ Converter interface (Go)
 - ✅ Filter interface (Go)
 
 **First Implementations**:
+
 - ✅ HTTP Consumer (webhook receiver)
 - ✅ HTTP Producer (REST API caller)
 - ✅ Simple orchestrator (state machine)
@@ -69,6 +74,7 @@ Build the foundational VRSky platform infrastructure with hybrid NATS architectu
 ### Technical Specifications
 
 **Platform NATS Deployment**:
+
 ```yaml
 Replicas: 3
 Resources: 4 CPU, 8GB RAM per node
@@ -80,6 +86,7 @@ KV Buckets:
 ```
 
 **Tenant NATS Deployment**:
+
 ```yaml
 Replicas: 1 (per instance)
 Resources: 2 CPU, 4GB RAM
@@ -88,6 +95,7 @@ Naming: nats-{tenant-id}-{instance-number}
 ```
 
 **Capacity Limits**:
+
 - Max 50 integrations per tenant NATS instance
 - Auto-scale: Provision new instance when limit reached
 
@@ -123,12 +131,14 @@ Implement automatic scaling and lifecycle management for tenant-scoped NATS inst
 ### Objectives
 
 **Auto-Scaling Logic**:
+
 - ✅ Monitor integration count per NATS instance
 - ✅ Monitor message throughput per NATS instance
 - ✅ Trigger new instance provisioning at 50 integrations or 100K msgs/sec
 - ✅ Automatic integration rebalancing
 
 **Lifecycle Management**:
+
 - ✅ Provision new NATS instance via Control Plane API
 - ✅ Register instance in service discovery (Kubernetes DNS)
 - ✅ Update PostgreSQL tracking table
@@ -136,6 +146,7 @@ Implement automatic scaling and lifecycle management for tenant-scoped NATS inst
 - ✅ Worker connection updates (connect to new instances)
 
 **Monitoring & Metrics**:
+
 - ✅ Prometheus metrics from NATS monitoring endpoint
 - ✅ Integration count per instance
 - ✅ Message rate (msgs/sec)
@@ -155,16 +166,17 @@ Implement automatic scaling and lifecycle management for tenant-scoped NATS inst
 ### Technical Specifications
 
 **Monitoring Loop**:
+
 ```go
 func monitorTenantCapacity(tenantID string) {
     instances := getNATSInstances(tenantID)
     for _, instance := range instances {
         metrics := fetchMetrics(instance)
-        
+
         if metrics.IntegrationCount >= 50 {
             provisionNewInstance(tenantID)
         }
-        
+
         if metrics.MsgRateSustained > 100_000 {
             provisionNewInstance(tenantID)
         }
@@ -173,6 +185,7 @@ func monitorTenantCapacity(tenantID string) {
 ```
 
 **Provisioning Flow**:
+
 ```
 1. Create Kubernetes Deployment (nats-{tenant}-{N})
 2. Create Kubernetes Service (DNS registration)
@@ -204,24 +217,28 @@ Implement message state tracking using NATS KV store with retry logic and dead l
 ### Objectives
 
 **State Machine**:
+
 - ✅ Message states: RECEIVED → PROCESSING → COMPLETED
 - ✅ Retry states: RETRY (with backoff)
 - ✅ Failed states: DEAD_LETTER
 - ✅ Max 3 retry attempts before DLQ
 
 **NATS KV Integration**:
+
 - ✅ Store message state in `message_state` bucket
 - ✅ Store retry queue in `retry_queue` stream
 - ✅ Store dead letter in `dead_letter_queue` stream
 - ✅ TTL-based cleanup (15min, 1hr, 7 days)
 
 **Retry Logic**:
+
 - ✅ Exponential backoff (2^retry_count seconds)
 - ✅ Track retry count in state
 - ✅ Move to DLQ after 3 failed attempts
 - ✅ Idempotency handling (prevent duplicate processing)
 
 **Worker Integration**:
+
 - ✅ Workers update state before/after processing
 - ✅ Workers check retry count before processing
 - ✅ Workers publish to retry queue on failure
@@ -241,6 +258,7 @@ Implement message state tracking using NATS KV store with retry logic and dead l
 ### Technical Specifications
 
 **State Schema**:
+
 ```go
 type MessageState struct {
     MessageID     string    `json:"message_id"`
@@ -255,6 +273,7 @@ type MessageState struct {
 ```
 
 **KV Operations**:
+
 ```go
 // Store state
 kv.Put(messageID, json.Marshal(state))
@@ -290,22 +309,26 @@ Implement service discovery mechanism for workers to connect to all tenant NATS 
 ### Objectives
 
 **Kubernetes DNS Integration**:
+
 - ✅ Each tenant NATS instance has Kubernetes Service
 - ✅ Predictable DNS naming: `nats-{tenant-id}-{N}.vrsky-tenants.svc.cluster.local`
 - ✅ Service discovery via Control Plane API
 
 **Control Plane API**:
+
 - ✅ `GET /api/tenants/{tenant_id}/nats-instances` - Returns list of NATS URLs
 - ✅ PostgreSQL tracking table: `nats_instances`
 - ✅ Real-time updates when new instances provisioned
 
 **Worker Discovery**:
+
 - ✅ Workers fetch NATS instances on startup
 - ✅ Workers connect to all instances (comma-separated URLs)
 - ✅ Workers reconnect when new instances added
 - ✅ NATS client handles automatic reconnection
 
 **Health Checks**:
+
 - ✅ Liveness probe on NATS instances
 - ✅ Mark instance as unhealthy if unreachable
 - ✅ Remove unhealthy instances from discovery
@@ -322,6 +345,7 @@ Implement service discovery mechanism for workers to connect to all tenant NATS 
 ### Technical Specifications
 
 **Database Schema**:
+
 ```sql
 CREATE TABLE nats_instances (
     id SERIAL PRIMARY KEY,
@@ -339,6 +363,7 @@ CREATE INDEX idx_nats_instances_tenant ON nats_instances(tenant_id, status);
 ```
 
 **API Response**:
+
 ```json
 {
   "tenant_id": "tenant-a",
@@ -360,6 +385,7 @@ CREATE INDEX idx_nats_instances_tenant ON nats_instances(tenant_id, status);
 ```
 
 **Worker Connection**:
+
 ```go
 // Fetch instances from Control Plane
 instances := controlPlane.GetNATSInstances(tenantID)
@@ -398,24 +424,28 @@ Implement comprehensive monitoring and observability for Platform NATS and Tenan
 ### Objectives
 
 **Prometheus Metrics**:
+
 - ✅ Platform NATS: JetStream size, KV size, stream lag
 - ✅ Tenant NATS: Message rate, connection count, memory usage
 - ✅ Per-tenant metrics (integration count, throughput)
 - ✅ Dead letter queue size
 
 **Grafana Dashboards**:
+
 - ✅ Platform Overview (all NATS health)
 - ✅ Tenant Detail (per-tenant NATS instances)
 - ✅ Message Flow (end-to-end latency)
 - ✅ Capacity Planning (utilization, growth trends)
 
 **Alerting**:
+
 - ✅ Tenant NATS approaching capacity (80%)
 - ✅ Platform NATS KV storage high (>80GB)
 - ✅ Dead letter queue growing (>10K messages)
 - ✅ NATS instance unhealthy/down
 
 **Logging**:
+
 - ✅ Loki integration for structured logs
 - ✅ NATS server logs aggregated
 - ✅ Worker processing logs
@@ -434,18 +464,24 @@ Implement comprehensive monitoring and observability for Platform NATS and Tenan
 ### Technical Specifications
 
 **Prometheus Config**:
+
 ```yaml
 scrape_configs:
-  - job_name: 'nats-platform'
+  - job_name: "nats-platform"
     static_configs:
-      - targets: ['nats-platform-0:8222', 'nats-platform-1:8222', 'nats-platform-2:8222']
+      - targets:
+          [
+            "nats-platform-0:8222",
+            "nats-platform-1:8222",
+            "nats-platform-2:8222",
+          ]
     scrape_interval: 15s
-    
-  - job_name: 'nats-tenants'
+
+  - job_name: "nats-tenants"
     kubernetes_sd_configs:
       - role: pod
         namespaces:
-          names: ['vrsky-tenants']
+          names: ["vrsky-tenants"]
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: keep
@@ -454,6 +490,7 @@ scrape_configs:
 ```
 
 **Key Metrics**:
+
 - `nats_jetstream_storage_bytes` - JetStream storage used
 - `nats_kv_bucket_size_bytes` - KV bucket size
 - `nats_messages_in_per_sec` - Message ingress rate
@@ -482,18 +519,21 @@ scrape_configs:
 **Add to existing scope**:
 
 **Tenant NATS Isolation**:
+
 - ✅ Each tenant has dedicated NATS instance(s)
 - ✅ Kubernetes NetworkPolicy prevents cross-tenant access
 - ✅ NATS credentials unique per tenant
 - ✅ JWT-based authentication for workers
 
 **Platform NATS Security**:
+
 - ✅ Only Control Plane can access Platform NATS
 - ✅ Service account authentication
 - ✅ TLS encryption (in-cluster)
 - ✅ No direct tenant access
 
 **Credential Management**:
+
 - ✅ NATS credentials stored in Kubernetes Secrets
 - ✅ Automatic rotation (monthly)
 - ✅ Revocation on tenant deletion
@@ -518,25 +558,27 @@ scrape_configs:
 ## Summary of New/Updated Issues
 
 ### New Issues (Create These)
+
 1. **NATS Instance Auto-Scaling & Lifecycle Management** (P1)
 2. **NATS KV State Tracking & Retry Logic** (P1)
 3. **Service Discovery for Tenant NATS Instances** (P1)
 4. **NATS Monitoring & Observability Dashboards** (P2)
 
 ### Updated Issues (Modify These)
+
 1. **Issue #1** - Add detailed NATS hybrid architecture implementation (P0)
 2. **Issue #4** - Add NATS security and isolation requirements (P0)
 
 ### Total Implementation Effort
 
-| Issue | Priority | Estimated Weeks | Team Size |
-|-------|----------|----------------|-----------|
-| #1 (Updated) | P0 | 4 weeks | 2-3 engineers |
-| #4 (Updated) | P0 | 3 weeks | 1-2 engineers |
-| Auto-Scaling (NEW) | P1 | 3 weeks | 1-2 engineers |
-| State Tracking (NEW) | P1 | 3 weeks | 1-2 engineers |
-| Service Discovery (NEW) | P1 | 2 weeks | 1 engineer |
-| Monitoring (NEW) | P2 | 2 weeks | 1 engineer |
+| Issue                   | Priority | Estimated Weeks | Team Size     |
+| ----------------------- | -------- | --------------- | ------------- |
+| #1 (Updated)            | P0       | 4 weeks         | 2-3 engineers |
+| #4 (Updated)            | P0       | 3 weeks         | 1-2 engineers |
+| Auto-Scaling (NEW)      | P1       | 3 weeks         | 1-2 engineers |
+| State Tracking (NEW)    | P1       | 3 weeks         | 1-2 engineers |
+| Service Discovery (NEW) | P1       | 2 weeks         | 1 engineer    |
+| Monitoring (NEW)        | P2       | 2 weeks         | 1 engineer    |
 
 **Total**: ~17 engineering weeks (can parallelize to 4-5 calendar weeks)
 
