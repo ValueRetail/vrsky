@@ -45,10 +45,10 @@ check_prerequisites() {
 
 	# Check helm
 	if ! command -v helm &>/dev/null; then
-		print_error "helm not found. Install helm first."
-		exit 1
+		print_warning "helm not found. Monitoring and Ingress might fail if not skipped."
+	else
+		print_success "helm found: $(helm version --short)"
 	fi
-	print_success "helm found: $(helm version --short)"
 
 	# Check cluster connectivity
 	if ! kubectl cluster-info &>/dev/null; then
@@ -57,9 +57,15 @@ check_prerequisites() {
 	fi
 	print_success "Connected to cluster: $(kubectl config current-context)"
 
+	# If we are in k3d, we don't need Longhorn for local testing
+	if kubectl config current-context | grep -q "k3d-vrsky-dev"; then
+		print_success "Running in local k3d cluster - skipping Longhorn requirement"
+		return
+	fi
+
 	# Check Longhorn
 	if ! kubectl get storageclass longhorn &>/dev/null; then
-		print_warning "Longhorn storage class not found. Install Longhorn first or storage will fail."
+		print_warning "Longhorn storage class not found. Using default storage class."
 	else
 		print_success "Longhorn storage class found"
 	fi

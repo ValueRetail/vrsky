@@ -1,0 +1,31 @@
+# k3d configuration for VRSky Local Development
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: vrsky-dev
+image: rancher/k3s:v1.35.0-k3s1
+servers: 1
+agents: 2
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+  - port: 4222:4222
+    nodeFilters:
+      - loadbalancer
+  - port: 5432:5432
+    nodeFilters:
+      - loadbalancer
+  - port: 9000:9000
+    nodeFilters:
+      - loadbalancer
+  - port: 9001:9001
+    nodeFilters:
+      - loadbalancer
+options:
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchContext: true

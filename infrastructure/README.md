@@ -20,7 +20,25 @@ This infrastructure deploys:
 
 ## Quick Start
 
-### Prerequisites
+### Local Development (Recommended for Testing)
+
+If you are testing the stack on your local machine, use **k3d** to spin up a cluster that mirrors our production environment (K3s v1.35.0).
+
+```bash
+# From this directory (infrastructure/)
+./scripts/local-up.sh
+```
+
+This will create a cluster named `vrsky-dev` with all necessary port mappings for NATS, MinIO, and PostgreSQL.
+
+To tear down the local cluster:
+```bash
+./scripts/local-down.sh
+```
+
+### Production Deployment (ServeTheWorld)
+
+#### Prerequisites
 
 1. **Order 3× GP316 VPS** from ServeTheWorld:
    - https://my.servetheworld.net/order/vps-gp3
