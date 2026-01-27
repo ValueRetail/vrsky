@@ -1,2 +1,169 @@
-# vrsky
-A distributed integration platform for exhanging data between internal and external systems written in Go
+# VRSky Integration Platform
+
+> A highly scalable, cloud-native integration hub designed to connect internal and external systems through a marketplace-driven ecosystem.
+
+![Status](https://img.shields.io/badge/status-research-blue)
+![License](https://img.shields.io/badge/license-TBD-lightgrey)
+
+## Vision
+
+VRSky is an integration platform as a service (iPaaS) that revolutionizes how organizations connect their systems. By combining the power of modern message streaming with a thriving connector marketplace, VRSky enables seamless data flow between applications, services, and partners.
+
+### Key Differentiators
+
+- **Ephemeral by Design**: No persistent storage in the platform core - messages only live during transit
+- **Reference-Based Messaging**: Large payloads stored efficiently in object storage, with NATS carrying lightweight references
+- **Multi-Tenant with Collaboration**: Strong isolation with controlled cross-tenant data sharing for B2B scenarios
+- **Marketplace Economy**: Developers can publish and monetize connectors, creating a vibrant ecosystem
+- **Massive Scalability**: Built on Go and NATS to handle millions of messages per day with sub-100ms latency
+
+## Architecture Philosophy
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    VRSky Platform Core                      │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐               │
+│  │ Consumer │───▶│ Converter│───▶│ Producer │     Ephemeral │
+│  │          │    │  Filter  │    │          │     Processing│
+│  └──────────┘    └──────────┘    └──────────┘               │
+│         │              │               │                    │
+│         └──────────────┴───────────────┘                    │
+│                        │                                    │
+│                   NATS JetStream                            │
+│              (Reference-Based Messaging)                    │
+└─────────────────────────────────────────────────────────────┘
+                           │
+        ┌──────────────────┴──────────────────┐
+        │                                     │
+┌───────▼────────┐                   ┌────────▼─────────┐
+│ Object Storage │                   │  Storage-as-a-   │
+│   (Temporary)  │                   │  Service (Opt-in)│
+│                │                   │                  │
+│ • Large files  │                   │ • Message archive│
+│ • Auto-cleanup │                   │ • State persist  │
+│ • Pre-signed   │                   │ • Compliance     │
+└────────────────┘                   └──────────────────┘
+```
+
+### Core Concepts
+
+**Consumers**: Ingest data from external systems (APIs, databases, webhooks, queues)
+
+**Producers**: Deliver data to target systems (APIs, databases, storage, notifications)
+
+**Converters**: Transform data between formats (JSON↔XML, mapping, enrichment)
+
+**Filters**: Route, filter, and process messages based on rules and conditions
+
+**Marketplace**: Discover, install, and monetize pre-built connectors
+
+**Storage-as-a-Service**: Optional paid add-on for long-term message archival and state persistence
+
+## Technology Stack (Proposed)
+
+| Component | Technology | Rationale |
+|-----------|------------|-----------|
+| **Backend** | Go | Superior concurrency, low footprint, cloud-native |
+| **Messaging** | NATS + JetStream | 11M+ msgs/sec, multi-tenancy, persistence options |
+| **Storage** | S3/GCS/Azure Blob | Scalable object storage for large payloads |
+| **Orchestration** | Kubernetes | Container orchestration, auto-scaling |
+| **Observability** | OpenTelemetry + Prometheus + Grafana | Metrics, logs, traces |
+| **API Gateway** | TBD (Kong/Envoy/Traefik) | Under research |
+
+> Note: These technologies are being validated through research. See [Research Tasks](#current-phase-research) below.
+
+## Use Cases
+
+### B2B Data Exchange
+Connect with suppliers, partners, and customers securely with fine-grained permissions and audit trails.
+
+### Enterprise Integration
+Break down data silos by connecting legacy systems, SaaS applications, and modern microservices.
+
+### Event-Driven Architecture
+Build reactive systems that respond to events across your entire technology stack.
+
+### Marketplace Ecosystem
+Developers create and monetize connectors while enterprises benefit from pre-built integrations.
+
+### Multi-Cloud Strategy
+Integrate applications across AWS, GCP, Azure, and on-premise infrastructure.
+
+## Current Phase: Research
+
+We're currently in the research phase, evaluating technologies and designing the architecture. Our research is organized into 17 comprehensive tasks:
+
+**View all research tasks**: [docs/tasks/README.md](docs/tasks/README.md)
+
+**Track progress**: [GitHub Issues](https://github.com/ValueRetail/vrsky/issues)
+
+### Research Priorities
+
+**P0 - Critical Foundation**
+- Technology stack evaluation (.NET vs Go)
+- Message transport architecture (NATS design)
+- Core platform architecture
+- Multi-tenancy and data isolation
+
+**P1 - Core Platform**
+- Component model (consumers, producers, converters, filters)
+- Plugin/connector SDK design
+- Security and authentication
+- API gateway and service mesh
+- Orchestration engine
+
+**P2 - Business Layer**
+- Marketplace platform
+- Storage-as-a-Service
+- Cross-tenant collaboration
+
+**P3 - Operations & Quality**
+- Observability and monitoring
+- Deployment and infrastructure
+- Performance testing
+- Developer experience
+- Documentation
+
+**Estimated Timeline**: 4-6 months of research with 3-4 engineers
+
+## Getting Started (Coming Soon)
+
+Once we complete the research phase, we'll provide:
+- Quick start guide
+- Local development setup
+- SDK installation
+- Example integrations
+- Connector development guide
+
+## Contributing
+
+We're in the early research phase. If you'd like to contribute:
+
+1. Review the [research tasks](docs/tasks/README.md)
+2. Comment on relevant [GitHub issues](https://github.com/ValueRetail/vrsky/issues)
+3. Share your expertise and experience with similar platforms
+4. Propose additional research areas we should consider
+
+## Project Status
+
+| Milestone | Status | Target Date |
+|-----------|--------|-------------|
+| Research Phase | 🔵 In Progress | Q2 2026 |
+| Proof of Concept | ⚪ Planned | Q3 2026 |
+| Alpha Release | ⚪ Planned | Q4 2026 |
+| Beta Release | ⚪ Planned | Q1 2027 |
+| Production Release | ⚪ Planned | Q2 2027 |
+
+## License
+
+TBD (To Be Determined during research phase)
+
+## Contact & Community
+
+- **Issues**: [GitHub Issues](https://github.com/ValueRetail/vrsky/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ValueRetail/vrsky/discussions)
+- **Research Tasks**: [docs/tasks/README.md](docs/tasks/README.md)
+
+---
+
+**Built with ❤️ by the ValueRetail team**
