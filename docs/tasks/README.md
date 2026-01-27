@@ -4,7 +4,8 @@ This directory contains the comprehensive research task plan for building the VR
 
 ## Quick Links
 
-**All tasks are tracked as GitHub Issues**: https://github.com/ValueRetail/vrsky/issues
+- **GitHub Issues**: https://github.com/ValueRetail/vrsky/issues
+- **Project Inception**: [../PROJECT_INCEPTION.md](../PROJECT_INCEPTION.md) - Original vision and requirements from kickoff session
 
 ## Project Overview
 

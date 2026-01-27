@@ -93,9 +93,11 @@ Integrate applications across AWS, GCP, Azure, and on-premise infrastructure.
 
 We're currently in the research phase, evaluating technologies and designing the architecture. Our research is organized into 17 comprehensive tasks:
 
-**View all research tasks**: [docs/tasks/README.md](docs/tasks/README.md)
+**📋 View all research tasks**: [docs/tasks/README.md](docs/tasks/README.md)
 
-**Track progress**: [GitHub Issues](https://github.com/ValueRetail/vrsky/issues)
+**📝 Project inception and original vision**: [docs/PROJECT_INCEPTION.md](docs/PROJECT_INCEPTION.md)
+
+**🔗 Track progress**: [GitHub Issues](https://github.com/ValueRetail/vrsky/issues)
 
 ### Research Priorities
 
