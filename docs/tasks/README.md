@@ -47,15 +47,15 @@ These foundational decisions must be made first as they affect all subsequent wo
 | [#1](https://github.com/ValueRetail/vrsky/issues/1) | Technology Stack Evaluation (.NET vs Go) | None | 1-2 weeks |
 | [#2](https://github.com/ValueRetail/vrsky/issues/2) | Message Transport Architecture (NATS Design) | #1 | 2 weeks |
 | [#3](https://github.com/ValueRetail/vrsky/issues/3) | Core Integration Platform Architecture | #1, #2 | 2-3 weeks |
-| [#4](https://github.com/ValueRetail/vrsky/issues/4) | Multi-Tenancy Architecture & Data Isolation | #2, #3 | 2 weeks |
-
 **Key Focus Areas**:
 - Technology stack selection (Go recommended)
 - NATS + JetStream configuration
 - Reference-based messaging for large payloads
 - Object storage integration for temporary data
 - Message size thresholds and TTL configuration
-- Multi-tenant isolation model
+- Multi-tenant isolation (Shared vs Dedicated)
+- Customer-level segregation within shared nodes
+- Tenant migration and promotion workflows
 
 ### P1: High Priority - Core Platform (Issues #5-9)
 
@@ -63,15 +63,16 @@ Core functionality that makes the platform work.
 
 | Issue | Task | Dependencies | Effort |
 |-------|------|--------------|--------|
-| [#5](https://github.com/ValueRetail/vrsky/issues/5) | Integration Component Model (Consumers, Producers, Converters, Filters) | #1, #3 | 2 weeks |
-| [#6](https://github.com/ValueRetail/vrsky/issues/6) | Plugin/Connector SDK Design | #1, #5 | 3 weeks |
+| [#5](https://github.com/ValueRetail/vrsky/issues/5) | Service Node Model & Pipeline Architecture | #1, #3 | 2 weeks |
+| [#6](https://github.com/ValueRetail/vrsky/issues/6) | Plugin System & Scripting Engine (JS/TS) | #1, #5 | 3 weeks |
 | [#7](https://github.com/ValueRetail/vrsky/issues/7) | Security & Authentication Architecture | #4, #6 | 2-3 weeks |
 | [#8](https://github.com/ValueRetail/vrsky/issues/8) | API Gateway & Service Mesh Design | #3, #7 | 2 weeks |
 | [#9](https://github.com/ValueRetail/vrsky/issues/9) | Data Flow & Orchestration Engine | #2, #3, #5 | 3 weeks |
 
 **Key Focus Areas**:
-- Consumer/Producer/Converter/Filter abstractions
-- Connector SDK for third-party developers
+- Service Node (Incoming/Outgoing/Converter/Filter) abstractions
+- Dynamic loading of Go-based connection nodes
+- JavaScript/TypeScript scripting engine for logic nodes
 - Security (authN, authZ, secrets, sandboxing)
 - API gateway and service-to-service communication
 - Workflow orchestration and state management

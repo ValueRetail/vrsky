@@ -16,14 +16,16 @@
 
 The VRSky platform is designed around several key architectural concepts:
 
-#### Integration Components
+#### Integration Components (Service Nodes)
 
-- **Consumers**: Receive data from external systems
-- **Producers**: Send data to external systems
-- **Converters**: Transform data between formats
-- **Filters**: Route, filter, and process messages
+The platform is built on a pipeline of **Service Nodes**. Each node is a scalable unit (managed by K3s) that performs a specific role in the message lifecycle:
 
-These components should be **composable and scalable**, allowing users to build complex integration workflows.
+- **Incoming Connections**: Receive data from external systems (Go-based, dynamically loaded).
+- **Converters**: Transform data between formats (Supports JavaScript/TypeScript scripting or built-in functions).
+- **Filters**: Route, filter, and process messages (Supports JavaScript/TypeScript scripting).
+- **Outgoing Connections**: Send data to external systems (Go-based, dynamically loaded).
+
+These components are **composable, scalable, and multi-tenant aware**, using Customer IDs to segregate processing logic even within shared resources.
 
 #### Marketplace Model
 
@@ -34,12 +36,15 @@ A central marketplace/app store where:
 - Users can discover and enable connectors built by others
 - Both internal connectors and external third-party connectors are available
 
-#### Multi-Tenancy with Collaboration
+#### Multi-Tenancy & Tiered Isolation
 
-- **Multi-tenant architecture** with strong isolation between users/companies
-- **Cross-tenant interaction** - companies can collaborate and share data within the platform
-- Users can **enable external connectors** so other users/companies can access their integrations
-- Balance between isolation and controlled collaboration
+VRSky supports a flexible multi-tenancy model designed for rapid onboarding and enterprise-grade isolation:
+
+- **Shared Tenants**: A cost-effective "Free Tier" model where multiple customers share a single pool of Service Nodes and NATS resources. Isolation is enforced at the application level using Customer IDs.
+- **Dedicated Tenants**: Isolated environments (potentially separate K3s namespaces) for paid subscriptions, offering guaranteed resources and higher configurability.
+- **Seamless Migration**: Customers can be moved between shared tenants or promoted to dedicated tenants by re-routing their message flows, without requiring changes to their integration logic.
+- **Self-Hosting**: The entire stack can be deployed as a single-tenant instance for customers requiring total control over their infrastructure.
+- **Collaboration**: Controlled data sharing between tenants via the NATS backbone.
 
 ### Architectural Principles
 
