@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ValueRetail/vrsky/cmd/producer"
+	"github.com/ValueRetail/vrsky/pkg/component"
 	"github.com/ValueRetail/vrsky/internal/config"
 	"github.com/ValueRetail/vrsky/pkg/io"
 )
@@ -46,7 +46,7 @@ func main() {
 	}
 
 	// Create producer
-	prod := producer.New(input, output)
+	prod := component.New(input, output)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

@@ -6,16 +6,15 @@ WORKDIR /build
 # Install build dependencies
 RUN apk add --no-cache git
 
-# Copy module files
-COPY go.mod go.sum ./
-
-# Download dependencies
-RUN go mod download
-
-# Copy source code
+# Copy module and source files first
+COPY go.mod ./
 COPY cmd/producer/ ./cmd/producer/
 COPY pkg/ ./pkg/
 COPY internal/ ./internal/
+
+# Download dependencies - must be after source code is copied
+# so go can identify all required packages
+RUN go mod download && go mod tidy
 
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \

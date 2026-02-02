@@ -1,29 +1,27 @@
-package producer
+package component
 
 import (
 	"context"
 	"log/slog"
 	"sync"
-
-	"github.com/ValueRetail/vrsky/pkg/component"
 )
 
 // GenericProducer implements the Producer interface with pluggable I/O
 type GenericProducer struct {
 	name   string
-	input  component.Input
-	output component.Output
+	input  Input
+	output Output
 	mu     sync.RWMutex
-	health component.HealthStatus
+	health HealthStatus
 }
 
 // New creates a new generic producer
-func New(input component.Input, output component.Output) *GenericProducer {
+func New(input Input, output Output) *GenericProducer {
 	return &GenericProducer{
 		name:   "VRSky-Producer",
 		input:  input,
 		output: output,
-		health: component.HealthStopped,
+		health: HealthStopped,
 	}
 }
 
@@ -33,8 +31,8 @@ func (p *GenericProducer) Name() string {
 }
 
 // Type returns the component type
-func (p *GenericProducer) Type() component.ComponentType {
-	return component.TypeProducer
+func (p *GenericProducer) Type() ComponentType {
+	return TypeProducer
 }
 
 // Version returns the producer version
@@ -49,7 +47,7 @@ func (p *GenericProducer) Start(ctx context.Context) error {
 		"version", p.Version())
 
 	p.mu.Lock()
-	p.health = component.HealthHealthy
+	p.health = HealthHealthy
 	p.mu.Unlock()
 
 	return nil
@@ -60,7 +58,7 @@ func (p *GenericProducer) Stop(ctx context.Context) error {
 	slog.Info("Producer stopping")
 
 	p.mu.Lock()
-	p.health = component.HealthStopped
+	p.health = HealthStopped
 	p.mu.Unlock()
 
 	if p.input != nil {
@@ -79,7 +77,7 @@ func (p *GenericProducer) Stop(ctx context.Context) error {
 }
 
 // Health returns the current health status
-func (p *GenericProducer) Health() component.HealthStatus {
+func (p *GenericProducer) Health() HealthStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.health
@@ -92,7 +90,7 @@ func (p *GenericProducer) Configure(config []byte) error {
 }
 
 // Process runs the main producer loop: read from input, write to output
-func (p *GenericProducer) Process(ctx context.Context, input component.Input, output component.Output) error {
+func (p *GenericProducer) Process(ctx context.Context, input Input, output Output) error {
 	p.input = input
 	p.output = output
 
