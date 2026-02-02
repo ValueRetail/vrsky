@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # NATS message broker
+  nats:
+    image: nats:2.10-alpine
+    container_name: vrsky-nats
+    ports:
+      # Client port
+      - "4222:4222"
+      # Management port
+      - "8222:8222"
+    command:
+      - "-js"  # Enable JetStream
+      - "-m"   # Enable management port
+      - "8222"
+    networks:
+      - vrsky-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # HTTP test endpoint (httpbin)
+  httpbin:
+    image: kennethreitz/httpbin:latest
+    container_name: vrsky-httpbin
+    ports:
+      - "8080:80"
+    networks:
+      - vrsky-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/status/200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Producer service (optional - can run locally for development)
+  producer:
+    build:
+      context: .
+      dockerfile: cmd/producer/Dockerfile
+    container_name: vrsky-producer
+    environment:
+      # Input configuration: subscribe to NATS topic
+      INPUT_TYPE: "nats"
+      INPUT_CONFIG: '{"url":"nats://nats:4222","topic":"test.>"}'
+      
+      # Output configuration: POST to httpbin
+      OUTPUT_TYPE: "http"
+      OUTPUT_CONFIG: '{"url":"http://httpbin:80/post","method":"POST","retries":1}'
+      
+      # Logging (optional - structured JSON logging is default)
+      LOG_LEVEL: "info"
+    depends_on:
+      nats:
+        condition: service_healthy
+      httpbin:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+networks:
+  vrsky-network:
+    driver: bridge
+    name: vrsky-network
