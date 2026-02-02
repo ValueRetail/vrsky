@@ -2,6 +2,7 @@ package component
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -93,6 +94,16 @@ func (p *GenericProducer) Configure(config []byte) error {
 func (p *GenericProducer) Process(ctx context.Context, input Input, output Output) error {
 	p.input = input
 	p.output = output
+
+	// Start the input (connects to source)
+	if err := input.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start input: %w", err)
+	}
+
+	// Start the output (prepares destination)
+	if err := output.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start output: %w", err)
+	}
 
 	slog.Info("Producer starting main loop")
 

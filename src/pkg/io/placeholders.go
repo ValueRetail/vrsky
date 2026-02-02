@@ -16,6 +16,10 @@ func NewHTTPInput(configJSON json.RawMessage) (*HTTPInput, error) {
 	return nil, fmt.Errorf("HTTPInput not yet implemented")
 }
 
+func (h *HTTPInput) Start(ctx context.Context) error {
+	return fmt.Errorf("HTTPInput not yet implemented")
+}
+
 func (h *HTTPInput) Read(ctx context.Context) (*envelope.Envelope, error) {
 	return nil, fmt.Errorf("HTTPInput not yet implemented")
 }
@@ -29,6 +33,10 @@ type FileInput struct{}
 
 func NewFileInput(configJSON json.RawMessage) (*FileInput, error) {
 	return nil, fmt.Errorf("FileInput not yet implemented")
+}
+
+func (f *FileInput) Start(ctx context.Context) error {
+	return fmt.Errorf("FileInput not yet implemented")
 }
 
 func (f *FileInput) Read(ctx context.Context) (*envelope.Envelope, error) {
@@ -46,6 +54,10 @@ func NewNATSOutput(configJSON json.RawMessage) (*NATSOutput, error) {
 	return nil, fmt.Errorf("NATSOutput not yet implemented")
 }
 
+func (n *NATSOutput) Start(ctx context.Context) error {
+	return fmt.Errorf("NATSOutput not yet implemented")
+}
+
 func (n *NATSOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 	return fmt.Errorf("NATSOutput not yet implemented")
 }
@@ -59,6 +71,10 @@ type FileOutput struct{}
 
 func NewFileOutput(configJSON json.RawMessage) (*FileOutput, error) {
 	return nil, fmt.Errorf("FileOutput not yet implemented")
+}
+
+func (f *FileOutput) Start(ctx context.Context) error {
+	return fmt.Errorf("FileOutput not yet implemented")
 }
 
 func (f *FileOutput) Write(ctx context.Context, env *envelope.Envelope) error {

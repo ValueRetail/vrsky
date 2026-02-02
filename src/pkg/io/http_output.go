@@ -61,6 +61,12 @@ func NewHTTPOutput(configJSON json.RawMessage) (*HTTPOutput, error) {
 	}, nil
 }
 
+// Start initializes the HTTP output (no-op for HTTP)
+func (h *HTTPOutput) Start(ctx context.Context) error {
+	slog.Info("HTTP output started", "url", h.url)
+	return nil
+}
+
 // Write sends the envelope to the configured HTTP endpoint with retries
 func (h *HTTPOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 	if h.url == "" {
