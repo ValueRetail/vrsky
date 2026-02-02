@@ -56,10 +56,8 @@ services:
       # Logging (optional - structured JSON logging is default)
       LOG_LEVEL: "info"
     depends_on:
-      nats:
-        condition: service_healthy
-      httpbin:
-        condition: service_healthy
+      - nats
+      - httpbin
     networks:
       - vrsky-network
     restart: unless-stopped
