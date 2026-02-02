@@ -41,7 +41,7 @@ services:
   # Producer service (optional - can run locally for development)
   producer:
     build:
-      context: ./src
+      context: .
       dockerfile: cmd/producer/Dockerfile
     container_name: vrsky-producer
     environment:
