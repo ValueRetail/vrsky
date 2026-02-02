@@ -11,7 +11,6 @@ services:
       # Management port
       - "8222:8222"
     command:
-      - "-js"  # Enable JetStream
       - "-m"   # Enable management port
       - "8222"
     networks:
