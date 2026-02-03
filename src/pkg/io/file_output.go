@@ -205,15 +205,15 @@ func (f *FileProducer) generateFileName(env *envelope.Envelope) (string, error) 
 	// Use cached template for better performance
 	var buf bytes.Buffer
 	if err := f.fileNameTemplate.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute filename template: %w", err)
+	}
+
 	rawFileName := buf.String()
 
 	// Additional sanitization for filename
 	fileName := sanitizeForFilename(rawFileName)
 	if fileName == "" {
 		return "", fmt.Errorf("filename template produced only characters that are unsafe for filenames (raw result: %q)", rawFileName)
-	fileName = sanitizeForFilename(fileName)
-	if fileName == "" {
-		return "", fmt.Errorf("filename template resulted in empty string")
 	}
 
 	return fileName, nil

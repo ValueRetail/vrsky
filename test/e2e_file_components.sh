@@ -26,7 +26,8 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Cleanup on exit
+# Cleanup on exit.
+# Set SKIP_CLEANUP to any non-zero value to preserve the test directory even on success (useful for debugging).
 cleanup() {
     # If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory
     if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${SKIP_CLEANUP:-0}" -ne 0 ]; then
@@ -152,26 +153,26 @@ test_envelope_serialization() {
 
 # Test 4: Multiple files processed correctly
 test_multiple_files() {
-	test_start "Processing multiple files"
-	
-	if go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Multiple files test passed"
-	else
-		test_fail "Multiple files test failed"
-		return 1
-	fi
+    test_start "Processing multiple files"
+    
+    if go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Multiple files test passed"
+    else
+        test_fail "Multiple files test failed"
+        return 1
+    fi
 }
 
 # Test 5: Metadata preservation
 test_metadata_preservation() {
-	test_start "Envelope metadata preservation"
-	
-	if go test -v ./pkg/io -run "TestFileConsumerMetadataPreservation" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Metadata preservation test passed"
-	else
-		test_fail "Metadata preservation test failed"
-		return 1
-	fi
+    test_start "Envelope metadata preservation"
+    
+    if go test -v ./pkg/io -run "TestFileConsumerMetadataPreservation" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Metadata preservation test passed"
+    else
+        test_fail "Metadata preservation test failed"
+        return 1
+    fi
 }
 
 # Test 6: Complete pipeline

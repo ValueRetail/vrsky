@@ -248,6 +248,7 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 		readCtx, cancelRead := context.WithTimeout(ctx, 3*time.Second)
 		env, err := consumer.Read(readCtx)
 		cancelRead()
+		if err == nil && env != nil {
 			count++
 		}
 	}
@@ -289,12 +290,15 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Consumer should still be running
-	if consumer.closed {
+		t.Fatalf("Consumer was stopped due to error while processing unreadable file")
+	}
+
 	// Wait (up to 2s) for at least one file processing attempt, ensuring the consumer stays running.
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.After(2 * time.Second)
 
+waitLoop:
 	waitLoop:
 	for {
 		select {
