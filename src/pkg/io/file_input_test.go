@@ -286,14 +286,14 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileConsumer() error = %v", err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	go func() {
 		if err := consumer.Start(ctx); err != nil && err != context.Canceled {
 			t.Errorf("FileConsumer.Start() error = %v", err)
 		}
 	}()
-
-
-	}
 
 	// Wait for file processing attempt (should not crash)
 	time.Sleep(2 * time.Second)
@@ -302,13 +302,12 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.After(2 * time.Second)
-				t.Fatalf("File consumer closed unexpectedly while handling read error")
 waitLoop:
 	for {
 		select {
 		case <-ticker.C:
 			if consumer.closed {
-
+				t.Fatalf("File consumer closed unexpectedly while handling read error")
 			}
 		case <-timeout:
 			break waitLoop

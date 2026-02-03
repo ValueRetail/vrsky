@@ -155,12 +155,9 @@ test_envelope_serialization() {
 test_multiple_files() {
     test_start "Processing multiple files"
     
-    if go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1; then
-        test_pass "Multiple files test passed"
-    else
+    go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1 && \
+        test_pass "Multiple files test passed" || \
         test_fail "Multiple files test failed"
-        return 1
-    fi
 }
 
 # Test 5: Metadata preservation
