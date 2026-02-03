@@ -16,8 +16,8 @@ import (
 
 // NATSInputConfig defines the configuration for NATS Input
 type NATSInputConfig struct {
-	URL     string `json:"url"`              // NATS server URL
-	Topic   string `json:"topic"`            // Topic pattern to subscribe to
+	URL     string `json:"url"`               // NATS server URL
+	Topic   string `json:"topic"`             // Topic pattern to subscribe to
 	Timeout int    `json:"timeout,omitempty"` // Connection timeout in seconds (default: 30)
 }
 

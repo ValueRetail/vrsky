@@ -55,14 +55,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create producer
-	prod := component.New(input, output)
+	// Create consumer
+	cons := component.New(input, output)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start the producer input and output
+	// Start the consumer input and output
 	if err := input.Start(ctx); err != nil {
 		slog.Error("Failed to start input", "error", err)
 		os.Exit(1)
@@ -80,21 +80,21 @@ func main() {
 	// Start the main processing loop in a goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- prod.Process(ctx, input, output)
+		errChan <- cons.Process(ctx, input, output)
 	}()
 
 	// Wait for either an error or a signal
 	select {
 	case err := <-errChan:
 		if err != nil {
-			slog.Error("Producer error", "error", err)
+			slog.Error("Consumer error", "error", err)
 			os.Exit(1)
 		}
 	case sig := <-sigChan:
 		slog.Info("Received signal, shutting down",
 			"signal", sig.String())
 		cancel()
-		prod.Stop(ctx)
+		cons.Stop(ctx)
 	}
 }
 
