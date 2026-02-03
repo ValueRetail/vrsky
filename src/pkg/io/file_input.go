@@ -2,7 +2,9 @@ package io
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"os"
@@ -17,24 +19,45 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
+// ProcessedFile tracks the hash and modification time of a processed file
+type ProcessedFile struct {
+	Hash  string
+	Mtime int64
+}
+
+// FileRetry tracks retry attempts for failed files
+type FileRetry struct {
+	Attempts    int
+	LastError   string
+	LastAttempt time.Time
+}
+
 // FileConsumer monitors a directory for files and publishes them to NATS
 type FileConsumer struct {
 	// Configuration
-	dir          string
-	pattern      string
-	pollInterval time.Duration
+	dir                   string
+	pattern               string
+	pollInterval          time.Duration
+	archiveDir            string
+	errorDir              string
+	deleteAfterProcessing bool
+	maxRetries            int
+	retryBackoffMs        int
+	archiveRetentionDays  int
 
 	// Runtime
-	ctx        context.Context
-	cancel     context.CancelFunc
-	ticker     *time.Ticker
-	messages   chan *envelope.Envelope
-	subject    string
-	nc         *nats.Conn
-	logger     *slog.Logger
-	mu         sync.Mutex
-	closed     bool
-	closedOnce sync.Once
+	ctx            context.Context
+	cancel         context.CancelFunc
+	ticker         *time.Ticker
+	messages       chan *envelope.Envelope
+	subject        string
+	nc             *nats.Conn
+	logger         *slog.Logger
+	mu             sync.Mutex
+	closed         bool
+	closedOnce     sync.Once
+	processedFiles map[string]ProcessedFile
+	failedFiles    map[string]FileRetry
 }
 
 // NewFileConsumer creates a new file consumer from environment configuration
@@ -68,6 +91,35 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 	if subject == "" {
 		subject = "file.input"
 	}
+
+	// Read archive/error directory configuration
+	archiveDir := os.Getenv("FILE_INPUT_ARCHIVE_DIR")
+	errorDir := os.Getenv("FILE_INPUT_ERROR_DIR")
+	deleteAfterProcessing := os.Getenv("FILE_INPUT_DELETE_AFTER_PROCESSING") == "true"
+
+	// Read retry configuration
+	maxRetries := 3
+	if maxRetriesStr := os.Getenv("FILE_INPUT_MAX_RETRIES"); maxRetriesStr != "" {
+		if parsed, err := strconv.Atoi(maxRetriesStr); err == nil && parsed > 0 {
+			maxRetries = parsed
+		}
+	}
+
+	retryBackoffMs := 1000
+	if retryBackoffStr := os.Getenv("FILE_INPUT_RETRY_BACKOFF_MS"); retryBackoffStr != "" {
+		if parsed, err := strconv.Atoi(retryBackoffStr); err == nil && parsed > 0 {
+			retryBackoffMs = parsed
+		}
+	}
+
+	// Read archive retention configuration
+	archiveRetentionDays := 30
+	if retentionStr := os.Getenv("FILE_INPUT_ARCHIVE_RETENTION_DAYS"); retentionStr != "" {
+		if parsed, err := strconv.Atoi(retentionStr); err == nil && parsed > 0 {
+			archiveRetentionDays = parsed
+		}
+	}
+
 	// Validate configuration
 	if err := validateFileInputConfig(dir, pattern, pollInterval); err != nil {
 		return nil, err
@@ -85,12 +137,20 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 		}
 	}
 	return &FileConsumer{
-		dir:          dir,
-		pattern:      pattern,
-		pollInterval: pollInterval,
-		subject: subject,
-		logger:       logger,
-		messages:     make(chan *envelope.Envelope, bufferSize),
+		dir:                   dir,
+		pattern:               pattern,
+		pollInterval:          pollInterval,
+		subject:               subject,
+		archiveDir:            archiveDir,
+		errorDir:              errorDir,
+		deleteAfterProcessing: deleteAfterProcessing,
+		maxRetries:            maxRetries,
+		retryBackoffMs:        retryBackoffMs,
+		archiveRetentionDays:  archiveRetentionDays,
+		logger:                logger,
+		messages:              make(chan *envelope.Envelope, bufferSize),
+		processedFiles:        make(map[string]ProcessedFile),
+		failedFiles:           make(map[string]FileRetry),
 	}, nil
 }
 
@@ -210,19 +270,324 @@ func (f *FileConsumer) processFiles() {
 			continue
 		}
 
+		// Check if file is locked
+		if f.isFileLocked(filePath) {
+			f.logger.Debug("File is locked, skipping", "path", filePath)
+			continue
+		}
+
+		// Check if should retry failed file
+		if f.shouldRetry(filePath) {
+			f.logger.Debug("Retrying failed file", "path", filePath)
+		}
+
 		// Process file
 		if err := f.processFile(filePath); err != nil {
 			f.logger.Error("Failed to process file", "path", filePath, "err", err)
+		}
+	}
+
+	// Clean up old archives
+	if f.archiveDir != "" {
+		f.cleanupOldArchives()
+	}
+}
+
+// calculateFileHash computes SHA256 hash of first 64KB of file
+func (f *FileConsumer) calculateFileHash(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	// Read first 64KB for hashing
+	limitedReader := io.LimitReader(file, 64*1024)
+	if _, err := io.Copy(hash, limitedReader); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// isFileProcessed checks if file has been processed before (no changes)
+func (f *FileConsumer) isFileProcessed(filePath string) (bool, error) {
+	fileName := filepath.Base(filePath)
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	processed, exists := f.processedFiles[fileName]
+	if !exists {
+		return false, nil
+	}
+
+	// Check if modification time changed
+	if processed.Mtime != info.ModTime().Unix() {
+		return false, nil
+	}
+
+	// Check if hash matches
+	currentHash, err := f.calculateFileHash(filePath)
+	if err != nil {
+		return false, err
+	}
+
+	return currentHash == processed.Hash, nil
+}
+
+// recordProcessedFile stores file hash and modification time
+func (f *FileConsumer) recordProcessedFile(filePath string, hash string, mtime int64) {
+	fileName := filepath.Base(filePath)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.processedFiles[fileName] = ProcessedFile{
+		Hash:  hash,
+		Mtime: mtime,
+	}
+
+	// Remove from failed files on success
+	delete(f.failedFiles, fileName)
+}
+
+// isFileLocked checks if file is currently open/being written
+func (f *FileConsumer) isFileLocked(filePath string) bool {
+	// Try to open file - if locked, this will fail
+	file, err := os.Open(filePath)
+	if err != nil {
+		// File is likely locked or has permission issues
+		return true
+	}
+	defer file.Close()
+
+	// Check for recent modification (likely being written)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return true
+	}
+
+	// If modified in last second, likely being written
+	if time.Since(info.ModTime()) < 1*time.Second {
+		return true
+	}
+
+	return false
+}
+
+// shouldRetry checks if we should retry a failed file
+func (f *FileConsumer) shouldRetry(filePath string) bool {
+	fileName := filepath.Base(filePath)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	retry, exists := f.failedFiles[fileName]
+	if !exists {
+		return false
+	}
+
+	if retry.Attempts >= f.maxRetries {
+		return false
+	}
+
+	// Calculate backoff: exponential (1s, 2s, 4s, 8s, ...)
+	// Cap shift amount at 20 to keep reasonable backoff values (1s × 2^20 ≈ 17 minutes)
+	// Combined with 5-minute duration cap, backoff won't exceed practical limits
+	maxShift := uint(20)
+	shiftAmount := uint(0)
+	if retry.Attempts > 0 {
+		shiftAmount = uint(retry.Attempts - 1)
+	}
+	if shiftAmount > maxShift {
+		shiftAmount = maxShift
+	}
+
+	// Cap maximum backoff duration at 5 minutes to prevent unreasonable wait times
+	maxBackoffMs := int64(5 * 60 * 1000) // 5 minutes
+
+	baseBackoffMs := int64(f.retryBackoffMs)
+	// Compute exponential factor in int64 to avoid intermediate overflow
+	factor := int64(1) << shiftAmount
+
+	var backoffMs int64
+	if baseBackoffMs <= 0 {
+		backoffMs = 0
+	} else if factor > maxBackoffMs/baseBackoffMs {
+		// If multiplying would exceed maxBackoffMs, clamp to maxBackoffMs
+		backoffMs = maxBackoffMs
+	} else {
+		backoffMs = baseBackoffMs * factor
+	}
+	backoffDuration := time.Duration(backoffMs) * time.Millisecond
+
+	return time.Since(retry.LastAttempt) >= backoffDuration
+}
+
+// recordFailedFile tracks retry attempts for a failed file
+func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) {
+	fileName := filepath.Base(filePath)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	retry, exists := f.failedFiles[fileName]
+	if !exists {
+		retry = FileRetry{Attempts: 0}
+	}
+
+	retry.Attempts++
+	retry.LastError = errMsg
+	retry.LastAttempt = time.Now()
+
+	f.failedFiles[fileName] = retry
+}
+
+// moveToArchive moves processed file to archive directory with date subdirectory
+func (f *FileConsumer) moveToArchive(filePath string) error {
+	if f.archiveDir == "" {
+		return nil
+	}
+
+	// Create date subdirectory (YYYY-MM-DD)
+	today := time.Now().Format("2006-01-02")
+	archivePath := filepath.Join(f.archiveDir, today)
+
+	if err := os.MkdirAll(archivePath, 0o755); err != nil {
+		return fmt.Errorf("create archive directory: %w", err)
+	}
+
+	// Move file
+	destPath := filepath.Join(archivePath, filepath.Base(filePath))
+	if err := os.Rename(filePath, destPath); err != nil {
+		return fmt.Errorf("move to archive: %w", err)
+	}
+
+	f.logger.Info("Moved file to archive", "source", filePath, "dest", destPath)
+	return nil
+}
+
+// moveToError moves failed file to error directory with metadata
+func (f *FileConsumer) moveToError(filePath string, errMsg string) error {
+	if f.errorDir == "" {
+		return nil
+	}
+
+	// Create date subdirectory (YYYY-MM-DD)
+	today := time.Now().Format("2006-01-02")
+	errorPath := filepath.Join(f.errorDir, today)
+
+	if err := os.MkdirAll(errorPath, 0o755); err != nil {
+		return fmt.Errorf("create error directory: %w", err)
+	}
+
+	// Move file
+	fileName := filepath.Base(filePath)
+	destPath := filepath.Join(errorPath, fileName)
+	if err := os.Rename(filePath, destPath); err != nil {
+		return fmt.Errorf("move to error: %w", err)
+	}
+
+	// Create .error metadata file
+	errorMetadataPath := destPath + ".error"
+	metadata := fmt.Sprintf("timestamp=%s\nerror=%s\n", time.Now().Format(time.RFC3339), errMsg)
+	if err := os.WriteFile(errorMetadataPath, []byte(metadata), 0o644); err != nil {
+		f.logger.Warn("Failed to write error metadata", "path", errorMetadataPath, "err", err)
+	}
+
+	f.logger.Error("Moved file to error directory", "source", filePath, "dest", destPath, "reason", errMsg)
+	return nil
+}
+
+// handleProcessedFile determines what to do with a successfully processed file
+func (f *FileConsumer) handleProcessedFile(filePath string) error {
+	if f.deleteAfterProcessing {
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("delete processed file: %w", err)
+		}
+		f.logger.Info("Deleted processed file", "path", filePath)
+		return nil
+	}
+
+	if f.archiveDir != "" {
+		return f.moveToArchive(filePath)
+	}
+
+	// Leave in place
+	return nil
+}
+
+// cleanupOldArchives removes archived files older than retention period
+func (f *FileConsumer) cleanupOldArchives() {
+	if f.archiveDir == "" || f.archiveRetentionDays <= 0 {
+		return
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -f.archiveRetentionDays)
+
+	entries, err := os.ReadDir(f.archiveDir)
+	if err != nil {
+		f.logger.Debug("Failed to read archive directory", "path", f.archiveDir, "err", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dirPath := filepath.Join(f.archiveDir, entry.Name())
+		info, err := os.Stat(dirPath)
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().Before(cutoffTime) {
+			if err := os.RemoveAll(dirPath); err != nil {
+				f.logger.Warn("Failed to cleanup old archive", "path", dirPath, "err", err)
+			} else {
+				f.logger.Info("Cleaned up old archive directory", "path", dirPath)
+			}
 		}
 	}
 }
 
 // processFile reads a file and publishes it as an envelope
 func (f *FileConsumer) processFile(filePath string) error {
+	// Check if already processed
+	isProcessed, err := f.isFileProcessed(filePath)
+	if err != nil {
+		f.logger.Warn("Failed to check if file was processed", "path", filePath, "err", err)
+	} else if isProcessed {
+		f.logger.Debug("File already processed, skipping", "path", filePath)
+		return nil
+	}
+
 	// Read file contents
 	content, err := os.ReadFile(filePath)
 	if err != nil {
+		f.recordFailedFile(filePath, err.Error())
+		if f.failedFiles[filepath.Base(filePath)].Attempts >= f.maxRetries {
+			if err := f.moveToError(filePath, fmt.Sprintf("max retries exceeded: %v", err)); err != nil {
+				f.logger.Error("Failed to move file to error directory", "path", filePath, "err", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("read file: %w", err)
+	}
+
+	// Calculate file hash for reprocessing prevention
+	fileHash, err := f.calculateFileHash(filePath)
+	if err != nil {
+		f.logger.Warn("Failed to calculate file hash", "path", filePath, "err", err)
+		fileHash = ""
 	}
 
 	// Create envelope using the proper structure
@@ -237,32 +602,44 @@ func (f *FileConsumer) processFile(filePath string) error {
 	if err := f.ctx.Err(); err != nil {
 		return err
 	}
-	// Send to messages channel first (atomic operation)
+
+	// Send to messages channel with timeout
+	sendTimeout := 5 * time.Second
 	select {
 	case f.messages <- env:
 		// Only publish to NATS after successful channel send
 		data, err := envelope.Marshal(env)
 		if err != nil {
+			f.recordFailedFile(filePath, err.Error())
 			return fmt.Errorf("marshal envelope: %w", err)
 		}
 		if err := f.nc.Publish(f.subject, data); err != nil {
+			f.recordFailedFile(filePath, err.Error())
 			return fmt.Errorf("publish to NATS: %w", err)
 		}
-
-		// Move the file to a processed directory AFTER both channel send AND NATS publish succeed.
-		// If the move fails, log the error but do not treat it as fatal, since the message has
-		// already been delivered and we want to avoid blocking further processing.
-		processedDir := filepath.Join(f.dir, "processed")
-		if err := os.MkdirAll(processedDir, 0o755); err != nil {
-			f.logger.Error("Failed to create processed directory", "dir", processedDir, "error", err)
+		var mtime int64
+		if err != nil {
+			// If the file has been moved or deleted after processing, we still
+			// record the current time to prevent unintended reprocessing.
+			mtime = time.Now().Unix()
+			f.logger.Debug("Failed to stat file after processing; using current time as mtime", "path", filePath, "err", err)
 		} else {
-			destPath := filepath.Join(processedDir, filepath.Base(filePath))
-			if err := os.Rename(filePath, destPath); err != nil {
-				f.logger.Error("Failed to move processed file", "source", filePath, "dest", destPath, "error", err)
-			}
+			mtime = info.ModTime().Unix()
 		}
+
+		if err := f.handleProcessedFile(filePath); err != nil {
+			f.logger.Error("Failed to handle processed file", "path", filePath, "err", err)
+		}
+
+		// Record file as processed
+
+		// Record file as processed
+		f.recordProcessedFile(filePath, fileHash, mtime)
+
 		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
 		return nil
+	case <-time.After(sendTimeout):
+		return fmt.Errorf("timeout sending envelope to messages channel (buffer may be full)")
 	case <-f.ctx.Done():
 		return f.ctx.Err()
 	}
