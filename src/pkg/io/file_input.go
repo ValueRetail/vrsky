@@ -227,10 +227,9 @@ func (f *FileConsumer) processFile(filePath string) error {
 	}
 
 	// Send to messages channel and handle context cancellation
-
 	select {
 	case f.messages <- env:
-		// Remove the file AFTER successful publish
+		// Remove the file AFTER both NATS publish AND channel send succeed
 		if err := os.Remove(filePath); err != nil {
 			return fmt.Errorf("remove processed file: %w", err)
 		}

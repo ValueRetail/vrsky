@@ -110,9 +110,9 @@ setup_test_env() {
     log "INFO" "Setting up test environment"
 }
 
-# Test 1: File Producer writes simple text file
+# Test 1: Simple text output
 test_simple_text_output() {
-	test_start "File Producer writes simple text file"
+	test_start "Simple text output"
 	
 	export FILE_OUTPUT_DIR="${OUTPUT_DIR}/test1"
 	mkdir -p "${FILE_OUTPUT_DIR}"

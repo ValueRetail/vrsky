@@ -19,15 +19,17 @@ import (
 // FileProducer writes message envelopes to the file system
 type FileProducer struct {
 	// Configuration
-	outputDir      string
-	fileNameFormat string
-	permissions    os.FileMode
+	outputDir        string
+	fileNameFormat   string
+	permissions      os.FileMode
 
 	// Runtime
-	logger     *slog.Logger
-	mu         sync.Mutex
-	closed     bool
-	closedOnce sync.Once
+	absOutputDir      string
+	fileNameTemplate  *template.Template
+	logger            *slog.Logger
+	mu                sync.Mutex
+	closed            bool
+	closedOnce        sync.Once
 }
 
 // NewFileProducer creates a new file producer from environment configuration
@@ -88,10 +90,19 @@ func (f *FileProducer) Start(ctx context.Context) error {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
-	// Validate template can be parsed
-	if _, err := template.New("filename").Parse(f.fileNameFormat); err != nil {
+	// Cache the absolute output directory path for use in Write()
+	absDir, err := filepath.Abs(f.outputDir)
+	if err != nil {
+		return fmt.Errorf("resolve output directory path: %w", err)
+	}
+	f.absOutputDir = absDir
+
+	// Parse and cache the filename template for use in Write()
+	tmpl, err := template.New("filename").Parse(f.fileNameFormat)
+	if err != nil {
 		return fmt.Errorf("invalid filename template: %w", err)
 	}
+	f.fileNameTemplate = tmpl
 
 	f.logger.Info("File Producer started", "dir", f.outputDir, "format", f.fileNameFormat, "permissions", fmt.Sprintf("%o", f.permissions))
 	return nil
@@ -125,11 +136,8 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 		return fmt.Errorf("resolve absolute path: %w", err)
 	}
 
-	absOutputDir, err := filepath.Abs(f.outputDir)
-
-	if err != nil {
-		return fmt.Errorf("resolve output directory path: %w", err)
-	}
+	// Use cached absolute output directory (calculated in Start())
+	absOutputDir := f.absOutputDir
 
 	relPath, err := filepath.Rel(absOutputDir, absPath)
 	if err != nil {
@@ -181,14 +189,9 @@ func (f *FileProducer) generateFileName(env *envelope.Envelope) (string, error) 
 		"Timestamp": env.CreatedAt.Format(time.RFC3339),
 	}
 
-	// Parse and execute template
-	tmpl, err := template.New("filename").Parse(f.fileNameFormat)
-	if err != nil {
-		return "", fmt.Errorf("parse template: %w", err)
-	}
-
+	// Use cached template for better performance
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := f.fileNameTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 
