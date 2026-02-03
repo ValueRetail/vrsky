@@ -213,7 +213,7 @@ func (f *FileProducer) generateFileName(env *envelope.Envelope) (string, error) 
 	// Additional sanitization for filename
 	fileName := sanitizeForFilename(rawFileName)
 	if fileName == "" {
-		return "", fmt.Errorf("filename template produced only characters that are unsafe for filenames (raw result: %q). Use only alphanumeric characters, hyphens, underscores, and dots in filenames.", rawFileName)
+		return "", fmt.Errorf("filename template produced only unsafe characters that were sanitized away, resulting in an empty filename (raw: %q)", rawFileName)
 	}
 
 	return fileName, nil

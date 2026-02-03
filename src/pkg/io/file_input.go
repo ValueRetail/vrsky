@@ -233,6 +233,10 @@ func (f *FileConsumer) processFile(filePath string) error {
 	env.PayloadSize = int64(len(content))
 	env.ContentType = f.detectContentType(filePath)
 
+	// Check for context cancellation before attempting to send to the channel
+	if err := f.ctx.Err(); err != nil {
+		return err
+	}
 	// Send to messages channel first (atomic operation)
 	select {
 	case f.messages <- env:
@@ -245,11 +249,17 @@ func (f *FileConsumer) processFile(filePath string) error {
 			return fmt.Errorf("publish to NATS: %w", err)
 		}
 
-		// Remove the file AFTER both channel send AND NATS publish succeed.
-		// If removal fails, log the error but do not treat it as fatal to avoid
-		// reprocessing the same file and publishing duplicate messages.
-		if err := os.Remove(filePath); err != nil {
-			f.logger.Error("Failed to remove processed file", "filename", filepath.Base(filePath), "error", err)
+		// Move the file to a processed directory AFTER both channel send AND NATS publish succeed.
+		// If the move fails, log the error but do not treat it as fatal, since the message has
+		// already been delivered and we want to avoid blocking further processing.
+		processedDir := filepath.Join(f.dir, "processed")
+		if err := os.MkdirAll(processedDir, 0o755); err != nil {
+			f.logger.Error("Failed to create processed directory", "dir", processedDir, "error", err)
+		} else {
+			destPath := filepath.Join(processedDir, filepath.Base(filePath))
+			if err := os.Rename(filePath, destPath); err != nil {
+				f.logger.Error("Failed to move processed file", "source", filePath, "dest", destPath, "error", err)
+			}
 		}
 		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
 		return nil

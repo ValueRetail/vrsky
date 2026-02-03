@@ -2,6 +2,22 @@
 
 # VRSky File Consumer/Producer End-to-End Test Script
 # This script tests the complete pipeline without requiring NATS
+#
+# Usage:
+#   ./test/e2e_file_components.sh
+#
+# Environment Variables:
+#   PRESERVE_TEST_DIR  Set to 1 to preserve test directory on success (default: 0)
+#                      Useful for debugging: PRESERVE_TEST_DIR=1 ./test/e2e_file_components.sh
+#
+# Examples:
+#   # Run tests normally (cleanup on success)
+#   ./test/e2e_file_components.sh
+#
+#   # Run tests and preserve directory for debugging
+#   PRESERVE_TEST_DIR=1 ./test/e2e_file_components.sh
+#
+#   # Tests will always preserve directory if they fail, regardless of this variable
 
 set -euo pipefail
 
@@ -119,8 +135,8 @@ run_go_test() {
     local test_name=$1
     (cd "${PROJECT_ROOT}/src" && go test -v ./pkg/io -run "${test_name}" -timeout 10s)
 }
-test_simple_text_output() {
-    test_start "Simple text output"
+test_file_producer_write_file() {
+    test_start "File Producer writes file"
     
     export FILE_OUTPUT_DIR="${OUTPUT_DIR}/test1"
     mkdir -p "${FILE_OUTPUT_DIR}"
@@ -226,6 +242,15 @@ run_all_tests() {
     echo ""
     
     log "INFO" "Starting E2E tests"
+    
+    # Display configuration info
+    if [ "${PRESERVE_TEST_DIR:-0}" -eq 1 ]; then
+        echo -e "${YELLOW}[Config]${NC} Test directory will be preserved (PRESERVE_TEST_DIR=1)"
+    else
+        echo -e "${YELLOW}[Config]${NC} Test directory will be cleaned up on success (set PRESERVE_TEST_DIR=1 to preserve)"
+    fi
+    echo -e "${YELLOW}[Config]${NC} Test directory: ${TEST_DIR}"
+    echo ""
     
     # Run each test
     test_simple_text_output || true

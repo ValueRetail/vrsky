@@ -239,11 +239,7 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 	// Read up to 2 envelopes (only .json files), allowing time for processing
 	count := 0
 
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		// Fallback deadline if context has no deadline; matches outer timeout duration.
-		deadline = time.Now().Add(5 * time.Second)
-	}
+	deadline, _ := ctx.Deadline()
 
 	for count < 2 && time.Now().Before(deadline) {
 		remaining := time.Until(deadline)
