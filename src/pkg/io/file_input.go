@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
+	"strconv"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -50,7 +50,14 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 	pollIntervalStr := os.Getenv("FILE_INPUT_POLL_INTERVAL")
 	pollInterval := 5 * time.Second
 	if pollIntervalStr != "" {
-		if parsed, err := time.ParseDuration(pollIntervalStr + "s"); err == nil {
+		effectiveLogger := logger
+		if effectiveLogger == nil {
+			effectiveLogger = slog.Default()
+		}
+		parsed, err := time.ParseDuration(pollIntervalStr)
+		if err != nil {
+			effectiveLogger.Warn("invalid FILE_INPUT_POLL_INTERVAL, using default", "value", pollIntervalStr, "error", err, "default", pollInterval)
+		} else {
 			pollInterval = parsed
 		}
 	}
@@ -64,13 +71,20 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 		logger = slog.Default()
 	}
 
-	return &FileConsumer{
-		dir:          dir,
-		pattern:      pattern,
-		pollInterval: pollInterval,
-		logger:       logger,
-		messages:     make(chan *envelope.Envelope, 100),
-	}, nil
+	bufferSizeStr := os.Getenv("FILE_INPUT_BUFFER_SIZE")
+bufferSize := 100
+if bufferSizeStr != "" {
+    if parsed, err := strconv.Atoi(bufferSizeStr); err == nil && parsed > 0 {
+        bufferSize = parsed
+    }
+}
+return &FileConsumer{
+    dir:          dir,
+    pattern:      pattern,
+    pollInterval: pollInterval,
+    logger:       logger,
+    messages:     make(chan *envelope.Envelope, bufferSize),
+}, nil
 }
 
 // Start begins monitoring the directory for files
@@ -104,28 +118,22 @@ func (f *FileConsumer) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully stops the file consumer
 func (f *FileConsumer) Close() error {
 	f.closedOnce.Do(func() {
 		f.mu.Lock()
+		defer f.mu.Unlock()
 		f.closed = true
-		f.mu.Unlock()
-
 		if f.cancel != nil {
 			f.cancel()
 		}
-
 		if f.ticker != nil {
 			f.ticker.Stop()
 		}
-
 		if f.nc != nil {
 			f.nc.Close()
 		}
-
 		close(f.messages)
 	})
-
 	f.logger.Info("File Consumer closed")
 	return nil
 }
@@ -205,26 +213,45 @@ func (f *FileConsumer) processFile(filePath string) error {
 	env.ContentType = detectContentType(filePath)
 
 	// Publish to NATS
-	data, err := envelope.Marshal(env)
+data, err := envelope.Marshal(env)
+if err != nil {
+    return fmt.Errorf("marshal envelope: %w", err)
+}
+if err := f.nc.Publish(f.subject, data); err != nil {
+    return fmt.Errorf("publish to NATS: %w", err)
+}
 	if err != nil {
 		return fmt.Errorf("marshal envelope: %w", err)
 	}
 
-	if err := f.nc.Publish("integration.files.received", data); err != nil {
-		return fmt.Errorf("publish to NATS: %w", err)
+	// Send to messages channel and handle context cancellation
+	// Log a warning if the messages channel is nearing capacity to surface potential backpressure issues.
+	if cap(f.messages) > 0 {
+		currentLen := len(f.messages)
+		currentCap := cap(f.messages)
+		// Warn when usage reaches or exceeds 80% of capacity.
+		if currentLen*100/currentCap >= 80 {
+			f.logger.Warn("FileConsumer messages channel near capacity", "len", currentLen, "cap", currentCap)
+		}
 	}
 
-	// Send to messages channel
+	// Send to messages channel and handle context cancellation
 	select {
 	case f.messages <- env:
+		// Publish to NATS first
 	case <-f.ctx.Done():
 		return f.ctx.Err()
-	}
-
-	f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
-	return nil
-}
-
+	case f.messages <- env:
+		// Publish to NATS first
+		if err := f.nc.Publish(...); err != nil {
+			return fmt.Errorf("publish to NATS: %w", err)
+		}
+		// Remove the file AFTER successful publish
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("remove processed file: %w", err)
+		}
+		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
+		return nil
 // detectContentType determines the MIME type from file extension
 func detectContentType(filePath string) string {
 	ext := filepath.Ext(filePath)

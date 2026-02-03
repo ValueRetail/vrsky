@@ -44,10 +44,16 @@ func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
 	}
 
 	permissionsStr := os.Getenv("FILE_OUTPUT_PERMISSIONS")
-	permissions := os.FileMode(0644)
+	permissions := os.FileMode(0o644)
 	if permissionsStr != "" {
 		if parsed, err := strconv.ParseInt(permissionsStr, 8, 32); err == nil {
 			permissions = os.FileMode(parsed)
+		} else {
+			if logger != nil {
+				logger.Warn("Invalid FILE_OUTPUT_PERMISSIONS; using default permissions", "value", permissionsStr, "error", err)
+			} else {
+				slog.Default().Warn("Invalid FILE_OUTPUT_PERMISSIONS; using default permissions", "value", permissionsStr, "error", err)
+			}
 		}
 	}
 
@@ -78,7 +84,7 @@ func (f *FileProducer) Start(ctx context.Context) error {
 	f.mu.Unlock()
 
 	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(f.outputDir, 0755); err != nil {
+	if err := os.MkdirAll(f.outputDir, f.permissions); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -120,12 +126,16 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	}
 
 	absOutputDir, err := filepath.Abs(f.outputDir)
+
 	if err != nil {
 		return fmt.Errorf("resolve output directory path: %w", err)
 	}
 
-	// Verify the resolved path is within the output directory
-	if !strings.HasPrefix(absPath, absOutputDir) {
+	relPath, err := filepath.Rel(absOutputDir, absPath)
+	if err != nil {
+		return fmt.Errorf("resolve relative path: %w", err)
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("path traversal detected: %s is outside output directory", filePath)
 	}
 
@@ -153,10 +163,20 @@ func (f *FileProducer) Close() error {
 
 // generateFileName generates a filename from the configured template
 func (f *FileProducer) generateFileName(env *envelope.Envelope) (string, error) {
+	// Sanitize Source for safe use in filenames; log if sanitization changes the value.
+	safeSource := sanitizeForFilename(env.Source)
+	if safeSource != env.Source {
+		f.logger.Warn(
+			"Source contains characters unsafe for filenames; using sanitized value in filename",
+			"source", env.Source,
+			"sanitizedSource", safeSource,
+		)
+	}
+
 	// Prepare template data
-	data := map[string]interface{}{
+	data := map[string]any{
 		"ID":        env.ID,
-		"Source":    sanitizeForFilename(env.Source),
+		"Source":    safeSource,
 		"Extension": f.deriveExtension(env.ContentType),
 		"Timestamp": env.CreatedAt.Format(time.RFC3339),
 	}

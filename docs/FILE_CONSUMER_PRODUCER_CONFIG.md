@@ -57,7 +57,7 @@ The File Consumer automatically detects content types based on file extensions:
 | `.html` | `text/html` |
 | `.css` | `text/css` |
 | `.js` | `application/javascript` |
-| `.yaml` / `.yml` | `application/x-yaml` |
+| `.yaml` / `.yml` | `application/yaml` |
 | `.zip` | `application/zip` |
 | *(unknown)* | `application/octet-stream` |
 
@@ -243,7 +243,7 @@ export FILE_INPUT_POLL_INTERVAL=5s
 
 # Producer: Archive processed responses
 export FILE_OUTPUT_DIR=/data/api-archive
-export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.CreatedAt}}-{{.ID}}.{{.Extension}}"
+export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.Timestamp}}-{{.ID}}.{{.Extension}}"
 export FILE_OUTPUT_PERMISSIONS=0644
 ```
 
@@ -265,24 +265,24 @@ export FILE_OUTPUT_PERMISSIONS=0600  # Tenant-isolated access
 
 ### Run Unit Tests
 ```bash
-cd /home/ludvik/vrsky/src
-/home/ludvik/go/bin/go test -v ./pkg/io -run FileConsumer -timeout 15s
-/home/ludvik/go/bin/go test -v ./pkg/io -run FileProducer -timeout 15s
+cd $PROJECT_ROOT/src
+go test -v ./pkg/io -run FileConsumer -timeout 15s
+go test -v ./pkg/io -run FileProducer -timeout 15s
 ```
 
 ### Run Integration Tests
 ```bash
-/home/ludvik/go/bin/go test -v ./pkg/io -run Pipeline -timeout 15s
+go test -v ./pkg/io -run Pipeline -timeout 15s
 ```
 
 ### Run E2E Test Suite
 ```bash
-bash /home/ludvik/vrsky/test/e2e_file_components.sh
+bash test/e2e_file_components.sh
 ```
 
 ### Manual Testing
 ```bash
-bash /home/ludvik/vrsky/test/manual_testing_guide.sh
+bash test/manual_testing_guide.sh
 ```
 
 ## Troubleshooting

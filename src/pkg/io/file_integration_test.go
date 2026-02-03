@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"bytes"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
@@ -75,7 +76,7 @@ func TestFileConsumerProducerPipeline(t *testing.T) {
 		t.Fatalf("Failed to read output file: %v", err)
 	}
 
-	if string(outputContent) != string(testContent) {
+	if !bytes.Equal(outputContent, testContent) {
 		t.Errorf("Output content mismatch. Expected %s, got %s", testContent, outputContent)
 	}
 }
@@ -486,7 +487,7 @@ func TestFileProducerPathTraversalPrevention(t *testing.T) {
 		}
 
 		// Verify file is within output directory
-		if !filepath.HasPrefix(fullPath, outputAbs) {
+		if !strings.HasPrefix(fullPath, outputAbs) {
 			t.Errorf("File created outside output directory: %s", fullPath)
 		}
 	}

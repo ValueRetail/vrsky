@@ -29,7 +29,7 @@ func TestFileProducer_NewFileProducer(t *testing.T) {
 }
 
 func TestFileProducer_ValidateFails_EmptyDir(t *testing.T) {
-	err := validateFileOutputConfig("", "{{.ID}}.{{.Extension}}", 0644)
+	err := validateFileOutputConfig("", "{{.ID}}.{{.Extension}}", 0o644)
 	if err == nil {
 		t.Error("validateFileOutputConfig() should fail with empty directory")
 	}
@@ -43,7 +43,7 @@ func TestFileProducer_ValidateFails_InvalidPermissions(t *testing.T) {
 }
 
 func TestFileProducer_ValidateFails_EmptyFormat(t *testing.T) {
-	err := validateFileOutputConfig("/tmp", "", 0644)
+	err := validateFileOutputConfig("/tmp", "", 0o644)
 	if err == nil {
 		t.Error("validateFileOutputConfig() should fail with empty format")
 	}

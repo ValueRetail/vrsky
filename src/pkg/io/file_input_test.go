@@ -48,7 +48,7 @@ func TestFileConsumer_Start(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	consumer, err := NewFileConsumer(logger)
@@ -75,7 +75,7 @@ func TestFileConsumer_ReadsFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	// Create test file
 	testFile := filepath.Join(tmpDir, "test.txt")

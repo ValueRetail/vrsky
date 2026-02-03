@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-PROJECT_ROOT="/home/ludvik/vrsky"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INPUT_DIR="/tmp/vrsky-manual-test/input"
 OUTPUT_DIR="/tmp/vrsky-manual-test/output"
 
@@ -31,9 +31,9 @@ echo ""
 echo -e "${YELLOW}2. Building binaries${NC}"
 cd "${PROJECT_ROOT}/src"
 echo "   Building file-consumer..."
-/home/ludvik/go/bin/go build -o "${PROJECT_ROOT}/bin/file-consumer" ./cmd/file-consumer
+go build -o "${PROJECT_ROOT}/bin/file-consumer" ./cmd/file-consumer
 echo "   Building file-producer..."
-/home/ludvik/go/bin/go build -o "${PROJECT_ROOT}/bin/file-producer" ./cmd/file-producer
+go build -o "${PROJECT_ROOT}/bin/file-producer" ./cmd/file-producer
 echo -e "${GREEN}✓ Binaries built successfully${NC}"
 echo ""
 
@@ -47,7 +47,7 @@ echo "      FILE_INPUT_DIR=${INPUT_DIR}"
 echo "      FILE_INPUT_PATTERN=*.txt"
 echo "      FILE_INPUT_POLL_INTERVAL=5s"
 echo "      FILE_OUTPUT_DIR=${OUTPUT_DIR}"
-echo "      FILE_OUTPUT_FILENAME_FORMAT={{.ID}}_{{.Extension}}"
+echo "      FILE_OUTPUT_FILENAME_FORMAT={{.ID}}.{{.Extension}}"
 echo ""
 
 # Test scenario 2: JSON file
@@ -96,7 +96,7 @@ echo "      export FILE_OUTPUT_DIR=${OUTPUT_DIR}"
 echo "      export FILE_OUTPUT_FILENAME_FORMAT={{.ID}}_{{.Extension}}"
 echo ""
 echo "   Step 4: Add test files to input directory"
-echo "      cp ${INPUT_DIR}/*.* /tmp/vrsky-manual-test/input/"
+echo "      cp /path/to/your/test/files/*.* ${INPUT_DIR}/"
 echo ""
 echo "   Step 5: Check output directory for processed files"
 echo "      ls -la ${OUTPUT_DIR}/"
@@ -154,16 +154,16 @@ echo -e "${YELLOW}10. Run Automated Tests${NC}"
 echo ""
 echo "   Run all file I/O tests:"
 echo "      cd ${PROJECT_ROOT}/src"
-echo "      /home/ludvik/go/bin/go test -v ./pkg/io -timeout 30s"
+echo "      go test -v ./pkg/io -timeout 30s"
 echo ""
 echo "   Run only File Consumer tests:"
-echo "      /home/ludvik/go/bin/go test -v ./pkg/io -run FileConsumer -timeout 15s"
+echo "      go test -v ./pkg/io -run FileConsumer -timeout 15s"
 echo ""
 echo "   Run only File Producer tests:"
-echo "      /home/ludvik/go/bin/go test -v ./pkg/io -run FileProducer -timeout 15s"
+echo "      go test -v ./pkg/io -run FileProducer -timeout 15s"
 echo ""
 echo "   Run integration tests:"
-echo "      /home/ludvik/go/bin/go test -v ./pkg/io -run Pipeline -timeout 15s"
+echo "      go test -v ./pkg/io -run Pipeline -timeout 15s"
 echo ""
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"

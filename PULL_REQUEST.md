@@ -279,17 +279,17 @@ FILE_OUTPUT_PERMISSIONS     # Default: 0644 (octal)
 ### Quick Verification
 ```bash
 # Run all tests
-cd /home/ludvik/vrsky/src
-/home/ludvik/go/bin/go test -v ./pkg/io -timeout 30s
+cd src
+go test -v ./pkg/io -timeout 30s
 
 # Run E2E suite
-bash /home/ludvik/vrsky/test/e2e_file_components.sh
+bash test/e2e_file_components.sh
 ```
 
 ### Manual Testing
 ```bash
 # Interactive guide with example files
-bash /home/ludvik/vrsky/test/manual_testing_guide.sh
+bash test/manual_testing_guide.sh
 ```
 
 ## Breaking Changes

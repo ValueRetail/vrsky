@@ -13,8 +13,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SCRIPT_DIR="/home/ludvik/vrsky/test"
-PROJECT_ROOT="/home/ludvik/vrsky"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BIN_DIR="${PROJECT_ROOT}/bin"
 TEST_DIR="/tmp/vrsky-e2e-test-$$"
 INPUT_DIR="${TEST_DIR}/input"
@@ -28,6 +28,11 @@ TESTS_FAILED=0
 
 # Cleanup on exit
 cleanup() {
+	# If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory
+	if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${SKIP_CLEANUP:-0}" -ne 0 ]; then
+		echo -e "${BLUE}[Cleanup]${NC} Preserving test directory for debugging: ${TEST_DIR}"
+		return
+	fi
 	echo -e "${BLUE}[Cleanup]${NC} Removing test directory: ${TEST_DIR}"
 	rm -rf "${TEST_DIR}"
 }
@@ -75,7 +80,8 @@ assert_file_content() {
 		return 1
 	fi
 	
-	local actual=$(cat "${file}")
+	local actual
+	actual=$(<"$file")
 	if [ "${actual}" != "${expected}" ]; then
 		test_fail "File content mismatch. Expected: '${expected}', Got: '${actual}'"
 		return 1
@@ -87,7 +93,8 @@ assert_file_content() {
 assert_files_count() {
 	local dir=$1
 	local expected=$2
-	local actual=$(find "${dir}" -type f | wc -l)
+	local actual
+	actual=$(find "${dir}" -type f | wc -l | tr -d '[:space:]')
 	if [ "${actual}" -ne "${expected}" ]; then
 		test_fail "File count mismatch in ${dir}. Expected: ${expected}, Got: ${actual}"
 		return 1
@@ -111,7 +118,7 @@ test_simple_text_output() {
 	mkdir -p "${FILE_OUTPUT_DIR}"
 	
 	# Run producer test via Go
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileProducerFilenameGeneration" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileProducerFilenameGeneration" -timeout 10s > "${TEST_DIR}/test.log" 2>&1; then
 		test_pass "File Producer test passed"
 	else
 		test_fail "File Producer test failed"
@@ -123,7 +130,7 @@ test_simple_text_output() {
 test_file_permissions() {
 	test_start "File Producer respects file permissions"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileProducerPermissions" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileProducerPermissions" -timeout 10s >/dev/null 2>&1; then
 		test_pass "File permissions test passed"
 	else
 		test_fail "File permissions test failed"
@@ -135,7 +142,7 @@ test_file_permissions() {
 test_envelope_serialization() {
 	test_start "Envelope serialization through pipeline"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestEnvelopeSerializationThroughPipeline" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestEnvelopeSerializationThroughPipeline" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Envelope serialization test passed"
 	else
 		test_fail "Envelope serialization test failed"
@@ -147,7 +154,7 @@ test_envelope_serialization() {
 test_multiple_files() {
 	test_start "Processing multiple files"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Multiple files test passed"
 	else
 		test_fail "Multiple files test failed"
@@ -159,7 +166,7 @@ test_multiple_files() {
 test_metadata_preservation() {
 	test_start "Envelope metadata preservation"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileConsumerMetadataPreservation" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileConsumerMetadataPreservation" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Metadata preservation test passed"
 	else
 		test_fail "Metadata preservation test failed"
@@ -171,7 +178,7 @@ test_metadata_preservation() {
 test_consumer_producer_pipeline() {
 	test_start "Complete Consumer → Producer pipeline"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileConsumerProducerPipeline" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileConsumerProducerPipeline" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Consumer → Producer pipeline test passed"
 	else
 		test_fail "Consumer → Producer pipeline test failed"
@@ -183,7 +190,7 @@ test_consumer_producer_pipeline() {
 test_pattern_matching() {
 	test_start "File pattern matching"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileConsumerPatternMatching" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileConsumerPatternMatching" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Pattern matching test passed"
 	else
 		test_fail "Pattern matching test failed"
@@ -195,7 +202,7 @@ test_pattern_matching() {
 test_graceful_shutdown() {
 	test_start "Graceful shutdown and context cancellation"
 	
-	if /home/ludvik/go/bin/go test -v ./pkg/io -run "TestFileConsumerProducerGracefulShutdown" -timeout 10s >/dev/null 2>&1; then
+	if go test -v ./pkg/io -run "TestFileConsumerProducerGracefulShutdown" -timeout 10s >/dev/null 2>&1; then
 		test_pass "Graceful shutdown test passed"
 	else
 		test_fail "Graceful shutdown test failed"
