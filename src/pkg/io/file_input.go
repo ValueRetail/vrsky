@@ -107,7 +107,12 @@ func (f *FileConsumer) Start(ctx context.Context) error {
 	}
 
 	// Connect to NATS
-	nc, err := nats.Connect(nats.DefaultURL)
+	natsURL := os.Getenv("FILE_INPUT_NATS_URL")
+	if natsURL == "" {
+		natsURL = nats.DefaultURL
+	}
+
+	nc, err := nats.Connect(natsURL)
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
 	}

@@ -83,7 +83,8 @@ func (f *FileProducer) Start(ctx context.Context) error {
 	f.mu.Unlock()
 
 	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(f.outputDir, f.permissions); err != nil {
+	dirPermissions := f.permissions | 0o111
+	if err := os.MkdirAll(f.outputDir, dirPermissions); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -132,11 +133,22 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	if err != nil {
 		return fmt.Errorf("resolve absolute path: %w", err)
 	}
+	// Resolve symlinks in the target path
+	resolvedAbsPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks for target path: %w", err)
+	}
 
 	// Use cached absolute output directory (calculated in Start())
 	absOutputDir := f.absOutputDir
 
-	relPath, err := filepath.Rel(absOutputDir, absPath)
+	// Resolve symlinks in the output directory
+	resolvedOutputDir, err := filepath.EvalSymlinks(absOutputDir)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks for output directory: %w", err)
+	}
+
+	relPath, err := filepath.Rel(resolvedOutputDir, resolvedAbsPath)
 	if err != nil {
 		return fmt.Errorf("resolve relative path: %w", err)
 	}
@@ -144,7 +156,8 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 		return fmt.Errorf("path traversal detected: %s is outside output directory", filePath)
 	}
 
-	// Write payload to file
+	// Write payload to file using the validated, symlink-resolved path
+	if err := os.WriteFile(resolvedAbsPath, env.Payload, f.permissions); err != nil {
 	if err := os.WriteFile(filePath, env.Payload, f.permissions); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}

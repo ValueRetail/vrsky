@@ -195,7 +195,10 @@ func TestFileProducer_FileNameGeneration(t *testing.T) {
 
 func TestFileProducer_ContentTypeToExtension(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	producer, _ := NewFileProducer(logger)
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
 
 	cases := []struct {
 		contentType string

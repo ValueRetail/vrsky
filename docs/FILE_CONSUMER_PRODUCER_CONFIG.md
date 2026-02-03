@@ -127,9 +127,12 @@ The File Producer writes envelope contents to the file system, creating files wi
 - **Available template variables**:
   - `{{.ID}}` - The envelope ID (UUID)
   - `{{.Extension}}` - File extension derived from content type
-  - `{{.TenantID}}` - Tenant ID (if set in envelope)
-  - `{{.IntegrationID}}` - Integration ID (if set in envelope)
-  - `{{.Source}}` - Source component name
+  - `{{.Source}}` - Source component name (sanitized for safe filenames)
+  - `{{.Timestamp}}` - RFC3339 formatted timestamp
+
+- **Currently unavailable** (reserved for future use):
+  - `{{.TenantID}}` - Not populated in current version
+  - `{{.IntegrationID}}` - Not populated in current version
 
 **Template Examples**:
 ```bash
@@ -137,17 +140,17 @@ The File Producer writes envelope contents to the file system, creating files wi
 FILE_OUTPUT_FILENAME_FORMAT="{{.ID}}.{{.Extension}}"
 # Output: 550e8400-e29b-41d4-a716-446655440000.json
 
-# With timestamp-like IDs
-FILE_OUTPUT_FILENAME_FORMAT="output-{{.ID}}.{{.Extension}}"
-# Output: output-550e8400-e29b-41d4-a716-446655440000.json
+# With timestamp
+FILE_OUTPUT_FILENAME_FORMAT="{{.ID}}-{{.Timestamp}}.{{.Extension}}"
+# Output: 550e8400-e29b-41d4-a716-446655440000-2026-02-03T12:34:56Z.json
 
 # With source prefix
 FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.ID}}.{{.Extension}}"
 # Output: file-consumer-550e8400-e29b-41d4-a716-446655440000.json
 
-# With directory structure (tenant isolation)
-FILE_OUTPUT_FILENAME_FORMAT="{{.TenantID}}/{{.IntegrationID}}/{{.ID}}.{{.Extension}}"
-# Output: tenant-123/integration-456/550e8400-e29b-41d4-a716-446655440000.json
+# Nested directory (custom organization)
+FILE_OUTPUT_FILENAME_FORMAT="archive/{{.Timestamp}}/{{.ID}}.{{.Extension}}"
+# Output: archive/2026-02-03T12:34:56Z/550e8400-e29b-41d4-a716-446655440000.json
 ```
 
 #### FILE_OUTPUT_PERMISSIONS
@@ -208,16 +211,18 @@ export FILE_OUTPUT_DIR=/data/sensitive-output
 export FILE_OUTPUT_FILENAME_FORMAT="secure-{{.ID}}.{{.Extension}}"
 export FILE_OUTPUT_PERMISSIONS=0600
 
-# Multi-tenant output with directory structure
-export FILE_OUTPUT_DIR=/data/multi-tenant
-export FILE_OUTPUT_FILENAME_FORMAT="{{.TenantID}}/{{.IntegrationID}}/{{.ID}}.{{.Extension}}"
+# With source tracking and timestamp
+export FILE_OUTPUT_DIR=/data/processed
+export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.Timestamp}}-{{.ID}}.{{.Extension}}"
 export FILE_OUTPUT_PERMISSIONS=0644
 
-# With source tracking
-export FILE_OUTPUT_DIR=/data/processed
-export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.ID}}-{{.TenantID}}.{{.Extension}}"
+# Organized by date
+export FILE_OUTPUT_DIR=/data/archive
+export FILE_OUTPUT_FILENAME_FORMAT="2026-02/{{.Source}}/{{.ID}}.{{.Extension}}"
 export FILE_OUTPUT_PERMISSIONS=0644
 ```
+
+**Note**: TenantID and IntegrationID are not currently available in templates. For tenant/integration organization, use the Source field or external folder structure.
 
 ## Integration Scenarios
 
@@ -247,7 +252,7 @@ export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}-{{.Timestamp}}-{{.ID}}.{{.Extens
 export FILE_OUTPUT_PERMISSIONS=0644
 ```
 
-### Scenario 3: Multi-Tenant SaaS Platform
+### Scenario 3: Multi-Tenant SaaS Platform (Organization by Folder)
 
 ```bash
 # Consumer: One shared upload directory (monitored)
@@ -255,10 +260,18 @@ export FILE_INPUT_DIR=/mnt/uploads
 export FILE_INPUT_PATTERN=*
 export FILE_INPUT_POLL_INTERVAL=1s
 
-# Producer: Organize by tenant and integration
+# Producer: Organize by external folder structure
+# (Note: Tenant/Integration IDs are not available in templates yet)
 export FILE_OUTPUT_DIR=/mnt/processed
-export FILE_OUTPUT_FILENAME_FORMAT="{{.TenantID}}/{{.IntegrationID}}/{{.ID}}.{{.Extension}}"
-export FILE_OUTPUT_PERMISSIONS=0600  # Tenant-isolated access
+export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}/{{.ID}}.{{.Extension}}"
+export FILE_OUTPUT_PERMISSIONS=0600  # Restricted access
+```
+
+**Alternative approach**: Use external file system organization:
+```bash
+# Separate FILE_OUTPUT_DIR per tenant for isolation
+export FILE_OUTPUT_DIR=/mnt/processed/tenant-123
+export FILE_OUTPUT_FILENAME_FORMAT="{{.Source}}/{{.ID}}.{{.Extension}}"
 ```
 
 ## Testing

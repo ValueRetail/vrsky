@@ -112,18 +112,18 @@ setup_test_env() {
 
 # Test 1: Simple text output
 test_simple_text_output() {
-	test_start "Simple text output"
-	
-	export FILE_OUTPUT_DIR="${OUTPUT_DIR}/test1"
-	mkdir -p "${FILE_OUTPUT_DIR}"
-	
-	# Run producer test via Go
-	if go test -v ./pkg/io -run "TestFileProducer_WriteFile" -timeout 10s > "${TEST_DIR}/test_simple_text_output.log" 2>&1; then
-		test_pass "File Producer test passed"
-	else
-		test_fail "File Producer test failed"
-		return 1
-	fi
+    test_start "Simple text output"
+    
+    export FILE_OUTPUT_DIR="${OUTPUT_DIR}/test1"
+    mkdir -p "${FILE_OUTPUT_DIR}"
+    
+    # Run producer test via Go
+    if go test -v ./pkg/io -run "TestFileProducer_WriteFile" -timeout 10s > "${TEST_DIR}/test_simple_text_output.log" 2>&1; then
+        test_pass "File Producer test passed"
+    else
+        test_fail "File Producer test failed"
+        return 1
+    fi
 }
 
 # Test 2: File Producer respects file permissions

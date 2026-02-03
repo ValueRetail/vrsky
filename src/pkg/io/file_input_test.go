@@ -98,11 +98,11 @@ func TestFileConsumer_ReadsFile(t *testing.T) {
 		t.Errorf("Start() error = %v", err)
 	}
 
-	// Wait for file to be processed
-	time.Sleep(2 * time.Second)
+	// Read envelope with timeout instead of arbitrary sleep
+	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer readCancel()
 
-	// Read envelope
-	env, err := consumer.Read(context.Background())
+	env, err := consumer.Read(readCtx)
 	if err != nil {
 		t.Errorf("Read() error = %v", err)
 	}
