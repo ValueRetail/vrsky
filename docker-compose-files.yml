@@ -19,7 +19,7 @@ services:
     networks:
       - vrsky-files-network
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
+      test: ["CMD", "nats-server", "--signal", "status"]
       interval: 10s
       timeout: 5s
       retries: 5

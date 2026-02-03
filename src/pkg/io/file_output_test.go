@@ -656,9 +656,15 @@ func TestFileProducer_ValidateEnvelope(t *testing.T) {
 	// Test 3: Exceeding max file size
 	env = envelope.New()
 	env.ID = "test-large-exceeds"
-	env.Payload = make([]byte, 2*1024*1024*1024) // 2GB (exceeds 1GB default)
+	env.Payload = make([]byte, 150*1024*1024) // 150MB
 	env.ContentType = "text/plain"
+	
+	// Temporarily set max file size to 100MB for this test to avoid memory pressure
+	oldMaxFileSize := producer.maxFileSize
+	producer.maxFileSize = 100 * 1024 * 1024
 	err = producer.Write(ctx, env)
+	producer.maxFileSize = oldMaxFileSize
+	
 	if err == nil {
 		t.Error("Write() with payload exceeding max size should fail")
 	}

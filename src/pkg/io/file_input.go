@@ -399,8 +399,9 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 	}
 
 	// Calculate backoff: exponential (1s, 2s, 4s, 8s, ...)
-	// Cap at reasonable value to prevent overflow: max 10 retries = 512x backoff = ~512 seconds
-	maxShift := uint(63) // Prevent overflow in bit shift
+	// Cap shift amount at 20 to keep reasonable backoff values (1s × 2^20 ≈ 17 minutes)
+	// Combined with 5-minute duration cap, backoff won't exceed practical limits
+	maxShift := uint(20)
 	shiftAmount := uint(0)
 	if retry.Attempts > 0 {
 		shiftAmount = uint(retry.Attempts - 1)
@@ -409,14 +410,22 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 		shiftAmount = maxShift
 	}
 
-	backoffMs := f.retryBackoffMs * (1 << uint(shiftAmount))
-	
 	// Cap maximum backoff duration at 5 minutes to prevent unreasonable wait times
 	maxBackoffMs := int64(5 * 60 * 1000) // 5 minutes
-	if backoffMs > maxBackoffMs {
+
+	baseBackoffMs := int64(f.retryBackoffMs)
+	// Compute exponential factor in int64 to avoid intermediate overflow
+	factor := int64(1) << shiftAmount
+
+	var backoffMs int64
+	if baseBackoffMs <= 0 {
+		backoffMs = 0
+	} else if factor > maxBackoffMs/baseBackoffMs {
+		// If multiplying would exceed maxBackoffMs, clamp to maxBackoffMs
 		backoffMs = maxBackoffMs
+	} else {
+		backoffMs = baseBackoffMs * factor
 	}
-	
 	backoffDuration := time.Duration(backoffMs) * time.Millisecond
 
 	return time.Since(retry.LastAttempt) >= backoffDuration
@@ -607,9 +616,13 @@ func (f *FileConsumer) processFile(filePath string) error {
 		if err := f.nc.Publish(f.subject, data); err != nil {
 			f.recordFailedFile(filePath, err.Error())
 			return fmt.Errorf("publish to NATS: %w", err)
-		}
-
-		// Handle processed file (archive, delete, or leave)
+		info, err := os.Stat(filePath)
+		mtime := time.Now().Unix()
+		if err != nil {
+			// If the file has been moved or deleted after processing, we still
+			// record the current time to prevent unintended reprocessing.
+			f.logger.Debug("Failed to stat file after processing; using current time as mtime", "path", filePath, "err", err)
+		} else if info != nil {
 		if err := f.handleProcessedFile(filePath); err != nil {
 			f.logger.Error("Failed to handle processed file", "path", filePath, "err", err)
 		}

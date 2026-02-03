@@ -286,8 +286,24 @@ func (f *FileProducer) checkDiskSpace(requiredSize int64) error {
 		return fmt.Errorf("check disk space: %w", err)
 	}
 
-	// Calculate available space in bytes
-	available := int64(stat.Bavail) * int64(stat.Bsize)
+	// Calculate available space in bytes, guarding against integer overflow
+	bavail := int64(stat.Bavail)
+	bsize := int64(stat.Bsize)
+	if bavail < 0 {
+		bavail = 0
+	}
+	if bsize < 0 {
+		bsize = 0
+	}
+	var available int64
+	if bavail == 0 || bsize == 0 {
+		available = 0
+	} else if bavail > math.MaxInt64/bsize {
+		// Cap at MaxInt64 to avoid overflow while representing "very large" free space
+		available = math.MaxInt64
+	} else {
+		available = bavail * bsize
+	}
 
 	// Require 2x the file size to be safe (avoid running disk out of space)
 	// Check for overflow: if requiredSize > maxInt64/2, operation would overflow

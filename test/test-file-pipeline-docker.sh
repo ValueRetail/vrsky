@@ -174,20 +174,20 @@ wait_for_services() {
     while [ "${elapsed}" -lt "${max_wait}" ]; do
         cd "${PROJECT_ROOT}"
         
-        # Check if all services are running
+        # Check if all services are running and healthy
         local nats_ready=0
         local consumer_ready=0
         local producer_ready=0
         
-        if docker-compose -f docker-compose-files.yml ps vrsky-nats-files | grep -q "Up"; then
+        if docker-compose -f docker-compose-files.yml ps vrsky-nats-files | grep -q "Up (healthy)"; then
             nats_ready=1
         fi
         
-        if docker-compose -f docker-compose-files.yml ps vrsky-file-consumer | grep -q "Up"; then
+        if docker-compose -f docker-compose-files.yml ps vrsky-file-consumer | grep -q "Up (healthy)"; then
             consumer_ready=1
         fi
         
-        if docker-compose -f docker-compose-files.yml ps vrsky-file-producer | grep -q "Up"; then
+        if docker-compose -f docker-compose-files.yml ps vrsky-file-producer | grep -q "Up (healthy)"; then
             producer_ready=1
         fi
         
