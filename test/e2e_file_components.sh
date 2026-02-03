@@ -91,23 +91,23 @@ assert_file_content() {
 }
 
 assert_files_count() {
-	local dir=$1
-	local expected=$2
-	local actual
-	actual=$(find "${dir}" -type f | wc -l | tr -d '[:space:]')
-	if [ "${actual}" -ne "${expected}" ]; then
-		test_fail "File count mismatch in ${dir}. Expected: ${expected}, Got: ${actual}"
-		return 1
-	fi
-	test_pass "File count correct: ${actual} files in ${dir}"
-	return 0
+    local dir=$1
+    local expected=$2
+    local actual
+    actual=$(find "${dir}" -type f | wc -l | tr -d '[:space:]')
+    if [ "${actual}" -ne "${expected}" ]; then
+        test_fail "File count mismatch in ${dir}. Expected: ${expected}, Got: ${actual}"
+        return 1
+    fi
+    test_pass "File count correct: ${actual} files in ${dir}"
+    return 0
 }
 
 # Setup test environment
 setup_test_env() {
-	mkdir -p "${INPUT_DIR}" "${OUTPUT_DIR}" "${TEST_DIR}"
-	echo "Test output log" > "${LOG_FILE}"
-	log "INFO" "Setting up test environment"
+    mkdir -p "${INPUT_DIR}" "${OUTPUT_DIR}" "${TEST_DIR}"
+    echo "Test output log" > "${LOG_FILE}"
+    log "INFO" "Setting up test environment"
 }
 
 # Test 1: File Producer writes simple text file
@@ -118,7 +118,7 @@ test_simple_text_output() {
 	mkdir -p "${FILE_OUTPUT_DIR}"
 	
 	# Run producer test via Go
-	if go test -v ./pkg/io -run "TestFileProducerFilenameGeneration" -timeout 10s > "${TEST_DIR}/test.log" 2>&1; then
+	if go test -v ./pkg/io -run "TestFileProducerFilenameGeneration" -timeout 10s > "${TEST_DIR}/test_simple_text_output.log" 2>&1; then
 		test_pass "File Producer test passed"
 	else
 		test_fail "File Producer test failed"

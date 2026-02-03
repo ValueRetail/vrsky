@@ -343,6 +343,12 @@ func TestFileConsumer_Stop(t *testing.T) {
 }
 
 func TestDetectContentType(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	consumer, err := NewFileConsumer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create consumer: %v", err)
+	}
+
 	cases := []struct {
 		filename string
 		expected string
@@ -358,7 +364,7 @@ func TestDetectContentType(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.filename, func(t *testing.T) {
-			got := detectContentType(tt.filename)
+			got := consumer.detectContentType(tt.filename)
 			if got != tt.expected {
 				t.Errorf("detectContentType(%s) = %s, want %s", tt.filename, got, tt.expected)
 			}

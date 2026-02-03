@@ -7,9 +7,9 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
-	"strconv"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -227,17 +227,7 @@ func (f *FileConsumer) processFile(filePath string) error {
 	}
 
 	// Send to messages channel and handle context cancellation
-	// Log a warning if the messages channel is nearing capacity to surface potential backpressure issues.
-	if cap(f.messages) > 0 {
-		currentLen := len(f.messages)
-		currentCap := cap(f.messages)
-		// Warn when usage reaches or exceeds 80% of capacity.
-		if currentLen*100/currentCap >= 80 {
-			f.logger.Warn("FileConsumer messages channel near capacity", "len", currentLen, "cap", currentCap)
-		}
-	}
 
-	// Send to messages channel and handle context cancellation
 	select {
 	case f.messages <- env:
 		// Remove the file AFTER successful publish

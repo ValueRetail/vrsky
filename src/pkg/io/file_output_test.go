@@ -348,6 +348,39 @@ func TestFileProducer_PathTraversalPrevention(t *testing.T) {
 		t.Error("No files created in output directory")
 	}
 
+	// Verify path traversal prevention: files should be within tmpDir
+	for _, entry := range entries {
+		filePath := filepath.Join(tmpDir, entry.Name())
+		absFilePath, err := filepath.Abs(filePath)
+		if err != nil {
+			t.Fatalf("Failed to get absolute path: %v", err)
+		}
+
+		absTmpDir, err := filepath.Abs(tmpDir)
+		if err != nil {
+			t.Fatalf("Failed to get absolute tmpDir path: %v", err)
+		}
+
+		// Verify file is within output directory
+		if !strings.HasPrefix(absFilePath, absTmpDir) {
+			t.Errorf("Path traversal detected: file %s is outside output directory %s", absFilePath, absTmpDir)
+		}
+	}
+
+	// Verify no files were created in parent directories
+	parentDir := filepath.Dir(tmpDir)
+	parentEntries, err := os.ReadDir(parentDir)
+	if err != nil {
+		t.Fatalf("Failed to read parent directory: %v", err)
+	}
+
+	// Count files created by this test in parent directory (should be 0)
+	for _, entry := range parentEntries {
+		if strings.Contains(entry.Name(), "test-traversal") {
+			t.Errorf("Path traversal allowed: file created in parent directory: %s", entry.Name())
+		}
+	}
+
 	producer.Close()
 }
 
