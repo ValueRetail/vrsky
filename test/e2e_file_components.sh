@@ -95,7 +95,9 @@ assert_files_count() {
     local dir=$1
     local expected=$2
     local actual
-    actual=$(find "${dir}" -type f | wc -l | tr -d '[:space:]')
+    if ! actual=$(find "${dir}" -type f -print0 | grep -zc .); then
+        actual=0
+    fi
     if [ "${actual}" -ne "${expected}" ]; then
         test_fail "File count mismatch in ${dir}. Expected: ${expected}, Got: ${actual}"
         return 1
@@ -159,9 +161,12 @@ test_envelope_serialization() {
 test_multiple_files() {
     test_start "Processing multiple files"
     
-    run_go_test "TestFileConsumerMultipleFiles" >/dev/null 2>&1 && \
-        test_pass "Multiple files test passed" || \
+    if run_go_test "TestFileConsumerMultipleFiles" >/dev/null 2>&1; then
+        test_pass "Multiple files test passed"
+    else
         test_fail "Multiple files test failed"
+        return 1
+    fi
 }
 
 # Test 5: Metadata preservation

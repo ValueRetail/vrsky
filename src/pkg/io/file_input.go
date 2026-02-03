@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"github.com/ValueRetail/vrsky/pkg/envelope"
+
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 // FileConsumer monitors a directory for files and publishes them to NATS
