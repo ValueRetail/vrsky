@@ -1,6 +1,7 @@
 package io
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -411,6 +412,303 @@ func TestFileProducer_NilEnvelopeError(t *testing.T) {
 	err = producer.Write(ctx, nil)
 	if err == nil {
 		t.Error("Write(nil) should return error")
+	}
+
+	producer.Close()
+}
+
+// Test 9: Streaming write functionality with large files
+func TestFileProducer_StreamWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "1024")
+	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "5")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create large payload (100KB)
+	largePayload := make([]byte, 100*1024)
+	for i := range largePayload {
+		largePayload[i] = byte(i % 256)
+	}
+
+	// Create test envelope
+	env := envelope.New()
+	env.ID = "test-large"
+	env.Payload = largePayload
+	env.ContentType = "application/octet-stream"
+	env.Source = "TestProducer"
+
+	// Write envelope
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+
+	// Verify file was created with correct size
+	expectedFile := filepath.Join(tmpDir, "test-large.bin")
+	content, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Errorf("Failed to read output file: %v", err)
+	}
+
+	if len(content) != len(largePayload) {
+		t.Errorf("File size mismatch: got %d, want %d", len(content), len(largePayload))
+	}
+
+	if !bytes.Equal(content, largePayload) {
+		t.Error("File content does not match original payload")
+	}
+
+	producer.Close()
+}
+
+// Test 10: File organization by type
+func TestFileProducer_OrganizeByType(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CREATE_SUBDIRS", "true")
+	t.Setenv("FILE_OUTPUT_ORGANIZE_BY", "type")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create test envelopes with different content types
+	tests := []struct {
+		contentType string
+		expectedDir string
+	}{
+		{"application/json", "application-json"},
+		{"text/csv", "text-csv"},
+		{"application/xml", "application-xml"},
+	}
+
+	for _, tt := range tests {
+		env := envelope.New()
+		env.ID = "test-type-" + tt.expectedDir
+		env.Payload = []byte("test data")
+		env.ContentType = tt.contentType
+		env.Source = "TestProducer"
+
+		err = producer.Write(ctx, env)
+		if err != nil {
+			t.Errorf("Write() error for %s: %v", tt.contentType, err)
+		}
+
+		// Verify subdirectory was created
+		expectedPath := filepath.Join(tmpDir, tt.expectedDir)
+		if _, err := os.Stat(expectedPath); err != nil {
+			t.Errorf("Subdirectory not created for %s: %v", tt.contentType, err)
+		}
+	}
+
+	producer.Close()
+}
+
+// Test 11: File organization by date
+func TestFileProducer_OrganizeByDate(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CREATE_SUBDIRS", "true")
+	t.Setenv("FILE_OUTPUT_ORGANIZE_BY", "date")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create test envelope
+	env := envelope.New()
+	env.ID = "test-date"
+	env.Payload = []byte("test data")
+	env.ContentType = "text/plain"
+	env.Source = "TestProducer"
+
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+
+	// Verify date subdirectory was created (YYYY/MM/DD format)
+	today := time.Now().Format("2006/01/02")
+	expectedPath := filepath.Join(tmpDir, today)
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Errorf("Date subdirectory not created: %v", err)
+	}
+
+	producer.Close()
+}
+
+// Test 12: Disk space validation
+func TestFileProducer_DiskSpaceCheck(t *testing.T) {
+	if os.Getenv("CI") == "true" {
+		t.Skip("Skipping disk space test in CI environment")
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Test successful disk space check for normal file
+	env := envelope.New()
+	env.ID = "test-diskspace"
+	env.Payload = []byte("test data")
+	env.ContentType = "text/plain"
+	env.Source = "TestProducer"
+
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() with sufficient disk space failed: %v", err)
+	}
+
+	producer.Close()
+}
+
+// Test 13: Envelope validation
+func TestFileProducer_ValidateEnvelope(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Test 1: Empty payload
+	env := envelope.New()
+	env.ID = "test-empty"
+	env.Payload = []byte("")
+	env.ContentType = "text/plain"
+	err = producer.Write(ctx, env)
+	if err == nil {
+		t.Error("Write() with empty payload should fail")
+	}
+
+	// Test 2: Empty ID
+	env = envelope.New()
+	env.ID = ""
+	env.Payload = []byte("test")
+	env.ContentType = "text/plain"
+	err = producer.Write(ctx, env)
+	if err == nil {
+		t.Error("Write() with empty ID should fail")
+	}
+
+	// Test 3: Exceeding max file size
+	env = envelope.New()
+	env.ID = "test-large-exceeds"
+	env.Payload = make([]byte, 2*1024*1024*1024) // 2GB (exceeds 1GB default)
+	env.ContentType = "text/plain"
+	err = producer.Write(ctx, env)
+	if err == nil {
+		t.Error("Write() with payload exceeding max size should fail")
+	}
+
+	producer.Close()
+}
+
+// Test 14: Checksum calculation in streamWrite
+func TestFileProducer_ChecksumCalculation(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "512")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create test envelope with known payload
+	testData := []byte("the quick brown fox jumps over the lazy dog")
+	env := envelope.New()
+	env.ID = "test-checksum"
+	env.Payload = testData
+	env.ContentType = "text/plain"
+	env.Source = "TestProducer"
+
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() error = %v", err)
+	}
+
+	// Verify checksum is logged (indirectly by verifying file content)
+	expectedFile := filepath.Join(tmpDir, "test-checksum.txt")
+	content, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Errorf("Failed to read output file: %v", err)
+	}
+
+	if !bytes.Equal(content, testData) {
+		t.Error("File content does not match original payload")
 	}
 
 	producer.Close()

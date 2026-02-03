@@ -581,3 +581,149 @@ func TestEnvelopeSerializationThroughPipeline(t *testing.T) {
 		t.Errorf("ContentType mismatch: %s != %s", unmarshaled.ContentType, env.ContentType)
 	}
 }
+
+// TestFileProducerLargeFileHandling tests streaming write for large files (>1MB)
+func TestFileProducerLargeFileHandling(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	outputDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", outputDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "256000")   // 256KB chunks
+	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "10")   // fsync every 10 chunks (2.56MB)
+	t.Setenv("FILE_OUTPUT_MAX_FILE_SIZE", "50000000") // 50MB max
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create producer: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := producer.Start(ctx); err != nil {
+		t.Fatalf("Failed to start producer: %v", err)
+	}
+	defer producer.Close()
+
+	// Create large payload (5MB)
+	largePayload := make([]byte, 5*1024*1024)
+	for i := range largePayload {
+		largePayload[i] = byte((i / 1024) % 256) // Pattern repeats every 1KB
+	}
+
+	env := &envelope.Envelope{
+		ID:          "test-large-5mb",
+		Payload:     largePayload,
+		PayloadSize: int64(len(largePayload)),
+		ContentType: "application/octet-stream",
+		Source:      "integration-test",
+		CreatedAt:   time.Now(),
+	}
+
+	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := producer.Write(writeCtx, env); err != nil {
+		t.Fatalf("Failed to write large file: %v", err)
+	}
+
+	// Verify output file was created and has correct size
+	outputFiles, err := filepath.Glob(filepath.Join(outputDir, "*"))
+	if err != nil {
+		t.Fatalf("Failed to glob output files: %v", err)
+	}
+
+	if len(outputFiles) == 0 {
+		t.Fatal("No output file created")
+	}
+
+	fileInfo, err := os.Stat(outputFiles[0])
+	if err != nil {
+		t.Fatalf("Failed to stat output file: %v", err)
+	}
+
+	if fileInfo.Size() != int64(len(largePayload)) {
+		t.Errorf("Output file size mismatch: got %d, want %d", fileInfo.Size(), len(largePayload))
+	}
+
+	// Verify content integrity by checking a sample
+	content, err := os.ReadFile(outputFiles[0])
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	if !bytes.Equal(content, largePayload) {
+		t.Error("Output file content does not match original payload")
+	}
+}
+
+// TestFileProducerPayloadSizeValidation tests envelope validation with various payload sizes
+func TestFileProducerPayloadSizeValidation(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	outputDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", outputDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_MAX_FILE_SIZE", "1000000") // 1MB max
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create producer: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := producer.Start(ctx); err != nil {
+		t.Fatalf("Failed to start producer: %v", err)
+	}
+	defer producer.Close()
+
+	testCases := []struct {
+		name    string
+		payload []byte
+		shouldFail bool
+	}{
+		{
+			name:    "small payload",
+			payload: []byte("small"),
+			shouldFail: false,
+		},
+		{
+			name:    "512KB payload",
+			payload: make([]byte, 512*1024),
+			shouldFail: false,
+		},
+		{
+			name:    "2MB payload (exceeds 1MB max)",
+			payload: make([]byte, 2*1024*1024),
+			shouldFail: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := &envelope.Envelope{
+				ID:          "test-" + tc.name,
+				Payload:     tc.payload,
+				PayloadSize: int64(len(tc.payload)),
+				ContentType: "application/octet-stream",
+				Source:      "integration-test",
+				CreatedAt:   time.Now(),
+			}
+
+			writeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := producer.Write(writeCtx, env)
+			cancel()
+
+			if tc.shouldFail && err == nil {
+				t.Errorf("Write() should have failed for %s", tc.name)
+			}
+
+			if !tc.shouldFail && err != nil {
+				t.Errorf("Write() should have succeeded for %s, got error: %v", tc.name, err)
+			}
+		})
+	}
+}
