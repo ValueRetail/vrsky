@@ -35,15 +35,15 @@ type FileRetry struct {
 // FileConsumer monitors a directory for files and publishes them to NATS
 type FileConsumer struct {
 	// Configuration
-	dir                    string
-	pattern                string
-	pollInterval           time.Duration
-	archiveDir             string
-	errorDir               string
-	deleteAfterProcessing  bool
-	maxRetries             int
-	retryBackoffMs         int
-	archiveRetentionDays   int
+	dir                   string
+	pattern               string
+	pollInterval          time.Duration
+	archiveDir            string
+	errorDir              string
+	deleteAfterProcessing bool
+	maxRetries            int
+	retryBackoffMs        int
+	archiveRetentionDays  int
 
 	// Runtime
 	ctx            context.Context
@@ -401,11 +401,11 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 	// Calculate backoff: exponential (1s, 2s, 4s, 8s, ...)
 	// Cap at reasonable value to prevent overflow: max 10 retries = 512x backoff = ~512 seconds
 	maxShift := uint(63) // Prevent overflow in bit shift
-	shiftAmount := retry.Attempts - 1
+	shiftAmount := uint(retry.Attempts - 1)
 	if shiftAmount > maxShift {
 		shiftAmount = maxShift
 	}
-	
+
 	backoffMs := f.retryBackoffMs * (1 << uint(shiftAmount))
 	backoffDuration := time.Duration(backoffMs) * time.Millisecond
 

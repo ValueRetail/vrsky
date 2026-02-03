@@ -38,7 +38,7 @@ services:
         condition: service_healthy
     environment:
       # NATS configuration
-      NATS_URL: "nats://nats:4222"
+      FILE_INPUT_NATS_URL: "nats://nats:4222"
       
       # File Consumer configuration
       FILE_INPUT_DIR: "/data/input"
@@ -81,8 +81,8 @@ services:
       nats:
         condition: service_healthy
     environment:
-      # NATS configuration
-      NATS_URL: "nats://nats:4222"
+      # NATS configuration (not used by producer, but included for completeness)
+      FILE_INPUT_SUBJECT: "files.input"
       
       # File Producer configuration
       FILE_OUTPUT_DIR: "/data/output"
@@ -93,9 +93,6 @@ services:
       FILE_OUTPUT_FSYNC_INTERVAL: "10"             # Fsync every 10 chunks
       FILE_OUTPUT_CREATE_SUBDIRS: "true"
       FILE_OUTPUT_ORGANIZE_BY: "date"              # Options: type, date, source, none
-      
-      # File Consumer publishes to this subject
-      FILE_INPUT_SUBJECT: "files.input"
       
       # Logging
       LOG_LEVEL: "info"

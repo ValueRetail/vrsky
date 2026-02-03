@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -23,22 +22,22 @@ import (
 // FileProducer writes message envelopes to the file system
 type FileProducer struct {
 	// Configuration
-	outputDir        string
-	fileNameFormat   string
-	permissions      os.FileMode
-	chunkSize        int64
-	maxFileSize      int64
-	fsyncInterval    int
-	createSubdirs    bool
-	organizeBy       string
+	outputDir      string
+	fileNameFormat string
+	permissions    os.FileMode
+	chunkSize      int64
+	maxFileSize    int64
+	fsyncInterval  int
+	createSubdirs  bool
+	organizeBy     string
 
 	// Runtime
-	absOutputDir      string
-	fileNameTemplate  *template.Template
-	logger            *slog.Logger
-	mu                sync.Mutex
-	closed            bool
-	closedOnce        sync.Once
+	absOutputDir     string
+	fileNameTemplate *template.Template
+	logger           *slog.Logger
+	mu               sync.Mutex
+	closed           bool
+	closedOnce       sync.Once
 }
 
 // NewFileProducer creates a new file producer from environment configuration

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -236,7 +237,6 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 		t.Errorf("Start() error = %v", err)
 	}
 
-
 	// Read up to 2 envelopes (only .json files), allowing time for processing
 	count := 0
 
@@ -380,8 +380,8 @@ func TestDetectContentType(t *testing.T) {
 			got := consumer.detectContentType(tt.filename)
 			if got != tt.expected {
 				t.Errorf("detectContentType(%s) = %s, want %s", tt.filename, got, tt.expected)
-		}
-	})
+			}
+		})
 	}
 }
 
@@ -560,6 +560,9 @@ func TestFileConsumer_FileLocking(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
+	// Wait for file to be older than 1 second so it's not considered locked
+	time.Sleep(1100 * time.Millisecond)
+
 	// File should not be locked
 	if consumer.isFileLocked(testFile) {
 		t.Error("Newly created file should not be locked")
@@ -642,7 +645,7 @@ func TestFileConsumer_BackoffOverflowProtection(t *testing.T) {
 
 	// Simulate many failed attempts without overflow
 	testFile := filepath.Join(tmpDir, "test.txt")
-	
+
 	// Record 100 failures (this would overflow with naive 1 << attempt calculation)
 	for i := 0; i < 100; i++ {
 		consumer.recordFailedFile(testFile, "test error")
@@ -650,7 +653,7 @@ func TestFileConsumer_BackoffOverflowProtection(t *testing.T) {
 
 	// shouldRetry should handle this without panicking
 	// After backoff cap, it should still work
-	result := consumer.shouldRetry(testFile)
+	_ = consumer.shouldRetry(testFile)
 	// Result doesn't matter, just shouldn't panic
 
 	consumer.Close()
@@ -658,5 +661,5 @@ func TestFileConsumer_BackoffOverflowProtection(t *testing.T) {
 
 // helper function for test assertions
 func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && s[0:len(substr)] == substr || s[len(s)-len(substr):] == substr)
+	return strings.Contains(s, substr)
 }

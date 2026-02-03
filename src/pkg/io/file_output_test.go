@@ -115,7 +115,7 @@ func TestFileProducer_WriteFile(t *testing.T) {
 	// Verify file was created
 	expectedFile := filepath.Join(tmpDir, "test-123.txt")
 	t.Logf("Looking for file at: %s", expectedFile)
-	
+
 	// List directory contents
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestFileProducer_WriteFile(t *testing.T) {
 			t.Logf("  - %s", e.Name())
 		}
 	}
-	
+
 	content, err := os.ReadFile(expectedFile)
 	if err != nil {
 		t.Errorf("Failed to read output file: %v", err)
@@ -919,7 +919,7 @@ func TestFileProducer_DiskSpaceOverflowProtection(t *testing.T) {
 	// Try to write a payload larger than MaxInt64/2 (would overflow in 2x check)
 	// We can't actually allocate this much memory in tests, so we mock it
 	// by directly calling checkDiskSpace with a large value
-	requiredSize := int64(9223372036854775807 / 2) + 1 // MaxInt64/2 + 1
+	requiredSize := int64(9223372036854775807/2) + 1 // MaxInt64/2 + 1
 
 	err = producer.checkDiskSpace(requiredSize)
 	if err == nil {

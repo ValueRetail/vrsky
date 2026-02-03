@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
@@ -87,7 +86,7 @@ func TestFileConsumerProducerPipeline(t *testing.T) {
 func TestFileConsumerMetadataPreservation(t *testing.T) {
 	// Create an envelope directly (simulating what FileConsumer would create)
 	testContent := []byte(`{"key": "value", "number": 42}`)
-	
+
 	env := &envelope.Envelope{
 		ID:          "test-metadata-123",
 		Payload:     testContent,
@@ -383,7 +382,7 @@ func TestFileConsumerPatternMatching(t *testing.T) {
 	// Verify each file has correct extension based on content type
 	for _, outputFile := range outputFiles {
 		fileName := filepath.Base(outputFile)
-		
+
 		// Check that files have the expected ID pattern
 		idFound := false
 		for _, tc := range testCases {
@@ -392,7 +391,7 @@ func TestFileConsumerPatternMatching(t *testing.T) {
 				break
 			}
 		}
-		
+
 		if !idFound {
 			t.Errorf("Output file %s doesn't match expected pattern", fileName)
 		}
@@ -589,8 +588,8 @@ func TestFileProducerLargeFileHandling(t *testing.T) {
 	outputDir := t.TempDir()
 	t.Setenv("FILE_OUTPUT_DIR", outputDir)
 	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
-	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "256000")   // 256KB chunks
-	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "10")   // fsync every 10 chunks (2.56MB)
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "256000")      // 256KB chunks
+	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "10")      // fsync every 10 chunks (2.56MB)
 	t.Setenv("FILE_OUTPUT_MAX_FILE_SIZE", "50000000") // 50MB max
 
 	producer, err := NewFileProducer(logger)
@@ -681,23 +680,23 @@ func TestFileProducerPayloadSizeValidation(t *testing.T) {
 	defer producer.Close()
 
 	testCases := []struct {
-		name    string
-		payload []byte
+		name       string
+		payload    []byte
 		shouldFail bool
 	}{
 		{
-			name:    "small payload",
-			payload: []byte("small"),
+			name:       "small payload",
+			payload:    []byte("small"),
 			shouldFail: false,
 		},
 		{
-			name:    "512KB payload",
-			payload: make([]byte, 512*1024),
+			name:       "512KB payload",
+			payload:    make([]byte, 512*1024),
 			shouldFail: false,
 		},
 		{
-			name:    "2MB payload (exceeds 1MB max)",
-			payload: make([]byte, 2*1024*1024),
+			name:       "2MB payload (exceeds 1MB max)",
+			payload:    make([]byte, 2*1024*1024),
 			shouldFail: true,
 		},
 	}
