@@ -15,8 +15,8 @@ import (
 
 // NATSOutputConfig defines the configuration for NATS Output
 type NATSOutputConfig struct {
-	URL     string `json:"url"`      // NATS server URL
-	Subject string `json:"subject"`  // Subject to publish to
+	URL     string `json:"url"`               // NATS server URL
+	Subject string `json:"subject"`           // Subject to publish to
 	Timeout int    `json:"timeout,omitempty"` // Connection timeout in seconds (default: 30)
 }
 
@@ -116,7 +116,7 @@ func (n *NATSOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 		"size", len(envJSON))
 
 	// Publish to NATS with timeout
-	_ , cancel := context.WithTimeout(ctx, 5*time.Second)
+	_, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Create NATS message with headers

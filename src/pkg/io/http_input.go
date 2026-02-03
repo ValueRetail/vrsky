@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/google/uuid"
 )
 
 // HTTPInput listens for webhooks on a configured HTTP port

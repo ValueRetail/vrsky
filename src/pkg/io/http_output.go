@@ -15,8 +15,8 @@ import (
 
 // HTTPOutputConfig defines the configuration for HTTP Output
 type HTTPOutputConfig struct {
-	URL     string            `json:"url"`              // Target HTTP endpoint
-	Method  string            `json:"method,omitempty"` // HTTP method (default: POST)
+	URL     string            `json:"url"`               // Target HTTP endpoint
+	Method  string            `json:"method,omitempty"`  // HTTP method (default: POST)
 	Timeout int               `json:"timeout,omitempty"` // Request timeout in seconds (default: 30)
 	Retries int               `json:"retries,omitempty"` // Number of retries (default: 1)
 	Headers map[string]string `json:"headers,omitempty"` // Additional headers

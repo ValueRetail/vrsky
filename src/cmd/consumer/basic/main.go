@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ValueRetail/vrsky/pkg/component"
 	"github.com/ValueRetail/vrsky/internal/config"
+	"github.com/ValueRetail/vrsky/pkg/component"
 	"github.com/ValueRetail/vrsky/pkg/io"
 )
 

@@ -13,15 +13,15 @@ type Envelope struct {
 	IntegrationID string `json:"integration_id"`
 
 	// Payload (inline or reference)
-	Payload       []byte `json:"payload,omitempty"`        // For payloads < 256KB
-	PayloadRef    string `json:"payload_ref,omitempty"`    // MinIO reference for large payloads
-	PayloadSize   int64  `json:"payload_size"`
-	ContentType   string `json:"content_type"`
+	Payload     []byte `json:"payload,omitempty"`     // For payloads < 256KB
+	PayloadRef  string `json:"payload_ref,omitempty"` // MinIO reference for large payloads
+	PayloadSize int64  `json:"payload_size"`
+	ContentType string `json:"content_type"`
 
 	// Pipeline tracking
-	Source       string   `json:"source"`       // Component that created this envelope
-	CurrentStep  int      `json:"current_step"` // Current position in pipeline
-	StepHistory  []string `json:"step_history"` // Path through pipeline
+	Source      string   `json:"source"`       // Component that created this envelope
+	CurrentStep int      `json:"current_step"` // Current position in pipeline
+	StepHistory []string `json:"step_history"` // Path through pipeline
 
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`

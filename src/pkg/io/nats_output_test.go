@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/nats-io/nats.go"
 )
 
 func TestNATSOutput_New(t *testing.T) {
