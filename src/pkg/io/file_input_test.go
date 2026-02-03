@@ -254,6 +254,10 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 		}
 
 		readCtx, cancelRead := context.WithTimeout(ctx, remaining)
+		_, err := consumer.Read(readCtx)
+		cancelRead()
+		if err == nil {
+		defer cancelRead()
 			count++
 		}
 	}
@@ -282,9 +286,11 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileConsumer() error = %v", err)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	go func() {
+		if err := consumer.Start(ctx); err != nil && err != context.Canceled {
+			t.Errorf("FileConsumer.Start() error = %v", err)
+		}
+	}()
 
 
 	}
@@ -296,7 +302,7 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.After(2 * time.Second)
-
+				t.Fatalf("File consumer closed unexpectedly while handling read error")
 waitLoop:
 	for {
 		select {

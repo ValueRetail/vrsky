@@ -201,60 +201,60 @@ test_pattern_matching() {
 
 # Test 8: Graceful shutdown
 test_graceful_shutdown() {
-	test_start "Graceful shutdown and context cancellation"
-	
-	if go test -v ./pkg/io -run "TestFileConsumerProducerGracefulShutdown" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Graceful shutdown test passed"
-	else
-		test_fail "Graceful shutdown test failed"
-		return 1
-	fi
+    test_start "Graceful shutdown and context cancellation"
+    
+    if go test -v ./pkg/io -run "TestFileConsumerProducerGracefulShutdown" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Graceful shutdown test passed"
+    else
+        test_fail "Graceful shutdown test failed"
+        return 1
+    fi
 }
 
 # Run all tests
 run_all_tests() {
-	echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-	echo -e "${BLUE}VRSky File Consumer/Producer E2E Test Suite${NC}"
-	echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-	echo ""
-	
-	log "INFO" "Starting E2E tests"
-	
-	# Change to project directory
-	cd "${PROJECT_ROOT}/src" || { echo "Failed to change to src directory"; exit 1; }
-	
-	# Run each test
-	test_simple_text_output || true
-	test_file_permissions || true
-	test_envelope_serialization || true
-	test_multiple_files || true
-	test_metadata_preservation || true
-	test_consumer_producer_pipeline || true
-	test_pattern_matching || true
-	test_graceful_shutdown || true
-	
-	echo ""
-	echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-	echo -e "${BLUE}Test Results${NC}"
-	echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-	echo "Total Tests Run: ${TESTS_RUN}"
-	echo -e "Passed: ${GREEN}${TESTS_PASSED}${NC}"
-	echo -e "Failed: ${RED}${TESTS_FAILED}${NC}"
-	echo ""
-	
-	if [ ${TESTS_FAILED} -eq 0 ]; then
-		echo -e "${GREEN}✓ All tests passed!${NC}"
-		return 0
-	else
-		echo -e "${RED}✗ Some tests failed!${NC}"
-		return 1
-	fi
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}VRSky File Consumer/Producer E2E Test Suite${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    log "INFO" "Starting E2E tests"
+    
+    # Change to project directory
+    cd "${PROJECT_ROOT}/src" || { echo "Failed to change to src directory"; exit 1; }
+    
+    # Run each test
+    test_simple_text_output || true
+    test_file_permissions || true
+    test_envelope_serialization || true
+    test_multiple_files || true
+    test_metadata_preservation || true
+    test_consumer_producer_pipeline || true
+    test_pattern_matching || true
+    test_graceful_shutdown || true
+    
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}Test Results${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo "Total Tests Run: ${TESTS_RUN}"
+    echo -e "Passed: ${GREEN}${TESTS_PASSED}${NC}"
+    echo -e "Failed: ${RED}${TESTS_FAILED}${NC}"
+    echo ""
+    
+    if [ ${TESTS_FAILED} -eq 0 ]; then
+        echo -e "${GREEN}✓ All tests passed!${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Some tests failed!${NC}"
+        return 1
+    fi
 }
 
 # Main
 main() {
-	setup_test_env
-	run_all_tests
+    setup_test_env
+    run_all_tests
 }
 
 main "$@"
