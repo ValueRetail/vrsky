@@ -28,6 +28,8 @@ vendor/
 # Build Artifacts & Binaries
 # ============================================================================
 bin/
+*/bin/
+**/bin/
 dist/
 build/
 *.o
