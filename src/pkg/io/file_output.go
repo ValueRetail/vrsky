@@ -305,10 +305,12 @@ func (f *FileProducer) checkDiskSpace(requiredSize int64) error {
 		available = bavail * bsize
 	}
 
-	// Require 2x the file size to be safe (avoid running disk out of space)
-	// Check for overflow: if requiredSize > maxInt64/2, operation would overflow
+	// Require 2x the file size to be safe (avoid running disk out of space).
+	// This check guards against integer overflow when computing requiredSize * 2.
+	// Note: the limit (~4.6 EiB) is derived from int64 and is an internal safety bound,
+	//       not an application-level maximum file size.
 	if requiredSize > math.MaxInt64/2 {
-		return fmt.Errorf("payload size too large: %d bytes (max safe size: %d bytes)", requiredSize, math.MaxInt64/2)
+		return fmt.Errorf("internal size limit exceeded while checking disk space: required=%d bytes, max-safely-checkable=%d bytes", requiredSize, math.MaxInt64/2)
 	}
 	required := requiredSize * 2
 	if available < required {

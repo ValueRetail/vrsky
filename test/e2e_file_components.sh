@@ -185,8 +185,9 @@ setup_test_env() {
 run_go_test() {
     local test_name=$1
     if ! (cd "${PROJECT_ROOT}/src" && go test -v ./pkg/io -run "${test_name}" -timeout 30s); then
-        log "ERROR" "Test '${test_name}' failed"
-        return 1
+        local status=$?
+        log "ERROR" "Test '${test_name}' failed with exit code ${status}"
+        return "${status}"
     fi
 }
 

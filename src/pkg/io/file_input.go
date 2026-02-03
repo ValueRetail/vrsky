@@ -616,23 +616,24 @@ func (f *FileConsumer) processFile(filePath string) error {
 		if err := f.nc.Publish(f.subject, data); err != nil {
 			f.recordFailedFile(filePath, err.Error())
 			return fmt.Errorf("publish to NATS: %w", err)
-		info, err := os.Stat(filePath)
-		mtime := time.Now().Unix()
+		}
+		var mtime int64
 		if err != nil {
 			// If the file has been moved or deleted after processing, we still
 			// record the current time to prevent unintended reprocessing.
+			mtime = time.Now().Unix()
 			f.logger.Debug("Failed to stat file after processing; using current time as mtime", "path", filePath, "err", err)
-		} else if info != nil {
+		} else {
+			mtime = info.ModTime().Unix()
+		}
+
 		if err := f.handleProcessedFile(filePath); err != nil {
 			f.logger.Error("Failed to handle processed file", "path", filePath, "err", err)
 		}
 
 		// Record file as processed
-		info, _ := os.Stat(filePath)
-		mtime := int64(0)
-		if info != nil {
-			mtime = info.ModTime().Unix()
-		}
+
+		// Record file as processed
 		f.recordProcessedFile(filePath, fileHash, mtime)
 
 		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
