@@ -259,9 +259,9 @@ func TestFileProducer_PermissionRespect(t *testing.T) {
 		t.Errorf("Failed to stat file: %v", err)
 	}
 
-	// Check that permissions match or are close (mask with 0777 to ignore platform-specific bits)
-	actualPerms := info.Mode().Perm()
-	expectedPerms := os.FileMode(0o600)
+	// Check that permissions match (mask with 0777 to ignore platform-specific bits)
+	actualPerms := info.Mode().Perm() & 0o777
+	expectedPerms := producer.permissions & 0o777
 	if actualPerms != expectedPerms {
 		t.Errorf("File permissions mismatch: got %o, want %o", actualPerms, expectedPerms)
 	}

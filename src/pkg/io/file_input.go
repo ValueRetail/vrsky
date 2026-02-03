@@ -137,8 +137,10 @@ func (f *FileConsumer) Close() error {
 		if f.nc != nil {
 			f.nc.Close()
 		}
-		close(f.messages)
 	})
+
+	// Close channel after releasing mutex to avoid potential deadlock
+	close(f.messages)
 	f.logger.Info("File Consumer closed")
 	return nil
 }
@@ -217,19 +219,19 @@ func (f *FileConsumer) processFile(filePath string) error {
 	env.PayloadSize = int64(len(content))
 	env.ContentType = f.detectContentType(filePath)
 
-	// Publish to NATS
-	data, err := envelope.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("marshal envelope: %w", err)
-	}
-	if err := f.nc.Publish(f.subject, data); err != nil {
-		return fmt.Errorf("publish to NATS: %w", err)
-	}
-
-	// Send to messages channel and handle context cancellation
+	// Send to messages channel first (atomic operation)
 	select {
 	case f.messages <- env:
-		// Remove the file AFTER both NATS publish AND channel send succeed
+		// Only publish to NATS after successful channel send
+		data, err := envelope.Marshal(env)
+		if err != nil {
+			return fmt.Errorf("marshal envelope: %w", err)
+		}
+		if err := f.nc.Publish(f.subject, data); err != nil {
+			return fmt.Errorf("publish to NATS: %w", err)
+		}
+
+		// Remove the file AFTER both channel send AND NATS publish succeed
 		if err := os.Remove(filePath); err != nil {
 			return fmt.Errorf("remove processed file: %w", err)
 		}

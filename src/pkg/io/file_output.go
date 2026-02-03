@@ -34,6 +34,11 @@ type FileProducer struct {
 
 // NewFileProducer creates a new file producer from environment configuration
 func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
+	// Initialize logger early so it's available for all operations
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	// Read configuration from environment variables
 	outputDir := os.Getenv("FILE_OUTPUT_DIR")
 	if outputDir == "" {
@@ -51,21 +56,13 @@ func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
 		if parsed, err := strconv.ParseInt(permissionsStr, 8, 32); err == nil {
 			permissions = os.FileMode(parsed)
 		} else {
-			if logger != nil {
-				logger.Warn("Invalid FILE_OUTPUT_PERMISSIONS; using default permissions", "value", permissionsStr, "error", err)
-			} else {
-				slog.Default().Warn("Invalid FILE_OUTPUT_PERMISSIONS; using default permissions", "value", permissionsStr, "error", err)
-			}
+			logger.Warn("Invalid FILE_OUTPUT_PERMISSIONS; using default permissions", "value", permissionsStr, "error", err)
 		}
 	}
 
 	// Validate configuration
 	if err := validateFileOutputConfig(outputDir, fileNameFormat, permissions); err != nil {
 		return nil, err
-	}
-
-	if logger == nil {
-		logger = slog.Default()
 	}
 
 	return &FileProducer{
