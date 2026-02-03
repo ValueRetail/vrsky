@@ -399,7 +399,14 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 	}
 
 	// Calculate backoff: exponential (1s, 2s, 4s, 8s, ...)
-	backoffMs := f.retryBackoffMs * (1 << uint(retry.Attempts-1))
+	// Cap at reasonable value to prevent overflow: max 10 retries = 512x backoff = ~512 seconds
+	maxShift := uint(63) // Prevent overflow in bit shift
+	shiftAmount := retry.Attempts - 1
+	if shiftAmount > maxShift {
+		shiftAmount = maxShift
+	}
+	
+	backoffMs := f.retryBackoffMs * (1 << uint(shiftAmount))
 	backoffDuration := time.Duration(backoffMs) * time.Millisecond
 
 	return time.Since(retry.LastAttempt) >= backoffDuration

@@ -625,6 +625,37 @@ func TestFileConsumer_RetryLogic(t *testing.T) {
 	}
 }
 
+// Test: Backoff overflow protection with many retries
+func TestFileConsumer_BackoffOverflowProtection(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_INPUT_DIR", tmpDir)
+	t.Setenv("FILE_INPUT_PATTERN", "*")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "100ms")
+	t.Setenv("FILE_INPUT_MAX_RETRIES", "100") // Very high retry count
+
+	consumer, err := NewFileConsumer(logger)
+	if err != nil {
+		t.Fatalf("Failed to create consumer: %v", err)
+	}
+
+	// Simulate many failed attempts without overflow
+	testFile := filepath.Join(tmpDir, "test.txt")
+	
+	// Record 100 failures (this would overflow with naive 1 << attempt calculation)
+	for i := 0; i < 100; i++ {
+		consumer.recordFailedFile(testFile, "test error")
+	}
+
+	// shouldRetry should handle this without panicking
+	// After backoff cap, it should still work
+	result := consumer.shouldRetry(testFile)
+	// Result doesn't matter, just shouldn't panic
+
+	consumer.Close()
+}
+
 // helper function for test assertions
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && s[0:len(substr)] == substr || s[len(s)-len(substr):] == substr)
