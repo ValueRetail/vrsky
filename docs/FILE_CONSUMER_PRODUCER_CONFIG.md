@@ -129,11 +129,7 @@ The File Producer writes envelope contents to the file system, creating files wi
   - `{{.Extension}}` - File extension derived from content type
   - `{{.Source}}` - Source component name (sanitized for safe filenames)
   - `{{.Timestamp}}` - RFC3339 formatted timestamp
-
-- **Reserved template variables**:
-  - `{{.TenantID}}` - Intended for potential future support of tenant-aware filenames. Reserved for future use. Not currently available in templates.
-  - `{{.IntegrationID}}` - Intended for potential future support of integration-aware filenames. Reserved for future use. Not currently available in templates.
-
+- **Note**: Additional template variables may be introduced in future versions. Refer to the release notes for any updates to this list.
 **Template Examples**:
 ```bash
 # Simple format: ID.ext

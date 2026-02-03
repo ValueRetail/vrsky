@@ -29,12 +29,14 @@ echo ""
 
 # Build binaries
 echo -e "${YELLOW}2. Building binaries${NC}"
-cd "${PROJECT_ROOT}/src" || { echo "Failed to change to src directory"; exit 1; }
-echo "   Building file-consumer..."
-go build -o "${PROJECT_ROOT}/bin/file-consumer" ./cmd/file-consumer
-echo "   Building file-producer..."
-go build -o "${PROJECT_ROOT}/bin/file-producer" ./cmd/file-producer
-echo -e "${GREEN}✓ Binaries built successfully${NC}"
+if [ ! -d "${PROJECT_ROOT}/src" ]; then
+  echo "   WARNING: Expected source directory not found at: ${PROJECT_ROOT}/src"
+  echo "            Adjust the following commands to match your project layout."
+fi
+echo "   Run the following commands in your shell to build the binaries:"
+echo "      cd \"${PROJECT_ROOT}/src\""
+echo "      go build -o \"${PROJECT_ROOT}/bin/file-consumer\" ./cmd/file-consumer"
+echo "      go build -o \"${PROJECT_ROOT}/bin/file-producer\" ./cmd/file-producer"
 echo ""
 
 # Test scenario 1: Basic text file

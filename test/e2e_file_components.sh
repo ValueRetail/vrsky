@@ -26,11 +26,11 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Conditional cleanup on exit based on test results and SKIP_CLEANUP.
-# Set SKIP_CLEANUP to any non-zero value to preserve the test directory even on success (useful for debugging).
+# Conditional cleanup on exit based on test results and PRESERVE_TEST_DIR.
+# Set PRESERVE_TEST_DIR to 1 to preserve the test directory even on success (useful for debugging).
 cleanup() {
-    # If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory
-    if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${SKIP_CLEANUP:-0}" -ne 0 ]; then
+    # If any tests failed or PRESERVE_TEST_DIR is set to 1, preserve the test directory
+    if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${PRESERVE_TEST_DIR:-0}" -eq 1 ]; then
         echo -e "${BLUE}[Cleanup]${NC} Preserving test directory for debugging: ${TEST_DIR}"
         return
     fi
@@ -111,7 +111,11 @@ setup_test_env() {
     log "INFO" "Setting up test environment"
 }
 
-# Test 1: Simple text output
+# Helper to run Go tests from src directory
+run_go_test() {
+    local test_name=$1
+    (cd "${PROJECT_ROOT}/src" && go test -v ./pkg/io -run "${test_name}" -timeout 10s)
+}
 test_simple_text_output() {
     test_start "Simple text output"
     
@@ -119,7 +123,7 @@ test_simple_text_output() {
     mkdir -p "${FILE_OUTPUT_DIR}"
     
     # Run producer test via Go
-    if go test -v ./pkg/io -run "TestFileProducer_WriteFile" -timeout 10s > "${TEST_DIR}/test_file_producer_write_file.log" 2>&1; then
+    if run_go_test "TestFileProducer_WriteFile" > "${TEST_DIR}/test_file_producer_write_file.log" 2>&1; then
         test_pass "File Producer test passed"
     else
         test_fail "File Producer test failed"
@@ -131,7 +135,7 @@ test_simple_text_output() {
 test_file_permissions() {
     test_start "File Producer respects file permissions"
     
-    if go test -v ./pkg/io -run "TestFileProducerPermissions" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestFileProducerPermissions" >/dev/null 2>&1; then
         test_pass "File permissions test passed"
     else
         test_fail "File permissions test failed"
@@ -143,7 +147,7 @@ test_file_permissions() {
 test_envelope_serialization() {
     test_start "Envelope serialization through pipeline"
     
-    if go test -v ./pkg/io -run "TestEnvelopeSerializationThroughPipeline" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestEnvelopeSerializationThroughPipeline" >/dev/null 2>&1; then
         test_pass "Envelope serialization test passed"
     else
         test_fail "Envelope serialization test failed"
@@ -155,7 +159,7 @@ test_envelope_serialization() {
 test_multiple_files() {
     test_start "Processing multiple files"
     
-    go test -v ./pkg/io -run "TestFileConsumerMultipleFiles" -timeout 10s >/dev/null 2>&1 && \
+    run_go_test "TestFileConsumerMultipleFiles" >/dev/null 2>&1 && \
         test_pass "Multiple files test passed" || \
         test_fail "Multiple files test failed"
 }
@@ -164,7 +168,7 @@ test_multiple_files() {
 test_metadata_preservation() {
     test_start "Envelope metadata preservation"
     
-    if go test -v ./pkg/io -run "TestFileConsumerMetadataPreservation" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestFileConsumerMetadataPreservation" >/dev/null 2>&1; then
         test_pass "Metadata preservation test passed"
     else
         test_fail "Metadata preservation test failed"
@@ -176,7 +180,7 @@ test_metadata_preservation() {
 test_consumer_producer_pipeline() {
     test_start "Complete Consumer → Producer pipeline"
     
-    if go test -v ./pkg/io -run "TestFileConsumerProducerPipeline" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestFileConsumerProducerPipeline" >/dev/null 2>&1; then
         test_pass "Consumer → Producer pipeline test passed"
     else
         test_fail "Consumer → Producer pipeline test failed"
@@ -188,7 +192,7 @@ test_consumer_producer_pipeline() {
 test_pattern_matching() {
     test_start "File pattern matching"
     
-    if go test -v ./pkg/io -run "TestFileConsumerPatternMatching" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestFileConsumerPatternMatching" >/dev/null 2>&1; then
         test_pass "Pattern matching test passed"
     else
         test_fail "Pattern matching test failed"
@@ -200,7 +204,7 @@ test_pattern_matching() {
 test_graceful_shutdown() {
     test_start "Graceful shutdown and context cancellation"
     
-    if go test -v ./pkg/io -run "TestFileConsumerProducerGracefulShutdown" -timeout 10s >/dev/null 2>&1; then
+    if run_go_test "TestFileConsumerProducerGracefulShutdown" >/dev/null 2>&1; then
         test_pass "Graceful shutdown test passed"
     else
         test_fail "Graceful shutdown test failed"
@@ -216,9 +220,6 @@ run_all_tests() {
     echo ""
     
     log "INFO" "Starting E2E tests"
-    
-    # Change to project directory
-    cd "${PROJECT_ROOT}/src" || { echo "Failed to change to src directory"; exit 1; }
     
     # Run each test
     test_simple_text_output || true
