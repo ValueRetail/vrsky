@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -40,4 +41,18 @@ func New() *Envelope {
 		RetryCount:  0,
 		StepHistory: []string{},
 	}
+}
+
+// Marshal serializes an envelope to JSON bytes
+func Marshal(e *Envelope) ([]byte, error) {
+	return json.Marshal(e)
+}
+
+// Unmarshal deserializes JSON bytes into an envelope
+func Unmarshal(data []byte) (*Envelope, error) {
+	var e Envelope
+	if err := json.Unmarshal(data, &e); err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
