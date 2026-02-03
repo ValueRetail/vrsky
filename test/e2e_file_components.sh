@@ -95,8 +95,9 @@ assert_files_count() {
     local dir=$1
     local expected=$2
     local actual
-    if ! actual=$(find "${dir}" -type f -print0 | grep -zc .); then
-        actual=0
+    if ! actual=$(find "${dir}" -type f 2>/dev/null | wc -l); then
+        test_fail "Failed to count files in ${dir}"
+        return 1
     fi
     if [ "${actual}" -ne "${expected}" ]; then
         test_fail "File count mismatch in ${dir}. Expected: ${expected}, Got: ${actual}"

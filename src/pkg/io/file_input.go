@@ -104,7 +104,15 @@ func (f *FileConsumer) Start(ctx context.Context) error {
 	f.mu.Unlock()
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(f.dir, 0755); err != nil {
+	dirPerm := os.FileMode(0755)
+	if permStr := os.Getenv("FILE_INPUT_PERMISSIONS"); permStr != "" {
+		if parsed, err := strconv.ParseUint(permStr, 8, 32); err != nil {
+			f.logger.Warn("invalid FILE_INPUT_PERMISSIONS, using default", "value", permStr, "error", err, "default", dirPerm)
+		} else {
+			dirPerm = os.FileMode(parsed)
+		}
+	}
+	if err := os.MkdirAll(f.dir, dirPerm); err != nil {
 		return fmt.Errorf("create input directory: %w", err)
 	}
 
@@ -237,9 +245,11 @@ func (f *FileConsumer) processFile(filePath string) error {
 			return fmt.Errorf("publish to NATS: %w", err)
 		}
 
-		// Remove the file AFTER both channel send AND NATS publish succeed
+		// Remove the file AFTER both channel send AND NATS publish succeed.
+		// If removal fails, log the error but do not treat it as fatal to avoid
+		// reprocessing the same file and publishing duplicate messages.
 		if err := os.Remove(filePath); err != nil {
-			return fmt.Errorf("remove processed file: %w", err)
+			f.logger.Error("Failed to remove processed file", "filename", filepath.Base(filePath), "error", err)
 		}
 		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
 		return nil
