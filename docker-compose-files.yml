@@ -1,0 +1,122 @@
+version: '3.8'
+
+# Docker Compose for File Consumer and File Producer components
+# This demonstrates the file processing pipeline with proper volume mounts
+
+services:
+  # NATS message broker - required for pub/sub between consumer and producer
+  nats:
+    image: nats:2.10-alpine
+    container_name: vrsky-nats-files
+    ports:
+      # Client port for NATS connections
+      - "4222:4222"
+      # Management port for monitoring
+      - "8222:8222"
+    command:
+      - "-m"   # Enable management port
+      - "8222"
+    networks:
+      - vrsky-files-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4222"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - nats-data:/data
+
+  # File Consumer - watches input directory and publishes files to NATS
+  file-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/file-consumer/Dockerfile
+    container_name: vrsky-file-consumer
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      # NATS configuration
+      NATS_URL: "nats://nats:4222"
+      
+      # File Consumer configuration
+      FILE_INPUT_DIR: "/data/input"
+      FILE_INPUT_PATTERN: "*"
+      FILE_INPUT_POLL_INTERVAL: "5s"
+      FILE_INPUT_SUBJECT: "files.input"
+      FILE_INPUT_ARCHIVE_DIR: "/data/archive"
+      FILE_INPUT_ERROR_DIR: "/data/error"
+      FILE_INPUT_DELETE_AFTER_PROCESSING: "false"
+      FILE_INPUT_MAX_RETRIES: "3"
+      FILE_INPUT_RETRY_BACKOFF_MS: "1000"
+      FILE_INPUT_ARCHIVE_RETENTION_DAYS: "30"
+      FILE_INPUT_BUFFER_SIZE: "100"
+      
+      # Logging
+      LOG_LEVEL: "info"
+    networks:
+      - vrsky-files-network
+    volumes:
+      # Bind mount directories for file operations
+      - ./data/input:/data/input
+      - ./data/output:/data/output
+      - ./data/archive:/data/archive
+      - ./data/error:/data/error
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/file-consumer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # File Producer - subscribes to NATS messages and writes files to output directory
+  file-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/file-producer/Dockerfile
+    container_name: vrsky-file-producer
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      # NATS configuration
+      NATS_URL: "nats://nats:4222"
+      
+      # File Producer configuration
+      FILE_OUTPUT_DIR: "/data/output"
+      FILE_OUTPUT_FILENAME_FORMAT: "{{.ID}}.{{.Extension}}"
+      FILE_OUTPUT_PERMISSIONS: "0644"
+      FILE_OUTPUT_CHUNK_SIZE: "65536"              # 64KB chunks for streaming
+      FILE_OUTPUT_MAX_FILE_SIZE: "1073741824"      # 1GB limit
+      FILE_OUTPUT_FSYNC_INTERVAL: "10"             # Fsync every 10 chunks
+      FILE_OUTPUT_CREATE_SUBDIRS: "true"
+      FILE_OUTPUT_ORGANIZE_BY: "date"              # Options: type, date, source, none
+      
+      # File Consumer publishes to this subject
+      FILE_INPUT_SUBJECT: "files.input"
+      
+      # Logging
+      LOG_LEVEL: "info"
+    networks:
+      - vrsky-files-network
+    volumes:
+      # Bind mount directories for file operations
+      - ./data/output:/data/output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/file-producer"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  vrsky-files-network:
+    driver: bridge
+    name: vrsky-files-network
+
+volumes:
+  nats-data:
+    driver: local
