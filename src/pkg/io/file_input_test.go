@@ -235,8 +235,6 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 		t.Errorf("Start() error = %v", err)
 	}
 
-	// Wait for files to be processed
-	time.Sleep(3 * time.Second)
 
 	// Read up to 2 envelopes (only .json files), allowing time for processing
 	count := 0

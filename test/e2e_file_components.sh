@@ -119,7 +119,7 @@ test_simple_text_output() {
     mkdir -p "${FILE_OUTPUT_DIR}"
     
     # Run producer test via Go
-    if go test -v ./pkg/io -run "TestFileProducer_WriteFile" -timeout 10s > "${TEST_DIR}/test_simple_text_output.log" 2>&1; then
+    if go test -v ./pkg/io -run "TestFileProducer_WriteFile" -timeout 10s > "${TEST_DIR}/test_file_producer_write_file.log" 2>&1; then
         test_pass "File Producer test passed"
     else
         test_fail "File Producer test failed"

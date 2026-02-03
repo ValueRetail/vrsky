@@ -29,7 +29,7 @@ echo ""
 
 # Build binaries
 echo -e "${YELLOW}2. Building binaries${NC}"
-cd "${PROJECT_ROOT}/src" || { echo 'Failed to change to src directory'; exit 1; }
+cd "${PROJECT_ROOT}/src" || { echo "Failed to change to src directory"; exit 1; }
 echo "   Building file-consumer..."
 go build -o "${PROJECT_ROOT}/bin/file-consumer" ./cmd/file-consumer
 echo "   Building file-producer..."

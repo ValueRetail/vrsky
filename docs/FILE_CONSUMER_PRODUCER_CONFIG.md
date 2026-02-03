@@ -130,9 +130,9 @@ The File Producer writes envelope contents to the file system, creating files wi
   - `{{.Source}}` - Source component name (sanitized for safe filenames)
   - `{{.Timestamp}}` - RFC3339 formatted timestamp
 
-- **Reserved variable names (not exposed to FILE_OUTPUT_FILENAME_FORMAT templates in this release)**:
-  - `{{.TenantID}}` - Reserved for potential future support of tenant-aware filenames. While an internal `TenantID` field may exist on the underlying `Envelope` struct, it is **intentionally not** included in the public filename template context in this release and must not be used. No compatibility guarantees or activation timeline are provided for this variable.
-  - `{{.IntegrationID}}` - Reserved for potential future support of integration-aware filenames. While an internal `IntegrationID` field may exist on the underlying `Envelope` struct, it is **intentionally not** included in the public filename template context in this release and must not be used. No compatibility guarantees or activation timeline are provided for this variable.
+- **Reserved template variables**:
+  - `{{.TenantID}}` - Intended for potential future support of tenant-aware filenames. Reserved for future use. Not currently available in templates.
+  - `{{.IntegrationID}}` - Intended for potential future support of integration-aware filenames. Reserved for future use. Not currently available in templates.
 
 **Template Examples**:
 ```bash
