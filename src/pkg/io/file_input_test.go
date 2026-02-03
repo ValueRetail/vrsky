@@ -117,7 +117,7 @@ func TestFileConsumer_EnvelopeStructure(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*.txt")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	// Create test file
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -167,7 +167,7 @@ func TestFileConsumer_Metadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*.json")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	// Create test JSON file
 	testFile := filepath.Join(tmpDir, "data.json")
@@ -217,7 +217,7 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*.json")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	// Create multiple files
 	files := []string{"file1.json", "file2.json", "file3.txt"}
@@ -268,7 +268,7 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	// Create file with no read permissions
 	testFile := filepath.Join(tmpDir, "noperm.txt")
@@ -308,7 +308,7 @@ func TestFileConsumer_Stop(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_INPUT_DIR", tmpDir)
 	t.Setenv("FILE_INPUT_PATTERN", "*")
-	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1")
+	t.Setenv("FILE_INPUT_POLL_INTERVAL", "1s")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	consumer, err := NewFileConsumer(logger)

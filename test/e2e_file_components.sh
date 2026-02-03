@@ -28,33 +28,33 @@ TESTS_FAILED=0
 
 # Cleanup on exit
 cleanup() {
-	# If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory
-	if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${SKIP_CLEANUP:-0}" -ne 0 ]; then
-		echo -e "${BLUE}[Cleanup]${NC} Preserving test directory for debugging: ${TEST_DIR}"
-		return
-	fi
-	echo -e "${BLUE}[Cleanup]${NC} Removing test directory: ${TEST_DIR}"
-	rm -rf "${TEST_DIR}"
+    # If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory
+    if [ "${TESTS_FAILED:-0}" -gt 0 ] || [ "${SKIP_CLEANUP:-0}" -ne 0 ]; then
+        echo -e "${BLUE}[Cleanup]${NC} Preserving test directory for debugging: ${TEST_DIR}"
+        return
+    fi
+    echo -e "${BLUE}[Cleanup]${NC} Removing test directory: ${TEST_DIR}"
+    rm -rf "${TEST_DIR}"
 }
 
 trap cleanup EXIT
 
 # Helper functions
 log() {
-	local level=$1
-	shift
-	local message="$*"
-	echo "$(date '+%Y-%m-%d %H:%M:%S') [${level}] ${message}" | tee -a "${LOG_FILE}"
+    local level=$1
+    shift
+    local message="$*"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${level}] ${message}" | tee -a "${LOG_FILE}"
 }
 
 test_start() {
-	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -e "${BLUE}[Test ${TESTS_RUN}]${NC} $1"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    echo -e "${BLUE}[Test ${TESTS_RUN}]${NC} $1"
 }
 
 test_pass() {
-	TESTS_PASSED=$((TESTS_PASSED + 1))
-	echo -e "${GREEN}✓ PASS${NC}: $1"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓ PASS${NC}: $1"
 }
 
 test_fail() {

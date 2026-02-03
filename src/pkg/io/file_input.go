@@ -27,6 +27,7 @@ type FileConsumer struct {
 	cancel     context.CancelFunc
 	ticker     *time.Ticker
 	messages   chan *envelope.Envelope
+	subject    string
 	nc         *nats.Conn
 	logger     *slog.Logger
 	mu         sync.Mutex
@@ -61,7 +62,10 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 			pollInterval = parsed
 		}
 	}
-
+	subject := os.Getenv("FILE_INPUT_NATS_SUBJECT")
+	if subject == "" {
+		subject = "file.input"
+	}
 	// Validate configuration
 	if err := validateFileInputConfig(dir, pattern, pollInterval); err != nil {
 		return nil, err
@@ -72,19 +76,20 @@ func NewFileConsumer(logger *slog.Logger) (*FileConsumer, error) {
 	}
 
 	bufferSizeStr := os.Getenv("FILE_INPUT_BUFFER_SIZE")
-bufferSize := 100
-if bufferSizeStr != "" {
-    if parsed, err := strconv.Atoi(bufferSizeStr); err == nil && parsed > 0 {
-        bufferSize = parsed
-    }
-}
-return &FileConsumer{
-    dir:          dir,
-    pattern:      pattern,
-    pollInterval: pollInterval,
-    logger:       logger,
-    messages:     make(chan *envelope.Envelope, bufferSize),
-}, nil
+	bufferSize := 100
+	if bufferSizeStr != "" {
+		if parsed, err := strconv.Atoi(bufferSizeStr); err == nil && parsed > 0 {
+			bufferSize = parsed
+		}
+	}
+	return &FileConsumer{
+		dir:          dir,
+		pattern:      pattern,
+		pollInterval: pollInterval,
+		subject: subject,
+		logger:       logger,
+		messages:     make(chan *envelope.Envelope, bufferSize),
+	}, nil
 }
 
 // Start begins monitoring the directory for files
@@ -220,9 +225,6 @@ if err != nil {
 if err := f.nc.Publish(f.subject, data); err != nil {
     return fmt.Errorf("publish to NATS: %w", err)
 }
-	if err != nil {
-		return fmt.Errorf("marshal envelope: %w", err)
-	}
 
 	// Send to messages channel and handle context cancellation
 	// Log a warning if the messages channel is nearing capacity to surface potential backpressure issues.
@@ -237,27 +239,20 @@ if err := f.nc.Publish(f.subject, data); err != nil {
 
 	// Send to messages channel and handle context cancellation
 	select {
-	case f.messages <- env:
-		// Publish to NATS first
-	case <-f.ctx.Done():
-		return f.ctx.Err()
-	case f.messages <- env:
-		// Publish to NATS first
-		if err := f.nc.Publish(...); err != nil {
-			return fmt.Errorf("publish to NATS: %w", err)
-		}
-		// Remove the file AFTER successful publish
-		if err := os.Remove(filePath); err != nil {
-			return fmt.Errorf("remove processed file: %w", err)
-		}
-		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
-		return nil
-// detectContentType determines the MIME type from file extension
-func detectContentType(filePath string) string {
-	ext := filepath.Ext(filePath)
-	if ext == "" {
-		return "application/octet-stream"
-	}
+case f.messages <- env:
+    // Publish to NATS first
+    if err := f.nc.Publish(f.subject, data); err != nil {
+        return fmt.Errorf("publish to NATS: %w", err)
+    }
+    // Remove the file AFTER successful publish
+    if err := os.Remove(filePath); err != nil {
+        return fmt.Errorf("remove processed file: %w", err)
+    }
+    f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
+    return nil
+case <-f.ctx.Done():
+    return f.ctx.Err()
+}
 
 	// Custom mappings for common types (takes precedence over mime package)
 	switch ext {
