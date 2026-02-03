@@ -406,7 +406,7 @@ run_all_tests() {
     test_error_handling || true
     test_reprocessing_prevention || true
     test_large_file_handling || true
-    
+    # All tests executed; summary output follows
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test Results${NC}"

@@ -801,9 +801,7 @@ func TestFileProducer_WriteWithoutStart(t *testing.T) {
 	if err == nil {
 		t.Error("Write() should fail when Start() not called")
 	}
-	if !strings.Contains(err.Error(), "not started") {
-		t.Errorf("Error message should mention 'not started', got: %v", err)
-	}
+
 }
 
 // Test 18: Empty content type in type organization

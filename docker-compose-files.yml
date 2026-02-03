@@ -81,8 +81,9 @@ services:
       nats:
         condition: service_healthy
     environment:
-      # NATS configuration (not used by producer, but included for completeness)
-      FILE_INPUT_SUBJECT: "files.input"
+      # NATS configuration
+      FILE_OUTPUT_NATS_URL: "nats://nats:4222"
+      FILE_OUTPUT_SUBSCRIBE_SUBJECT: "files.input"
       
       # File Producer configuration
       FILE_OUTPUT_DIR: "/data/output"

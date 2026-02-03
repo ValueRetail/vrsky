@@ -184,7 +184,7 @@ setup_test_env() {
 # Helper to run Go tests from src directory
 run_go_test() {
     local test_name=$1
-    (cd "${PROJECT_ROOT}/src" && go test -v ./pkg/io -run "${test_name}" -timeout 30s 2>&1) || return 1
+    (cd "${PROJECT_ROOT}/src" && go test -v ./pkg/io -run "${test_name}" -timeout 30s) || return 1
 }
 
 # Test 1: File Producer writes file
