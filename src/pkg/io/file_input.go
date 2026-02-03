@@ -142,10 +142,9 @@ func (f *FileConsumer) Close() error {
 		if f.nc != nil {
 			f.nc.Close()
 		}
+		close(f.messages)
 	})
 
-	// Close channel after releasing mutex to avoid potential deadlock
-	close(f.messages)
 	f.logger.Info("File Consumer closed")
 	return nil
 }

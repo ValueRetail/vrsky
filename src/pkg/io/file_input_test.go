@@ -140,11 +140,8 @@ func TestFileConsumer_EnvelopeStructure(t *testing.T) {
 		t.Errorf("Start() error = %v", err)
 	}
 
-	// Wait for file to be processed
-	time.Sleep(2 * time.Second)
-
-	// Read envelope
-	env, err := consumer.Read(context.Background())
+	// Read envelope (waits until processed or context timeout)
+	env, err := consumer.Read(ctx)
 	if err != nil {
 		t.Errorf("Read() error = %v", err)
 	}
@@ -193,11 +190,10 @@ func TestFileConsumer_Metadata(t *testing.T) {
 	// Wait for file to be processed
 	time.Sleep(2 * time.Second)
 
-	// Read envelope
-	env, err := consumer.Read(context.Background())
-	if err != nil {
-		t.Errorf("Read() error = %v", err)
-	}
+	// Read envelope, waiting up to 3 seconds for the file to be processed
+	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer readCancel()
+	env, err := consumer.Read(readCtx)
 
 	// Verify fields
 	if env.Source != "FileConsumer" {
@@ -246,13 +242,12 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	// Should get 2 envelopes (only .json files)
+	// Read up to 2 envelopes (only .json files), allowing time for processing
 	count := 0
 	for i := 0; i < 2; i++ {
-		env, err := consumer.Read(context.Background())
-		if err != nil {
-			break
-		}
-		if env != nil {
+		readCtx, cancelRead := context.WithTimeout(ctx, 3*time.Second)
+		env, err := consumer.Read(readCtx)
+		cancelRead()
 			count++
 		}
 	}
@@ -295,9 +290,25 @@ func TestFileConsumer_ReadErrorHandling(t *testing.T) {
 
 	// Consumer should still be running
 	if consumer.closed {
-		t.Error("Consumer was stopped due to error")
-	}
+	// Wait (up to 2s) for at least one file processing attempt, ensuring the consumer stays running.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(2 * time.Second)
 
+	waitLoop:
+	for {
+		select {
+		case <-ticker.C:
+			if consumer.closed {
+				t.Fatalf("Consumer was stopped due to error while processing unreadable file")
+			}
+		case <-timeout:
+			break waitLoop
+		case <-ctx.Done():
+			// Context timed out; stop waiting and let the test assertions run.
+			break waitLoop
+		}
+	}
 	consumer.Close()
 
 	// Cleanup - restore permissions

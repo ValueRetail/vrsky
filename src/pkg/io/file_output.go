@@ -133,9 +133,12 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	if err != nil {
 		return fmt.Errorf("resolve absolute path: %w", err)
 	}
-	// Resolve symlinks in the target path
-	resolvedAbsPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
+	// Resolve symlinks in the target path. The file may not exist yet, so
+	// ignore "not exist" errors and fall back to the absolute path.
+	resolvedAbsPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		resolvedAbsPath = resolved
+	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("resolve symlinks for target path: %w", err)
 	}
 
@@ -158,7 +161,7 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 
 	// Write payload to file using the validated, symlink-resolved path
 	if err := os.WriteFile(resolvedAbsPath, env.Payload, f.permissions); err != nil {
-	if err := os.WriteFile(filePath, env.Payload, f.permissions); err != nil {
+
 		return fmt.Errorf("write file: %w", err)
 	}
 
@@ -202,12 +205,12 @@ func (f *FileProducer) generateFileName(env *envelope.Envelope) (string, error) 
 	// Use cached template for better performance
 	var buf bytes.Buffer
 	if err := f.fileNameTemplate.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute template: %w", err)
-	}
-
-	fileName := buf.String()
+	rawFileName := buf.String()
 
 	// Additional sanitization for filename
+	fileName := sanitizeForFilename(rawFileName)
+	if fileName == "" {
+		return "", fmt.Errorf("filename template produced only characters that are unsafe for filenames (raw result: %q)", rawFileName)
 	fileName = sanitizeForFilename(fileName)
 	if fileName == "" {
 		return "", fmt.Errorf("filename template resulted in empty string")

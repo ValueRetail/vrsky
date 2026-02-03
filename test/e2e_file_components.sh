@@ -128,26 +128,26 @@ test_simple_text_output() {
 
 # Test 2: File Producer respects file permissions
 test_file_permissions() {
-	test_start "File Producer respects file permissions"
-	
-	if go test -v ./pkg/io -run "TestFileProducerPermissions" -timeout 10s >/dev/null 2>&1; then
-		test_pass "File permissions test passed"
-	else
-		test_fail "File permissions test failed"
-		return 1
-	fi
+    test_start "File Producer respects file permissions"
+    
+    if go test -v ./pkg/io -run "TestFileProducerPermissions" -timeout 10s >/dev/null 2>&1; then
+        test_pass "File permissions test passed"
+    else
+        test_fail "File permissions test failed"
+        return 1
+    fi
 }
 
 # Test 3: Envelope serialization works correctly
 test_envelope_serialization() {
-	test_start "Envelope serialization through pipeline"
-	
-	if go test -v ./pkg/io -run "TestEnvelopeSerializationThroughPipeline" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Envelope serialization test passed"
-	else
-		test_fail "Envelope serialization test failed"
-		return 1
-	fi
+    test_start "Envelope serialization through pipeline"
+    
+    if go test -v ./pkg/io -run "TestEnvelopeSerializationThroughPipeline" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Envelope serialization test passed"
+    else
+        test_fail "Envelope serialization test failed"
+        return 1
+    fi
 }
 
 # Test 4: Multiple files processed correctly
