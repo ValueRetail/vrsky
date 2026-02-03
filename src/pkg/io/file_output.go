@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -72,7 +73,11 @@ func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
 	chunkSize := int64(64 * 1024)
 	if chunkSizeStr := os.Getenv("FILE_OUTPUT_CHUNK_SIZE"); chunkSizeStr != "" {
 		if parsed, err := strconv.ParseInt(chunkSizeStr, 10, 64); err == nil {
-			chunkSize = parsed
+			if parsed <= 0 {
+				logger.Warn("FILE_OUTPUT_CHUNK_SIZE must be positive; using default 64KB", "value", parsed)
+			} else {
+				chunkSize = parsed
+			}
 		} else {
 			logger.Warn("Invalid FILE_OUTPUT_CHUNK_SIZE; using default 64KB", "value", chunkSizeStr, "error", err)
 		}
@@ -89,10 +94,15 @@ func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
 	}
 
 	// Read fsync interval (default: 10 chunks)
+	// fsyncInterval = 0 means never fsync (valid), negative values are invalid
 	fsyncInterval := 10
 	if fsyncIntervalStr := os.Getenv("FILE_OUTPUT_FSYNC_INTERVAL"); fsyncIntervalStr != "" {
 		if parsed, err := strconv.ParseInt(fsyncIntervalStr, 10, 32); err == nil {
-			fsyncInterval = int(parsed)
+			if parsed < 0 {
+				logger.Warn("FILE_OUTPUT_FSYNC_INTERVAL cannot be negative; using default 10", "value", parsed)
+			} else {
+				fsyncInterval = int(parsed)
+			}
 		} else {
 			logger.Warn("Invalid FILE_OUTPUT_FSYNC_INTERVAL; using default 10", "value", fsyncIntervalStr, "error", err)
 		}
@@ -175,6 +185,11 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	}
 	f.mu.Unlock()
 
+	// Verify that Start() has been called
+	if f.fileNameTemplate == nil {
+		return fmt.Errorf("file producer not started: call Start() before Write()")
+	}
+
 	// Validate envelope before processing
 	if err := f.validateEnvelope(env); err != nil {
 		return fmt.Errorf("invalid envelope: %w", err)
@@ -247,7 +262,11 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			f.logger.Warn("Failed to close file after write", "path", resolvedAbsPath, "error", closeErr)
+		}
+	}()
 
 	// Write payload using streaming approach with checksums
 	checksum, err := f.streamWrite(file, env.Payload)
@@ -272,6 +291,10 @@ func (f *FileProducer) checkDiskSpace(requiredSize int64) error {
 	available := int64(stat.Bavail) * int64(stat.Bsize)
 
 	// Require 2x the file size to be safe (avoid running disk out of space)
+	// Check for overflow: if requiredSize > maxInt64/2, operation would overflow
+	if requiredSize > math.MaxInt64/2 {
+		return fmt.Errorf("payload size too large: %d bytes (max safe size: %d bytes)", requiredSize, math.MaxInt64/2)
+	}
 	required := requiredSize * 2
 	if available < required {
 		return fmt.Errorf("insufficient disk space: need %d bytes, available %d bytes", required, available)
@@ -315,7 +338,11 @@ func (f *FileProducer) getOrganizedPath(env *envelope.Envelope) (string, error) 
 	switch f.organizeBy {
 	case "type":
 		// Organize by content type (e.g., "application-json", "text-csv")
-		contentType := strings.ReplaceAll(env.ContentType, "/", "-")
+		contentType := env.ContentType
+		if contentType == "" {
+			contentType = "unknown"
+		}
+		contentType = strings.ReplaceAll(contentType, "/", "-")
 		return sanitizeForFilename(contentType), nil
 
 	case "date":
@@ -325,7 +352,11 @@ func (f *FileProducer) getOrganizedPath(env *envelope.Envelope) (string, error) 
 
 	case "source":
 		// Organize by source system
-		return sanitizeForFilename(env.Source), nil
+		source := env.Source
+		if source == "" {
+			source = "unknown"
+		}
+		return sanitizeForFilename(source), nil
 
 	default:
 		return "", nil

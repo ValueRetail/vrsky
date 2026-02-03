@@ -713,3 +713,221 @@ func TestFileProducer_ChecksumCalculation(t *testing.T) {
 
 	producer.Close()
 }
+
+// Test 15: Invalid chunk size handling
+func TestFileProducer_InvalidChunkSize(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+
+	// Test with invalid chunk size = 0
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "0")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() should not fail with invalid chunk size: %v", err)
+	}
+
+	// Chunk size should be set to default (64KB), not 0
+	if producer.chunkSize <= 0 {
+		t.Errorf("Chunk size should be positive, got %d", producer.chunkSize)
+	}
+
+	// Test with negative chunk size
+	t.Setenv("FILE_OUTPUT_CHUNK_SIZE", "-1000")
+	producer2, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() should not fail with negative chunk size: %v", err)
+	}
+
+	if producer2.chunkSize <= 0 {
+		t.Errorf("Chunk size should be positive, got %d", producer2.chunkSize)
+	}
+}
+
+// Test 16: Invalid fsync interval handling
+func TestFileProducer_InvalidFsyncInterval(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+
+	// Test with invalid fsync interval (negative)
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "-5")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() should not fail with negative fsync interval: %v", err)
+	}
+
+	// Fsync interval should be set to default (10), not negative
+	if producer.fsyncInterval < 0 {
+		t.Errorf("Fsync interval should be non-negative, got %d", producer.fsyncInterval)
+	}
+
+	// Test with zero fsync interval (valid - means never fsync)
+	t.Setenv("FILE_OUTPUT_FSYNC_INTERVAL", "0")
+	producer2, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	if producer2.fsyncInterval != 0 {
+		t.Errorf("Fsync interval 0 should be allowed, got %d", producer2.fsyncInterval)
+	}
+}
+
+// Test 17: Write without Start() should fail
+func TestFileProducer_WriteWithoutStart(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	// Try to write WITHOUT calling Start()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	env := envelope.New()
+	env.ID = "test-no-start"
+	env.Payload = []byte("test data")
+	env.ContentType = "text/plain"
+
+	err = producer.Write(ctx, env)
+	if err == nil {
+		t.Error("Write() should fail when Start() not called")
+	}
+	if !strings.Contains(err.Error(), "not started") {
+		t.Errorf("Error message should mention 'not started', got: %v", err)
+	}
+}
+
+// Test 18: Empty content type in type organization
+func TestFileProducer_EmptyContentTypeOrganization(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CREATE_SUBDIRS", "true")
+	t.Setenv("FILE_OUTPUT_ORGANIZE_BY", "type")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create envelope with empty content type
+	env := envelope.New()
+	env.ID = "test-empty-type"
+	env.Payload = []byte("test data")
+	env.ContentType = "" // Empty!
+	env.Source = "test"
+
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() should succeed even with empty content type: %v", err)
+	}
+
+	// Verify file was created in "unknown" subdirectory
+	expectedPath := filepath.Join(tmpDir, "unknown")
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Errorf("Expected 'unknown' subdirectory for empty content type: %v", err)
+	}
+
+	producer.Close()
+}
+
+// Test 19: Empty source in source organization
+func TestFileProducer_EmptySourceOrganization(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	t.Setenv("FILE_OUTPUT_CREATE_SUBDIRS", "true")
+	t.Setenv("FILE_OUTPUT_ORGANIZE_BY", "source")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Create envelope with empty source
+	env := envelope.New()
+	env.ID = "test-empty-source"
+	env.Payload = []byte("test data")
+	env.ContentType = "text/plain"
+	env.Source = "" // Empty!
+
+	err = producer.Write(ctx, env)
+	if err != nil {
+		t.Errorf("Write() should succeed even with empty source: %v", err)
+	}
+
+	// Verify file was created in "unknown" subdirectory
+	expectedPath := filepath.Join(tmpDir, "unknown")
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Errorf("Expected 'unknown' subdirectory for empty source: %v", err)
+	}
+
+	producer.Close()
+}
+
+// Test 20: Integer overflow protection in disk space check
+func TestFileProducer_DiskSpaceOverflowProtection(t *testing.T) {
+	if os.Getenv("CI") == "true" {
+		t.Skip("Skipping disk space overflow test in CI")
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	tmpDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
+	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+
+	producer, err := NewFileProducer(logger)
+	if err != nil {
+		t.Fatalf("NewFileProducer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = producer.Start(ctx)
+	if err != nil {
+		t.Errorf("Start() error = %v", err)
+	}
+
+	// Try to write a payload larger than MaxInt64/2 (would overflow in 2x check)
+	// We can't actually allocate this much memory in tests, so we mock it
+	// by directly calling checkDiskSpace with a large value
+	requiredSize := int64(9223372036854775807 / 2) + 1 // MaxInt64/2 + 1
+
+	err = producer.checkDiskSpace(requiredSize)
+	if err == nil {
+		t.Error("checkDiskSpace should fail for size exceeding MaxInt64/2")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("Error should mention size too large, got: %v", err)
+	}
+
+	producer.Close()
+}
