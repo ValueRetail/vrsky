@@ -58,36 +58,36 @@ test_pass() {
 }
 
 test_fail() {
-	TESTS_FAILED=$((TESTS_FAILED + 1))
-	echo -e "${RED}✗ FAIL${NC}: $1"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗ FAIL${NC}: $1"
 }
 
 assert_file_exists() {
-	local file=$1
-	if [ ! -f "${file}" ]; then
-		test_fail "File does not exist: ${file}"
-		return 1
-	fi
-	test_pass "File exists: ${file}"
-	return 0
+    local file=$1
+    if [ ! -f "${file}" ]; then
+        test_fail "File does not exist: ${file}"
+        return 1
+    fi
+    test_pass "File exists: ${file}"
+    return 0
 }
 
 assert_file_content() {
-	local file=$1
-	local expected=$2
-	if [ ! -f "${file}" ]; then
-		test_fail "File does not exist: ${file}"
-		return 1
-	fi
-	
-	local actual
-	actual=$(<"$file")
-	if [ "${actual}" != "${expected}" ]; then
-		test_fail "File content mismatch. Expected: '${expected}', Got: '${actual}'"
-		return 1
-	fi
-	test_pass "File content matches: '${expected}'"
-	return 0
+    local file=$1
+    local expected=$2
+    if [ ! -f "${file}" ]; then
+        test_fail "File does not exist: ${file}"
+        return 1
+    fi
+    
+    local actual
+    actual=$(<"$file")
+    if [ "${actual}" != "${expected}" ]; then
+        test_fail "File content mismatch. Expected: '${expected}', Got: '${actual}'"
+        return 1
+    fi
+    test_pass "File content matches: '${expected}'"
+    return 0
 }
 
 assert_files_count() {

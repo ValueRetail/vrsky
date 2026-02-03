@@ -1,6 +1,7 @@
 package io
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -8,7 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"bytes"
+	
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )

@@ -215,16 +215,16 @@ func (f *FileConsumer) processFile(filePath string) error {
 	env.Source = "FileConsumer"
 	env.Payload = content
 	env.PayloadSize = int64(len(content))
-	env.ContentType = detectContentType(filePath)
+	env.ContentType = f.detectContentType(filePath)
 
 	// Publish to NATS
-data, err := envelope.Marshal(env)
-if err != nil {
-    return fmt.Errorf("marshal envelope: %w", err)
-}
-if err := f.nc.Publish(f.subject, data); err != nil {
-    return fmt.Errorf("publish to NATS: %w", err)
-}
+	data, err := envelope.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshal envelope: %w", err)
+	}
+	if err := f.nc.Publish(f.subject, data); err != nil {
+		return fmt.Errorf("publish to NATS: %w", err)
+	}
 
 	// Send to messages channel and handle context cancellation
 	// Log a warning if the messages channel is nearing capacity to surface potential backpressure issues.
@@ -239,20 +239,24 @@ if err := f.nc.Publish(f.subject, data); err != nil {
 
 	// Send to messages channel and handle context cancellation
 	select {
-case f.messages <- env:
-    // Publish to NATS first
-    if err := f.nc.Publish(f.subject, data); err != nil {
-        return fmt.Errorf("publish to NATS: %w", err)
-    }
-    // Remove the file AFTER successful publish
-    if err := os.Remove(filePath); err != nil {
-        return fmt.Errorf("remove processed file: %w", err)
-    }
-    f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
-    return nil
-case <-f.ctx.Done():
-    return f.ctx.Err()
+	case f.messages <- env:
+		// Remove the file AFTER successful publish
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("remove processed file: %w", err)
+		}
+		f.logger.Info("Processed file", "filename", filepath.Base(filePath), "size", len(content), "id", env.ID)
+		return nil
+	case <-f.ctx.Done():
+		return f.ctx.Err()
+	}
 }
+
+// detectContentType determines the MIME type from file extension
+func (f *FileConsumer) detectContentType(filePath string) string {
+	ext := filepath.Ext(filePath)
+	if ext == "" {
+		return "application/octet-stream"
+	}
 
 	// Custom mappings for common types (takes precedence over mime package)
 	switch ext {
