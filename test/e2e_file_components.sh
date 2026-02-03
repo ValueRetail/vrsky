@@ -177,26 +177,26 @@ test_metadata_preservation() {
 
 # Test 6: Complete pipeline
 test_consumer_producer_pipeline() {
-	test_start "Complete Consumer → Producer pipeline"
-	
-	if go test -v ./pkg/io -run "TestFileConsumerProducerPipeline" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Consumer → Producer pipeline test passed"
-	else
-		test_fail "Consumer → Producer pipeline test failed"
-		return 1
-	fi
+    test_start "Complete Consumer → Producer pipeline"
+    
+    if go test -v ./pkg/io -run "TestFileConsumerProducerPipeline" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Consumer → Producer pipeline test passed"
+    else
+        test_fail "Consumer → Producer pipeline test failed"
+        return 1
+    fi
 }
 
 # Test 7: Pattern matching
 test_pattern_matching() {
-	test_start "File pattern matching"
-	
-	if go test -v ./pkg/io -run "TestFileConsumerPatternMatching" -timeout 10s >/dev/null 2>&1; then
-		test_pass "Pattern matching test passed"
-	else
-		test_fail "Pattern matching test failed"
-		return 1
-	fi
+    test_start "File pattern matching"
+    
+    if go test -v ./pkg/io -run "TestFileConsumerPatternMatching" -timeout 10s >/dev/null 2>&1; then
+        test_pass "Pattern matching test passed"
+    else
+        test_fail "Pattern matching test failed"
+        return 1
+    fi
 }
 
 # Test 8: Graceful shutdown
