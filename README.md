@@ -148,6 +148,57 @@ Once we complete the research phase, we'll provide:
 - Example integrations
 - Connector development guide
 
+## Implemented Components
+
+### Phase 1C: File-Based Integration (✅ Complete)
+
+We've successfully implemented the **File Consumer** and **File Producer** components:
+
+#### File Consumer
+Monitors a directory for incoming files and creates envelope messages for pipeline processing.
+
+**Features:**
+- Directory monitoring with configurable poll intervals
+- Glob pattern support for file filtering
+- Automatic content-type detection
+- Metadata enrichment (ID, timestamps, source tracking)
+
+**Configuration:**
+```bash
+export FILE_INPUT_DIR=/data/incoming
+export FILE_INPUT_PATTERN=*.json
+export FILE_INPUT_POLL_INTERVAL=5s
+```
+
+#### File Producer
+Writes envelope contents to files with configurable naming and permissions.
+
+**Features:**
+- Template-based filename generation
+- Configurable file permissions
+- Path traversal prevention
+- Extension detection from content-type
+
+**Configuration:**
+```bash
+export FILE_OUTPUT_DIR=/data/outgoing
+export FILE_OUTPUT_FILENAME_FORMAT="{{.ID}}.{{.Extension}}"
+export FILE_OUTPUT_PERMISSIONS=0644
+```
+
+**📚 Complete Documentation**: [docs/FILE_CONSUMER_PRODUCER_CONFIG.md](docs/FILE_CONSUMER_PRODUCER_CONFIG.md)
+
+**🧪 Test Suite**: 
+- 20+ unit tests (100% passing)
+- 8 integration tests
+- E2E test script: `bash test/e2e_file_components.sh`
+
+**📋 Source Code**:
+- `src/pkg/io/file_input.go` - File Consumer implementation
+- `src/pkg/io/file_output.go` - File Producer implementation
+- `src/cmd/file-consumer/main.go` - Consumer entry point
+- `src/cmd/file-producer/main.go` - Producer entry point
+
 ## Contributing
 
 We're in the early research phase. If you'd like to contribute:
