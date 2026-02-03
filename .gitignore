@@ -1,6 +1,6 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
+# ============================================================================
+# Go / Binaries
+# ============================================================================
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -11,23 +11,135 @@
 # Test binary, built with `go test -c`
 *.test
 
-# Code coverage profiles and other test artifacts
+# Output of the go coverage tool
 *.out
 coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
 # Go workspace file
 go.work
 go.work.sum
 
-# env file
-.env
+# Dependency directories
+vendor/
 
-# Editor/IDE
-# .idea/
-# .vscode/
-bin/helm
+# ============================================================================
+# Build Artifacts & Binaries
+# ============================================================================
+bin/
+dist/
+build/
+*.o
+*.a
+
+# ============================================================================
+# Environment & Secrets
+# ============================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Kubernetes secrets (never commit!)
+**/secret.yaml
+**/secret*.yaml
+**/secrets/
+**/*secret*.yaml
+
+# AWS, GCP, Azure credentials
+aws_credentials
+.aws/
+.gcp/
+.azure/
+
+# ============================================================================
+# IDE / Editor
+# ============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+*.sublime-project
+*.iml
+.project
+.classpath
+.c9/
+*.jmk
+*.ipr
+*.iws
+
+# ============================================================================
+# Development & Planning Documents
+# ============================================================================
+# These are temporary development notes, not production documentation
+*IMPLEMENTATION*.md
+*SUMMARY*.md
+*COMPLETE*.md
+*IMPLEMENTATION*.txt
+*SUMMARY*.txt
+NEXT_*.md
+QUICK_*.md
+*QUICK*.md
+*CHECKLIST*.md
+*GUIDE*.md
+*REFERENCE*.md
+*TESTING*.md
+*TEST_*.md
+*FINAL*.md
+*INDEX*.md
+FILES_CREATED*.txt
+
+# ============================================================================
+# OS Specific
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ============================================================================
+# Testing
+# ============================================================================
+*.coverprofile
+.coverage
+coverage.out
+*.test
+test-results/
+test-logs/
+
+# ============================================================================
+# Local Development
+# ============================================================================
+local/
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# ============================================================================
+# Docker
+# ============================================================================
+docker-compose.override.yml
+
+# ============================================================================
+# Database
+# ============================================================================
+*.db
+*.sqlite
+*.sqlite3
