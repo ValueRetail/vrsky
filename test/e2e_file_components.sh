@@ -26,7 +26,7 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Cleanup on exit.
+# Conditional cleanup on exit based on test results and SKIP_CLEANUP.
 # Set SKIP_CLEANUP to any non-zero value to preserve the test directory even on success (useful for debugging).
 cleanup() {
     # If any tests failed or SKIP_CLEANUP is set (non-zero), preserve the test directory

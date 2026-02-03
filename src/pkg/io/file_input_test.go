@@ -257,7 +257,7 @@ func TestFileConsumer_PatternMatching(t *testing.T) {
 		_, err := consumer.Read(readCtx)
 		cancelRead()
 		if err == nil {
-		defer cancelRead()
+
 			count++
 		}
 	}
