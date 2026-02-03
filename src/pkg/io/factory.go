@@ -3,6 +3,7 @@ package io
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/ValueRetail/vrsky/pkg/component"
 )
@@ -14,6 +15,9 @@ func NewInput(inputType string, configJSON json.RawMessage) (component.Input, er
 		return NewHTTPInput(configJSON)
 	case "nats":
 		return NewNATSInput(configJSON)
+	case "file":
+		logger := slog.Default()
+		return NewFileConsumer(logger)
 	default:
 		return nil, fmt.Errorf("unknown input type: %s", inputType)
 	}
