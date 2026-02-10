@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,6 +36,16 @@ func main() {
 	}
 
 	logger.Info("PostgreSQL producer started successfully")
+
+	// Start metrics HTTP server on port 9090
+	metricsHandler := io.GetMetricsHandler()
+	go func() {
+		http.Handle("/metrics", metricsHandler)
+		logger.Info("Starting metrics server on :9090")
+		if err := http.ListenAndServe(":9090", nil); err != nil && err != http.ErrServerClosed {
+			logger.Error("Metrics server error", "error", err)
+		}
+	}()
 
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)

@@ -51,6 +51,13 @@ type PostgresInput struct {
 	lsn                uint64 // Last acknowledged LSN
 	pendingBatch       []*envelope.Envelope
 	batchTimer         *time.Timer
+
+	// Observability
+	metrics            *PostgresConsumerMetrics
+	dlqPublisher       *DLQPublisher
+	backoffConfig      BackoffConfig
+	maxRetries         int
+	batchStartTime     time.Time // Track latency from capture to publish
 }
 
 // CDCChange represents a change captured from PostgreSQL WAL
@@ -77,6 +84,9 @@ func NewPostgresInput(logger *slog.Logger) (*PostgresInput, error) {
 		tableFilters:     make(map[string]bool),
 		batchSize:        100,
 		batchTimeout:     5 * time.Second,
+		backoffConfig:    DefaultBackoffConfig(),
+		maxRetries:       3,
+		metrics:          NewPostgresConsumerMetrics(),
 	}
 
 	// Read configuration from environment
@@ -152,6 +162,49 @@ func NewPostgresInput(logger *slog.Logger) (*PostgresInput, error) {
 	dropSlotStr := os.Getenv("POSTGRES_INPUT_DROP_SLOT_ON_CLOSE")
 	pi.dropSlotOnClose = strings.ToLower(dropSlotStr) == "true"
 
+	// Backoff configuration from environment
+	if initialBackoffMs := os.Getenv("POSTGRES_INPUT_INITIAL_BACKOFF_MS"); initialBackoffMs != "" {
+		if ms, err := strconv.Atoi(initialBackoffMs); err == nil && ms > 0 {
+			pi.backoffConfig.InitialDuration = time.Duration(ms) * time.Millisecond
+		}
+	}
+
+	if maxBackoffMs := os.Getenv("POSTGRES_INPUT_MAX_BACKOFF_MS"); maxBackoffMs != "" {
+		if ms, err := strconv.Atoi(maxBackoffMs); err == nil && ms > 0 {
+			pi.backoffConfig.MaxDuration = time.Duration(ms) * time.Millisecond
+		}
+	}
+
+	if maxRetriesStr := os.Getenv("POSTGRES_INPUT_MAX_RETRIES"); maxRetriesStr != "" {
+		if retries, err := strconv.Atoi(maxRetriesStr); err == nil && retries > 0 {
+			pi.maxRetries = retries
+		}
+	}
+
+	// DLQ configuration from environment
+	dlqConfig := DefaultDLQConfig()
+	if dlqEnabledStr := os.Getenv("POSTGRES_INPUT_DLQ_ENABLED"); dlqEnabledStr != "" {
+		dlqConfig.Enabled = strings.ToLower(dlqEnabledStr) == "true"
+	}
+
+	if dlqSubject := os.Getenv("POSTGRES_INPUT_DLQ_SUBJECT"); dlqSubject != "" {
+		dlqConfig.Subject = dlqSubject
+	}
+
+	if dlqMaxRetriesStr := os.Getenv("POSTGRES_INPUT_DLQ_MAX_RETRIES"); dlqMaxRetriesStr != "" {
+		if retries, err := strconv.Atoi(dlqMaxRetriesStr); err == nil && retries > 0 {
+			dlqConfig.MaxRetries = retries
+		}
+	}
+
+	// DLQ publisher will be created after NATS connection in Start()
+	// For now, just store the config
+	pi.dlqPublisher = &DLQPublisher{
+		natsConn: nil, // Will be set in Start()
+		config:   dlqConfig,
+		logger:   logger,
+	}
+
 	pi.ctx, pi.cancel = context.WithCancel(context.Background())
 
 	pi.logger.Info("PostgreSQL Input initialized",
@@ -162,6 +215,10 @@ func NewPostgresInput(logger *slog.Logger) (*PostgresInput, error) {
 		"publication", pi.publication,
 		"nats_subject", pi.natsSubject,
 		"drop_slot_on_close", pi.dropSlotOnClose,
+		"max_retries", pi.maxRetries,
+		"dlq_enabled", dlqConfig.Enabled,
+		"backoff_initial_ms", pi.backoffConfig.InitialDuration.Milliseconds(),
+		"backoff_max_ms", pi.backoffConfig.MaxDuration.Milliseconds(),
 	)
 
 	return pi, nil
@@ -253,6 +310,10 @@ func (pi *PostgresInput) connectNATS() error {
 	}
 
 	pi.natsConn = nc
+
+	// Initialize DLQ publisher with NATS connection
+	pi.dlqPublisher = NewDLQPublisher(nc, pi.dlqPublisher.config, pi.logger)
+
 	pi.logger.Info("Connected to NATS", "url", pi.natsURL)
 	return nil
 }
@@ -319,14 +380,57 @@ func (pi *PostgresInput) pollChanges() {
 		default:
 		}
 
-		if err := pi.fetchChanges(); err != nil {
-			pi.logger.Error("Failed to fetch changes", "error", err)
-			// Exponential backoff on error
+		// Retry with exponential backoff
+		attempt := 0
+		var lastErr error
+
+		for attempt < pi.maxRetries {
+			attempt++
+
+			if err := pi.fetchChanges(); err != nil {
+				lastErr = err
+				pi.logger.Warn("Failed to fetch changes",
+					"error", err,
+					"attempt", attempt,
+					"max_retries", pi.maxRetries)
+
+				// Record error metric
+				pi.metrics.ConnectionErrorsTotal.Inc()
+
+				// If we've exhausted retries, log and break to wait
+				if attempt >= pi.maxRetries {
+					pi.logger.Error("Max retries exhausted for fetchChanges",
+						"error", err,
+						"attempt", attempt)
+					break
+				}
+
+				// Calculate backoff and wait
+				backoff := CalculateBackoff(attempt, pi.backoffConfig)
+				pi.logger.Debug("Exponential backoff before retry",
+					"backoff_duration", backoff,
+					"attempt", attempt)
+
+				select {
+				case <-pi.ctx.Done():
+					return
+				case <-time.After(backoff):
+					continue // Retry
+				}
+			} else {
+				// Success - reset for next poll
+				attempt = 0
+				break
+			}
+		}
+
+		// If we had errors and exhausted retries, wait before next poll cycle
+		if lastErr != nil {
 			select {
 			case <-pi.ctx.Done():
 				return
-			case <-time.After(time.Second):
-				continue
+			case <-time.After(5 * time.Second):
+				// Continue to next poll cycle
 			}
 		}
 	}
@@ -351,6 +455,7 @@ func (pi *PostgresInput) fetchChanges() error {
 		pi.replicationSlot,
 	)
 	if err != nil {
+		pi.logger.Error("Failed to query replication slot status", "error", err)
 		return fmt.Errorf("failed to query replication slot status: %w", err)
 	}
 	defer rows.Close()
@@ -358,6 +463,8 @@ func (pi *PostgresInput) fetchChanges() error {
 	if rows.Next() {
 		var restartLSN, confirmedFlushLSN string
 		if err := rows.Scan(&restartLSN, &confirmedFlushLSN); err != nil {
+			pi.logger.Error("Failed to scan slot status", "error", err)
+			pi.metrics.ParseErrorsTotal.Inc()
 			return fmt.Errorf("failed to scan slot status: %w", err)
 		}
 		pi.logger.Debug("Replication slot status", "restart_lsn", restartLSN, "confirmed_flush_lsn", confirmedFlushLSN)
@@ -367,12 +474,20 @@ func (pi *PostgresInput) fetchChanges() error {
 	// This is a simplified polling approach - in production use actual CDC
 	changes, err := pi.pollTableChanges()
 	if err != nil {
+		pi.logger.Error("Failed to poll table changes", "error", err)
 		return fmt.Errorf("failed to poll table changes: %w", err)
+	}
+
+	// Track batch start time for latency measurement
+	if len(changes) > 0 && pi.batchStartTime.IsZero() {
+		pi.batchStartTime = time.Now()
 	}
 
 	for _, change := range changes {
 		env := pi.createEnvelopeFromChange(change)
 		if env != nil {
+			// Record change captured metric
+			pi.metrics.ChangesCapturedTotal.WithLabelValues(change.Operation).Inc()
 			pi.addToPendingBatch(env)
 		}
 	}
@@ -413,10 +528,30 @@ func (pi *PostgresInput) createEnvelopeFromChange(change CDCChange) *envelope.En
 	data, err := json.Marshal(change)
 	if err != nil {
 		pi.logger.Error("Failed to marshal CDC change", "error", err, "table", change.Table)
+		pi.metrics.ParseErrorsTotal.Inc()
+
+		// Send to DLQ
+		if pi.dlqPublisher != nil {
+			dlqErr := pi.dlqPublisher.PublishConsumerError(
+				env,
+				"marshal_error",
+				fmt.Sprintf("Failed to marshal CDC change: %v", err),
+				1,
+				change.Table,
+				change.Operation,
+				change.LSN,
+			)
+			if dlqErr != nil {
+				pi.logger.Error("Failed to publish marshal error to DLQ", "error", dlqErr)
+			}
+		}
 		return nil
 	}
 	env.Payload = data
 	env.PayloadSize = int64(len(data))
+
+	// Update LSN gauge
+	pi.metrics.LSNOffsetGauge.Set(float64(change.LSN))
 
 	return env
 }
@@ -475,6 +610,9 @@ func (pi *PostgresInput) addToPendingBatch(env *envelope.Envelope) {
 
 	pi.pendingBatch = append(pi.pendingBatch, env)
 
+	// Update pending batch size gauge
+	pi.metrics.PendingBatchSizeGauge.Set(float64(len(pi.pendingBatch)))
+
 	// Flush if batch is full
 	if len(pi.pendingBatch) >= pi.batchSize {
 		pi.flushBatch()
@@ -494,6 +632,19 @@ func (pi *PostgresInput) flushBatch() {
 		return
 	}
 
+	// Record batch size metric
+	pi.metrics.BatchSizeHistogram.Observe(float64(len(pi.pendingBatch)))
+
+	// Record latency from first change to publish
+	if !pi.batchStartTime.IsZero() {
+		latency := time.Since(pi.batchStartTime).Seconds()
+		pi.metrics.CaptureLatencyHistogram.Observe(latency)
+		pi.logger.Debug("Batch latency recorded",
+			"latency_seconds", latency,
+			"batch_size", len(pi.pendingBatch))
+		pi.batchStartTime = time.Time{} // Reset
+	}
+
 	for _, env := range pi.pendingBatch {
 		select {
 		case pi.messages <- env:
@@ -509,6 +660,12 @@ func (pi *PostgresInput) flushBatch() {
 			return
 		}
 	}
+
+	// Record batch published metric
+	pi.metrics.BatchesPublishedTotal.Inc()
+
+	// Update pending batch size gauge
+	pi.metrics.PendingBatchSizeGauge.Set(0)
 
 	pi.pendingBatch = nil
 	if pi.batchTimer != nil {
