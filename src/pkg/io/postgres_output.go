@@ -48,6 +48,7 @@ type PostgresOutput struct {
 	pendingBatch []*envelope.Envelope
 	batchTimer   *time.Timer
 	written      int64 // Track written messages
+	wg           sync.WaitGroup // Track in-flight batch writes
 }
 
 // CDCWriteOperation represents a database write operation
@@ -306,7 +307,12 @@ func (po *PostgresOutput) writeBatch() {
 	}
 
 	// Write in background to avoid blocking
-	go po.executeBatch(batch)
+	// Track this goroutine so Close() can wait for it
+	po.wg.Add(1)
+	go func() {
+		defer po.wg.Done()
+		po.executeBatch(batch)
+	}()
 }
 
 // executeBatch executes the batch of writes
@@ -425,27 +431,37 @@ func (po *PostgresOutput) executeInsert(tx pgx.Tx, tableName string, payload map
 
 	// For UPSERT strategy, add ON CONFLICT clause
 	if po.conflictResolution == "UPSERT" {
-		// Find primary key columns (heuristic: assume 'id' or first column)
-		pkCol := "id"
-		for col := range after {
-			if col == "id" {
+		// Extract primary key from payload (should be set by Consumer)
+		pkMap, ok := payload["primary_key"].(map[string]interface{})
+		if !ok || len(pkMap) == 0 {
+			// No primary key in payload - fall back to DO NOTHING to avoid conflicts
+			po.logger.Warn("No primary_key in payload for UPSERT, falling back to DO NOTHING",
+				"table", tableName)
+			query += " ON CONFLICT DO NOTHING"
+		} else {
+			// Use the first (and typically only) primary key column
+			var pkCol string
+			for col := range pkMap {
 				pkCol = col
 				break
 			}
-		}
 
-		// Build SET clause for update part
-		setClause := make([]string, 0)
-		for col := range after {
-			if col != pkCol {
-				setClause = append(setClause, fmt.Sprintf("%s = EXCLUDED.%s", po.quoteIdentifier(col), po.quoteIdentifier(col)))
+			// Build SET clause for update part (update all non-PK columns)
+			setClause := make([]string, 0)
+			for col := range after {
+				if col != pkCol {
+					setClause = append(setClause, fmt.Sprintf("%s = EXCLUDED.%s", po.quoteIdentifier(col), po.quoteIdentifier(col)))
+				}
 			}
-		}
 
-		if len(setClause) > 0 {
-			query += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s",
-				po.quoteIdentifier(pkCol),
-				strings.Join(setClause, ", "))
+			if len(setClause) > 0 {
+				query += fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s",
+					po.quoteIdentifier(pkCol),
+					strings.Join(setClause, ", "))
+			} else {
+				// No non-PK columns to update, just do nothing
+				query += " ON CONFLICT DO NOTHING"
+			}
 		}
 	}
 
