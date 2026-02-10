@@ -22,6 +22,50 @@ services:
       retries: 5
       start_period: 10s
 
+  # PostgreSQL source database (for consumer)
+  postgres-source:
+    image: postgres:16-alpine
+    container_name: vrsky-postgres-source
+    environment:
+      POSTGRES_DB: source_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: source_password
+      # Enable logical replication (required for CDC)
+      POSTGRES_INITDB_ARGS: "-c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-source-data:/var/lib/postgresql/data
+    networks:
+      - vrsky-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # PostgreSQL target database (for producer)
+  postgres-target:
+    image: postgres:16-alpine
+    container_name: vrsky-postgres-target
+    environment:
+      POSTGRES_DB: target_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: target_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-target-data:/var/lib/postgresql/data
+    networks:
+      - vrsky-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # HTTP test endpoint (httpbin)
   httpbin:
     image: kennethreitz/httpbin:latest
@@ -36,6 +80,65 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  # PostgreSQL Consumer (CDC from source to NATS)
+  postgres-consumer:
+    build:
+      context: ./src
+      dockerfile: cmd/postgres-consumer/Dockerfile
+    container_name: vrsky-postgres-consumer
+    environment:
+      # Source PostgreSQL configuration
+      POSTGRES_INPUT_HOST: postgres-source
+      POSTGRES_INPUT_PORT: 5432
+      POSTGRES_INPUT_USER: postgres
+      POSTGRES_INPUT_PASSWORD: source_password
+      POSTGRES_INPUT_DATABASE: source_db
+      POSTGRES_INPUT_REPLICATION_SLOT: vrsky_slot
+      POSTGRES_INPUT_PUBLICATION: vrsky_publication
+      POSTGRES_INPUT_BATCH_SIZE: "100"
+      # NATS configuration
+      NATS_URL: nats://nats:4222
+      POSTGRES_INPUT_SUBJECT: postgres.changes
+      # Logging
+      LOG_LEVEL: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-source:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # PostgreSQL Producer (CDC from NATS to target database)
+  postgres-producer:
+    build:
+      context: ./src
+      dockerfile: cmd/postgres-producer/Dockerfile
+    container_name: vrsky-postgres-producer
+    environment:
+      # Target PostgreSQL configuration
+      POSTGRES_OUTPUT_HOST: postgres-target
+      POSTGRES_OUTPUT_PORT: 5432
+      POSTGRES_OUTPUT_USER: postgres
+      POSTGRES_OUTPUT_PASSWORD: target_password
+      POSTGRES_OUTPUT_DATABASE: target_db
+      POSTGRES_OUTPUT_BATCH_SIZE: "100"
+      POSTGRES_CONFLICT_RESOLUTION: UPSERT
+      # NATS configuration
+      NATS_URL: nats://nats:4222
+      POSTGRES_OUTPUT_SUBJECT: postgres.changes
+      # Logging
+      LOG_LEVEL: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
 
   # Producer service (optional - can run locally for development)
   producer:
@@ -65,3 +168,9 @@ networks:
   vrsky-network:
     driver: bridge
     name: vrsky-network
+
+volumes:
+  postgres-source-data:
+    driver: local
+  postgres-target-data:
+    driver: local

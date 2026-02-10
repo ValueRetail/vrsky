@@ -618,6 +618,7 @@ func (f *FileConsumer) processFile(filePath string) error {
 			return fmt.Errorf("publish to NATS: %w", err)
 		}
 		var mtime int64
+		info, err := os.Stat(filePath)
 		if err != nil {
 			// If the file has been moved or deleted after processing, we still
 			// record the current time to prevent unintended reprocessing.
