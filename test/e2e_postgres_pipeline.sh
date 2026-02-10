@@ -87,21 +87,10 @@ wait_for_nats() {
     local timeout=30
     local elapsed=0
 
-    # Parse NATS_URL (format: nats://host:port)
-    # Remove nats:// prefix
-    local nats_addr="${NATS_URL#nats://}"
-    # Extract host and port
-    local nats_host="${nats_addr%:*}"
-    local nats_port="${nats_addr#*:}"
-    
-    # Default to localhost:4222 if parsing fails
-    nats_host="${nats_host:-localhost}"
-    nats_port="${nats_port:-4222}"
-
-    print_test "Waiting for NATS at $nats_host:$nats_port"
+    print_test "Waiting for NATS at $NATS_URL"
     
     while [ $elapsed -lt $timeout ]; do
-        if nc -z "$nats_host" "$nats_port" > /dev/null 2>&1; then
+        if nc -z localhost 4222 > /dev/null 2>&1; then
             print_success "NATS is ready"
             return 0
         fi
@@ -109,7 +98,7 @@ wait_for_nats() {
         ((elapsed++))
     done
     
-    print_error "NATS at $nats_host:$nats_port did not become ready after ${timeout}s"
+    print_error "NATS did not become ready after ${timeout}s"
     return 1
 }
 
@@ -130,13 +119,13 @@ test_create_source_table() {
     
     print_test "Creating test table in source database"
     
-    PGPASSWORD=$POSTGRES_SOURCE_PASSWORD psql \
-        -h $POSTGRES_SOURCE_HOST \
-        -p $POSTGRES_SOURCE_PORT \
-        -U $POSTGRES_SOURCE_USER \
-        -d $POSTGRES_SOURCE_DB \
-        -c "DROP TABLE IF EXISTS $TEST_TABLE CASCADE;" \
-        -c "CREATE TABLE $TEST_TABLE (
+    PGPASSWORD="$POSTGRES_SOURCE_PASSWORD" psql \
+        -h "$POSTGRES_SOURCE_HOST" \
+        -p "$POSTGRES_SOURCE_PORT" \
+        -U "$POSTGRES_SOURCE_USER" \
+        -d "$POSTGRES_SOURCE_DB" \
+        -c "DROP TABLE IF EXISTS \"$TEST_TABLE\" CASCADE;" \
+        -c "CREATE TABLE \"$TEST_TABLE\" (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             email VARCHAR(100),
