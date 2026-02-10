@@ -96,6 +96,172 @@ The key insight: Consumer and Producer are **completely decoupled** by NATS, whi
    VALUES (123, 'TestUser', 'test@example.com')
         ↓
 8. Done! Data is now in target database
+
+
+### Phase 1D - Production Enhancements (Weeks 2-3) ✅
+
+**What was missing:** Basic connectors worked but lacked production reliability features.
+
+**What was added:**
+- ✅ **Exponential Backoff with Jitter** - Retry failed writes with intelligent delays to prevent thundering herd
+- ✅ **Dead Letter Queue (DLQ)** - Preserve failed messages after max retries for manual recovery
+- ✅ **Prometheus Metrics** - Track batch sizes, write latency, error rates, and DLQ publishes
+- ✅ **Graceful Shutdown** - Clean termination with in-flight batch handling and resource cleanup
+- ✅ **Comprehensive Tests** - 8+ tests validating retry logic, backoff behavior, and DLQ accuracy
+
+**Why it matters:**
+
+| Component | Prevents | Benefit |
+|-----------|----------|---------|
+| Backoff + Jitter | Cascade failures on retry | Stable recovery when DB is slow |
+| DLQ | Silent data loss | Manual recovery of failed messages |
+| Metrics | Flying blind | Can alert on problems, debug issues |
+| Graceful Shutdown | Goroutine leaks, lost data | Clean production deployments |
+| Tests | Regressions | Confidence in reliability |
+
+**How they work together:**
+
+When Producer writes a batch of 100 messages:
+1. **Success path**: Messages written, latency recorded in metrics
+2. **Failure path**: 
+   - Retry 1: Wait 1 second + jitter, then retry
+   - Retry 2: Wait 1.5 seconds + jitter, then retry  
+   - Retry 3: Wait 2.25 seconds + jitter, then retry
+   - All retries exhausted: Send each message to DLQ
+   - Metrics updated: error count and DLQ count incremented
+3. **Shutdown**: Cancel signal received → complete in-flight batches → gracefully close metrics server → exit
+
+**Producer Retry Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Producer Retry Flow with Backoff & DLQ                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Write Batch (100 messages)                                 │
+│         │                                                    │
+│         ├─ Success ──▶ Record latency, return              │
+│         │                                                    │
+│         └─ Failure                                          │
+│            │                                                 │
+│            ├─ Retry 1: Wait 1s ± jitter ──▶ Success/Fail   │
+│            │                                                 │
+│            ├─ Retry 2: Wait 1.5s ± jitter ──▶ Success/Fail │
+│            │                                                 │
+│            ├─ Retry 3: Wait 2.25s ± jitter ──▶ Success/Fail│
+│            │                                                 │
+│            └─ Max retries exhausted                         │
+│               │                                              │
+│               └─ Publish to DLQ                             │
+│                  │                                           │
+│                  └─ Update metrics: errors++, dlq++         │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**New Configuration Options:**
+- `POSTGRES_PRODUCER_METRICS_PORT` (default: 9091) - Metrics endpoint port
+- `POSTGRES_CONSUMER_METRICS_PORT` (default: 9090) - Metrics endpoint port
+- `POSTGRES_OUTPUT_INITIAL_BACKOFF_MS` (default: 1000) - Initial backoff duration
+- `POSTGRES_OUTPUT_MAX_BACKOFF_MS` (default: 30000) - Maximum backoff duration
+- `POSTGRES_OUTPUT_MAX_RETRIES` (default: 3) - Max retry attempts before DLQ
+- `POSTGRES_OUTPUT_DLQ_ENABLED` (default: true) - Enable/disable DLQ publishing
+
+**Code Quality Improvements:**
+- Eliminated 2 data races (batchStartTime, global rand contention)
+- Fixed metric accuracy (DLQ only counted on successful publish)
+- Resolved 7 code review issues from Copilot analysis
+- Added per-package seeded RNG for jitter consistency
+
+### Phase 2 - Data Transformation (Weeks 3-4)
+- **Converters**: Transform message format between schemas
+  - Example: PostgreSQL column → different name/type in target
+  - Example: Normalize data before writing
+- **Filters**: Route or filter messages based on criteria
+  - Example: Only sync certain tables
+  - Example: Only process records where field = value
+
+### Phase 3 - Enterprise Features (Weeks 5+)
+- **UI Dashboard**: Visual integration management
+- **Multi-tenant isolation**: Separate customers' data
+- **JavaScript/TypeScript scripting**: Custom transformations
+- **Stream replication**: True CDC instead of polling
+- **Error handling**: Dead letter queues, retries, backoff
+- **Monitoring**: Metrics, dashboards, alerting
+
+### How New Components Fit In
+
+```
+Source DB
+   │
+   ▼
+Consumer (reads from source)
+   │
+   ├─▶ Filter₁ (filter records)
+   │     │
+   │     ├─▶ Converter₁ (transform format)
+   │     │     │
+   │     │     └─▶ Filter₂ (route by rules)
+   │     │          │
+   │     │          └─▶ NATS (publish)
+   │     │
+   │     └─▶ [skip record]
+   │
+   └─▶ [error handling]
+         │
+         └─▶ Dead Letter Queue
+              │
+              └─▶ NATS (error messages)
+
+NATS
+   │
+   ▼
+Producer (receives from NATS)
+   │
+   └─▶ Target DB (writes)
+```
+
+The beauty: All these components are **pluggable**. Consumer publishes the same messages regardless of how many filters/converters subscribe to them.
+
+---
+
+## For Your Partner
+
+### Reading Order
+
+1. **Start here**: This section explains how the system works
+2. **Run the tests**: Follow "Testing with 4 Terminals" section
+3. **Explore the code**:
+   - `src/pkg/io/postgres_input.go` - Consumer (reads from DB)
+   - `src/pkg/io/postgres_output.go` - Producer (writes to DB)
+   - `src/pkg/envelope/envelope.go` - Message format
+4. **Check the docs**: See `docs/` folder for detailed architecture
+
+### Key Concepts to Understand
+
+- **Pub/Sub**: Publisher (Consumer) and Subscriber (Producer) are decoupled
+- **Message Envelope**: Standardized format for all messages
+- **NATS Subject**: Like a "channel" - publishers send to it, subscribers listen to it
+- **Decoupling**: Consumer doesn't know about Producer, Producer doesn't know about Consumer
+- **Extensibility**: Easy to add filters, converters, or other processors in between
+
+### Questions to Ask Yourself While Testing
+
+1. **When I insert data in Terminal 4, why do I see a message in Terminal 3?**
+   - Because Consumer detected the change and published it to NATS
+
+2. **Why does the same data appear in the target database?**
+   - Because Producer received the message and applied it
+
+3. **Could I insert a filter between Consumer and Producer?**
+   - Yes! It would subscribe to `postgres.changes`, filter messages, then publish to a different subject
+
+4. **Could I have multiple Producers?**
+   - Yes! Multiple Producers can subscribe to the same subject and all receive messages
+
+5. **Could the source and target be different database types?**
+   - Yes! We could have MySQL Consumer and PostgreSQL Producer - NATS and the envelope format bridge them
+
 ```
 
 ---
@@ -338,166 +504,3 @@ Watch Terminal 3 to see the actual messages flowing through the system. Later, y
 ✅ NATS integration working  
 ✅ Testing framework in place
 
-### Phase 1D - Production Enhancements (Weeks 2-3) ✅
-
-**What was missing:** Basic connectors worked but lacked production reliability features.
-
-**What was added:**
-- ✅ **Exponential Backoff with Jitter** - Retry failed writes with intelligent delays to prevent thundering herd
-- ✅ **Dead Letter Queue (DLQ)** - Preserve failed messages after max retries for manual recovery
-- ✅ **Prometheus Metrics** - Track batch sizes, write latency, error rates, and DLQ publishes
-- ✅ **Graceful Shutdown** - Clean termination with in-flight batch handling and resource cleanup
-- ✅ **Comprehensive Tests** - 8+ tests validating retry logic, backoff behavior, and DLQ accuracy
-
-**Why it matters:**
-
-| Component | Prevents | Benefit |
-|-----------|----------|---------|
-| Backoff + Jitter | Cascade failures on retry | Stable recovery when DB is slow |
-| DLQ | Silent data loss | Manual recovery of failed messages |
-| Metrics | Flying blind | Can alert on problems, debug issues |
-| Graceful Shutdown | Goroutine leaks, lost data | Clean production deployments |
-| Tests | Regressions | Confidence in reliability |
-
-**How they work together:**
-
-When Producer writes a batch of 100 messages:
-1. **Success path**: Messages written, latency recorded in metrics
-2. **Failure path**: 
-   - Retry 1: Wait 1 second + jitter, then retry
-   - Retry 2: Wait 1.5 seconds + jitter, then retry  
-   - Retry 3: Wait 2.25 seconds + jitter, then retry
-   - All retries exhausted: Send each message to DLQ
-   - Metrics updated: error count and DLQ count incremented
-3. **Shutdown**: Cancel signal received → complete in-flight batches → gracefully close metrics server → exit
-
-**Producer Retry Flow:**
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Producer Retry Flow with Backoff & DLQ                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  Write Batch (100 messages)                                 │
-│         │                                                    │
-│         ├─ Success ──▶ Record latency, return              │
-│         │                                                    │
-│         └─ Failure                                          │
-│            │                                                 │
-│            ├─ Retry 1: Wait 1s ± jitter ──▶ Success/Fail   │
-│            │                                                 │
-│            ├─ Retry 2: Wait 1.5s ± jitter ──▶ Success/Fail │
-│            │                                                 │
-│            ├─ Retry 3: Wait 2.25s ± jitter ──▶ Success/Fail│
-│            │                                                 │
-│            └─ Max retries exhausted                         │
-│               │                                              │
-│               └─ Publish to DLQ                             │
-│                  │                                           │
-│                  └─ Update metrics: errors++, dlq++         │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**New Configuration Options:**
-- `POSTGRES_PRODUCER_METRICS_PORT` (default: 9091) - Metrics endpoint port
-- `POSTGRES_CONSUMER_METRICS_PORT` (default: 9090) - Metrics endpoint port
-- `POSTGRES_OUTPUT_INITIAL_BACKOFF_MS` (default: 1000) - Initial backoff duration
-- `POSTGRES_OUTPUT_MAX_BACKOFF_MS` (default: 30000) - Maximum backoff duration
-- `POSTGRES_OUTPUT_MAX_RETRIES` (default: 3) - Max retry attempts before DLQ
-- `POSTGRES_OUTPUT_DLQ_ENABLED` (default: true) - Enable/disable DLQ publishing
-
-**Code Quality Improvements:**
-- Eliminated 2 data races (batchStartTime, global rand contention)
-- Fixed metric accuracy (DLQ only counted on successful publish)
-- Resolved 7 code review issues from Copilot analysis
-- Added per-package seeded RNG for jitter consistency
-
-### Phase 2 - Data Transformation (Weeks 3-4)
-- **Converters**: Transform message format between schemas
-  - Example: PostgreSQL column → different name/type in target
-  - Example: Normalize data before writing
-- **Filters**: Route or filter messages based on criteria
-  - Example: Only sync certain tables
-  - Example: Only process records where field = value
-
-### Phase 3 - Enterprise Features (Weeks 5+)
-- **UI Dashboard**: Visual integration management
-- **Multi-tenant isolation**: Separate customers' data
-- **JavaScript/TypeScript scripting**: Custom transformations
-- **Stream replication**: True CDC instead of polling
-- **Error handling**: Dead letter queues, retries, backoff
-- **Monitoring**: Metrics, dashboards, alerting
-
-### How New Components Fit In
-
-```
-Source DB
-   │
-   ▼
-Consumer (reads from source)
-   │
-   ├─▶ Filter₁ (filter records)
-   │     │
-   │     ├─▶ Converter₁ (transform format)
-   │     │     │
-   │     │     └─▶ Filter₂ (route by rules)
-   │     │          │
-   │     │          └─▶ NATS (publish)
-   │     │
-   │     └─▶ [skip record]
-   │
-   └─▶ [error handling]
-         │
-         └─▶ Dead Letter Queue
-              │
-              └─▶ NATS (error messages)
-
-NATS
-   │
-   ▼
-Producer (receives from NATS)
-   │
-   └─▶ Target DB (writes)
-```
-
-The beauty: All these components are **pluggable**. Consumer publishes the same messages regardless of how many filters/converters subscribe to them.
-
----
-
-## For Your Partner
-
-### Reading Order
-
-1. **Start here**: This section explains how the system works
-2. **Run the tests**: Follow "Testing with 4 Terminals" section
-3. **Explore the code**:
-   - `src/pkg/io/postgres_input.go` - Consumer (reads from DB)
-   - `src/pkg/io/postgres_output.go` - Producer (writes to DB)
-   - `src/pkg/envelope/envelope.go` - Message format
-4. **Check the docs**: See `docs/` folder for detailed architecture
-
-### Key Concepts to Understand
-
-- **Pub/Sub**: Publisher (Consumer) and Subscriber (Producer) are decoupled
-- **Message Envelope**: Standardized format for all messages
-- **NATS Subject**: Like a "channel" - publishers send to it, subscribers listen to it
-- **Decoupling**: Consumer doesn't know about Producer, Producer doesn't know about Consumer
-- **Extensibility**: Easy to add filters, converters, or other processors in between
-
-### Questions to Ask Yourself While Testing
-
-1. **When I insert data in Terminal 4, why do I see a message in Terminal 3?**
-   - Because Consumer detected the change and published it to NATS
-
-2. **Why does the same data appear in the target database?**
-   - Because Producer received the message and applied it
-
-3. **Could I insert a filter between Consumer and Producer?**
-   - Yes! It would subscribe to `postgres.changes`, filter messages, then publish to a different subject
-
-4. **Could I have multiple Producers?**
-   - Yes! Multiple Producers can subscribe to the same subject and all receive messages
-
-5. **Could the source and target be different database types?**
-   - Yes! We could have MySQL Consumer and PostgreSQL Producer - NATS and the envelope format bridge them
