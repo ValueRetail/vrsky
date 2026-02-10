@@ -449,7 +449,15 @@ func (po *PostgresOutput) executeInsert(tx pgx.Tx, tableName string, payload map
 				"table", tableName)
 			query += " ON CONFLICT DO NOTHING"
 		} else {
-			// Use the first (and typically only) primary key column
+			// NOTE: Only single-column primary keys are supported
+			// Composite primary keys would require ordered array in payload, not map
+			// For now, pick first key (arbitrary iteration order, but safe for single PKs)
+			if len(pkMap) > 1 {
+				po.logger.Warn("Composite primary key detected but only first column will be used",
+					"table", tableName, "pk_columns", len(pkMap))
+			}
+
+			// Use the first primary key column
 			var pkCol string
 			for col := range pkMap {
 				pkCol = col
@@ -570,19 +578,12 @@ func (po *PostgresOutput) executeDelete(tx pgx.Tx, tableName string, payload map
 	return err
 }
 
-// quoteIdentifier safely quotes SQL identifiers to prevent injection
+// quoteIdentifier safely quotes SQL identifiers to prevent injection and case folding
 func (po *PostgresOutput) quoteIdentifier(identifier string) string {
-	// Validate identifier contains only safe characters
-	for _, ch := range identifier {
-		if !((ch >= 'a' && ch <= 'z') ||
-			(ch >= 'A' && ch <= 'Z') ||
-			(ch >= '0' && ch <= '9') ||
-			ch == '_') {
-			// For identifiers with special chars, quote with double quotes
-			return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
-		}
-	}
-	return identifier
+	// Always quote identifiers to prevent PostgreSQL's automatic lower-casing
+	// of unquoted identifiers (e.g., UserID becomes userid)
+	// Escape embedded double quotes by doubling them
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 // Write is part of the Producer interface (for direct writes)

@@ -87,10 +87,18 @@ wait_for_nats() {
     local timeout=30
     local elapsed=0
 
-    print_test "Waiting for NATS at $NATS_URL"
+    # Parse NATS_URL to extract host and port (format: nats://host:port)
+    local nats_host=$(echo "$NATS_URL" | sed -E 's|nats://([^:]+).*|\1|')
+    local nats_port=$(echo "$NATS_URL" | sed -E 's|.*:([0-9]+).*|\1|')
+    
+    # Fallback to defaults if parsing fails
+    nats_host="${nats_host:-localhost}"
+    nats_port="${nats_port:-4222}"
+
+    print_test "Waiting for NATS at $NATS_URL ($nats_host:$nats_port)"
     
     while [ $elapsed -lt $timeout ]; do
-        if nc -z localhost 4222 > /dev/null 2>&1; then
+        if nc -z "$nats_host" "$nats_port" > /dev/null 2>&1; then
             print_success "NATS is ready"
             return 0
         fi
@@ -98,7 +106,7 @@ wait_for_nats() {
         ((elapsed++))
     done
     
-    print_error "NATS did not become ready after ${timeout}s"
+    print_error "NATS did not become ready after ${timeout}s at $nats_host:$nats_port"
     return 1
 }
 
@@ -148,11 +156,11 @@ test_setup_replication() {
     
     print_test "Creating replication slot"
     
-    PGPASSWORD=$POSTGRES_SOURCE_PASSWORD psql \
-        -h $POSTGRES_SOURCE_HOST \
-        -p $POSTGRES_SOURCE_PORT \
-        -U $POSTGRES_SOURCE_USER \
-        -d $POSTGRES_SOURCE_DB \
+    PGPASSWORD="$POSTGRES_SOURCE_PASSWORD" psql \
+        -h "$POSTGRES_SOURCE_HOST" \
+        -p "$POSTGRES_SOURCE_PORT" \
+        -U "$POSTGRES_SOURCE_USER" \
+        -d "$POSTGRES_SOURCE_DB" \
         -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = 'vrsky_slot' AND NOT active;" \
         > /dev/null 2>&1
     
@@ -161,11 +169,11 @@ test_setup_replication() {
     
     print_test "Creating publication for all tables"
     
-    PGPASSWORD=$POSTGRES_SOURCE_PASSWORD psql \
-        -h $POSTGRES_SOURCE_HOST \
-        -p $POSTGRES_SOURCE_PORT \
-        -U $POSTGRES_SOURCE_USER \
-        -d $POSTGRES_SOURCE_DB \
+    PGPASSWORD="$POSTGRES_SOURCE_PASSWORD" psql \
+        -h "$POSTGRES_SOURCE_HOST" \
+        -p "$POSTGRES_SOURCE_PORT" \
+        -U "$POSTGRES_SOURCE_USER" \
+        -d "$POSTGRES_SOURCE_DB" \
         -c "DROP PUBLICATION IF EXISTS vrsky_publication;" \
         -c "CREATE PUBLICATION vrsky_publication FOR ALL TABLES;" \
         > /dev/null 2>&1

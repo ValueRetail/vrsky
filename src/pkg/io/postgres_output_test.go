@@ -2,7 +2,6 @@ package io
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
 	"testing"
@@ -171,6 +170,7 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 		name               string
 		envVars            map[string]string
 		wantConflictStrat  string
+		wantErr            bool
 	}{
 		{
 			name: "default UPSERT strategy",
@@ -179,15 +179,16 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 				"POSTGRES_OUTPUT_DATABASE": "test_db",
 			},
 			wantConflictStrat: "UPSERT",
+			wantErr:           false,
 		},
 		{
-			name: "custom REPLACE strategy",
+			name: "unsupported REPLACE strategy",
 			envVars: map[string]string{
 				"POSTGRES_OUTPUT_PASSWORD": "password",
 				"POSTGRES_OUTPUT_DATABASE": "test_db",
 				"POSTGRES_CONFLICT_RESOLUTION": "REPLACE",
 			},
-			wantConflictStrat: "REPLACE",
+			wantErr: true,
 		},
 	}
 
@@ -203,11 +204,12 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 			}
 
 			po, err := NewPostgresOutput(slog.Default())
-			if err != nil {
-				t.Fatalf("NewPostgresOutput() error = %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewPostgresOutput() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
 
-			if po.conflictResolution != tt.wantConflictStrat {
+			if err == nil && po.conflictResolution != tt.wantConflictStrat {
 				t.Errorf("conflictResolution = %s, want %s", po.conflictResolution, tt.wantConflictStrat)
 			}
 		})

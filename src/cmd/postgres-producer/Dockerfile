@@ -53,7 +53,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # - POSTGRES_OUTPUT_USER: PostgreSQL user (default: postgres)
 # - POSTGRES_OUTPUT_BATCH_SIZE: Batch size for writes (default: 100)
 # - POSTGRES_OUTPUT_SUBJECT: NATS subject to subscribe to (default: postgres.changes)
-# - POSTGRES_CONFLICT_RESOLUTION: Conflict strategy - UPSERT, REPLACE, or SKIP (default: UPSERT)
+# - POSTGRES_CONFLICT_RESOLUTION: Conflict strategy - UPSERT only (default: UPSERT)
 
 # Run producer
 ENTRYPOINT ["./postgres-producer"]

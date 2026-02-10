@@ -535,55 +535,63 @@ func (pi *PostgresInput) Read(ctx context.Context) (*envelope.Envelope, error) {
 // Close gracefully shuts down the consumer
 func (pi *PostgresInput) Close() error {
 	pi.closedOnce.Do(func() {
+		// Capture references and update flag while holding lock
 		pi.mu.Lock()
-		defer pi.mu.Unlock()
-
 		pi.closed = true
+		cancel := pi.cancel
+		pool := pi.pool
+		natsConn := pi.natsConn
+		dropSlot := pi.dropSlotOnClose
+		slotName := pi.replicationSlot
+		pi.mu.Unlock()
 
+		// Release lock before performing I/O operations
 		// Flush any pending batch
+		pi.mu.Lock()
 		pi.flushBatch()
+		pi.mu.Unlock()
 
 		// Cancel context
-		if pi.cancel != nil {
-			pi.cancel()
+		if cancel != nil {
+			cancel()
 		}
 
 		// Close channels
 		close(pi.messages)
 
 		// Close connections
-		if pi.natsConn != nil {
-			pi.natsConn.Close()
+		if natsConn != nil {
+			natsConn.Close()
 		}
 
 		// Drop replication slot before closing pool (only if configured)
-		if pi.pool != nil && pi.dropSlotOnClose {
-			// Use context with timeout for cleanup (don't use the cancelled pi.ctx)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+		if pool != nil && dropSlot {
+			// Use context with timeout for cleanup
+			ctx, ctxCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer ctxCancel()
 
 			// Acquire connection BEFORE closing pool for cleanup
-			conn, err := pi.pool.Acquire(ctx)
+			conn, err := pool.Acquire(ctx)
 			if err == nil {
 				defer conn.Release()
 				// Use parameterized query to safely drop the replication slot
-				_, slotErr := conn.Exec(ctx, "SELECT pg_drop_replication_slot($1)", pi.replicationSlot)
+				_, slotErr := conn.Exec(ctx, "SELECT pg_drop_replication_slot($1)", slotName)
 				if slotErr != nil {
-					pi.logger.Warn("Failed to drop replication slot", "slot", pi.replicationSlot, "error", slotErr)
+					pi.logger.Warn("Failed to drop replication slot", "slot", slotName, "error", slotErr)
 				} else {
-					pi.logger.Info("Dropped replication slot", "slot", pi.replicationSlot)
+					pi.logger.Info("Dropped replication slot", "slot", slotName)
 				}
 			} else {
 				pi.logger.Warn("Failed to acquire connection for cleanup", "error", err)
 			}
-		} else if pi.pool != nil {
+		} else if pool != nil {
 			pi.logger.Info("Preserving replication slot (POSTGRES_INPUT_DROP_SLOT_ON_CLOSE=false)",
-				"slot", pi.replicationSlot)
+				"slot", slotName)
 		}
 
 		// Close pool
-		if pi.pool != nil {
-			pi.pool.Close()
+		if pool != nil {
+			pool.Close()
 		}
 	})
 
