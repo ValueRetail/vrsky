@@ -87,10 +87,21 @@ wait_for_nats() {
     local timeout=30
     local elapsed=0
 
-    print_test "Waiting for NATS at $NATS_URL"
+    # Parse NATS_URL (format: nats://host:port)
+    # Remove nats:// prefix
+    local nats_addr="${NATS_URL#nats://}"
+    # Extract host and port
+    local nats_host="${nats_addr%:*}"
+    local nats_port="${nats_addr#*:}"
+    
+    # Default to localhost:4222 if parsing fails
+    nats_host="${nats_host:-localhost}"
+    nats_port="${nats_port:-4222}"
+
+    print_test "Waiting for NATS at $nats_host:$nats_port"
     
     while [ $elapsed -lt $timeout ]; do
-        if nc -z localhost 4222 > /dev/null 2>&1; then
+        if nc -z "$nats_host" "$nats_port" > /dev/null 2>&1; then
             print_success "NATS is ready"
             return 0
         fi
@@ -98,7 +109,7 @@ wait_for_nats() {
         ((elapsed++))
     done
     
-    print_error "NATS did not become ready after ${timeout}s"
+    print_error "NATS at $nats_host:$nats_port did not become ready after ${timeout}s"
     return 1
 }
 
