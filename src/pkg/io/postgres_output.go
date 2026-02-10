@@ -160,16 +160,25 @@ func (po *PostgresOutput) Start(ctx context.Context) error {
 		po.mu.Unlock()
 		return fmt.Errorf("producer already closed")
 	}
+	
+	// Derive po.ctx from the passed context so cancellation/timeouts work
+	// If ctx is nil, fall back to background context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	po.ctx, po.cancel = context.WithCancel(ctx)
 	po.mu.Unlock()
 
 	// Connect to PostgreSQL
 	if err := po.connectPostgres(); err != nil {
+		po.cancel()
 		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 	}
 
 	// Connect to NATS
 	if err := po.connectNATS(); err != nil {
 		po.pool.Close()
+		po.cancel()
 		return fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
@@ -177,6 +186,7 @@ func (po *PostgresOutput) Start(ctx context.Context) error {
 	if err := po.subscribeChanges(); err != nil {
 		po.pool.Close()
 		po.natsConn.Close()
+		po.cancel()
 		return fmt.Errorf("failed to subscribe to changes: %w", err)
 	}
 
@@ -627,22 +637,25 @@ func (po *PostgresOutput) WriteBatch(ctx context.Context, envelopes []*envelope.
 func (po *PostgresOutput) Close() error {
 	po.closedOnce.Do(func() {
 		po.mu.Lock()
-		defer po.mu.Unlock()
-
 		po.closed = true
 
 		// Flush any pending batch
 		po.writeBatch()
+		po.mu.Unlock()
 
-		// Wait a bit for pending writes to complete
-		time.Sleep(100 * time.Millisecond)
-
-		// Unsubscribe from NATS
+		// Unsubscribe from NATS first to stop accepting new messages
 		if po.natsSub != nil {
 			po.natsSub.Unsubscribe()
 		}
 
-		// Cancel context
+		// Wait for all in-flight writes to complete
+		// This must be done BEFORE closing resources
+		po.wg.Wait()
+
+		po.mu.Lock()
+		defer po.mu.Unlock()
+
+		// Cancel context after writes complete
 		if po.cancel != nil {
 			po.cancel()
 		}

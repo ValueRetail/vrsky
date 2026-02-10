@@ -14,7 +14,7 @@ COPY internal/ ./internal/
 
 # Download dependencies - must be after source code is copied
 # so go can identify all required packages
-RUN go mod download && go mod tidy
+RUN go mod download
 
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
