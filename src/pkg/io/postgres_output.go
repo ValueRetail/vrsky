@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -302,7 +303,7 @@ func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) {
 			// Continue with other envelopes instead of failing entire batch
 			continue
 		}
-		po.written++
+		atomic.AddInt64(&po.written, 1)
 	}
 
 	// Commit transaction
@@ -586,7 +587,5 @@ func (po *PostgresOutput) Close() error {
 
 // GetWritten returns the count of written messages
 func (po *PostgresOutput) GetWritten() int64 {
-	po.mu.Lock()
-	defer po.mu.Unlock()
-	return po.written
+	return atomic.LoadInt64(&po.written)
 }
