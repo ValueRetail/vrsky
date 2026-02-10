@@ -412,20 +412,19 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 
 	// Cap maximum backoff duration at 5 minutes to prevent unreasonable wait times
 	maxBackoffMs := int64(5 * 60 * 1000) // 5 minutes
-
 	baseBackoffMs := int64(f.retryBackoffMs)
-	// Compute exponential factor in int64 to avoid intermediate overflow
-	factor := int64(1) << shiftAmount
 
-	var backoffMs int64
-	if baseBackoffMs <= 0 {
-		backoffMs = 0
-	} else if factor > maxBackoffMs/baseBackoffMs {
-		// If multiplying would exceed maxBackoffMs, clamp to maxBackoffMs
-		backoffMs = maxBackoffMs
-	} else {
-		backoffMs = baseBackoffMs * factor
+	// Compute exponential factor, clamped to prevent exceeding max backoff
+	factor := int64(1) << shiftAmount
+	if baseBackoffMs > 0 && factor > maxBackoffMs/baseBackoffMs {
+		factor = maxBackoffMs / baseBackoffMs
 	}
+
+	backoffMs := baseBackoffMs * factor
+	if backoffMs > maxBackoffMs {
+		backoffMs = maxBackoffMs
+	}
+
 	backoffDuration := time.Duration(backoffMs) * time.Millisecond
 
 	return time.Since(retry.LastAttempt) >= backoffDuration
