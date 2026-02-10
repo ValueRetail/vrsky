@@ -338,6 +338,81 @@ Watch Terminal 3 to see the actual messages flowing through the system. Later, y
 ✅ NATS integration working  
 ✅ Testing framework in place
 
+### Phase 1D - Production Enhancements (Weeks 2-3) ✅
+
+**What was missing:** Basic connectors worked but lacked production reliability features.
+
+**What was added:**
+- ✅ **Exponential Backoff with Jitter** - Retry failed writes with intelligent delays to prevent thundering herd
+- ✅ **Dead Letter Queue (DLQ)** - Preserve failed messages after max retries for manual recovery
+- ✅ **Prometheus Metrics** - Track batch sizes, write latency, error rates, and DLQ publishes
+- ✅ **Graceful Shutdown** - Clean termination with in-flight batch handling and resource cleanup
+- ✅ **Comprehensive Tests** - 8+ tests validating retry logic, backoff behavior, and DLQ accuracy
+
+**Why it matters:**
+
+| Component | Prevents | Benefit |
+|-----------|----------|---------|
+| Backoff + Jitter | Cascade failures on retry | Stable recovery when DB is slow |
+| DLQ | Silent data loss | Manual recovery of failed messages |
+| Metrics | Flying blind | Can alert on problems, debug issues |
+| Graceful Shutdown | Goroutine leaks, lost data | Clean production deployments |
+| Tests | Regressions | Confidence in reliability |
+
+**How they work together:**
+
+When Producer writes a batch of 100 messages:
+1. **Success path**: Messages written, latency recorded in metrics
+2. **Failure path**: 
+   - Retry 1: Wait 1 second + jitter, then retry
+   - Retry 2: Wait 1.5 seconds + jitter, then retry  
+   - Retry 3: Wait 2.25 seconds + jitter, then retry
+   - All retries exhausted: Send each message to DLQ
+   - Metrics updated: error count and DLQ count incremented
+3. **Shutdown**: Cancel signal received → complete in-flight batches → gracefully close metrics server → exit
+
+**Producer Retry Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Producer Retry Flow with Backoff & DLQ                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Write Batch (100 messages)                                 │
+│         │                                                    │
+│         ├─ Success ──▶ Record latency, return              │
+│         │                                                    │
+│         └─ Failure                                          │
+│            │                                                 │
+│            ├─ Retry 1: Wait 1s ± jitter ──▶ Success/Fail   │
+│            │                                                 │
+│            ├─ Retry 2: Wait 1.5s ± jitter ──▶ Success/Fail │
+│            │                                                 │
+│            ├─ Retry 3: Wait 2.25s ± jitter ──▶ Success/Fail│
+│            │                                                 │
+│            └─ Max retries exhausted                         │
+│               │                                              │
+│               └─ Publish to DLQ                             │
+│                  │                                           │
+│                  └─ Update metrics: errors++, dlq++         │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**New Configuration Options:**
+- `POSTGRES_PRODUCER_METRICS_PORT` (default: 9091) - Metrics endpoint port
+- `POSTGRES_CONSUMER_METRICS_PORT` (default: 9090) - Metrics endpoint port
+- `POSTGRES_OUTPUT_INITIAL_BACKOFF_MS` (default: 1000) - Initial backoff duration
+- `POSTGRES_OUTPUT_MAX_BACKOFF_MS` (default: 30000) - Maximum backoff duration
+- `POSTGRES_OUTPUT_MAX_RETRIES` (default: 3) - Max retry attempts before DLQ
+- `POSTGRES_OUTPUT_DLQ_ENABLED` (default: true) - Enable/disable DLQ publishing
+
+**Code Quality Improvements:**
+- Eliminated 2 data races (batchStartTime, global rand contention)
+- Fixed metric accuracy (DLQ only counted on successful publish)
+- Resolved 7 code review issues from Copilot analysis
+- Added per-package seeded RNG for jitter consistency
+
 ### Phase 2 - Data Transformation (Weeks 3-4)
 - **Converters**: Transform message format between schemas
   - Example: PostgreSQL column → different name/type in target
