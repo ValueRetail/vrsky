@@ -18,9 +18,11 @@
 
 ---
 
-## Testing with 3 Terminals
+## Testing with 4 Terminals
 
-Open 3 terminals in `/home/ludvik/vrsky/src`
+This tests the complete pub/sub pipeline: Consumer reads from source DB → publishes messages to NATS → Producer consumes messages and writes to target DB.
+
+Open 4 terminals in `/home/ludvik/vrsky/src`
 
 ### Terminal 1: Start Consumer
 
@@ -42,6 +44,8 @@ Connected to NATS
 PostgreSQL Input started
 PostgreSQL consumer started successfully
 ```
+
+The Consumer is now listening to the source database for changes and ready to publish messages to NATS.
 
 ### Terminal 2: Start Producer
 
@@ -65,53 +69,56 @@ PostgreSQL Output started
 PostgreSQL producer started successfully
 ```
 
-### Terminal 3: Test It
+The Producer is now listening to NATS for messages and ready to write to the target database.
 
-**Step 1: Check source database has data**
+### Terminal 3: Watch NATS Messages
+
+Open a new terminal and subscribe to the message stream to see what's being published:
+
 ```bash
-PGPASSWORD=source_password psql -h localhost -p 5432 -U postgres -d source_db \
-  -c "SELECT COUNT(*) FROM test_cdc_table;"
+nats sub postgres.changes
 ```
 
-**Step 2: Insert test data into source**
+This shows you the actual messages flowing through the system. You'll see messages appear here when the Consumer publishes changes.
+
+### Terminal 4: Insert Test Data and Verify
+
+**Step 1: Insert data into source database**
 ```bash
 PGPASSWORD=source_password psql -h localhost -p 5432 -U postgres -d source_db \
   -c "INSERT INTO test_cdc_table (name, email) VALUES ('TestUser', 'test@example.com');"
 ```
 
-**Step 3: Wait 2 seconds**
-```bash
-sleep 2
-```
+**Step 2: Watch Terminal 3**
+You should see a message appear on `postgres.changes` subject. This is the Consumer publishing the change.
 
-**Step 4: Check target database received it**
+**Step 3: Check target database received it**
 ```bash
 PGPASSWORD=target_password psql -h localhost -p 5433 -U postgres -d target_db \
   -c "SELECT * FROM test_cdc_table WHERE name = 'TestUser';"
 ```
 
-**Step 5: Watch messages on NATS (optional, open Terminal 4)**
-```bash
-nats sub postgres.changes
-```
+The Producer should have received the message from NATS and written it to the target database.
 
 ---
 
 ## Expected Results
 
-After inserting data in Terminal 3, you should see:
+**In Terminal 3 (NATS messages):**
+```
+[#1] Received on "postgres.changes":
+{message with database change}
+```
 
-**In Terminal 3:**
-- Source database shows the new record
-- Target database shows the same record (eventual consistency)
-
-**In Terminal 4 (optional NATS monitor):**
-- Messages appear on `postgres.changes` subject
-- Each message contains the CDC change data
+**In Terminal 4:**
+- Source database insert succeeds
+- Target database shows the new record
+- No errors
 
 **In Terminal 1 & 2 logs:**
-- Consumer and Producer show processing activity
-- No errors
+- Consumer shows it processed the change
+- Producer shows it received and processed the message
+- Both stay running, ready for more messages
 
 ---
 
@@ -139,10 +146,15 @@ Target Database
 
 ## What to Try
 
-1. **Insert multiple records** in source and watch them appear in target
-2. **Update a record** in source and see it change in target
-3. **Delete a record** in source and see it disappear from target
-4. **Watch NATS** in Terminal 4 to see messages flowing between Consumer and Producer
+1. **Watch the message flow** - Insert data in source, see message on NATS (Terminal 3), then see result in target
+2. **Insert multiple records** - Watch multiple messages appear on NATS as you insert multiple rows
+3. **Update a record** - See how the system handles UPDATE messages
+4. **Delete a record** - See how the system handles DELETE messages
+5. **Check message format** - Look at the actual message structure on NATS to understand what data is being sent
+
+The key thing to understand: **Every database change becomes a message on NATS that the Producer consumes and applies to the target database.**
+
+This is the foundation for adding Converters, Filters, and other components that can process these messages between Consumer and Producer.
 
 ---
 
@@ -173,6 +185,10 @@ nc -zv localhost 4222
 
 ## Summary
 
-Consumer listens to source database → publishes changes to NATS → Producer receives and writes to target database.
+This is a **pub/sub message pipeline** for database changes:
 
-That's it. Test by inserting data in Terminal 3 and watching it appear in the target database.
+1. Consumer reads database changes → publishes to NATS (publisher)
+2. Producer subscribes to NATS → applies changes to target database (subscriber)
+3. NATS is the message broker connecting them
+
+Watch Terminal 3 to see the actual messages flowing through the system. Later, you can add Converters, Filters, and other components to process these messages in between.
