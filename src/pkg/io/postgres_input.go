@@ -328,11 +328,10 @@ func (pi *PostgresInput) fetchChanges() error {
 	// - Receive and parse XLogData messages
 	// - Send StandbyStatusUpdate to acknowledge received data
 	
+	// Use parameterized query to safely query replication slot status
 	rows, err := pi.pool.Query(pi.ctx,
-		fmt.Sprintf(
-			"SELECT restart_lsn, confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '%s'",
-			pi.replicationSlot,
-		),
+		"SELECT restart_lsn, confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1",
+		pi.replicationSlot,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to query replication slot status: %w", err)
