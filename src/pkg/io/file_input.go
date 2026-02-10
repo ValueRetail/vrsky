@@ -412,27 +412,26 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 
 	// Cap maximum backoff duration at 5 minutes to prevent unreasonable wait times
 	maxBackoffMs := int64(5 * 60 * 1000) // 5 minutes
-
 	baseBackoffMs := int64(f.retryBackoffMs)
-	// Compute exponential factor in int64 to avoid intermediate overflow
-	factor := int64(1) << shiftAmount
 
-	var backoffMs int64
-	if baseBackoffMs <= 0 {
-		backoffMs = 0
-	} else if factor > maxBackoffMs/baseBackoffMs {
-		// If multiplying would exceed maxBackoffMs, clamp to maxBackoffMs
-		backoffMs = maxBackoffMs
-	} else {
-		backoffMs = baseBackoffMs * factor
+	// Compute exponential factor, clamped to prevent exceeding max backoff
+	factor := int64(1) << shiftAmount
+	if baseBackoffMs > 0 && factor > maxBackoffMs/baseBackoffMs {
+		factor = maxBackoffMs / baseBackoffMs
 	}
+
+	backoffMs := baseBackoffMs * factor
+	if backoffMs > maxBackoffMs {
+		backoffMs = maxBackoffMs
+	}
+
 	backoffDuration := time.Duration(backoffMs) * time.Millisecond
 
 	return time.Since(retry.LastAttempt) >= backoffDuration
 }
 
-// recordFailedFile tracks retry attempts for a failed file
-func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) {
+// recordFailedFile tracks retry attempts for a failed file and returns the current attempt count
+func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) int {
 	fileName := filepath.Base(filePath)
 
 	f.mu.Lock()
@@ -448,6 +447,7 @@ func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) {
 	retry.LastAttempt = time.Now()
 
 	f.failedFiles[fileName] = retry
+	return retry.Attempts
 }
 
 // moveToArchive moves processed file to archive directory with date subdirectory
@@ -573,8 +573,8 @@ func (f *FileConsumer) processFile(filePath string) error {
 	// Read file contents
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		f.recordFailedFile(filePath, err.Error())
-		if f.failedFiles[filepath.Base(filePath)].Attempts >= f.maxRetries {
+		attempts := f.recordFailedFile(filePath, err.Error())
+		if attempts >= f.maxRetries {
 			if err := f.moveToError(filePath, fmt.Sprintf("max retries exceeded: %v", err)); err != nil {
 				f.logger.Error("Failed to move file to error directory", "path", filePath, "err", err)
 			}
@@ -618,6 +618,7 @@ func (f *FileConsumer) processFile(filePath string) error {
 			return fmt.Errorf("publish to NATS: %w", err)
 		}
 		var mtime int64
+		info, err := os.Stat(filePath)
 		if err != nil {
 			// If the file has been moved or deleted after processing, we still
 			// record the current time to prevent unintended reprocessing.

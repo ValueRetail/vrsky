@@ -194,8 +194,14 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 		return fmt.Errorf("invalid envelope: %w", err)
 	}
 
+	// Validate payload size does not exceed maximum file size
+	payloadSize := int64(len(env.Payload))
+	if payloadSize > f.maxFileSize {
+		return fmt.Errorf("payload size (%d bytes) exceeds maximum file size (%d bytes)", payloadSize, f.maxFileSize)
+	}
+
 	// Check disk space availability
-	if err := f.checkDiskSpace(int64(len(env.Payload))); err != nil {
+	if err := f.checkDiskSpace(payloadSize); err != nil {
 		return fmt.Errorf("disk space check failed: %w", err)
 	}
 
@@ -310,7 +316,7 @@ func (f *FileProducer) checkDiskSpace(requiredSize int64) error {
 	// Note: the limit (~4.6 EiB) is derived from int64 and is an internal safety bound,
 	//       not an application-level maximum file size.
 	if requiredSize > math.MaxInt64/2 {
-		return fmt.Errorf("internal size limit exceeded while checking disk space: required=%d bytes, max-safely-checkable=%d bytes", requiredSize, math.MaxInt64/2)
+		return fmt.Errorf("payload size too large for disk space check: required=%d bytes, max-safely-checkable=%d bytes", requiredSize, math.MaxInt64/2)
 	}
 	required := requiredSize * 2
 	if available < required {

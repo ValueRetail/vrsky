@@ -24,6 +24,9 @@ type Envelope struct {
 	CurrentStep int      `json:"current_step"` // Current position in pipeline
 	StepHistory []string `json:"step_history"` // Path through pipeline
 
+	// Metadata - arbitrary key-value pairs for custom data (e.g., CDC operation, table name)
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`

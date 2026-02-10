@@ -148,6 +148,11 @@ func TestFileConsumer_EnvelopeStructure(t *testing.T) {
 		t.Errorf("Read() error = %v", err)
 	}
 
+	// Verify envelope was returned
+	if env == nil {
+		t.Fatal("Read() returned nil envelope")
+	}
+
 	// Verify structure
 	if env.ID == "" {
 		t.Error("Envelope ID is empty")
