@@ -256,11 +256,11 @@ func (pi *PostgresInput) setupReplication() error {
 	}
 	defer tmpConn.Close(pi.ctx)
 	
-	// Try to create replication slot (ignore error if it already exists)
-	// Use pg_create_logical_replication_slot function instead of CREATE_REPLICATION_SLOT command
-	// because the latter is not available in replication connections
+	// Try to create replication slot using parameterized query
+	// Use pg_create_logical_replication_slot function with parameters
 	_, err = tmpConn.Exec(pi.ctx,
-		fmt.Sprintf("SELECT pg_create_logical_replication_slot('%s', 'pgoutput')", pi.replicationSlot))
+		"SELECT pg_create_logical_replication_slot($1, 'pgoutput')",
+		pi.replicationSlot)
 	if err != nil {
 		// Slot might already exist, which is fine
 		if !strings.Contains(err.Error(), "already exists") {
@@ -271,8 +271,10 @@ func (pi *PostgresInput) setupReplication() error {
 	}
 
 	// Try to create publication (ignore error if it already exists)
+	// Use quoted identifier for publication name to safely handle special characters
+	quotedPub := fmt.Sprintf(`"%s"`, strings.ReplaceAll(pi.publication, `"`, `""`))
 	_, err = tmpConn.Exec(pi.ctx,
-		fmt.Sprintf("CREATE PUBLICATION %s FOR ALL TABLES", pi.publication))
+		fmt.Sprintf("CREATE PUBLICATION %s FOR ALL TABLES", quotedPub))
 	if err != nil {
 		// Publication might already exist, which is fine
 		if !strings.Contains(err.Error(), "already exists") {
