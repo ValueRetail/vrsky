@@ -171,6 +171,15 @@ func (po *PostgresOutput) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to changes: %w", err)
 	}
 
+	// Flush any batches that arrived before pool was initialized
+	po.mu.Lock()
+	if len(po.pendingBatch) > 0 {
+		po.logger.Info("Flushing pending batch after pool initialized",
+			"batch_size", len(po.pendingBatch))
+		po.writeBatch()
+	}
+	po.mu.Unlock()
+
 	po.logger.Info("PostgreSQL Output started")
 	return nil
 }
@@ -259,6 +268,7 @@ func (po *PostgresOutput) addToPendingBatch(env *envelope.Envelope) {
 }
 
 // writeBatch writes pending batch to PostgreSQL
+// Must be called with po.mu held
 func (po *PostgresOutput) writeBatch() {
 	if len(po.pendingBatch) == 0 {
 		return
@@ -266,8 +276,16 @@ func (po *PostgresOutput) writeBatch() {
 
 	// Check if pool is initialized (may not be if Start() hasn't been called yet)
 	if po.pool == nil {
-		po.logger.Warn("writeBatch called but pool not initialized - skipping batch write until Start() is called",
+		po.logger.Warn("writeBatch called but pool not initialized - will retry with timer",
 			"pending_batch_size", len(po.pendingBatch))
+		// Set/restart timer to retry writing after pool initializes
+		if po.batchTimer == nil {
+			po.batchTimer = time.AfterFunc(po.batchTimeout, func() {
+				po.mu.Lock()
+				defer po.mu.Unlock()
+				po.writeBatch()
+			})
+		}
 		return
 	}
 
