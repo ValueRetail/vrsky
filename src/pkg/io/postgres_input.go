@@ -381,7 +381,22 @@ func (pi *PostgresInput) createEnvelopeFromChange(change CDCChange) *envelope.En
 	env.ContentType = "application/cdc+json"
 	env.Source = "PostgresInput"
 	
-	data, _ := json.Marshal(change)
+	// Populate metadata for downstream consumers
+	env.Metadata = map[string]interface{}{
+		"operation":      change.Operation,
+		"schema":         change.Schema,
+		"table":          change.Table,
+		"timestamp":      change.Timestamp,
+		"transaction_id": change.TransactionID,
+		"lsn":            change.LSN,
+	}
+
+	// Marshal change to payload
+	data, err := json.Marshal(change)
+	if err != nil {
+		pi.logger.Error("Failed to marshal CDC change", "error", err, "table", change.Table)
+		return nil
+	}
 	env.Payload = data
 	env.PayloadSize = int64(len(data))
 
