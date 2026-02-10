@@ -31,7 +31,7 @@ type PostgresOutput struct {
 	natsSubject        string
 	batchSize          int
 	batchTimeout       time.Duration
-	conflictResolution string // "UPSERT", "REPLACE", "SKIP"
+	conflictResolution string // "UPSERT" - handles INSERT conflicts by updating existing rows
 
 	// Connection
 	pool     *pgxpool.Pool
@@ -129,6 +129,14 @@ func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
 	po.conflictResolution = os.Getenv("POSTGRES_CONFLICT_RESOLUTION")
 	if po.conflictResolution == "" {
 		po.conflictResolution = "UPSERT"
+	}
+
+	// Validate conflict resolution strategy (only UPSERT is currently implemented)
+	validStrategies := map[string]bool{
+		"UPSERT": true,
+	}
+	if !validStrategies[po.conflictResolution] {
+		return nil, fmt.Errorf("unsupported POSTGRES_CONFLICT_RESOLUTION strategy: %s (only UPSERT is supported)", po.conflictResolution)
 	}
 
 	po.ctx, po.cancel = context.WithCancel(context.Background())
