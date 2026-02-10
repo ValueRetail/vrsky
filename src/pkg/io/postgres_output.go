@@ -575,9 +575,26 @@ func (po *PostgresOutput) WriteBatch(ctx context.Context, envelopes []*envelope.
 	default:
 	}
 
+	if len(envelopes) == 0 {
+		return nil
+	}
+
 	po.mu.Lock()
+	defer po.mu.Unlock()
+
 	po.pendingBatch = append(po.pendingBatch, envelopes...)
-	po.mu.Unlock()
+
+	// Check if batch is full and needs to be written
+	if len(po.pendingBatch) >= po.batchSize {
+		po.writeBatch()
+	} else if po.batchTimer == nil && len(po.pendingBatch) > 0 {
+		// Start timer for batch timeout if not already running
+		po.batchTimer = time.AfterFunc(po.batchTimeout, func() {
+			po.mu.Lock()
+			defer po.mu.Unlock()
+			po.writeBatch()
+		})
+	}
 
 	return nil
 }
