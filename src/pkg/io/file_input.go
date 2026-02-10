@@ -430,8 +430,8 @@ func (f *FileConsumer) shouldRetry(filePath string) bool {
 	return time.Since(retry.LastAttempt) >= backoffDuration
 }
 
-// recordFailedFile tracks retry attempts for a failed file
-func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) {
+// recordFailedFile tracks retry attempts for a failed file and returns the current attempt count
+func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) int {
 	fileName := filepath.Base(filePath)
 
 	f.mu.Lock()
@@ -447,6 +447,7 @@ func (f *FileConsumer) recordFailedFile(filePath string, errMsg string) {
 	retry.LastAttempt = time.Now()
 
 	f.failedFiles[fileName] = retry
+	return retry.Attempts
 }
 
 // moveToArchive moves processed file to archive directory with date subdirectory
@@ -572,8 +573,8 @@ func (f *FileConsumer) processFile(filePath string) error {
 	// Read file contents
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		f.recordFailedFile(filePath, err.Error())
-		if f.failedFiles[filepath.Base(filePath)].Attempts >= f.maxRetries {
+		attempts := f.recordFailedFile(filePath, err.Error())
+		if attempts >= f.maxRetries {
 			if err := f.moveToError(filePath, fmt.Sprintf("max retries exceeded: %v", err)); err != nil {
 				f.logger.Error("Failed to move file to error directory", "path", filePath, "err", err)
 			}
