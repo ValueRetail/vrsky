@@ -545,6 +545,7 @@ func (pi *PostgresInput) Close() error {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
+			// Acquire connection BEFORE closing pool for cleanup
 			conn, err := pi.pool.Acquire(ctx)
 			if err == nil {
 				defer conn.Release()
@@ -557,6 +558,7 @@ func (pi *PostgresInput) Close() error {
 				pi.logger.Warn("Failed to acquire connection for cleanup", "error", err)
 			}
 
+			// Now close the pool after cleanup is done
 			pi.pool.Close()
 		}
 	})
