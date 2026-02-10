@@ -317,8 +317,17 @@ func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) {
 
 // writeEnvelope writes a single envelope to PostgreSQL
 func (po *PostgresOutput) writeEnvelope(tx pgx.Tx, env *envelope.Envelope) error {
+	if env == nil {
+		return fmt.Errorf("envelope is nil")
+	}
+
 	if env.Payload == nil {
 		return fmt.Errorf("envelope payload is nil")
+	}
+
+	// Validate metadata exists
+	if env.Metadata == nil {
+		return fmt.Errorf("envelope metadata is nil")
 	}
 
 	// Parse payload
@@ -327,17 +336,25 @@ func (po *PostgresOutput) writeEnvelope(tx pgx.Tx, env *envelope.Envelope) error
 		return fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
 
-	operation := payload["operation"]
-	if operation == nil {
+	if payload == nil {
+		return fmt.Errorf("payload unmarshaled to nil")
+	}
+
+	// Get operation with type assertion check
+	operation, ok := payload["operation"]
+	if !ok {
 		return fmt.Errorf("operation not found in payload")
 	}
 
-	op := operation.(string)
+	op, ok := operation.(string)
+	if !ok {
+		return fmt.Errorf("operation is not a string, got %T", operation)
+	}
 
-	// Get metadata
+	// Get metadata table name
 	tableName, ok := env.Metadata["table"].(string)
 	if !ok {
-		return fmt.Errorf("table not found in metadata")
+		return fmt.Errorf("table not found in metadata or is not a string")
 	}
 
 	// Execute appropriate write operation
