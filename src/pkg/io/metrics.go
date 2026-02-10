@@ -11,7 +11,7 @@ import (
 // PostgresConsumerMetrics holds all Prometheus metrics for PostgreSQL Consumer
 type PostgresConsumerMetrics struct {
 	// Counters
-	ChangesCapturedTotal      prometheus.CounterVec // By operation type
+	ChangesCapturedTotal      *prometheus.CounterVec // By operation type
 	BatchesPublishedTotal     prometheus.Counter
 	ConnectionErrorsTotal     prometheus.Counter
 	ParseErrorsTotal          prometheus.Counter
@@ -28,7 +28,7 @@ type PostgresConsumerMetrics struct {
 // PostgresProducerMetrics holds all Prometheus metrics for PostgreSQL Producer
 type PostgresProducerMetrics struct {
 	// Counters
-	MessagesReceivedTotal     prometheus.CounterVec // By operation type
+	MessagesReceivedTotal     *prometheus.CounterVec // By operation type
 	BatchesWrittenTotal       prometheus.Counter
 	WriteErrorsTotal          prometheus.Counter
 	DLQMessagesTotal          prometheus.Counter
@@ -44,7 +44,7 @@ type PostgresProducerMetrics struct {
 // NewPostgresConsumerMetrics creates and registers consumer metrics
 func NewPostgresConsumerMetrics() *PostgresConsumerMetrics {
 	return &PostgresConsumerMetrics{
-		ChangesCapturedTotal: *promauto.NewCounterVec(
+		ChangesCapturedTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "postgres_consumer_changes_captured_total",
 				Help: "Total number of changes captured from PostgreSQL, by operation type",
@@ -101,7 +101,7 @@ func NewPostgresConsumerMetrics() *PostgresConsumerMetrics {
 // NewPostgresProducerMetrics creates and registers producer metrics
 func NewPostgresProducerMetrics() *PostgresProducerMetrics {
 	return &PostgresProducerMetrics{
-		MessagesReceivedTotal: *promauto.NewCounterVec(
+		MessagesReceivedTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "postgres_producer_messages_received_total",
 				Help: "Total number of messages received from NATS, by operation type",
