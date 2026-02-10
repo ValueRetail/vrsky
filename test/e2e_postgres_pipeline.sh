@@ -10,19 +10,27 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-NATS_URL="nats://localhost:4222"
-POSTGRES_SOURCE_HOST="localhost"
-POSTGRES_SOURCE_PORT="5432"
-POSTGRES_SOURCE_USER="postgres"
-POSTGRES_SOURCE_PASSWORD="source_password"
-POSTGRES_SOURCE_DB="source_db"
+# Configuration - Load from environment variables with defaults for local development
+NATS_URL="${NATS_URL:-nats://localhost:4222}"
+POSTGRES_SOURCE_HOST="${POSTGRES_SOURCE_HOST:-localhost}"
+POSTGRES_SOURCE_PORT="${POSTGRES_SOURCE_PORT:-5432}"
+POSTGRES_SOURCE_USER="${POSTGRES_SOURCE_USER:-postgres}"
+POSTGRES_SOURCE_PASSWORD="${POSTGRES_SOURCE_PASSWORD:-}"  # Intentionally empty - use env var
+POSTGRES_SOURCE_DB="${POSTGRES_SOURCE_DB:-source_db}"
 
-POSTGRES_TARGET_HOST="localhost"
-POSTGRES_TARGET_PORT="5433"
-POSTGRES_TARGET_USER="postgres"
-POSTGRES_TARGET_PASSWORD="target_password"
-POSTGRES_TARGET_DB="target_db"
+POSTGRES_TARGET_HOST="${POSTGRES_TARGET_HOST:-localhost}"
+POSTGRES_TARGET_PORT="${POSTGRES_TARGET_PORT:-5433}"
+POSTGRES_TARGET_USER="${POSTGRES_TARGET_USER:-postgres}"
+POSTGRES_TARGET_PASSWORD="${POSTGRES_TARGET_PASSWORD:-}"  # Intentionally empty - use env var
+POSTGRES_TARGET_DB="${POSTGRES_TARGET_DB:-target_db}"
+
+# Validate that passwords are provided
+if [ -z "$POSTGRES_SOURCE_PASSWORD" ] || [ -z "$POSTGRES_TARGET_PASSWORD" ]; then
+    echo -e "${RED}Error: Database passwords must be provided via environment variables:${NC}"
+    echo "  export POSTGRES_SOURCE_PASSWORD=<password>"
+    echo "  export POSTGRES_TARGET_PASSWORD=<password>"
+    exit 1
+fi
 
 TEST_TABLE="test_cdc_table"
 NATS_SUBJECT="postgres.changes"
