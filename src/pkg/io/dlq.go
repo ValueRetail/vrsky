@@ -12,19 +12,17 @@ import (
 
 // DLQConfig holds Dead Letter Queue configuration
 type DLQConfig struct {
-	Enabled           bool
-	Subject           string        // NATS subject for DLQ messages
-	RetentionDuration time.Duration // How long to keep DLQ messages
-	MaxRetries        int           // Max attempts before sending to DLQ
+	Enabled    bool   // Enable/disable DLQ publishing
+	Subject    string // NATS subject for DLQ messages
+	MaxRetries int    // Max attempts before sending to DLQ
 }
 
 // DefaultDLQConfig returns recommended DLQ settings
 func DefaultDLQConfig() DLQConfig {
 	return DLQConfig{
-		Enabled:           true,
-		Subject:           "postgres.dlq",
-		RetentionDuration: 24 * time.Hour,
-		MaxRetries:        3,
+		Enabled:    true,
+		Subject:    "postgres.dlq",
+		MaxRetries: 3,
 	}
 }
 
