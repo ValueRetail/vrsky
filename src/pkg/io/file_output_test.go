@@ -618,6 +618,8 @@ func TestFileProducer_ValidateEnvelope(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FILE_OUTPUT_DIR", tmpDir)
 	t.Setenv("FILE_OUTPUT_FILENAME_FORMAT", "{{.ID}}.{{.Extension}}")
+	// Set max file size to 50MB for testing
+	t.Setenv("FILE_OUTPUT_MAX_FILE_SIZE", "52428800") // 50MB
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	producer, err := NewFileProducer(logger)
@@ -656,7 +658,7 @@ func TestFileProducer_ValidateEnvelope(t *testing.T) {
 	// Test 3: Exceeding max file size
 	env = envelope.New()
 	env.ID = "test-large-exceeds"
-	// Assume default max file size is 100MB; use a payload slightly larger to trigger the limit
+	// Max file size is set to 50MB above; use a payload of 101MB to exceed it
 	env.Payload = make([]byte, 101*1024*1024) // 101MB
 	env.ContentType = "text/plain"
 	err = producer.Write(ctx, env)
