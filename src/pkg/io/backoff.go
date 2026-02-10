@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// rng is a per-package random number generator seeded at init time
+// Using a separate RNG avoids contention on the global rand source and
+// ensures different sequences across restarts
+var rng *rand.Rand
+
+func init() {
+	// Seed the RNG with current time for non-deterministic jitter
+	rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+}
+
 // BackoffConfig holds exponential backoff configuration
 type BackoffConfig struct {
 	InitialDuration  time.Duration
@@ -48,9 +58,10 @@ func CalculateBackoff(attempt int, config BackoffConfig) time.Duration {
 	}
 
 	// Add jitter: ±JitterPercentage around baseBackoff
+	// Use per-package RNG to avoid contention and ensure non-deterministic behavior
 	jitterFraction := config.JitterPercentage / 100.0
 	maxJitter := baseBackoff * jitterFraction
-	jitter := (rand.Float64()*2 - 1) * maxJitter // Random in [-maxJitter, +maxJitter]
+	jitter := (rng.Float64()*2 - 1) * maxJitter // Random in [-maxJitter, +maxJitter]
 	finalBackoff := baseBackoff + jitter
 
 	// Ensure we don't go negative
