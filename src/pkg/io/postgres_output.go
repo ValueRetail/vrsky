@@ -450,18 +450,20 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 							}
 						}
 
-						dlqErr := po.dlqPublisher.PublishProducerError(
-							env,
-							"batch_write_error",
-							fmt.Sprintf("Failed to write batch after %d retries: %v", attempt, err),
-							attempt,
-							table,
-							op,
-						)
-						if dlqErr != nil {
-							po.logger.Error("Failed to publish to DLQ", "error", dlqErr)
-						}
+					dlqErr := po.dlqPublisher.PublishProducerError(
+						env,
+						"batch_write_error",
+						fmt.Sprintf("Failed to write batch after %d retries: %v", attempt, err),
+						attempt,
+						table,
+						op,
+					)
+					if dlqErr != nil {
+						po.logger.Error("Failed to publish to DLQ", "error", dlqErr)
+					} else {
+						// Only increment metric when DLQ publish succeeds
 						po.metrics.DLQMessagesTotal.Inc()
+					}
 					}
 				}
 				break
