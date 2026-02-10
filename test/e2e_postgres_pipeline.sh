@@ -327,30 +327,51 @@ test_data_consistency() {
     
     print_test "Verifying data reached target database (may take a moment)"
     
-    # Wait for replication to occur
-    sleep 5
-    
+    # Get source database count
     SOURCE_COUNT=$(PGPASSWORD=$POSTGRES_SOURCE_PASSWORD psql \
         -h $POSTGRES_SOURCE_HOST \
         -p $POSTGRES_SOURCE_PORT \
         -U $POSTGRES_SOURCE_USER \
         -d $POSTGRES_SOURCE_DB \
-        -t -c "SELECT COUNT(*) FROM $TEST_TABLE;")
+        -t -c "SELECT COUNT(*) FROM $TEST_TABLE;" 2>/dev/null | tr -d ' ')
     
-    TARGET_COUNT=$(PGPASSWORD=$POSTGRES_TARGET_PASSWORD psql \
-        -h $POSTGRES_TARGET_HOST \
-        -p $POSTGRES_TARGET_PORT \
-        -U $POSTGRES_TARGET_USER \
-        -d $POSTGRES_TARGET_DB \
-        -t -c "SELECT COUNT(*) FROM $TEST_TABLE;" 2>/dev/null || echo "0")
-    
-    echo "Source count: $SOURCE_COUNT, Target count: $TARGET_COUNT"
-    
-    if [ "$TARGET_COUNT" -ge 0 ]; then
-        print_success "Target database has received data (count: $TARGET_COUNT)"
-    else
-        print_error "Target database may not have received data"
+    if [ -z "$SOURCE_COUNT" ] || ! [ "$SOURCE_COUNT" -gt 0 ]; then
+        print_error "Could not determine source record count"
+        return 1
     fi
+    
+    # Retry logic: wait for target to catch up with source
+    local max_retries=30  # 30 seconds with 1-second intervals
+    local retry=0
+    local target_count=0
+    
+    while [ $retry -lt $max_retries ]; do
+        TARGET_COUNT=$(PGPASSWORD=$POSTGRES_TARGET_PASSWORD psql \
+            -h $POSTGRES_TARGET_HOST \
+            -p $POSTGRES_TARGET_PORT \
+            -U $POSTGRES_TARGET_USER \
+            -d $POSTGRES_TARGET_DB \
+            -t -c "SELECT COUNT(*) FROM $TEST_TABLE;" 2>/dev/null | tr -d ' ')
+        
+        if [ -z "$TARGET_COUNT" ]; then
+            TARGET_COUNT=0
+        fi
+        
+        if [ "$TARGET_COUNT" -eq "$SOURCE_COUNT" ]; then
+            echo "Source count: $SOURCE_COUNT, Target count: $TARGET_COUNT (matched after ${retry}s)"
+            print_success "Target database has received all data"
+            return 0
+        fi
+        
+        echo "  Waiting for replication... Source: $SOURCE_COUNT, Target: $TARGET_COUNT (attempt $((retry + 1))/$max_retries)"
+        sleep 1
+        ((retry++))
+    done
+    
+    # Timeout - log what we got
+    echo "Source count: $SOURCE_COUNT, Target count: $TARGET_COUNT"
+    print_error "Target database did not catch up after ${max_retries}s (expected $SOURCE_COUNT records, got $TARGET_COUNT)"
+    return 1
 }
 
 # Main execution
