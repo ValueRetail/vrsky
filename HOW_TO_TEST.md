@@ -3,32 +3,14 @@
 ## Architecture
 
 ```
-Source Database          NATS Broker            Target Database
-  (port 5432)       (port 4222)                 (port 5433)
-      │                   │                          │
-      │                   │                          │
-      ▼                   ▼                          ▼
-  ┌────────┐         ┌──────────┐            ┌────────┐
-  │ source │         │postgres  │            │ target │
-  │  _db   │◄────────│ .changes │◄───────────│  _db   │
-  └────────┘         └──────────┘            └────────┘
-      ▲                                           ▲
-      │                                           │
-      │              ┌──────────┐                 │
-      │              │          │                 │
-      └──────────────│ Consumer │─────────────────┘
-                     │          │
-                     └──────────┘
-                          │
-                          │
-                     ┌──────────┐
-                     │          │
-                     │ Producer │
-                     │          │
-                     └──────────┘
+┌────────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌────────────┐
+│   Source   │      │ Consumer │      │   NATS   │      │ Producer │      │   Target   │
+│  Database  │─────▶│          │─────▶│  Broker  │─────▶│          │─────▶│  Database  │
+│ (5432)     │      │          │      │ (4222)   │      │          │      │ (5433)     │
+└────────────┘      └──────────┘      └──────────┘      └──────────┘      └────────────┘
 ```
 
-**What it does:**
+**Flow:**
 - Consumer reads changes from source database
 - Sends them to NATS broker  
 - Producer receives messages from NATS
