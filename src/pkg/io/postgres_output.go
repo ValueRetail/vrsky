@@ -386,7 +386,9 @@ func (po *PostgresOutput) writeBatch() {
 	}
 
 	batch := po.pendingBatch
+	batchStartTime := po.batchStartTime
 	po.pendingBatch = nil
+	po.batchStartTime = time.Time{} // Reset for next batch
 	batchSize := len(batch)
 
 	if po.batchTimer != nil {
@@ -402,12 +404,12 @@ func (po *PostgresOutput) writeBatch() {
 	po.wg.Add(1)
 	go func() {
 		defer po.wg.Done()
-		po.executeBatchWithRetry(batch)
+		po.executeBatchWithRetry(batch, batchStartTime)
 	}()
 }
 
 // executeBatchWithRetry executes batch with exponential backoff retry logic
-func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope) {
+func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batchStartTime time.Time) {
 	if len(batch) == 0 {
 		return
 	}
@@ -488,12 +490,11 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope) {
 			po.metrics.BatchesWrittenTotal.Inc()
 
 			// Record capture-to-write latency if we have it
-			if !po.batchStartTime.IsZero() {
-				captureLatency := time.Since(po.batchStartTime).Seconds()
+			if !batchStartTime.IsZero() {
+				captureLatency := time.Since(batchStartTime).Seconds()
 				po.logger.Debug("Batch latency recorded",
 					"capture_to_write_seconds", captureLatency,
 					"batch_size", len(batch))
-				po.batchStartTime = time.Time{} // Reset
 			}
 
 			return
