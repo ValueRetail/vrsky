@@ -539,17 +539,25 @@ func (pi *PostgresInput) Close() error {
 			pi.natsConn.Close()
 		}
 
+		// Drop replication slot before closing pool
 		if pi.pool != nil {
-			pi.pool.Close()
-		}
+			// Use context with timeout for cleanup (don't use the cancelled pi.ctx)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		// Drop replication slot
-		if pi.pool != nil {
-			conn, err := pi.pool.Acquire(context.Background())
+			conn, err := pi.pool.Acquire(ctx)
 			if err == nil {
 				defer conn.Release()
-				conn.Exec(context.Background(), fmt.Sprintf("DROP_REPLICATION_SLOT %s", pi.replicationSlot))
+				// Use parameterized query to safely drop the replication slot
+				_, slotErr := conn.Exec(ctx, "SELECT pg_drop_replication_slot($1)", pi.replicationSlot)
+				if slotErr != nil {
+					pi.logger.Warn("Failed to drop replication slot", "slot", pi.replicationSlot, "error", slotErr)
+				}
+			} else {
+				pi.logger.Warn("Failed to acquire connection for cleanup", "error", err)
 			}
+
+			pi.pool.Close()
 		}
 	})
 
