@@ -357,12 +357,12 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 
 			if po.natsURL != tt.wantNATSURL {
 				t.Errorf("natsURL = %s, want %s", po.natsURL, tt.wantNATSURL)
-		}
-		if po.natsSubject != tt.wantNATSSubject {
-			t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
-		}
+			}
+			if po.natsSubject != tt.wantNATSSubject {
+					t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+			}
 	})
-	}
+}
 }
 
 // TestNewPostgresOutput_ConfigurationValidation tests that invalid config values are handled with warnings
