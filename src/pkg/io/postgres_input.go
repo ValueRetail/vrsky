@@ -422,6 +422,7 @@ func (pi *PostgresInput) pollChanges() {
 				}
 			} else {
 				// Success - reset for next poll
+				lastErr = nil // Clear error so cooldown doesn't apply on success
 				attempt = 0
 				break
 			}
