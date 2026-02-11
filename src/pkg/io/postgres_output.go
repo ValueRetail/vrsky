@@ -398,6 +398,9 @@ func (po *PostgresOutput) writeBatch() {
 	po.batchStartTime = time.Time{} // Reset for next batch
 	batchSize := len(batch)
 
+	// Reset pending batch size gauge to 0
+	po.metrics.PendingBatchSizeGauge.Set(0)
+
 	if po.batchTimer != nil {
 		po.batchTimer.Stop()
 		po.batchTimer = nil
