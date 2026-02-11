@@ -18,10 +18,11 @@ import (
 
 // testSleeper implements sleeper interface for deterministic testing
 type testSleeper struct {
-	sleepDurations []time.Duration
-	sleepIndex     int
-	blockChan      chan struct{}  // For tests to control when to unblock
-	shouldBlock    bool            // Whether to actually block or return immediately
+	sleepDurations  []time.Duration
+	sleepIndex      int
+	blockChan       chan struct{}  // For tests to control when to unblock
+	shouldBlock     bool            // Whether to actually block or return immediately
+	attemptChan     chan struct{}  // Signals when an attempt completes (sent before sleeping)
 }
 
 // NewTestSleeper creates a test sleeper that can optionally block
@@ -29,6 +30,7 @@ func NewTestSleeper(shouldBlock bool) *testSleeper {
 	return &testSleeper{
 		sleepDurations: []time.Duration{},
 		blockChan:      make(chan struct{}, 1),
+		attemptChan:    make(chan struct{}, 1), // Buffered to allow non-blocking send
 		shouldBlock:    shouldBlock,
 	}
 }
@@ -36,6 +38,14 @@ func NewTestSleeper(shouldBlock bool) *testSleeper {
 func (ts *testSleeper) sleep(ctx context.Context, d time.Duration) error {
 	ts.sleepDurations = append(ts.sleepDurations, d)
 	ts.sleepIndex++
+
+	// Signal that an attempt has completed and we're about to sleep
+	// Use non-blocking send so the test can choose whether to wait for this signal
+	select {
+	case ts.attemptChan <- struct{}{}:
+	default:
+		// Channel full or no receiver, continue without blocking
+	}
 
 	if !ts.shouldBlock {
 		// Fast path for tests that don't need blocking
@@ -61,6 +71,17 @@ func (ts *testSleeper) Unblock() {
 	select {
 	case ts.blockChan <- struct{}{}:
 	default:
+	}
+}
+
+// WaitForAttempt waits for the batch executor to attempt execution, with a timeout
+// Returns true if attempt was detected, false if timeout occurs
+func (ts *testSleeper) WaitForAttempt(timeout time.Duration) bool {
+	select {
+	case <-ts.attemptChan:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
@@ -1476,8 +1497,11 @@ func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
 		close(done)
 	}()
 
-	// Allow first execution attempt to happen
-	time.Sleep(10 * time.Millisecond)
+	// Wait for first execution attempt to complete (deterministic, not time-based)
+	// The sleeper signals when it's about to sleep (i.e., when an attempt finished)
+	if !blockingSleeper.WaitForAttempt(5 * time.Second) {
+		t.Fatal("First batch execution attempt did not complete within timeout")
+	}
 
 	// Cancel the context - this should interrupt the retry sleep
 	po.cancel()
