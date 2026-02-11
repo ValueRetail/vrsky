@@ -77,6 +77,32 @@ func (m *mockExecuteBatch) execute() error {
 	return nil
 }
 
+// fakeDLQPublisher implements dlqPublisher interface for testing
+type fakeDLQPublisher struct {
+	publishCount      int
+	shouldPublishFail bool // Simulate publish error
+	shouldPublishSkip bool // Simulate disabled/no-op (no NATS connection)
+}
+
+func (f *fakeDLQPublisher) PublishProducerError(
+	env *envelope.Envelope,
+	errType string,
+	errMsg string,
+	attempt int,
+	table string,
+	operation string,
+) (error, bool) {
+	f.publishCount++
+
+	if f.shouldPublishFail {
+		return fmt.Errorf("simulated DLQ publish error"), false
+	}
+	if f.shouldPublishSkip {
+		return nil, false // DLQ disabled or no NATS connection
+	}
+	return nil, true // Success
+}
+
 // TestNewPostgresOutput_Configuration tests environment variable parsing
 func TestNewPostgresOutput_Configuration(t *testing.T) {
 	tests := []struct {
@@ -961,47 +987,99 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 	}
 }
 
-// TestExecuteBatchWithRetry_DLQMetricAccuracy tests that DLQ metric is correctly incremented based on publish success
+// TestExecuteBatchWithRetry_DLQMetricAccuracy verifies DLQ metric increments only when publish succeeds
 func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
-	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
-	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
-	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "1")
-	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
-	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
-	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
-
-	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
-	if err != nil {
-		t.Fatalf("NewPostgresOutput() error = %v", err)
+	tests := []struct {
+		name               string
+		shouldPublishFail  bool // DLQ publish fails
+		shouldPublishSkip  bool // DLQ disabled or no connection
+		expectMetricIncr   bool // Expect metric to increment
+		expectPublishCall  bool // Expect PublishProducerError to be called
+	}{
+		{
+			name:              "successful_publish_increments_metric",
+			shouldPublishFail: false,
+			shouldPublishSkip: false,
+			expectMetricIncr:  true,
+			expectPublishCall: true,
+		},
+		{
+			name:              "publish_skipped_does_not_increment_metric",
+			shouldPublishFail: false,
+			shouldPublishSkip: true,
+			expectMetricIncr:  false,
+			expectPublishCall: true,
+		},
+		{
+			name:              "publish_failed_does_not_increment_metric",
+			shouldPublishFail: true,
+			shouldPublishSkip: false,
+			expectMetricIncr:  false,
+			expectPublishCall: true,
+		},
 	}
 
-	po.ctx, po.cancel = context.WithCancel(context.Background())
-	defer po.cancel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+			os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+			os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "1")
+			defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+			defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+			defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
 
-	// Mock batch executor that always fails
-	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
-		return fmt.Errorf("simulated batch error")
-	})
-	po.setSleeper(&testSleeper{})
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+			if err != nil {
+				t.Fatalf("NewPostgresOutput() error = %v", err)
+			}
 
-	// Get initial DLQ metric count
-	initialDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+			po.ctx, po.cancel = context.WithCancel(context.Background())
+			defer po.cancel()
 
-	// Verify initial metric value is 0
-	if initialDLQCount != 0 {
-		t.Errorf("initialDLQCount = %f, want 0", initialDLQCount)
-	}
+			// Mock batch executor that always fails to trigger DLQ
+			po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+				return fmt.Errorf("simulated batch error")
+			})
+			po.setSleeper(NewTestSleeper(false))
 
-	// Execute batch that will exhaust retries and attempt DLQ publish
-	batch := []*envelope.Envelope{envelope.New()}
-	po.executeBatchWithRetry(batch, time.Now())
+			// Inject fake DLQ publisher
+			fakeDLQ := &fakeDLQPublisher{
+				shouldPublishFail: tt.shouldPublishFail,
+				shouldPublishSkip: tt.shouldPublishSkip,
+			}
+			po.setDLQPublisher(fakeDLQ)
 
-	// With natsConn=nil, DLQ publish should be a no-op (published=false)
-	// So DLQMessagesTotal should NOT be incremented
-	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
-	if finalDLQCount != initialDLQCount {
-		t.Errorf("DLQMessagesTotal = %f, want %f (should not increment when natsConn is nil)",
-			finalDLQCount, initialDLQCount)
+			// Get initial metric count
+			initialCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+			// Execute batch that will exhaust retries and trigger DLQ publish
+			batch := []*envelope.Envelope{envelope.New()}
+			po.executeBatchWithRetry(batch, time.Now())
+
+			// Get final metric count
+			finalCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+			// Verify PublishProducerError was called
+			if !tt.expectPublishCall {
+				t.Errorf("PublishProducerError should not be called")
+			}
+			if fakeDLQ.publishCount != 1 {
+				t.Errorf("PublishProducerError called %d times, want 1", fakeDLQ.publishCount)
+			}
+
+			// Verify metric behavior based on publish result
+			if tt.expectMetricIncr {
+				if finalCount != initialCount+1 {
+					t.Errorf("DLQMessagesTotal = %f, want %f (should increment on successful publish)",
+						finalCount, initialCount+1)
+				}
+			} else {
+				if finalCount != initialCount {
+					t.Errorf("DLQMessagesTotal = %f, want %f (should not increment)",
+						finalCount, initialCount)
+				}
+			}
+		})
 	}
 }
 
@@ -1025,8 +1103,8 @@ func TestExecuteBatchWithRetry_DLQDisabledDoesNotIncrementMetric(t *testing.T) {
 	defer po.cancel()
 
 	// Verify DLQ is disabled
-	if po.dlqPublisher.config.Enabled {
-		t.Errorf("DLQ should be disabled, but config.Enabled = %v", po.dlqPublisher.config.Enabled)
+	if po.dlqConfig.Enabled {
+		t.Errorf("DLQ should be disabled, but config.Enabled = %v", po.dlqConfig.Enabled)
 	}
 
 	// Mock batch executor that always fails

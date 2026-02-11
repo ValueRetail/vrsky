@@ -38,6 +38,24 @@ func (ds *defaultSleeper) sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// dlqPublisher is an interface for publishing messages to the Dead Letter Queue
+// This allows tests to inject fake implementations for behavior verification
+type dlqPublisher interface {
+	// PublishProducerError publishes a producer error to DLQ
+	// Returns (error, published) where:
+	// - (nil, true): Successfully published to DLQ
+	// - (nil, false): DLQ disabled or no NATS connection (no-op)
+	// - (error, false): Failed to publish due to error
+	PublishProducerError(
+		env *envelope.Envelope,
+		errType string,
+		errMsg string,
+		attempt int,
+		table string,
+		operation string,
+	) (error, bool)
+}
+
 // PostgresOutput implements a Producer that writes changes to PostgreSQL
 type PostgresOutput struct {
 	// Configuration
@@ -74,7 +92,8 @@ type PostgresOutput struct {
 	// Observability
 	metricsRegistry prometheus.Registerer
 	metrics      *PostgresProducerMetrics
-	dlqPublisher *DLQPublisher
+	dlqPublisher dlqPublisher
+	dlqConfig    DLQConfig
 	backoffConfig BackoffConfig
 	maxRetries   int
 	batchStartTime time.Time // Track latency from receive to write
@@ -296,6 +315,7 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 
 	// DLQ publisher will be created after NATS connection in Start()
 	// For now, just store the config
+	po.dlqConfig = dlqConfig
 	po.dlqPublisher = &DLQPublisher{
 		natsConn: nil, // Will be set in Start()
 		config:   dlqConfig,
@@ -327,6 +347,11 @@ func (po *PostgresOutput) setSleeper(s sleeper) {
 // setBatchExecutor injects a custom batch executor for testing (unexported, used only in tests)
 func (po *PostgresOutput) setBatchExecutor(executor func([]*envelope.Envelope) error) {
 	po.batchExecutor = executor
+}
+
+// setDLQPublisher injects a custom DLQ publisher for testing (unexported, used only in tests)
+func (po *PostgresOutput) setDLQPublisher(pub dlqPublisher) {
+	po.dlqPublisher = pub
 }
 
 // Start begins consuming messages from NATS and writing to PostgreSQL
@@ -420,7 +445,7 @@ func (po *PostgresOutput) connectNATS() error {
 	po.natsConn = nc
 
 	// Initialize DLQ publisher with NATS connection
-	po.dlqPublisher = NewDLQPublisher(nc, po.dlqPublisher.config, po.logger)
+	po.dlqPublisher = NewDLQPublisher(nc, po.dlqConfig, po.logger)
 
 	po.logger.Info("Connected to NATS", "url", po.natsURL)
 	return nil
