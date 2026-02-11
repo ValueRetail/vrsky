@@ -20,6 +20,24 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
+// sleeper is an interface for injecting sleep behavior during retries
+// This allows tests to control timing without actual delays
+type sleeper interface {
+	sleep(ctx context.Context, d time.Duration) error
+}
+
+// defaultSleeper implements sleeper using time.After
+type defaultSleeper struct{}
+
+func (ds *defaultSleeper) sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
 // PostgresOutput implements a Producer that writes changes to PostgreSQL
 type PostgresOutput struct {
 	// Configuration
@@ -50,6 +68,8 @@ type PostgresOutput struct {
 	batchTimer   *time.Timer
 	written      int64 // Track written messages
 	wg           sync.WaitGroup // Track in-flight batch writes
+	sleeper      sleeper // Injected for testing (defaults to time.After)
+	batchExecutor func([]*envelope.Envelope) error // Custom batch executor for testing (defaults to executeBatch)
 
 	// Observability
 	metricsRegistry prometheus.Registerer
@@ -91,6 +111,8 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 		backoffConfig:    DefaultBackoffConfig(),
 		maxRetries:       3,
 		metrics:          NewPostgresProducerMetrics(metricsRegistry),
+		sleeper:          &defaultSleeper{},
+		batchExecutor:    nil, // Will use executeBatch method if nil
 	}
 
 	// Read configuration from environment
@@ -215,6 +237,16 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 	)
 
 	return po, nil
+}
+
+// setSleeper injects a custom sleeper for testing (unexported, used only in tests)
+func (po *PostgresOutput) setSleeper(s sleeper) {
+	po.sleeper = s
+}
+
+// setBatchExecutor injects a custom batch executor for testing (unexported, used only in tests)
+func (po *PostgresOutput) setBatchExecutor(executor func([]*envelope.Envelope) error) {
+	po.batchExecutor = executor
 }
 
 // Start begins consuming messages from NATS and writing to PostgreSQL
@@ -428,7 +460,14 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 	var lastErr error
 
 	for attempt := 1; attempt <= po.maxRetries; attempt++ {
-		if err := po.executeBatch(batch); err != nil {
+		var err error
+		if po.batchExecutor != nil {
+			err = po.batchExecutor(batch)
+		} else {
+			err = po.executeBatch(batch)
+		}
+		
+		if err != nil {
 			lastErr = err
 			po.logger.Warn("Failed to execute batch",
 				"error", err,
@@ -485,11 +524,9 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 				"backoff_duration", backoff,
 				"attempt", attempt)
 
-			select {
-			case <-po.ctx.Done():
+			if err := po.sleeper.sleep(po.ctx, backoff); err != nil {
+				// Context cancelled during sleep
 				return
-			case <-time.After(backoff):
-				continue // Retry
 			}
 		} else {
 			// Success - record latency and return
