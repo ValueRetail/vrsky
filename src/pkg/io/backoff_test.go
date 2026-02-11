@@ -1,6 +1,7 @@
 package io
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -86,14 +87,22 @@ func TestCalculateBackoff_WithJitter(t *testing.T) {
 	}
 
 	// Check all values are within acceptable range (within jitter bounds)
-	baseBackoff := float64(10) * 1.5 // 10 seconds * 1.5^4
-	maxJitter := baseBackoff * 0.1    // ±10%
-	minExpected := time.Duration((baseBackoff - maxJitter) * 1e9) // Convert to nanoseconds
-	maxExpected := time.Duration((baseBackoff + maxJitter) * 1e9)
+	// CalculateBackoff works in nanoseconds (time.Duration is int64 nanoseconds)
+	// For attempt=5: base = InitialDuration * Multiplier^(attempt-1) = 10s * 1.5^4 = 50.625s
+	// But capped at MaxDuration = 30s
+	// In nanoseconds: 10e9 ns * 1.5^4 = 50.625e9 ns, capped at 30e9 ns
+	baseBackoffNs := float64(config.InitialDuration) * math.Pow(config.Multiplier, float64(5-1))
+	if baseBackoffNs > float64(config.MaxDuration) {
+		baseBackoffNs = float64(config.MaxDuration)
+	}
+	jitterFraction := config.JitterPercentage / 100.0
+	maxJitter := baseBackoffNs * jitterFraction
+	minExpected := time.Duration(baseBackoffNs - maxJitter)
+	maxExpected := time.Duration(baseBackoffNs + maxJitter)
 
 	for i, result := range results {
 		if result < minExpected || result > maxExpected {
-			t.Logf("Result %d = %v, outside range [%v, %v]", i, result, minExpected, maxExpected)
+			t.Errorf("Result %d = %v, outside range [%v, %v]", i, result, minExpected, maxExpected)
 		}
 	}
 }
