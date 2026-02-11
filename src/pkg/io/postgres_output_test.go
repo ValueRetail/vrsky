@@ -840,12 +840,12 @@ func TestExecuteBatchWithRetry_MaxRetriesExhausted(t *testing.T) {
 		t.Errorf("WriteErrorsTotal = %f, want %f", finalErrorCount, expectedErrorCount)
 	}
 
-	// Verify DLQ metric is incremented when max retries exhausted
-	// (dlqPublisher exists but natsConn is nil, so publish returns nil/success)
+	// Verify DLQ metric is NOT incremented when max retries exhausted
+	// (dlqPublisher exists but natsConn is nil, so publish is a no-op with published=false)
 	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
-	expectedDLQCount := initialDLQCount + float64(len(batch))
+	expectedDLQCount := initialDLQCount // Should remain unchanged
 	if finalDLQCount != expectedDLQCount {
-		t.Errorf("DLQMessagesTotal = %f, want %f (should increment by batch size on retry exhaustion)",
+		t.Errorf("DLQMessagesTotal = %f, want %f (should NOT increment when natsConn is nil)",
 			finalDLQCount, expectedDLQCount)
 	}
 }
@@ -931,7 +931,7 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 	}
 }
 
-// TestExecuteBatchWithRetry_DLQMetricAccuracy tests that DLQ metric is only incremented on success
+// TestExecuteBatchWithRetry_DLQMetricAccuracy tests that DLQ metric is correctly incremented based on publish success
 func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
 	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
 	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
@@ -948,12 +948,76 @@ func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
 	po.ctx, po.cancel = context.WithCancel(context.Background())
 	defer po.cancel()
 
+	// Mock batch executor that always fails
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return fmt.Errorf("simulated batch error")
+	})
+	po.setSleeper(&testSleeper{})
+
 	// Get initial DLQ metric count
 	initialDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
 
 	// Verify initial metric value is 0
 	if initialDLQCount != 0 {
 		t.Errorf("initialDLQCount = %f, want 0", initialDLQCount)
+	}
+
+	// Execute batch that will exhaust retries and attempt DLQ publish
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Now())
+
+	// With natsConn=nil, DLQ publish should be a no-op (published=false)
+	// So DLQMessagesTotal should NOT be incremented
+	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+	if finalDLQCount != initialDLQCount {
+		t.Errorf("DLQMessagesTotal = %f, want %f (should not increment when natsConn is nil)",
+			finalDLQCount, initialDLQCount)
+	}
+}
+
+// TestExecuteBatchWithRetry_DLQDisabledDoesNotIncrementMetric verifies metric doesn't increment when DLQ is disabled
+func TestExecuteBatchWithRetry_DLQDisabledDoesNotIncrementMetric(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "1")
+	os.Setenv("POSTGRES_OUTPUT_DLQ_ENABLED", "false")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DLQ_ENABLED")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Verify DLQ is disabled
+	if po.dlqPublisher.config.Enabled {
+		t.Errorf("DLQ should be disabled, but config.Enabled = %v", po.dlqPublisher.config.Enabled)
+	}
+
+	// Mock batch executor that always fails
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return fmt.Errorf("simulated batch error")
+	})
+	po.setSleeper(&testSleeper{})
+
+	// Get initial DLQ metric count
+	initialDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+	// Execute batch that will exhaust retries and attempt DLQ publish
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Now())
+
+	// With DLQ disabled, DLQ publish should be a no-op (published=false)
+	// So DLQMessagesTotal should NOT be incremented
+	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+	if finalDLQCount != initialDLQCount {
+		t.Errorf("DLQMessagesTotal = %f, want %f (should not increment when DLQ is disabled)",
+			finalDLQCount, initialDLQCount)
 	}
 }
 

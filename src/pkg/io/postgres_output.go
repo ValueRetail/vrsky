@@ -580,7 +580,7 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 							}
 						}
 
-						dlqErr := po.dlqPublisher.PublishProducerError(
+						dlqErr, published := po.dlqPublisher.PublishProducerError(
 							env,
 							"batch_write_error",
 							fmt.Sprintf("Failed to write batch after %d retries: %v", attempt, err),
@@ -590,8 +590,9 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 						)
 						if dlqErr != nil {
 							po.logger.Error("Failed to publish to DLQ", "error", dlqErr)
-						} else {
-							// Only increment metric when DLQ publish succeeds
+						}
+						if published {
+							// Only increment metric when message was actually published to DLQ
 							po.metrics.DLQMessagesTotal.Inc()
 						}
 					}

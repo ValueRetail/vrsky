@@ -67,6 +67,10 @@ func NewDLQPublisher(natsConn *nats.Conn, config DLQConfig, logger *slog.Logger)
 }
 
 // PublishConsumerError publishes a consumer error to DLQ
+// Returns (error, published) where published indicates if a message was actually published.
+// - (nil, true): Successfully published to DLQ
+// - (nil, false): DLQ disabled or no NATS connection (no-op)
+// - (error, false): Failed to publish due to error (marshal or publish failure)
 func (dlq *DLQPublisher) PublishConsumerError(
 	env *envelope.Envelope,
 	errType string,
@@ -75,9 +79,9 @@ func (dlq *DLQPublisher) PublishConsumerError(
 	table string,
 	operation string,
 	lsn uint64,
-) error {
+) (error, bool) {
 	if !dlq.config.Enabled || dlq.natsConn == nil {
-		return nil // DLQ disabled or no NATS connection
+		return nil, false // DLQ disabled or no NATS connection
 	}
 
 	msg := DLQMessage{
@@ -97,6 +101,10 @@ func (dlq *DLQPublisher) PublishConsumerError(
 }
 
 // PublishProducerError publishes a producer error to DLQ
+// Returns (error, published) where published indicates if a message was actually published.
+// - (nil, true): Successfully published to DLQ
+// - (nil, false): DLQ disabled or no NATS connection (no-op)
+// - (error, false): Failed to publish due to error (marshal or publish failure)
 func (dlq *DLQPublisher) PublishProducerError(
 	env *envelope.Envelope,
 	errType string,
@@ -104,9 +112,9 @@ func (dlq *DLQPublisher) PublishProducerError(
 	attempt int,
 	table string,
 	operation string,
-) error {
+) (error, bool) {
 	if !dlq.config.Enabled || dlq.natsConn == nil {
-		return nil // DLQ disabled or no NATS connection
+		return nil, false // DLQ disabled or no NATS connection
 	}
 
 	msg := DLQMessage{
@@ -125,11 +133,12 @@ func (dlq *DLQPublisher) PublishProducerError(
 }
 
 // publish sends a DLQ message to NATS
-func (dlq *DLQPublisher) publish(msg *DLQMessage) error {
+// Returns (error, published) where published is true only on successful publish
+func (dlq *DLQPublisher) publish(msg *DLQMessage) (error, bool) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		dlq.logger.Error("Failed to marshal DLQ message", "error", err)
-		return err
+		return err, false
 	}
 
 	if err := dlq.natsConn.Publish(dlq.config.Subject, data); err != nil {
@@ -138,7 +147,7 @@ func (dlq *DLQPublisher) publish(msg *DLQMessage) error {
 			"error", err,
 			"source", msg.Source,
 			"error_type", msg.ErrorType)
-		return err
+		return err, false
 	}
 
 	dlq.logger.Warn("Message sent to DLQ",
@@ -150,7 +159,7 @@ func (dlq *DLQPublisher) publish(msg *DLQMessage) error {
 		"operation", msg.Operation,
 		"error", msg.ErrorMessage)
 
-	return nil
+	return nil, true
 }
 
 // IsMaxRetriesExhausted checks if retry count has been exceeded

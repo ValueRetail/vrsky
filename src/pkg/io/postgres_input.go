@@ -535,7 +535,7 @@ func (pi *PostgresInput) createEnvelopeFromChange(change CDCChange) *envelope.En
 
 		// Send to DLQ
 		if pi.dlqPublisher != nil {
-			dlqErr := pi.dlqPublisher.PublishConsumerError(
+			dlqErr, _ := pi.dlqPublisher.PublishConsumerError(
 				env,
 				"marshal_error",
 				fmt.Sprintf("Failed to marshal CDC change: %v", err),
