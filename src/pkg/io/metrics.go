@@ -34,8 +34,9 @@ type PostgresProducerMetrics struct {
 	DLQMessagesTotal          prometheus.Counter
 
 	// Histograms
-	BatchWriteLatencyHistogram prometheus.Histogram
-	BatchSizeHistogram         prometheus.Histogram
+	BatchWriteLatencyHistogram      prometheus.Histogram
+	BatchWriteRetryLatencyHistogram prometheus.Histogram
+	BatchSizeHistogram              prometheus.Histogram
 
 	// Gauges
 	PendingBatchSizeGauge     prometheus.Gauge
@@ -143,8 +144,15 @@ func NewPostgresProducerMetrics(reg prometheus.Registerer) *PostgresProducerMetr
 		BatchWriteLatencyHistogram: factory.NewHistogram(
 			prometheus.HistogramOpts{
 				Name:    "postgres_producer_batch_write_latency_seconds",
-				Help:    "Latency of batch write operations to PostgreSQL, in seconds",
-				Buckets: prometheus.DefBuckets,
+				Help:    "Latency of successful batch write operations to PostgreSQL (final successful attempt only), in seconds",
+				Buckets: prometheus.DefBuckets, // 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10
+			},
+		),
+		BatchWriteRetryLatencyHistogram: factory.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "postgres_producer_batch_write_retry_latency_seconds",
+				Help:    "End-to-end latency of batch write operations including retries and exponential backoff, in seconds",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 90}, // Extended for retry durations
 			},
 		),
 		BatchSizeHistogram: factory.NewHistogram(

@@ -566,6 +566,7 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 
 	for attempt := 1; attempt <= po.maxRetries; attempt++ {
 		var err error
+		attemptStartTime := time.Now() // Capture start of individual attempt for accurate write latency
 		if po.batchExecutor != nil {
 			err = po.batchExecutor(batch)
 		} else {
@@ -635,11 +636,18 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 				return
 			}
 		} else {
-			// Success - record latency and return
-			latency := time.Since(startTime).Seconds()
-			po.metrics.BatchWriteLatencyHistogram.Observe(latency)
+			// Success - record both metrics
+			// BatchWriteLatencyHistogram: duration of successful write attempt only
+			attemptLatency := time.Since(attemptStartTime).Seconds()
+			po.metrics.BatchWriteLatencyHistogram.Observe(attemptLatency)
+			
+			// BatchWriteRetryLatencyHistogram: end-to-end duration including all retries and backoff
+			totalLatency := time.Since(startTime).Seconds()
+			po.metrics.BatchWriteRetryLatencyHistogram.Observe(totalLatency)
+			
 			po.logger.Debug("Batch written successfully with retries",
-				"latency_seconds", latency,
+				"write_latency_seconds", attemptLatency,
+				"total_retry_latency_seconds", totalLatency,
 				"batch_size", len(batch),
 				"attempts", attempt)
 			po.metrics.BatchesWrittenTotal.Inc()
