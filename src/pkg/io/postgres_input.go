@@ -148,8 +148,7 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 
 	// Batch configuration with validation
 	batchSizeStr := os.Getenv("POSTGRES_INPUT_BATCH_SIZE")
-	batchSize, _ := parsePositiveInt(logger, "POSTGRES_INPUT_BATCH_SIZE", batchSizeStr, pi.batchSize)
-	pi.batchSize = batchSize
+	pi.batchSize = parsePositiveInt(logger, "POSTGRES_INPUT_BATCH_SIZE", batchSizeStr, pi.batchSize)
 
 	// Batch timeout configuration with validation
 	batchTimeoutStr := os.Getenv("POSTGRES_INPUT_BATCH_TIMEOUT_MS")
@@ -182,8 +181,7 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 
 	// Max retries configuration with validation
 	maxRetriesStr := os.Getenv("POSTGRES_INPUT_MAX_RETRIES")
-	maxRetries, _ := parsePositiveInt(logger, "POSTGRES_INPUT_MAX_RETRIES", maxRetriesStr, pi.maxRetries)
-	pi.maxRetries = maxRetries
+	pi.maxRetries = parsePositiveInt(logger, "POSTGRES_INPUT_MAX_RETRIES", maxRetriesStr, pi.maxRetries)
 
 	// DLQ configuration from environment
 	dlqConfig := DefaultDLQConfig()
@@ -197,8 +195,7 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 
 	// DLQ max retries with validation
 	dlqMaxRetriesStr := os.Getenv("POSTGRES_INPUT_DLQ_MAX_RETRIES")
-	dlqMaxRetries, _ := parsePositiveInt(logger, "POSTGRES_INPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
-	dlqConfig.MaxRetries = dlqMaxRetries
+	dlqConfig.MaxRetries = parsePositiveInt(logger, "POSTGRES_INPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
 
 	// DLQ publisher will be created after NATS connection in Start()
 	// For now, just store the config

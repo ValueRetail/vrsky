@@ -93,11 +93,13 @@ type CDCWriteOperation struct {
 	TransactionID uint32               `json:"transaction_id"`
 }
 
-// parsePositiveInt parses a positive integer from string, logging warnings on invalid/default values
-// Returns the parsed value if valid, or defaultValue if invalid/empty with appropriate logging
-func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue int) (int, error) {
+// parsePositiveInt parses a positive integer from an environment variable.
+// Invalid or empty values are logged as warnings and the default value is returned.
+// This function never returns an error - invalid configuration is not fatal but logged,
+// allowing the application to start with safe defaults.
+func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue int) int {
 	if value == "" {
-		return defaultValue, nil
+		return defaultValue
 	}
 
 	parsed, err := strconv.Atoi(value)
@@ -107,7 +109,7 @@ func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue in
 			"provided_value", value,
 			"error", err,
 			"default_value", defaultValue)
-		return defaultValue, nil
+		return defaultValue
 	}
 
 	if parsed <= 0 {
@@ -115,10 +117,10 @@ func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue in
 			"env_var", envVar,
 			"provided_value", parsed,
 			"default_value", defaultValue)
-		return defaultValue, nil
+		return defaultValue
 	}
 
-	return parsed, nil
+	return parsed
 }
 
 // parseDurationMs parses a positive duration in milliseconds from string
@@ -245,8 +247,7 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 
 	// Batch configuration with validation
 	batchSizeStr := os.Getenv("POSTGRES_OUTPUT_BATCH_SIZE")
-	batchSize, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_BATCH_SIZE", batchSizeStr, po.batchSize)
-	po.batchSize = batchSize
+	po.batchSize = parsePositiveInt(logger, "POSTGRES_OUTPUT_BATCH_SIZE", batchSizeStr, po.batchSize)
 
 	// Batch timeout configuration with validation
 	batchTimeoutStr := os.Getenv("POSTGRES_OUTPUT_BATCH_TIMEOUT_MS")
@@ -277,8 +278,7 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 
 	// Max retries configuration with validation
 	maxRetriesStr := os.Getenv("POSTGRES_OUTPUT_MAX_RETRIES")
-	maxRetries, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_MAX_RETRIES", maxRetriesStr, po.maxRetries)
-	po.maxRetries = maxRetries
+	po.maxRetries = parsePositiveInt(logger, "POSTGRES_OUTPUT_MAX_RETRIES", maxRetriesStr, po.maxRetries)
 
 	// DLQ configuration from environment
 	dlqConfig := DefaultDLQConfig()
@@ -292,8 +292,7 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 
 	// DLQ max retries with validation
 	dlqMaxRetriesStr := os.Getenv("POSTGRES_OUTPUT_DLQ_MAX_RETRIES")
-	dlqMaxRetries, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
-	dlqConfig.MaxRetries = dlqMaxRetries
+	dlqConfig.MaxRetries = parsePositiveInt(logger, "POSTGRES_OUTPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
 
 	// DLQ publisher will be created after NATS connection in Start()
 	// For now, just store the config
