@@ -906,8 +906,8 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 	}
 
 	// Test that exponential backoff is actually used during retry logic
-	testSleeper := &testSleeper{}
-	po.setSleeper(testSleeper)
+	sleeper := &testSleeper{}
+	po.setSleeper(sleeper)
 
 	// Mock batch executor that fails all attempts
 	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
@@ -919,12 +919,12 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 	po.executeBatchWithRetry(batch, time.Now())
 
 	// Verify sleeper was called (maxRetries - 1) times (no sleep after final failure)
-	if len(testSleeper.sleepDurations) != po.maxRetries-1 {
-		t.Errorf("sleeper called %d times, want %d", len(testSleeper.sleepDurations), po.maxRetries-1)
+	if len(sleeper.sleepDurations) != po.maxRetries-1 {
+		t.Errorf("sleeper called %d times, want %d", len(sleeper.sleepDurations), po.maxRetries-1)
 	}
 
 	// Verify backoff durations are bounded
-	for i, duration := range testSleeper.sleepDurations {
+	for i, duration := range sleeper.sleepDurations {
 		if duration > po.backoffConfig.MaxDuration {
 			t.Errorf("sleep duration[%d] = %v, exceeds max %v", i, duration, po.backoffConfig.MaxDuration)
 		}
