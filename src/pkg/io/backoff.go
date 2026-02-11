@@ -3,13 +3,18 @@ package io
 import (
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
 // rng is a per-package random number generator seeded at init time
-// Using a separate RNG avoids contention on the global rand source and
-// ensures different sequences across restarts
-var rng *rand.Rand
+// Using a separate RNG avoids the use of global state and
+// ensures different sequences across restarts.
+// Access is protected by rngMu to prevent data races from concurrent calls.
+var (
+	rng   *rand.Rand
+	rngMu sync.Mutex // Protects rng.Float64() calls for thread-safe concurrent access
+)
 
 func init() {
 	// Seed the RNG with current time for non-deterministic jitter
@@ -58,10 +63,14 @@ func CalculateBackoff(attempt int, config BackoffConfig) time.Duration {
 	}
 
 	// Add jitter: ±JitterPercentage around baseBackoff
-	// Use per-package RNG to avoid contention and ensure non-deterministic behavior
+	// Use per-package RNG with mutex protection for thread-safe concurrent access
 	jitterFraction := config.JitterPercentage / 100.0
 	maxJitter := baseBackoff * jitterFraction
+	
+	rngMu.Lock()
 	jitter := (rng.Float64()*2 - 1) * maxJitter // Random in [-maxJitter, +maxJitter]
+	rngMu.Unlock()
+	
 	finalBackoff := baseBackoff + jitter
 
 	// Ensure we don't go negative

@@ -1,6 +1,7 @@
 package io
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -182,3 +183,68 @@ func TestDefaultBackoffConfig(t *testing.T) {
 		t.Errorf("JitterPercentage = %v, want 10", config.JitterPercentage)
 	}
 }
+
+// TestCalculateBackoff_ConcurrentAccess tests thread-safety with concurrent goroutines
+func TestCalculateBackoff_ConcurrentAccess(t *testing.T) {
+	config := BackoffConfig{
+		InitialDuration:  100 * time.Millisecond,
+		MaxDuration:      10 * time.Second,
+		Multiplier:       1.5,
+		JitterPercentage: 10,
+	}
+
+	// Run CalculateBackoff from multiple goroutines simultaneously
+	numGoroutines := 100
+	numCallsPerGoroutine := 100
+	var wg sync.WaitGroup
+	results := make([]time.Duration, numGoroutines*numCallsPerGoroutine)
+	resultsMu := sync.Mutex{}
+	resultIdx := 0
+
+	for g := 0; g < numGoroutines; g++ {
+		wg.Add(1)
+		go func(goroutineID int) {
+			defer wg.Done()
+			for call := 1; call <= numCallsPerGoroutine; call++ {
+				backoff := CalculateBackoff(call%3+1, config) // Vary attempt number
+
+				// Store result thread-safely
+				resultsMu.Lock()
+				results[resultIdx] = backoff
+				resultIdx++
+				resultsMu.Unlock()
+
+				// Verify result is valid
+				if backoff < 0 {
+					t.Errorf("goroutine %d call %d: negative backoff %v", goroutineID, call, backoff)
+				}
+				if backoff > config.MaxDuration {
+					t.Errorf("goroutine %d call %d: backoff %v exceeds max %v", goroutineID, call, backoff, config.MaxDuration)
+				}
+			}
+		}(g)
+	}
+
+	wg.Wait()
+
+	// Verify we got all results
+	if resultIdx != numGoroutines*numCallsPerGoroutine {
+		t.Errorf("collected %d results, want %d", resultIdx, numGoroutines*numCallsPerGoroutine)
+	}
+
+	// Verify we got variety in results (due to jitter)
+	hasDifference := false
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			hasDifference = true
+			break
+		}
+	}
+
+	if !hasDifference {
+		t.Logf("Warning: All concurrent results identical (unlikely but possible)")
+	}
+
+	t.Logf("Successfully ran %d concurrent calls to CalculateBackoff", numGoroutines*numCallsPerGoroutine)
+}
+
