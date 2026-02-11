@@ -54,8 +54,8 @@ type PostgresInput struct {
 	batchTimer         *time.Timer
 
 	// CDC polling
-	lastPollTime       time.Time // Track when we last checked for changes
-	seenRows           map[int64]bool // Track row IDs we've seen to detect changes
+	lastPollTime       time.Time              // Track when we last checked for changes
+	seenRows           map[string]map[int64]bool // Track row IDs we've seen to detect changes (keyed by table name)
 
 	// Observability
 	metricsRegistry    prometheus.Registerer
@@ -95,7 +95,7 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 		tableFilters:     make(map[string]bool),
 		batchSize:        100,
 		batchTimeout:     5 * time.Second,
-		seenRows:         make(map[int64]bool),
+		seenRows:         make(map[string]map[int64]bool),
 		lastPollTime:     time.Now(),
 		backoffConfig:    DefaultBackoffConfig(),
 		maxRetries:       3,
@@ -508,7 +508,10 @@ func (pi *PostgresInput) pollTableChanges() ([]CDCChange, error) {
 			continue
 		}
 
-		changes = append(changes, tableChanges...)
+		if len(tableChanges) > 0 {
+			pi.logger.Info("Detected changes in table", "table", tableName, "change_count", len(tableChanges))
+			changes = append(changes, tableChanges...)
+		}
 	}
 
 	pi.lastPollTime = time.Now()
@@ -518,6 +521,11 @@ func (pi *PostgresInput) pollTableChanges() ([]CDCChange, error) {
 // detectTableChanges detects changes in a specific table
 func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, error) {
 	var changes []CDCChange
+
+	// Initialize table-specific seen rows map if it doesn't exist
+	if _, exists := pi.seenRows[tableName]; !exists {
+		pi.seenRows[tableName] = make(map[int64]bool)
+	}
 
 	// Query for all rows in the table
 	query := fmt.Sprintf(
@@ -542,8 +550,9 @@ func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, erro
 
 		currentRowIDs[id] = true
 
-		// If we haven't seen this row before, it's an INSERT
-		if !pi.seenRows[id] {
+		// If we haven't seen this row before in this table, it's an INSERT
+		if !pi.seenRows[tableName][id] {
+			pi.logger.Info("Detected new row for INSERT", "table", tableName, "id", id)
 			// Fetch the full row data
 			fullRow, err := pi.fetchRowData(tableName, id)
 			if err != nil {
@@ -561,13 +570,14 @@ func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, erro
 				LSN:         uint64(id),               // Placeholder
 			}
 			changes = append(changes, change)
-			pi.seenRows[id] = true
+			pi.seenRows[tableName][id] = true
 		}
 	}
 
 	// Detect DELETEs: rows we saw before but don't see now
-	for seenID := range pi.seenRows {
+	for seenID := range pi.seenRows[tableName] {
 		if !currentRowIDs[seenID] {
+			pi.logger.Info("Detected row deletion", "table", tableName, "id", seenID)
 			change := CDCChange{
 				Operation:   "DELETE",
 				Table:       tableName,
@@ -578,7 +588,7 @@ func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, erro
 				LSN:         uint64(seenID),
 			}
 			changes = append(changes, change)
-			delete(pi.seenRows, seenID)
+			delete(pi.seenRows[tableName], seenID)
 		}
 	}
 
@@ -668,10 +678,19 @@ func (pi *PostgresInput) createEnvelopeFromChange(change CDCChange) *envelope.En
 		"lsn":            change.LSN,
 	}
 
-	// Marshal change to payload
-	data, err := json.Marshal(change)
+	// Create payload with structure expected by Producer
+	// Only include operation, before, and after (matching executeInsert/Update/Delete expectations)
+	payload := map[string]interface{}{
+		"operation":   change.Operation,
+		"before":      change.Before,
+		"after":       change.After,
+		"primary_key": map[string]interface{}{"id": change.After["id"]}, // Always use 'id' as primary key
+	}
+
+	// Marshal payload to JSON
+	data, err := json.Marshal(payload)
 	if err != nil {
-		pi.logger.Error("Failed to marshal CDC change", "error", err, "table", change.Table)
+		pi.logger.Error("Failed to marshal CDC change payload", "error", err, "table", change.Table)
 		pi.metrics.ParseErrorsTotal.Inc()
 
 		// Send to DLQ
