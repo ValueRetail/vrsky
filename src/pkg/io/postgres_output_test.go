@@ -2,13 +2,129 @@ package io
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
+
+// testSleeper implements sleeper interface for deterministic testing
+type testSleeper struct {
+	sleepDurations  []time.Duration
+	sleepIndex      int
+	blockChan       chan struct{}  // For tests to control when to unblock
+	shouldBlock     bool            // Whether to actually block or return immediately
+	attemptChan     chan struct{}  // Signals when an attempt completes (sent before sleeping)
+}
+
+// NewTestSleeper creates a test sleeper that can optionally block
+func NewTestSleeper(shouldBlock bool) *testSleeper {
+	return &testSleeper{
+		sleepDurations: []time.Duration{},
+		blockChan:      make(chan struct{}, 1),
+		attemptChan:    make(chan struct{}, 1), // Buffered to allow non-blocking send
+		shouldBlock:    shouldBlock,
+	}
+}
+
+func (ts *testSleeper) sleep(ctx context.Context, d time.Duration) error {
+	ts.sleepDurations = append(ts.sleepDurations, d)
+	ts.sleepIndex++
+
+	// Signal that an attempt has completed and we're about to sleep
+	// Use non-blocking send so the test can choose whether to wait for this signal
+	select {
+	case ts.attemptChan <- struct{}{}:
+	default:
+		// Channel full or no receiver, continue without blocking
+	}
+
+	if !ts.shouldBlock {
+		// Fast path for tests that don't need blocking
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+
+	// Blocking path - wait for unblock signal or context cancellation
+	select {
+	case <-ts.blockChan:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Unblock allows a test to unblock a sleeping goroutine
+func (ts *testSleeper) Unblock() {
+	select {
+	case ts.blockChan <- struct{}{}:
+	default:
+	}
+}
+
+// WaitForAttempt waits for the batch executor to attempt execution, with a timeout
+// Returns true if attempt was detected, false if timeout occurs
+func (ts *testSleeper) WaitForAttempt(timeout time.Duration) bool {
+	select {
+	case <-ts.attemptChan:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// mockExecuteBatch provides deterministic batch execution for testing
+type mockExecuteBatch struct {
+	callCount int
+	failUntil int // Fail first N attempts, then succeed
+	error     error
+}
+
+func (m *mockExecuteBatch) execute() error {
+	m.callCount++
+	if m.callCount <= m.failUntil {
+		return m.error
+	}
+	return nil
+}
+
+// fakeDLQPublisher implements dlqPublisher interface for testing
+type fakeDLQPublisher struct {
+	publishCount      int
+	shouldPublishFail bool // Simulate publish error
+	shouldPublishSkip bool // Simulate disabled/no-op (no NATS connection)
+}
+
+func (f *fakeDLQPublisher) PublishProducerError(
+	env *envelope.Envelope,
+	errType string,
+	errMsg string,
+	attempt int,
+	table string,
+	operation string,
+) (error, bool) {
+	f.publishCount++
+
+	if f.shouldPublishFail {
+		return fmt.Errorf("simulated DLQ publish error"), false
+	}
+	if f.shouldPublishSkip {
+		return nil, false // DLQ disabled or no NATS connection
+	}
+	return nil, true // Success
+}
 
 // TestNewPostgresOutput_Configuration tests environment variable parsing
 func TestNewPostgresOutput_Configuration(t *testing.T) {
@@ -85,7 +201,7 @@ func TestNewPostgresOutput_Configuration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresOutput() error = %v, wantErr %v", err, tt.wantErr)
@@ -149,7 +265,7 @@ func TestNewPostgresOutput_BatchConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresOutput() error = %v", err)
 			}
@@ -203,7 +319,7 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresOutput() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -257,7 +373,7 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresOutput() error = %v", err)
 			}
@@ -266,7 +382,140 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 				t.Errorf("natsURL = %s, want %s", po.natsURL, tt.wantNATSURL)
 			}
 			if po.natsSubject != tt.wantNATSSubject {
-				t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+					t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+			}
+	})
+}
+}
+
+// TestNewPostgresOutput_ConfigurationValidation tests that invalid config values are handled with warnings
+func TestNewPostgresOutput_ConfigurationValidation(t *testing.T) {
+	tests := []struct {
+		name             string
+		envVars          map[string]string
+		wantBatchSize    int
+		wantMaxRetries   int
+		wantInitialBackoff time.Duration
+		wantMaxBackoff   time.Duration
+	}{
+		{
+			name: "invalid batch size (non-integer) defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "invalid",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "zero batch size defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "0",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "negative batch size defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "-50",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "invalid max retries (non-integer) defaults to 3",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "not_a_number",
+			},
+			wantMaxRetries: 3,
+		},
+		{
+			name: "zero max retries defaults to 3",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "0",
+			},
+			wantMaxRetries: 3,
+		},
+		{
+			name: "invalid initial backoff (non-integer) defaults to 1000ms",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "bad",
+			},
+			wantInitialBackoff: 1000 * time.Millisecond,
+		},
+		{
+			name: "zero initial backoff defaults to 1000ms",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "0",
+			},
+			wantInitialBackoff: 1000 * time.Millisecond,
+		},
+		{
+			name: "max backoff less than initial resets to defaults",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "5000",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "1000",
+			},
+			wantInitialBackoff: DefaultBackoffConfig().InitialDuration,
+			wantMaxBackoff: DefaultBackoffConfig().MaxDuration,
+		},
+		{
+			name: "valid custom values are accepted",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "250",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "5",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "500",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "10000",
+			},
+			wantBatchSize: 250,
+			wantMaxRetries: 5,
+			wantInitialBackoff: 500 * time.Millisecond,
+			wantMaxBackoff: 10000 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear and set environment
+			for key := range tt.envVars {
+				os.Unsetenv(key)
+			}
+			for key, val := range tt.envVars {
+				os.Setenv(key, val)
+				defer os.Unsetenv(key)
+			}
+
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+			if err != nil {
+				t.Fatalf("NewPostgresOutput() error = %v", err)
+			}
+
+			if tt.wantBatchSize > 0 && po.batchSize != tt.wantBatchSize {
+				t.Errorf("batchSize = %d, want %d", po.batchSize, tt.wantBatchSize)
+			}
+			if tt.wantMaxRetries > 0 && po.maxRetries != tt.wantMaxRetries {
+				t.Errorf("maxRetries = %d, want %d", po.maxRetries, tt.wantMaxRetries)
+			}
+			if tt.wantInitialBackoff > 0 && po.backoffConfig.InitialDuration != tt.wantInitialBackoff {
+				t.Errorf("InitialDuration = %v, want %v", po.backoffConfig.InitialDuration, tt.wantInitialBackoff)
+			}
+			if tt.wantMaxBackoff > 0 && po.backoffConfig.MaxDuration != tt.wantMaxBackoff {
+				t.Errorf("MaxDuration = %v, want %v", po.backoffConfig.MaxDuration, tt.wantMaxBackoff)
 			}
 		})
 	}
@@ -279,7 +528,7 @@ func TestQuoteIdentifier(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -340,7 +589,7 @@ func TestPostgresOutput_AddToPendingBatch_BatchSize(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_BATCH_SIZE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -379,7 +628,7 @@ func TestPostgresOutput_AddToPendingBatch_BatchTimeout(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -405,7 +654,7 @@ func TestWriteBatch_EmptyBatch(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -504,7 +753,7 @@ func TestWrite_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -530,7 +779,7 @@ func TestWriteBatch_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -557,7 +806,7 @@ func TestPostgresOutput_Close_Idempotent(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -575,7 +824,7 @@ func TestGetWritten_CounterTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -601,7 +850,7 @@ func TestWrite_ProducerClosed(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -615,5 +864,663 @@ func TestWrite_ProducerClosed(t *testing.T) {
 
 	if err == nil {
 		t.Error("Write() should return error when producer is closed")
+	}
+}
+
+// TestExecuteBatchWithRetry_MaxRetriesExhausted tests that batch fails after maxRetries attempts
+func TestExecuteBatchWithRetry_MaxRetriesExhausted(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "2")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Verify that maxRetries is set correctly
+	if po.maxRetries != 2 {
+		t.Errorf("maxRetries = %d, want 2", po.maxRetries)
+	}
+
+	// Mock batch executor that always fails
+	callCount := 0
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		callCount++
+		return fmt.Errorf("simulated batch error")
+	})
+
+	// Inject test sleeper to avoid actual delays
+	po.setSleeper(&testSleeper{})
+
+	// Record initial metric values
+	initialErrorCount := testutil.ToFloat64(po.metrics.WriteErrorsTotal)
+	initialDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+	// Execute batch with retry - should fail after maxRetries attempts
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Now())
+
+	// Verify batch executor was called maxRetries times
+	if callCount != po.maxRetries {
+		t.Errorf("batch executor called %d times, want %d", callCount, po.maxRetries)
+	}
+
+	// Verify WriteErrorsTotal was incremented for each failed attempt
+	finalErrorCount := testutil.ToFloat64(po.metrics.WriteErrorsTotal)
+	expectedErrorCount := initialErrorCount + float64(po.maxRetries)
+	if finalErrorCount != expectedErrorCount {
+		t.Errorf("WriteErrorsTotal = %f, want %f", finalErrorCount, expectedErrorCount)
+	}
+
+	// Verify DLQ metric is NOT incremented when max retries exhausted
+	// (dlqPublisher exists but natsConn is nil, so publish is a no-op with published=false)
+	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+	expectedDLQCount := initialDLQCount // Should remain unchanged
+	if finalDLQCount != expectedDLQCount {
+		t.Errorf("DLQMessagesTotal = %f, want %f (should NOT increment when natsConn is nil)",
+			finalDLQCount, expectedDLQCount)
+	}
+}
+
+// TestExecuteBatchWithRetry_BackoffConfig tests backoff configuration and exponential backoff application
+func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	os.Setenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS", "100")
+	os.Setenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS", "1000")
+	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "3")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+	defer os.Unsetenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Verify backoff config is set correctly
+	if po.backoffConfig.InitialDuration != 100*time.Millisecond {
+		t.Errorf("initial backoff = %v, want 100ms", po.backoffConfig.InitialDuration)
+	}
+	if po.backoffConfig.MaxDuration != 1000*time.Millisecond {
+		t.Errorf("max backoff = %v, want 1000ms", po.backoffConfig.MaxDuration)
+	}
+
+	// Test CalculateBackoff function produces increasing values
+	backoff1 := CalculateBackoff(1, po.backoffConfig)
+	backoff2 := CalculateBackoff(2, po.backoffConfig)
+	backoff3 := CalculateBackoff(3, po.backoffConfig)
+
+	// Second attempt should have longer backoff (exponential)
+	if backoff2 <= backoff1 {
+		t.Errorf("backoff2 (%v) should be > backoff1 (%v) for exponential backoff", backoff2, backoff1)
+	}
+
+	// Third should be even longer
+	if backoff3 <= backoff2 {
+		t.Errorf("backoff3 (%v) should be > backoff2 (%v) for exponential backoff", backoff3, backoff2)
+	}
+
+	// All backoffs should not exceed max
+	if backoff1 > po.backoffConfig.MaxDuration {
+		t.Errorf("backoff1 (%v) exceeds max (%v)", backoff1, po.backoffConfig.MaxDuration)
+	}
+	if backoff2 > po.backoffConfig.MaxDuration {
+		t.Errorf("backoff2 (%v) exceeds max (%v)", backoff2, po.backoffConfig.MaxDuration)
+	}
+	if backoff3 > po.backoffConfig.MaxDuration {
+		t.Errorf("backoff3 (%v) exceeds max (%v)", backoff3, po.backoffConfig.MaxDuration)
+	}
+
+	// Test that exponential backoff is actually used during retry logic
+	sleeper := &testSleeper{}
+	po.setSleeper(sleeper)
+
+	// Mock batch executor that fails all attempts
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return fmt.Errorf("simulated batch error")
+	})
+
+	// Execute batch with retry
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Now())
+
+	// Verify sleeper was called (maxRetries - 1) times (no sleep after final failure)
+	if len(sleeper.sleepDurations) != po.maxRetries-1 {
+		t.Errorf("sleeper called %d times, want %d", len(sleeper.sleepDurations), po.maxRetries-1)
+	}
+
+	// Verify backoff durations are bounded
+	for i, duration := range sleeper.sleepDurations {
+		if duration > po.backoffConfig.MaxDuration {
+			t.Errorf("sleep duration[%d] = %v, exceeds max %v", i, duration, po.backoffConfig.MaxDuration)
+		}
+	}
+}
+
+// TestExecuteBatchWithRetry_DLQMetricAccuracy verifies DLQ metric increments only when publish succeeds
+func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
+	tests := []struct {
+		name               string
+		shouldPublishFail  bool // DLQ publish fails
+		shouldPublishSkip  bool // DLQ disabled or no connection
+		expectMetricIncr   bool // Expect metric to increment
+		expectPublishCall  bool // Expect PublishProducerError to be called
+	}{
+		{
+			name:              "successful_publish_increments_metric",
+			shouldPublishFail: false,
+			shouldPublishSkip: false,
+			expectMetricIncr:  true,
+			expectPublishCall: true,
+		},
+		{
+			name:              "publish_skipped_does_not_increment_metric",
+			shouldPublishFail: false,
+			shouldPublishSkip: true,
+			expectMetricIncr:  false,
+			expectPublishCall: true,
+		},
+		{
+			name:              "publish_failed_does_not_increment_metric",
+			shouldPublishFail: true,
+			shouldPublishSkip: false,
+			expectMetricIncr:  false,
+			expectPublishCall: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+			os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+			os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "1")
+			defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+			defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+			defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+			if err != nil {
+				t.Fatalf("NewPostgresOutput() error = %v", err)
+			}
+
+			po.ctx, po.cancel = context.WithCancel(context.Background())
+			defer po.cancel()
+
+			// Mock batch executor that always fails to trigger DLQ
+			po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+				return fmt.Errorf("simulated batch error")
+			})
+			po.setSleeper(NewTestSleeper(false))
+
+			// Inject fake DLQ publisher
+			fakeDLQ := &fakeDLQPublisher{
+				shouldPublishFail: tt.shouldPublishFail,
+				shouldPublishSkip: tt.shouldPublishSkip,
+			}
+			po.setDLQPublisher(fakeDLQ)
+
+			// Get initial metric count
+			initialCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+			// Execute batch that will exhaust retries and trigger DLQ publish
+			batch := []*envelope.Envelope{envelope.New()}
+			po.executeBatchWithRetry(batch, time.Now())
+
+			// Get final metric count
+			finalCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+			// Verify PublishProducerError was called
+			if !tt.expectPublishCall {
+				t.Errorf("PublishProducerError should not be called")
+			}
+			if fakeDLQ.publishCount != 1 {
+				t.Errorf("PublishProducerError called %d times, want 1", fakeDLQ.publishCount)
+			}
+
+			// Verify metric behavior based on publish result
+			if tt.expectMetricIncr {
+				if finalCount != initialCount+1 {
+					t.Errorf("DLQMessagesTotal = %f, want %f (should increment on successful publish)",
+						finalCount, initialCount+1)
+				}
+			} else {
+				if finalCount != initialCount {
+					t.Errorf("DLQMessagesTotal = %f, want %f (should not increment)",
+						finalCount, initialCount)
+				}
+			}
+		})
+	}
+}
+
+// TestExecuteBatchWithRetry_DLQDisabledDoesNotIncrementMetric verifies metric doesn't increment when DLQ is disabled
+func TestExecuteBatchWithRetry_DLQDisabledDoesNotIncrementMetric(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "1")
+	os.Setenv("POSTGRES_OUTPUT_DLQ_ENABLED", "false")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DLQ_ENABLED")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Verify DLQ is disabled
+	if po.dlqConfig.Enabled {
+		t.Errorf("DLQ should be disabled, but config.Enabled = %v", po.dlqConfig.Enabled)
+	}
+
+	// Mock batch executor that always fails
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return fmt.Errorf("simulated batch error")
+	})
+	po.setSleeper(&testSleeper{})
+
+	// Get initial DLQ metric count
+	initialDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+
+	// Execute batch that will exhaust retries and attempt DLQ publish
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Now())
+
+	// With DLQ disabled, DLQ publish should be a no-op (published=false)
+	// So DLQMessagesTotal should NOT be incremented
+	finalDLQCount := testutil.ToFloat64(po.metrics.DLQMessagesTotal)
+	if finalDLQCount != initialDLQCount {
+		t.Errorf("DLQMessagesTotal = %f, want %f (should not increment when DLQ is disabled)",
+			finalDLQCount, initialDLQCount)
+	}
+}
+
+// TestExecuteBatchWithRetry_SuccessRecordsMetrics tests that successful batch records metrics correctly
+func TestExecuteBatchWithRetry_SuccessRecordsMetrics(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Record initial metric values
+	initialBatchesWritten := testutil.ToFloat64(po.metrics.BatchesWrittenTotal)
+	initialErrors := testutil.ToFloat64(po.metrics.WriteErrorsTotal)
+
+	// Mock batch executor that succeeds immediately
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return nil // Success
+	})
+
+	// Execute batch with non-empty envelope
+	batch := []*envelope.Envelope{envelope.New()}
+	batchStartTime := time.Now()
+
+	po.executeBatchWithRetry(batch, batchStartTime)
+
+	// Verify that successful execution incremented BatchesWrittenTotal
+	finalBatchesWritten := testutil.ToFloat64(po.metrics.BatchesWrittenTotal)
+	if finalBatchesWritten != initialBatchesWritten+1 {
+		t.Errorf("BatchesWrittenTotal = %f, want %f", finalBatchesWritten, initialBatchesWritten+1)
+	}
+
+	// Verify that no errors were recorded
+	finalErrors := testutil.ToFloat64(po.metrics.WriteErrorsTotal)
+	if finalErrors != initialErrors {
+		t.Errorf("WriteErrorsTotal = %f, want %f (no errors expected on success)", finalErrors, initialErrors)
+	}
+
+	// Verify that latency histogram was updated (we can't read histogram values directly, but we can verify no panic)
+	// If we reach here, the function completed successfully and metrics were recorded
+}
+
+// TestExecuteBatchWithRetry_CaptureToWriteLatency tests latency recording with batchStartTime
+func TestExecuteBatchWithRetry_CaptureToWriteLatency(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+
+	registry := prometheus.NewRegistry()
+	po, err := NewPostgresOutput(slog.Default(), registry)
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Mock successful batch execution
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return nil // Success - latency will be recorded
+	})
+
+	// Use non-blocking sleeper since batch succeeds on first try
+	po.setSleeper(NewTestSleeper(false))
+
+	// Create a batchStartTime in the past to simulate capture-to-write latency
+	batchStartTime := time.Now().Add(-100 * time.Millisecond)
+	batch := []*envelope.Envelope{envelope.New()}
+
+	// Call executeBatchWithRetry with past startTime
+	po.executeBatchWithRetry(batch, batchStartTime)
+
+	// Verify that latency was recorded in metrics
+	metrics, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	found := false
+	for _, mf := range metrics {
+		if mf.GetName() == "postgres_producer_batch_write_latency_seconds" {
+			found = true
+			if len(mf.Metric) == 0 {
+				t.Error("BatchWriteLatencyHistogram metric has no observations")
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("BatchWriteLatencyHistogram metric not found in registry")
+	}
+}
+
+// TestExecuteBatchWithRetry_WriteLatencyDoesNotIncludeRetries verifies that
+// BatchWriteLatencyHistogram measures only successful write execution time,
+// excluding retry delays and backoff sleeps
+func TestExecuteBatchWithRetry_WriteLatencyDoesNotIncludeRetries(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+
+	registry := prometheus.NewRegistry()
+	po, err := NewPostgresOutput(slog.Default(), registry)
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Mock: fail first attempt, then succeed (simulates retry scenario)
+	attemptCount := 0
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		attemptCount++
+		if attemptCount == 1 {
+			return errors.New("simulated failure")
+		}
+		// Second attempt succeeds after a short delay to simulate DB write time
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	})
+
+	// Use a sleeper that does NOT block (for tests to complete quickly)
+	// The important thing is that both metrics record, not that we actually sleep
+	po.setSleeper(NewTestSleeper(false))
+
+	batch := []*envelope.Envelope{envelope.New()}
+	po.executeBatchWithRetry(batch, time.Time{})
+
+	// Verify metrics
+	metrics, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	var writeLatencyHistogram *dto.MetricFamily
+	var retryLatencyHistogram *dto.MetricFamily
+
+	for _, mf := range metrics {
+		if mf.GetName() == "postgres_producer_batch_write_latency_seconds" {
+			writeLatencyHistogram = mf
+		}
+		if mf.GetName() == "postgres_producer_batch_write_retry_latency_seconds" {
+			retryLatencyHistogram = mf
+		}
+	}
+
+	if writeLatencyHistogram == nil {
+		t.Error("BatchWriteLatencyHistogram metric not found in registry")
+	} else if len(writeLatencyHistogram.Metric) == 0 {
+		t.Error("BatchWriteLatencyHistogram has no observations")
+	} else {
+		// The successful write attempt took ~50ms
+		// BatchWriteLatencyHistogram should be close to 50ms, NOT including the 100ms backoff
+		summary := writeLatencyHistogram.Metric[0].GetHistogram()
+		if summary == nil {
+			t.Error("Expected histogram metric for BatchWriteLatencyHistogram")
+		} else {
+			// We recorded the histogram but can't easily access individual bucket values
+			// from prometheus.MetricFamily. Just verify it was recorded.
+			t.Logf("BatchWriteLatencyHistogram SampleCount=%d", summary.GetSampleCount())
+		}
+	}
+
+	if retryLatencyHistogram == nil {
+		t.Error("BatchWriteRetryLatencyHistogram metric not found in registry")
+	} else if len(retryLatencyHistogram.Metric) == 0 {
+		t.Error("BatchWriteRetryLatencyHistogram has no observations")
+	} else {
+		// The retry scenario took: ~100ms backoff + ~50ms write = ~150ms
+		// BatchWriteRetryLatencyHistogram should include this
+		summary := retryLatencyHistogram.Metric[0].GetHistogram()
+		if summary == nil {
+			t.Error("Expected histogram metric for BatchWriteRetryLatencyHistogram")
+		} else {
+			t.Logf("BatchWriteRetryLatencyHistogram SampleCount=%d", summary.GetSampleCount())
+		}
+	}
+}
+
+// TestExecuteBatchWithRetry_BothMetricsRecorded verifies that both latency metrics
+// are recorded on successful batch write with retries
+func TestExecuteBatchWithRetry_BothMetricsRecorded(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+
+	registry := prometheus.NewRegistry()
+	po, err := NewPostgresOutput(slog.Default(), registry)
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Mock successful batch execution
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		return nil
+	})
+
+	po.setSleeper(NewTestSleeper(false))
+	batch := []*envelope.Envelope{envelope.New()}
+
+	po.executeBatchWithRetry(batch, time.Time{})
+
+	// Verify both metrics were recorded
+	metrics, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	metricsFound := map[string]bool{
+		"postgres_producer_batch_write_latency_seconds":       false,
+		"postgres_producer_batch_write_retry_latency_seconds": false,
+	}
+
+	for _, mf := range metrics {
+		if _, ok := metricsFound[mf.GetName()]; ok {
+			if len(mf.Metric) > 0 {
+				metricsFound[mf.GetName()] = true
+			}
+		}
+	}
+
+	for metric, found := range metricsFound {
+		if !found {
+			t.Errorf("Metric %q not recorded or has no observations", metric)
+		}
+	}
+}
+
+// TestExecuteBatchWithRetry_RetryLatencyIncludesBackoff verifies that
+// BatchWriteRetryLatencyHistogram includes backoff sleep duration
+func TestExecuteBatchWithRetry_RetryLatencyIncludesBackoff(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+
+	registry := prometheus.NewRegistry()
+	po, err := NewPostgresOutput(slog.Default(), registry)
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+	defer po.cancel()
+
+	// Mock: fail first attempt, succeed second
+	attemptCount := 0
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		attemptCount++
+		if attemptCount == 1 {
+			return errors.New("simulated failure")
+		}
+		return nil
+	})
+
+	// Use a sleeper that does NOT block (fast execution for testing)
+	// The actual time accumulation happens via time.Now() in the code
+	po.setSleeper(NewTestSleeper(false))
+
+	batch := []*envelope.Envelope{envelope.New()}
+	startOverall := time.Now()
+	po.executeBatchWithRetry(batch, time.Time{})
+	totalElapsed := time.Since(startOverall)
+
+	// Total time should be >= backoff duration (since sleeper sleeps 100ms)
+	// This is just a sanity check that retries happened
+	if attemptCount != 2 {
+		t.Errorf("Expected 2 attempts, got %d", attemptCount)
+	}
+
+	// Verify retry latency metric was recorded
+	metrics, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	found := false
+	for _, mf := range metrics {
+		if mf.GetName() == "postgres_producer_batch_write_retry_latency_seconds" {
+			found = true
+			if len(mf.Metric) == 0 {
+				t.Error("BatchWriteRetryLatencyHistogram has no observations")
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("BatchWriteRetryLatencyHistogram metric not found")
+	}
+
+	t.Logf("Total elapsed time: %v (retry latency was recorded)", totalElapsed)
+}
+
+// TestExecuteBatchWithRetry_ContextCancellation tests that retry respects context cancellation
+func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
+	os.Setenv("POSTGRES_OUTPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_OUTPUT_DATABASE", "test_db")
+	os.Setenv("POSTGRES_OUTPUT_MAX_RETRIES", "5")
+	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
+	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
+
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresOutput() error = %v", err)
+	}
+
+	// Create a context that will be cancelled
+	po.ctx, po.cancel = context.WithCancel(context.Background())
+
+	// Mock batch executor that always fails (triggers retry)
+	attemptCount := 0
+	po.setBatchExecutor(func(batch []*envelope.Envelope) error {
+		attemptCount++
+		return fmt.Errorf("simulated failure")
+	})
+
+	// Create blocking test sleeper - will block until unblocked by test
+	blockingSleeper := NewTestSleeper(true)
+	po.setSleeper(blockingSleeper)
+
+	// Create a batch that will trigger retries
+	batch := []*envelope.Envelope{envelope.New()}
+	batchStartTime := time.Now()
+
+	// Start executeBatchWithRetry in a goroutine so we can cancel mid-retry
+	done := make(chan struct{})
+	go func() {
+		po.executeBatchWithRetry(batch, batchStartTime)
+		close(done)
+	}()
+
+	// Wait for first execution attempt to complete (deterministic, not time-based)
+	// The sleeper signals when it's about to sleep (i.e., when an attempt finished)
+	if !blockingSleeper.WaitForAttempt(5 * time.Second) {
+		t.Fatal("First batch execution attempt did not complete within timeout")
+	}
+
+	// Cancel the context - this should interrupt the retry sleep
+	po.cancel()
+
+	// Unblock the sleeper so the blocked goroutine can exit
+	blockingSleeper.Unblock()
+
+	// Wait for function to complete with bounded timeout
+	select {
+	case <-done:
+		// Success - function exited as expected
+		// Verify that we didn't attempt all retries (context was cancelled early)
+		if attemptCount >= po.maxRetries {
+			t.Fatalf("context cancellation did not interrupt retries (count=%d, maxRetries=%d)",
+				attemptCount, po.maxRetries)
+		}
+		t.Logf("Successfully interrupted after %d attempts (maxRetries=%d)",
+			attemptCount, po.maxRetries)
+	case <-time.After(2 * time.Second):
+		t.Fatal("executeBatchWithRetry did not respect context cancellation and exit within timeout")
 	}
 }

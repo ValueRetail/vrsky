@@ -15,9 +15,46 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
+
+// sleeper is an interface for injecting sleep behavior during retries
+// This allows tests to control timing without actual delays
+type sleeper interface {
+	sleep(ctx context.Context, d time.Duration) error
+}
+
+// defaultSleeper implements sleeper using time.After
+type defaultSleeper struct{}
+
+func (ds *defaultSleeper) sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// dlqPublisher is an interface for publishing messages to the Dead Letter Queue
+// This allows tests to inject fake implementations for behavior verification
+type dlqPublisher interface {
+	// PublishProducerError publishes a producer error to DLQ
+	// Returns (error, published) where:
+	// - (nil, true): Successfully published to DLQ
+	// - (nil, false): DLQ disabled or no NATS connection (no-op)
+	// - (error, false): Failed to publish due to error
+	PublishProducerError(
+		env *envelope.Envelope,
+		errType string,
+		errMsg string,
+		attempt int,
+		table string,
+		operation string,
+	) (error, bool)
+}
 
 // PostgresOutput implements a Producer that writes changes to PostgreSQL
 type PostgresOutput struct {
@@ -49,6 +86,17 @@ type PostgresOutput struct {
 	batchTimer   *time.Timer
 	written      int64 // Track written messages
 	wg           sync.WaitGroup // Track in-flight batch writes
+	sleeper      sleeper // Injected for testing (defaults to time.After)
+	batchExecutor func([]*envelope.Envelope) error // Custom batch executor for testing (defaults to executeBatch)
+
+	// Observability
+	metricsRegistry prometheus.Registerer
+	metrics      *PostgresProducerMetrics
+	dlqPublisher dlqPublisher
+	dlqConfig    DLQConfig
+	backoffConfig BackoffConfig
+	maxRetries   int
+	batchStartTime time.Time // Track latency from receive to write
 }
 
 // CDCWriteOperation represents a database write operation
@@ -64,16 +112,113 @@ type CDCWriteOperation struct {
 	TransactionID uint32               `json:"transaction_id"`
 }
 
+// parsePositiveInt parses a positive integer from an environment variable.
+// Invalid or empty values are logged as warnings and the default value is returned.
+// This function never returns an error - invalid configuration is not fatal but logged,
+// allowing the application to start with safe defaults.
+func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue int) int {
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Warn("invalid integer value for environment variable, using default",
+			"env_var", envVar,
+			"provided_value", value,
+			"error", err,
+			"default_value", defaultValue)
+		return defaultValue
+	}
+
+	if parsed <= 0 {
+		logger.Warn("non-positive value for environment variable, using default",
+			"env_var", envVar,
+			"provided_value", parsed,
+			"default_value", defaultValue)
+		return defaultValue
+	}
+
+	return parsed
+}
+
+// parseDurationMs parses a positive duration in milliseconds from string
+// Returns the parsed value if valid, or defaultValue if invalid/empty with appropriate logging
+func parseDurationMs(logger *slog.Logger, envVar, value string, defaultValue time.Duration) time.Duration {
+	if value == "" {
+		return defaultValue
+	}
+
+	ms, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Warn("invalid integer value for duration environment variable, using default",
+			"env_var", envVar,
+			"provided_value", value,
+			"error", err,
+			"default_ms", defaultValue.Milliseconds())
+		return defaultValue
+	}
+
+	if ms <= 0 {
+		logger.Warn("non-positive duration value, using default",
+			"env_var", envVar,
+			"provided_ms", ms,
+			"default_ms", defaultValue.Milliseconds())
+		return defaultValue
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+// validateBackoffConfig validates that max >= initial and both are positive
+// Logs warnings and adjusts if necessary
+func validateBackoffConfig(logger *slog.Logger, config *BackoffConfig) {
+	if config.InitialDuration <= 0 {
+		logger.Warn("invalid initial backoff duration, using default",
+			"provided_ms", config.InitialDuration.Milliseconds(),
+			"default_ms", DefaultBackoffConfig().InitialDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+		return
+	}
+
+	if config.MaxDuration <= 0 {
+		logger.Warn("invalid max backoff duration, using default",
+			"provided_ms", config.MaxDuration.Milliseconds(),
+			"default_ms", DefaultBackoffConfig().MaxDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+		return
+	}
+
+	if config.MaxDuration < config.InitialDuration {
+		logger.Warn("max backoff duration less than initial, resetting to defaults",
+			"initial_ms", config.InitialDuration.Milliseconds(),
+			"max_ms", config.MaxDuration.Milliseconds(),
+			"default_initial_ms", DefaultBackoffConfig().InitialDuration.Milliseconds(),
+			"default_max_ms", DefaultBackoffConfig().MaxDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+	}
+}
+
 // NewPostgresOutput creates a new PostgreSQL producer
-func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
+func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registerer) (*PostgresOutput, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	if metricsRegistry == nil {
+		metricsRegistry = prometheus.DefaultRegisterer
+	}
+
 	po := &PostgresOutput{
-		logger:       logger,
-		batchSize:    100,
-		batchTimeout: 5 * time.Second,
+		logger:           logger,
+		metricsRegistry:  metricsRegistry,
+		batchSize:        100,
+		batchTimeout:     5 * time.Second,
+		backoffConfig:    DefaultBackoffConfig(),
+		maxRetries:       3,
+		metrics:          NewPostgresProducerMetrics(metricsRegistry),
+		sleeper:          &defaultSleeper{},
+		batchExecutor:    nil, // Will use executeBatch method if nil
 	}
 
 	// Read configuration from environment
@@ -119,12 +264,13 @@ func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
 		po.natsSubject = "postgres.changes"
 	}
 
-	// Batch configuration
-	if batchSizeStr := os.Getenv("POSTGRES_OUTPUT_BATCH_SIZE"); batchSizeStr != "" {
-		if batchSize, err := strconv.Atoi(batchSizeStr); err == nil && batchSize > 0 {
-			po.batchSize = batchSize
-		}
-	}
+	// Batch configuration with validation
+	batchSizeStr := os.Getenv("POSTGRES_OUTPUT_BATCH_SIZE")
+	po.batchSize = parsePositiveInt(logger, "POSTGRES_OUTPUT_BATCH_SIZE", batchSizeStr, po.batchSize)
+
+	// Batch timeout configuration with validation
+	batchTimeoutStr := os.Getenv("POSTGRES_OUTPUT_BATCH_TIMEOUT_MS")
+	po.batchTimeout = parseDurationMs(logger, "POSTGRES_OUTPUT_BATCH_TIMEOUT_MS", batchTimeoutStr, po.batchTimeout)
 
 	// Conflict resolution strategy
 	po.conflictResolution = os.Getenv("POSTGRES_CONFLICT_RESOLUTION")
@@ -140,6 +286,42 @@ func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
 		return nil, fmt.Errorf("unsupported POSTGRES_CONFLICT_RESOLUTION strategy: %s (only UPSERT is supported)", po.conflictResolution)
 	}
 
+	// Backoff configuration from environment with validation
+	po.backoffConfig.InitialDuration = parseDurationMs(logger, "POSTGRES_OUTPUT_INITIAL_BACKOFF_MS",
+		os.Getenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS"), DefaultBackoffConfig().InitialDuration)
+	po.backoffConfig.MaxDuration = parseDurationMs(logger, "POSTGRES_OUTPUT_MAX_BACKOFF_MS",
+		os.Getenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS"), DefaultBackoffConfig().MaxDuration)
+
+	// Validate backoff config (max >= initial, both positive)
+	validateBackoffConfig(logger, &po.backoffConfig)
+
+	// Max retries configuration with validation
+	maxRetriesStr := os.Getenv("POSTGRES_OUTPUT_MAX_RETRIES")
+	po.maxRetries = parsePositiveInt(logger, "POSTGRES_OUTPUT_MAX_RETRIES", maxRetriesStr, po.maxRetries)
+
+	// DLQ configuration from environment
+	dlqConfig := DefaultDLQConfig()
+	if dlqEnabledStr := os.Getenv("POSTGRES_OUTPUT_DLQ_ENABLED"); dlqEnabledStr != "" {
+		dlqConfig.Enabled = strings.ToLower(dlqEnabledStr) == "true"
+	}
+
+	if dlqSubject := os.Getenv("POSTGRES_OUTPUT_DLQ_SUBJECT"); dlqSubject != "" {
+		dlqConfig.Subject = dlqSubject
+	}
+
+	// DLQ max retries with validation
+	dlqMaxRetriesStr := os.Getenv("POSTGRES_OUTPUT_DLQ_MAX_RETRIES")
+	dlqConfig.MaxRetries = parsePositiveInt(logger, "POSTGRES_OUTPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
+
+	// DLQ publisher will be created after NATS connection in Start()
+	// For now, just store the config
+	po.dlqConfig = dlqConfig
+	po.dlqPublisher = &DLQPublisher{
+		natsConn: nil, // Will be set in Start()
+		config:   dlqConfig,
+		logger:   logger,
+	}
+
 	po.ctx, po.cancel = context.WithCancel(context.Background())
 
 	po.logger.Info("PostgreSQL Output initialized",
@@ -148,9 +330,28 @@ func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
 		"database", po.database,
 		"nats_subject", po.natsSubject,
 		"conflict_resolution", po.conflictResolution,
+		"max_retries", po.maxRetries,
+		"dlq_enabled", dlqConfig.Enabled,
+		"backoff_initial_ms", po.backoffConfig.InitialDuration.Milliseconds(),
+		"backoff_max_ms", po.backoffConfig.MaxDuration.Milliseconds(),
 	)
 
 	return po, nil
+}
+
+// setSleeper injects a custom sleeper for testing (unexported, used only in tests)
+func (po *PostgresOutput) setSleeper(s sleeper) {
+	po.sleeper = s
+}
+
+// setBatchExecutor injects a custom batch executor for testing (unexported, used only in tests)
+func (po *PostgresOutput) setBatchExecutor(executor func([]*envelope.Envelope) error) {
+	po.batchExecutor = executor
+}
+
+// setDLQPublisher injects a custom DLQ publisher for testing (unexported, used only in tests)
+func (po *PostgresOutput) setDLQPublisher(pub dlqPublisher) {
+	po.dlqPublisher = pub
 }
 
 // Start begins consuming messages from NATS and writing to PostgreSQL
@@ -242,6 +443,10 @@ func (po *PostgresOutput) connectNATS() error {
 	}
 
 	po.natsConn = nc
+
+	// Initialize DLQ publisher with NATS connection
+	po.dlqPublisher = NewDLQPublisher(nc, po.dlqConfig, po.logger)
+
 	po.logger.Info("Connected to NATS", "url", po.natsURL)
 	return nil
 }
@@ -252,7 +457,15 @@ func (po *PostgresOutput) subscribeChanges() error {
 		env := &envelope.Envelope{}
 		if err := json.Unmarshal(msg.Data, env); err != nil {
 			po.logger.Warn("Failed to unmarshal envelope", "error", err)
+			po.metrics.WriteErrorsTotal.Inc()
 			return
+		}
+
+		// Record message received metric
+		if env.Metadata != nil {
+			if op, ok := env.Metadata["operation"].(string); ok {
+				po.metrics.MessagesReceivedTotal.WithLabelValues(op).Inc()
+			}
 		}
 
 		po.addToPendingBatch(env)
@@ -271,7 +484,15 @@ func (po *PostgresOutput) addToPendingBatch(env *envelope.Envelope) {
 	po.mu.Lock()
 	defer po.mu.Unlock()
 
+	// Track batch start time for latency measurement
+	if len(po.pendingBatch) == 0 && po.batchStartTime.IsZero() {
+		po.batchStartTime = time.Now()
+	}
+
 	po.pendingBatch = append(po.pendingBatch, env)
+
+	// Update pending batch size gauge
+	po.metrics.PendingBatchSizeGauge.Set(float64(len(po.pendingBatch)))
 
 	// Write if batch is full
 	if len(po.pendingBatch) >= po.batchSize {
@@ -309,33 +530,157 @@ func (po *PostgresOutput) writeBatch() {
 	}
 
 	batch := po.pendingBatch
+	batchStartTime := po.batchStartTime
 	po.pendingBatch = nil
+	po.batchStartTime = time.Time{} // Reset for next batch
+	batchSize := len(batch)
+
+	// Reset pending batch size gauge to 0
+	po.metrics.PendingBatchSizeGauge.Set(0)
 
 	if po.batchTimer != nil {
 		po.batchTimer.Stop()
 		po.batchTimer = nil
 	}
 
+	// Record batch size metric
+	po.metrics.BatchSizeHistogram.Observe(float64(batchSize))
+
 	// Write in background to avoid blocking
 	// Track this goroutine so Close() can wait for it
 	po.wg.Add(1)
 	go func() {
 		defer po.wg.Done()
-		po.executeBatch(batch)
+		po.executeBatchWithRetry(batch, batchStartTime)
 	}()
 }
 
-// executeBatch executes the batch of writes
-func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) {
+// executeBatchWithRetry executes batch with exponential backoff retry logic
+func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batchStartTime time.Time) {
 	if len(batch) == 0 {
 		return
+	}
+
+	startTime := time.Now()
+	var lastErr error
+
+	for attempt := 1; attempt <= po.maxRetries; attempt++ {
+		var err error
+		attemptStartTime := time.Now() // Capture start of individual attempt for accurate write latency
+		if po.batchExecutor != nil {
+			err = po.batchExecutor(batch)
+		} else {
+			err = po.executeBatch(batch)
+		}
+		
+		if err != nil {
+			lastErr = err
+			po.logger.Warn("Failed to execute batch",
+				"error", err,
+				"attempt", attempt,
+				"max_retries", po.maxRetries,
+				"batch_size", len(batch))
+
+			// Record error metric
+			po.metrics.WriteErrorsTotal.Inc()
+
+			// If we've exhausted retries, send to DLQ
+			if attempt >= po.maxRetries {
+				po.logger.Error("Max retries exhausted for batch",
+					"error", err,
+					"attempt", attempt,
+					"batch_size", len(batch))
+
+				// Send failed batch to DLQ
+				for _, env := range batch {
+					if po.dlqPublisher != nil {
+						table := ""
+						op := ""
+						if env.Metadata != nil {
+							if t, ok := env.Metadata["table"].(string); ok {
+								table = t
+							}
+							if o, ok := env.Metadata["operation"].(string); ok {
+								op = o
+							}
+						}
+
+						dlqErr, published := po.dlqPublisher.PublishProducerError(
+							env,
+							"batch_write_error",
+							fmt.Sprintf("Failed to write batch after %d retries: %v", attempt, err),
+							attempt,
+							table,
+							op,
+						)
+						if dlqErr != nil {
+							po.logger.Error("Failed to publish to DLQ", "error", dlqErr)
+						}
+						if published {
+							// Only increment metric when message was actually published to DLQ
+							po.metrics.DLQMessagesTotal.Inc()
+						}
+					}
+				}
+				break
+			}
+
+			// Calculate backoff and retry
+			backoff := CalculateBackoff(attempt, po.backoffConfig)
+			po.logger.Debug("Exponential backoff before retry",
+				"backoff_duration", backoff,
+				"attempt", attempt)
+
+			if err := po.sleeper.sleep(po.ctx, backoff); err != nil {
+				// Context cancelled during sleep
+				return
+			}
+		} else {
+			// Success - record both metrics
+			// BatchWriteLatencyHistogram: duration of successful write attempt only
+			attemptLatency := time.Since(attemptStartTime).Seconds()
+			po.metrics.BatchWriteLatencyHistogram.Observe(attemptLatency)
+			
+			// BatchWriteRetryLatencyHistogram: end-to-end duration including all retries and backoff
+			totalLatency := time.Since(startTime).Seconds()
+			po.metrics.BatchWriteRetryLatencyHistogram.Observe(totalLatency)
+			
+			po.logger.Debug("Batch written successfully with retries",
+				"write_latency_seconds", attemptLatency,
+				"total_retry_latency_seconds", totalLatency,
+				"batch_size", len(batch),
+				"attempts", attempt)
+			po.metrics.BatchesWrittenTotal.Inc()
+
+			// Record capture-to-write latency if we have it
+			if !batchStartTime.IsZero() {
+				captureLatency := time.Since(batchStartTime).Seconds()
+				po.logger.Debug("Batch latency recorded",
+					"capture_to_write_seconds", captureLatency,
+					"batch_size", len(batch))
+			}
+
+			return
+		}
+	}
+
+	// If we get here, we've exhausted retries and failed
+	po.logger.Error("Batch write failed after all retries",
+		"error", lastErr,
+		"batch_size", len(batch))
+}
+
+// executeBatch executes the batch of writes
+func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) error {
+	if len(batch) == 0 {
+		return nil
 	}
 
 	// Start transaction
 	tx, err := po.pool.Begin(po.ctx)
 	if err != nil {
 		po.logger.Error("Failed to begin transaction", "error", err, "batch_size", len(batch))
-		return
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(po.ctx)
 
@@ -351,10 +696,11 @@ func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) {
 	// Commit transaction
 	if err := tx.Commit(po.ctx); err != nil {
 		po.logger.Error("Failed to commit transaction", "error", err, "batch_size", len(batch))
-		return
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	po.logger.Debug("Batch written successfully", "batch_size", len(batch), "total_written", po.written)
+	return nil
 }
 
 // writeEnvelope writes a single envelope to PostgreSQL

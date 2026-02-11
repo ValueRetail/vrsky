@@ -88,6 +88,25 @@ services:
       retries: 5
       start_period: 5s
 
+  # Prometheus monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: vrsky-prometheus
+    ports:
+      - "9099:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - vrsky-network
+    depends_on:
+      - postgres-consumer
+      - postgres-producer
+    restart: unless-stopped
+
   # PostgreSQL Consumer (CDC from source to NATS)
   postgres-consumer:
     build:
@@ -107,6 +126,14 @@ services:
       # NATS configuration
       NATS_URL: nats://nats:4222
       POSTGRES_INPUT_SUBJECT: postgres.changes
+      # Backoff configuration (exponential backoff with jitter)
+      POSTGRES_INPUT_INITIAL_BACKOFF_MS: "1000"
+      POSTGRES_INPUT_MAX_BACKOFF_MS: "30000"
+      POSTGRES_INPUT_MAX_RETRIES: "3"
+      # DLQ configuration
+      POSTGRES_INPUT_DLQ_ENABLED: "true"
+      POSTGRES_INPUT_DLQ_SUBJECT: "postgres.dlq"
+      POSTGRES_INPUT_DLQ_MAX_RETRIES: "3"
       # Logging
       LOG_LEVEL: info
     depends_on:
@@ -114,6 +141,8 @@ services:
         condition: service_healthy
       postgres-source:
         condition: service_healthy
+    ports:
+      - "9090:9090"
     networks:
       - vrsky-network
     restart: unless-stopped
@@ -136,6 +165,14 @@ services:
       # NATS configuration
       NATS_URL: nats://nats:4222
       POSTGRES_OUTPUT_SUBJECT: postgres.changes
+      # Backoff configuration (exponential backoff with jitter)
+      POSTGRES_OUTPUT_INITIAL_BACKOFF_MS: "1000"
+      POSTGRES_OUTPUT_MAX_BACKOFF_MS: "30000"
+      POSTGRES_OUTPUT_MAX_RETRIES: "3"
+      # DLQ configuration
+      POSTGRES_OUTPUT_DLQ_ENABLED: "true"
+      POSTGRES_OUTPUT_DLQ_SUBJECT: "postgres.dlq"
+      POSTGRES_OUTPUT_DLQ_MAX_RETRIES: "3"
       # Logging
       LOG_LEVEL: info
     depends_on:
@@ -143,6 +180,8 @@ services:
         condition: service_healthy
       postgres-target:
         condition: service_healthy
+    ports:
+      - "9091:9091"
     networks:
       - vrsky-network
     restart: unless-stopped
@@ -180,4 +219,6 @@ volumes:
   postgres-source-data:
     driver: local
   postgres-target-data:
+    driver: local
+  prometheus-data:
     driver: local
