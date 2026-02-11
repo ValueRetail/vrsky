@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
@@ -28,7 +30,7 @@ func TestPostgresConsumerProducerIntegration_FullPipeline(t *testing.T) {
 		os.Setenv("POSTGRES_INPUT_DATABASE", "source_db")
 		defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-		pi, err := NewPostgresInput(slog.Default())
+		pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create input: %v", err)
 		}
@@ -72,7 +74,7 @@ func TestPostgresConsumerProducerIntegration_MessageFlow(t *testing.T) {
 	os.Setenv("POSTGRES_INPUT_DATABASE", "source_db")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -98,12 +100,12 @@ func TestPostgresConsumerProducerIntegration_ConnectionPooling(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
 	// Create two consumers - should share connections efficiently
-	pi1, err := NewPostgresInput(slog.Default())
+	pi1, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create first consumer: %v", err)
 	}
 
-	pi2, err := NewPostgresInput(slog.Default())
+	pi2, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create second consumer: %v", err)
 	}
@@ -138,7 +140,7 @@ func TestPostgresConsumerProducerIntegration_BatchProcessing(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_BATCH_SIZE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create output: %v", err)
 	}
@@ -181,7 +183,7 @@ func TestPostgresConsumerProducerIntegration_ErrorHandling(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create output: %v", err)
 	}
@@ -208,7 +210,7 @@ func TestPostgresConsumerProducerIntegration_TableFiltering(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_INPUT_TABLES")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -264,7 +266,7 @@ func TestPostgresConsumerProducerIntegration_ConflictResolution(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_CONFLICT_RESOLUTION")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create output: %v", err)
 	}
@@ -289,7 +291,7 @@ func TestPostgresConsumerProducerIntegration_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -311,7 +313,7 @@ func TestPostgresConsumerProducerIntegration_LSNTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -348,7 +350,7 @@ func TestPostgresConsumerProducerIntegration_SchemaTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -386,7 +388,7 @@ func TestPostgresConsumerProducerIntegration_BeforeAfterTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create consumer: %v", err)
 	}
@@ -437,7 +439,7 @@ func TestPostgresConsumerProducerIntegration_ConcurrentWrites(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_BATCH_SIZE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("failed to create output: %v", err)
 	}
@@ -482,7 +484,7 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 
 	// Test 1: DELETE with simple primary key
 	t.Run("delete_with_primary_key", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -514,7 +516,7 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 
 	// Test 2: DELETE with composite key
 	t.Run("delete_with_composite_key", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -547,7 +549,7 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 
 	// Test 3: DELETE without required key should handle gracefully
 	t.Run("delete_missing_key_handling", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -577,7 +579,7 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 
 	// Test 4: Batch DELETE operations
 	t.Run("batch_delete_operations", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -629,7 +631,7 @@ func TestPostgresConsumerProducerIntegration_ConnectionRecovery(t *testing.T) {
 
 	// Test 1: Recovery after temporary pool unavailability
 	t.Run("recovery_after_pool_unavailable", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -662,7 +664,7 @@ func TestPostgresConsumerProducerIntegration_ConnectionRecovery(t *testing.T) {
 
 	// Test 2: Multiple failed write attempts with recovery
 	t.Run("multiple_failed_writes_recovery", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -693,7 +695,7 @@ func TestPostgresConsumerProducerIntegration_ConnectionRecovery(t *testing.T) {
 
 	// Test 3: Context cancellation during write
 	t.Run("context_cancellation_recovery", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -717,7 +719,7 @@ func TestPostgresConsumerProducerIntegration_ConnectionRecovery(t *testing.T) {
 
 	// Test 4: Close idempotency
 	t.Run("close_idempotency", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -742,7 +744,7 @@ func TestPostgresConsumerProducerIntegration_ConstraintHandling(t *testing.T) {
 
 	// Test 1: UPSERT conflict resolution on constraint violation
 	t.Run("upsert_on_unique_constraint", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -778,7 +780,7 @@ func TestPostgresConsumerProducerIntegration_ConstraintHandling(t *testing.T) {
 
 	// Test 2: Foreign key constraint handling
 	t.Run("foreign_key_constraint_handling", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -810,7 +812,7 @@ func TestPostgresConsumerProducerIntegration_ConstraintHandling(t *testing.T) {
 
 	// Test 3: CHECK constraint handling
 	t.Run("check_constraint_handling", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -841,7 +843,7 @@ func TestPostgresConsumerProducerIntegration_ConstraintHandling(t *testing.T) {
 
 	// Test 4: Multiple constraint violations in batch
 	t.Run("batch_constraint_violations", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -891,7 +893,7 @@ func TestPostgresConsumerProducerIntegration_PerformanceBaseline(t *testing.T) {
 
 	// Test 1: Single envelope write latency
 	t.Run("single_envelope_latency", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -916,7 +918,7 @@ func TestPostgresConsumerProducerIntegration_PerformanceBaseline(t *testing.T) {
 
 	// Test 2: Batch write throughput
 	t.Run("batch_write_throughput", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -948,7 +950,7 @@ func TestPostgresConsumerProducerIntegration_PerformanceBaseline(t *testing.T) {
 
 	// Test 3: Memory usage stability with repeated writes
 	t.Run("memory_stability", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
@@ -983,7 +985,7 @@ func TestPostgresConsumerProducerIntegration_PerformanceBaseline(t *testing.T) {
 
 	// Test 4: Concurrent write handling
 	t.Run("concurrent_write_safety", func(t *testing.T) {
-		po, err := NewPostgresOutput(slog.Default())
+		po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 		if err != nil {
 			t.Fatalf("failed to create output: %v", err)
 		}
