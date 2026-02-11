@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
@@ -85,7 +87,7 @@ func TestNewPostgresOutput_Configuration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresOutput() error = %v, wantErr %v", err, tt.wantErr)
@@ -149,7 +151,7 @@ func TestNewPostgresOutput_BatchConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresOutput() error = %v", err)
 			}
@@ -203,7 +205,7 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresOutput() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -257,7 +259,7 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			po, err := NewPostgresOutput(slog.Default())
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresOutput() error = %v", err)
 			}
@@ -279,7 +281,7 @@ func TestQuoteIdentifier(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -340,7 +342,7 @@ func TestPostgresOutput_AddToPendingBatch_BatchSize(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_BATCH_SIZE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -379,7 +381,7 @@ func TestPostgresOutput_AddToPendingBatch_BatchTimeout(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -405,7 +407,7 @@ func TestWriteBatch_EmptyBatch(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -504,7 +506,7 @@ func TestWrite_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -530,7 +532,7 @@ func TestWriteBatch_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -557,7 +559,7 @@ func TestPostgresOutput_Close_Idempotent(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -575,7 +577,7 @@ func TestGetWritten_CounterTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -601,7 +603,7 @@ func TestWrite_ProducerClosed(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -627,7 +629,7 @@ func TestExecuteBatchWithRetry_MaxRetriesExhausted(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -663,7 +665,7 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS")
 	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -700,7 +702,7 @@ func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_MAX_RETRIES")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -732,7 +734,7 @@ func TestExecuteBatchWithRetry_SuccessRecordsMetrics(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -757,7 +759,7 @@ func TestExecuteBatchWithRetry_CaptureToWriteLatency(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -785,7 +787,7 @@ func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS")
 
-	po, err := NewPostgresOutput(slog.Default())
+	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}

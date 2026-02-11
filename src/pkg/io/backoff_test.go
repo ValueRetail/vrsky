@@ -159,7 +159,7 @@ func TestCalculateBackoffDefault(t *testing.T) {
 
 	// Should be roughly 1 second (with jitter)
 	if backoff < 800*time.Millisecond || backoff > 1200*time.Millisecond {
-		t.Logf("CalculateBackoffDefault(1) = %v, expected ~1s (±10% jitter)", backoff)
+		t.Logf("CalculateBackoffDefault(1) = %v, expected approximately 1s with jitter", backoff)
 	}
 }
 

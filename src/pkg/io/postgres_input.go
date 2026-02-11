@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
@@ -53,6 +54,7 @@ type PostgresInput struct {
 	batchTimer         *time.Timer
 
 	// Observability
+	metricsRegistry    prometheus.Registerer
 	metrics            *PostgresConsumerMetrics
 	dlqPublisher       *DLQPublisher
 	backoffConfig      BackoffConfig
@@ -73,20 +75,25 @@ type CDCChange struct {
 }
 
 // NewPostgresInput creates a new PostgreSQL CDC consumer
-func NewPostgresInput(logger *slog.Logger) (*PostgresInput, error) {
+func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer) (*PostgresInput, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	if metricsRegistry == nil {
+		metricsRegistry = prometheus.DefaultRegisterer
+	}
+
 	pi := &PostgresInput{
 		logger:           logger,
+		metricsRegistry:  metricsRegistry,
 		messages:         make(chan *envelope.Envelope, 100),
 		tableFilters:     make(map[string]bool),
 		batchSize:        100,
 		batchTimeout:     5 * time.Second,
 		backoffConfig:    DefaultBackoffConfig(),
 		maxRetries:       3,
-		metrics:          NewPostgresConsumerMetrics(),
+		metrics:          NewPostgresConsumerMetrics(metricsRegistry),
 	}
 
 	// Read configuration from environment

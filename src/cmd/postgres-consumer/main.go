@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/ValueRetail/vrsky/pkg/io"
 )
 
@@ -21,7 +23,7 @@ func main() {
 	}))
 
 	// Create PostgreSQL CDC consumer
-	consumer, err := io.NewPostgresInput(logger)
+	consumer, err := io.NewPostgresInput(logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		logger.Error("Failed to create PostgreSQL consumer", "error", err)
 		os.Exit(1)
@@ -52,7 +54,7 @@ func main() {
 
 	// Create metrics HTTP server with explicit ServeMux and handler
 	metricsMux := http.NewServeMux()
-	metricsHandler := io.GetMetricsHandler()
+	metricsHandler := io.GetMetricsHandler(prometheus.DefaultRegisterer)
 	metricsMux.Handle("/metrics", metricsHandler)
 
 	metricsAddr := fmt.Sprintf(":%s", metricsPort)

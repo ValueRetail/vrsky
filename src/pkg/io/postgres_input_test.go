@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
@@ -87,7 +89,7 @@ func TestNewPostgresInput_Configuration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			pi, err := NewPostgresInput(slog.Default())
+			pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewPostgresInput() error = %v, wantErr %v", err, tt.wantErr)
@@ -169,7 +171,7 @@ func TestNewPostgresInput_BatchConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			pi, err := NewPostgresInput(slog.Default())
+			pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresInput() error = %v", err)
 			}
@@ -247,7 +249,7 @@ func TestNewPostgresInput_TableFilters(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			pi, err := NewPostgresInput(slog.Default())
+			pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresInput() error = %v", err)
 			}
@@ -315,7 +317,7 @@ func TestNewPostgresInput_NATSConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			pi, err := NewPostgresInput(slog.Default())
+			pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresInput() error = %v", err)
 			}
@@ -380,7 +382,7 @@ func TestNewPostgresInput_ReplicationSlotConfiguration(t *testing.T) {
 				defer os.Unsetenv(key)
 			}
 
-			pi, err := NewPostgresInput(slog.Default())
+			pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 			if err != nil {
 				t.Fatalf("NewPostgresInput() error = %v", err)
 			}
@@ -402,7 +404,7 @@ func TestCreateEnvelopeFromWAL_ValidChange(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -449,7 +451,7 @@ func TestCreateEnvelopeFromWAL_InvalidJSON(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -469,7 +471,7 @@ func TestCreateEnvelopeFromWAL_TableFiltering(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_INPUT_TABLES")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -516,7 +518,7 @@ func TestCreateEnvelopeFromWAL_AllOperationTypes(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -557,7 +559,7 @@ func TestCreateEnvelopeFromWAL_LSNTracking(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -593,7 +595,7 @@ func TestPostgresInput_AddToPendingBatch_BatchSize(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 	defer os.Unsetenv("POSTGRES_INPUT_BATCH_SIZE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -630,7 +632,7 @@ func TestPostgresInput_AddToPendingBatch_BatchTimeout(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -655,7 +657,7 @@ func TestFlushBatch_EmptyBatch(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -677,7 +679,7 @@ func TestFlushBatch_PublishesEnvelopes(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -723,7 +725,7 @@ func TestClose_GracefulShutdown(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -771,7 +773,7 @@ func TestPostgresInput_Close_Idempotent(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -795,7 +797,7 @@ func TestRead_ContextCancellation(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -822,7 +824,7 @@ func TestRead_ConsumerClosed(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -848,7 +850,7 @@ func TestCreateEnvelopeFromWAL_EnvelopeID(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}
@@ -879,7 +881,7 @@ func TestCreateEnvelopeFromWAL_PayloadSerialization(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
 
-	pi, err := NewPostgresInput(slog.Default())
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
 	if err != nil {
 		t.Fatalf("NewPostgresInput() error = %v", err)
 	}

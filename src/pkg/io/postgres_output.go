@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
@@ -51,6 +52,7 @@ type PostgresOutput struct {
 	wg           sync.WaitGroup // Track in-flight batch writes
 
 	// Observability
+	metricsRegistry prometheus.Registerer
 	metrics      *PostgresProducerMetrics
 	dlqPublisher *DLQPublisher
 	backoffConfig BackoffConfig
@@ -72,18 +74,23 @@ type CDCWriteOperation struct {
 }
 
 // NewPostgresOutput creates a new PostgreSQL producer
-func NewPostgresOutput(logger *slog.Logger) (*PostgresOutput, error) {
+func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registerer) (*PostgresOutput, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	if metricsRegistry == nil {
+		metricsRegistry = prometheus.DefaultRegisterer
+	}
+
 	po := &PostgresOutput{
-		logger:       logger,
-		batchSize:    100,
-		batchTimeout: 5 * time.Second,
-		backoffConfig: DefaultBackoffConfig(),
-		maxRetries:   3,
-		metrics:      NewPostgresProducerMetrics(),
+		logger:           logger,
+		metricsRegistry:  metricsRegistry,
+		batchSize:        100,
+		batchTimeout:     5 * time.Second,
+		backoffConfig:    DefaultBackoffConfig(),
+		maxRetries:       3,
+		metrics:          NewPostgresProducerMetrics(metricsRegistry),
 	}
 
 	// Read configuration from environment
