@@ -146,12 +146,14 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 		}
 	}
 
-	// Batch configuration
-	if batchSizeStr := os.Getenv("POSTGRES_INPUT_BATCH_SIZE"); batchSizeStr != "" {
-		if batchSize, err := strconv.Atoi(batchSizeStr); err == nil && batchSize > 0 {
-			pi.batchSize = batchSize
-		}
-	}
+	// Batch configuration with validation
+	batchSizeStr := os.Getenv("POSTGRES_INPUT_BATCH_SIZE")
+	batchSize, _ := parsePositiveInt(logger, "POSTGRES_INPUT_BATCH_SIZE", batchSizeStr, pi.batchSize)
+	pi.batchSize = batchSize
+
+	// Batch timeout configuration with validation
+	batchTimeoutStr := os.Getenv("POSTGRES_INPUT_BATCH_TIMEOUT_MS")
+	pi.batchTimeout = parseDurationMs(logger, "POSTGRES_INPUT_BATCH_TIMEOUT_MS", batchTimeoutStr, pi.batchTimeout)
 
 	// NATS configuration
 	pi.natsURL = os.Getenv("NATS_URL")
@@ -169,24 +171,19 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 	dropSlotStr := os.Getenv("POSTGRES_INPUT_DROP_SLOT_ON_CLOSE")
 	pi.dropSlotOnClose = strings.ToLower(dropSlotStr) == "true"
 
-	// Backoff configuration from environment
-	if initialBackoffMs := os.Getenv("POSTGRES_INPUT_INITIAL_BACKOFF_MS"); initialBackoffMs != "" {
-		if ms, err := strconv.Atoi(initialBackoffMs); err == nil && ms > 0 {
-			pi.backoffConfig.InitialDuration = time.Duration(ms) * time.Millisecond
-		}
-	}
+	// Backoff configuration from environment with validation
+	pi.backoffConfig.InitialDuration = parseDurationMs(logger, "POSTGRES_INPUT_INITIAL_BACKOFF_MS",
+		os.Getenv("POSTGRES_INPUT_INITIAL_BACKOFF_MS"), DefaultBackoffConfig().InitialDuration)
+	pi.backoffConfig.MaxDuration = parseDurationMs(logger, "POSTGRES_INPUT_MAX_BACKOFF_MS",
+		os.Getenv("POSTGRES_INPUT_MAX_BACKOFF_MS"), DefaultBackoffConfig().MaxDuration)
 
-	if maxBackoffMs := os.Getenv("POSTGRES_INPUT_MAX_BACKOFF_MS"); maxBackoffMs != "" {
-		if ms, err := strconv.Atoi(maxBackoffMs); err == nil && ms > 0 {
-			pi.backoffConfig.MaxDuration = time.Duration(ms) * time.Millisecond
-		}
-	}
+	// Validate backoff config (max >= initial, both positive)
+	validateBackoffConfig(logger, &pi.backoffConfig)
 
-	if maxRetriesStr := os.Getenv("POSTGRES_INPUT_MAX_RETRIES"); maxRetriesStr != "" {
-		if retries, err := strconv.Atoi(maxRetriesStr); err == nil && retries > 0 {
-			pi.maxRetries = retries
-		}
-	}
+	// Max retries configuration with validation
+	maxRetriesStr := os.Getenv("POSTGRES_INPUT_MAX_RETRIES")
+	maxRetries, _ := parsePositiveInt(logger, "POSTGRES_INPUT_MAX_RETRIES", maxRetriesStr, pi.maxRetries)
+	pi.maxRetries = maxRetries
 
 	// DLQ configuration from environment
 	dlqConfig := DefaultDLQConfig()
@@ -198,11 +195,10 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 		dlqConfig.Subject = dlqSubject
 	}
 
-	if dlqMaxRetriesStr := os.Getenv("POSTGRES_INPUT_DLQ_MAX_RETRIES"); dlqMaxRetriesStr != "" {
-		if retries, err := strconv.Atoi(dlqMaxRetriesStr); err == nil && retries > 0 {
-			dlqConfig.MaxRetries = retries
-		}
-	}
+	// DLQ max retries with validation
+	dlqMaxRetriesStr := os.Getenv("POSTGRES_INPUT_DLQ_MAX_RETRIES")
+	dlqMaxRetries, _ := parsePositiveInt(logger, "POSTGRES_INPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
+	dlqConfig.MaxRetries = dlqMaxRetries
 
 	// DLQ publisher will be created after NATS connection in Start()
 	// For now, just store the config

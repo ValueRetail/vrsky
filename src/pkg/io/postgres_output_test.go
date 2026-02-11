@@ -301,9 +301,142 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 
 			if po.natsURL != tt.wantNATSURL {
 				t.Errorf("natsURL = %s, want %s", po.natsURL, tt.wantNATSURL)
+		}
+		if po.natsSubject != tt.wantNATSSubject {
+			t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+		}
+	})
+	}
+}
+
+// TestNewPostgresOutput_ConfigurationValidation tests that invalid config values are handled with warnings
+func TestNewPostgresOutput_ConfigurationValidation(t *testing.T) {
+	tests := []struct {
+		name             string
+		envVars          map[string]string
+		wantBatchSize    int
+		wantMaxRetries   int
+		wantInitialBackoff time.Duration
+		wantMaxBackoff   time.Duration
+	}{
+		{
+			name: "invalid batch size (non-integer) defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "invalid",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "zero batch size defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "0",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "negative batch size defaults to 100",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "-50",
+			},
+			wantBatchSize: 100,
+		},
+		{
+			name: "invalid max retries (non-integer) defaults to 3",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "not_a_number",
+			},
+			wantMaxRetries: 3,
+		},
+		{
+			name: "zero max retries defaults to 3",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "0",
+			},
+			wantMaxRetries: 3,
+		},
+		{
+			name: "invalid initial backoff (non-integer) defaults to 1000ms",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "bad",
+			},
+			wantInitialBackoff: 1000 * time.Millisecond,
+		},
+		{
+			name: "zero initial backoff defaults to 1000ms",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "0",
+			},
+			wantInitialBackoff: 1000 * time.Millisecond,
+		},
+		{
+			name: "max backoff less than initial resets to defaults",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "5000",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "1000",
+			},
+			wantInitialBackoff: DefaultBackoffConfig().InitialDuration,
+			wantMaxBackoff: DefaultBackoffConfig().MaxDuration,
+		},
+		{
+			name: "valid custom values are accepted",
+			envVars: map[string]string{
+				"POSTGRES_OUTPUT_PASSWORD":       "password",
+				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":     "250",
+				"POSTGRES_OUTPUT_MAX_RETRIES":    "5",
+				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "500",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "10000",
+			},
+			wantBatchSize: 250,
+			wantMaxRetries: 5,
+			wantInitialBackoff: 500 * time.Millisecond,
+			wantMaxBackoff: 10000 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear and set environment
+			for key := range tt.envVars {
+				os.Unsetenv(key)
 			}
-			if po.natsSubject != tt.wantNATSSubject {
-				t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+			for key, val := range tt.envVars {
+				os.Setenv(key, val)
+				defer os.Unsetenv(key)
+			}
+
+			po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+			if err != nil {
+				t.Fatalf("NewPostgresOutput() error = %v", err)
+			}
+
+			if tt.wantBatchSize > 0 && po.batchSize != tt.wantBatchSize {
+				t.Errorf("batchSize = %d, want %d", po.batchSize, tt.wantBatchSize)
+			}
+			if tt.wantMaxRetries > 0 && po.maxRetries != tt.wantMaxRetries {
+				t.Errorf("maxRetries = %d, want %d", po.maxRetries, tt.wantMaxRetries)
+			}
+			if tt.wantInitialBackoff > 0 && po.backoffConfig.InitialDuration != tt.wantInitialBackoff {
+				t.Errorf("InitialDuration = %v, want %v", po.backoffConfig.InitialDuration, tt.wantInitialBackoff)
+			}
+			if tt.wantMaxBackoff > 0 && po.backoffConfig.MaxDuration != tt.wantMaxBackoff {
+				t.Errorf("MaxDuration = %v, want %v", po.backoffConfig.MaxDuration, tt.wantMaxBackoff)
 			}
 		})
 	}

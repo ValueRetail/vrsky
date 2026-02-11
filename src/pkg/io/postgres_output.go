@@ -93,6 +93,91 @@ type CDCWriteOperation struct {
 	TransactionID uint32               `json:"transaction_id"`
 }
 
+// parsePositiveInt parses a positive integer from string, logging warnings on invalid/default values
+// Returns the parsed value if valid, or defaultValue if invalid/empty with appropriate logging
+func parsePositiveInt(logger *slog.Logger, envVar, value string, defaultValue int) (int, error) {
+	if value == "" {
+		return defaultValue, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Warn("invalid integer value for environment variable, using default",
+			"env_var", envVar,
+			"provided_value", value,
+			"error", err,
+			"default_value", defaultValue)
+		return defaultValue, nil
+	}
+
+	if parsed <= 0 {
+		logger.Warn("non-positive value for environment variable, using default",
+			"env_var", envVar,
+			"provided_value", parsed,
+			"default_value", defaultValue)
+		return defaultValue, nil
+	}
+
+	return parsed, nil
+}
+
+// parseDurationMs parses a positive duration in milliseconds from string
+// Returns the parsed value if valid, or defaultValue if invalid/empty with appropriate logging
+func parseDurationMs(logger *slog.Logger, envVar, value string, defaultValue time.Duration) time.Duration {
+	if value == "" {
+		return defaultValue
+	}
+
+	ms, err := strconv.Atoi(value)
+	if err != nil {
+		logger.Warn("invalid integer value for duration environment variable, using default",
+			"env_var", envVar,
+			"provided_value", value,
+			"error", err,
+			"default_ms", defaultValue.Milliseconds())
+		return defaultValue
+	}
+
+	if ms <= 0 {
+		logger.Warn("non-positive duration value, using default",
+			"env_var", envVar,
+			"provided_ms", ms,
+			"default_ms", defaultValue.Milliseconds())
+		return defaultValue
+	}
+
+	return time.Duration(ms) * time.Millisecond
+}
+
+// validateBackoffConfig validates that max >= initial and both are positive
+// Logs warnings and adjusts if necessary
+func validateBackoffConfig(logger *slog.Logger, config *BackoffConfig) {
+	if config.InitialDuration <= 0 {
+		logger.Warn("invalid initial backoff duration, using default",
+			"provided_ms", config.InitialDuration.Milliseconds(),
+			"default_ms", DefaultBackoffConfig().InitialDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+		return
+	}
+
+	if config.MaxDuration <= 0 {
+		logger.Warn("invalid max backoff duration, using default",
+			"provided_ms", config.MaxDuration.Milliseconds(),
+			"default_ms", DefaultBackoffConfig().MaxDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+		return
+	}
+
+	if config.MaxDuration < config.InitialDuration {
+		logger.Warn("max backoff duration less than initial, resetting to defaults",
+			"initial_ms", config.InitialDuration.Milliseconds(),
+			"max_ms", config.MaxDuration.Milliseconds(),
+			"default_initial_ms", DefaultBackoffConfig().InitialDuration.Milliseconds(),
+			"default_max_ms", DefaultBackoffConfig().MaxDuration.Milliseconds())
+		*config = DefaultBackoffConfig()
+	}
+}
+
 // NewPostgresOutput creates a new PostgreSQL producer
 func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registerer) (*PostgresOutput, error) {
 	if logger == nil {
@@ -158,12 +243,14 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 		po.natsSubject = "postgres.changes"
 	}
 
-	// Batch configuration
-	if batchSizeStr := os.Getenv("POSTGRES_OUTPUT_BATCH_SIZE"); batchSizeStr != "" {
-		if batchSize, err := strconv.Atoi(batchSizeStr); err == nil && batchSize > 0 {
-			po.batchSize = batchSize
-		}
-	}
+	// Batch configuration with validation
+	batchSizeStr := os.Getenv("POSTGRES_OUTPUT_BATCH_SIZE")
+	batchSize, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_BATCH_SIZE", batchSizeStr, po.batchSize)
+	po.batchSize = batchSize
+
+	// Batch timeout configuration with validation
+	batchTimeoutStr := os.Getenv("POSTGRES_OUTPUT_BATCH_TIMEOUT_MS")
+	po.batchTimeout = parseDurationMs(logger, "POSTGRES_OUTPUT_BATCH_TIMEOUT_MS", batchTimeoutStr, po.batchTimeout)
 
 	// Conflict resolution strategy
 	po.conflictResolution = os.Getenv("POSTGRES_CONFLICT_RESOLUTION")
@@ -179,24 +266,19 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 		return nil, fmt.Errorf("unsupported POSTGRES_CONFLICT_RESOLUTION strategy: %s (only UPSERT is supported)", po.conflictResolution)
 	}
 
-	// Backoff configuration from environment
-	if initialBackoffMs := os.Getenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS"); initialBackoffMs != "" {
-		if ms, err := strconv.Atoi(initialBackoffMs); err == nil && ms > 0 {
-			po.backoffConfig.InitialDuration = time.Duration(ms) * time.Millisecond
-		}
-	}
+	// Backoff configuration from environment with validation
+	po.backoffConfig.InitialDuration = parseDurationMs(logger, "POSTGRES_OUTPUT_INITIAL_BACKOFF_MS",
+		os.Getenv("POSTGRES_OUTPUT_INITIAL_BACKOFF_MS"), DefaultBackoffConfig().InitialDuration)
+	po.backoffConfig.MaxDuration = parseDurationMs(logger, "POSTGRES_OUTPUT_MAX_BACKOFF_MS",
+		os.Getenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS"), DefaultBackoffConfig().MaxDuration)
 
-	if maxBackoffMs := os.Getenv("POSTGRES_OUTPUT_MAX_BACKOFF_MS"); maxBackoffMs != "" {
-		if ms, err := strconv.Atoi(maxBackoffMs); err == nil && ms > 0 {
-			po.backoffConfig.MaxDuration = time.Duration(ms) * time.Millisecond
-		}
-	}
+	// Validate backoff config (max >= initial, both positive)
+	validateBackoffConfig(logger, &po.backoffConfig)
 
-	if maxRetriesStr := os.Getenv("POSTGRES_OUTPUT_MAX_RETRIES"); maxRetriesStr != "" {
-		if retries, err := strconv.Atoi(maxRetriesStr); err == nil && retries > 0 {
-			po.maxRetries = retries
-		}
-	}
+	// Max retries configuration with validation
+	maxRetriesStr := os.Getenv("POSTGRES_OUTPUT_MAX_RETRIES")
+	maxRetries, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_MAX_RETRIES", maxRetriesStr, po.maxRetries)
+	po.maxRetries = maxRetries
 
 	// DLQ configuration from environment
 	dlqConfig := DefaultDLQConfig()
@@ -208,11 +290,10 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 		dlqConfig.Subject = dlqSubject
 	}
 
-	if dlqMaxRetriesStr := os.Getenv("POSTGRES_OUTPUT_DLQ_MAX_RETRIES"); dlqMaxRetriesStr != "" {
-		if retries, err := strconv.Atoi(dlqMaxRetriesStr); err == nil && retries > 0 {
-			dlqConfig.MaxRetries = retries
-		}
-	}
+	// DLQ max retries with validation
+	dlqMaxRetriesStr := os.Getenv("POSTGRES_OUTPUT_DLQ_MAX_RETRIES")
+	dlqMaxRetries, _ := parsePositiveInt(logger, "POSTGRES_OUTPUT_DLQ_MAX_RETRIES", dlqMaxRetriesStr, dlqConfig.MaxRetries)
+	dlqConfig.MaxRetries = dlqMaxRetries
 
 	// DLQ publisher will be created after NATS connection in Start()
 	// For now, just store the config
