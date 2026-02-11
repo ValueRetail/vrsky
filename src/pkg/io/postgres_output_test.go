@@ -18,17 +18,47 @@ import (
 type testSleeper struct {
 	sleepDurations []time.Duration
 	sleepIndex     int
+	blockChan      chan struct{}  // For tests to control when to unblock
+	shouldBlock    bool            // Whether to actually block or return immediately
+}
+
+// NewTestSleeper creates a test sleeper that can optionally block
+func NewTestSleeper(shouldBlock bool) *testSleeper {
+	return &testSleeper{
+		sleepDurations: []time.Duration{},
+		blockChan:      make(chan struct{}, 1),
+		shouldBlock:    shouldBlock,
+	}
 }
 
 func (ts *testSleeper) sleep(ctx context.Context, d time.Duration) error {
 	ts.sleepDurations = append(ts.sleepDurations, d)
 	ts.sleepIndex++
-	// Don't actually sleep - return immediately
+
+	if !ts.shouldBlock {
+		// Fast path for tests that don't need blocking
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+
+	// Blocking path - wait for unblock signal or context cancellation
 	select {
+	case <-ts.blockChan:
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// Unblock allows a test to unblock a sleeping goroutine
+func (ts *testSleeper) Unblock() {
+	select {
+	case ts.blockChan <- struct{}{}:
 	default:
-		return nil
 	}
 }
 
@@ -1074,7 +1104,8 @@ func TestExecuteBatchWithRetry_CaptureToWriteLatency(t *testing.T) {
 	defer os.Unsetenv("POSTGRES_OUTPUT_PASSWORD")
 	defer os.Unsetenv("POSTGRES_OUTPUT_DATABASE")
 
-	po, err := NewPostgresOutput(slog.Default(), prometheus.NewRegistry())
+	registry := prometheus.NewRegistry()
+	po, err := NewPostgresOutput(slog.Default(), registry)
 	if err != nil {
 		t.Fatalf("NewPostgresOutput() error = %v", err)
 	}
@@ -1087,6 +1118,9 @@ func TestExecuteBatchWithRetry_CaptureToWriteLatency(t *testing.T) {
 		return nil // Success - latency will be recorded
 	})
 
+	// Use non-blocking sleeper since batch succeeds on first try
+	po.setSleeper(NewTestSleeper(false))
+
 	// Create a batchStartTime in the past to simulate capture-to-write latency
 	batchStartTime := time.Now().Add(-100 * time.Millisecond)
 	batch := []*envelope.Envelope{envelope.New()}
@@ -1094,8 +1128,26 @@ func TestExecuteBatchWithRetry_CaptureToWriteLatency(t *testing.T) {
 	// Call executeBatchWithRetry with past startTime
 	po.executeBatchWithRetry(batch, batchStartTime)
 
-	// The function should process without error and record latency
-	// If we reach here, the function completed successfully and recorded metrics
+	// Verify that latency was recorded in metrics
+	metrics, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+
+	found := false
+	for _, mf := range metrics {
+		if mf.GetName() == "postgres_producer_batch_write_latency_seconds" {
+			found = true
+			if len(mf.Metric) == 0 {
+				t.Error("BatchWriteLatencyHistogram metric has no observations")
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("BatchWriteLatencyHistogram metric not found in registry")
+	}
 }
 
 // TestExecuteBatchWithRetry_ContextCancellation tests that retry respects context cancellation
@@ -1122,8 +1174,8 @@ func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
 		return fmt.Errorf("simulated failure")
 	})
 
-	// Create test sleeper that will block
-	blockingSleeper := &testSleeper{}
+	// Create blocking test sleeper - will block until unblocked by test
+	blockingSleeper := NewTestSleeper(true)
 	po.setSleeper(blockingSleeper)
 
 	// Create a batch that will trigger retries
@@ -1137,11 +1189,14 @@ func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
 		close(done)
 	}()
 
-	// Give it a moment to start executing and fail
+	// Allow first execution attempt to happen
 	time.Sleep(10 * time.Millisecond)
 
 	// Cancel the context - this should interrupt the retry sleep
 	po.cancel()
+
+	// Unblock the sleeper so the blocked goroutine can exit
+	blockingSleeper.Unblock()
 
 	// Wait for function to complete with bounded timeout
 	select {
@@ -1149,9 +1204,11 @@ func TestExecuteBatchWithRetry_ContextCancellation(t *testing.T) {
 		// Success - function exited as expected
 		// Verify that we didn't attempt all retries (context was cancelled early)
 		if attemptCount >= po.maxRetries {
-			t.Logf("all retries were attempted before cancellation (count=%d, maxRetries=%d)",
+			t.Fatalf("context cancellation did not interrupt retries (count=%d, maxRetries=%d)",
 				attemptCount, po.maxRetries)
 		}
+		t.Logf("Successfully interrupted after %d attempts (maxRetries=%d)",
+			attemptCount, po.maxRetries)
 	case <-time.After(2 * time.Second):
 		t.Fatal("executeBatchWithRetry did not respect context cancellation and exit within timeout")
 	}
