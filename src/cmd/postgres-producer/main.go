@@ -41,8 +41,9 @@ func main() {
 
 	logger.Info("PostgreSQL producer started successfully")
 
-	// Get metrics port from environment (default: 9090)
-	metricsPort := "9090"
+	// Get metrics port from environment (default: 9091)
+	// Producer uses 9091 to avoid conflicts with consumer (9090) when running locally
+	metricsPort := "9091"
 	if port := os.Getenv("POSTGRES_PRODUCER_METRICS_PORT"); port != "" {
 		// Validate port is a valid number
 		if _, err := strconv.Atoi(port); err == nil {

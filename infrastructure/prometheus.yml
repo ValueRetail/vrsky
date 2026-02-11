@@ -32,7 +32,7 @@ scrape_configs:
   # PostgreSQL Producer metrics
   - job_name: 'postgres-producer'
     static_configs:
-      - targets: ['postgres-producer:9090']
+      - targets: ['postgres-producer:9091']
     metrics_path: '/metrics'
     scrape_interval: 10s
     scrape_timeout: 5s

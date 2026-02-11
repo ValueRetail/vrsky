@@ -173,8 +173,6 @@ services:
       POSTGRES_OUTPUT_DLQ_ENABLED: "true"
       POSTGRES_OUTPUT_DLQ_SUBJECT: "postgres.dlq"
       POSTGRES_OUTPUT_DLQ_MAX_RETRIES: "3"
-      # Metrics configuration
-      POSTGRES_PRODUCER_METRICS_PORT: "9090"
       # Logging
       LOG_LEVEL: info
     depends_on:
