@@ -1,6 +1,7 @@
 package io
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -171,22 +172,15 @@ func NewPostgresProducerMetrics(reg prometheus.Registerer) *PostgresProducerMetr
 	}
 }
 
-// GetMetricsHandler returns the Prometheus metrics HTTP handler for the given registry
-// If registry is nil, uses prometheus.DefaultRegisterer for backward compatibility
-// The registry parameter should implement both Registerer and Gatherer (like prometheus.Registry)
-func GetMetricsHandler(reg prometheus.Registerer) http.Handler {
-	if reg == nil {
-		reg = prometheus.DefaultRegisterer
+// GetMetricsHandler returns the Prometheus metrics HTTP handler for the given gatherer.
+// The gatherer parameter must implement prometheus.Gatherer to provide metrics data.
+// Returns an error if the gatherer is nil or cannot gather metrics.
+// This strict approach prevents silently serving incorrect metrics from fallback registries.
+func GetMetricsHandler(gatherer prometheus.Gatherer) (http.Handler, error) {
+	if gatherer == nil {
+		return nil, fmt.Errorf("metrics gatherer cannot be nil")
 	}
-	// prometheus.DefaultRegisterer implements both Registerer and Gatherer
-	// Custom registries created with prometheus.NewRegistry() also implement both
-	// Type assert to Gatherer since promhttp.HandlerFor requires a Gatherer
-	gatherer, ok := reg.(prometheus.Gatherer)
-	if !ok {
-		// Fallback to DefaultRegisterer if the provided registry doesn't implement Gatherer
-		gatherer = prometheus.DefaultRegisterer.(prometheus.Gatherer)
-	}
-	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}), nil
 }
 
 // MetricsRegistry provides a centralized place for all metrics

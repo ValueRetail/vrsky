@@ -55,7 +55,11 @@ func main() {
 
 	// Create metrics HTTP server with explicit ServeMux and handler
 	metricsMux := http.NewServeMux()
-	metricsHandler := io.GetMetricsHandler(prometheus.DefaultRegisterer)
+	metricsHandler, err := io.GetMetricsHandler(prometheus.DefaultRegisterer)
+	if err != nil {
+		logger.Error("Failed to create metrics handler", "error", err)
+		os.Exit(1)
+	}
 	metricsMux.Handle("/metrics", metricsHandler)
 
 	metricsAddr := fmt.Sprintf(":%s", metricsPort)
