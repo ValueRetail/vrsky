@@ -7,7 +7,7 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 # Copy module and source files first
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY cmd/consumer/ ./cmd/consumer/
 COPY pkg/ ./pkg/
 COPY internal/ ./internal/
