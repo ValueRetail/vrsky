@@ -1,22 +1,32 @@
 FROM golang:1.21-alpine AS builder
 
-WORKDIR /app
+WORKDIR /build
+
+RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
+
+COPY cmd/ ./cmd/
+
+COPY pkg/ ./pkg/
+
+COPY internal/ ./internal/
+
 RUN go mod download
 
-COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o filter \
+    ./cmd/filter
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o filter ./cmd/filter
+FROM alpine:3.18
 
-FROM alpine:latest
+WORKDIR /app
 
-RUN apk --no-cache add ca-certificates
+RUN apk add --no-cache ca-certificates curl
 
-WORKDIR /root/
+COPY --from=builder /build/filter .
 
-COPY --from=builder /app/filter .
+RUN chmod +x ./filter
 
-EXPOSE 8080
-
-CMD ["./filter"]
+ENTRYPOINT ["./filter"]
