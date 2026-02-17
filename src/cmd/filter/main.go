@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ValueRetail/vrsky/pkg/filter"
@@ -93,12 +93,12 @@ func main() {
 					continue
 				}
 
-				// Create envelope from NATS message
-				env := &envelope.Envelope{
-					ID:      msg.Subject + "-" + fmt.Sprintf("%d", time.Now().UnixNano()),
-					Payload: msg.Data,
-					Source:  config.InputTopic,
-				}
+			// Create envelope from NATS message
+			env := &envelope.Envelope{
+				ID:      uuid.New().String(),
+				Payload: msg.Data,
+				Source:  config.InputTopic,
+			}
 
 				// Process the message through filter
 				decision, err := f.ProcessMessage(ctx, env)
