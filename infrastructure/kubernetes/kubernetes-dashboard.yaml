@@ -61,13 +61,10 @@ spec:
         - containerPort: 8443
           protocol: TCP
         args:
-          # Extended session timeout: 28800 seconds = 8 hours (default is 900 = 15 minutes)
+          # Session timeout uses the dashboard default (900 seconds = 15 minutes)
           - --auto-generate-cert
           - --namespace=kubernetes-dashboard
-          # Extended token validity duration (in seconds)
-          # This allows tokens to remain valid for 86400 seconds = 24 hours
-          - --token-ttl=86400
-          # Dashboard will not ask for re-authentication for 28800 seconds = 8 hours
+          # Dashboard will use its default token TTL for authentication sessions
           - --authentication-mode=token
           # Enable skip login button for easier access (optional - remove if security concern)
           - --enable-skip-login

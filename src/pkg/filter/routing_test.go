@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
@@ -331,7 +332,7 @@ func TestRoutingEngine_ValidationErrors(t *testing.T) {
 				t.Errorf("Expected error containing '%s', got nil", tt.wantErr)
 				return
 			}
-			if !contains(err.Error(), tt.wantErr) {
+			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("Error = %v, want to contain %s", err, tt.wantErr)
 			}
 		})
@@ -430,14 +431,4 @@ func TestApplyRoutingToEnvelope(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper function for substring checking
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

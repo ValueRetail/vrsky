@@ -56,18 +56,20 @@ func TestBackoffConfig_CalculateDelay(t *testing.T) {
 	tests := []struct {
 		name     string
 		attempt  int
-		maxDelay time.Duration
+		expected time.Duration
 	}{
 		{"first attempt", 0, 100 * time.Millisecond},
 		{"second attempt", 1, 200 * time.Millisecond},
 		{"third attempt", 2, 400 * time.Millisecond},
+		{"fourth attempt", 3, 800 * time.Millisecond},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			delay := config.CalculateBackoffDelay(tt.attempt)
-			if delay > tt.maxDelay+10*time.Millisecond { // Allow some tolerance
-				t.Errorf("CalculateBackoffDelay(%d) = %v, want <= %v", tt.attempt, delay, tt.maxDelay)
+			// Allow 1ms tolerance for floating point rounding
+			if delay < tt.expected-1*time.Millisecond || delay > tt.expected+1*time.Millisecond {
+				t.Errorf("CalculateBackoffDelay(%d) = %v, want %v", tt.attempt, delay, tt.expected)
 			}
 		})
 	}

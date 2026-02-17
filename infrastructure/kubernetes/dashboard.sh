@@ -123,17 +123,33 @@ get_token() {
         return 1
     fi
     
-    TOKEN=$(kubectl -n $DASHBOARD_NAMESPACE create token $ADMIN_USER --duration=24h)
+    # Try to create a 24-hour token, but handle clusters that don't support this duration
+    if ! TOKEN=$(kubectl -n "$DASHBOARD_NAMESPACE" create token "$ADMIN_USER" --duration=24h 2>/dev/null); then
+        echo -e "${YELLOW}Warning: Failed to create 24-hour token. Your cluster may not support this duration. Retrying with cluster default duration...${NC}"
+        if ! TOKEN=$(kubectl -n "$DASHBOARD_NAMESPACE" create token "$ADMIN_USER" 2>/dev/null); then
+            print_error "Failed to create access token. Please check your cluster version and permissions."
+            return 1
+        fi
+        DURATION_INFO="with cluster default duration"
+    else
+        DURATION_INFO="valid for 24 hours"
+    fi
+    
+    if [ -z "$TOKEN" ]; then
+        print_error "Token creation command succeeded but returned an empty token."
+        return 1
+    fi
     
     echo ""
-    echo -e "${GREEN}Token (valid for 24 hours):${NC}"
+    echo -e "${GREEN}Token (${DURATION_INFO}):${NC}"
     echo -e "${YELLOW}${TOKEN}${NC}"
     echo ""
     
-    # Also save to file
-    TOKEN_FILE="/tmp/k8s-dashboard-token.txt"
-    echo "$TOKEN" > "$TOKEN_FILE"
-    print_success "Token saved to $TOKEN_FILE"
+    # Also save to a securely created temporary file
+    TOKEN_FILE=$(mktemp "${TMPDIR:-/tmp}/k8s-dashboard-token.XXXXXX")
+    chmod 600 "$TOKEN_FILE"
+    printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
+    print_success "Token saved to $TOKEN_FILE (file permissions set to 600)"
 }
 
 # Port forward to access dashboard

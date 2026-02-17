@@ -70,7 +70,8 @@ func (eh *ErrorHandler) RecordError(level string, message string, err error, con
 
 	// Keep only last 1000 errors
 	if len(eh.errors) > 1000 {
-		eh.errors = eh.errors[1:]
+		start := len(eh.errors) - 1000
+		eh.errors = eh.errors[start:]
 	}
 }
 

@@ -88,7 +88,7 @@ rules:
     condition:
       operator: "contains"
       field: "subject"
-      value: "viagra"
+      value: "SPAM_KEYWORD_TEST"
   - name: "valid_domain"
     description: "Accept emails from allowed domains"
     condition:

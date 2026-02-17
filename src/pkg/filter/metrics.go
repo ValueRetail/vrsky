@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"math"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -208,7 +209,8 @@ func (bc *BackoffConfig) CalculateBackoffDelay(attempt int) time.Duration {
 		attempt = 0
 	}
 
-	delay := time.Duration(float64(bc.InitialDelay) * (bc.Multiplier * float64(attempt)))
+	// Use exponential backoff: InitialDelay * (Multiplier ^ attempt)
+	delay := time.Duration(float64(bc.InitialDelay) * math.Pow(bc.Multiplier, float64(attempt)))
 	if delay > bc.MaxDelay {
 		delay = bc.MaxDelay
 	}

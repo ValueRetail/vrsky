@@ -2,6 +2,7 @@ package filter
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
@@ -9,6 +10,8 @@ import (
 
 // RateLimitQueue is a bounded FIFO queue for rate-limited messages
 type RateLimitQueue struct {
+	mu       sync.RWMutex
+	closed   bool
 	messages chan *QueuedMessage
 	size     int
 	logger   *slog.Logger
@@ -35,8 +38,17 @@ func NewRateLimitQueue(size int, logger *slog.Logger) *RateLimitQueue {
 }
 
 // Enqueue adds a message to the queue
-// Returns error if queue is full
+// Returns ErrQueueFull if queue is at capacity
+// Returns ErrQueueClosed if queue has been closed
 func (q *RateLimitQueue) Enqueue(msg *QueuedMessage) error {
+	q.mu.RLock()
+	closed := q.closed
+	q.mu.RUnlock()
+
+	if closed {
+		return ErrQueueClosed
+	}
+
 	select {
 	case q.messages <- msg:
 		return nil
@@ -68,7 +80,16 @@ func (q *RateLimitQueue) IsFull() bool {
 }
 
 // Close gracefully shuts down the queue
+// After Close(), all Enqueue calls will return ErrQueueClosed
 func (q *RateLimitQueue) Close() error {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return nil // Already closed, safe to call multiple times
+	}
+	q.closed = true
+	q.mu.Unlock()
+
 	close(q.messages)
 	return nil
 }
