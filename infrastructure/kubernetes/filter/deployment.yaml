@@ -47,8 +47,8 @@ spec:
       
       containers:
       - name: filter
-        image: vrsky/filter:latest
-        imagePullPolicy: Always
+        image: localhost:5000/vrsky/filter:latest
+        imagePullPolicy: IfNotPresent
         
         # Resource limits
         resources:
@@ -62,7 +62,7 @@ spec:
         # Environment variables
         env:
         - name: NATS_URL
-          value: "nats://nats-platform:4222"
+          value: "nats://nats:4222"
         - name: FILTER_ID
           valueFrom:
             fieldRef:
@@ -82,30 +82,9 @@ spec:
           containerPort: 9090
           protocol: TCP
         
-        # Liveness probe - restart if unhealthy
-        livenessProbe:
-          exec:
-            command:
-            - /bin/sh
-            - -c
-            - "nc -z 127.0.0.1 9090"
-          initialDelaySeconds: 10
-          periodSeconds: 30
-          timeoutSeconds: 5
-          failureThreshold: 3
-        
-        # Readiness probe - remove from load balancer if not ready
-        readinessProbe:
-          exec:
-            command:
-            - /bin/sh
-            - -c
-            - "nc -z 127.0.0.1 9090"
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        
+         # Note: Probes disabled - filter is a message processor without HTTP server
+         # TODO: Implement Prometheus HTTP metrics endpoint on port 9090 for proper health checks
+         
         # Security context
         securityContext:
           runAsNonRoot: true
