@@ -1,4 +1,4 @@
-.PHONY: help build build-consumer docker-build docker-build-consumer docker-push docker-push-consumer clean test run run-consumer lint fmt vet e2e-test
+.PHONY: help build build-consumer build-filter docker-build docker-build-consumer docker-build-filter docker-push docker-push-consumer docker-push-filter clean test run run-consumer lint fmt vet e2e-test
 
 # Variables
 BINARY_NAME=producer
@@ -57,6 +57,22 @@ docker-push-consumer: docker-build-consumer ## Push consumer Docker image to reg
 	@echo "$(BLUE)Pushing consumer Docker image...$(NC)"
 	@docker push vrsky/consumer:latest
 	@echo "$(GREEN)✓ Consumer Docker image pushed$(NC)"
+
+build-filter: clean ## Build filter binary to ./bin/filter
+	@echo "$(BLUE)Building filter binary...$(NC)"
+	@mkdir -p $(BIN_DIR)
+	@$(GO) build -o $(BIN_DIR)/filter ./cmd/filter
+	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/filter$(NC)"
+
+docker-build-filter: ## Build Docker image: vrsky/filter:latest
+	@echo "$(BLUE)Building filter Docker image...$(NC)"
+	@docker build -t vrsky/filter:latest -f cmd/filter/Dockerfile .
+	@echo "$(GREEN)✓ Docker image built: vrsky/filter:latest$(NC)"
+
+docker-push-filter: docker-build-filter ## Push filter Docker image to registry
+	@echo "$(BLUE)Pushing filter Docker image...$(NC)"
+	@docker push vrsky/filter:latest
+	@echo "$(GREEN)✓ Filter Docker image pushed$(NC)"
 
 run-consumer: build-consumer ## Build and run consumer locally
 	@echo "$(BLUE)Running consumer...$(NC)"

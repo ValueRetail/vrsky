@@ -167,6 +167,27 @@ deploy_minio() {
 	print_success "MinIO deployment complete"
 }
 
+deploy_filter() {
+	print_header "Deploying VRSky Filter Component (Phase 1E)"
+
+	cd "$SCRIPT_DIR/filter"
+
+	kubectl apply -f deployment.yaml
+	kubectl apply -f service.yaml
+
+	print_success "Filter manifests applied"
+
+	echo "Waiting for Filter pods to be ready (3 replicas)..."
+	kubectl wait --for=condition=ready pod -l app=vrsky-filter -n vrsky-platform --timeout=300s || {
+		print_error "Filter pods did not become ready in time"
+		kubectl get pods -n vrsky-platform -l app=vrsky-filter
+		exit 1
+	}
+
+	print_success "Filter is ready (all 3 replicas)"
+	print_success "Filter deployment complete"
+}
+
 deploy_monitoring() {
 	print_header "Deploying Monitoring Stack (Prometheus + Grafana)"
 
@@ -280,21 +301,27 @@ print_summary() {
 	echo "1. Verify all pods are running:"
 	echo "     kubectl get pods -A | grep vrsky"
 	echo ""
-	echo "2. Access Grafana:"
+	echo "2. Run filter smoke test:"
+	echo "     bash infrastructure/scripts/test-filter-smoke.sh"
+	echo ""
+	echo "3. Access Grafana:"
 	echo "     kubectl port-forward -n vrsky-monitoring svc/grafana 3000:80"
 	echo "     Open: http://localhost:3000 (admin/changeme-grafana-password)"
 	echo ""
-	echo "3. Test PostgreSQL connection:"
+	echo "4. Test PostgreSQL connection:"
 	echo "     kubectl port-forward -n vrsky-database svc/postgresql 5432:5432"
 	echo "     psql -h localhost -U vrsky -d vrsky"
 	echo ""
-	echo "4. Test MinIO console:"
+	echo "5. Test MinIO console:"
 	echo "     kubectl port-forward -n vrsky-storage svc/minio 9001:9001"
 	echo "     Open: http://localhost:9001"
 	echo ""
-	echo "5. Deploy VRSky application services (API Gateway, Data Plane)"
+	echo "6. Monitor filter logs:"
+	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-filter"
 	echo ""
-	echo "6. Apply Ingress rules (after API Gateway is deployed):"
+	echo "7. Deploy VRSky application services (API Gateway, Data Plane)"
+	echo ""
+	echo "8. Apply Ingress rules (after API Gateway is deployed):"
 	echo "     kubectl apply -f infrastructure/kubernetes/ingress/ingress.yaml"
 	echo ""
 }
@@ -322,6 +349,8 @@ main() {
 	deploy_postgresql
 
 	deploy_minio
+
+	deploy_filter
 
 	deploy_monitoring
 
