@@ -5,11 +5,8 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
-
-COPY cmd/ ./cmd/
-
+COPY cmd/filter/ ./cmd/filter/
 COPY pkg/ ./pkg/
-
 COPY internal/ ./internal/
 
 RUN go mod download
