@@ -42,10 +42,9 @@ func NewRateLimitQueue(size int, logger *slog.Logger) *RateLimitQueue {
 // Returns ErrQueueClosed if queue has been closed
 func (q *RateLimitQueue) Enqueue(msg *QueuedMessage) error {
 	q.mu.RLock()
-	closed := q.closed
-	q.mu.RUnlock()
+	defer q.mu.RUnlock()
 
-	if closed {
+	if q.closed {
 		return ErrQueueClosed
 	}
 

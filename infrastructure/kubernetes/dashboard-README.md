@@ -247,10 +247,10 @@ You can customize the dashboard further:
 | Flag | Default | Example | Notes |
 |------|---------|---------|-------|
 | `--token-ttl` | 15m | 86400s | Token validity duration |
-| --authentication-mode | token | token,basic | Auth method |
-| --enable-skip-login | false | true | Allow skip login |
-| --kubeconfig | (auto) | /path/to/config | Kubeconfig path |
-| --insecure-bind-address | (none) | 127.0.0.1 | HTTP bind address |
+| `--authentication-mode` | token | token,basic | Auth method |
+| `--enable-skip-login` | false | true | Allow skip login |
+| `--kubeconfig` | (auto) | /path/to/config | Kubeconfig path |
+| `--insecure-bind-address` | (none) | 127.0.0.1 | HTTP bind address |
 
 ## References
 

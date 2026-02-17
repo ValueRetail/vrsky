@@ -152,8 +152,19 @@ get_token() {
     umask 077
     TOKEN_FILE=$(mktemp "${TMPDIR:-/tmp}/k8s-dashboard-token.XXXXXX")
     umask "$old_umask"
+
+    if [ -z "$TOKEN_FILE" ] || [ ! -f "$TOKEN_FILE" ]; then
+        print_error "Failed to create temporary file for token."
+        return 1
+    fi
+
+    if ! chmod 600 "$TOKEN_FILE"; then
+        print_error "Failed to set secure permissions on token file: $TOKEN_FILE"
+        return 1
+    fi
+
     printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
-    print_success "Token saved to $TOKEN_FILE (file permissions: 600)"
+    print_success "Token saved to $TOKEN_FILE (file permissions set to 600)"
 }
 
 # Port forward to access dashboard

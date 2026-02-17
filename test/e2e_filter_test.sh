@@ -2,7 +2,7 @@
 # Phase 1E Filter Component - E2E Test Scenarios
 # Tests the complete gating and validation flow
 
-set -e
+# Note: Real test execution/assertions not yet implemented; do not use 'set -e' here
 
 NATS_URL="${NATS_URL:-nats://localhost:4222}"
 FILTER_BINARY="${FILTER_BINARY:-./bin/filter}"

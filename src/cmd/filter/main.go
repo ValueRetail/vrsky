@@ -93,12 +93,12 @@ func main() {
 					continue
 				}
 
-			// Create envelope from NATS message
-			env := &envelope.Envelope{
-				ID:      uuid.New().String(),
-				Payload: msg.Data,
-				Source:  config.InputTopic,
-			}
+				// Create envelope from NATS message
+				env := &envelope.Envelope{
+					ID:      uuid.New().String(),
+					Payload: msg.Data,
+					Source:  config.InputTopic,
+				}
 
 				// Process the message through filter
 				decision, err := f.ProcessMessage(ctx, env)
