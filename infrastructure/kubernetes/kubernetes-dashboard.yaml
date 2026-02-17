@@ -66,8 +66,9 @@ spec:
           - --namespace=kubernetes-dashboard
           # Dashboard will use its default token TTL for authentication sessions
           - --authentication-mode=token
-          # Enable skip login button for easier access (optional - remove if security concern)
-          - --enable-skip-login
+          # NOTE: Skip-login is intentionally disabled to prevent unauthenticated access in production.
+          # To enable it ONLY for non-production/testing clusters, uncomment and add:
+          # - --enable-skip-login
           # Enable insecure local endpoint (for internal cluster access only)
           - --insecure-bind-address=127.0.0.1
         volumeMounts:

@@ -5,21 +5,25 @@
 This deployment provides the official Kubernetes Dashboard with:
 - **Extended Token TTL**: 24 hours (86400 seconds) instead of default 15 minutes
 - **Extended Session Timeout**: 8 hours (28800 seconds) instead of default 15 minutes
-- **Skip Login Option**: Quick access without re-entering tokens frequently
 - **Full RBAC**: Proper permissions for dashboard access
 - **TLS Support**: Secure HTTPS connections
+- **Security Hardened**: Skip-login disabled by default to prevent unauthenticated access
 
 ## Configuration Parameters
 
-The key configuration for extended session time is in the deployment arguments:
+The deployment is configured for secure production use:
 
 ```yaml
 args:
-  - --token-ttl=86400          # Token valid for 24 hours
+  - --auto-generate-cert
+  - --namespace=kubernetes-dashboard
   - --authentication-mode=token
-  - --enable-skip-login         # Optional: skip login screen
+  # Skip-login is disabled for security (remove comment to enable for non-prod only)
+  # - --enable-skip-login
   - --insecure-bind-address=127.0.0.1
 ```
+
+**Security Note**: The `--enable-skip-login` flag is intentionally disabled. Enabling it allows unauthenticated access to the dashboard and is only suitable for non-production testing environments.
 
 ## Deployment
 
@@ -156,31 +160,37 @@ kubectl -n kubernetes-dashboard create token admin-user --duration=24h
 
 ## Security Considerations
 
-⚠️ **IMPORTANT**: The `--enable-skip-login` flag allows unauthenticated access!
+🔒 **SECURITY BY DEFAULT**: This deployment disables `--enable-skip-login` to prevent unauthenticated access.
 
-### For Production
+### Critical Security Notes
 
-Remove `--enable-skip-login` and use token authentication:
+- ⚠️ **NEVER enable `--enable-skip-login` in production** - it allows full cluster access without authentication
+- ⚠️ **Token-based authentication only** - always require valid tokens to access the dashboard
+- ⚠️ **RBAC-restricted service account** - this deployment uses cluster-admin (for testing only)
+
+### For Production Deployments
+
+1. **Remove cluster-admin access**: Create a limited service account with only necessary permissions
+2. **Use TLS with Ingress**: Deploy behind nginx-ingress with cert-manager for HTTPS
+3. **Network Policy**: Restrict access to trusted networks only
+4. **Audit Logging**: Enable and monitor all dashboard access
+5. **Token Rotation**: Even with 24-hour TTL, rotate tokens regularly
+6. **No Unauthenticated Access**: Keep `--enable-skip-login` disabled (it is disabled by default)
+
+### Testing Only: Enable Skip-Login
+
+To enable skip-login ONLY for non-production testing clusters, edit `kubernetes-dashboard.yaml`:
 
 ```yaml
 args:
   - --auto-generate-cert
   - --namespace=kubernetes-dashboard
-  - --token-ttl=86400
   - --authentication-mode=token
-  # Remove: - --enable-skip-login
+  - --enable-skip-login         # ⚠️ TESTING ONLY - DO NOT USE IN PRODUCTION
   - --insecure-bind-address=127.0.0.1
 ```
 
-Then always use explicit tokens to log in.
-
-### Best Practices
-
-1. **Use RBAC**: Don't give dashboard full cluster-admin access
-2. **Use TLS**: Deploy with proper certificates (Ingress + cert-manager)
-3. **Network Policy**: Restrict who can access the dashboard
-4. **Audit Logging**: Monitor dashboard access
-5. **Token Rotation**: Periodically refresh tokens (though 24h TTL helps)
+Then use `./dashboard.sh` to access it.
 
 ## Uninstall
 

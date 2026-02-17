@@ -146,10 +146,14 @@ get_token() {
     echo ""
     
     # Also save to a securely created temporary file
+    # Set restrictive umask to ensure file is created with 600 permissions from the start
+    # This eliminates race condition window where file might be readable by other users
+    old_umask=$(umask)
+    umask 077
     TOKEN_FILE=$(mktemp "${TMPDIR:-/tmp}/k8s-dashboard-token.XXXXXX")
-    chmod 600 "$TOKEN_FILE"
+    umask "$old_umask"
     printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
-    print_success "Token saved to $TOKEN_FILE (file permissions set to 600)"
+    print_success "Token saved to $TOKEN_FILE (file permissions: 600)"
 }
 
 # Port forward to access dashboard
