@@ -551,3 +551,307 @@ func TestIntegration_ErrorRecovery(t *testing.T) {
 		t.Errorf("Timeout waiting for message in DLQ")
 	}
 }
+
+// ============================================================================
+// Priority 2: Conditional Routing Integration Tests
+// ============================================================================
+
+func TestIntegration_Priority2_BasicRouting(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	config := &Config{
+		FilterID:       "routing_filter",
+		InputTopic:     "test.routing.input",
+		OutputTopic:    "test.routing.default",
+		RejectionTopic: "test.routing.rejection",
+		Rules: []interface{}{
+			map[interface{}]interface{}{
+				"name": "accept_all",
+				"condition": map[interface{}]interface{}{
+					"operator": "always",
+				},
+			},
+		},
+		RoutingRules: []interface{}{
+			map[interface{}]interface{}{
+				"id":           "premium_route",
+				"name":         "Premium Orders",
+				"priority":     1,
+				"condition":    map[interface{}]interface{}{"operator": "==", "field": "tier", "value": "premium"},
+				"output_topic": "test.routing.premium",
+			},
+			map[interface{}]interface{}{
+				"id":           "standard_route",
+				"name":         "Standard Orders",
+				"priority":     2,
+				"condition":    map[interface{}]interface{}{"operator": "always"},
+				"output_topic": "test.routing.standard",
+			},
+		},
+	}
+
+	f, err := NewFilter("routing_filter", config, nc, logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		t.Fatalf("NewFilter failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := f.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer f.Stop(ctx)
+
+	// Subscribe to routing topics
+	premiumMsgs := make(chan *envelope.Envelope, 1)
+	standardMsgs := make(chan *envelope.Envelope, 1)
+
+	premiumSub, _ := nc.Subscribe("test.routing.premium", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		premiumMsgs <- env
+	})
+	defer premiumSub.Unsubscribe()
+
+	standardSub, _ := nc.Subscribe("test.routing.standard", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		standardMsgs <- env
+	})
+	defer standardSub.Unsubscribe()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Send premium order
+	premiumOrder := envelope.New()
+	premiumOrder.ID = "premium_order_1"
+	premiumOrder.Payload = []byte(`{"order_id":"p1","tier":"premium","amount":1500}`)
+	premiumOrder.ContentType = "application/json"
+
+	data, _ := envelope.Marshal(premiumOrder)
+	nc.Publish("test.routing.input", data)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Send standard order
+	standardOrder := envelope.New()
+	standardOrder.ID = "standard_order_1"
+	standardOrder.Payload = []byte(`{"order_id":"s1","tier":"standard","amount":50}`)
+	standardOrder.ContentType = "application/json"
+
+	data, _ = envelope.Marshal(standardOrder)
+	nc.Publish("test.routing.input", data)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify routing
+	select {
+	case msg := <-premiumMsgs:
+		if msg == nil || msg.ID != "premium_order_1" {
+			t.Errorf("Premium message not routed correctly")
+		}
+	case <-time.After(1 * time.Second):
+		t.Errorf("Premium message not received in routing topic")
+	}
+
+	select {
+	case msg := <-standardMsgs:
+		if msg == nil || msg.ID != "standard_order_1" {
+			t.Errorf("Standard message not routed correctly")
+		}
+	case <-time.After(1 * time.Second):
+		t.Errorf("Standard message not received in routing topic")
+	}
+}
+
+func TestIntegration_Priority2_TransformationsWithRouting(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	config := &Config{
+		FilterID:       "transform_filter",
+		InputTopic:     "test.transform.input",
+		OutputTopic:    "test.transform.default",
+		RejectionTopic: "test.transform.rejection",
+		Rules: []interface{}{
+			map[interface{}]interface{}{
+				"name": "accept_all",
+				"condition": map[interface{}]interface{}{
+					"operator": "always",
+				},
+			},
+		},
+		RoutingRules: []interface{}{
+			map[interface{}]interface{}{
+				"id":           "with_transforms",
+				"name":         "Add Metadata",
+				"priority":     1,
+				"condition":    map[interface{}]interface{}{"operator": "always"},
+				"output_topic": "test.transform.routed",
+				"transformations": []interface{}{
+					map[interface{}]interface{}{
+						"action": "add_field",
+						"field":  "routed_by",
+						"value":  "priority2_filter",
+					},
+					map[interface{}]interface{}{
+						"action": "add_field",
+						"field":  "trace_id",
+						"value":  "${uuid()}",
+					},
+				},
+			},
+		},
+	}
+
+	f, err := NewFilter("transform_filter", config, nc, logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		t.Fatalf("NewFilter failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := f.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer f.Stop(ctx)
+
+	// Subscribe to routed topic
+	routedMsgs := make(chan *envelope.Envelope, 1)
+	routedSub, _ := nc.Subscribe("test.transform.routed", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		routedMsgs <- env
+	})
+	defer routedSub.Unsubscribe()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Send message
+	testOrder := envelope.New()
+	testOrder.ID = "transform_test_1"
+	testOrder.Payload = []byte(`{"order_id":"t1","status":"pending"}`)
+	testOrder.ContentType = "application/json"
+
+	data, _ := envelope.Marshal(testOrder)
+	nc.Publish("test.transform.input", data)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify transformations were applied
+	select {
+	case msg := <-routedMsgs:
+		if msg == nil || msg.ID != "transform_test_1" {
+			t.Errorf("Message not routed correctly")
+			return
+		}
+
+		if msg.Metadata["routed_by"] != "priority2_filter" {
+			t.Errorf("routed_by field not set correctly: %v", msg.Metadata["routed_by"])
+		}
+
+		if _, exists := msg.Metadata["trace_id"]; !exists {
+			t.Errorf("trace_id field not added")
+		}
+
+		if traceID, ok := msg.Metadata["trace_id"].(string); ok {
+			if len(traceID) != 36 { // UUID length
+				t.Errorf("trace_id not in correct format: %s", traceID)
+			}
+		} else {
+			t.Errorf("trace_id not a string: %T", msg.Metadata["trace_id"])
+		}
+
+	case <-time.After(1 * time.Second):
+		t.Errorf("Message not received in routed topic")
+	}
+}
+
+func TestIntegration_Priority2_NestedFieldRouting(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	config := &Config{
+		FilterID:       "nested_filter",
+		InputTopic:     "test.nested.input",
+		OutputTopic:    "test.nested.default",
+		RejectionTopic: "test.nested.rejection",
+		Rules: []interface{}{
+			map[interface{}]interface{}{
+				"name": "accept_all",
+				"condition": map[interface{}]interface{}{
+					"operator": "always",
+				},
+			},
+		},
+		RoutingRules: []interface{}{
+			map[interface{}]interface{}{
+				"id":           "high_value",
+				"priority":     1,
+				"condition":    map[interface{}]interface{}{"operator": ">", "field": "order.amount", "value": 1000},
+				"output_topic": "test.nested.high_value",
+			},
+			map[interface{}]interface{}{
+				"id":           "standard",
+				"priority":     2,
+				"condition":    map[interface{}]interface{}{"operator": "always"},
+				"output_topic": "test.nested.standard",
+			},
+		},
+	}
+
+	f, err := NewFilter("nested_filter", config, nc, logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		t.Fatalf("NewFilter failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := f.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer f.Stop(ctx)
+
+	// Subscribe to routing topics
+	highValueMsgs := make(chan *envelope.Envelope, 1)
+	standardMsgs := make(chan *envelope.Envelope, 1)
+
+	highValueSub, _ := nc.Subscribe("test.nested.high_value", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		highValueMsgs <- env
+	})
+	defer highValueSub.Unsubscribe()
+
+	standardSub, _ := nc.Subscribe("test.nested.standard", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		standardMsgs <- env
+	})
+	defer standardSub.Unsubscribe()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Send high-value order
+	highOrder := envelope.New()
+	highOrder.ID = "high_order_1"
+	highOrder.Payload = []byte(`{"order":{"amount":1500,"currency":"USD"}}`)
+	highOrder.ContentType = "application/json"
+
+	data, _ := envelope.Marshal(highOrder)
+	nc.Publish("test.nested.input", data)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify routing
+	select {
+	case msg := <-highValueMsgs:
+		if msg == nil || msg.ID != "high_order_1" {
+			t.Errorf("High-value message not routed correctly")
+		}
+	case <-time.After(1 * time.Second):
+		t.Errorf("High-value message not received")
+	}
+}

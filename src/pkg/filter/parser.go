@@ -82,7 +82,7 @@ func (me *MessageExtractor) Extract(message interface{}, path string) (interface
 	}
 
 	ce := NewConditionEngine()
-	return ce.getFieldValue(message, path)
+	return ce.GetFieldValue(message, path)
 }
 
 // ExtractMultiple extracts multiple values from a message
@@ -91,7 +91,7 @@ func (me *MessageExtractor) ExtractMultiple(message interface{}, paths ...string
 	ce := NewConditionEngine()
 
 	for _, path := range paths {
-		value, err := ce.getFieldValue(message, path)
+		value, err := ce.GetFieldValue(message, path)
 		if err != nil {
 			return nil, fmt.Errorf("extract %s: %w", path, err)
 		}

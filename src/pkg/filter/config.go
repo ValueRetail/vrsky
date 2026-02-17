@@ -13,7 +13,8 @@ type Config struct {
 	InputTopic     string        `yaml:"input_topic"`
 	OutputTopic    string        `yaml:"output_topic"`
 	RejectionTopic string        `yaml:"rejection_topic"`
-	Rules          []interface{} `yaml:"rules"` // Raw rules for flexibility
+	Rules          []interface{} `yaml:"rules"`         // Raw gating/validation rules
+	RoutingRules   []interface{} `yaml:"routing_rules"` // Optional routing rules for Priority 2
 }
 
 // Rule represents a single filter rule
@@ -68,5 +69,6 @@ func (c *Config) Validate() error {
 	if len(c.Rules) == 0 {
 		return fmt.Errorf("at least one rule is required")
 	}
+	// Routing rules are optional (Priority 2 feature)
 	return nil
 }

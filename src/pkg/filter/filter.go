@@ -73,6 +73,10 @@ type FilterImpl struct {
 	// Validators and schema handler
 	schemaValidator *SchemaValidator
 	conditionEngine *ConditionEngine
+
+	// Priority 2: Routing and Transformations (optional)
+	routingEngine        RoutingEngine
+	transformationEngine TransformationEngine
 }
 
 // NewFilter creates a new filter instance
@@ -115,22 +119,37 @@ func NewFilter(
 		return nil, fmt.Errorf("parse rules: %w", err)
 	}
 
+	// Initialize routing engine (optional, Priority 2)
+	var routingEngine RoutingEngine
+	if len(config.RoutingRules) > 0 {
+		var err error
+		routingEngine, err = NewRoutingEngine(config.RoutingRules, conditionEngine)
+		if err != nil {
+			return nil, fmt.Errorf("initialize routing engine: %w", err)
+		}
+	}
+
+	// Initialize transformation engine (optional, Priority 2)
+	transformationEngine := NewTransformationEngine(conditionEngine)
+
 	f := &FilterImpl{
-		id:                 id,
-		config:             config,
-		rules:              rules,
-		natsConn:           natsConn,
-		natsInputSubject:   config.InputTopic,
-		natsOutputTopic:    config.OutputTopic,
-		natsRejectionTopic: config.RejectionTopic,
-		logger:             logger,
-		metricsRegistry:    metricsRegistry,
-		health:             component.HealthStopped,
-		backoffConfig:      DefaultBackoffConfig(),
-		maxRetries:         3,
-		schemaValidator:    schemaValidator,
-		conditionEngine:    conditionEngine,
-		closed:             true, // Initialize as closed (not yet started)
+		id:                   id,
+		config:               config,
+		rules:                rules,
+		natsConn:             natsConn,
+		natsInputSubject:     config.InputTopic,
+		natsOutputTopic:      config.OutputTopic,
+		natsRejectionTopic:   config.RejectionTopic,
+		logger:               logger,
+		metricsRegistry:      metricsRegistry,
+		health:               component.HealthStopped,
+		backoffConfig:        DefaultBackoffConfig(),
+		maxRetries:           3,
+		schemaValidator:      schemaValidator,
+		conditionEngine:      conditionEngine,
+		routingEngine:        routingEngine,
+		transformationEngine: transformationEngine,
+		closed:               true, // Initialize as closed (not yet started)
 	}
 
 	// Register metrics
@@ -327,6 +346,54 @@ func (f *FilterImpl) consumeMessages() {
 		var outputTopic string
 		if decision.Action == ActionAccept {
 			outputTopic = f.natsOutputTopic
+
+			// Priority 2: Apply conditional routing if configured
+			if f.routingEngine != nil {
+				// Parse payload for routing evaluation
+				var payload interface{}
+				if err := json.Unmarshal(env.Payload, &payload); err != nil {
+					f.logger.WarnContext(f.ctx, "Failed to parse payload for routing",
+						"envelope_id", env.ID,
+						"error", err,
+					)
+					f.metrics.RecordRoutingFailure()
+					outputTopic = f.natsRejectionTopic
+				} else {
+					// Evaluate routing rules
+					routingDecision, err := f.routingEngine.EvaluateRules(payload, env.Metadata)
+					if err != nil {
+						f.logger.WarnContext(f.ctx, "Routing evaluation failed",
+							"envelope_id", env.ID,
+							"error", err,
+						)
+						f.metrics.RecordRoutingFailure()
+						outputTopic = f.natsRejectionTopic
+					} else {
+						outputTopic = routingDecision.OutputTopic
+
+						// Apply transformations (Priority 2)
+						if len(routingDecision.Transformations) > 0 {
+							if err := f.transformationEngine.ApplyTransformations(env, routingDecision.Transformations, payload); err != nil {
+								f.logger.WarnContext(f.ctx, "Transformation failed, sending to DLQ",
+									"envelope_id", env.ID,
+									"routing_rule", routingDecision.RuleID,
+									"error", err,
+								)
+								f.metrics.RecordTransformationFailure()
+								outputTopic = f.natsRejectionTopic
+							}
+						}
+
+						// Apply routing metadata
+						if err := ApplyRoutingToEnvelope(env, routingDecision, f.id); err != nil {
+							f.logger.WarnContext(f.ctx, "Failed to apply routing metadata",
+								"envelope_id", env.ID,
+								"error", err,
+							)
+						}
+					}
+				}
+			}
 		} else {
 			outputTopic = f.natsRejectionTopic
 		}

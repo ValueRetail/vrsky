@@ -8,11 +8,13 @@ import (
 
 // FilterMetrics holds Prometheus metrics for the filter
 type FilterMetrics struct {
-	receivedCounter  prometheus.Counter
-	acceptedCounter  prometheus.Counter
-	rejectedCounter  prometheus.Counter
-	failedCounter    prometheus.Counter
-	processHistogram prometheus.Histogram
+	receivedCounter              prometheus.Counter
+	acceptedCounter              prometheus.Counter
+	rejectedCounter              prometheus.Counter
+	failedCounter                prometheus.Counter
+	routingFailureCounter        prometheus.Counter
+	transformationFailureCounter prometheus.Counter
+	processHistogram             prometheus.Histogram
 }
 
 // NewFilterMetrics creates and registers filter metrics
@@ -49,6 +51,22 @@ func NewFilterMetrics(filterID string, registerer prometheus.Registerer) *Filter
 		},
 	})
 
+	routingFailureCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "vrsky_filter_routing_failures_total",
+		Help: "Total number of routing evaluation failures",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
+	transformationFailureCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "vrsky_filter_transformation_failures_total",
+		Help: "Total number of transformation failures",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
 	processHistogram := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name: "vrsky_filter_process_duration_seconds",
 		Help: "Duration of message processing in seconds",
@@ -58,14 +76,16 @@ func NewFilterMetrics(filterID string, registerer prometheus.Registerer) *Filter
 		Buckets: prometheus.DefBuckets,
 	})
 
-	registerer.MustRegister(receivedCounter, acceptedCounter, rejectedCounter, failedCounter, processHistogram)
+	registerer.MustRegister(receivedCounter, acceptedCounter, rejectedCounter, failedCounter, routingFailureCounter, transformationFailureCounter, processHistogram)
 
 	return &FilterMetrics{
-		receivedCounter:  receivedCounter,
-		acceptedCounter:  acceptedCounter,
-		rejectedCounter:  rejectedCounter,
-		failedCounter:    failedCounter,
-		processHistogram: processHistogram,
+		receivedCounter:              receivedCounter,
+		acceptedCounter:              acceptedCounter,
+		rejectedCounter:              rejectedCounter,
+		failedCounter:                failedCounter,
+		routingFailureCounter:        routingFailureCounter,
+		transformationFailureCounter: transformationFailureCounter,
+		processHistogram:             processHistogram,
 	}
 }
 
@@ -92,6 +112,16 @@ func (m *FilterMetrics) RecordFailure() {
 // RecordProcessDuration records the processing duration
 func (m *FilterMetrics) RecordProcessDuration(duration time.Duration) {
 	m.processHistogram.Observe(duration.Seconds())
+}
+
+// RecordRoutingFailure increments the routing failure counter (Priority 2)
+func (m *FilterMetrics) RecordRoutingFailure() {
+	m.routingFailureCounter.Inc()
+}
+
+// RecordTransformationFailure increments the transformation failure counter (Priority 2)
+func (m *FilterMetrics) RecordTransformationFailure() {
+	m.transformationFailureCounter.Inc()
 }
 
 // BackoffConfig holds exponential backoff configuration

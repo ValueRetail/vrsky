@@ -50,7 +50,7 @@ func (ce *ConditionEngine) Evaluate(cond *Condition, payload interface{}) (bool,
 	}
 
 	// Extract field value from payload using dot notation
-	fieldValue, err := ce.getFieldValue(payload, cond.Field)
+	fieldValue, err := ce.GetFieldValue(payload, cond.Field)
 	if err != nil {
 		return false, err
 	}
@@ -65,9 +65,9 @@ func (ce *ConditionEngine) Evaluate(cond *Condition, payload interface{}) (bool,
 	return opFunc(fieldValue, cond.Value)
 }
 
-// getFieldValue extracts a value from payload using dot notation
+// GetFieldValue extracts a value from payload using dot notation
 // e.g., "user.name" or "items[0].price"
-func (ce *ConditionEngine) getFieldValue(payload interface{}, path string) (interface{}, error) {
+func (ce *ConditionEngine) GetFieldValue(payload interface{}, path string) (interface{}, error) {
 	if path == "" {
 		return payload, nil
 	}

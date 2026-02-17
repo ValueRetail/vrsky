@@ -282,7 +282,7 @@ func TestConditionEngine_GetFieldValue(t *testing.T) {
 	ce := NewConditionEngine()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ce.getFieldValue(tt.payload, tt.path)
+			got, err := ce.GetFieldValue(tt.payload, tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("getFieldValue error = %v, wantError %v", err, tt.wantErr)
 				return
