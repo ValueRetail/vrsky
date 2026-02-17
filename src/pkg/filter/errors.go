@@ -16,6 +16,7 @@ import (
 var (
 	ErrRateLimitExceeded      = errors.New("rate limit exceeded")
 	ErrQueueFull              = errors.New("rate limit queue full")
+	ErrQueueClosed            = errors.New("rate limit queue closed")
 	ErrInvalidRateLimitRule   = errors.New("invalid rate limit rule configuration")
 	ErrConcurrentLimitExceeded = errors.New("concurrent limit exceeded")
 )
