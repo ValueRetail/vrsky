@@ -1,0 +1,29 @@
+
+  # Filter service - applies Priority 1/2/3 filtering, routing, and rate limiting
+  filter:
+    build:
+      context: ./src
+      dockerfile: cmd/filter/Dockerfile
+    container_name: vrsky-filter
+    environment:
+      # Filter configuration
+      FILTER_ID: "order-processor-filter"
+      INPUT_TOPIC: "postgres.changes"
+      OUTPUT_TOPIC: "filter.output"
+      REJECTION_TOPIC: "filter.rejection"
+      
+      # NATS configuration
+      NATS_URL: "nats://nats:4222"
+      
+      # Logging
+      LOG_LEVEL: "info"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-consumer:
+        condition: service_started
+    ports:
+      - "9092:9090"
+    networks:
+      - vrsky-network
+    restart: unless-stopped

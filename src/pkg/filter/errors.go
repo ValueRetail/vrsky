@@ -2,6 +2,7 @@ package filter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,14 @@ import (
 	"sync"
 	"syscall"
 	"time"
+)
+
+// Rate limit errors
+var (
+	ErrRateLimitExceeded      = errors.New("rate limit exceeded")
+	ErrQueueFull              = errors.New("rate limit queue full")
+	ErrInvalidRateLimitRule   = errors.New("invalid rate limit rule configuration")
+	ErrConcurrentLimitExceeded = errors.New("concurrent limit exceeded")
 )
 
 // ErrorHandler provides structured error handling with context

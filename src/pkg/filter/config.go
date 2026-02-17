@@ -13,8 +13,9 @@ type Config struct {
 	InputTopic     string        `yaml:"input_topic"`
 	OutputTopic    string        `yaml:"output_topic"`
 	RejectionTopic string        `yaml:"rejection_topic"`
-	Rules          []interface{} `yaml:"rules"`         // Raw gating/validation rules
-	RoutingRules   []interface{} `yaml:"routing_rules"` // Optional routing rules for Priority 2
+	Rules          []interface{} `yaml:"rules"`              // Raw gating/validation rules
+	RoutingRules   []interface{} `yaml:"routing_rules"`      // Optional routing rules for Priority 2
+	RateLimitRules []interface{} `yaml:"rate_limit_rules"`   // Optional rate limit rules for Priority 3
 }
 
 // Rule represents a single filter rule

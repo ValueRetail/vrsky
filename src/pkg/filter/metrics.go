@@ -15,6 +15,10 @@ type FilterMetrics struct {
 	routingFailureCounter        prometheus.Counter
 	transformationFailureCounter prometheus.Counter
 	processHistogram             prometheus.Histogram
+	rateLimitDropCounter         prometheus.Counter
+	rateLimitRejectCounter       prometheus.Counter
+	rateLimitQueueCounter        prometheus.Counter
+	rateLimitQueueDepthGauge     prometheus.Gauge
 }
 
 // NewFilterMetrics creates and registers filter metrics
@@ -76,7 +80,39 @@ func NewFilterMetrics(filterID string, registerer prometheus.Registerer) *Filter
 		Buckets: prometheus.DefBuckets,
 	})
 
-	registerer.MustRegister(receivedCounter, acceptedCounter, rejectedCounter, failedCounter, routingFailureCounter, transformationFailureCounter, processHistogram)
+	rateLimitDropCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "vrsky_filter_ratelimit_dropped_total",
+		Help: "Total number of messages dropped by rate limiter",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
+	rateLimitRejectCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "vrsky_filter_ratelimit_rejected_total",
+		Help: "Total number of messages rejected by rate limiter",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
+	rateLimitQueueCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "vrsky_filter_ratelimit_queued_total",
+		Help: "Total number of messages queued by rate limiter",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
+	rateLimitQueueDepthGauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "vrsky_filter_ratelimit_queue_depth",
+		Help: "Current depth of rate limit queue",
+		ConstLabels: prometheus.Labels{
+			"filter_id": filterID,
+		},
+	})
+
+	registerer.MustRegister(receivedCounter, acceptedCounter, rejectedCounter, failedCounter, routingFailureCounter, transformationFailureCounter, processHistogram, rateLimitDropCounter, rateLimitRejectCounter, rateLimitQueueCounter, rateLimitQueueDepthGauge)
 
 	return &FilterMetrics{
 		receivedCounter:              receivedCounter,
@@ -86,6 +122,10 @@ func NewFilterMetrics(filterID string, registerer prometheus.Registerer) *Filter
 		routingFailureCounter:        routingFailureCounter,
 		transformationFailureCounter: transformationFailureCounter,
 		processHistogram:             processHistogram,
+		rateLimitDropCounter:         rateLimitDropCounter,
+		rateLimitRejectCounter:       rateLimitRejectCounter,
+		rateLimitQueueCounter:        rateLimitQueueCounter,
+		rateLimitQueueDepthGauge:     rateLimitQueueDepthGauge,
 	}
 }
 
@@ -122,6 +162,26 @@ func (m *FilterMetrics) RecordRoutingFailure() {
 // RecordTransformationFailure increments the transformation failure counter (Priority 2)
 func (m *FilterMetrics) RecordTransformationFailure() {
 	m.transformationFailureCounter.Inc()
+}
+
+// RecordRateLimitDrop increments the rate limit drop counter (Priority 3)
+func (m *FilterMetrics) RecordRateLimitDrop() {
+	m.rateLimitDropCounter.Inc()
+}
+
+// RecordRateLimitReject increments the rate limit reject counter (Priority 3)
+func (m *FilterMetrics) RecordRateLimitReject() {
+	m.rateLimitRejectCounter.Inc()
+}
+
+// RecordRateLimitQueue increments the rate limit queue counter (Priority 3)
+func (m *FilterMetrics) RecordRateLimitQueue() {
+	m.rateLimitQueueCounter.Inc()
+}
+
+// UpdateQueueDepth updates the queue depth gauge (Priority 3)
+func (m *FilterMetrics) UpdateQueueDepth(depth int) {
+	m.rateLimitQueueDepthGauge.Set(float64(depth))
 }
 
 // BackoffConfig holds exponential backoff configuration

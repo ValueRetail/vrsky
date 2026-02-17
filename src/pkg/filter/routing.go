@@ -252,22 +252,6 @@ func getStringKey(m map[interface{}]interface{}, keys ...string) string {
 	return ""
 }
 
-// getIntKey safely extracts int from map
-func getIntKey(m map[interface{}]interface{}, key string, defaultVal int) int {
-	if v, ok := m[key]; ok {
-		switch val := v.(type) {
-		case int:
-			return val
-		case float64:
-			return int(val)
-		case string:
-			var i int
-			fmt.Sscanf(val, "%d", &i)
-			return i
-		}
-	}
-	return defaultVal
-}
 
 // getBoolKey safely extracts bool from map
 func getBoolKey(m map[interface{}]interface{}, key string, defaultVal bool) bool {
