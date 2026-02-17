@@ -1,8 +1,9 @@
 package filter
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"os"
 	"regexp"
 	"strings"
@@ -295,7 +296,14 @@ func (te *TemplateEngine) resolveExpression(expr string) (interface{}, error) {
 			return nil, fmt.Errorf("min (%d) cannot be greater than max (%d)", min, max)
 		}
 
-		return min + rand.Intn(max-min+1), nil
+		// Use crypto/rand for thread-safe random number generation
+		// This avoids race conditions when transformations are applied concurrently
+		randNum, err := rand.Int(rand.Reader, big.NewInt(int64(max-min+1)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate random number: %w", err)
+		}
+
+		return min + int(randNum.Int64()), nil
 	}
 
 	// Field reference: field_name (not supported in priority 2, reserved for future)
