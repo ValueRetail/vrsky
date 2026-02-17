@@ -130,6 +130,7 @@ func NewFilter(
 		maxRetries:         3,
 		schemaValidator:    schemaValidator,
 		conditionEngine:    conditionEngine,
+		closed:             true, // Initialize as closed (not yet started)
 	}
 
 	// Register metrics

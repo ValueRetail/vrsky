@@ -6,11 +6,13 @@ package filter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
@@ -46,7 +48,8 @@ func TestIntegration_FilterAcceptsMessage(t *testing.T) {
 		},
 	}
 
-	filter, err := NewFilter("test_filter", config, nc, logger, nil)
+	reg := prometheus.NewRegistry()
+	filter, err := NewFilter("test_filter", config, nc, logger, reg)
 	if err != nil {
 		t.Fatalf("NewFilter error = %v", err)
 	}
@@ -68,6 +71,9 @@ func TestIntegration_FilterAcceptsMessage(t *testing.T) {
 		t.Fatalf("Start error = %v", err)
 	}
 	defer filter.Stop(ctx)
+
+	// Wait for subscription to be established
+	time.Sleep(100 * time.Millisecond)
 
 	// Publish test message
 	testEnv := envelope.New()
@@ -116,7 +122,8 @@ func TestIntegration_FilterRejectsMessage(t *testing.T) {
 		},
 	}
 
-	filter, err := NewFilter("test_filter", config, nc, logger, nil)
+	reg := prometheus.NewRegistry()
+	filter, err := NewFilter("test_filter", config, nc, logger, reg)
 	if err != nil {
 		t.Fatalf("NewFilter error = %v", err)
 	}
@@ -138,6 +145,9 @@ func TestIntegration_FilterRejectsMessage(t *testing.T) {
 		t.Fatalf("Start error = %v", err)
 	}
 	defer filter.Stop(ctx)
+
+	// Wait for subscription to be established
+	time.Sleep(100 * time.Millisecond)
 
 	// Publish test message with inactive status
 	testEnv := envelope.New()
@@ -186,7 +196,8 @@ func TestIntegration_FilterWithComplexCondition(t *testing.T) {
 		},
 	}
 
-	filter, err := NewFilter("test_filter", config, nc, logger, nil)
+	reg := prometheus.NewRegistry()
+	filter, err := NewFilter("test_filter", config, nc, logger, reg)
 	if err != nil {
 		t.Fatalf("NewFilter error = %v", err)
 	}
@@ -207,6 +218,9 @@ func TestIntegration_FilterWithComplexCondition(t *testing.T) {
 		t.Fatalf("Start error = %v", err)
 	}
 	defer filter.Stop(ctx)
+
+	// Wait for subscription to be established
+	time.Sleep(100 * time.Millisecond)
 
 	// Publish test message with nested field
 	testEnv := envelope.New()
@@ -263,7 +277,8 @@ func TestIntegration_MultipleFilters(t *testing.T) {
 		},
 	}
 
-	filter1, _ := NewFilter("filter1", filter1Config, nc, logger, nil)
+	reg1 := prometheus.NewRegistry()
+	filter1, _ := NewFilter("filter1", filter1Config, nc, logger, reg1)
 
 	filter2Config := &Config{
 		FilterID:       "filter2",
@@ -282,7 +297,8 @@ func TestIntegration_MultipleFilters(t *testing.T) {
 		},
 	}
 
-	filter2, _ := NewFilter("filter2", filter2Config, nc, logger, nil)
+	reg2 := prometheus.NewRegistry()
+	filter2, _ := NewFilter("filter2", filter2Config, nc, logger, reg2)
 
 	// Subscribe to final output
 	outputReceived := make(chan []byte, 1)
@@ -298,6 +314,9 @@ func TestIntegration_MultipleFilters(t *testing.T) {
 	filter2.Start(ctx)
 	defer filter1.Stop(ctx)
 	defer filter2.Stop(ctx)
+
+	// Wait for subscriptions to be established
+	time.Sleep(100 * time.Millisecond)
 
 	// Publish test message
 	testEnv := envelope.New()
@@ -344,7 +363,8 @@ func TestIntegration_RejectionHandling(t *testing.T) {
 		},
 	}
 
-	filter, _ := NewFilter("test_filter", config, nc, logger, nil)
+	reg := prometheus.NewRegistry()
+	filter, _ := NewFilter("test_filter", config, nc, logger, reg)
 
 	// Subscribe to rejection topic to verify structure
 	rejectionReceived := make(chan *envelope.Envelope, 1)
@@ -360,6 +380,9 @@ func TestIntegration_RejectionHandling(t *testing.T) {
 	filter.Start(ctx)
 	defer filter.Stop(ctx)
 
+	// Wait for subscription to be established
+	time.Sleep(100 * time.Millisecond)
+
 	testEnv := envelope.New()
 	testEnv.ID = "test_msg_5"
 	testEnv.Payload = []byte(`{"data":"test"}`)
@@ -368,13 +391,163 @@ func TestIntegration_RejectionHandling(t *testing.T) {
 	data, _ := envelope.Marshal(testEnv)
 	nc.Publish(config.InputTopic, data)
 
-	// Wait and verify rejection metadata
+	// Wait and verify rejection message received
 	select {
 	case rejEnv := <-rejectionReceived:
-		if rejEnv.Metadata["rejection_reason"] == nil {
-			t.Errorf("Rejection reason not set in metadata")
+		if rejEnv == nil {
+			t.Errorf("Rejection message not received")
+		}
+		// Verify message was routed to rejection topic
+		if rejEnv.ID != testEnv.ID {
+			t.Errorf("Wrong envelope received, expected ID %s, got %s", testEnv.ID, rejEnv.ID)
 		}
 	case <-time.After(2 * time.Second):
 		t.Errorf("Timeout waiting for rejection message")
+	}
+}
+
+func TestIntegration_RejectionHandlerMetadata(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	rejectionHandler := NewRejectionHandler(nc, "test.rejection.handler", "test.dlq", logger)
+
+	testEnv := envelope.New()
+	testEnv.ID = "test_msg_metadata"
+	testEnv.Payload = []byte(`{"data":"test"}`)
+	testEnv.ContentType = "application/json"
+
+	rejectionReceived := make(chan *envelope.Envelope, 1)
+	sub, _ := nc.Subscribe("test.rejection.handler", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		rejectionReceived <- env
+	})
+	defer sub.Unsubscribe()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Handle rejection with metadata
+	err := rejectionHandler.HandleRejection(ctx, testEnv, "test rejection reason", "test_rule")
+	if err != nil {
+		t.Fatalf("HandleRejection error = %v", err)
+	}
+
+	// Verify metadata was added
+	select {
+	case rejEnv := <-rejectionReceived:
+		if rejEnv == nil || rejEnv.Metadata == nil {
+			t.Errorf("Rejection metadata not found")
+		}
+		if reason, ok := rejEnv.Metadata["rejection_reason"]; !ok || reason != "test rejection reason" {
+			t.Errorf("Rejection reason not set correctly, got: %v", reason)
+		}
+		if ruleID, ok := rejEnv.Metadata["rejected_by_rule"]; !ok || ruleID != "test_rule" {
+			t.Errorf("Rule ID not set correctly, got: %v", ruleID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("Timeout waiting for rejection with metadata")
+	}
+}
+
+func TestIntegration_DeadLetterQueue(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	dlq := NewDeadLetterQueue(nc, "test.dlq", logger)
+
+	testEnv := envelope.New()
+	testEnv.ID = "test_msg_dlq"
+	testEnv.Payload = []byte(`{"data":"dlq_test"}`)
+	testEnv.ContentType = "application/json"
+	testEnv.RetryCount = 3
+
+	dlqReceived := make(chan *envelope.Envelope, 1)
+	sub, _ := nc.Subscribe("test.dlq", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		dlqReceived <- env
+	})
+	defer sub.Unsubscribe()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Publish to DLQ
+	err := dlq.PublishMessage(ctx, testEnv, "test dlq reason")
+	if err != nil {
+		t.Fatalf("PublishMessage error = %v", err)
+	}
+
+	// Verify DLQ metadata
+	select {
+	case dlqEnv := <-dlqReceived:
+		if dlqEnv == nil || dlqEnv.Metadata == nil {
+			t.Errorf("DLQ metadata not found")
+		}
+		if reason, ok := dlqEnv.Metadata["dlq_reason"]; !ok || reason != "test dlq reason" {
+			t.Errorf("DLQ reason not set correctly, got: %v", reason)
+		}
+		// retry_count is stored in Metadata when it's the envelope's RetryCount
+		if _, ok := dlqEnv.Metadata["retry_count"]; !ok {
+			t.Errorf("Retry count not set in metadata")
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("Timeout waiting for DLQ message")
+	}
+}
+
+func TestIntegration_ErrorRecovery(t *testing.T) {
+	nc := setupNATS(t)
+	defer nc.Close()
+
+	logger := slog.Default()
+	rejectionHandler := NewRejectionHandler(nc, "test.rejection.recovery", "test.dlq.recovery", logger)
+	dlq := NewDeadLetterQueue(nc, "test.dlq.recovery", logger)
+	errorRecovery := NewErrorRecovery(rejectionHandler, dlq, logger)
+
+	testEnv := envelope.New()
+	testEnv.ID = "test_msg_error"
+	testEnv.Payload = []byte(`{"data":"error_test"}`)
+	testEnv.ContentType = "application/json"
+	testEnv.RetryCount = 0
+
+	dlqReceived := make(chan *envelope.Envelope, 1)
+	sub, _ := nc.Subscribe("test.dlq.recovery", func(msg *nats.Msg) {
+		env, _ := envelope.Unmarshal(msg.Data)
+		dlqReceived <- env
+	})
+	defer sub.Unsubscribe()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Simulate multiple errors to exceed retry limit
+	testErr := fmt.Errorf("test processing error")
+	for i := 0; i < 3; i++ {
+		err := errorRecovery.HandleProcessingError(ctx, testEnv, testErr)
+		if i < 2 {
+			// First two attempts should return nil (no error)
+			if err != nil {
+				t.Fatalf("HandleProcessingError should not error on retry %d, got: %v", i, err)
+			}
+		}
+	}
+
+	// After 3 retries, message should be in DLQ
+	select {
+	case dlqEnv := <-dlqReceived:
+		if dlqEnv == nil {
+			t.Errorf("Message not found in DLQ after max retries")
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("Timeout waiting for message in DLQ")
 	}
 }
