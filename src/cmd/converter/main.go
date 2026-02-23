@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/ValueRetail/vrsky/pkg/converter"
@@ -106,5 +105,3 @@ func main() {
 
 	logger.InfoContext(context.Background(), "Converter stopped successfully")
 }
-
-import "time"
