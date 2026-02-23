@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vrsky-converter-config
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-converter
+    component: converter
+    phase: 4
+data:
+  # Default converter configuration
+  # These can be overridden per-tenant via ConfigService API
+  
+  # Server configuration
+  SERVER_PORT: "8080"
+  GRACEFUL_SHUTDOWN_TIMEOUT: "15"
+  HEALTH_CHECK_INTERVAL: "30"
+  
+  # Logging configuration
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  
+  # Performance configuration
+  MAX_CONCURRENT_REQUESTS: "1000"
+  REQUEST_TIMEOUT: "30"
+  CACHE_TTL: "300"
+  
+  # Validation configuration
+  VALIDATION_MODE: "strict"
+  VALIDATION_ERROR_STRATEGY: "fail"
+  
+  # Database configuration
+  POSTGRES_MAX_CONNECTIONS: "25"
+  POSTGRES_CONNECTION_TIMEOUT: "5"
+  
+  # Storage configuration
+  MINIO_REGION: "us-east-1"
+  MINIO_BUCKET: "vrsky-converter"
+  
+  # NATS configuration
+  NATS_REQUEST_TIMEOUT: "30"
+  NATS_TOPICS_PREFIX: "vrsky"
+  
+  # Metrics configuration
+  PROMETHEUS_PORT: "8080"
+  METRICS_ENABLED: "true"
+  
+  # WASM configuration
+  WASM_MODULE_DIR: "/app/wasm-modules"
+  WASM_MEMORY_PAGES: "256"
+  WASM_SANDBOX_ENABLED: "true"
