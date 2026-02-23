@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"container/heap"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -106,9 +107,10 @@ func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 
 // ResponseCache stores HTTP responses with TTL
 type ResponseCache struct {
-	cache   map[string]*CachedResponse
-	mu      sync.RWMutex
-	maxSize int
+	cache      map[string]*CachedResponse
+	expiryHeap *ExpiryHeap // Min-heap sorted by expiration time
+	mu         sync.RWMutex
+	maxSize    int
 }
 
 // CachedResponse holds response data with expiration time
@@ -117,11 +119,46 @@ type CachedResponse struct {
 	ExpiresAt time.Time
 }
 
+// ExpiryEntry represents an entry in the expiry min-heap
+type ExpiryEntry struct {
+	Key       string
+	ExpiresAt time.Time
+	Index     int // Heap index, set by heap.Interface
+}
+
+// ExpiryHeap implements heap.Interface for min-heap of expiry times
+type ExpiryHeap []*ExpiryEntry
+
+func (eh ExpiryHeap) Len() int           { return len(eh) }
+func (eh ExpiryHeap) Less(i, j int) bool { return eh[i].ExpiresAt.Before(eh[j].ExpiresAt) }
+func (eh ExpiryHeap) Swap(i, j int) {
+	eh[i], eh[j] = eh[j], eh[i]
+	eh[i].Index = i
+	eh[j].Index = j
+}
+
+func (eh *ExpiryHeap) Push(x interface{}) {
+	entry := x.(*ExpiryEntry)
+	entry.Index = len(*eh)
+	*eh = append(*eh, entry)
+}
+
+func (eh *ExpiryHeap) Pop() interface{} {
+	old := *eh
+	n := len(old)
+	entry := old[n-1]
+	old[n-1] = nil
+	entry.Index = -1
+	*eh = old[0 : n-1]
+	return entry
+}
+
 // NewResponseCache creates a new response cache with size limit
 func NewResponseCache(maxSize int) *ResponseCache {
 	return &ResponseCache{
-		cache:   make(map[string]*CachedResponse),
-		maxSize: maxSize,
+		cache:      make(map[string]*CachedResponse),
+		expiryHeap: &ExpiryHeap{},
+		maxSize:    maxSize,
 	}
 }
 
@@ -143,28 +180,16 @@ func (rc *ResponseCache) Get(key string) (map[string]interface{}, bool) {
 	return cached.Data, true
 }
 
-// evictOne removes a single entry from the cache when it reaches capacity.
-// It prefers to remove the entry with the earliest expiration time.
+// evictOne removes the entry with the earliest expiration time in O(log n).
+// Uses a min-heap to efficiently find and remove the oldest entry.
 func (rc *ResponseCache) evictOne() {
-	if len(rc.cache) == 0 {
+	if rc.expiryHeap.Len() == 0 {
 		return
 	}
 
-	var oldestKey string
-	var oldestExpiresAt time.Time
-	first := true
-
-	for key, cached := range rc.cache {
-		if first || cached.ExpiresAt.Before(oldestExpiresAt) {
-			oldestKey = key
-			oldestExpiresAt = cached.ExpiresAt
-			first = false
-		}
-	}
-
-	if !first {
-		delete(rc.cache, oldestKey)
-	}
+	// Pop the entry with minimum expiration time from the heap
+	entry := heap.Pop(rc.expiryHeap).(*ExpiryEntry)
+	delete(rc.cache, entry.Key)
 }
 
 // Set stores a response with TTL
@@ -177,10 +202,18 @@ func (rc *ResponseCache) Set(key string, data map[string]interface{}, ttl time.D
 		rc.evictOne()
 	}
 
+	expiresAt := time.Now().Add(ttl)
 	rc.cache[key] = &CachedResponse{
 		Data:      data,
-		ExpiresAt: time.Now().Add(ttl),
+		ExpiresAt: expiresAt,
 	}
+
+	// Add entry to expiry heap for O(log n) eviction later
+	entry := &ExpiryEntry{
+		Key:       key,
+		ExpiresAt: expiresAt,
+	}
+	heap.Push(rc.expiryHeap, entry)
 }
 
 // Cleanup removes expired entries
@@ -189,11 +222,26 @@ func (rc *ResponseCache) Cleanup() {
 	defer rc.mu.Unlock()
 
 	now := time.Now()
+
+	// Remove expired entries from cache
 	for key, cached := range rc.cache {
 		if now.After(cached.ExpiresAt) {
 			delete(rc.cache, key)
 		}
 	}
+
+	// Rebuild heap with only non-expired entries
+	newHeap := &ExpiryHeap{}
+	for key, cached := range rc.cache {
+		if !now.After(cached.ExpiresAt) {
+			entry := &ExpiryEntry{
+				Key:       key,
+				ExpiresAt: cached.ExpiresAt,
+			}
+			heap.Push(newHeap, entry)
+		}
+	}
+	rc.expiryHeap = newHeap
 }
 
 // HTTPLookupBackend provides resilient HTTP API lookups with retry, caching, and circuit breaker
