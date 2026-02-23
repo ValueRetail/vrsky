@@ -27,13 +27,13 @@ type FunctionCacheEntry struct {
 // FunctionCache provides result caching for pure functions
 // This improves performance for repeated function calls with same arguments
 type FunctionCache struct {
-	registry    *FunctionRegistry
-	cache       map[string]*FunctionCacheEntry
-	cacheLock   sync.RWMutex
-	defaultTTL  time.Duration
-	maxSize     int
-	logger      Logger
-	metrics     *CacheMetrics
+	registry   *FunctionRegistry
+	cache      map[string]*FunctionCacheEntry
+	cacheLock  sync.RWMutex
+	defaultTTL time.Duration
+	maxSize    int
+	logger     Logger
+	metrics    *CacheMetrics
 }
 
 // PureFunctions defines which functions can be cached
@@ -60,12 +60,12 @@ var PureFunctions = map[string]bool{
 
 // NonPureFunctions defines functions that should never be cached
 var NonPureFunctions = map[string]bool{
-	"now":         true, // Changes every call
-	"random":      true, // Non-deterministic
-	"uuid":        true, // Generates new values
-	"date_now":    true, // Current timestamp
-	"date_today":  true, // Current date
-	"get_env":     true, // Environment-dependent
+	"now":        true, // Changes every call
+	"random":     true, // Non-deterministic
+	"uuid":       true, // Generates new values
+	"date_now":   true, // Current timestamp
+	"date_today": true, // Current date
+	"get_env":    true, // Environment-dependent
 }
 
 // NewFunctionCache creates a new function cache wrapping a registry
@@ -185,15 +185,36 @@ func (fc *FunctionCache) SetWithTTL(funcName string, result interface{}, ttl tim
 	fc.cacheLock.Lock()
 	defer fc.cacheLock.Unlock()
 
-	// Simple eviction: clear old entries when at capacity
+	// Remove expired entries first to free up space
+	now := time.Now()
+	for key, entry := range fc.cache {
+		if now.After(entry.ExpiresAt) {
+			delete(fc.cache, key)
+			fc.metrics.expirations++
+		}
+	}
+
+	// If still at capacity after cleanup, evict oldest entry (LRU by expiration time)
 	if len(fc.cache) >= fc.maxSize {
-		fc.cache = make(map[string]*FunctionCacheEntry)
-		fc.metrics.evictions++
+		var oldestKey string
+		var oldestTime time.Time = now.Add(ttl) // Compare with future time
+
+		for key, entry := range fc.cache {
+			if entry.ExpiresAt.Before(oldestTime) {
+				oldestTime = entry.ExpiresAt
+				oldestKey = key
+			}
+		}
+
+		if oldestKey != "" {
+			delete(fc.cache, oldestKey)
+			fc.metrics.evictions++
+		}
 	}
 
 	fc.cache[cacheKey] = &FunctionCacheEntry{
 		Result:    result,
-		ExpiresAt: time.Now().Add(ttl),
+		ExpiresAt: now.Add(ttl),
 	}
 }
 
@@ -231,11 +252,11 @@ func (fc *FunctionCache) GetMetrics() CacheMetrics {
 	defer fc.cacheLock.RUnlock()
 
 	return CacheMetrics{
-		hits:           fc.metrics.hits,
-		misses:         fc.metrics.misses,
-		evictions:      fc.metrics.evictions,
-		expirations:    fc.metrics.expirations,
-		totalCacheHits: fc.metrics.hits,
+		hits:             fc.metrics.hits,
+		misses:           fc.metrics.misses,
+		evictions:        fc.metrics.evictions,
+		expirations:      fc.metrics.expirations,
+		totalCacheHits:   fc.metrics.hits,
 		totalCacheMisses: fc.metrics.misses,
 	}
 }

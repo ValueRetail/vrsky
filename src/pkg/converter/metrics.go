@@ -121,7 +121,7 @@ func (m *Metrics) RecordMessageSucceeded() {
 }
 
 // RecordMessageFailed increments the failed messages counter
-func (m *Metrics) RecordMessageFailed(reason string) {
+func (m *Metrics) RecordMessageFailed() {
 	m.messagesFailed.Inc()
 }
 

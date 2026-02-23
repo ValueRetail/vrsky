@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
@@ -128,6 +129,7 @@ func NewPostgresLookupBackendWithConfig(ctx context.Context, config PostgresConf
 // Implements LookupBackend.Lookup().
 // Returns a map of column names to values, or nil if not found.
 // Gracefully returns nil (with warning) on errors instead of throwing exceptions.
+// Uses parameterized identifiers to prevent SQL injection.
 func (pb *PostgresLookupBackend) Lookup(ctx context.Context, table, field string, value interface{}) (map[string]interface{}, error) {
 	if table == "" || field == "" || value == nil {
 		return nil, nil
@@ -137,9 +139,12 @@ func (pb *PostgresLookupBackend) Lookup(ctx context.Context, table, field string
 	queryCtx, cancel := context.WithTimeout(ctx, pb.queryTimeout)
 	defer cancel()
 
-	// Build parameterized query to prevent SQL injection
+	// Build parameterized query using pgx.Identifier for safe table/field names
+	// pgx.Identifier properly escapes SQL identifiers to prevent injection
 	// Query: SELECT * FROM table WHERE field = $1 LIMIT 1
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 LIMIT 1", table, field)
+	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 LIMIT 1",
+		pgx.Identifier{table}.Sanitize(),
+		pgx.Identifier{field}.Sanitize())
 
 	// Execute query
 	rows, err := pb.pool.Query(queryCtx, query, value)

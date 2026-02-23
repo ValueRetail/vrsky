@@ -343,18 +343,20 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 
 // makeRequest performs a single HTTP request
 func (hb *HTTPLookupBackend) makeRequest(ctx context.Context, url string, params map[string]interface{}) (map[string]interface{}, error) {
-	// Build query string from params
-	queryStr := ""
-	if len(params) > 0 {
-		paramsJSON, _ := json.Marshal(params)
-		queryStr = "?" + string(paramsJSON)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url+queryStr, nil)
+	// Create base request
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Build URL-encoded query string from params
+	if len(params) > 0 {
+		q := req.URL.Query()
+		for k, v := range params {
+			q.Set(k, fmt.Sprint(v))
+		}
+		req.URL.RawQuery = q.Encode()
+	}
 	resp, err := hb.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)

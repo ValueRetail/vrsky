@@ -10,11 +10,10 @@ import (
 )
 
 // SchemaValidator provides thread-safe validation of input/output data against JSON schemas
-// It supports multi-tenant schema isolation and caching for performance optimization
+// It supports multi-tenant schema isolation for performance optimization
 type SchemaValidator struct {
 	mu       sync.RWMutex
 	schemas  map[string]*jsonschema.Schema // key: "tenantID:schemaName"
-	cache    map[string]interface{}        // cache for validation results
 	compiler *jsonschema.Compiler          // shared compiler for schema compilation
 }
 
@@ -22,7 +21,6 @@ type SchemaValidator struct {
 func NewSchemaValidator() *SchemaValidator {
 	return &SchemaValidator{
 		schemas:  make(map[string]*jsonschema.Schema),
-		cache:    make(map[string]interface{}),
 		compiler: jsonschema.NewCompiler(),
 	}
 }
