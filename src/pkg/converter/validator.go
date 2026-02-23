@@ -129,7 +129,6 @@ func (sv *SchemaValidator) ClearAllSchemas() {
 	defer sv.mu.Unlock()
 
 	sv.schemas = make(map[string]*jsonschema.Schema)
-	sv.cache = make(map[string]interface{})
 }
 
 // makeKey creates a unique key for tenant-scoped schema isolation
