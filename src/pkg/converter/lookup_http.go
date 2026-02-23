@@ -182,6 +182,7 @@ type HTTPLookupBackend struct {
 	ctx              context.Context
 	config           HTTPConfig
 	metricsCollector *HTTPMetrics
+	backoffDurations []time.Duration // Pre-computed exponential backoff durations
 	mu               sync.Mutex
 }
 
@@ -243,6 +244,17 @@ func NewHTTPLookupBackendWithConfig(config HTTPConfig, logger Logger) (*HTTPLook
 		config.MaxCacheSize = 1000
 	}
 
+	// Pre-compute backoff durations: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
+	backoffDurations := make([]time.Duration, config.MaxRetries+1)
+	for i := 0; i <= config.MaxRetries; i++ {
+		if i == 0 {
+			backoffDurations[i] = 0 // First attempt: no backoff
+		} else {
+			// Exponential backoff: 1s, 2s, 4s, 8s, 16s...
+			backoffDurations[i] = time.Duration(1<<uint(i-1)) * time.Second
+		}
+	}
+
 	backend := &HTTPLookupBackend{
 		client: &http.Client{
 			Timeout: config.Timeout,
@@ -253,6 +265,7 @@ func NewHTTPLookupBackendWithConfig(config HTTPConfig, logger Logger) (*HTTPLook
 		ctx:              context.Background(),
 		config:           config,
 		metricsCollector: &HTTPMetrics{},
+		backoffDurations: backoffDurations,
 	}
 
 	logger.InfoContext(backend.ctx, "HTTP lookup backend initialized",
@@ -292,22 +305,10 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 	}
 	hb.metricsCollector.cacheMisses++
 
-	// Generate backoff durations dynamically based on MaxRetries
-	// Pattern: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
-	backoffDurations := make([]time.Duration, hb.config.MaxRetries+1)
-	for i := 0; i <= hb.config.MaxRetries; i++ {
-		if i == 0 {
-			backoffDurations[i] = 0 // First attempt: no backoff
-		} else {
-			// Exponential backoff: 1s, 2s, 4s, 8s, 16s...
-			backoffDurations[i] = time.Duration(1<<uint(i-1)) * time.Second
-		}
-	}
-
 	for attempt := 0; attempt <= hb.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
 		if attempt > 0 {
-			waitTime := backoffDurations[attempt]
+			waitTime := hb.backoffDurations[attempt]
 			hb.logger.InfoContext(ctx, "HTTP lookup retry",
 				"url", url, "attempt", attempt, "wait_ms", waitTime.Milliseconds())
 			hb.metricsCollector.retries++
