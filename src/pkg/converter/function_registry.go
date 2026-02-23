@@ -114,32 +114,27 @@ func (fr *FunctionRegistry) Register(name string, fn Function) error {
 // Call invokes a registered function.
 // Phase 3.5 Iteration 3: Checks WASM functions first, then built-in functions
 func (fr *FunctionRegistry) Call(name string, args ...interface{}) (interface{}, error) {
-	// First, check for a matching WASM function and copy out required fields under lock.
+	// First, check for a matching WASM function and retrieve the module under lock
+	// to prevent race conditions where wasmLoader could be modified after lock release.
 	fr.mu.RLock()
 
 	wasmFunc, isWASM := fr.wasmFunctions[name]
-	var moduleName, exportName string
-	var wasmLoader *WASMFunctionLoader // Copy wasmLoader reference under lock
+	var module *WASMModule
 	useWASM := isWASM && fr.wasmLoader != nil
 	if useWASM {
-		moduleName = wasmFunc.ModuleName
-		exportName = wasmFunc.ExportName
-		wasmLoader = fr.wasmLoader // Safe copy under lock
+		// Retrieve the module while holding the lock to ensure wasmLoader state is consistent
+		module = fr.wasmLoader.GetModule(wasmFunc.ModuleName)
 	}
 	fr.mu.RUnlock()
 
-	// Check WASM functions first using only local copies of the data.
-	// wasmLoader reference is guaranteed to be valid (copied under lock)
-	if useWASM && wasmLoader != nil {
-		module := wasmLoader.GetModule(moduleName)
-
-		if module != nil {
-			result := module.Call(fr.ctx, exportName, args...)
-			if result != nil {
-				return result, nil
-			}
-			// Graceful degradation: WASM returned nil, continue to built-in
+	// Check WASM functions first using the module retrieved under lock.
+	// The module reference is safe to use even after lock release because it's a snapshot
+	if useWASM && module != nil {
+		result := module.Call(fr.ctx, wasmFunc.ExportName, args...)
+		if result != nil {
+			return result, nil
 		}
+		// Graceful degradation: WASM returned nil, continue to built-in
 	}
 
 	// Check built-in functions

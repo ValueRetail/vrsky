@@ -9,11 +9,12 @@ import (
 
 // Metrics holds all Prometheus metrics for the converter component
 type Metrics struct {
-	messagesReceived       prometheus.Counter
-	messagesSucceeded      prometheus.Counter
-	messagesFailed         prometheus.Counter
-	transformationDuration prometheus.Histogram
-	retryAttempts          prometheus.Counter
+	messagesReceived              prometheus.Counter
+	messagesSucceeded             prometheus.Counter
+	messagesFailed                *prometheus.CounterVec
+	transformationDurationSuccess prometheus.Histogram // Duration for successful transformations
+	transformationDurationFailure prometheus.Histogram // Duration for failed transformations
+	retryAttempts                 prometheus.Counter
 }
 
 // NewMetrics creates and registers all converter metrics
@@ -49,24 +50,37 @@ func NewMetrics(converterID, tenantID string) (*Metrics, error) {
 		},
 	)
 
-	// messagesFailed counts failed transformations
-	messagesFailed := prometheus.NewCounter(
+	// messagesFailed counts failed transformations by error category
+	messagesFailed := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   "vrsky",
 			Subsystem:   "converter",
 			Name:        "messages_failed_total",
-			Help:        "Total number of message transformation failures",
+			Help:        "Total number of message transformation failures by error category",
 			ConstLabels: labels,
 		},
+		[]string{"error_category"},
 	)
 
-	// transformationDuration tracks transformation latency
-	transformationDuration := prometheus.NewHistogram(
+	// transformationDurationSuccess tracks successful transformation latency
+	transformationDurationSuccess := prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace:   "vrsky",
 			Subsystem:   "converter",
-			Name:        "transformation_duration_seconds",
-			Help:        "Duration of message transformation in seconds",
+			Name:        "transformation_duration_success_seconds",
+			Help:        "Duration of successful message transformations in seconds",
+			ConstLabels: labels,
+			Buckets:     []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0},
+		},
+	)
+
+	// transformationDurationFailure tracks failed transformation latency
+	transformationDurationFailure := prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "transformation_duration_failure_seconds",
+			Help:        "Duration of failed message transformations in seconds",
 			ConstLabels: labels,
 			Buckets:     []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0},
 		},
@@ -94,19 +108,23 @@ func NewMetrics(converterID, tenantID string) (*Metrics, error) {
 	if err := reg.Register(messagesFailed); err != nil {
 		return nil, fmt.Errorf("register messagesFailed: %w", err)
 	}
-	if err := reg.Register(transformationDuration); err != nil {
-		return nil, fmt.Errorf("register transformationDuration: %w", err)
+	if err := reg.Register(transformationDurationSuccess); err != nil {
+		return nil, fmt.Errorf("register transformationDurationSuccess: %w", err)
+	}
+	if err := reg.Register(transformationDurationFailure); err != nil {
+		return nil, fmt.Errorf("register transformationDurationFailure: %w", err)
 	}
 	if err := reg.Register(retryAttempts); err != nil {
 		return nil, fmt.Errorf("register retryAttempts: %w", err)
 	}
 
 	return &Metrics{
-		messagesReceived:       messagesReceived,
-		messagesSucceeded:      messagesSucceeded,
-		messagesFailed:         messagesFailed,
-		transformationDuration: transformationDuration,
-		retryAttempts:          retryAttempts,
+		messagesReceived:              messagesReceived,
+		messagesSucceeded:             messagesSucceeded,
+		messagesFailed:                messagesFailed,
+		transformationDurationSuccess: transformationDurationSuccess,
+		transformationDurationFailure: transformationDurationFailure,
+		retryAttempts:                 retryAttempts,
 	}, nil
 }
 
@@ -121,19 +139,24 @@ func (m *Metrics) RecordMessageSucceeded() {
 }
 
 // RecordMessageFailed increments the failed messages counter
-func (m *Metrics) RecordMessageFailed() {
-	m.messagesFailed.Inc()
+func (m *Metrics) RecordMessageFailed(errorCategory string) {
+	m.messagesFailed.WithLabelValues(errorCategory).Inc()
 }
 
-// RecordTransformationDuration records the transformation latency
-func (m *Metrics) RecordTransformationDuration(duration time.Duration) {
-	m.transformationDuration.Observe(duration.Seconds())
+// RecordTransformationDurationSuccess records the duration of successful transformations
+func (m *Metrics) RecordTransformationDurationSuccess(duration time.Duration) {
+	m.transformationDurationSuccess.Observe(duration.Seconds())
+}
+
+// RecordTransformationDurationFailure records the duration of failed transformations
+func (m *Metrics) RecordTransformationDurationFailure(duration time.Duration) {
+	m.transformationDurationFailure.Observe(duration.Seconds())
 }
 
 // RecordRetryAttempt increments the retry attempts counter.
-// The attempt number is currently unused but kept for compatibility
-// and potential future use (e.g., as a label or for logging).
+// TODO: In the future, add attempt-level labels for per-attempt metrics
+// e.g., m.retryAttempts.WithLabelValues(fmt.Sprintf("%d", attempt)).Inc()
+// This would enable tracking which retry attempts are most common and alerting on specific retry patterns.
 func (m *Metrics) RecordRetryAttempt(attempt int) {
-	_ = attempt
 	m.retryAttempts.Inc()
 }

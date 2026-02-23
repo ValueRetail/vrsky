@@ -266,7 +266,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 				"error", err.Error(),
 			)
 			duration := time.Since(start)
-			c.metrics.RecordTransformationDuration(duration)
+			c.metrics.RecordTransformationDurationFailure(duration)
 			c.metrics.RecordMessageFailed(ErrorCategoryTransformation)
 			return env, err
 		}
@@ -279,7 +279,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 				"error", err.Error(),
 			)
 			duration := time.Since(start)
-			c.metrics.RecordTransformationDuration(duration)
+			c.metrics.RecordTransformationDurationFailure(duration)
 			c.metrics.RecordMessageFailed(ErrorCategoryMarshal)
 			return env, err
 		}
@@ -301,9 +301,9 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 		)
 	}
 
-	// Record transformation duration
+	// Record transformation duration on success
 	duration := time.Since(start)
-	c.metrics.RecordTransformationDuration(duration)
+	c.metrics.RecordTransformationDurationSuccess(duration)
 	c.metrics.RecordMessageSucceeded()
 
 	return env, nil

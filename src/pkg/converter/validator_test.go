@@ -13,7 +13,6 @@ func TestNewSchemaValidator(t *testing.T) {
 	sv := NewSchemaValidator()
 	assert.NotNil(t, sv)
 	assert.NotNil(t, sv.schemas)
-	assert.NotNil(t, sv.cache)
 }
 
 func TestRegisterSchema_ValidSchema(t *testing.T) {

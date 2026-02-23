@@ -162,7 +162,7 @@ func TestConverterMetrics(t *testing.T) {
 		// Record some metric events
 		metrics.RecordMessageReceived()
 		metrics.RecordMessageSucceeded()
-		metrics.RecordTransformationDuration(100 * time.Millisecond)
+		metrics.RecordTransformationDurationSuccess(100 * time.Millisecond)
 		metrics.RecordRetryAttempt(1)
 
 		// Verify metrics were created (in real test, we'd query Prometheus)
@@ -877,11 +877,11 @@ func TestWASMIntegration_ThreadSafety(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			go func() {
 				defer func() { done <- true }()
-				
+
 				// Concurrent Exists checks
 				registry.Exists("sum")
 				registry.Exists("concat")
-				
+
 				// Concurrent function calls
 				registry.Call("sum", []interface{}{1, 2, 3})
 			}()
@@ -1006,4 +1006,3 @@ func TestWASMIntegration_PluginSystemEndToEnd(t *testing.T) {
 		}
 	})
 }
-

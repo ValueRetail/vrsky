@@ -27,13 +27,14 @@ type FunctionCacheEntry struct {
 // FunctionCache provides result caching for pure functions
 // This improves performance for repeated function calls with same arguments
 type FunctionCache struct {
-	registry   *FunctionRegistry
-	cache      map[string]*FunctionCacheEntry
-	cacheLock  sync.RWMutex
-	defaultTTL time.Duration
-	maxSize    int
-	logger     Logger
-	metrics    *CacheMetrics
+	registry    *FunctionRegistry
+	cache       map[string]*FunctionCacheEntry
+	cacheLock   sync.RWMutex
+	defaultTTL  time.Duration
+	maxSize     int
+	logger      Logger
+	metrics     *CacheMetrics
+	metricsLock sync.RWMutex
 }
 
 // PureFunctions defines which functions can be cached
@@ -143,21 +144,27 @@ func (fc *FunctionCache) Get(funcName string, args ...interface{}) (interface{},
 	cacheKey := fc.generateCacheKey(funcName, args...)
 
 	fc.cacheLock.RLock()
-	defer fc.cacheLock.RUnlock()
-
 	entry, exists := fc.cache[cacheKey]
+	fc.cacheLock.RUnlock()
+
 	if !exists {
+		fc.metricsLock.Lock()
 		fc.metrics.misses++
+		fc.metricsLock.Unlock()
 		return nil, false
 	}
 
 	// Check if expired
 	if time.Now().After(entry.ExpiresAt) {
+		fc.metricsLock.Lock()
 		fc.metrics.expirations++
+		fc.metricsLock.Unlock()
 		return nil, false
 	}
 
+	fc.metricsLock.Lock()
 	fc.metrics.hits++
+	fc.metricsLock.Unlock()
 	return entry.Result, true
 }
 
@@ -189,7 +196,9 @@ func (fc *FunctionCache) SetWithTTL(funcName string, result interface{}, ttl tim
 	if len(fc.cache) >= fc.maxSize {
 		for key := range fc.cache {
 			delete(fc.cache, key)
+			fc.metricsLock.Lock()
 			fc.metrics.evictions++
+			fc.metricsLock.Unlock()
 			break
 		}
 	}
@@ -216,7 +225,9 @@ func (fc *FunctionCache) Cleanup() {
 	}
 
 	if removed > 0 {
+		fc.metricsLock.Lock()
 		fc.metrics.expirations += int64(removed)
+		fc.metricsLock.Unlock()
 	}
 }
 
