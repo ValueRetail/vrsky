@@ -809,3 +809,201 @@ func TestE2E_MathOperationsPipeline(t *testing.T) {
 		t.Errorf("multiply with coercion: expected 50.0, got %v", coerced)
 	}
 }
+
+// =============================================================================
+// WASM PLUGIN FRAMEWORK TESTS (Phase 3.5 Iteration 3)
+// =============================================================================
+
+// TestWASMIntegration_FunctionRegistryBasics tests WASM integration with FunctionRegistry
+func TestWASMIntegration_FunctionRegistryBasics(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("InitializeWASM succeeds with valid directory", func(t *testing.T) {
+		err := registry.InitializeWASM("./testdata/plugins")
+		if err != nil {
+			t.Errorf("InitializeWASM failed: %v", err)
+		}
+	})
+
+	t.Run("InitializeWASM handles empty directory gracefully", func(t *testing.T) {
+		err := registry.InitializeWASM("")
+		if err != nil {
+			t.Errorf("InitializeWASM with empty path should not error: %v", err)
+		}
+	})
+
+	t.Run("CloseWASM succeeds", func(t *testing.T) {
+		err := registry.CloseWASM()
+		if err != nil {
+			t.Errorf("CloseWASM failed: %v", err)
+		}
+	})
+}
+
+// TestWASMIntegration_ExistsCheck tests WASM function existence check
+func TestWASMIntegration_ExistsCheck(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("Exists returns true for built-in functions", func(t *testing.T) {
+		if !registry.Exists("sum") {
+			t.Error("Exists: expected true for 'sum' function")
+		}
+		if !registry.Exists("concat") {
+			t.Error("Exists: expected true for 'concat' function")
+		}
+	})
+
+	t.Run("Exists returns false for non-existent functions", func(t *testing.T) {
+		if registry.Exists("nonexistent_function") {
+			t.Error("Exists: expected false for non-existent function")
+		}
+	})
+}
+
+// TestWASMIntegration_ThreadSafety tests thread-safe WASM operations
+func TestWASMIntegration_ThreadSafety(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("concurrent registry operations are thread-safe", func(t *testing.T) {
+		done := make(chan bool, 100)
+
+		// Launch concurrent operations
+		for i := 0; i < 100; i++ {
+			go func() {
+				defer func() { done <- true }()
+				
+				// Concurrent Exists checks
+				registry.Exists("sum")
+				registry.Exists("concat")
+				
+				// Concurrent function calls
+				registry.Call("sum", []interface{}{1, 2, 3})
+			}()
+		}
+
+		// Wait for all goroutines
+		for i := 0; i < 100; i++ {
+			<-done
+		}
+	})
+}
+
+// TestWASMIntegration_FallbackBehavior tests graceful fallback from WASM to built-in
+func TestWASMIntegration_FallbackBehavior(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("registry continues to work if WASM is unavailable", func(t *testing.T) {
+		result, err := registry.Call("sum", []interface{}{1, 2, 3})
+		if err != nil {
+			t.Fatalf("Call failed: %v", err)
+		}
+		if result != 6.0 {
+			t.Errorf("expected 6.0, got %v", result)
+		}
+	})
+
+	t.Run("all built-in functions work alongside WASM system", func(t *testing.T) {
+		// Initialize WASM (even if modules aren't available)
+		registry.InitializeWASM("")
+
+		// Call built-in functions
+		sum, err := registry.Call("sum", []interface{}{5, 10})
+		if err != nil {
+			t.Fatalf("sum failed: %v", err)
+		}
+		if sum != 15.0 {
+			t.Errorf("expected 15.0, got %v", sum)
+		}
+
+		concat, err := registry.Call("concat", "hello", " ", "world")
+		if err != nil {
+			t.Fatalf("concat failed: %v", err)
+		}
+		if concat != "hello world" {
+			t.Errorf("expected 'hello world', got %v", concat)
+		}
+	})
+}
+
+// TestWASMIntegration_RegistrationErrors tests error handling in WASM registration
+func TestWASMIntegration_RegistrationErrors(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("RegisterWASM rejects empty function name", func(t *testing.T) {
+		err := registry.RegisterWASM("", "path.wasm", "export")
+		if err == nil {
+			t.Error("expected error for empty function name")
+		}
+	})
+
+	t.Run("RegisterWASM rejects empty module path", func(t *testing.T) {
+		err := registry.RegisterWASM("func", "", "export")
+		if err == nil {
+			t.Error("expected error for empty module path")
+		}
+	})
+
+	t.Run("RegisterWASM rejects empty export name", func(t *testing.T) {
+		err := registry.RegisterWASM("func", "path.wasm", "")
+		if err == nil {
+			t.Error("expected error for empty export name")
+		}
+	})
+
+	t.Run("UnregisterWASM fails for non-existent function", func(t *testing.T) {
+		err := registry.UnregisterWASM("nonexistent")
+		if err == nil {
+			t.Error("expected error for non-existent WASM function")
+		}
+	})
+}
+
+// TestWASMIntegration_PluginSystemEndToEnd tests complete WASM plugin flow
+func TestWASMIntegration_PluginSystemEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	t.Run("complete WASM plugin lifecycle", func(t *testing.T) {
+		// Initialize WASM system
+		err := registry.InitializeWASM("./testdata/plugins")
+		if err != nil {
+			t.Fatalf("InitializeWASM failed: %v", err)
+		}
+
+		// Verify built-in functions still work
+		result, err := registry.Call("uppercase", "hello")
+		if err != nil {
+			t.Fatalf("uppercase failed: %v", err)
+		}
+		if result != "HELLO" {
+			t.Errorf("expected 'HELLO', got %v", result)
+		}
+
+		// Close WASM system
+		err = registry.CloseWASM()
+		if err != nil {
+			t.Fatalf("CloseWASM failed: %v", err)
+		}
+
+		// Verify built-in functions still work after close
+		result2, err := registry.Call("lowercase", "WORLD")
+		if err != nil {
+			t.Fatalf("lowercase failed: %v", err)
+		}
+		if result2 != "world" {
+			t.Errorf("expected 'world', got %v", result2)
+		}
+	})
+}
+
