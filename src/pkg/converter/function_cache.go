@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,14 +28,16 @@ type FunctionCacheEntry struct {
 // FunctionCache provides result caching for pure functions
 // This improves performance for repeated function calls with same arguments
 type FunctionCache struct {
-	registry    *FunctionRegistry
-	cache       map[string]*FunctionCacheEntry
-	cacheLock   sync.RWMutex
-	defaultTTL  time.Duration
-	maxSize     int
-	logger      Logger
-	metrics     *CacheMetrics
-	metricsLock sync.RWMutex
+	registry           *FunctionRegistry
+	cache              map[string]*FunctionCacheEntry
+	cacheLock          sync.RWMutex
+	defaultTTL         time.Duration
+	maxSize            int
+	logger             Logger
+	metricsHits        atomic.Int64
+	metricsMisses      atomic.Int64
+	metricsEvictions   atomic.Int64
+	metricsExpirations atomic.Int64
 }
 
 // PureFunctions defines which functions can be cached
@@ -84,7 +87,6 @@ func NewFunctionCache(registry *FunctionRegistry, logger Logger) (*FunctionCache
 		defaultTTL: 1 * time.Hour,
 		maxSize:    10000,
 		logger:     logger,
-		metrics:    &CacheMetrics{},
 	}, nil
 }
 
@@ -109,7 +111,6 @@ func NewFunctionCacheWithConfig(registry *FunctionRegistry, logger Logger, defau
 		defaultTTL: defaultTTL,
 		maxSize:    maxSize,
 		logger:     logger,
-		metrics:    &CacheMetrics{},
 	}, nil
 }
 
@@ -148,23 +149,17 @@ func (fc *FunctionCache) Get(funcName string, args ...interface{}) (interface{},
 	fc.cacheLock.RUnlock()
 
 	if !exists {
-		fc.metricsLock.Lock()
-		fc.metrics.misses++
-		fc.metricsLock.Unlock()
+		fc.metricsMisses.Add(1)
 		return nil, false
 	}
 
 	// Check if expired
 	if time.Now().After(entry.ExpiresAt) {
-		fc.metricsLock.Lock()
-		fc.metrics.expirations++
-		fc.metricsLock.Unlock()
+		fc.metricsExpirations.Add(1)
 		return nil, false
 	}
 
-	fc.metricsLock.Lock()
-	fc.metrics.hits++
-	fc.metricsLock.Unlock()
+	fc.metricsHits.Add(1)
 	return entry.Result, true
 }
 
@@ -196,9 +191,7 @@ func (fc *FunctionCache) SetWithTTL(funcName string, result interface{}, ttl tim
 	if len(fc.cache) >= fc.maxSize {
 		for key := range fc.cache {
 			delete(fc.cache, key)
-			fc.metricsLock.Lock()
-			fc.metrics.evictions++
-			fc.metricsLock.Unlock()
+			fc.metricsEvictions.Add(1)
 			break
 		}
 	}
@@ -225,9 +218,7 @@ func (fc *FunctionCache) Cleanup() {
 	}
 
 	if removed > 0 {
-		fc.metricsLock.Lock()
-		fc.metrics.expirations += int64(removed)
-		fc.metricsLock.Unlock()
+		fc.metricsExpirations.Add(int64(removed))
 	}
 }
 
@@ -242,16 +233,13 @@ func (fc *FunctionCache) ClearCache() {
 
 // GetMetrics returns current cache metrics
 func (fc *FunctionCache) GetMetrics() CacheMetrics {
-	fc.cacheLock.RLock()
-	defer fc.cacheLock.RUnlock()
-
 	return CacheMetrics{
-		hits:             fc.metrics.hits,
-		misses:           fc.metrics.misses,
-		evictions:        fc.metrics.evictions,
-		expirations:      fc.metrics.expirations,
-		totalCacheHits:   fc.metrics.hits,
-		totalCacheMisses: fc.metrics.misses,
+		hits:             fc.metricsHits.Load(),
+		misses:           fc.metricsMisses.Load(),
+		evictions:        fc.metricsEvictions.Load(),
+		expirations:      fc.metricsExpirations.Load(),
+		totalCacheHits:   fc.metricsHits.Load(),
+		totalCacheMisses: fc.metricsMisses.Load(),
 	}
 }
 
