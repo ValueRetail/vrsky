@@ -1,0 +1,3 @@
+tenant_id: hp
+input_topic: hp.webhook.received
+error_topic: hp.webhook.errors
