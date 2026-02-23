@@ -115,29 +115,35 @@ func (fr *FunctionRegistry) Register(name string, fn Function) error {
 // Call invokes a registered function.
 // Phase 3.5 Iteration 3: Checks WASM functions first, then built-in functions
 func (fr *FunctionRegistry) Call(name string, args ...interface{}) (interface{}, error) {
+	// First, check for a matching WASM function and copy out required fields under lock.
 	fr.mu.RLock()
-	
-	// Check WASM functions first
+
 	wasmFunc, isWASM := fr.wasmFunctions[name]
-	if isWASM && fr.wasmLoader != nil {
-		module := fr.wasmLoader.GetModule(wasmFunc.ModuleName)
-		fr.mu.RUnlock()
-		
+	var moduleName, exportName string
+	useWASM := isWASM && fr.wasmLoader != nil
+	if useWASM {
+		moduleName = wasmFunc.ModuleName
+		exportName = wasmFunc.ExportName
+	}
+	fr.mu.RUnlock()
+
+	// Check WASM functions first using only local copies of the data.
+	if useWASM {
+		module := fr.wasmLoader.GetModule(moduleName)
+
 		if module != nil {
-			result := module.Call(fr.ctx, wasmFunc.ExportName, args...)
+			result := module.Call(fr.ctx, exportName, args...)
 			if result != nil {
 				return result, nil
 			}
 			// Graceful degradation: WASM returned nil, continue to built-in
 		}
-		
-		fr.mu.RLock()
 	}
-	
+
 	// Check built-in functions
+	fr.mu.RLock()
 	fn, exists := fr.functions[name]
 	fr.mu.RUnlock()
-	
 	if !exists {
 		return nil, fmt.Errorf("function not found: %s", name)
 	}

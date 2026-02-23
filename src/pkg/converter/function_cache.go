@@ -197,10 +197,10 @@ func (fc *FunctionCache) SetWithTTL(funcName string, result interface{}, ttl tim
 	// If still at capacity after cleanup, evict oldest entry (LRU by expiration time)
 	if len(fc.cache) >= fc.maxSize {
 		var oldestKey string
-		var oldestTime time.Time = now.Add(ttl) // Compare with future time
+		var oldestTime time.Time
 
 		for key, entry := range fc.cache {
-			if entry.ExpiresAt.Before(oldestTime) {
+			if oldestTime.IsZero() || entry.ExpiresAt.Before(oldestTime) {
 				oldestTime = entry.ExpiresAt
 				oldestKey = key
 			}

@@ -14,6 +14,14 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// Error category constants for metrics and logging
+const (
+	ErrorCategoryTransformation   = "transformation"
+	ErrorCategoryMarshal          = "marshal"
+	ErrorCategoryUnmarshal        = "unmarshal"
+	ErrorCategoryExhaustedRetries = "exhausted_retries"
+)
+
 // slogLoggerAdapter adapts slog.Logger to our Logger interface
 type slogLoggerAdapter struct {
 	logger *slog.Logger
@@ -260,7 +268,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 			)
 			duration := time.Since(start)
 			c.metrics.RecordTransformationDuration(duration)
-			c.metrics.RecordMessageFailed("transformation")
+			c.metrics.RecordMessageFailed(ErrorCategoryTransformation)
 			return env, err
 		}
 
@@ -273,7 +281,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 			)
 			duration := time.Since(start)
 			c.metrics.RecordTransformationDuration(duration)
-			c.metrics.RecordMessageFailed("marshal")
+			c.metrics.RecordMessageFailed(ErrorCategoryMarshal)
 			return env, err
 		}
 
@@ -321,7 +329,7 @@ func (c *ConverterImpl) handleMessage(msg *nats.Msg) {
 			"error", err,
 			"subject", msg.Subject,
 		)
-		c.metrics.RecordMessageFailed("unmarshal")
+		c.metrics.RecordMessageFailed(ErrorCategoryUnmarshal)
 		return
 	}
 
@@ -337,7 +345,7 @@ func (c *ConverterImpl) handleMessage(msg *nats.Msg) {
 			"envelope_id", env.ID,
 			"error", err,
 		)
-		c.metrics.RecordMessageFailed("exhausted_retries")
+		c.metrics.RecordMessageFailed(ErrorCategoryExhaustedRetries)
 
 		// Publish to error topic
 		c.publishToErrorTopic(&env, err)

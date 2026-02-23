@@ -297,8 +297,8 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 
 	for attempt := 0; attempt <= hb.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
-		if attempt > 0 && attempt-1 < len(backoffDurations)-1 {
-			waitTime := backoffDurations[attempt]
+		if attempt > 0 && attempt < len(backoffDurations) {
+			waitTime := backoffDurations[attempt-1]
 			hb.logger.InfoContext(ctx, "HTTP lookup retry",
 				"url", url, "attempt", attempt, "wait_ms", waitTime.Milliseconds())
 			hb.metricsCollector.retries++

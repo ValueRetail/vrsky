@@ -218,7 +218,7 @@ func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func() error) erro
 	case err := <-done:
 		return err
 	case <-time.After(timeout):
-		return fmt.Errorf("WASM function execution timeout after %v", timeout)
+		return fmt.Errorf("WASM function execution timeout after %s", timeout)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
