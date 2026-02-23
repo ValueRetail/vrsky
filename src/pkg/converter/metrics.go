@@ -157,6 +157,6 @@ func (m *Metrics) RecordTransformationDurationFailure(duration time.Duration) {
 // TODO: In the future, add attempt-level labels for per-attempt metrics
 // e.g., m.retryAttempts.WithLabelValues(fmt.Sprintf("%d", attempt)).Inc()
 // This would enable tracking which retry attempts are most common and alerting on specific retry patterns.
-func (m *Metrics) RecordRetryAttempt(attempt int) {
+func (m *Metrics) RecordRetryAttempt() {
 	m.retryAttempts.Inc()
 }
