@@ -279,6 +279,155 @@ func TestConverterComponentInterface(t *testing.T) {
 	})
 }
 
+// TestConverterTransformations tests end-to-end transformation with Phase 2F rule engine
+func TestConverterTransformations(t *testing.T) {
+	_ = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	t.Run("simple field mapping transformation", func(t *testing.T) {
+		env := envelope.New()
+		env.ID = "msg-transform-001"
+		env.TenantID = "test-tenant"
+		env.IntegrationID = "test-integration"
+		env.ContentType = "application/json"
+		env.Payload = []byte(`{"customer_name": "John Doe", "order_amount": 99.99}`)
+
+		rules := []Transformation{
+			{Source: "customer_name", Target: "name"},
+			{Source: "order_amount", Target: "amount"},
+		}
+
+		ctx := context.Background()
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		// Create rule engine
+		loggerAdapter := &slogLoggerAdapter{logger: logger}
+		fm := NewFieldMapper(ctx, loggerAdapter)
+		fr := NewFunctionRegistry(ctx, loggerAdapter)
+		ee := NewExpressionEvaluator(ctx, loggerAdapter, fr)
+		re := NewRuleEngine(ctx, loggerAdapter, fm, ee, fr)
+
+		// Execute transformations
+		result, err := re.ExecuteTransformations(env.Payload, rules)
+		if err != nil {
+			t.Fatalf("ExecuteTransformations failed: %v", err)
+		}
+
+		// Verify results
+		if result["name"] != "John Doe" {
+			t.Errorf("expected name='John Doe', got %v", result["name"])
+		}
+		if result["amount"] != float64(99.99) {
+			t.Errorf("expected amount=99.99, got %v", result["amount"])
+		}
+	})
+
+	t.Run("expression-based transformation", func(t *testing.T) {
+		env := envelope.New()
+		env.ID = "msg-transform-002"
+		env.TenantID = "test-tenant"
+		env.IntegrationID = "test-integration"
+		env.ContentType = "application/json"
+		env.Payload = []byte(`{"quantity": 5, "unit_price": 20.0}`)
+
+		rules := []Transformation{
+			{Expression: "quantity * unit_price", Target: "total_amount"},
+		}
+
+		ctx := context.Background()
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		loggerAdapter := &slogLoggerAdapter{logger: logger}
+		fm := NewFieldMapper(ctx, loggerAdapter)
+		fr := NewFunctionRegistry(ctx, loggerAdapter)
+		ee := NewExpressionEvaluator(ctx, loggerAdapter, fr)
+		re := NewRuleEngine(ctx, loggerAdapter, fm, ee, fr)
+
+		result, err := re.ExecuteTransformations(env.Payload, rules)
+		if err != nil {
+			t.Fatalf("ExecuteTransformations failed: %v", err)
+		}
+
+		// JSON unmarshals numbers to float64, so 5 * 20.0 = 100.0
+		if result["total_amount"] != float64(100) {
+			t.Errorf("expected total_amount=100, got %v", result["total_amount"])
+		}
+	})
+
+	t.Run("conditional transformation", func(t *testing.T) {
+		env := envelope.New()
+		env.ID = "msg-transform-003"
+		env.TenantID = "test-tenant"
+		env.IntegrationID = "test-integration"
+		env.ContentType = "application/json"
+		env.Payload = []byte(`{"order_total": 500.0, "is_premium": true}`)
+
+		rules := []Transformation{
+			{
+				Value:     "discount_applied",
+				Target:    "status",
+				Condition: "is_premium == true && order_total > 100",
+			},
+		}
+
+		ctx := context.Background()
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		loggerAdapter := &slogLoggerAdapter{logger: logger}
+		fm := NewFieldMapper(ctx, loggerAdapter)
+		fr := NewFunctionRegistry(ctx, loggerAdapter)
+		ee := NewExpressionEvaluator(ctx, loggerAdapter, fr)
+		re := NewRuleEngine(ctx, loggerAdapter, fm, ee, fr)
+
+		result, err := re.ExecuteTransformations(env.Payload, rules)
+		if err != nil {
+			t.Fatalf("ExecuteTransformations failed: %v", err)
+		}
+
+		// Condition is true, so status should be set
+		if result["status"] != "discount_applied" {
+			t.Errorf("expected status='discount_applied', got %v", result["status"])
+		}
+	})
+
+	t.Run("type conversion during transformation", func(t *testing.T) {
+		env := envelope.New()
+		env.ID = "msg-transform-004"
+		env.TenantID = "test-tenant"
+		env.IntegrationID = "test-integration"
+		env.ContentType = "application/json"
+		env.Payload = []byte(`{"id": "12345", "price": "99.99"}`)
+
+		rules := []Transformation{
+			{Source: "id", Target: "customer_id", Type: "int"},
+			{Source: "price", Target: "amount", Type: "float"},
+		}
+
+		ctx := context.Background()
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		loggerAdapter := &slogLoggerAdapter{logger: logger}
+		fm := NewFieldMapper(ctx, loggerAdapter)
+		fr := NewFunctionRegistry(ctx, loggerAdapter)
+		ee := NewExpressionEvaluator(ctx, loggerAdapter, fr)
+		re := NewRuleEngine(ctx, loggerAdapter, fm, ee, fr)
+
+		result, err := re.ExecuteTransformations(env.Payload, rules)
+		if err != nil {
+			t.Fatalf("ExecuteTransformations failed: %v", err)
+		}
+
+		// Verify type conversions
+		if result["customer_id"] != 12345 {
+			t.Errorf("expected customer_id=12345 (int), got %v (%T)", result["customer_id"], result["customer_id"])
+		}
+		if result["amount"] != float32(99.99) {
+			t.Errorf("expected amount=99.99 (float32), got %v (%T)", result["amount"], result["amount"])
+		}
+	})
+}
+
 // TestConverterProcessMessage tests message processing (Phase 1 pass-through)
 func TestConverterProcessMessage(t *testing.T) {
 	_ = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{

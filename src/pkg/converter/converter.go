@@ -14,12 +14,43 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// slogLoggerAdapter adapts slog.Logger to our Logger interface
+type slogLoggerAdapter struct {
+	logger *slog.Logger
+}
+
+func (a *slogLoggerAdapter) InfoContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.InfoContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) WarnContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.WarnContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) ErrorContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.ErrorContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) Warn(msg string) {
+	a.logger.Warn(msg)
+}
+
+func (a *slogLoggerAdapter) Error(msg string) {
+	a.logger.Error(msg)
+}
+
 // ConverterImpl is the converter component implementation
 type ConverterImpl struct {
 	config   *ConverterConfig
 	natsConn *nats.Conn
 	logger   *slog.Logger
 	metrics  *Metrics
+
+	// Phase 2F: Rule engine components
+	fieldMapper         *FieldMapper
+	expressionEvaluator *ExpressionEvaluator
+	functionRegistry    *FunctionRegistry
+	ruleEngine          *RuleEngine
 
 	mu           sync.RWMutex
 	closed       bool
@@ -64,14 +95,27 @@ func NewConverter(
 	// Create component context
 	componentCtx, cancel := context.WithCancel(context.Background())
 
+	// Initialize rule engine components (Phase 2F)
+	// Wrap slog.Logger in our Logger interface
+	loggerAdapter := &slogLoggerAdapter{logger: logger}
+
+	fieldMapper := NewFieldMapper(componentCtx, loggerAdapter)
+	functionRegistry := NewFunctionRegistry(componentCtx, loggerAdapter)
+	expressionEvaluator := NewExpressionEvaluator(componentCtx, loggerAdapter, functionRegistry)
+	ruleEngine := NewRuleEngine(componentCtx, loggerAdapter, fieldMapper, expressionEvaluator, functionRegistry)
+
 	converter := &ConverterImpl{
-		config:   config,
-		natsConn: natsConn,
-		logger:   logger,
-		metrics:  metrics,
-		closed:   false,
-		ctx:      componentCtx,
-		cancel:   cancel,
+		config:              config,
+		natsConn:            natsConn,
+		logger:              logger,
+		metrics:             metrics,
+		fieldMapper:         fieldMapper,
+		expressionEvaluator: expressionEvaluator,
+		functionRegistry:    functionRegistry,
+		ruleEngine:          ruleEngine,
+		closed:              false,
+		ctx:                 componentCtx,
+		cancel:              cancel,
 	}
 
 	logger.InfoContext(ctx, "Converter created successfully",
@@ -191,20 +235,64 @@ func (c *ConverterImpl) Health() component.HealthStatus {
 	return component.HealthHealthy
 }
 
-// ProcessMessage processes a single message (Phase 1: pass-through)
-// In Phase 1, this is a placeholder that returns the envelope unchanged
-// Phase 2 will implement actual transformation logic
+// ProcessMessage processes a single message with rule-based transformations
+// In Phase 2F, applies configured transformation rules to the message payload
+// If no transformations are defined, returns the envelope unchanged for backward compatibility
 func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelope) (*envelope.Envelope, error) {
 	start := time.Now()
 	c.metrics.RecordMessageReceived()
 
-	// Phase 1: Pass-through (no transformation)
-	// The message is returned unchanged
-	c.logger.DebugContext(ctx, "Processing message (Phase 1: pass-through)",
-		"envelope_id", env.ID,
-		"tenant_id", env.TenantID,
-		"content_type", env.ContentType,
-	)
+	// Phase 2F: Rule-based transformation
+	// If transformations are defined, apply them to the payload
+	if len(c.config.Transformations) > 0 && env.Payload != nil {
+		c.logger.DebugContext(ctx, "Processing message with transformations",
+			"envelope_id", env.ID,
+			"tenant_id", env.TenantID,
+			"num_transformations", len(c.config.Transformations),
+		)
+
+		// Execute transformations via rule engine
+		transformed, err := c.ruleEngine.ExecuteTransformations(env.Payload, c.config.Transformations)
+		if err != nil {
+			c.logger.ErrorContext(ctx, "Transformation failed",
+				"envelope_id", env.ID,
+				"error", err.Error(),
+			)
+			duration := time.Since(start)
+			c.metrics.RecordTransformationDuration(duration)
+			c.metrics.RecordMessageFailed("transformation")
+			return env, err
+		}
+
+		// Convert transformed map to JSON and update envelope payload
+		transformedJSON, err := json.Marshal(transformed)
+		if err != nil {
+			c.logger.ErrorContext(ctx, "Failed to marshal transformed output",
+				"envelope_id", env.ID,
+				"error", err.Error(),
+			)
+			duration := time.Since(start)
+			c.metrics.RecordTransformationDuration(duration)
+			c.metrics.RecordMessageFailed("marshal")
+			return env, err
+		}
+
+		// Update envelope with transformed payload
+		env.Payload = transformedJSON
+		env.PayloadSize = int64(len(transformedJSON))
+
+		c.logger.DebugContext(ctx, "Message transformed successfully",
+			"envelope_id", env.ID,
+			"output_fields", len(transformed),
+		)
+	} else {
+		// No transformations defined - pass-through for backward compatibility
+		c.logger.DebugContext(ctx, "Processing message (no transformations, pass-through)",
+			"envelope_id", env.ID,
+			"tenant_id", env.TenantID,
+			"content_type", env.ContentType,
+		)
+	}
 
 	// Record transformation duration
 	duration := time.Since(start)

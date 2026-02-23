@@ -1,8 +1,19 @@
 package converter
 
 import (
+	"context"
 	"time"
 )
+
+// Logger is an interface for logging operations.
+// It abstracts the concrete logging implementation.
+type Logger interface {
+	InfoContext(ctx context.Context, msg string, args ...interface{})
+	WarnContext(ctx context.Context, msg string, args ...interface{})
+	ErrorContext(ctx context.Context, msg string, args ...interface{})
+	Warn(msg string)
+	Error(msg string)
+}
 
 // ConverterConfig holds the configuration for a converter instance.
 // It defines input/output topics, transformation rules, and error handling strategies.
