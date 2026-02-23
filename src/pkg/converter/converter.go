@@ -325,9 +325,17 @@ func (c *ConverterImpl) handleMessage(msg *nats.Msg) {
 	// Unmarshal envelope
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
+		// Log truncated payload for debugging (max 256 bytes)
+		payloadPreview := string(msg.Data)
+		if len(payloadPreview) > 256 {
+			payloadPreview = payloadPreview[:256] + "..."
+		}
+
 		c.logger.ErrorContext(c.ctx, "Failed to unmarshal envelope",
 			"error", err,
 			"subject", msg.Subject,
+			"payload_preview", payloadPreview,
+			"payload_size", len(msg.Data),
 		)
 		c.metrics.RecordMessageFailed(ErrorCategoryUnmarshal)
 		return

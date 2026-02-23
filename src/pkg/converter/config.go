@@ -44,9 +44,15 @@ func LoadConfig(ctx context.Context, tenantID, converterID string, logger *slog.
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Wait before retry (exponential backoff: 100ms, 1s, 10s)
 		if attempt > 1 {
-			// Backoff values in milliseconds: 100ms, 1s, 10s
-			backoffMs := []int{100, 1000, 10000}[attempt-2]
-			backoff := time.Duration(backoffMs) * time.Millisecond
+			var backoff time.Duration
+			switch attempt {
+			case 2:
+				backoff = 100 * time.Millisecond
+			case 3:
+				backoff = 1 * time.Second
+			default:
+				backoff = 10 * time.Second
+			}
 			logger.WarnContext(ctx, "Retrying config fetch", "attempt", attempt, "backoff", backoff.String())
 			time.Sleep(backoff)
 		}

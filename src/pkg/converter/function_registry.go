@@ -25,10 +25,9 @@ type FunctionRegistry struct {
 
 // WASMModuleFunction maps a function name to its WASM module and export
 type WASMModuleFunction struct {
-	ModuleName    string
-	ExportName    string
+	ModuleName string
+	ExportName string
 }
-
 
 // NewFunctionRegistry creates a new function registry with stubs for Phase 3 functions.
 func NewFunctionRegistry(ctx context.Context, logger Logger) *FunctionRegistry {
@@ -120,16 +119,19 @@ func (fr *FunctionRegistry) Call(name string, args ...interface{}) (interface{},
 
 	wasmFunc, isWASM := fr.wasmFunctions[name]
 	var moduleName, exportName string
+	var wasmLoader *WASMFunctionLoader // Copy wasmLoader reference under lock
 	useWASM := isWASM && fr.wasmLoader != nil
 	if useWASM {
 		moduleName = wasmFunc.ModuleName
 		exportName = wasmFunc.ExportName
+		wasmLoader = fr.wasmLoader // Safe copy under lock
 	}
 	fr.mu.RUnlock()
 
 	// Check WASM functions first using only local copies of the data.
-	if useWASM {
-		module := fr.wasmLoader.GetModule(moduleName)
+	// wasmLoader reference is guaranteed to be valid (copied under lock)
+	if useWASM && wasmLoader != nil {
+		module := wasmLoader.GetModule(moduleName)
 
 		if module != nil {
 			result := module.Call(fr.ctx, exportName, args...)

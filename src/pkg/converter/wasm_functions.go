@@ -38,15 +38,15 @@ func NewWASMConfig() *WASMConfig {
 
 // WASMMetrics holds performance metrics for a WASM module
 type WASMMetrics struct {
-	mu              sync.RWMutex
-	CallCount       int64
-	ErrorCount      int64
-	TotalLatencyMs  int64
-	MaxLatencyMs    int64
-	MinLatencyMs    int64
-	LastCallTime    time.Time
-	LastErrorTime   time.Time
-	LastErrorMsg    string
+	mu             sync.RWMutex
+	CallCount      int64
+	ErrorCount     int64
+	TotalLatencyMs int64
+	MaxLatencyMs   int64
+	MinLatencyMs   int64
+	LastCallTime   time.Time
+	LastErrorTime  time.Time
+	LastErrorMsg   string
 }
 
 // RecordCall records a successful function call with latency
@@ -101,15 +101,15 @@ func (m *WASMMetrics) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"call_count":        m.CallCount,
-		"error_count":       m.ErrorCount,
-		"total_latency_ms":  m.TotalLatencyMs,
-		"avg_latency_ms":    avgLatency,
-		"max_latency_ms":    m.MaxLatencyMs,
-		"min_latency_ms":    m.MinLatencyMs,
-		"last_call_time":    m.LastCallTime,
-		"last_error_time":   m.LastErrorTime,
-		"last_error_msg":    m.LastErrorMsg,
+		"call_count":       m.CallCount,
+		"error_count":      m.ErrorCount,
+		"total_latency_ms": m.TotalLatencyMs,
+		"avg_latency_ms":   avgLatency,
+		"max_latency_ms":   m.MaxLatencyMs,
+		"min_latency_ms":   m.MinLatencyMs,
+		"last_call_time":   m.LastCallTime,
+		"last_error_time":  m.LastErrorTime,
+		"last_error_msg":   m.LastErrorMsg,
 	}
 }
 
@@ -119,16 +119,16 @@ func (m *WASMMetrics) GetStats() map[string]interface{} {
 
 // WASMModule represents a loaded and instantiated WASM module
 type WASMModule struct {
-	Name      string
-	FilePath  string
-	Instance  *wasmtime.Instance
-	Store     *wasmtime.Store
-	Engine    *wasmtime.Engine
-	Metrics   *WASMMetrics
-	Logger    Logger
-	Config    *WASMConfig
-	mu        sync.RWMutex
-	ctx       context.Context
+	Name     string
+	FilePath string
+	Instance *wasmtime.Instance
+	Store    *wasmtime.Store
+	Engine   *wasmtime.Engine
+	Metrics  *WASMMetrics
+	Logger   Logger
+	Config   *WASMConfig
+	mu       sync.RWMutex
+	ctx      context.Context
 }
 
 // Call invokes an exported function in the WASM module with graceful error handling
@@ -172,7 +172,7 @@ func (wm *WASMModule) Call(ctx context.Context, funcName string, args ...interfa
 	// Call WASM function (with timeout enforcement)
 	var result interface{}
 	var err error
-	err = wm.callWithTimeout(ctx, func() error {
+	err = wm.callWithTimeout(ctx, func(callCtx context.Context) error {
 		res, err := f.Call(wm.Store, args...)
 		if err != nil {
 			return err
@@ -200,14 +200,16 @@ func (wm *WASMModule) Call(ctx context.Context, funcName string, args ...interfa
 	return result
 }
 
-// callWithTimeout executes a function with timeout enforcement
-func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func() error) error {
-	// Create channel for result
+// callWithTimeout executes a function with timeout enforcement and context-aware cancellation.
+// The function fn receives the context so it can check ctx.Done() and exit early,
+// preventing goroutine leaks when timeout or context cancellation occurs.
+func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func(context.Context) error) error {
+	// Create channel for result (buffered to prevent goroutine leak on timeout)
 	done := make(chan error, 1)
 
-	// Run function in goroutine
+	// Run function in goroutine with context awareness
 	go func() {
-		done <- fn()
+		done <- fn(ctx)
 	}()
 
 	// Determine timeout

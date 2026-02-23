@@ -130,7 +130,9 @@ func (m *Metrics) RecordTransformationDuration(duration time.Duration) {
 	m.transformationDuration.Observe(duration.Seconds())
 }
 
-// RecordRetryAttempt increments the retry attempts counter
-func (m *Metrics) RecordRetryAttempt(attemptNumber int) {
+// RecordRetryAttempt increments the retry attempts counter.
+// The attempt number is currently unused but kept for compatibility
+// and potential future use (e.g., as a label or for logging).
+func (m *Metrics) RecordRetryAttempt(_ int) {
 	m.retryAttempts.Inc()
 }
