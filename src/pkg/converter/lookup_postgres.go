@@ -141,8 +141,9 @@ func (pb *PostgresLookupBackend) Lookup(ctx context.Context, table, field string
 
 	// Build parameterized query using pgx.Identifier for safe table/field names
 	// pgx.Identifier properly escapes SQL identifiers to prevent injection
-	// Query: SELECT * FROM table WHERE field = $1 LIMIT 1
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 LIMIT 1",
+	// Query: SELECT field FROM table WHERE field = $1 LIMIT 1
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1 LIMIT 1",
+		pgx.Identifier{field}.Sanitize(),
 		pgx.Identifier{table}.Sanitize(),
 		pgx.Identifier{field}.Sanitize())
 

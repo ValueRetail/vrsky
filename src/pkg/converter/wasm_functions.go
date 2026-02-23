@@ -226,71 +226,7 @@ func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func(context.Conte
 	}
 }
 
-// marshalArgs converts Go types to WASM types
-// Primitives (int, float, bool, string) are handled directly
-// Complex types (arrays, maps) are JSON-serialized to WASM linear memory
-func (wm *WASMModule) marshalArgs(args []interface{}) ([]interface{}, error) {
-	if len(args) == 0 {
-		return []interface{}{}, nil
-	}
-
-	result := make([]interface{}, len(args))
-
-	for i, arg := range args {
-		switch v := arg.(type) {
-		case nil:
-			// nil becomes 0 for i32
-			result[i] = int32(0)
-
-		case bool:
-			// bool becomes i32 (0 or 1)
-			if v {
-				result[i] = int32(1)
-			} else {
-				result[i] = int32(0)
-			}
-
-		case int:
-			result[i] = int64(v)
-
-		case int32:
-			result[i] = v
-
-		case int64:
-			result[i] = v
-
-		case float32:
-			result[i] = float64(v)
-
-		case float64:
-			result[i] = v
-
-		case string:
-			// Strings are stored in linear memory, return pointer (in WASM this would be handled)
-			// For now, we JSON encode to string
-			result[i] = v
-
-		case []interface{}, []string, []int, []float64, map[string]interface{}:
-			// Complex types: JSON serialize
-			data, err := json.Marshal(v)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal argument: %w", err)
-			}
-			result[i] = string(data)
-
-		default:
-			// Try JSON for unknown types
-			data, err := json.Marshal(v)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal argument of type %T: %w", v, err)
-			}
-			result[i] = string(data)
-		}
-	}
-
-	return result, nil
-}
-
+// (removed unused marshalArgs helper; no behavior change as it was never called)
 // unmarshalResult converts WASM result back to Go types
 func (wm *WASMModule) unmarshalResult(wasmResult []interface{}) (interface{}, error) {
 	if len(wasmResult) == 0 {
@@ -355,46 +291,7 @@ func NewWASMFunctionLoader(ctx context.Context, logger Logger) *WASMFunctionLoad
 		logger:  logger,
 		config:  NewWASMConfig(),
 		ctx:     ctx,
-	}
-}
 
-// SetConfig sets the WASM runtime configuration
-func (wfl *WASMFunctionLoader) SetConfig(config *WASMConfig) {
-	if config != nil {
-		wfl.config = config
-	}
-}
-
-// LoadFromFile loads a WASM module from a file
-// moduleName: identifier for the module (e.g., "calculate_discount")
-// filePath: path to the .wasm binary file
-func (wfl *WASMFunctionLoader) LoadFromFile(moduleName, filePath string) error {
-	if moduleName == "" {
-		return fmt.Errorf("module name cannot be empty")
-	}
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-
-	wfl.mu.Lock()
-	defer wfl.mu.Unlock()
-
-	// Check if module already loaded
-	if _, exists := wfl.modules[moduleName]; exists {
-		return fmt.Errorf("module already loaded: %s", moduleName)
-	}
-
-	// Create engine and store
-	engine := wasmtime.NewEngine()
-	store := wasmtime.NewStore(engine)
-
-	// Set memory limit via a custom linker if needed
-	// For now, rely on OS-level process memory limits
-
-	// Read WASM binary
-	wasmData, err := os.ReadFile(filePath)
-	if err != nil {
-		if wfl.logger != nil {
 			wfl.logger.ErrorContext(wfl.ctx, "failed to read WASM file", "module", moduleName, "path", filePath, "error", err.Error())
 		}
 		return fmt.Errorf("failed to read WASM file: %w", err)

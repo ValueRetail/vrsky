@@ -82,7 +82,7 @@ spec:
         - name: CONVERTER_ID
           valueFrom:
             fieldRef:
-              fieldPath: metadata.name
+              fieldPath: metadata.labels['app']
         - name: POD_NAME
           valueFrom:
             fieldRef:

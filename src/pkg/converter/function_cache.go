@@ -185,30 +185,16 @@ func (fc *FunctionCache) SetWithTTL(funcName string, result interface{}, ttl tim
 	fc.cacheLock.Lock()
 	defer fc.cacheLock.Unlock()
 
-	// Remove expired entries first to free up space and track oldest remaining entry
-	now := time.Now()
-	var oldestKey string
-	var oldestTime time.Time
-	for key, entry := range fc.cache {
-		if now.After(entry.ExpiresAt) {
-			delete(fc.cache, key)
-			fc.metrics.expirations++
-		} else {
-			if oldestTime.IsZero() || entry.ExpiresAt.Before(oldestTime) {
-				oldestTime = entry.ExpiresAt
-				oldestKey = key
-			}
-		}
-	}
-
-	// If still at capacity after cleanup, evict oldest entry (LRU by expiration time)
+	// Enforce max size with O(1) eviction of an arbitrary entry if at capacity.
 	if len(fc.cache) >= fc.maxSize {
-		if oldestKey != "" {
-			delete(fc.cache, oldestKey)
+		for key := range fc.cache {
+			delete(fc.cache, key)
 			fc.metrics.evictions++
+			break
 		}
 	}
 
+	now := time.Now()
 	fc.cache[cacheKey] = &FunctionCacheEntry{
 		Result:    result,
 		ExpiresAt: now.Add(ttl),

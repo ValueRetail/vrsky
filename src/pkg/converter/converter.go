@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"sync"
 	"time"
 
@@ -423,7 +422,7 @@ func (c *ConverterImpl) publishToErrorTopic(env *envelope.Envelope, err error) {
 }
 
 // executeWithRetry executes a function with exponential backoff retry
-// Attempts: 1 immediate, 2 after 1s, 3 after 2s (doubling each time)
+// Attempts: 1 immediate, 2 after 1s, 3 after 2s, 4 after 4s (doubling each time)
 func (c *ConverterImpl) executeWithRetry(fn func() error) error {
 	maxAttempts := c.config.MaxRetries
 	var lastErr error
@@ -431,8 +430,9 @@ func (c *ConverterImpl) executeWithRetry(fn func() error) error {
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Wait before retry (except first attempt)
 		if attempt > 1 {
-			backoffMs := int(math.Pow(2, float64(attempt-2))) * 1000 // 1s, 2s, 4s...
-			backoff := time.Duration(backoffMs) * time.Millisecond
+			// Exponential backoff: 1s, 2s, 4s, 8s... using bit shift (more efficient than math.Pow)
+			backoffSeconds := 1 << uint(attempt-2)
+			backoff := time.Duration(backoffSeconds) * time.Second
 			time.Sleep(backoff)
 		}
 

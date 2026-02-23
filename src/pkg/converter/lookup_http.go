@@ -26,19 +26,19 @@ type HTTPMetrics struct {
 type CircuitBreakerState string
 
 const (
-	CircuitBreakerClosed     CircuitBreakerState = "closed"
-	CircuitBreakerOpen       CircuitBreakerState = "open"
-	CircuitBreakerHalfOpen   CircuitBreakerState = "half_open"
+	CircuitBreakerClosed   CircuitBreakerState = "closed"
+	CircuitBreakerOpen     CircuitBreakerState = "open"
+	CircuitBreakerHalfOpen CircuitBreakerState = "half_open"
 )
 
 // CircuitBreaker tracks endpoint health and prevents cascading failures
 type CircuitBreaker struct {
-	state              CircuitBreakerState
-	failureCount       int
-	failureThreshold   int
-	lastFailureTime    time.Time
-	recoveryTimeout    time.Duration
-	mu                 sync.Mutex
+	state            CircuitBreakerState
+	failureCount     int
+	failureThreshold int
+	lastFailureTime  time.Time
+	recoveryTimeout  time.Duration
+	mu               sync.Mutex
 }
 
 // NewCircuitBreaker creates a new circuit breaker with configured thresholds
@@ -175,14 +175,14 @@ func (rc *ResponseCache) Cleanup() {
 
 // HTTPLookupBackend provides resilient HTTP API lookups with retry, caching, and circuit breaker
 type HTTPLookupBackend struct {
-	client         *http.Client
-	cache          *ResponseCache
-	circuitBreaker *CircuitBreaker
-	logger         Logger
-	ctx            context.Context
-	config         HTTPConfig
+	client           *http.Client
+	cache            *ResponseCache
+	circuitBreaker   *CircuitBreaker
+	logger           Logger
+	ctx              context.Context
+	config           HTTPConfig
 	metricsCollector *HTTPMetrics
-	mu             sync.Mutex
+	mu               sync.Mutex
 }
 
 // HTTPConfig holds HTTP backend configuration
@@ -247,11 +247,11 @@ func NewHTTPLookupBackendWithConfig(config HTTPConfig, logger Logger) (*HTTPLook
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		cache:          NewResponseCache(config.MaxCacheSize),
-		circuitBreaker: NewCircuitBreaker(config.CircuitBreakerThreshold, config.CircuitBreakerTimeout),
-		logger:         logger,
-		ctx:            context.Background(),
-		config:         config,
+		cache:            NewResponseCache(config.MaxCacheSize),
+		circuitBreaker:   NewCircuitBreaker(config.CircuitBreakerThreshold, config.CircuitBreakerTimeout),
+		logger:           logger,
+		ctx:              context.Background(),
+		config:           config,
 		metricsCollector: &HTTPMetrics{},
 	}
 
@@ -292,13 +292,22 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 	}
 	hb.metricsCollector.cacheMisses++
 
-	// Retry logic with exponential backoff
-	backoffDurations := []time.Duration{0, 1 * time.Second, 2 * time.Second, 4 * time.Second}
+	// Generate backoff durations dynamically based on MaxRetries
+	// Pattern: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
+	backoffDurations := make([]time.Duration, hb.config.MaxRetries+1)
+	for i := 0; i <= hb.config.MaxRetries; i++ {
+		if i == 0 {
+			backoffDurations[i] = 0 // First attempt: no backoff
+		} else {
+			// Exponential backoff: 1s, 2s, 4s, 8s, 16s...
+			backoffDurations[i] = time.Duration(1<<uint(i-1)) * time.Second
+		}
+	}
 
 	for attempt := 0; attempt <= hb.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
-		if attempt > 0 && attempt < len(backoffDurations) {
-			waitTime := backoffDurations[attempt-1]
+		if attempt > 0 {
+			waitTime := backoffDurations[attempt]
 			hb.logger.InfoContext(ctx, "HTTP lookup retry",
 				"url", url, "attempt", attempt, "wait_ms", waitTime.Milliseconds())
 			hb.metricsCollector.retries++
