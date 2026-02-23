@@ -12,9 +12,10 @@ type Function func(ctx context.Context, args ...interface{}) (interface{}, error
 // FunctionRegistry manages custom functions available in expressions.
 // This allows Phase 3 to register built-in functions without modifying the evaluator.
 type FunctionRegistry struct {
-	functions map[string]Function
-	logger    Logger
-	ctx       context.Context
+	functions     map[string]Function
+	logger        Logger
+	ctx           context.Context
+	lookupBackend LookupBackend
 }
 
 // NewFunctionRegistry creates a new function registry with stubs for Phase 3 functions.
@@ -37,32 +38,45 @@ func NewFunctionRegistry(ctx context.Context, logger Logger) *FunctionRegistry {
 
 // registerStubs registers placeholder functions for Phase 3 implementation.
 func (fr *FunctionRegistry) registerStubs() {
-	// Lookup functions
+	// Aggregation functions
+	fr.Register("sum", sumFunc)
+	fr.Register("avg", avgFunc)
+	fr.Register("count", countFunc)
+	fr.Register("max", maxFunc)
+	fr.Register("min", minFunc)
+
+	// String functions
+	fr.Register("concat", concatFunc)
+	fr.Register("uppercase", uppercaseFunc)
+	fr.Register("lowercase", lowercaseFunc)
+	fr.Register("trim", trimFunc)
+	fr.Register("split", splitFunc)
+	fr.Register("replace", replaceFunc)
+
+	// Math functions
+	fr.Register("multiply", multiplyFunc)
+	fr.Register("divide", divideFunc)
+
+	// Type conversion functions
+	fr.Register("as_string", asStringFunc)
+	fr.Register("as_number", asNumberFunc)
+
+	// Date/Time functions
+	fr.Register("now", nowFunc)
+	fr.Register("date_format", dateFormatFunc)
+	fr.Register("date_add", dateAddFunc)
+
+	// Lookup functions (mock implementations - Phase 3)
+	mockBackend := NewMockLookupBackend()
+	fr.Register("lookup", newLookupFunc(mockBackend))
+	fr.Register("http_lookup", newHTTPLookupFunc(mockBackend))
+
+	// Legacy lookup functions (for backward compatibility)
 	fr.Register("lookup_customer_account", stubLookupCustomerAccount)
 	fr.Register("get_product_info", stubGetProductInfo)
 	fr.Register("get_inventory_level", stubGetInventoryLevel)
 	fr.Register("get_pricing", stubGetPricing)
 	fr.Register("lookup_tax_rate", stubLookupTaxRate)
-
-	// Aggregation functions
-	fr.Register("sum", stubSum)
-	fr.Register("avg", stubAvg)
-	fr.Register("count", stubCount)
-	fr.Register("max", stubMax)
-	fr.Register("min", stubMin)
-
-	// String functions
-	fr.Register("concat", stubConcat)
-	fr.Register("uppercase", stubUppercase)
-	fr.Register("lowercase", stubLowercase)
-	fr.Register("trim", stubTrim)
-	fr.Register("split", stubSplit)
-	fr.Register("replace", stubReplace)
-
-	// Date/Time functions
-	fr.Register("now", stubNow)
-	fr.Register("date_format", stubDateFormat)
-	fr.Register("date_add", stubDateAdd)
 }
 
 // Register registers a custom function with the registry.
@@ -93,6 +107,16 @@ func (fr *FunctionRegistry) Call(name string, args ...interface{}) (interface{},
 func (fr *FunctionRegistry) Exists(name string) bool {
 	_, exists := fr.functions[name]
 	return exists
+}
+
+// SetLookupBackend sets the lookup backend for database and HTTP lookup functions.
+func (fr *FunctionRegistry) SetLookupBackend(backend LookupBackend) {
+	if backend != nil {
+		fr.lookupBackend = backend
+		// Re-register lookup functions with new backend
+		fr.Register("lookup", newLookupFunc(backend))
+		fr.Register("http_lookup", newHTTPLookupFunc(backend))
+	}
 }
 
 // =============================================================================
@@ -132,10 +156,10 @@ func stubGetInventoryLevel(ctx context.Context, args ...interface{}) (interface{
 func stubGetPricing(ctx context.Context, args ...interface{}) (interface{}, error) {
 	// Phase 3: Implement pricing engine integration
 	return map[string]interface{}{
-		"basePrice":      0.0,
-		"discountPrice":  0.0,
-		"currencyCode":   "USD",
-		"effectiveDate":  "",
+		"basePrice":     0.0,
+		"discountPrice": 0.0,
+		"currencyCode":  "USD",
+		"effectiveDate": "",
 	}, nil
 }
 

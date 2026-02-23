@@ -55,7 +55,7 @@ func TestRuleEngine_ExecuteTransformations(t *testing.T) {
 				{Expression: "qty * price", Target: "total"},
 			},
 			expected: map[string]interface{}{
-				"total": float64(50),  // JSON unmarshals numbers to float64
+				"total": float64(50), // JSON unmarshals numbers to float64
 			},
 			wantErr: false,
 		},
@@ -154,10 +154,10 @@ func TestRuleEngine_ExecuteTransformations(t *testing.T) {
 				{Source: "born", Target: "birth_year", Type: "int"},
 			},
 			expected: map[string]interface{}{
-				"first_name":  "John",
-				"last_name":   "Doe",
-				"full_name":   "John Doe",
-				"birth_year":  1990,
+				"first_name": "John",
+				"last_name":  "Doe",
+				"full_name":  "John Doe",
+				"birth_year": 1990,
 			},
 			wantErr: false,
 		},

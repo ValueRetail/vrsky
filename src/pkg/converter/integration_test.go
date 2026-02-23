@@ -479,3 +479,333 @@ func TestBackoffCalculation(t *testing.T) {
 		})
 	}
 }
+
+// === PHASE 3 E2E INTEGRATION TESTS ===
+
+// TestE2E_AggregationPipeline tests end-to-end aggregation function pipeline
+func TestE2E_AggregationPipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+
+	// Create converter components
+	registry := NewFunctionRegistry(ctx, logger)
+	mapper := NewFieldMapper(ctx, logger)
+
+	// Test payload with order items
+	payload := []byte(`{
+		"order_id": "ORD001",
+		"items": [
+			{"sku": "SKU-001", "price": 100.00, "qty": 2},
+			{"sku": "SKU-002", "price": 50.00, "qty": 3},
+			{"sku": "SKU-003", "price": 25.00, "qty": 1}
+		]
+	}`)
+
+	// Extract items and calculate totals using functions
+	itemPrices := mapper.ExtractAll(payload, "items")
+	if len(itemPrices) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(itemPrices))
+	}
+
+	// Extract prices for aggregation
+	var prices []interface{}
+	for _, item := range itemPrices {
+		if m, ok := item.(map[string]interface{}); ok {
+			prices = append(prices, m["price"])
+		}
+	}
+
+	// Test sum function
+	sum, err := registry.Call("sum", prices)
+	if err != nil {
+		t.Fatalf("sum function failed: %v", err)
+	}
+	expected := 175.0
+	if sum != expected {
+		t.Errorf("sum: expected %v, got %v", expected, sum)
+	}
+
+	// Test avg function
+	avg, err := registry.Call("avg", prices)
+	if err != nil {
+		t.Fatalf("avg function failed: %v", err)
+	}
+	expectedAvg := 58.33
+	if val, ok := avg.(float64); !ok || math.Abs(val-expectedAvg) > 0.1 {
+		t.Errorf("avg: expected ~%v, got %v", expectedAvg, avg)
+	}
+
+	// Test count function
+	count, err := registry.Call("count", prices)
+	if err != nil {
+		t.Fatalf("count function failed: %v", err)
+	}
+	if count != float64(3) {
+		t.Errorf("count: expected 3, got %v", count)
+	}
+
+	// Test max and min
+	max, err := registry.Call("max", prices)
+	if err != nil {
+		t.Fatalf("max function failed: %v", err)
+	}
+	if max != 100.0 {
+		t.Errorf("max: expected 100.0, got %v", max)
+	}
+
+	min, err := registry.Call("min", prices)
+	if err != nil {
+		t.Fatalf("min function failed: %v", err)
+	}
+	if min != 25.0 {
+		t.Errorf("min: expected 25.0, got %v", min)
+	}
+}
+
+// TestE2E_StringOperationsPipeline tests end-to-end string function operations
+func TestE2E_StringOperationsPipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	// Test concat
+	concat, err := registry.Call("concat", "Hello", " ", "World")
+	if err != nil {
+		t.Fatalf("concat failed: %v", err)
+	}
+	if concat != "Hello World" {
+		t.Errorf("concat: expected 'Hello World', got %v", concat)
+	}
+
+	// Test uppercase
+	upper, err := registry.Call("uppercase", "hello world")
+	if err != nil {
+		t.Fatalf("uppercase failed: %v", err)
+	}
+	if upper != "HELLO WORLD" {
+		t.Errorf("uppercase: expected 'HELLO WORLD', got %v", upper)
+	}
+
+	// Test lowercase
+	lower, err := registry.Call("lowercase", "HELLO WORLD")
+	if err != nil {
+		t.Fatalf("lowercase failed: %v", err)
+	}
+	if lower != "hello world" {
+		t.Errorf("lowercase: expected 'hello world', got %v", lower)
+	}
+
+	// Test trim
+	trimmed, err := registry.Call("trim", "  hello world  ")
+	if err != nil {
+		t.Fatalf("trim failed: %v", err)
+	}
+	if trimmed != "hello world" {
+		t.Errorf("trim: expected 'hello world', got %v", trimmed)
+	}
+
+	// Test split
+	split, err := registry.Call("split", "a,b,c", ",")
+	if err != nil {
+		t.Fatalf("split failed: %v", err)
+	}
+	if splitArr, ok := split.([]interface{}); !ok || len(splitArr) != 3 {
+		t.Errorf("split: expected 3 elements, got %v", split)
+	}
+
+	// Test replace
+	replaced, err := registry.Call("replace", "hello world", "world", "everyone")
+	if err != nil {
+		t.Fatalf("replace failed: %v", err)
+	}
+	if replaced != "hello everyone" {
+		t.Errorf("replace: expected 'hello everyone', got %v", replaced)
+	}
+}
+
+// TestE2E_DateTimePipeline tests end-to-end date/time function operations
+func TestE2E_DateTimePipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	// Test now function
+	now, err := registry.Call("now")
+	if err != nil {
+		t.Fatalf("now failed: %v", err)
+	}
+	// Should return current time as string
+	if nowStr, ok := now.(string); !ok || len(nowStr) == 0 {
+		t.Errorf("now: expected non-empty string, got %v", now)
+	}
+
+	// Test date_format
+	timeStr := "2026-02-23T10:30:00Z"
+	formatted, err := registry.Call("date_format", timeStr, "2006-01-02")
+	if err != nil {
+		t.Fatalf("date_format failed: %v", err)
+	}
+	if formatted != "2026-02-23" {
+		t.Errorf("date_format: expected '2026-02-23', got %v", formatted)
+	}
+
+	// Test date_add
+	dateAdded, err := registry.Call("date_add", "2026-02-23", 5)
+	if err != nil {
+		t.Fatalf("date_add failed: %v", err)
+	}
+	if dateAdded == nil {
+		t.Error("date_add: expected non-nil result")
+	}
+}
+
+// TestE2E_TypeConversionPipeline tests end-to-end type conversion operations
+func TestE2E_TypeConversionPipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	// Test as_string conversions
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"int to string", 123, "123"},
+		{"float to string", 123.45, "123.45"},
+		{"bool true to string", true, "true"},
+		{"bool false to string", false, "false"},
+	}
+
+	for _, tt := range tests {
+		result, err := registry.Call("as_string", tt.input)
+		if err != nil {
+			t.Errorf("%s: %v", tt.name, err)
+			continue
+		}
+		if result != tt.expected {
+			t.Errorf("%s: expected %q, got %v", tt.name, tt.expected, result)
+		}
+	}
+
+	// Test as_number conversions
+	numTests := []struct {
+		name     string
+		input    interface{}
+		expected float64
+	}{
+		{"string to number", "123.45", 123.45},
+		{"int to number", 123, 123.0},
+		{"bool true to number", true, 1.0},
+		{"bool false to number", false, 0.0},
+	}
+
+	for _, tt := range numTests {
+		result, err := registry.Call("as_number", tt.input)
+		if err != nil {
+			t.Errorf("%s: %v", tt.name, err)
+			continue
+		}
+		if resultNum, ok := result.(float64); !ok || resultNum != tt.expected {
+			t.Errorf("%s: expected %v, got %v", tt.name, tt.expected, result)
+		}
+	}
+}
+
+// TestE2E_LookupFunctionsPipeline tests end-to-end lookup function operations
+func TestE2E_LookupFunctionsPipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	// Test database lookup
+	customerLookup, err := registry.Call("lookup", "customers", "id", "CUST001")
+	if err != nil {
+		t.Fatalf("lookup failed: %v", err)
+	}
+	if customerLookup == nil {
+		t.Error("lookup: expected non-nil customer, got nil")
+	}
+
+	// Test lookup with email field
+	emailLookup, err := registry.Call("lookup", "customers", "email", "alice@example.com")
+	if err != nil {
+		t.Fatalf("email lookup failed: %v", err)
+	}
+	if emailLookup == nil {
+		t.Error("lookup: expected non-nil result for email lookup")
+	}
+
+	// Test product lookup
+	productLookup, err := registry.Call("lookup", "products", "sku", "SKU-001")
+	if err != nil {
+		t.Fatalf("product lookup failed: %v", err)
+	}
+	if productLookup == nil {
+		t.Error("lookup: expected non-nil product")
+	}
+
+	// Test HTTP lookup (mock)
+	httpLookup, err := registry.Call("http_lookup", "https://api.example.com/exchange", map[string]interface{}{"from": "USD", "to": "EUR"})
+	if err != nil {
+		t.Fatalf("http_lookup failed: %v", err)
+	}
+	if httpLookup == nil {
+		t.Error("http_lookup: expected non-nil result for currency lookup")
+	}
+
+	// Test lookup with non-existent data
+	notFound, err := registry.Call("lookup", "customers", "id", "NONEXISTENT")
+	if err != nil {
+		t.Fatalf("not found lookup failed: %v", err)
+	}
+	if notFound != nil {
+		// Should return nil or empty
+		if m, ok := notFound.(map[string]interface{}); ok && len(m) > 0 {
+			t.Error("lookup: expected nil or empty for non-existent customer")
+		}
+	}
+}
+
+// TestE2E_MathOperationsPipeline tests end-to-end math function operations
+func TestE2E_MathOperationsPipeline(t *testing.T) {
+	ctx := context.Background()
+	logger := NewTestLogger()
+	registry := NewFunctionRegistry(ctx, logger)
+
+	// Test multiply
+	product, err := registry.Call("multiply", 10, 5)
+	if err != nil {
+		t.Fatalf("multiply failed: %v", err)
+	}
+	if product != 50.0 {
+		t.Errorf("multiply: expected 50.0, got %v", product)
+	}
+
+	// Test divide
+	quotient, err := registry.Call("divide", 100, 4)
+	if err != nil {
+		t.Fatalf("divide failed: %v", err)
+	}
+	if quotient != 25.0 {
+		t.Errorf("divide: expected 25.0, got %v", quotient)
+	}
+
+	// Test divide by zero (should return 0, not error)
+	divZero, err := registry.Call("divide", 100, 0)
+	if err != nil {
+		t.Fatalf("divide by zero failed: %v", err)
+	}
+	if divZero != 0.0 {
+		t.Errorf("divide by zero: expected 0.0, got %v", divZero)
+	}
+
+	// Test multiply with type coercion
+	coerced, err := registry.Call("multiply", "10", "5")
+	if err != nil {
+		t.Fatalf("multiply with coercion failed: %v", err)
+	}
+	if coerced != 50.0 {
+		t.Errorf("multiply with coercion: expected 50.0, got %v", coerced)
+	}
+}

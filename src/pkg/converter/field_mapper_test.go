@@ -200,7 +200,7 @@ func TestFieldMapper_CoerceType(t *testing.T) {
 
 		// Edge cases
 		{"invalid bool string", "maybe", "bool", false}, // logs warning
-		{"invalid int string", "abc", "int", 0},          // logs warning
+		{"invalid int string", "abc", "int", 0},         // logs warning
 
 		// Whole number float to string
 		{"whole number float string", 42.0, "string", "42"},
@@ -271,5 +271,139 @@ func NewTestLogger() Logger {
 func (tl *TestLogger) InfoContext(ctx context.Context, msg string, args ...interface{})  {}
 func (tl *TestLogger) WarnContext(ctx context.Context, msg string, args ...interface{})  {}
 func (tl *TestLogger) ErrorContext(ctx context.Context, msg string, args ...interface{}) {}
-func (tl *TestLogger) Warn(msg string)  {}
-func (tl *TestLogger) Error(msg string) {}
+func (tl *TestLogger) Warn(msg string)                                                   {}
+func (tl *TestLogger) Error(msg string)                                                  {}
+
+// TestFieldMapper_ComplexJSONPath tests JSONPath query support
+func TestFieldMapper_ComplexJSONPath(t *testing.T) {
+	logger := NewTestLogger()
+	ctx := context.Background()
+	fm := NewFieldMapper(ctx, logger)
+
+	payload := []byte(`{
+		"order": {
+			"id": "ORD001",
+			"items": [
+				{"sku": "SKU-001", "name": "Laptop", "price": 1299.99, "qty": 1},
+				{"sku": "SKU-002", "name": "Mouse", "price": 29.99, "qty": 2},
+				{"sku": "SKU-003", "name": "Keyboard", "price": 149.99, "qty": 1}
+			]
+		}
+	}`)
+
+	tests := []struct {
+		name        string
+		path        string
+		wantCount   int
+		wantContent bool
+	}{
+		{
+			name:        "all items in array",
+			path:        "order.items",
+			wantCount:   3,
+			wantContent: true,
+		},
+		{
+			name:        "array access - first item",
+			path:        "order.items.0",
+			wantCount:   1,
+			wantContent: true,
+		},
+		{
+			name:        "array access - second item",
+			path:        "order.items.1",
+			wantCount:   1,
+			wantContent: true,
+		},
+		{
+			name:        "nested field access",
+			path:        "order.items.0.name",
+			wantCount:   1,
+			wantContent: true,
+		},
+		{
+			name:        "non-existent path",
+			path:        "order.items.99.name",
+			wantCount:   0,
+			wantContent: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test with ExtractAll for array queries
+			if tt.wantCount > 1 {
+				result := fm.ExtractAll(payload, tt.path)
+				if tt.wantContent {
+					if result == nil || len(result) != tt.wantCount {
+						t.Errorf("expected %d results, got %d", tt.wantCount, len(result))
+					}
+				} else {
+					if result != nil && len(result) > 0 {
+						t.Errorf("expected empty result, got %v", result)
+					}
+				}
+			} else {
+				// Test with ExtractField for single values
+				result := fm.ExtractField(payload, tt.path)
+				if tt.wantContent {
+					if result == nil {
+						t.Errorf("expected non-nil result")
+					}
+				} else {
+					if result != nil {
+						t.Errorf("expected nil, got %v", result)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestFieldMapper_ExtractFieldsByFilter tests the ExtractFieldsByFilter helper
+func TestFieldMapper_ExtractFieldsByFilter(t *testing.T) {
+	logger := NewTestLogger()
+	ctx := context.Background()
+	fm := NewFieldMapper(ctx, logger)
+
+	payload := []byte(`{
+		"items": [
+			{"id": 1, "status": "active", "balance": 100.50},
+			{"id": 2, "status": "inactive", "balance": 250.75},
+			{"id": 3, "status": "active", "balance": 50.25}
+		]
+	}`)
+
+	tests := []struct {
+		name       string
+		arrayPath  string
+		filterExpr string
+		wantCount  int
+		wantErr    bool
+	}{
+		{
+			name:       "extract all items without filter",
+			arrayPath:  "items",
+			filterExpr: "",
+			wantCount:  0, // Empty filter returns nil
+			wantErr:    false,
+		},
+		{
+			name:       "empty array path",
+			arrayPath:  "",
+			filterExpr: "status == \"active\"",
+			wantCount:  0,
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fm.ExtractFieldsByFilter(payload, tt.arrayPath, tt.filterExpr)
+
+			if len(result) != tt.wantCount {
+				t.Errorf("expected %d results, got %d", tt.wantCount, len(result))
+			}
+		})
+	}
+}

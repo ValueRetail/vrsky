@@ -10,11 +10,11 @@ import (
 // RuleEngine executes transformation rules against JSON payloads.
 // It orchestrates field extraction, expression evaluation, and type conversion.
 type RuleEngine struct {
-	fieldMapper           *FieldMapper
-	expressionEvaluator   *ExpressionEvaluator
-	functionRegistry      *FunctionRegistry
-	logger                Logger
-	ctx                   context.Context
+	fieldMapper         *FieldMapper
+	expressionEvaluator *ExpressionEvaluator
+	functionRegistry    *FunctionRegistry
+	logger              Logger
+	ctx                 context.Context
 }
 
 // NewRuleEngine creates a new rule engine instance.

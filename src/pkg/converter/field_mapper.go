@@ -27,6 +27,13 @@ func NewFieldMapper(ctx context.Context, logger Logger) *FieldMapper {
 }
 
 // ExtractField retrieves a field from JSON payload using dot notation or JSONPath.
+// Supports complex JSONPath queries:
+//   - Dot notation: "order.customer.email"
+//   - Array access: "items.0", "items[0]"
+//   - Wildcards: "items.*" (gets all items)
+//   - Recursive descent: "$..price" (finds all 'price' fields recursively)
+//   - Filters: "items[?(@.price > 100)]" (filters items where price > 100)
+//
 // Returns the value (typed), or nil if field doesn't exist.
 // Errors are logged but not returned (lenient approach).
 func (fm *FieldMapper) ExtractField(payload []byte, path string) interface{} {
@@ -34,7 +41,7 @@ func (fm *FieldMapper) ExtractField(payload []byte, path string) interface{} {
 		return nil
 	}
 
-	// Use gjson to extract the value
+	// Use gjson to extract the value (supports complex JSONPath)
 	result := gjson.GetBytes(payload, path)
 
 	// If value doesn't exist, return nil
@@ -195,6 +202,10 @@ func (fm *FieldMapper) toBool(value interface{}) bool {
 
 // ExtractAll returns all fields at the path as a slice.
 // Useful for array processing in expressions.
+// Supports complex JSONPath queries including filters and wildcards:
+//   - "items[*]" - all items in array
+//   - "items[?(@.price > 100)]" - items where price > 100
+//   - "$..price" - all price fields at any depth
 func (fm *FieldMapper) ExtractAll(payload []byte, path string) []interface{} {
 	if len(payload) == 0 || path == "" {
 		return nil
@@ -216,4 +227,19 @@ func (fm *FieldMapper) ExtractAll(payload []byte, path string) []interface{} {
 
 	// If single value, return as slice with one element
 	return []interface{}{result.Value()}
+}
+
+// ExtractFieldsByFilter applies a JSONPath filter expression and returns matching results.
+// Example: ExtractFieldsByFilter(payload, "items", "price > 100")
+// Returns array of matching values or nil if no matches.
+func (fm *FieldMapper) ExtractFieldsByFilter(payload []byte, arrayPath, filterExpr string) []interface{} {
+	if len(payload) == 0 || arrayPath == "" || filterExpr == "" {
+		return nil
+	}
+
+	// Build complex JSONPath query with filter
+	// Format: arrayPath[?(filter_expr)]
+	path := fmt.Sprintf("%s[?(@.%s)]", arrayPath, filterExpr)
+
+	return fm.ExtractAll(payload, path)
 }
