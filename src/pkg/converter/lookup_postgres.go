@@ -3,16 +3,17 @@ package converter
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// PostgresMetrics tracks PostgreSQL operation metrics
+// PostgresMetrics tracks PostgreSQL operation metrics with thread-safe atomic operations
 type PostgresMetrics struct {
-	queriesTotal   int64
-	queriesFailed  int64
+	queriesTotal   atomic.Int64
+	queriesFailed  atomic.Int64
 	queryLatencyMs float64
 	connPoolSize   int32
 	connPoolActive int32
@@ -151,7 +152,7 @@ func (pb *PostgresLookupBackend) Lookup(ctx context.Context, table, field string
 	if err != nil {
 		pb.logger.WarnContext(ctx, "PostgreSQL query error",
 			"table", table, "field", field, "value", value, "error", err.Error())
-		pb.metricsCollector.queriesFailed++
+		pb.metricsCollector.queriesFailed.Add(1)
 		return nil, nil // Graceful degradation: return nil, not error
 	}
 	defer rows.Close()
@@ -185,7 +186,7 @@ func (pb *PostgresLookupBackend) Lookup(ctx context.Context, table, field string
 		return nil, nil
 	}
 
-	pb.metricsCollector.queriesTotal++
+	pb.metricsCollector.queriesTotal.Add(1)
 	pb.logger.InfoContext(ctx, "PostgreSQL lookup successful",
 		"table", table, "field", field, "columns", len(output))
 

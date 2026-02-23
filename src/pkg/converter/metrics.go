@@ -12,9 +12,9 @@ type Metrics struct {
 	messagesReceived              prometheus.Counter
 	messagesSucceeded             prometheus.Counter
 	messagesFailed                *prometheus.CounterVec
-	transformationDurationSuccess prometheus.Histogram // Duration for successful transformations
-	transformationDurationFailure prometheus.Histogram // Duration for failed transformations
-	retryAttempts                 prometheus.Counter
+	transformationDurationSuccess prometheus.Histogram   // Duration for successful transformations
+	transformationDurationFailure prometheus.Histogram   // Duration for failed transformations
+	retryAttempts                 *prometheus.CounterVec // Track retry attempts by attempt number
 }
 
 // NewMetrics creates and registers all converter metrics
@@ -86,15 +86,16 @@ func NewMetrics(converterID, tenantID string) (*Metrics, error) {
 		},
 	)
 
-	// retryAttempts tracks retry distribution
-	retryAttempts := prometheus.NewCounter(
+	// retryAttempts tracks retry distribution by attempt number
+	retryAttempts := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   "vrsky",
 			Subsystem:   "converter",
 			Name:        "retry_attempts_total",
-			Help:        "Total number of retry attempts made",
+			Help:        "Total number of retry attempts made by attempt number",
 			ConstLabels: labels,
 		},
+		[]string{"attempt"},
 	)
 
 	// Register metrics
@@ -153,10 +154,8 @@ func (m *Metrics) RecordTransformationDurationFailure(duration time.Duration) {
 	m.transformationDurationFailure.Observe(duration.Seconds())
 }
 
-// RecordRetryAttempt increments the retry attempts counter.
-// TODO: In the future, add attempt-level labels for per-attempt metrics
-// e.g., m.retryAttempts.WithLabelValues(fmt.Sprintf("%d", attempt)).Inc()
-// This would enable tracking which retry attempts are most common and alerting on specific retry patterns.
-func (m *Metrics) RecordRetryAttempt() {
-	m.retryAttempts.Inc()
+// RecordRetryAttempt increments the retry attempts counter for the specified attempt number.
+// attempt should be 1, 2, 3, etc. to track which retry attempts are most common.
+func (m *Metrics) RecordRetryAttempt(attempt int) {
+	m.retryAttempts.WithLabelValues(fmt.Sprintf("%d", attempt)).Inc()
 }

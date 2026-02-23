@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	exprpkg "github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -10,10 +11,12 @@ import (
 
 // ExpressionEvaluator evaluates expressions against a variable context.
 // Uses expr-lang/expr for safe, efficient expression evaluation.
+// Thread-safe with mutex protection for the compiled expression cache.
 type ExpressionEvaluator struct {
 	functionRegistry *FunctionRegistry
 	logger           Logger
 	ctx              context.Context
+	mu               sync.RWMutex
 	compiled         map[string]*vm.Program
 }
 
@@ -66,11 +69,15 @@ func (ee *ExpressionEvaluator) Evaluate(expression string, variables map[string]
 
 // getCompiledProgram retrieves or compiles an expression program.
 // Caches compiled programs to avoid recompilation.
+// Thread-safe with read lock for cache hits and write lock for misses.
 func (ee *ExpressionEvaluator) getCompiledProgram(expression string, variables map[string]interface{}) (*vm.Program, error) {
-	// Check cache first
+	// Check cache first with read lock
+	ee.mu.RLock()
 	if program, exists := ee.compiled[expression]; exists {
+		ee.mu.RUnlock()
 		return program, nil
 	}
+	ee.mu.RUnlock()
 
 	// Compile the expression with the environment
 	program, err := exprpkg.Compile(
@@ -81,7 +88,9 @@ func (ee *ExpressionEvaluator) getCompiledProgram(expression string, variables m
 		return nil, err
 	}
 
-	// Cache the compiled program
+	// Cache the compiled program with write lock
+	ee.mu.Lock()
+	defer ee.mu.Unlock()
 	ee.compiled[expression] = program
 
 	return program, nil
@@ -118,7 +127,10 @@ func (ee *ExpressionEvaluator) EvaluateCondition(expression string, variables ma
 
 // ClearCache clears the compiled expression cache.
 // Use when you want to free memory or reset state.
+// Thread-safe operation.
 func (ee *ExpressionEvaluator) ClearCache() {
+	ee.mu.Lock()
+	defer ee.mu.Unlock()
 	ee.compiled = make(map[string]*vm.Program)
 }
 

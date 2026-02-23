@@ -2,15 +2,41 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/ValueRetail/vrsky/pkg/converter"
+	"github.com/nats-io/nats.go"
 )
+
+// slogLoggerAdapter adapts slog.Logger to converter.Logger interface
+type slogLoggerAdapter struct {
+	logger *slog.Logger
+}
+
+func (a *slogLoggerAdapter) InfoContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.InfoContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) WarnContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.WarnContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) ErrorContext(ctx context.Context, msg string, args ...interface{}) {
+	a.logger.ErrorContext(ctx, msg, args...)
+}
+
+func (a *slogLoggerAdapter) Warn(msg string) {
+	a.logger.Warn(msg)
+}
+
+func (a *slogLoggerAdapter) Error(msg string) {
+	a.logger.Error(msg)
+}
 
 func main() {
 	// Setup logging
@@ -18,7 +44,8 @@ func main() {
 	if logLevel == "" {
 		logLevel = "info"
 	}
-	logger := converter.SetupLogger(logLevel)
+	slogLogger := converter.SetupLogger(logLevel)
+	logger := &slogLoggerAdapter{logger: slogLogger}
 
 	logger.InfoContext(context.Background(), "Converter service starting")
 
@@ -67,8 +94,24 @@ func main() {
 
 	logger.InfoContext(ctx, "Connected to NATS", "server_id", natsConn.ConnectedServerId())
 
+	// Start health server for Kubernetes probes (port 8080)
+	healthServer := converter.NewHealthServer(8080, logger)
+	if healthServer != nil {
+		if err := healthServer.Start(ctx); err != nil {
+			logger.ErrorContext(ctx, "Failed to start health server", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := healthServer.Stop(shutdownCtx); err != nil {
+				logger.ErrorContext(shutdownCtx, "Error stopping health server", "error", err)
+			}
+		}()
+	}
+
 	// Create converter instance
-	conv, err := converter.NewConverter(ctx, converterID, tenantID, natsConn, logger)
+	conv, err := converter.NewConverter(ctx, converterID, tenantID, natsConn, slogLogger)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create converter", "error", err)
 		os.Exit(1)

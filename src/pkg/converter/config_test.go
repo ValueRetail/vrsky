@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -235,5 +236,5 @@ func TestGetConfigServiceEndpoint(t *testing.T) {
 
 // Helper function
 func containsString(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr))
+	return strings.Contains(s, substr)
 }

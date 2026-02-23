@@ -195,7 +195,7 @@ func (fr *FunctionRegistry) RegisterWASM(functionName, modulePath, exportName st
 	// Try to load module if not already loaded
 	module := fr.wasmLoader.GetModule(moduleName)
 	if module == nil {
-		err := fr.wasmLoader.LoadFromFile(moduleName, modulePath)
+		err := fr.wasmLoader.LoadFromFile(fr.ctx, moduleName, modulePath)
 		if err != nil {
 			if fr.logger != nil {
 				fr.logger.ErrorContext(fr.ctx, "failed to load WASM module", "function", functionName, "module", moduleName, "error", err.Error())

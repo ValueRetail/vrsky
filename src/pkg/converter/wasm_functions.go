@@ -2,7 +2,6 @@ package converter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -254,12 +253,30 @@ func NewWASMFunctionLoader(ctx context.Context, logger Logger) *WASMFunctionLoad
 	}
 }
 
-// Compile module
-	module, err := wasmtime.NewModule(engine, wasmData)
+// LoadFromFile loads a WASM module from a file on disk
+func (wfl *WASMFunctionLoader) LoadFromFile(ctx context.Context, moduleName string, filePath string) error {
+	if moduleName == "" || filePath == "" {
+		return fmt.Errorf("module name and file path are required")
+	}
 
+	// Read WASM file from disk
+	wasmData, err := os.ReadFile(filePath)
 	if err != nil {
 		if wfl.logger != nil {
-			wfl.logger.ErrorContext(wfl.ctx, "failed to compile WASM module", "module", moduleName, "error", err.Error())
+			wfl.logger.ErrorContext(ctx, "failed to read WASM file", "module", moduleName, "path", filePath, "error", err.Error())
+		}
+		return fmt.Errorf("failed to read WASM file: %w", err)
+	}
+
+	// Create engine and store
+	engine := wasmtime.NewEngine()
+	store := wasmtime.NewStore(engine)
+
+	// Compile module
+	module, err := wasmtime.NewModule(engine, wasmData)
+	if err != nil {
+		if wfl.logger != nil {
+			wfl.logger.ErrorContext(ctx, "failed to compile WASM module", "module", moduleName, "error", err.Error())
 		}
 		return fmt.Errorf("failed to compile WASM module: %w", err)
 	}
@@ -268,7 +285,7 @@ func NewWASMFunctionLoader(ctx context.Context, logger Logger) *WASMFunctionLoad
 	instance, err := wasmtime.NewInstance(store, module, []wasmtime.AsExtern{})
 	if err != nil {
 		if wfl.logger != nil {
-			wfl.logger.ErrorContext(wfl.ctx, "failed to instantiate WASM module", "module", moduleName, "error", err.Error())
+			wfl.logger.ErrorContext(ctx, "failed to instantiate WASM module", "module", moduleName, "error", err.Error())
 		}
 		return fmt.Errorf("failed to instantiate WASM module: %w", err)
 	}
@@ -283,14 +300,14 @@ func NewWASMFunctionLoader(ctx context.Context, logger Logger) *WASMFunctionLoad
 		Logger:   wfl.logger,
 		Config:   wfl.config,
 		Metrics:  &WASMMetrics{},
-		ctx:      wfl.ctx,
+		ctx:      ctx,
 	}
 
 	// Store module
 	wfl.modules[moduleName] = wm
 
 	if wfl.logger != nil {
-		wfl.logger.InfoContext(wfl.ctx, "WASM module loaded successfully", "module", moduleName, "path", filePath)
+		wfl.logger.InfoContext(ctx, "WASM module loaded successfully", "module", moduleName, "path", filePath)
 	}
 
 	return nil

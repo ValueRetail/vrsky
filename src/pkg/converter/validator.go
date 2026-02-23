@@ -12,9 +12,10 @@ import (
 // SchemaValidator provides thread-safe validation of input/output data against JSON schemas
 // It supports multi-tenant schema isolation for performance optimization
 type SchemaValidator struct {
-	mu       sync.RWMutex
-	schemas  map[string]*jsonschema.Schema // key: "tenantID:schemaName"
-	compiler *jsonschema.Compiler          // shared compiler for schema compilation
+	mu           sync.RWMutex
+	schemas      map[string]*jsonschema.Schema // key: "tenantID:schemaName"
+	compiler     *jsonschema.Compiler          // shared compiler for schema compilation
+	compilerLock sync.Mutex                    // separate lock for compiler operations (not thread-safe)
 }
 
 // NewSchemaValidator creates a new schema validator with thread-safety
@@ -37,6 +38,10 @@ func (sv *SchemaValidator) RegisterSchema(tenantID, schemaName string, schemaDat
 
 	// Create a unique URL for this schema to avoid conflicts
 	schemaURL := fmt.Sprintf("schema://%s/%s", tenantID, schemaName)
+
+	// Protect compiler operations (AddResource + Compile are not thread-safe)
+	sv.compilerLock.Lock()
+	defer sv.compilerLock.Unlock()
 
 	// Add the resource to the compiler
 	if err := sv.compiler.AddResource(schemaURL, makeReader(schemaData)); err != nil {

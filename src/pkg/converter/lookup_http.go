@@ -107,10 +107,11 @@ func (cb *CircuitBreaker) GetState() CircuitBreakerState {
 
 // ResponseCache stores HTTP responses with TTL
 type ResponseCache struct {
-	cache      map[string]*CachedResponse
-	expiryHeap *ExpiryHeap // Min-heap sorted by expiration time
-	mu         sync.RWMutex
-	maxSize    int
+	cache       map[string]*CachedResponse
+	heapEntries map[string]*ExpiryEntry // Track heap entry per key for updates
+	expiryHeap  *ExpiryHeap             // Min-heap sorted by expiration time
+	mu          sync.RWMutex
+	maxSize     int
 }
 
 // CachedResponse holds response data with expiration time
@@ -123,7 +124,8 @@ type CachedResponse struct {
 type ExpiryEntry struct {
 	Key       string
 	ExpiresAt time.Time
-	Index     int // Heap index, set by heap.Interface
+	Index     int  // Heap index, set by heap.Interface
+	Deleted   bool // Mark as deleted instead of removing (lazy deletion)
 }
 
 // ExpiryHeap implements heap.Interface for min-heap of expiry times
@@ -156,9 +158,10 @@ func (eh *ExpiryHeap) Pop() interface{} {
 // NewResponseCache creates a new response cache with size limit
 func NewResponseCache(maxSize int) *ResponseCache {
 	return &ResponseCache{
-		cache:      make(map[string]*CachedResponse),
-		expiryHeap: &ExpiryHeap{},
-		maxSize:    maxSize,
+		cache:       make(map[string]*CachedResponse),
+		heapEntries: make(map[string]*ExpiryEntry),
+		expiryHeap:  &ExpiryHeap{},
+		maxSize:     maxSize,
 	}
 }
 
@@ -182,14 +185,23 @@ func (rc *ResponseCache) Get(key string) (map[string]interface{}, bool) {
 
 // evictOne removes the entry with the earliest expiration time in O(log n).
 // Uses a min-heap to efficiently find and remove the oldest entry.
+// Skips entries marked as deleted (lazy deletion).
 func (rc *ResponseCache) evictOne() {
-	if rc.expiryHeap.Len() == 0 {
+	for rc.expiryHeap.Len() > 0 {
+		// Pop the entry with minimum expiration time from the heap
+		entry := heap.Pop(rc.expiryHeap).(*ExpiryEntry)
+
+		// Skip deleted entries
+		if entry.Deleted {
+			continue
+		}
+
+		// Remove from heapEntries tracking map
+		delete(rc.heapEntries, entry.Key)
+		// Remove from cache
+		delete(rc.cache, entry.Key)
 		return
 	}
-
-	// Pop the entry with minimum expiration time from the heap
-	entry := heap.Pop(rc.expiryHeap).(*ExpiryEntry)
-	delete(rc.cache, entry.Key)
 }
 
 // Set stores a response with TTL
@@ -208,11 +220,18 @@ func (rc *ResponseCache) Set(key string, data map[string]interface{}, ttl time.D
 		ExpiresAt: expiresAt,
 	}
 
-	// Add entry to expiry heap for O(log n) eviction later
+	// If key already exists, mark old heap entry as deleted (lazy deletion)
+	if oldEntry, exists := rc.heapEntries[key]; exists {
+		oldEntry.Deleted = true
+	}
+
+	// Add new entry to expiry heap for O(log n) eviction later
 	entry := &ExpiryEntry{
 		Key:       key,
 		ExpiresAt: expiresAt,
+		Deleted:   false,
 	}
+	rc.heapEntries[key] = entry
 	heap.Push(rc.expiryHeap, entry)
 }
 
@@ -227,21 +246,37 @@ func (rc *ResponseCache) Cleanup() {
 	for key, cached := range rc.cache {
 		if now.After(cached.ExpiresAt) {
 			delete(rc.cache, key)
+			// Mark heap entry as deleted (lazy deletion)
+			if entry, exists := rc.heapEntries[key]; exists {
+				entry.Deleted = true
+				delete(rc.heapEntries, key)
+			}
 		}
 	}
 
-	// Rebuild heap with only non-expired entries
+	// Rebuild heap with only non-deleted, non-expired entries
 	newHeap := &ExpiryHeap{}
-	for key, cached := range rc.cache {
-		if !now.After(cached.ExpiresAt) {
-			entry := &ExpiryEntry{
-				Key:       key,
-				ExpiresAt: cached.ExpiresAt,
+	for key, entry := range rc.heapEntries {
+		if !entry.Deleted {
+			cached, exists := rc.cache[key]
+			if exists && !now.After(cached.ExpiresAt) {
+				// Create new entry for fresh heap
+				newEntry := &ExpiryEntry{
+					Key:       key,
+					ExpiresAt: cached.ExpiresAt,
+					Deleted:   false,
+				}
+				heap.Push(newHeap, newEntry)
 			}
-			heap.Push(newHeap, entry)
 		}
 	}
 	rc.expiryHeap = newHeap
+
+	// Rebuild heapEntries map with new entries
+	rc.heapEntries = make(map[string]*ExpiryEntry)
+	for _, entry := range *rc.expiryHeap {
+		rc.heapEntries[entry.Key] = entry
+	}
 }
 
 // HTTPLookupBackend provides resilient HTTP API lookups with retry, caching, and circuit breaker
