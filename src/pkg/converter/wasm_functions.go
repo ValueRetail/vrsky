@@ -38,15 +38,15 @@ func NewWASMConfig() *WASMConfig {
 
 // WASMMetrics holds performance metrics for a WASM module
 type WASMMetrics struct {
-	mu              sync.RWMutex
-	CallCount       int64
-	ErrorCount      int64
-	TotalLatencyMs  int64
-	MaxLatencyMs    int64
-	MinLatencyMs    int64
-	LastCallTime    time.Time
-	LastErrorTime   time.Time
-	LastErrorMsg    string
+	mu             sync.RWMutex
+	CallCount      int64
+	ErrorCount     int64
+	TotalLatencyMs int64
+	MaxLatencyMs   int64
+	MinLatencyMs   int64
+	LastCallTime   time.Time
+	LastErrorTime  time.Time
+	LastErrorMsg   string
 }
 
 // RecordCall records a successful function call with latency
@@ -101,15 +101,15 @@ func (m *WASMMetrics) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"call_count":        m.CallCount,
-		"error_count":       m.ErrorCount,
-		"total_latency_ms":  m.TotalLatencyMs,
-		"avg_latency_ms":    avgLatency,
-		"max_latency_ms":    m.MaxLatencyMs,
-		"min_latency_ms":    m.MinLatencyMs,
-		"last_call_time":    m.LastCallTime,
-		"last_error_time":   m.LastErrorTime,
-		"last_error_msg":    m.LastErrorMsg,
+		"call_count":       m.CallCount,
+		"error_count":      m.ErrorCount,
+		"total_latency_ms": m.TotalLatencyMs,
+		"avg_latency_ms":   avgLatency,
+		"max_latency_ms":   m.MaxLatencyMs,
+		"min_latency_ms":   m.MinLatencyMs,
+		"last_call_time":   m.LastCallTime,
+		"last_error_time":  m.LastErrorTime,
+		"last_error_msg":   m.LastErrorMsg,
 	}
 }
 
@@ -119,16 +119,16 @@ func (m *WASMMetrics) GetStats() map[string]interface{} {
 
 // WASMModule represents a loaded and instantiated WASM module
 type WASMModule struct {
-	Name      string
-	FilePath  string
-	Instance  *wasmtime.Instance
-	Store     *wasmtime.Store
-	Engine    *wasmtime.Engine
-	Metrics   *WASMMetrics
-	Logger    Logger
-	Config    *WASMConfig
-	mu        sync.RWMutex
-	ctx       context.Context
+	Name     string
+	FilePath string
+	Instance *wasmtime.Instance
+	Store    *wasmtime.Store
+	Engine   *wasmtime.Engine
+	Metrics  *WASMMetrics
+	Logger   Logger
+	Config   *WASMConfig
+	mu       sync.RWMutex
+	ctx      context.Context
 }
 
 // Call invokes an exported function in the WASM module with graceful error handling
@@ -172,7 +172,7 @@ func (wm *WASMModule) Call(ctx context.Context, funcName string, args ...interfa
 	// Call WASM function (with timeout enforcement)
 	var result interface{}
 	var err error
-	err = wm.callWithTimeout(ctx, func() error {
+	err = wm.callWithTimeout(ctx, func(callCtx context.Context) error {
 		res, err := f.Call(wm.Store, args...)
 		if err != nil {
 			return err
@@ -200,14 +200,16 @@ func (wm *WASMModule) Call(ctx context.Context, funcName string, args ...interfa
 	return result
 }
 
-// callWithTimeout executes a function with timeout enforcement
-func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func() error) error {
-	// Create channel for result
+// callWithTimeout executes a function with timeout enforcement and context-aware cancellation.
+// The function fn receives the context so it can check ctx.Done() and exit early,
+// preventing goroutine leaks when timeout or context cancellation occurs.
+func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func(context.Context) error) error {
+	// Create channel for result (buffered to prevent goroutine leak on timeout)
 	done := make(chan error, 1)
 
-	// Run function in goroutine
+	// Run function in goroutine with context awareness
 	go func() {
-		done <- fn()
+		done <- fn(ctx)
 	}()
 
 	// Determine timeout
@@ -218,117 +220,13 @@ func (wm *WASMModule) callWithTimeout(ctx context.Context, fn func() error) erro
 	case err := <-done:
 		return err
 	case <-time.After(timeout):
-		return fmt.Errorf("WASM function execution timeout after %v", timeout)
+		return fmt.Errorf("WASM function execution timeout after %s", timeout)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// marshalArgs converts Go types to WASM types
-// Primitives (int, float, bool, string) are handled directly
-// Complex types (arrays, maps) are JSON-serialized to WASM linear memory
-func (wm *WASMModule) marshalArgs(args []interface{}) ([]interface{}, error) {
-	if len(args) == 0 {
-		return []interface{}{}, nil
-	}
-
-	result := make([]interface{}, len(args))
-
-	for i, arg := range args {
-		switch v := arg.(type) {
-		case nil:
-			// nil becomes 0 for i32
-			result[i] = int32(0)
-
-		case bool:
-			// bool becomes i32 (0 or 1)
-			if v {
-				result[i] = int32(1)
-			} else {
-				result[i] = int32(0)
-			}
-
-		case int:
-			result[i] = int64(v)
-
-		case int32:
-			result[i] = v
-
-		case int64:
-			result[i] = v
-
-		case float32:
-			result[i] = float64(v)
-
-		case float64:
-			result[i] = v
-
-		case string:
-			// Strings are stored in linear memory, return pointer (in WASM this would be handled)
-			// For now, we JSON encode to string
-			result[i] = v
-
-		case []interface{}, []string, []int, []float64, map[string]interface{}:
-			// Complex types: JSON serialize
-			data, err := json.Marshal(v)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal argument: %w", err)
-			}
-			result[i] = string(data)
-
-		default:
-			// Try JSON for unknown types
-			data, err := json.Marshal(v)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal argument of type %T: %w", v, err)
-			}
-			result[i] = string(data)
-		}
-	}
-
-	return result, nil
-}
-
-// unmarshalResult converts WASM result back to Go types
-func (wm *WASMModule) unmarshalResult(wasmResult []interface{}) (interface{}, error) {
-	if len(wasmResult) == 0 {
-		return nil, nil
-	}
-
-	// WASM functions typically return single value
-	result := wasmResult[0]
-
-	// Handle different result types
-	switch v := result.(type) {
-	case int32:
-		return int64(v), nil
-
-	case int64:
-		return v, nil
-
-	case float32:
-		return float64(v), nil
-
-	case float64:
-		return v, nil
-
-	case string:
-		// Try to parse as JSON for complex types
-		var parsed interface{}
-		err := json.Unmarshal([]byte(v), &parsed)
-		if err == nil {
-			// Successfully parsed JSON - return parsed value
-			return parsed, nil
-		}
-
-		// Not JSON - return as string
-		return v, nil
-
-	default:
-		return result, nil
-	}
-}
-
+// (removed unused marshalArgs and unmarshalResult helpers; no behavior change as they were never called)
 // =============================================================================
 // WASM FUNCTION LOADER
 // =============================================================================
@@ -356,48 +254,8 @@ func NewWASMFunctionLoader(ctx context.Context, logger Logger) *WASMFunctionLoad
 	}
 }
 
-// SetConfig sets the WASM runtime configuration
-func (wfl *WASMFunctionLoader) SetConfig(config *WASMConfig) {
-	if config != nil {
-		wfl.config = config
-	}
-}
-
-// LoadFromFile loads a WASM module from a file
-// moduleName: identifier for the module (e.g., "calculate_discount")
-// filePath: path to the .wasm binary file
-func (wfl *WASMFunctionLoader) LoadFromFile(moduleName, filePath string) error {
-	if moduleName == "" {
-		return fmt.Errorf("module name cannot be empty")
-	}
-	if filePath == "" {
-		return fmt.Errorf("file path cannot be empty")
-	}
-
-	wfl.mu.Lock()
-	defer wfl.mu.Unlock()
-
-	// Check if module already loaded
-	if _, exists := wfl.modules[moduleName]; exists {
-		return fmt.Errorf("module already loaded: %s", moduleName)
-	}
-
-	// Create engine and store
-	engine := wasmtime.NewEngine()
-	store := wasmtime.NewStore(engine)
-
-	// Set memory limit via a custom linker if needed
-	// For now, rely on OS-level process memory limits
-
-	// Read WASM binary
-	wasmData, err := os.ReadFile(filePath)
-	if err != nil {
-		if wfl.logger != nil {
-			wfl.logger.ErrorContext(wfl.ctx, "failed to read WASM file", "module", moduleName, "path", filePath, "error", err.Error())
-		}
-		return fmt.Errorf("failed to read WASM file: %w", err)
-	}
-
+// Compile module
+	module, err := wasmtime.NewModule(engine, wasmData)
 	// Compile module
 	module, err := wasmtime.NewModule(engine, wasmData)
 	if err != nil {

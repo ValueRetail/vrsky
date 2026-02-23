@@ -251,7 +251,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 
 	// Phase 2F: Rule-based transformation
 	// If transformations are defined, apply them to the payload
-	if len(c.config.Transformations) > 0 && env.Payload != nil {
+	if env.Payload != nil && len(c.config.Transformations) > 0 {
 		c.logger.DebugContext(ctx, "Processing message with transformations",
 			"envelope_id", env.ID,
 			"tenant_id", env.TenantID,
@@ -266,7 +266,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 				"error", err.Error(),
 			)
 			duration := time.Since(start)
-			c.metrics.RecordTransformationDurationFailure(duration)
+			c.metrics.RecordTransformationDuration(duration)
 			c.metrics.RecordMessageFailed(ErrorCategoryTransformation)
 			return env, err
 		}
@@ -279,7 +279,7 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 				"error", err.Error(),
 			)
 			duration := time.Since(start)
-			c.metrics.RecordTransformationDurationFailure(duration)
+			c.metrics.RecordTransformationDuration(duration)
 			c.metrics.RecordMessageFailed(ErrorCategoryMarshal)
 			return env, err
 		}
@@ -301,9 +301,9 @@ func (c *ConverterImpl) ProcessMessage(ctx context.Context, env *envelope.Envelo
 		)
 	}
 
-	// Record transformation duration on success
+	// Record transformation duration
 	duration := time.Since(start)
-	c.metrics.RecordTransformationDurationSuccess(duration)
+	c.metrics.RecordTransformationDuration(duration)
 	c.metrics.RecordMessageSucceeded()
 
 	return env, nil

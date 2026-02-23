@@ -143,15 +143,38 @@ func (rc *ResponseCache) Get(key string) (map[string]interface{}, bool) {
 	return cached.Data, true
 }
 
+// evictOne removes a single entry from the cache when it reaches capacity.
+// It prefers to remove the entry with the earliest expiration time.
+func (rc *ResponseCache) evictOne() {
+	if len(rc.cache) == 0 {
+		return
+	}
+
+	var oldestKey string
+	var oldestExpiresAt time.Time
+	first := true
+
+	for key, cached := range rc.cache {
+		if first || cached.ExpiresAt.Before(oldestExpiresAt) {
+			oldestKey = key
+			oldestExpiresAt = cached.ExpiresAt
+			first = false
+		}
+	}
+
+	if !first {
+		delete(rc.cache, oldestKey)
+	}
+}
+
 // Set stores a response with TTL
 func (rc *ResponseCache) Set(key string, data map[string]interface{}, ttl time.Duration) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
-	// Simple eviction: clear cache if at max size (not LRU for simplicity)
-	if len(rc.cache) >= rc.maxSize {
-		// Clear oldest entries (all for simplicity)
-		rc.cache = make(map[string]*CachedResponse)
+	// Evict a single entry when at max size instead of clearing the entire cache.
+	if rc.maxSize > 0 && len(rc.cache) >= rc.maxSize {
+		rc.evictOne()
 	}
 
 	rc.cache[key] = &CachedResponse{
@@ -182,7 +205,6 @@ type HTTPLookupBackend struct {
 	ctx              context.Context
 	config           HTTPConfig
 	metricsCollector *HTTPMetrics
-	backoffDurations []time.Duration // Pre-computed exponential backoff durations
 	mu               sync.Mutex
 }
 
@@ -244,17 +266,6 @@ func NewHTTPLookupBackendWithConfig(config HTTPConfig, logger Logger) (*HTTPLook
 		config.MaxCacheSize = 1000
 	}
 
-	// Pre-compute backoff durations: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
-	backoffDurations := make([]time.Duration, config.MaxRetries+1)
-	for i := 0; i <= config.MaxRetries; i++ {
-		if i == 0 {
-			backoffDurations[i] = 0 // First attempt: no backoff
-		} else {
-			// Exponential backoff: 1s, 2s, 4s, 8s, 16s...
-			backoffDurations[i] = time.Duration(1<<uint(i-1)) * time.Second
-		}
-	}
-
 	backend := &HTTPLookupBackend{
 		client: &http.Client{
 			Timeout: config.Timeout,
@@ -265,7 +276,6 @@ func NewHTTPLookupBackendWithConfig(config HTTPConfig, logger Logger) (*HTTPLook
 		ctx:              context.Background(),
 		config:           config,
 		metricsCollector: &HTTPMetrics{},
-		backoffDurations: backoffDurations,
 	}
 
 	logger.InfoContext(backend.ctx, "HTTP lookup backend initialized",
@@ -305,10 +315,22 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 	}
 	hb.metricsCollector.cacheMisses++
 
+	// Generate backoff durations dynamically based on MaxRetries
+	// Pattern: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
+	backoffDurations := make([]time.Duration, hb.config.MaxRetries+1)
+	for i := 0; i <= hb.config.MaxRetries; i++ {
+		if i == 0 {
+			backoffDurations[i] = 0 // First attempt: no backoff
+		} else {
+			// Exponential backoff: 1s, 2s, 4s, 8s, 16s...
+			backoffDurations[i] = time.Duration(1<<uint(i-1)) * time.Second
+		}
+	}
+
 	for attempt := 0; attempt <= hb.config.MaxRetries; attempt++ {
 		// Wait before retry (except first attempt)
 		if attempt > 0 {
-			waitTime := hb.backoffDurations[attempt]
+			waitTime := backoffDurations[attempt]
 			hb.logger.InfoContext(ctx, "HTTP lookup retry",
 				"url", url, "attempt", attempt, "wait_ms", waitTime.Milliseconds())
 			hb.metricsCollector.retries++
