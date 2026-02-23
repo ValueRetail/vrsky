@@ -1,0 +1,136 @@
+package converter
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// Metrics holds all Prometheus metrics for the converter component
+type Metrics struct {
+	messagesReceived       prometheus.Counter
+	messagesSucceeded      prometheus.Counter
+	messagesFailed         prometheus.Counter
+	transformationDuration prometheus.Histogram
+	retryAttempts          prometheus.Counter
+}
+
+// NewMetrics creates and registers all converter metrics
+func NewMetrics(converterID, tenantID string) (*Metrics, error) {
+	if converterID == "" || tenantID == "" {
+		return nil, fmt.Errorf("converter_id and tenant_id are required")
+	}
+
+	labels := prometheus.Labels{
+		"converter_id": converterID,
+		"tenant_id":    tenantID,
+	}
+
+	// messagesReceived counts total messages received
+	messagesReceived := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "messages_received_total",
+			Help:        "Total number of messages received by the converter",
+			ConstLabels: labels,
+		},
+	)
+
+	// messagesSucceeded counts successfully transformed messages
+	messagesSucceeded := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "messages_succeeded_total",
+			Help:        "Total number of messages successfully transformed",
+			ConstLabels: labels,
+		},
+	)
+
+	// messagesFailed counts failed transformations
+	messagesFailed := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "messages_failed_total",
+			Help:        "Total number of message transformation failures",
+			ConstLabels: labels,
+		},
+	)
+
+	// transformationDuration tracks transformation latency
+	transformationDuration := prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "transformation_duration_seconds",
+			Help:        "Duration of message transformation in seconds",
+			ConstLabels: labels,
+			Buckets:     []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0},
+		},
+	)
+
+	// retryAttempts tracks retry distribution
+	retryAttempts := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace:   "vrsky",
+			Subsystem:   "converter",
+			Name:        "retry_attempts_total",
+			Help:        "Total number of retry attempts made",
+			ConstLabels: labels,
+		},
+	)
+
+	// Register metrics
+	reg := prometheus.DefaultRegisterer
+	if err := reg.Register(messagesReceived); err != nil {
+		return nil, fmt.Errorf("register messagesReceived: %w", err)
+	}
+	if err := reg.Register(messagesSucceeded); err != nil {
+		return nil, fmt.Errorf("register messagesSucceeded: %w", err)
+	}
+	if err := reg.Register(messagesFailed); err != nil {
+		return nil, fmt.Errorf("register messagesFailed: %w", err)
+	}
+	if err := reg.Register(transformationDuration); err != nil {
+		return nil, fmt.Errorf("register transformationDuration: %w", err)
+	}
+	if err := reg.Register(retryAttempts); err != nil {
+		return nil, fmt.Errorf("register retryAttempts: %w", err)
+	}
+
+	return &Metrics{
+		messagesReceived:       messagesReceived,
+		messagesSucceeded:      messagesSucceeded,
+		messagesFailed:         messagesFailed,
+		transformationDuration: transformationDuration,
+		retryAttempts:          retryAttempts,
+	}, nil
+}
+
+// RecordMessageReceived increments the received messages counter
+func (m *Metrics) RecordMessageReceived() {
+	m.messagesReceived.Inc()
+}
+
+// RecordMessageSucceeded increments the succeeded messages counter
+func (m *Metrics) RecordMessageSucceeded() {
+	m.messagesSucceeded.Inc()
+}
+
+// RecordMessageFailed increments the failed messages counter
+func (m *Metrics) RecordMessageFailed(reason string) {
+	m.messagesFailed.Inc()
+}
+
+// RecordTransformationDuration records the transformation latency
+func (m *Metrics) RecordTransformationDuration(duration time.Duration) {
+	m.transformationDuration.Observe(duration.Seconds())
+}
+
+// RecordRetryAttempt increments the retry attempts counter
+func (m *Metrics) RecordRetryAttempt(attemptNumber int) {
+	m.retryAttempts.Inc()
+}

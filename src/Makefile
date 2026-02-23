@@ -1,4 +1,4 @@
-.PHONY: help build build-consumer build-filter docker-build docker-build-consumer docker-build-filter docker-push docker-push-consumer docker-push-filter clean test run run-consumer lint fmt vet e2e-test
+.PHONY: help build build-consumer build-filter build-converter docker-build docker-build-consumer docker-build-filter docker-build-converter docker-push docker-push-consumer docker-push-filter docker-push-converter clean test test-converter run run-consumer lint fmt vet e2e-test
 
 # Variables
 BINARY_NAME=producer
@@ -74,16 +74,37 @@ docker-push-filter: docker-build-filter ## Push filter Docker image to registry
 	@docker push vrsky/filter:latest
 	@echo "$(GREEN)✓ Filter Docker image pushed$(NC)"
 
-run-consumer: build-consumer ## Build and run consumer locally
-	@echo "$(BLUE)Running consumer...$(NC)"
-	@INPUT_TYPE=http INPUT_CONFIG='{"port":"8000"}' \
-	 OUTPUT_TYPE=nats OUTPUT_CONFIG='{"url":"nats://localhost:4222","subject":"test.messages"}' \
-	 ./bin/consumer
+build-converter: clean ## Build converter binary to ./bin/converter
+	@echo "$(BLUE)Building converter binary...$(NC)"
+	@mkdir -p $(BIN_DIR)
+	@$(GO) build -o $(BIN_DIR)/converter ./cmd/converter
+	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/converter$(NC)"
+
+docker-build-converter: ## Build Docker image: vrsky/converter:latest
+	@echo "$(BLUE)Building converter Docker image...$(NC)"
+	@docker build -t vrsky/converter:latest -f cmd/converter/Dockerfile .
+	@echo "$(GREEN)✓ Docker image built: vrsky/converter:latest$(NC)"
+
+docker-push-converter: docker-build-converter ## Push converter Docker image to registry
+	@echo "$(BLUE)Pushing converter Docker image...$(NC)"
+	@docker push vrsky/converter:latest
+	@echo "$(GREEN)✓ Converter Docker image pushed$(NC)"
 
 test: ## Run Go tests
 	@echo "$(BLUE)Running tests...$(NC)"
 	@$(GO) test -v ./...
 	@echo "$(GREEN)✓ Tests passed$(NC)"
+
+test-converter: ## Run converter tests with coverage
+	@echo "$(BLUE)Running converter tests...$(NC)"
+	@$(GO) test -v -cover ./pkg/converter/...
+	@echo "$(GREEN)✓ Converter tests passed$(NC)"
+
+run-consumer: build-consumer ## Build and run consumer locally
+	@echo "$(BLUE)Running consumer...$(NC)"
+	@INPUT_TYPE=http INPUT_CONFIG='{"port":"8000"}' \
+	 OUTPUT_TYPE=nats OUTPUT_CONFIG='{"url":"nats://localhost:4222","subject":"test.messages"}' \
+	 ./bin/consumer
 
 lint: ## Run linter (golangci-lint)
 	@echo "$(BLUE)Running linter...$(NC)"
