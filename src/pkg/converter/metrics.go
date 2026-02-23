@@ -11,7 +11,7 @@ import (
 type Metrics struct {
 	messagesReceived       prometheus.Counter
 	messagesSucceeded      prometheus.Counter
-	messagesFailed         *prometheus.CounterVec // Pointer to CounterVec for label tracking
+	messagesFailed         prometheus.Counter
 	transformationDuration prometheus.Histogram
 	retryAttempts          prometheus.Counter
 }
@@ -49,16 +49,15 @@ func NewMetrics(converterID, tenantID string) (*Metrics, error) {
 		},
 	)
 
-	// messagesFailed counts failed transformations by error category
-	messagesFailed := prometheus.NewCounterVec(
+	// messagesFailed counts failed transformations
+	messagesFailed := prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace:   "vrsky",
 			Subsystem:   "converter",
 			Name:        "messages_failed_total",
-			Help:        "Total number of message transformation failures by error category",
+			Help:        "Total number of message transformation failures",
 			ConstLabels: labels,
 		},
-		[]string{"error_category"}, // Label for error type tracking
 	)
 
 	// transformationDuration tracks transformation latency
@@ -121,9 +120,9 @@ func (m *Metrics) RecordMessageSucceeded() {
 	m.messagesSucceeded.Inc()
 }
 
-// RecordMessageFailed increments the failed messages counter by error category
-func (m *Metrics) RecordMessageFailed(errorCategory string) {
-	m.messagesFailed.WithLabelValues(errorCategory).Inc()
+// RecordMessageFailed increments the failed messages counter
+func (m *Metrics) RecordMessageFailed() {
+	m.messagesFailed.Inc()
 }
 
 // RecordTransformationDuration records the transformation latency
@@ -134,6 +133,7 @@ func (m *Metrics) RecordTransformationDuration(duration time.Duration) {
 // RecordRetryAttempt increments the retry attempts counter.
 // The attempt number is currently unused but kept for compatibility
 // and potential future use (e.g., as a label or for logging).
-func (m *Metrics) RecordRetryAttempt(_ int) {
+func (m *Metrics) RecordRetryAttempt(attempt int) {
+	_ = attempt
 	m.retryAttempts.Inc()
 }
