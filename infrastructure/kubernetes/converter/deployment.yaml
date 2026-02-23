@@ -63,7 +63,9 @@ spec:
         env:
         - name: CONVERTER_PORT
           value: "8080"
-        - name: NATS_URL
+        - name: TENANT_ID
+          value: "default-tenant"
+        - name: NATS_URLS
           value: "nats://nats:4222"
         - name: CONFIG_SERVICE_URL
           value: "http://config-service:8080"

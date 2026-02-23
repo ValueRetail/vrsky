@@ -61,7 +61,7 @@ spec:
         
         # Environment variables
         env:
-        - name: NATS_URL
+        - name: NATS_URLS
           value: "nats://nats:4222"
         - name: FILTER_ID
           valueFrom:
