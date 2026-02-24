@@ -1,0 +1,15 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vrsky-ui
+  namespace: vrsky-ui
+  labels:
+    app: vrsky-ui
+    component: frontend
+    phase: 12
+
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vrsky-ui

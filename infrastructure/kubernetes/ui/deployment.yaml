@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-ui
+  namespace: vrsky-ui
+  labels:
+    app: vrsky-ui
+    component: frontend
+    phase: 12
+
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: vrsky-ui
+
+  template:
+    metadata:
+      labels:
+        app: vrsky-ui
+        component: frontend
+        phase: 12
+      annotations:
+        prometheus.io/scrape: "false"
+
+    spec:
+      # Pod anti-affinity for HA across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-ui
+              topologyKey: kubernetes.io/hostname
+
+      serviceAccountName: default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+
+      containers:
+      - name: ui
+        image: ghcr.io/ValueRetail/vrsky/ui:latest
+        imagePullPolicy: IfNotPresent
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: vrsky-ui-config
+
+        # Ports
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+
+        # Probes
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop:
+            - ALL
+
+        # Volume mounts
+        volumeMounts:
+        - name: cache
+          mountPath: /var/cache/nginx
+        - name: run
+          mountPath: /var/run
+        - name: tmp
+          mountPath: /tmp
+
+      # Volumes
+      volumes:
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+
+      # Restart policy
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
