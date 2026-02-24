@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgconn"
 )
 
 // PostgresRepository implements Repository interface using PostgreSQL
@@ -50,7 +52,8 @@ func (r *PostgresRepository) CreateConnection(ctx context.Context, connection *C
 	)
 
 	if err != nil {
-		if strings.Contains(err.Error(), "unique_tenant_connection_name") {
+		// Check for unique constraint violation (error code 23505)
+		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
 			return &ConflictError{Message: "Connection with this name already exists for this tenant"}
 		}
 		return fmt.Errorf("failed to create connection: %w", err)

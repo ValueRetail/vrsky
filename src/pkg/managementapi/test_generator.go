@@ -337,16 +337,16 @@ func (tg *TestGenerator) Status() TestGeneratorStatus {
 
 // Start begins generating test messages
 func (tg *TestGenerator) Start(ctx context.Context, ratePerSecond int, publisher *NATSPublisher) error {
+	// Validate input parameters before acquiring lock
+	if ratePerSecond < 1 || ratePerSecond > 1000 {
+		return fmt.Errorf("invalid rate: must be between 1 and 1000")
+	}
+
 	tg.mu.Lock()
 
 	if tg.isRunning {
 		tg.mu.Unlock()
 		return fmt.Errorf("test generator is already running")
-	}
-
-	if ratePerSecond < 1 || ratePerSecond > 1000 {
-		tg.mu.Unlock()
-		return fmt.Errorf("invalid rate: must be between 1 and 1000")
 	}
 
 	tg.isRunning = true

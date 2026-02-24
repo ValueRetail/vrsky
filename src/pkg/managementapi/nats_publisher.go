@@ -161,6 +161,7 @@ func (p *NATSPublisher) publishCommand(ctx context.Context, tenantID, cmdType st
 	// Retry logic with exponential backoff
 	const maxRetries = 3
 	const initialBackoff = 100 * time.Millisecond
+	const publishTimeout = 5 * time.Second
 
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -175,6 +176,10 @@ func (p *NATSPublisher) publishCommand(ctx context.Context, tenantID, cmdType st
 		go func() {
 			done <- p.nc.Publish(subject, data)
 		}()
+
+		// Create timer for publish timeout
+		timer := time.NewTimer(publishTimeout)
+		defer timer.Stop()
 
 		// Wait for publish with timeout
 		select {
@@ -192,7 +197,7 @@ func (p *NATSPublisher) publishCommand(ctx context.Context, tenantID, cmdType st
 				p.logger.Printf("Publish attempt %d failed: %v, retrying in %v", attempt+1, err, backoff)
 				time.Sleep(backoff)
 			}
-		case <-time.After(5 * time.Second):
+		case <-timer.C:
 			lastErr = fmt.Errorf("publish timeout")
 			if attempt < maxRetries-1 {
 				p.logger.Printf("Publish attempt %d timeout, retrying", attempt+1)

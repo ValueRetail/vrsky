@@ -184,7 +184,7 @@ var addSorting = (function() {
         for (i = 0; i < cols.length; i += 1) {
             if (cols[i].sortable) {
                 // add the click event handler on the th so users
-                // dont have to click on those tiny arrows
+                // don't have to click on those tiny arrows
                 el = getNthColumn(i).querySelector('.sorter').parentElement;
                 if (el.addEventListener) {
                     el.addEventListener('click', ithSorter(i));

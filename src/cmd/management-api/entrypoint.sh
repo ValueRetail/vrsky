@@ -58,9 +58,15 @@ if [ -d "./migrations" ]; then
         if migrate -path "./migrations" -database "$DATABASE_URL" up; then
             echo "[Management API] ✓ Database migrations completed successfully"
         else
+            # Check migration version state after failure
+            version_output=$(migrate -path "./migrations" -database "$DATABASE_URL" version 2>&1 || true)
             # It's OK if we're already at the latest version
-            if migrate -path "./migrations" -database "$DATABASE_URL" version 2>&1 | grep -q "dirty\|no change"; then
+            if echo "$version_output" | grep -q "no change"; then
                 echo "[Management API] ✓ Already at latest migration version"
+            # A dirty state indicates a failed migration that requires manual intervention
+            elif echo "$version_output" | grep -q "dirty"; then
+                echo "[Management API] ✗ Database migration is in a dirty state. Manual intervention is required before starting the service."
+                exit 1
             else
                 echo "[Management API] ⚠ Migration completed with warnings (this may be normal)"
             fi

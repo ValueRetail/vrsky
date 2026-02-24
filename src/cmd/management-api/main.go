@@ -144,26 +144,25 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 			"nats":     "ok",
 		}
 
+		// Determine HTTP status based on dependencies
+		statusCode := http.StatusOK
+
 		// Verify database connectivity
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := db.PingContext(ctx); err != nil {
 			deps["database"] = "error: " + err.Error()
-			w.WriteHeader(http.StatusServiceUnavailable)
+			statusCode = http.StatusServiceUnavailable
 		}
 
 		// Verify NATS connectivity
 		if !nc.IsConnected() {
 			deps["nats"] = "error: not connected"
-			if w.Header().Get("X-Status") != "" {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}
+			statusCode = http.StatusServiceUnavailable
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if w.Header().Get("X-Status") == "" {
-			w.WriteHeader(http.StatusOK)
-		}
+		w.WriteHeader(statusCode)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":       "ready",
 			"timestamp":    time.Now().UTC().Format(time.RFC3339),

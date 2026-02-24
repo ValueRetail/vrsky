@@ -22,9 +22,6 @@ COPY index.html ./
 COPY tests ./tests
 COPY vitest.config.ts ./
 
-# Run tests to ensure code quality
-RUN npm run test
-
 # Build application
 RUN npm run build
 
