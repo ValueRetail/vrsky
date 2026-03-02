@@ -12,21 +12,23 @@ import (
 
 // Handler implements REST API handlers for connection management
 type Handler struct {
-	repo           Repository
-	validator      *Validator
-	publisher      *NATSPublisher
-	clientRegistry *ClientRegistry
-	metricsCache   *MetricsCache
+	repo              Repository
+	validator         *Validator
+	publisher         *NATSPublisher
+	clientRegistry    *ClientRegistry
+	metricsCache      *MetricsCache
+	generatorRegistry *TestGeneratorRegistry
 }
 
 // NewHandler creates a new handler
 func NewHandler(repo Repository, validator *Validator) *Handler {
 	return &Handler{
-		repo:           repo,
-		validator:      validator,
-		publisher:      nil, // Will be set via SetPublisher if needed
-		clientRegistry: nil, // Will be set via InitializeWebSocketSupport if needed
-		metricsCache:   nil, // Will be set via InitializeWebSocketSupport if needed
+		repo:              repo,
+		validator:         validator,
+		publisher:         nil, // Will be set via SetPublisher if needed
+		clientRegistry:    nil, // Will be set via InitializeWebSocketSupport if needed
+		metricsCache:      nil, // Will be set via InitializeWebSocketSupport if needed
+		generatorRegistry: NewTestGeneratorRegistry(),
 	}
 }
 
@@ -122,6 +124,16 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to create connection", nil)
 		}
 		return
+	}
+
+	// Create connection created event
+	eventData, _ := json.Marshal(map[string]string{
+		"status":      conn.Status,
+		"description": conn.Description,
+	})
+	event := NewConnectionEvent(conn.ID, conn.TenantID, "created", eventData)
+	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
+		// Log error but don't fail the request - connection is already created
 	}
 
 	// Return created response
@@ -360,6 +372,15 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create connection deleted event
+	eventData, _ := json.Marshal(map[string]string{
+		"deletedAt": time.Now().UTC().String(),
+	})
+	event := NewConnectionEvent(id, tenantID, "deleted", eventData)
+	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
+		// Log error but don't fail the request - connection is already deleted
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -411,6 +432,16 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
 		writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
+	}
+
+	// Create connection started event
+	eventData, _ := json.Marshal(map[string]interface{}{
+		"status":    conn.Status,
+		"startedAt": conn.StartedAt,
+	})
+	event := NewConnectionEvent(connID, tenantID, "started", eventData)
+	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
+		// Log error but don't fail the request - status is already updated
 	}
 
 	// Publish start command to NATS if publisher is available
@@ -474,6 +505,16 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
 		writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
+	}
+
+	// Create connection stopped event
+	eventData, _ := json.Marshal(map[string]interface{}{
+		"status":    conn.Status,
+		"stoppedAt": conn.StoppedAt,
+	})
+	event := NewConnectionEvent(connID, tenantID, "stopped", eventData)
+	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
+		// Log error but don't fail the request - status is already updated
 	}
 
 	// Publish stop command to NATS if publisher is available
