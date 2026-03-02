@@ -27,6 +27,12 @@ type TestGenerator struct {
 	done            chan struct{}
 }
 
+// TestGeneratorRegistry manages active test generators per connection
+type TestGeneratorRegistry struct {
+	mu         sync.RWMutex
+	generators map[string]*TestGenerator // key: "{tenantID}:{connectionID}"
+}
+
 // TestDataPayload represents a test data message
 type TestDataPayload struct {
 	ID        string            `json:"id"`
@@ -66,6 +72,46 @@ func NewTestGenerator(connID, tenantID string) *TestGenerator {
 		tenantID:     tenantID,
 		done:         make(chan struct{}),
 	}
+}
+
+// NewTestGeneratorRegistry creates a new test generator registry
+func NewTestGeneratorRegistry() *TestGeneratorRegistry {
+	return &TestGeneratorRegistry{
+		generators: make(map[string]*TestGenerator),
+	}
+}
+
+// GetOrCreate gets an existing generator or creates a new one
+func (r *TestGeneratorRegistry) GetOrCreate(tenantID, connID string) *TestGenerator {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := fmt.Sprintf("%s:%s", tenantID, connID)
+	if gen, exists := r.generators[key]; exists {
+		return gen
+	}
+
+	gen := NewTestGenerator(connID, tenantID)
+	r.generators[key] = gen
+	return gen
+}
+
+// Get retrieves an existing generator
+func (r *TestGeneratorRegistry) Get(tenantID, connID string) *TestGenerator {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	key := fmt.Sprintf("%s:%s", tenantID, connID)
+	return r.generators[key]
+}
+
+// Remove removes a generator from the registry
+func (r *TestGeneratorRegistry) Remove(tenantID, connID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := fmt.Sprintf("%s:%s", tenantID, connID)
+	delete(r.generators, key)
 }
 
 // SendSingleTestMessage sends a single test message to the pipeline
@@ -183,17 +229,23 @@ func (h *Handler) StartAutoGenerator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Initialize or retrieve test generator for this connection
-	// For now, just return success response
-	status := TestGeneratorStatus{
-		ConnectionID:  connID,
-		IsRunning:     true,
-		RatePerSecond: req.RatePerSecond,
-		MessageCount:  0,
-		ErrorCount:    0,
-		StartTime:     pointerTo(time.Now().UTC()),
+	// Get or create test generator for this connection
+	gen := h.generatorRegistry.GetOrCreate(tenantID, connID)
+
+	// Check if already running
+	if gen.Status().IsRunning {
+		writeError(w, http.StatusConflict, "AlreadyRunning", "test generator is already running for this connection", nil)
+		return
 	}
 
+	// Start the generator
+	if err := gen.Start(ctx, req.RatePerSecond, h.publisher); err != nil {
+		writeError(w, http.StatusInternalServerError, "StartError", fmt.Sprintf("failed to start generator: %v", err), nil)
+		return
+	}
+
+	// Return status
+	status := gen.Status()
 	writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
@@ -230,16 +282,21 @@ func (h *Handler) StopAutoGenerator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Stop the test generator for this connection
-	// For now, just return success response
-	status := TestGeneratorStatus{
-		ConnectionID: connID,
-		IsRunning:    false,
-		MessageCount: 0,
-		ErrorCount:   0,
-		StopTime:     pointerTo(time.Now().UTC()),
+	// Get test generator for this connection
+	gen := h.generatorRegistry.Get(tenantID, connID)
+	if gen == nil {
+		writeError(w, http.StatusNotFound, "NotFound", "no test generator running for this connection", nil)
+		return
 	}
 
+	// Stop the generator
+	if err := gen.Stop(); err != nil {
+		writeError(w, http.StatusConflict, "NotRunning", fmt.Sprintf("generator not running: %v", err), nil)
+		return
+	}
+
+	// Return status
+	status := gen.Status()
 	writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
@@ -276,16 +333,25 @@ func (h *Handler) GetAutoGeneratorStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// TODO: Retrieve actual generator status
-	// For now, return default status
-	status := TestGeneratorStatus{
-		ConnectionID:  connID,
-		IsRunning:     false,
-		MessageCount:  0,
-		ErrorCount:    0,
-		RatePerSecond: 0,
+	// Get test generator for this connection
+	gen := h.generatorRegistry.Get(tenantID, connID)
+	if gen == nil {
+		// Return default status if no generator exists
+		status := TestGeneratorStatus{
+			ConnectionID:  connID,
+			IsRunning:     false,
+			MessageCount:  0,
+			ErrorCount:    0,
+			RatePerSecond: 0,
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{
+			Data: status,
+		})
+		return
 	}
 
+	// Return actual generator status
+	status := gen.Status()
 	writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
