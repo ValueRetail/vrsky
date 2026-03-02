@@ -79,7 +79,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:latest
             ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
-          cache-from: type=gha
+          cache-from: type=gha,ignore-error=true
           cache-to: type=gha,mode=max
 
       - name: Image digest
