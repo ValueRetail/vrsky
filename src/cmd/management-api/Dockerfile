@@ -6,7 +6,6 @@ RUN apk add --no-cache git
 
 COPY src/go.mod src/go.sum ./
 COPY src/cmd/management-api/ ./cmd/management-api/
-COPY src/pkg/managementapi/ ./pkg/managementapi/
 COPY src/pkg/ ./pkg/
 COPY src/internal/ ./internal/
 
