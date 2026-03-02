@@ -1,8 +1,8 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21 AS builder
 
 WORKDIR /build
 
-RUN apk add --no-cache git build-base
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY src/go.mod src/go.sum ./
 COPY src/cmd/converter/ ./cmd/converter/
