@@ -206,7 +206,7 @@ func setupMockHTTPServer(t *testing.T, messages *[]map[string]interface{}) *http
 		t.Logf("Mock HTTP server received: %v", msg)
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	go func() {

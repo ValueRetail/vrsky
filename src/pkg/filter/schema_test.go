@@ -78,7 +78,7 @@ func TestSchemaValidator_StrictMode(t *testing.T) {
 		}
 	}`)
 
-	sv.RegisterSchema("test", schemaData)
+	_ = sv.RegisterSchema("test", schemaData)
 
 	// Valid data should pass
 	err = sv.Validate("test", map[string]interface{}{"status": "active"})
@@ -106,7 +106,7 @@ func TestSchemaValidator_LenientMode(t *testing.T) {
 		}
 	}`)
 
-	sv.RegisterSchema("test", schemaData)
+	_ = sv.RegisterSchema("test", schemaData)
 
 	// Invalid data should NOT fail in lenient mode
 	err = sv.Validate("test", map[string]interface{}{"status": 123})

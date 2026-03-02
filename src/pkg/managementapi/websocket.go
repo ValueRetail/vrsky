@@ -170,7 +170,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	for {
 		select {
 		case data := <-client.Ch:
-			w.Write([]byte("data: " + string(data) + "\n\n"))
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
 
 		case <-heartbeatTicker.C:
@@ -193,7 +193,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 				Data:      map[string]string{"reason": "client closed"},
 			}
 			data, _ := json.Marshal(disconnectMsg)
-			w.Write([]byte("data: " + string(data) + "\n\n"))
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
 			return
 

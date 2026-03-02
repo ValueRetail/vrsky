@@ -81,9 +81,9 @@ type FilterImpl struct {
 	transformationEngine TransformationEngine
 
 	// Priority 3: Rate limiting (optional)
-	rateLimitEngine     RateLimitEngine
-	rateLimitRules      []*RateLimitRule
-	pendingRateLimitID  string // Track which rate limit rule for concurrent tracking
+	rateLimitEngine    RateLimitEngine
+	rateLimitRules     []*RateLimitRule
+	pendingRateLimitID string // Track which rate limit rule for concurrent tracking
 }
 
 // NewFilter creates a new filter instance
@@ -361,7 +361,7 @@ func (f *FilterImpl) getRateLimitRuleState(ruleID string) (*RateLimitState, bool
 	if impl, ok := f.rateLimitEngine.(*RateLimitEngineImpl); ok {
 		impl.mu.RLock()
 		defer impl.mu.RUnlock()
-		
+
 		state, ok := impl.state[ruleID]
 		return state, ok
 	}
@@ -479,33 +479,33 @@ func (f *FilterImpl) consumeMessages() {
 			} else if !rateLimitDecision.Allowed {
 				// Rate limited - handle based on exceed action
 				switch rateLimitDecision.Action {
-			case "queue":
-				f.logger.DebugContext(f.ctx, "Message queued by rate limiter",
-					"envelope_id", env.ID,
-					"rule_id", rateLimitDecision.RuleID,
-					"current", rateLimitDecision.Current,
-					"limit", rateLimitDecision.Limit,
-				)
-				f.metrics.RecordRateLimitQueue()
-				
-				// Queue message for later retry by background worker
-				if ruleState, ok := f.getRateLimitRuleState(rateLimitDecision.RuleID); ok && ruleState.queue != nil {
-					queuedMsg := &QueuedMessage{
-						Envelope:  env,
-						RuleID:    rateLimitDecision.RuleID,
-						Timestamp: time.Now(),
+				case "queue":
+					f.logger.DebugContext(f.ctx, "Message queued by rate limiter",
+						"envelope_id", env.ID,
+						"rule_id", rateLimitDecision.RuleID,
+						"current", rateLimitDecision.Current,
+						"limit", rateLimitDecision.Limit,
+					)
+					f.metrics.RecordRateLimitQueue()
+
+					// Queue message for later retry by background worker
+					if ruleState, ok := f.getRateLimitRuleState(rateLimitDecision.RuleID); ok && ruleState.queue != nil {
+						queuedMsg := &QueuedMessage{
+							Envelope:  env,
+							RuleID:    rateLimitDecision.RuleID,
+							Timestamp: time.Now(),
+						}
+
+						if err := ruleState.queue.Enqueue(queuedMsg); err != nil {
+							f.logger.WarnContext(f.ctx, "Failed to queue message",
+								"envelope_id", env.ID,
+								"rule_id", rateLimitDecision.RuleID,
+								"error", err,
+							)
+							f.metrics.RecordFailure()
+						}
 					}
-					
-					if err := ruleState.queue.Enqueue(queuedMsg); err != nil {
-						f.logger.WarnContext(f.ctx, "Failed to queue message",
-							"envelope_id", env.ID,
-							"rule_id", rateLimitDecision.RuleID,
-							"error", err,
-						)
-						f.metrics.RecordFailure()
-					}
-				}
-				return
+					return
 
 				case "drop":
 					f.logger.DebugContext(f.ctx, "Message dropped by rate limiter",
@@ -733,7 +733,7 @@ func getIntValue(v interface{}) int {
 		return int(val)
 	case string:
 		var i int
-		fmt.Sscanf(val, "%d", &i)
+		_, _ = fmt.Sscanf(val, "%d", &i)
 		return i
 	default:
 		return 0

@@ -255,7 +255,7 @@ func TestHTTPLookupBackend_InvalidJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer server.Close()
 
@@ -430,10 +430,10 @@ func TestHTTPLookupBackend_MetricsTracking(t *testing.T) {
 	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 
 	metrics := backend.GetMetrics()
-	assert.Equal(t, int64(2), metrics.requestsTotal)       // 1 initial + 1 retry
-	assert.Equal(t, int64(1), metrics.requestsSucceeded)   // Succeeded after retry
-	assert.Equal(t, int64(1), metrics.retries)              // 1 retry happened
-	assert.Equal(t, int64(1), metrics.cacheMisses)          // Cache miss on first try
+	assert.Equal(t, int64(2), metrics.requestsTotal)     // 1 initial + 1 retry
+	assert.Equal(t, int64(1), metrics.requestsSucceeded) // Succeeded after retry
+	assert.Equal(t, int64(1), metrics.retries)           // 1 retry happened
+	assert.Equal(t, int64(1), metrics.cacheMisses)       // Cache miss on first try
 }
 
 // TestHTTPLookupBackend_CacheExpiration tests cache TTL
@@ -520,7 +520,7 @@ func TestHTTPLookupBackend_CircuitBreakerRecovery(t *testing.T) {
 	// Attempt a request during recovery - should still fail due to server error
 	// But the circuit should transition through half-open
 	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
-	
+
 	// After failed recovery attempt, state should be open again
 	assert.Equal(t, CircuitBreakerOpen, backend.GetCircuitBreakerState())
 }

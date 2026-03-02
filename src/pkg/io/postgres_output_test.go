@@ -18,11 +18,11 @@ import (
 
 // testSleeper implements sleeper interface for deterministic testing
 type testSleeper struct {
-	sleepDurations  []time.Duration
-	sleepIndex      int
-	blockChan       chan struct{}  // For tests to control when to unblock
-	shouldBlock     bool            // Whether to actually block or return immediately
-	attemptChan     chan struct{}  // Signals when an attempt completes (sent before sleeping)
+	sleepDurations []time.Duration
+	sleepIndex     int
+	blockChan      chan struct{} // For tests to control when to unblock
+	shouldBlock    bool          // Whether to actually block or return immediately
+	attemptChan    chan struct{} // Signals when an attempt completes (sent before sleeping)
 }
 
 // NewTestSleeper creates a test sleeper that can optionally block
@@ -85,21 +85,6 @@ func (ts *testSleeper) WaitForAttempt(timeout time.Duration) bool {
 	}
 }
 
-// mockExecuteBatch provides deterministic batch execution for testing
-type mockExecuteBatch struct {
-	callCount int
-	failUntil int // Fail first N attempts, then succeed
-	error     error
-}
-
-func (m *mockExecuteBatch) execute() error {
-	m.callCount++
-	if m.callCount <= m.failUntil {
-		return m.error
-	}
-	return nil
-}
-
 // fakeDLQPublisher implements dlqPublisher interface for testing
 type fakeDLQPublisher struct {
 	publishCount      int
@@ -129,12 +114,12 @@ func (f *fakeDLQPublisher) PublishProducerError(
 // TestNewPostgresOutput_Configuration tests environment variable parsing
 func TestNewPostgresOutput_Configuration(t *testing.T) {
 	tests := []struct {
-		name        string
-		envVars     map[string]string
-		wantErr     bool
-		wantHost    string
-		wantPort    int
-		wantUser    string
+		name         string
+		envVars      map[string]string
+		wantErr      bool
+		wantHost     string
+		wantPort     int
+		wantUser     string
 		wantDatabase string
 	}{
 		{
@@ -143,11 +128,11 @@ func TestNewPostgresOutput_Configuration(t *testing.T) {
 				"POSTGRES_OUTPUT_PASSWORD": "password",
 				"POSTGRES_OUTPUT_DATABASE": "test_db",
 			},
-			wantErr:       false,
-			wantHost:      "localhost",
-			wantPort:      5432,
-			wantUser:      "postgres",
-			wantDatabase:  "test_db",
+			wantErr:      false,
+			wantHost:     "localhost",
+			wantPort:     5432,
+			wantUser:     "postgres",
+			wantDatabase: "test_db",
 		},
 		{
 			name: "custom host and port",
@@ -229,10 +214,10 @@ func TestNewPostgresOutput_Configuration(t *testing.T) {
 // TestNewPostgresOutput_BatchConfiguration tests batch settings
 func TestNewPostgresOutput_BatchConfiguration(t *testing.T) {
 	tests := []struct {
-		name           string
-		envVars        map[string]string
-		wantBatchSize  int
-		wantBatchTime  time.Duration
+		name          string
+		envVars       map[string]string
+		wantBatchSize int
+		wantBatchTime time.Duration
 	}{
 		{
 			name: "default batch settings",
@@ -246,8 +231,8 @@ func TestNewPostgresOutput_BatchConfiguration(t *testing.T) {
 		{
 			name: "custom batch size",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD": "password",
-				"POSTGRES_OUTPUT_DATABASE": "test_db",
+				"POSTGRES_OUTPUT_PASSWORD":   "password",
+				"POSTGRES_OUTPUT_DATABASE":   "test_db",
 				"POSTGRES_OUTPUT_BATCH_SIZE": "50",
 			},
 			wantBatchSize: 50,
@@ -283,10 +268,10 @@ func TestNewPostgresOutput_BatchConfiguration(t *testing.T) {
 // TestNewPostgresOutput_ConflictResolution tests conflict resolution strategy
 func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 	tests := []struct {
-		name               string
-		envVars            map[string]string
-		wantConflictStrat  string
-		wantErr            bool
+		name              string
+		envVars           map[string]string
+		wantConflictStrat string
+		wantErr           bool
 	}{
 		{
 			name: "default UPSERT strategy",
@@ -300,8 +285,8 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 		{
 			name: "unsupported REPLACE strategy",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD": "password",
-				"POSTGRES_OUTPUT_DATABASE": "test_db",
+				"POSTGRES_OUTPUT_PASSWORD":     "password",
+				"POSTGRES_OUTPUT_DATABASE":     "test_db",
 				"POSTGRES_CONFLICT_RESOLUTION": "REPLACE",
 			},
 			wantErr: true,
@@ -335,10 +320,10 @@ func TestNewPostgresOutput_ConflictResolution(t *testing.T) {
 // TestNewPostgresOutput_NATSConfiguration tests NATS settings
 func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 	tests := []struct {
-		name             string
-		envVars          map[string]string
-		wantNATSURL      string
-		wantNATSSubject  string
+		name            string
+		envVars         map[string]string
+		wantNATSURL     string
+		wantNATSSubject string
 	}{
 		{
 			name: "default NATS configuration",
@@ -354,8 +339,8 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_OUTPUT_PASSWORD": "password",
 				"POSTGRES_OUTPUT_DATABASE": "test_db",
-				"NATS_URL": "nats://nats.prod:4222",
-				"POSTGRES_OUTPUT_SUBJECT": "cdc.writes",
+				"NATS_URL":                 "nats://nats.prod:4222",
+				"POSTGRES_OUTPUT_SUBJECT":  "cdc.writes",
 			},
 			wantNATSURL:     "nats://nats.prod:4222",
 			wantNATSSubject: "cdc.writes",
@@ -382,72 +367,72 @@ func TestNewPostgresOutput_NATSConfiguration(t *testing.T) {
 				t.Errorf("natsURL = %s, want %s", po.natsURL, tt.wantNATSURL)
 			}
 			if po.natsSubject != tt.wantNATSSubject {
-					t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
+				t.Errorf("natsSubject = %s, want %s", po.natsSubject, tt.wantNATSSubject)
 			}
-	})
-}
+		})
+	}
 }
 
 // TestNewPostgresOutput_ConfigurationValidation tests that invalid config values are handled with warnings
 func TestNewPostgresOutput_ConfigurationValidation(t *testing.T) {
 	tests := []struct {
-		name             string
-		envVars          map[string]string
-		wantBatchSize    int
-		wantMaxRetries   int
+		name               string
+		envVars            map[string]string
+		wantBatchSize      int
+		wantMaxRetries     int
 		wantInitialBackoff time.Duration
-		wantMaxBackoff   time.Duration
+		wantMaxBackoff     time.Duration
 	}{
 		{
 			name: "invalid batch size (non-integer) defaults to 100",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_BATCH_SIZE":     "invalid",
+				"POSTGRES_OUTPUT_PASSWORD":   "password",
+				"POSTGRES_OUTPUT_DATABASE":   "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE": "invalid",
 			},
 			wantBatchSize: 100,
 		},
 		{
 			name: "zero batch size defaults to 100",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_BATCH_SIZE":     "0",
+				"POSTGRES_OUTPUT_PASSWORD":   "password",
+				"POSTGRES_OUTPUT_DATABASE":   "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE": "0",
 			},
 			wantBatchSize: 100,
 		},
 		{
 			name: "negative batch size defaults to 100",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_BATCH_SIZE":     "-50",
+				"POSTGRES_OUTPUT_PASSWORD":   "password",
+				"POSTGRES_OUTPUT_DATABASE":   "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE": "-50",
 			},
 			wantBatchSize: 100,
 		},
 		{
 			name: "invalid max retries (non-integer) defaults to 3",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_MAX_RETRIES":    "not_a_number",
+				"POSTGRES_OUTPUT_PASSWORD":    "password",
+				"POSTGRES_OUTPUT_DATABASE":    "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES": "not_a_number",
 			},
 			wantMaxRetries: 3,
 		},
 		{
 			name: "zero max retries defaults to 3",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_MAX_RETRIES":    "0",
+				"POSTGRES_OUTPUT_PASSWORD":    "password",
+				"POSTGRES_OUTPUT_DATABASE":    "test_db",
+				"POSTGRES_OUTPUT_MAX_RETRIES": "0",
 			},
 			wantMaxRetries: 3,
 		},
 		{
 			name: "invalid initial backoff (non-integer) defaults to 1000ms",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_PASSWORD":           "password",
+				"POSTGRES_OUTPUT_DATABASE":           "test_db",
 				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "bad",
 			},
 			wantInitialBackoff: 1000 * time.Millisecond,
@@ -455,8 +440,8 @@ func TestNewPostgresOutput_ConfigurationValidation(t *testing.T) {
 		{
 			name: "zero initial backoff defaults to 1000ms",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_PASSWORD":           "password",
+				"POSTGRES_OUTPUT_DATABASE":           "test_db",
 				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "0",
 			},
 			wantInitialBackoff: 1000 * time.Millisecond,
@@ -464,28 +449,28 @@ func TestNewPostgresOutput_ConfigurationValidation(t *testing.T) {
 		{
 			name: "max backoff less than initial resets to defaults",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
+				"POSTGRES_OUTPUT_PASSWORD":           "password",
+				"POSTGRES_OUTPUT_DATABASE":           "test_db",
 				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "5000",
-				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "1000",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS":     "1000",
 			},
 			wantInitialBackoff: DefaultBackoffConfig().InitialDuration,
-			wantMaxBackoff: DefaultBackoffConfig().MaxDuration,
+			wantMaxBackoff:     DefaultBackoffConfig().MaxDuration,
 		},
 		{
 			name: "valid custom values are accepted",
 			envVars: map[string]string{
-				"POSTGRES_OUTPUT_PASSWORD":       "password",
-				"POSTGRES_OUTPUT_DATABASE":       "test_db",
-				"POSTGRES_OUTPUT_BATCH_SIZE":     "250",
-				"POSTGRES_OUTPUT_MAX_RETRIES":    "5",
+				"POSTGRES_OUTPUT_PASSWORD":           "password",
+				"POSTGRES_OUTPUT_DATABASE":           "test_db",
+				"POSTGRES_OUTPUT_BATCH_SIZE":         "250",
+				"POSTGRES_OUTPUT_MAX_RETRIES":        "5",
 				"POSTGRES_OUTPUT_INITIAL_BACKOFF_MS": "500",
-				"POSTGRES_OUTPUT_MAX_BACKOFF_MS": "10000",
+				"POSTGRES_OUTPUT_MAX_BACKOFF_MS":     "10000",
 			},
-			wantBatchSize: 250,
-			wantMaxRetries: 5,
+			wantBatchSize:      250,
+			wantMaxRetries:     5,
 			wantInitialBackoff: 500 * time.Millisecond,
-			wantMaxBackoff: 10000 * time.Millisecond,
+			wantMaxBackoff:     10000 * time.Millisecond,
 		},
 	}
 
@@ -679,8 +664,8 @@ func TestExecuteInsert_BuildsValidQuery(t *testing.T) {
 	// Test data - simulating payload
 	payload := map[string]interface{}{
 		"after": map[string]interface{}{
-			"id":   1,
-			"name": "John",
+			"id":    1,
+			"name":  "John",
 			"email": "john@example.com",
 		},
 	}
@@ -1013,11 +998,11 @@ func TestExecuteBatchWithRetry_BackoffConfig(t *testing.T) {
 // TestExecuteBatchWithRetry_DLQMetricAccuracy verifies DLQ metric increments only when publish succeeds
 func TestExecuteBatchWithRetry_DLQMetricAccuracy(t *testing.T) {
 	tests := []struct {
-		name               string
-		shouldPublishFail  bool // DLQ publish fails
-		shouldPublishSkip  bool // DLQ disabled or no connection
-		expectMetricIncr   bool // Expect metric to increment
-		expectPublishCall  bool // Expect PublishProducerError to be called
+		name              string
+		shouldPublishFail bool // DLQ publish fails
+		shouldPublishSkip bool // DLQ disabled or no connection
+		expectMetricIncr  bool // Expect metric to increment
+		expectPublishCall bool // Expect PublishProducerError to be called
 	}{
 		{
 			name:              "successful_publish_increments_metric",

@@ -3,7 +3,6 @@ package managementapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -370,21 +369,4 @@ func (r *PostgresRepository) Close() error {
 		return r.db.Close()
 	}
 	return nil
-}
-
-// Helper function to marshal JSONB for database storage
-func marshalJSONB(v interface{}) (interface{}, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// Helper function to unmarshal JSONB from database
-func unmarshalJSONB(data []byte, v interface{}) error {
-	if data == nil {
-		return nil
-	}
-	return json.Unmarshal(data, v)
 }

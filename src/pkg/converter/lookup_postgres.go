@@ -12,11 +12,8 @@ import (
 
 // PostgresMetrics tracks PostgreSQL operation metrics with thread-safe atomic operations
 type PostgresMetrics struct {
-	queriesTotal   atomic.Int64
-	queriesFailed  atomic.Int64
-	queryLatencyMs float64
-	connPoolSize   int32
-	connPoolActive int32
+	queriesTotal  atomic.Int64
+	queriesFailed atomic.Int64
 }
 
 // PostgresLookupBackend provides production-grade database lookups with connection pooling.

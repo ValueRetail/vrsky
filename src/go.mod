@@ -1,6 +1,6 @@
 module github.com/ValueRetail/vrsky
 
-go 1.21
+go 1.22
 
 require (
 	github.com/bytecodealliance/wasmtime-go/v13 v13.0.0
