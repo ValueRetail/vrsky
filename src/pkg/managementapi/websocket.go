@@ -1,8 +1,11 @@
 package managementapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,68 +13,136 @@ import (
 
 // WebSocketMessage represents a message sent over WebSocket
 type WebSocketMessage struct {
-	Type      string      `json:"type"` // "metrics", "event", "connection_status"
+	Type      string      `json:"type"` // "metrics", "event", "connection_status", "ping", "pong"
 	Timestamp time.Time   `json:"timestamp"`
 	Data      interface{} `json:"data"`
 }
 
-// HandleMetricsSSE handles Server-Sent Events for real-time metrics
-// Endpoint: GET /api/v1/connections/{id}/metrics/stream
-// Alternative to WebSocket using HTTP Server-Sent Events
-func (h *Handler) HandleMetricsSSE(w http.ResponseWriter, r *http.Request) {
+// ClientMessage represents a message received from client
+type ClientMessage struct {
+	Type string      `json:"type"` // "subscribe", "unsubscribe", "pong"
+	Data interface{} `json:"data"`
+}
+
+// WebSocketClient represents a connected WebSocket client
+type WebSocketClient struct {
+	ID            string
+	ConnectionID  string
+	TenantID      string
+	Ch            chan []byte
+	DoneCh        chan struct{}
+	ConnectedAt   time.Time
+	LastMessageAt time.Time
+	mu            sync.RWMutex
+}
+
+// NewWebSocketClient creates a new WebSocket client
+func NewWebSocketClient(connID, tenantID string) *WebSocketClient {
+	return &WebSocketClient{
+		ID:           uuid.New().String(),
+		ConnectionID: connID,
+		TenantID:     tenantID,
+		Ch:           make(chan []byte, 256),
+		DoneCh:       make(chan struct{}),
+		ConnectedAt:  time.Now().UTC(),
+	}
+}
+
+// Send sends a message to the client
+func (c *WebSocketClient) Send(msg []byte) error {
+	select {
+	case c.Ch <- msg:
+		c.mu.Lock()
+		c.LastMessageAt = time.Now().UTC()
+		c.mu.Unlock()
+		return nil
+	case <-c.DoneCh:
+		return fmt.Errorf("client closed")
+	default:
+		return fmt.Errorf("channel full")
+	}
+}
+
+// Close closes the client connection
+func (c *WebSocketClient) Close() {
+	close(c.DoneCh)
+}
+
+// HandleMetricsWebSocket handles WebSocket-like connections for real-time metrics
+// Endpoint: GET /api/v1/connections/{id}/metrics/ws
+// Uses HTTP Server-Sent Events (SSE) as a fallback to WebSocket
+// with heartbeat pings for connection keep-alive
+func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID from context
-	tenantID, ok := r.Context().Value("tenant_id").(string)
-	if !ok || tenantID == "" {
-		w.WriteHeader(http.StatusBadRequest)
+	tenantID, err := GetTenantIDFromContext(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Get connection ID from URL
 	connID := r.PathValue("id")
 	if connID == "" {
-		w.WriteHeader(http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
 	// Verify connection exists and belongs to tenant
 	conn, err := h.repo.GetConnection(r.Context(), connID)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		if _, ok := err.(*NotFoundError); ok {
+			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		} else {
+			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+		}
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		w.WriteHeader(http.StatusForbidden)
+		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
-	// Create client
-	clientID := uuid.New().String()
-	client := &WSClient{
-		ID:           clientID,
-		ConnectionID: connID,
-		TenantID:     tenantID,
-		Ch:           make(chan []byte, 100),
-		ConnectedAt:  time.Now().UTC(),
-	}
+	// Create WebSocket client
+	client := NewWebSocketClient(connID, tenantID)
 
-	// Register client
+	// Register client for metrics updates
 	if h.clientRegistry != nil {
-		h.clientRegistry.RegisterClient(connID, client)
-		defer h.clientRegistry.UnregisterClient(connID, clientID)
+		h.clientRegistry.RegisterClient(connID, &WSClient{
+			ID:           client.ID,
+			ConnectionID: client.ConnectionID,
+			TenantID:     client.TenantID,
+			Ch:           client.Ch,
+			ConnectedAt:  client.ConnectedAt,
+		})
+		defer h.clientRegistry.UnregisterClient(connID, client.ID)
 	}
 
-	// Set up SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// Set up SSE headers with WebSocket-like behavior
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "InternalError", "streaming not supported", nil)
 		return
 	}
+
+	// Send connection established message
+	connMsg := WebSocketMessage{
+		Type:      "connected",
+		Timestamp: time.Now().UTC(),
+		Data: map[string]interface{}{
+			"client_id":     client.ID,
+			"connection_id": connID,
+		},
+	}
+	data, _ := json.Marshal(connMsg)
+	w.Write([]byte("data: " + string(data) + "\n\n"))
+	flusher.Flush()
 
 	// Send initial metrics state
 	if h.metricsCache != nil {
@@ -87,29 +158,46 @@ func (h *Handler) HandleMetricsSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Stream metrics
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	// Context for cancellation
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
+	// Heartbeat ticker
+	heartbeatTicker := time.NewTicker(30 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	// Stream metrics and keep-alive
 	for {
 		select {
 		case data := <-client.Ch:
 			w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
-			client.LastMessageAt = time.Now().UTC()
 
-		case <-ticker.C:
-			// Send periodic health check
-			msg := WebSocketMessage{
+		case <-heartbeatTicker.C:
+			// Send periodic heartbeat/ping
+			heartbeat := WebSocketMessage{
 				Type:      "ping",
 				Timestamp: time.Now().UTC(),
-				Data:      nil,
+				Data:      map[string]string{"type": "heartbeat"},
 			}
-			data, _ := json.Marshal(msg)
-			w.Write([]byte(": " + string(data) + "\n\n"))
+			data, _ := json.Marshal(heartbeat)
+			w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
 
-		case <-r.Context().Done():
+		case <-ctx.Done():
+			client.Close()
+			// Send disconnection message
+			disconnectMsg := WebSocketMessage{
+				Type:      "disconnected",
+				Timestamp: time.Now().UTC(),
+				Data:      map[string]string{"reason": "client closed"},
+			}
+			data, _ := json.Marshal(disconnectMsg)
+			w.Write([]byte("data: " + string(data) + "\n\n"))
+			flusher.Flush()
+			return
+
+		case <-client.DoneCh:
 			return
 		}
 	}
@@ -119,4 +207,10 @@ func (h *Handler) HandleMetricsSSE(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) InitializeWebSocketSupport(clientRegistry *ClientRegistry, metricsCache *MetricsCache) {
 	h.clientRegistry = clientRegistry
 	h.metricsCache = metricsCache
+}
+
+// HandleMetricsSSE is an alias for HandleMetricsWebSocket for backward compatibility
+// Deprecated: Use HandleMetricsWebSocket instead
+func (h *Handler) HandleMetricsSSE(w http.ResponseWriter, r *http.Request) {
+	h.HandleMetricsWebSocket(w, r)
 }
