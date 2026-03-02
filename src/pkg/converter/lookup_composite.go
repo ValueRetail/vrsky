@@ -100,6 +100,10 @@ func (cb *CompositeBackend) Lookup(ctx context.Context, table, field string, val
 
 		// Try this backend
 		result, err := backend.Lookup(ctx, table, field, value)
+		if err != nil {
+			// Continue to next backend on error
+			continue
+		}
 
 		// If found (result is non-nil), return immediately
 		if result != nil {
@@ -148,6 +152,10 @@ func (cb *CompositeBackend) HTTPLookup(ctx context.Context, url string, params m
 
 		// Try this backend
 		result, err := backend.HTTPLookup(ctx, url, params)
+		if err != nil {
+			// Continue to next backend on error
+			continue
+		}
 
 		// If found (result is non-nil), return immediately
 		if result != nil {

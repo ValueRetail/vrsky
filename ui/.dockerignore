@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Dependencies
+node_modules
+yarn.lock
+
+# Build artifacts
+dist
+build
+*.tsbuildinfo
+
+# Test coverage output (but keep test files for build)
+coverage
+.nyc_output
+*.lcov
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Documentation
+README.md
+docs
+CHANGELOG.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+
+# Development
+.eslintcache
+.vite
+.turbo
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

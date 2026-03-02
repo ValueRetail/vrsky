@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,12 +18,12 @@ import (
 // TestNewPostgresInput_Configuration tests environment variable parsing
 func TestNewPostgresInput_Configuration(t *testing.T) {
 	tests := []struct {
-		name        string
-		envVars     map[string]string
-		wantErr     bool
-		wantHost    string
-		wantPort    int
-		wantUser    string
+		name         string
+		envVars      map[string]string
+		wantErr      bool
+		wantHost     string
+		wantPort     int
+		wantUser     string
 		wantDatabase string
 	}{
 		{
@@ -31,11 +32,11 @@ func TestNewPostgresInput_Configuration(t *testing.T) {
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
 			},
-			wantErr:       false,
-			wantHost:      "localhost",
-			wantPort:      5432,
-			wantUser:      "postgres",
-			wantDatabase:  "source_db",
+			wantErr:      false,
+			wantHost:     "localhost",
+			wantPort:     5432,
+			wantUser:     "postgres",
+			wantDatabase: "source_db",
 		},
 		{
 			name: "custom host and port",
@@ -117,10 +118,10 @@ func TestNewPostgresInput_Configuration(t *testing.T) {
 // TestNewPostgresInput_BatchConfiguration tests batch size and timeout settings
 func TestNewPostgresInput_BatchConfiguration(t *testing.T) {
 	tests := []struct {
-		name           string
-		envVars        map[string]string
-		wantBatchSize  int
-		wantBatchTime  time.Duration
+		name          string
+		envVars       map[string]string
+		wantBatchSize int
+		wantBatchTime time.Duration
 	}{
 		{
 			name: "default batch settings",
@@ -134,8 +135,8 @@ func TestNewPostgresInput_BatchConfiguration(t *testing.T) {
 		{
 			name: "custom batch size",
 			envVars: map[string]string{
-				"POSTGRES_INPUT_PASSWORD": "password",
-				"POSTGRES_INPUT_DATABASE": "source_db",
+				"POSTGRES_INPUT_PASSWORD":   "password",
+				"POSTGRES_INPUT_DATABASE":   "source_db",
 				"POSTGRES_INPUT_BATCH_SIZE": "50",
 			},
 			wantBatchSize: 50,
@@ -143,8 +144,8 @@ func TestNewPostgresInput_BatchConfiguration(t *testing.T) {
 		{
 			name: "invalid batch size ignored",
 			envVars: map[string]string{
-				"POSTGRES_INPUT_PASSWORD": "password",
-				"POSTGRES_INPUT_DATABASE": "source_db",
+				"POSTGRES_INPUT_PASSWORD":   "password",
+				"POSTGRES_INPUT_DATABASE":   "source_db",
 				"POSTGRES_INPUT_BATCH_SIZE": "invalid",
 			},
 			wantBatchSize: 100, // Falls back to default
@@ -152,8 +153,8 @@ func TestNewPostgresInput_BatchConfiguration(t *testing.T) {
 		{
 			name: "zero batch size ignored",
 			envVars: map[string]string{
-				"POSTGRES_INPUT_PASSWORD": "password",
-				"POSTGRES_INPUT_DATABASE": "source_db",
+				"POSTGRES_INPUT_PASSWORD":   "password",
+				"POSTGRES_INPUT_DATABASE":   "source_db",
 				"POSTGRES_INPUT_BATCH_SIZE": "0",
 			},
 			wantBatchSize: 100, // Falls back to default
@@ -206,7 +207,7 @@ func TestNewPostgresInput_TableFilters(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
-				"POSTGRES_INPUT_TABLES": "users",
+				"POSTGRES_INPUT_TABLES":   "users",
 			},
 			wantFilters: map[string]bool{"users": true},
 		},
@@ -215,7 +216,7 @@ func TestNewPostgresInput_TableFilters(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
-				"POSTGRES_INPUT_TABLES": "users,orders,products",
+				"POSTGRES_INPUT_TABLES":   "users,orders,products",
 			},
 			wantFilters: map[string]bool{
 				"users":    true,
@@ -228,7 +229,7 @@ func TestNewPostgresInput_TableFilters(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
-				"POSTGRES_INPUT_TABLES": " users , orders , products ",
+				"POSTGRES_INPUT_TABLES":   " users , orders , products ",
 			},
 			wantFilters: map[string]bool{
 				"users":    true,
@@ -270,9 +271,9 @@ func TestNewPostgresInput_TableFilters(t *testing.T) {
 // TestNewPostgresInput_NATSConfiguration tests NATS settings
 func TestNewPostgresInput_NATSConfiguration(t *testing.T) {
 	tests := []struct {
-		name           string
-		envVars        map[string]string
-		wantNATSURL    string
+		name            string
+		envVars         map[string]string
+		wantNATSURL     string
 		wantNATSSubject string
 	}{
 		{
@@ -289,7 +290,7 @@ func TestNewPostgresInput_NATSConfiguration(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
-				"NATS_URL": "nats://nats.example.com:4222",
+				"NATS_URL":                "nats://nats.example.com:4222",
 			},
 			wantNATSURL:     "nats://nats.example.com:4222",
 			wantNATSSubject: "postgres.changes",
@@ -299,7 +300,7 @@ func TestNewPostgresInput_NATSConfiguration(t *testing.T) {
 			envVars: map[string]string{
 				"POSTGRES_INPUT_PASSWORD": "password",
 				"POSTGRES_INPUT_DATABASE": "source_db",
-				"POSTGRES_INPUT_SUBJECT": "custom.cdc.topic",
+				"POSTGRES_INPUT_SUBJECT":  "custom.cdc.topic",
 			},
 			wantNATSURL:     "nats://localhost:4222",
 			wantNATSSubject: "custom.cdc.topic",
@@ -335,10 +336,10 @@ func TestNewPostgresInput_NATSConfiguration(t *testing.T) {
 // TestNewPostgresInput_ReplicationSlotConfiguration tests replication slot naming
 func TestNewPostgresInput_ReplicationSlotConfiguration(t *testing.T) {
 	tests := []struct {
-		name             string
-		envVars          map[string]string
-		wantSlotName     string
-		wantPublication  string
+		name            string
+		envVars         map[string]string
+		wantSlotName    string
+		wantPublication string
 	}{
 		{
 			name: "default replication settings",
@@ -352,8 +353,8 @@ func TestNewPostgresInput_ReplicationSlotConfiguration(t *testing.T) {
 		{
 			name: "custom replication slot",
 			envVars: map[string]string{
-				"POSTGRES_INPUT_PASSWORD": "password",
-				"POSTGRES_INPUT_DATABASE": "source_db",
+				"POSTGRES_INPUT_PASSWORD":         "password",
+				"POSTGRES_INPUT_DATABASE":         "source_db",
 				"POSTGRES_INPUT_REPLICATION_SLOT": "custom_slot",
 			},
 			wantSlotName:    "custom_slot",
@@ -362,8 +363,8 @@ func TestNewPostgresInput_ReplicationSlotConfiguration(t *testing.T) {
 		{
 			name: "custom publication",
 			envVars: map[string]string{
-				"POSTGRES_INPUT_PASSWORD": "password",
-				"POSTGRES_INPUT_DATABASE": "source_db",
+				"POSTGRES_INPUT_PASSWORD":    "password",
+				"POSTGRES_INPUT_DATABASE":    "source_db",
 				"POSTGRES_INPUT_PUBLICATION": "custom_pub",
 			},
 			wantSlotName:    "vrsky_slot",
@@ -693,13 +694,19 @@ func TestFlushBatch_PublishesEnvelopes(t *testing.T) {
 
 	pi.pendingBatch = []*envelope.Envelope{env1, env2}
 
-	// Start reading messages in background
+	// Start reading messages in background with proper synchronization
 	var received []*envelope.Envelope
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for i := 0; i < 2; i++ {
 			env, ok := <-pi.messages
 			if ok {
+				mu.Lock()
 				received = append(received, env)
+				mu.Unlock()
 			}
 		}
 	}()
@@ -711,8 +718,10 @@ func TestFlushBatch_PublishesEnvelopes(t *testing.T) {
 	pi.flushBatch()
 
 	// Wait for messages to be received
-	time.Sleep(50 * time.Millisecond)
+	wg.Wait()
 
+	mu.Lock()
+	defer mu.Unlock()
 	if len(received) != 2 {
 		t.Errorf("received %d messages, want 2", len(received))
 	}
@@ -954,7 +963,6 @@ func TestPollChanges_SuccessfulRetryDoesNotApplyCooldown(t *testing.T) {
 
 	// Second iteration: simulate success
 	if lastErr != nil { // Retry because error occurred
-		attempt++
 		lastErr = nil // SUCCESS: This is the key fix - reset lastErr on success
 	}
 

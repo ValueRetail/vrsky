@@ -15,7 +15,7 @@ func TestTimeWindowRateLimit_AllowedWithinLimit(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_test",
@@ -49,7 +49,7 @@ func TestTimeWindowRateLimit_RejectedExceedsLimit(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_test",
@@ -95,7 +95,7 @@ func TestTimeWindowRateLimit_WindowReset(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_test",
@@ -150,7 +150,7 @@ func TestTimeWindowRateLimit_EdgeCaseWindowBoundary(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_test",
@@ -191,7 +191,7 @@ func TestTimeWindowRateLimit_QueueAction(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_queue",
@@ -238,7 +238,7 @@ func TestTimeWindowRateLimit_DropAction(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                   "time_window_drop",
@@ -282,7 +282,7 @@ func TestConcurrentRateLimit_AllowedWithinLimit(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:            "concurrent_test",
@@ -315,7 +315,7 @@ func TestConcurrentRateLimit_RejectedExceedsLimit(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:            "concurrent_test",
@@ -360,7 +360,7 @@ func TestConcurrentRateLimit_DecrementOnComplete(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:            "concurrent_test",
@@ -413,7 +413,7 @@ func TestConcurrentRateLimit_MultipleRulesIndependent(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule1 := &RateLimitRule{
 		ID:            "rule_1",
@@ -492,7 +492,7 @@ func TestTokenBucketRateLimit_TokenRefill(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                  "token_test",
@@ -547,7 +547,7 @@ func TestTokenBucketRateLimit_BurstCapacity(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                  "token_burst",
@@ -590,7 +590,7 @@ func TestTokenBucketRateLimit_RejectedWhenEmpty(t *testing.T) {
 	condEngine := NewConditionEngine()
 	metrics := NewFilterMetrics("test", prometheus.NewRegistry())
 	rle := NewRateLimitEngine(condEngine, metrics, logger)
-	defer rle.Stop()
+	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
 		ID:                  "token_empty",

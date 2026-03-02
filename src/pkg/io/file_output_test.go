@@ -21,6 +21,7 @@ func TestFileProducer_NewFileProducer(t *testing.T) {
 	}
 	if producer == nil {
 		t.Error("NewFileProducer() returned nil")
+		return
 	}
 	if producer.outputDir == "" {
 		t.Error("NewFileProducer() outputDir is empty")

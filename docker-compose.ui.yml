@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+      target: builder
+    container_name: vrsky-ui-dev
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8080/api"
+      VITE_ENVIRONMENT: "development"
+    volumes:
+      - ./ui:/app
+      - /app/node_modules
+      - /app/dist
+    command: npm run dev -- --host 0.0.0.0
+    profiles:
+      - dev
+    networks:
+      - vrsky
+
+  ui-prod:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      target: nginx
+    container_name: vrsky-ui-prod
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8080/api"
+      VITE_ENVIRONMENT: "production"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/index.html"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - vrsky
+    profiles:
+      - prod
+
+networks:
+  vrsky:
+    driver: bridge

@@ -72,7 +72,7 @@ func TestHTTPLookupBackend_SuccessfulRequest(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":    "123",
 			"name":  "Test",
 			"value": 42,
@@ -103,7 +103,7 @@ func TestHTTPLookupBackend_CachingWorks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 
@@ -140,7 +140,7 @@ func TestHTTPLookupBackend_RetryLogic(t *testing.T) {
 		}
 		// Succeed on 3rd attempt
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	}))
 	defer server.Close()
 
@@ -175,7 +175,7 @@ func TestHTTPLookupBackend_CircuitBreaker(t *testing.T) {
 	// Make requests to trigger circuit breaker
 	// First 2 requests fail
 	for i := 0; i < 2; i++ {
-		backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+		_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 	}
 
 	// Circuit should be open now
@@ -255,7 +255,7 @@ func TestHTTPLookupBackend_InvalidJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer server.Close()
 
@@ -295,7 +295,7 @@ func TestHTTPLookupBackend_ConcurrentRequests(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -329,14 +329,14 @@ func TestHTTPLookupBackend_ClearCache(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
 	ctx := context.Background()
 
 	// First request caches result
-	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+	_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 
 	// Clear cache
 	backend.ClearCache()
@@ -346,7 +346,7 @@ func TestHTTPLookupBackend_ClearCache(t *testing.T) {
 	initialCacheHits := initialMetrics.cacheHits
 
 	// Next request should miss cache
-	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+	_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 
 	finalMetrics := backend.GetMetrics()
 	// Cache should have missed (new request increments misses)
@@ -383,7 +383,7 @@ func TestHTTPLookupBackend_WithParams(t *testing.T) {
 			paramsReceived = true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -422,18 +422,18 @@ func TestHTTPLookupBackend_MetricsTracking(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
 	ctx := context.Background()
-	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+	_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 
 	metrics := backend.GetMetrics()
-	assert.Equal(t, int64(2), metrics.requestsTotal)       // 1 initial + 1 retry
-	assert.Equal(t, int64(1), metrics.requestsSucceeded)   // Succeeded after retry
-	assert.Equal(t, int64(1), metrics.retries)              // 1 retry happened
-	assert.Equal(t, int64(1), metrics.cacheMisses)          // Cache miss on first try
+	assert.Equal(t, int64(2), metrics.requestsTotal)     // 1 initial + 1 retry
+	assert.Equal(t, int64(1), metrics.requestsSucceeded) // Succeeded after retry
+	assert.Equal(t, int64(1), metrics.retries)           // 1 retry happened
+	assert.Equal(t, int64(1), metrics.cacheMisses)       // Cache miss on first try
 }
 
 // TestHTTPLookupBackend_CacheExpiration tests cache TTL
@@ -448,7 +448,7 @@ func TestHTTPLookupBackend_CacheExpiration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 
@@ -480,7 +480,7 @@ func TestHTTPLookupBackend_ContextCancellation(t *testing.T) {
 		// Simulate slow response
 		time.Sleep(5 * time.Second)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -488,7 +488,7 @@ func TestHTTPLookupBackend_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+	result, _ := backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 
 	// Should handle cancellation gracefully
 	assert.Nil(t, result)
@@ -511,7 +511,7 @@ func TestHTTPLookupBackend_CircuitBreakerRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	// Make one failing request to trigger circuit breaker
-	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+	_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
 	assert.Equal(t, CircuitBreakerOpen, backend.GetCircuitBreakerState())
 
 	// Wait for recovery timeout
@@ -519,8 +519,8 @@ func TestHTTPLookupBackend_CircuitBreakerRecovery(t *testing.T) {
 
 	// Attempt a request during recovery - should still fail due to server error
 	// But the circuit should transition through half-open
-	backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
-	
+	_, _ = backend.HTTPLookup(ctx, server.URL, map[string]interface{}{})
+
 	// After failed recovery attempt, state should be open again
 	assert.Equal(t, CircuitBreakerOpen, backend.GetCircuitBreakerState())
 }
@@ -535,7 +535,7 @@ func TestHTTPLookupBackend_DifferentParamsCacheSeparately(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 

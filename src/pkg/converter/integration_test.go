@@ -75,7 +75,7 @@ func TestConverterMessageFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to subscribe to output topic: %v", err)
 		}
-		defer sub.Unsubscribe()
+		defer func() { _ = sub.Unsubscribe() }()
 
 		// Publish a test message to input topic
 		inputTopic := "test.converter.input"
@@ -883,7 +883,7 @@ func TestWASMIntegration_ThreadSafety(t *testing.T) {
 				registry.Exists("concat")
 
 				// Concurrent function calls
-				registry.Call("sum", []interface{}{1, 2, 3})
+				_, _ = registry.Call("sum", []interface{}{1, 2, 3})
 			}()
 		}
 
@@ -912,7 +912,7 @@ func TestWASMIntegration_FallbackBehavior(t *testing.T) {
 
 	t.Run("all built-in functions work alongside WASM system", func(t *testing.T) {
 		// Initialize WASM (even if modules aren't available)
-		registry.InitializeWASM("")
+		_ = registry.InitializeWASM("")
 
 		// Call built-in functions
 		sum, err := registry.Call("sum", []interface{}{5, 10})

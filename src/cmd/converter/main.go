@@ -131,10 +131,8 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Wait for signal
-	select {
-	case sig := <-sigChan:
-		logger.InfoContext(ctx, "Received signal, shutting down", "signal", sig.String())
-	}
+	sig := <-sigChan
+	logger.InfoContext(ctx, "Received signal, shutting down", "signal", sig.String())
 
 	// Graceful shutdown
 	logger.InfoContext(ctx, "Stopping converter (30s timeout)")

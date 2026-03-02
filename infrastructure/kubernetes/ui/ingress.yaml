@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrsky-ui
+  namespace: vrsky-ui
+  labels:
+    app: vrsky-ui
+    component: frontend
+    phase: "12"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - ui.vrsky.local
+    - ui.valueretalgroup.no
+    secretName: vrsky-ui-tls
+
+  rules:
+  - host: ui.vrsky.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vrsky-ui
+            port:
+              number: 80
+
+  - host: ui.valueretalgroup.no
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vrsky-ui
+            port:
+              number: 80

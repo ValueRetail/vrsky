@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 // MockLogger for testing
 type mockLogger struct {
+	mu   sync.Mutex
 	logs []map[string]interface{}
 }
 
@@ -21,22 +23,32 @@ func newMockLogger() *mockLogger {
 }
 
 func (ml *mockLogger) InfoContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "info", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) WarnContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "warn", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) ErrorContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "error", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) Warn(msg string) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "warn", "msg": msg})
 }
 
 func (ml *mockLogger) Error(msg string) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "error", "msg": msg})
 }
 
@@ -230,12 +242,12 @@ func TestPostgresLookupBackend_Metrics(t *testing.T) {
 	defer backend.Close()
 
 	// Perform lookups to generate metrics
-	backend.Lookup(ctx, "nonexistent", "id", "999")
-	backend.Lookup(ctx, "also_nonexistent", "field", "value")
+	_, _ = backend.Lookup(ctx, "nonexistent", "id", "999")
+	_, _ = backend.Lookup(ctx, "also_nonexistent", "field", "value")
 
-	metrics := backend.GetMetrics()
-	assert.Equal(t, int64(0), metrics.queriesTotal) // No successful queries
-	assert.Equal(t, int64(2), metrics.queriesFailed)
+	queriesTotal, queriesFailed := backend.GetMetricsValues()
+	assert.Equal(t, int64(0), queriesTotal) // No successful queries
+	assert.Equal(t, int64(2), queriesFailed)
 }
 
 // TestPostgresLookupBackend_Context_Timeout tests query timeout handling
@@ -298,7 +310,7 @@ func TestPostgresLookupBackend_WithContext(t *testing.T) {
 	logger := newMockLogger()
 
 	// Pass nil context - should use context.Background()
-	backend, err := NewPostgresLookupBackend(nil, os.Getenv("POSTGRES_URL"), logger)
+	backend, err := NewPostgresLookupBackend(context.TODO(), os.Getenv("POSTGRES_URL"), logger)
 	require.NoError(t, err)
 	defer backend.Close()
 

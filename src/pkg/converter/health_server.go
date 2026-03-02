@@ -116,7 +116,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleReady handles GET /ready (readiness probe)
@@ -138,5 +138,5 @@ func (hs *HealthServer) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }

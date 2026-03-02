@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vrsky-ui-config
+  namespace: vrsky-ui
+  labels:
+    app: vrsky-ui
+    component: frontend
+    phase: "12"
+
+data:
+  # API configuration
+  VITE_API_BASE_URL: "http://api.vrsky.local/api"
+  VITE_ENVIRONMENT: "production"
+  
+  # Feature flags
+  VITE_ENABLE_METRICS: "true"
+  VITE_ENABLE_MESSAGE_LOG: "true"
+  VITE_ENABLE_PIPELINE_VISUALIZATION: "true"
+  VITE_ENABLE_TEST_MESSAGE_FORM: "true"
+  
+  # Performance settings
+  VITE_MAX_LOG_SIZE: "1000"
+  VITE_AUTO_REFRESH_INTERVAL: "5000"
