@@ -4,10 +4,10 @@ WORKDIR /build
 
 RUN apk add --no-cache git
 
-COPY go.mod go.sum ./
-COPY cmd/converter/ ./cmd/converter/
-COPY pkg/ ./pkg/
-COPY internal/ ./internal/
+COPY src/go.mod src/go.sum ./
+COPY src/cmd/converter/ ./cmd/converter/
+COPY src/pkg/ ./pkg/
+COPY src/internal/ ./internal/
 
 RUN go mod download
 

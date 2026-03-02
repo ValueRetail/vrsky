@@ -5,22 +5,22 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
-COPY tsconfig*.json ./
-COPY vite.config.ts ./
-COPY postcss.config.js ./
-COPY tailwind.config.js ./
-COPY eslint.config.js ./
+COPY ui/package*.json ./
+COPY ui/tsconfig*.json ./
+COPY ui/vite.config.ts ./
+COPY ui/postcss.config.js ./
+COPY ui/tailwind.config.js ./
+COPY ui/eslint.config.js ./
 
 # Install dependencies
 RUN npm ci
 
 # Copy source code
-COPY src ./src
-COPY public ./public
-COPY index.html ./
-COPY tests ./tests
-COPY vitest.config.ts ./
+COPY ui/src ./src
+COPY ui/public ./public
+COPY ui/index.html ./
+COPY ui/tests ./tests
+COPY ui/vitest.config.ts ./
 
 # Build application
 RUN npm run build
@@ -33,8 +33,8 @@ RUN apk add --no-cache curl
 
 # Copy nginx configuration
 RUN rm -f /etc/nginx/conf.d/default.conf
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY nginx.default.conf /etc/nginx/conf.d/default.conf
+COPY ui/nginx.conf /etc/nginx/nginx.conf
+COPY ui/nginx.default.conf /etc/nginx/conf.d/default.conf
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

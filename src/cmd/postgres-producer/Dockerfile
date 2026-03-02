@@ -7,11 +7,11 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 # Copy module and source files first
-COPY go.mod ./
-COPY go.sum ./
-COPY cmd/postgres-producer/ ./cmd/postgres-producer/
-COPY pkg/ ./pkg/
-COPY internal/ ./internal/
+COPY src/go.mod ./
+COPY src/go.sum ./
+COPY src/cmd/postgres-producer/ ./cmd/postgres-producer/
+COPY src/pkg/ ./pkg/
+COPY src/internal/ ./internal/
 
 # Download dependencies - must be after source code is copied
 # so go can identify all required packages

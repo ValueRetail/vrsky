@@ -7,15 +7,15 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 # Copy only dependency files first for better layer caching
-COPY go.mod go.sum ./
+COPY src/go.mod src/go.sum ./
 
 # Download dependencies (cached if go.mod/go.sum unchanged)
 RUN go mod download
 
 # Copy source code (changes won't invalidate dependency layer)
-COPY cmd/file-producer/ ./cmd/file-producer/
-COPY pkg/ ./pkg/
-COPY internal/ ./internal/
+COPY src/cmd/file-producer/ ./cmd/file-producer/
+COPY src/pkg/ ./pkg/
+COPY src/internal/ ./internal/
 
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
