@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -49,7 +50,14 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 
 			// Validate tenant ID is present and non-empty
 			if strings.TrimSpace(tenantID) == "" {
-				http.Error(w, "Missing or invalid tenant ID header", http.StatusBadRequest)
+				// Return JSON error response consistent with API handlers
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":   "BadRequest",
+					"message": "Missing or invalid tenant ID header",
+					"status":  http.StatusBadRequest,
+				})
 				return
 			}
 

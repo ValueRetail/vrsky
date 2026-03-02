@@ -35,14 +35,14 @@ type JWTClaims struct {
 	Audience  string   `json:"aud"`
 }
 
-// Context keys
+// Context keys - use managementapi.TenantIDKey instead of TenantIDKey defined here
+// UserIDKey, RolesKey, EmailKey are only used in this package
 type contextKey string
 
 const (
-	TenantIDKey contextKey = "tenant_id"
-	UserIDKey   contextKey = "user_id"
-	RolesKey    contextKey = "roles"
-	EmailKey    contextKey = "email"
+	UserIDKey contextKey = "user_id"
+	RolesKey  contextKey = "roles"
+	EmailKey  contextKey = "email"
 )
 
 // LoadJWTConfig loads JWT configuration from environment

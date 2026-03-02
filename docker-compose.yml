@@ -110,8 +110,8 @@ services:
   # PostgreSQL Consumer (CDC from source to NATS)
   postgres-consumer:
     build:
-      context: ./src
-      dockerfile: cmd/postgres-consumer/Dockerfile
+      context: .
+      dockerfile: src/cmd/postgres-consumer/Dockerfile
     container_name: vrsky-postgres-consumer
     environment:
       # Source PostgreSQL configuration
@@ -150,8 +150,8 @@ services:
   # PostgreSQL Producer (CDC from NATS to target database)
   postgres-producer:
     build:
-      context: ./src
-      dockerfile: cmd/postgres-producer/Dockerfile
+      context: .
+      dockerfile: src/cmd/postgres-producer/Dockerfile
     container_name: vrsky-postgres-producer
     environment:
       # Target PostgreSQL configuration
@@ -189,8 +189,8 @@ services:
   # Producer service (optional - can run locally for development)
   producer:
     build:
-      context: ./src
-      dockerfile: cmd/producer/Dockerfile
+      context: .
+      dockerfile: src/cmd/producer/Dockerfile
     container_name: vrsky-producer
     environment:
       # Input configuration: subscribe to NATS topic
@@ -213,8 +213,8 @@ services:
   # Filter service - applies Priority 1/2/3 filtering, routing, and rate limiting
   filter:
      build:
-       context: ./src
-       dockerfile: cmd/filter/Dockerfile
+       context: .
+       dockerfile: src/cmd/filter/Dockerfile
      container_name: vrsky-filter
      environment:
        # Filter configuration
@@ -241,50 +241,43 @@ services:
 
   # Management API - Control plane for orchestrating data pipelines
   management-api:
-     build:
-       context: ./src
-       dockerfile: cmd/management-api/Dockerfile
-     container_name: vrsky-management-api
-     environment:
-       # Server configuration
-       LISTEN_ADDR: ":3000"
-       SERVICE_NAME: "VRSky Management API"
-       SERVICE_VERSION: "1.0.0"
-       
-       # Database configuration
-       DATABASE_HOST: postgres-management
-       DATABASE_PORT: "5432"
-       DATABASE_USER: postgres
-       DATABASE_PASSWORD: management_password
-       DATABASE_NAME: management_db
-       DATABASE_SSL_MODE: "${DATABASE_SSL_MODE:-disable}"
-       DATABASE_MAX_CONNS: "25"
-       DATABASE_MIN_CONNS: "5"
-       
-       # NATS configuration
-       NATS_URL: "nats://nats:4222"
-       
-       # CORS configuration
-       CORS_ORIGINS: "*"
-       TENANT_HEADER: "X-Tenant-ID"
-       
-       # Logging
-       LOG_LEVEL: "info"
-       
-       # Metrics and timeouts
-       READ_TIMEOUT: "15s"
-       WRITE_TIMEOUT: "15s"
-       IDLE_TIMEOUT: "60s"
-     depends_on:
-       nats:
-         condition: service_healthy
-       postgres-management:
-         condition: service_healthy
-     ports:
-       - "3000:3000"
-     networks:
-       - vrsky-network
-     restart: unless-stopped
+    build:
+      context: .
+      dockerfile: src/cmd/management-api/Dockerfile
+    container_name: vrsky-management-api
+    environment:
+      # Server configuration
+      MGMT_API_LISTEN: ":3000"
+      SERVICE_NAME: "VRSky Management API"
+      SERVICE_VERSION: "1.0.0"
+      
+      # Database configuration - Matches config.go: MGMT_API_DB_URL
+      MGMT_API_DB_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      
+      # NATS configuration - Matches config.go: MGMT_API_NATS_URL
+      MGMT_API_NATS_URL: "nats://nats:4222"
+      MGMT_API_NATS_PREFIX: "vrsky"
+      
+      # CORS configuration - Matches config.go: MGMT_API_CORS_ORIGINS
+      MGMT_API_CORS_ORIGINS: "*"
+      MGMT_API_TENANT_HEADER: "X-Tenant-ID"
+      
+      # Logging
+      LOG_LEVEL: "info"
+      
+      # Timeouts - Matches config.go
+      MGMT_API_READ_TIMEOUT_SEC: "15"
+      MGMT_API_WRITE_TIMEOUT_SEC: "30"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - vrsky-network
+    restart: unless-stopped
 
   # PostgreSQL database for management API
   postgres-management:

@@ -170,16 +170,18 @@ func TestNewWASMFunctionLoaderNilContext(t *testing.T) {
 	}
 }
 
-func TestWASMFunctionLoaderSetConfig(t *testing.T) {
+func TestWASMFunctionLoaderConfig(t *testing.T) {
 	loader := NewWASMFunctionLoader(context.Background(), getMockLoggerWASM())
-	customConfig := &WASMConfig{
-		MaxMemoryBytes: 50 * 1024 * 1024,
-		TimeoutSeconds: 10,
-	}
 
-	loader.SetConfig(customConfig)
-	if loader.config.TimeoutSeconds != 10 {
-		t.Errorf("expected 10s timeout, got %d", loader.config.TimeoutSeconds)
+	// Verify default config is set
+	if loader.config == nil {
+		t.Fatal("expected config to be initialized")
+	}
+	if loader.config.TimeoutSeconds != 5 {
+		t.Errorf("expected default 5s timeout, got %d", loader.config.TimeoutSeconds)
+	}
+	if loader.config.MaxMemoryBytes != 100*1024*1024 {
+		t.Errorf("expected 100MB default, got %d bytes", loader.config.MaxMemoryBytes)
 	}
 }
 
@@ -192,167 +194,8 @@ func TestWASMFunctionLoaderListModules(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// TYPE MARSHALING TESTS
-// =============================================================================
-
-func TestWASMMarshalArgsNil(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs(nil)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if len(result) != 0 {
-		t.Errorf("expected 0 args, got %d", len(result))
-	}
-}
-
-func TestWASMMarshalArgsBool(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs([]interface{}{true, false})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if v, ok := result[0].(int32); !ok || v != 1 {
-		t.Errorf("expected int32(1) for true, got %v", result[0])
-	}
-	if v, ok := result[1].(int32); !ok || v != 0 {
-		t.Errorf("expected int32(0) for false, got %v", result[1])
-	}
-}
-
-func TestWASMMarshalArgsNumbers(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs([]interface{}{int32(42), int64(1000), float32(3.14), float64(2.71)})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if v, ok := result[0].(int32); !ok || v != 42 {
-		t.Errorf("expected int32(42), got %v", result[0])
-	}
-	if v, ok := result[1].(int64); !ok || v != 1000 {
-		t.Errorf("expected int64(1000), got %v", result[1])
-	}
-	if _, ok := result[2].(float64); !ok {
-		t.Errorf("expected float64, got %T", result[2])
-	}
-}
-
-func TestWASMMarshalArgsString(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs([]interface{}{"hello", "world"})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if v, ok := result[0].(string); !ok || v != "hello" {
-		t.Errorf("expected string 'hello', got %v", result[0])
-	}
-	if v, ok := result[1].(string); !ok || v != "world" {
-		t.Errorf("expected string 'world', got %v", result[1])
-	}
-}
-
-func TestWASMMarshalArgsArray(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	arr := []interface{}{1, 2, 3}
-	result, err := wm.marshalArgs([]interface{}{arr})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if _, ok := result[0].(string); !ok {
-		t.Errorf("expected JSON string, got %T", result[0])
-	}
-}
-
-func TestWASMMarshalArgsMap(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	m := map[string]interface{}{"key": "value"}
-	result, err := wm.marshalArgs([]interface{}{m})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if _, ok := result[0].(string); !ok {
-		t.Errorf("expected JSON string, got %T", result[0])
-	}
-}
-
-// =============================================================================
-// UNMARSHAL RESULT TESTS
-// =============================================================================
-
-func TestWASMUnmarshalResultEmpty(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.unmarshalResult([]interface{}{})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if result != nil {
-		t.Errorf("expected nil, got %v", result)
-	}
-}
-
-func TestWASMUnmarshalResultNumber(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.unmarshalResult([]interface{}{int32(42)})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if v, ok := result.(int64); !ok || v != 42 {
-		t.Errorf("expected int64(42), got %v", result)
-	}
-}
-
-func TestWASMUnmarshalResultFloat(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.unmarshalResult([]interface{}{float64(3.14)})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if v, ok := result.(float64); !ok || v != 3.14 {
-		t.Errorf("expected float64(3.14), got %v", result)
-	}
-}
-
-func TestWASMUnmarshalResultString(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.unmarshalResult([]interface{}{"hello"})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if v, ok := result.(string); !ok || v != "hello" {
-		t.Errorf("expected string 'hello', got %v", result)
-	}
-}
-
-func TestWASMUnmarshalResultJSON(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	// String that is valid JSON
-	result, err := wm.unmarshalResult([]interface{}{`{"key":"value"}`})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	// Should parse as JSON
-	if m, ok := result.(map[string]interface{}); !ok || m["key"] != "value" {
-		t.Errorf("expected parsed JSON object, got %v", result)
-	}
-}
+// NOTE: marshalArgs and unmarshalResult were removed as private methods.
+// WASM argument handling is now part of the Call() public API.
 
 // =============================================================================
 // ERROR HANDLING TESTS
@@ -451,7 +294,7 @@ func TestWASMMetricsPerformance(t *testing.T) {
 func TestWASMFunctionLoaderLoadInvalidPath(t *testing.T) {
 	loader := NewWASMFunctionLoader(context.Background(), getMockLoggerWASM())
 
-	err := loader.LoadFromFile("test", "/nonexistent/path/to/module.wasm")
+	err := loader.LoadFromFile(context.Background(), "test", "/nonexistent/path/to/module.wasm")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}
@@ -460,7 +303,7 @@ func TestWASMFunctionLoaderLoadInvalidPath(t *testing.T) {
 func TestWASMFunctionLoaderLoadEmptyName(t *testing.T) {
 	loader := NewWASMFunctionLoader(context.Background(), getMockLoggerWASM())
 
-	err := loader.LoadFromFile("", "path/to/module.wasm")
+	err := loader.LoadFromFile(context.Background(), "", "path/to/module.wasm")
 	if err == nil {
 		t.Error("expected error for empty module name")
 	}
@@ -469,7 +312,7 @@ func TestWASMFunctionLoaderLoadEmptyName(t *testing.T) {
 func TestWASMFunctionLoaderLoadEmptyPath(t *testing.T) {
 	loader := NewWASMFunctionLoader(context.Background(), getMockLoggerWASM())
 
-	err := loader.LoadFromFile("test", "")
+	err := loader.LoadFromFile(context.Background(), "test", "")
 	if err == nil {
 		t.Error("expected error for empty file path")
 	}
@@ -545,55 +388,8 @@ func TestWASMConfigTimeout(t *testing.T) {
 }
 
 // =============================================================================
-// EDGE CASE TESTS
+// INTEGRATION TESTS
 // =============================================================================
-
-func TestWASMMarshalArgsEmpty(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs([]interface{}{})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if len(result) != 0 {
-		t.Errorf("expected empty result, got %d args", len(result))
-	}
-}
-
-func TestWASMMarshalArgsNilValue(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	result, err := wm.marshalArgs([]interface{}{nil})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if v, ok := result[0].(int32); !ok || v != 0 {
-		t.Errorf("expected int32(0) for nil, got %v", result[0])
-	}
-}
-
-func TestWASMMarshalArgsMixedTypes(t *testing.T) {
-	wm := &WASMModule{Config: NewWASMConfig()}
-
-	args := []interface{}{
-		true,
-		int32(42),
-		float64(3.14),
-		"hello",
-		[]interface{}{1, 2, 3},
-		map[string]interface{}{"key": "value"},
-	}
-
-	result, err := wm.marshalArgs(args)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if len(result) != len(args) {
-		t.Errorf("expected %d args, got %d", len(args), len(result))
-	}
-}
 
 // =============================================================================
 // INTEGRATION SANITY TESTS

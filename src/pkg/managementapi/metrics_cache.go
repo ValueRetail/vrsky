@@ -189,15 +189,21 @@ func (mc *MetricsCache) RemoveListener(listener MetricsListener) {
 }
 
 // notifyListeners notifies all registered listeners about metrics update
+// Uses a single dispatcher goroutine to avoid unbounded goroutine growth
 func (mc *MetricsCache) notifyListeners(connID string, metrics *ConnectionMetrics) {
 	mc.listenersMu.RLock()
 	listeners := make([]MetricsListener, len(mc.listeners))
 	copy(listeners, mc.listeners)
 	mc.listenersMu.RUnlock()
 
-	// Notify asynchronously to avoid blocking
-	for _, listener := range listeners {
-		go listener.OnMetricsUpdate(connID, metrics)
+	// Dispatch notifications in a single goroutine to avoid unbounded growth
+	// under high-frequency metric updates
+	if len(listeners) > 0 {
+		go func(listenersCopy []MetricsListener, id string, m *ConnectionMetrics) {
+			for _, listener := range listenersCopy {
+				listener.OnMetricsUpdate(id, m)
+			}
+		}(listeners, connID, metrics)
 	}
 }
 

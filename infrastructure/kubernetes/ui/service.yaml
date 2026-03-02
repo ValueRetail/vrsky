@@ -6,7 +6,7 @@ metadata:
   labels:
     app: vrsky-ui
     component: frontend
-    phase: 12
+    phase: "12"
 
 spec:
   type: ClusterIP

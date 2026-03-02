@@ -3,6 +3,7 @@ module github.com/ValueRetail/vrsky
 go 1.21
 
 require (
+	github.com/bytecodealliance/wasmtime-go/v13 v13.0.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/google/uuid v1.5.0
 	github.com/jackc/pgx/v4 v4.18.1
@@ -17,7 +18,6 @@ require (
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bytecodealliance/wasmtime-go/v13 v13.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
