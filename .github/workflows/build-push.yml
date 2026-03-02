@@ -77,8 +77,8 @@ jobs:
           file: ${{ matrix.service.dockerfile || format('{0}/Dockerfile', matrix.service.path) }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ${{ env.REGISTRY }}/ValueRetail/vrsky/${{ matrix.service.name }}:latest
-            ${{ env.REGISTRY }}/ValueRetail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:latest
+            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
