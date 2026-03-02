@@ -25,6 +25,7 @@ type TestGenerator struct {
 	ratePerSecond   int
 	cancel          context.CancelFunc
 	done            chan struct{}
+	wg              sync.WaitGroup // Synchronize loop termination
 }
 
 // TestGeneratorRegistry manages active test generators per connection
@@ -427,6 +428,9 @@ func (tg *TestGenerator) Start(ctx context.Context, ratePerSecond int, publisher
 	generatorCtx, cancel := context.WithCancel(ctx)
 	tg.cancel = cancel
 
+	// Add to WaitGroup before starting goroutine
+	tg.wg.Add(1)
+
 	tg.mu.Unlock()
 
 	go tg.generationLoop(generatorCtx, publisher)
@@ -434,7 +438,7 @@ func (tg *TestGenerator) Start(ctx context.Context, ratePerSecond int, publisher
 	return nil
 }
 
-// Stop stops the test generator
+// Stop stops the test generator and waits for it to exit
 func (tg *TestGenerator) Stop() error {
 	tg.mu.Lock()
 
@@ -458,11 +462,16 @@ func (tg *TestGenerator) Stop() error {
 		cancel()
 	}
 
+	// Wait for the generation loop to exit
+	tg.wg.Wait()
+
 	return nil
 }
 
 // generationLoop runs the test message generation loop
 func (tg *TestGenerator) generationLoop(ctx context.Context, publisher *NATSPublisher) {
+	defer tg.wg.Done() // Signal WaitGroup when loop exits
+
 	interval := time.Second / time.Duration(tg.ratePerSecond)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

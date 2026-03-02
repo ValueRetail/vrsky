@@ -20,6 +20,28 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
+// pgReservedKeywords contains PostgreSQL reserved keywords that must be quoted in identifiers
+var pgReservedKeywords = map[string]bool{
+	// SQL standard keywords
+	"select": true, "from": true, "where": true, "insert": true,
+	"update": true, "delete": true, "create": true, "alter": true,
+	"drop": true, "table": true, "index": true, "view": true,
+	"user": true, "group": true, "order": true, "by": true,
+	"asc": true, "desc": true, "limit": true, "offset": true,
+	"join": true, "inner": true, "left": true, "right": true,
+	"full": true, "outer": true, "cross": true, "on": true,
+	"and": true, "or": true, "not": true, "null": true,
+	"as": true, "with": true, "all": true, "any": true,
+	"exists": true, "case": true, "when": true, "then": true,
+	"else": true, "end": true, "cast": true, "between": true,
+	"like": true, "in": true, "is": true, "distinct": true,
+	"grant": true, "revoke": true, "transaction": true, "begin": true,
+	"commit": true, "rollback": true, "constraint": true, "primary": true,
+	"key": true, "foreign": true, "references": true, "unique": true,
+	"check": true, "default": true, "column": true, "schema": true,
+	"database": true, "values": true, "into": true, "set": true,
+}
+
 // sleeper is an interface for injecting sleep behavior during retries
 // This allows tests to control timing without actual delays
 type sleeper interface {
@@ -946,6 +968,8 @@ func (po *PostgresOutput) quoteIdentifier(identifier string) string {
 }
 
 // needsQuoting determines if a SQL identifier requires quoting
+// Identifiers need quoting if they: contain uppercase letters, are reserved keywords,
+// start with digits, contain special characters, or don't match standard rules
 func needsQuoting(identifier string) bool {
 	if len(identifier) == 0 {
 		return true
@@ -958,10 +982,20 @@ func needsQuoting(identifier string) bool {
 	}
 
 	// Check all characters are valid unquoted identifier characters
+	// and that there are no uppercase letters
 	for _, ch := range identifier {
 		if !isIdentifierChar(ch) {
 			return true // Contains special character, space, or quote
 		}
+		// PostgreSQL stores unquoted identifiers as lowercase, so uppercase requires quoting
+		if ch >= 'A' && ch <= 'Z' {
+			return true
+		}
+	}
+
+	// Check if it's a PostgreSQL reserved keyword
+	if pgReservedKeywords[strings.ToLower(identifier)] {
+		return true
 	}
 
 	return false

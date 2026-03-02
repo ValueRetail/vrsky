@@ -218,8 +218,8 @@ func TestGetConnection_Found(t *testing.T) {
 
 	r := httptest.NewRequest("GET", "/api/v1/connections/test-id", nil)
 	r = r.WithContext(ctx)
-	// Simulate PathValue being set by router
-	r = r.Clone(context.WithValue(r.Context(), contextKeyPathValue("id"), "test-id"))
+	// Set PathValue using Go 1.22+ standard API
+	r.SetPathValue("id", "test-id")
 	w := httptest.NewRecorder()
 
 	handler.GetConnection(w, r)
@@ -236,7 +236,7 @@ func TestGetConnection_NotFound(t *testing.T) {
 
 	r := httptest.NewRequest("GET", "/api/v1/connections/nonexistent", nil)
 	r = r.WithContext(ctx)
-	r = r.Clone(context.WithValue(r.Context(), contextKeyPathValue("id"), "nonexistent"))
+	r.SetPathValue("id", "nonexistent")
 	w := httptest.NewRecorder()
 
 	handler.GetConnection(w, r)
@@ -316,7 +316,7 @@ func TestUpdateConnection_Valid(t *testing.T) {
 	body, _ := json.Marshal(updateReq)
 	r := httptest.NewRequest("PUT", "/api/v1/connections/test-id", bytes.NewReader(body))
 	r = r.WithContext(ctx)
-	r = r.Clone(context.WithValue(r.Context(), contextKeyPathValue("id"), "test-id"))
+	r.SetPathValue("id", "test-id")
 	w := httptest.NewRecorder()
 
 	handler.UpdateConnection(w, r)
@@ -348,7 +348,7 @@ func TestDeleteConnection_Valid(t *testing.T) {
 
 	r := httptest.NewRequest("DELETE", "/api/v1/connections/test-id", nil)
 	r = r.WithContext(ctx)
-	r = r.Clone(context.WithValue(r.Context(), contextKeyPathValue("id"), "test-id"))
+	r.SetPathValue("id", "test-id")
 	w := httptest.NewRecorder()
 
 	handler.DeleteConnection(w, r)
@@ -380,7 +380,7 @@ func TestStartConnection_Valid(t *testing.T) {
 
 	r := httptest.NewRequest("POST", "/api/v1/connections/test-id/start", nil)
 	r = r.WithContext(ctx)
-	r = r.Clone(context.WithValue(r.Context(), contextKeyPathValue("id"), "test-id"))
+	r.SetPathValue("id", "test-id")
 	w := httptest.NewRecorder()
 
 	handler.StartConnection(w, r)
@@ -389,11 +389,6 @@ func TestStartConnection_Valid(t *testing.T) {
 	if w.Code != http.StatusOK && w.Code != http.StatusBadRequest {
 		t.Logf("start connection returned %d (may be expected if NATS not available)", w.Code)
 	}
-}
-
-// Test helper to define context keys for path values
-func contextKeyPathValue(key string) contextKey {
-	return contextKey("path_" + key)
 }
 
 // Implement required Repository method

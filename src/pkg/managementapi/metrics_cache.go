@@ -8,13 +8,15 @@ import (
 // MetricsCache stores real-time metrics for connections
 // Thread-safe in-memory storage with per-connection and per-component metrics
 type MetricsCache struct {
-	mu            sync.RWMutex
-	connections   map[string]*ConnectionMetrics // key: connectionID
-	listeners     []MetricsListener
-	listenersMu   sync.RWMutex
-	retentionTime time.Duration
-	cleanupTicker *time.Ticker
-	done          chan struct{}
+	mu             sync.RWMutex
+	connections    map[string]*ConnectionMetrics // key: connectionID
+	listeners      []MetricsListener
+	listenersMu    sync.RWMutex
+	retentionTime  time.Duration
+	cleanupTicker  *time.Ticker
+	done           chan struct{}
+	dispatchChan   chan *notificationRequest // Bounded channel for dispatcher
+	dispatcherDone chan struct{}             // Signal dispatcher to stop
 }
 
 // ConnectionMetrics contains aggregated metrics for a single connection
@@ -51,6 +53,12 @@ type MetricsListener interface {
 	OnMetricsUpdate(connID string, metrics *ConnectionMetrics)
 }
 
+// notificationRequest represents a metrics update notification to dispatch to listeners
+type notificationRequest struct {
+	connID  string
+	metrics *ConnectionMetrics
+}
+
 // ListenerFunc is a function adapter for MetricsListener
 type ListenerFunc func(connID string, metrics *ConnectionMetrics)
 
@@ -61,15 +69,20 @@ func (f ListenerFunc) OnMetricsUpdate(connID string, metrics *ConnectionMetrics)
 // NewMetricsCache creates a new metrics cache with specified retention time
 func NewMetricsCache(retentionTime time.Duration) *MetricsCache {
 	mc := &MetricsCache{
-		connections:   make(map[string]*ConnectionMetrics),
-		retentionTime: retentionTime,
-		listeners:     make([]MetricsListener, 0),
-		done:          make(chan struct{}),
+		connections:    make(map[string]*ConnectionMetrics),
+		retentionTime:  retentionTime,
+		listeners:      make([]MetricsListener, 0),
+		done:           make(chan struct{}),
+		dispatchChan:   make(chan *notificationRequest, 100), // Buffered channel (100 notifications)
+		dispatcherDone: make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
 	mc.cleanupTicker = time.NewTicker(retentionTime / 2)
 	go mc.cleanupLoop()
+
+	// Start dispatcher goroutine
+	go mc.dispatcherLoop()
 
 	return mc
 }
@@ -137,7 +150,7 @@ func (mc *MetricsCache) UpdateComponentMetrics(connID string, componentType stri
 	// Merge with existing metrics
 	existing, hasExisting := cm.Components[componentType]
 	if hasExisting {
-		update.SuccessCount = update.MessagesOut - existing.ErrorCount
+		update.SuccessCount = update.MessagesOut - update.ErrorCount
 		if update.AvgLatencyMs == 0 && existing.AvgLatencyMs > 0 {
 			update.AvgLatencyMs = existing.AvgLatencyMs
 		}
@@ -188,22 +201,15 @@ func (mc *MetricsCache) RemoveListener(listener MetricsListener) {
 	}
 }
 
-// notifyListeners notifies all registered listeners about metrics update
-// Uses a single dispatcher goroutine to avoid unbounded goroutine growth
+// notifyListeners sends a notification to the dispatcher for bounded, non-blocking delivery
+// If the dispatcher channel is full, the notification is dropped (graceful overload handling)
 func (mc *MetricsCache) notifyListeners(connID string, metrics *ConnectionMetrics) {
-	mc.listenersMu.RLock()
-	listeners := make([]MetricsListener, len(mc.listeners))
-	copy(listeners, mc.listeners)
-	mc.listenersMu.RUnlock()
-
-	// Dispatch notifications in a single goroutine to avoid unbounded growth
-	// under high-frequency metric updates
-	if len(listeners) > 0 {
-		go func(listenersCopy []MetricsListener, id string, m *ConnectionMetrics) {
-			for _, listener := range listenersCopy {
-				listener.OnMetricsUpdate(id, m)
-			}
-		}(listeners, connID, metrics)
+	select {
+	case mc.dispatchChan <- &notificationRequest{connID: connID, metrics: metrics}:
+		// Successfully queued
+	default:
+		// Channel is full, drop this notification (graceful degradation under load)
+		// In practice, the next update will arrive shortly
 	}
 }
 
@@ -252,6 +258,42 @@ func (mc *MetricsCache) cleanupLoop() {
 	}
 }
 
+// dispatcherLoop processes metrics update notifications and delivers them to all listeners
+// This single-threaded loop prevents unbounded goroutine growth under high-frequency updates
+func (mc *MetricsCache) dispatcherLoop() {
+	for {
+		select {
+		case <-mc.dispatcherDone:
+			// Drain remaining notifications before exiting
+			for {
+				select {
+				case req := <-mc.dispatchChan:
+					mc.deliverNotification(req)
+				default:
+					return
+				}
+			}
+		case req := <-mc.dispatchChan:
+			if req != nil {
+				mc.deliverNotification(req)
+			}
+		}
+	}
+}
+
+// deliverNotification sends an update to all registered listeners
+func (mc *MetricsCache) deliverNotification(req *notificationRequest) {
+	mc.listenersMu.RLock()
+	listeners := make([]MetricsListener, len(mc.listeners))
+	copy(listeners, mc.listeners)
+	mc.listenersMu.RUnlock()
+
+	// Notify all listeners sequentially
+	for _, listener := range listeners {
+		listener.OnMetricsUpdate(req.connID, req.metrics)
+	}
+}
+
 // cleanupStaleMetrics removes metrics that haven't been updated recently
 func (mc *MetricsCache) cleanupStaleMetrics() {
 	mc.mu.Lock()
@@ -267,9 +309,10 @@ func (mc *MetricsCache) cleanupStaleMetrics() {
 	}
 }
 
-// Close stops the metrics cache cleanup loop
+// Close stops the metrics cache cleanup and dispatcher loops
 func (mc *MetricsCache) Close() error {
-	close(mc.done)
+	close(mc.done)           // Stop cleanup loop
+	close(mc.dispatcherDone) // Stop dispatcher loop
 	return nil
 }
 

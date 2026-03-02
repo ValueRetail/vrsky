@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"io"
 	"log"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestPublishTestMessage_Signature(t *testing.T) {
 
 // Test logger initialization
 func TestNATSPublisherLogging(t *testing.T) {
-	logger := log.New(nil, "", 0)
+	logger := log.New(io.Discard, "", 0)
 	if logger == nil {
 		t.Error("expected logger to be initialized")
 	}

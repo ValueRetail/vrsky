@@ -193,7 +193,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// Wrap mux with middleware (applied in reverse order)
 	var handler http.Handler = mux
 	handler = LoggingMiddleware(logger)(handler)
-	handler = CORSMiddleware(config.CORSOrigins)(handler)
+	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
 
 	return &http.Server{
