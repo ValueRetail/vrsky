@@ -11,7 +11,7 @@ COPY src/internal/ ./internal/
 
 RUN go mod download
 
-RUN GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o converter \
     ./cmd/converter

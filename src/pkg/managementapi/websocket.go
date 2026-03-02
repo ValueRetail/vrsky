@@ -123,7 +123,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// CORS headers are managed by CORSMiddleware - don't override here
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

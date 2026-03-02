@@ -18,6 +18,30 @@ env:
   REGISTRY_USERNAME: ${{ github.actor }}
 
 jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      ui: ${{ steps.filter.outputs.ui }}
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui:
+              - 'ui/**'
+            src:
+              - 'src/**'
+              - 'infrastructure/**'
+              - 'docker-compose.yml'
+              - '.github/workflows/build-push.yml'
+
   build-and-push:
     name: Build and Push ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -88,7 +112,8 @@ jobs:
   test:
     name: Test UI
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.files.*.name, 'ui/')
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.ui == 'true'
 
     steps:
       - name: Checkout code
@@ -116,7 +141,8 @@ jobs:
   go-tests:
     name: Go Tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.files.*.name, 'src/'))
+    needs: changes
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && needs.changes.outputs.src == 'true')
 
     steps:
       - name: Checkout code
@@ -125,7 +151,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
+          go-version: '1.22'
 
       - name: Run Go tests
         working-directory: src

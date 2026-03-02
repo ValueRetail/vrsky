@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 // MockLogger for testing
 type mockLogger struct {
+	mu   sync.Mutex
 	logs []map[string]interface{}
 }
 
@@ -21,22 +23,32 @@ func newMockLogger() *mockLogger {
 }
 
 func (ml *mockLogger) InfoContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "info", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) WarnContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "warn", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) ErrorContext(ctx context.Context, msg string, args ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "error", "msg": msg, "args": args})
 }
 
 func (ml *mockLogger) Warn(msg string) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "warn", "msg": msg})
 }
 
 func (ml *mockLogger) Error(msg string) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.logs = append(ml.logs, map[string]interface{}{"level": "error", "msg": msg})
 }
 

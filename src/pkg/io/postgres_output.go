@@ -76,40 +76,40 @@ type PostgresOutput struct {
 	natsConn *nats.Conn
 
 	// Runtime
-	logger       *slog.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	closed       bool
-	closedOnce   sync.Once
-	pendingBatch []*envelope.Envelope
-	batchTimer   *time.Timer
-	written      int64 // Track written messages
-	wg           sync.WaitGroup // Track in-flight batch writes
-	sleeper      sleeper // Injected for testing (defaults to time.After)
+	logger        *slog.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex
+	closed        bool
+	closedOnce    sync.Once
+	pendingBatch  []*envelope.Envelope
+	batchTimer    *time.Timer
+	written       int64                            // Track written messages
+	wg            sync.WaitGroup                   // Track in-flight batch writes
+	sleeper       sleeper                          // Injected for testing (defaults to time.After)
 	batchExecutor func([]*envelope.Envelope) error // Custom batch executor for testing (defaults to executeBatch)
 
 	// Observability
 	metricsRegistry prometheus.Registerer
-	metrics      *PostgresProducerMetrics
-	dlqPublisher dlqPublisher
-	dlqConfig    DLQConfig
-	backoffConfig BackoffConfig
-	maxRetries   int
-	batchStartTime time.Time // Track latency from receive to write
+	metrics         *PostgresProducerMetrics
+	dlqPublisher    dlqPublisher
+	dlqConfig       DLQConfig
+	backoffConfig   BackoffConfig
+	maxRetries      int
+	batchStartTime  time.Time // Track latency from receive to write
 }
 
 // CDCWriteOperation represents a database write operation
 type CDCWriteOperation struct {
-	Operation    string                 `json:"operation"` // INSERT, UPDATE, DELETE
-	Schema       string                 `json:"schema"`
-	Table        string                 `json:"table"`
-	Values       map[string]interface{} `json:"values"`
-	PrimaryKey   map[string]interface{} `json:"primary_key"`
-	Before       map[string]interface{} `json:"before,omitempty"`
-	After        map[string]interface{} `json:"after,omitempty"`
-	Timestamp    time.Time              `json:"timestamp"`
-	TransactionID uint32               `json:"transaction_id"`
+	Operation     string                 `json:"operation"` // INSERT, UPDATE, DELETE
+	Schema        string                 `json:"schema"`
+	Table         string                 `json:"table"`
+	Values        map[string]interface{} `json:"values"`
+	PrimaryKey    map[string]interface{} `json:"primary_key"`
+	Before        map[string]interface{} `json:"before,omitempty"`
+	After         map[string]interface{} `json:"after,omitempty"`
+	Timestamp     time.Time              `json:"timestamp"`
+	TransactionID uint32                 `json:"transaction_id"`
 }
 
 // parsePositiveInt parses a positive integer from an environment variable.
@@ -210,15 +210,15 @@ func NewPostgresOutput(logger *slog.Logger, metricsRegistry prometheus.Registere
 	}
 
 	po := &PostgresOutput{
-		logger:           logger,
-		metricsRegistry:  metricsRegistry,
-		batchSize:        100,
-		batchTimeout:     5 * time.Second,
-		backoffConfig:    DefaultBackoffConfig(),
-		maxRetries:       3,
-		metrics:          NewPostgresProducerMetrics(metricsRegistry),
-		sleeper:          &defaultSleeper{},
-		batchExecutor:    nil, // Will use executeBatch method if nil
+		logger:          logger,
+		metricsRegistry: metricsRegistry,
+		batchSize:       100,
+		batchTimeout:    5 * time.Second,
+		backoffConfig:   DefaultBackoffConfig(),
+		maxRetries:      3,
+		metrics:         NewPostgresProducerMetrics(metricsRegistry),
+		sleeper:         &defaultSleeper{},
+		batchExecutor:   nil, // Will use executeBatch method if nil
 	}
 
 	// Read configuration from environment
@@ -361,7 +361,7 @@ func (po *PostgresOutput) Start(ctx context.Context) error {
 		po.mu.Unlock()
 		return fmt.Errorf("producer already closed")
 	}
-	
+
 	// Derive po.ctx from the passed context so cancellation/timeouts work
 	// If ctx is nil, fall back to background context
 	if ctx == nil {
@@ -572,7 +572,7 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 		} else {
 			err = po.executeBatch(batch)
 		}
-		
+
 		if err != nil {
 			lastErr = err
 			po.logger.Warn("Failed to execute batch",
@@ -640,11 +640,11 @@ func (po *PostgresOutput) executeBatchWithRetry(batch []*envelope.Envelope, batc
 			// BatchWriteLatencyHistogram: duration of successful write attempt only
 			attemptLatency := time.Since(attemptStartTime).Seconds()
 			po.metrics.BatchWriteLatencyHistogram.Observe(attemptLatency)
-			
+
 			// BatchWriteRetryLatencyHistogram: end-to-end duration including all retries and backoff
 			totalLatency := time.Since(startTime).Seconds()
 			po.metrics.BatchWriteRetryLatencyHistogram.Observe(totalLatency)
-			
+
 			po.logger.Debug("Batch written successfully with retries",
 				"write_latency_seconds", attemptLatency,
 				"total_retry_latency_seconds", totalLatency,
@@ -924,12 +924,57 @@ func (po *PostgresOutput) executeDelete(tx pgx.Tx, tableName string, payload map
 	return err
 }
 
-// quoteIdentifier safely quotes SQL identifiers to prevent injection and case folding
+// quoteIdentifier safely quotes SQL identifiers only when necessary.
+// SQL identifiers don't need quoting if they:
+// - Only contain lowercase letters, digits, and underscores
+// - Start with a letter or underscore
+// - Are not SQL reserved keywords
+//
+// Quoting is required for:
+// - Identifiers with special characters (hyphens, spaces, etc)
+// - Identifiers containing double quotes
+// - Mixed-case identifiers (to preserve case)
+// - Identifiers starting with digits
 func (po *PostgresOutput) quoteIdentifier(identifier string) string {
-	// Always quote identifiers to prevent PostgreSQL's automatic lower-casing
-	// of unquoted identifiers (e.g., UserID becomes userid)
-	// Escape embedded double quotes by doubling them
-	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+	// Check if identifier needs quoting
+	// Only lowercase alphanumeric + underscore, starting with letter/underscore = no quote needed
+	if needsQuoting(identifier) {
+		// Escape embedded double quotes by doubling them
+		return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+	}
+	return identifier
+}
+
+// needsQuoting determines if a SQL identifier requires quoting
+func needsQuoting(identifier string) bool {
+	if len(identifier) == 0 {
+		return true
+	}
+
+	// Check if it starts with a digit or non-letter/underscore
+	firstChar := rune(identifier[0])
+	if !isIdentifierStart(firstChar) {
+		return true
+	}
+
+	// Check all characters are valid unquoted identifier characters
+	for _, ch := range identifier {
+		if !isIdentifierChar(ch) {
+			return true // Contains special character, space, or quote
+		}
+	}
+
+	return false
+}
+
+// isIdentifierStart checks if a rune can start an unquoted SQL identifier
+func isIdentifierStart(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+
+// isIdentifierChar checks if a rune is valid in an unquoted SQL identifier
+func isIdentifierChar(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
 }
 
 // Write is part of the Producer interface (for direct writes)

@@ -14,6 +14,7 @@ import (
 
 // HTTPMetrics tracks HTTP operation metrics
 type HTTPMetrics struct {
+	mu                 sync.Mutex
 	requestsTotal      int64
 	requestsSucceeded  int64
 	requestsFailed     int64
@@ -382,7 +383,9 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 
 	// Check circuit breaker
 	if !hb.circuitBreaker.CanAttempt() {
+		hb.metricsCollector.mu.Lock()
 		hb.metricsCollector.circuitBreakerOpen++
+		hb.metricsCollector.mu.Unlock()
 		hb.logger.WarnContext(ctx, "Circuit breaker open, rejecting request", "url", url)
 		return nil, nil
 	}
@@ -392,11 +395,15 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 
 	// Check cache first
 	if cached, ok := hb.cache.Get(cacheKey); ok {
+		hb.metricsCollector.mu.Lock()
 		hb.metricsCollector.cacheHits++
+		hb.metricsCollector.mu.Unlock()
 		hb.logger.InfoContext(ctx, "HTTP lookup cache hit", "url", url)
 		return cached, nil
 	}
+	hb.metricsCollector.mu.Lock()
 	hb.metricsCollector.cacheMisses++
+	hb.metricsCollector.mu.Unlock()
 
 	// Generate backoff durations dynamically based on MaxRetries
 	// Pattern: 0s, 1s, 2s, 4s, 8s, 16s... (exponential)
@@ -416,7 +423,9 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 			waitTime := backoffDurations[attempt]
 			hb.logger.InfoContext(ctx, "HTTP lookup retry",
 				"url", url, "attempt", attempt, "wait_ms", waitTime.Milliseconds())
+			hb.metricsCollector.mu.Lock()
 			hb.metricsCollector.retries++
+			hb.metricsCollector.mu.Unlock()
 
 			select {
 			case <-time.After(waitTime):
@@ -427,11 +436,15 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 
 		// Make request
 		result, err := hb.makeRequest(ctx, url, params)
+		hb.metricsCollector.mu.Lock()
 		hb.metricsCollector.requestsTotal++
+		hb.metricsCollector.mu.Unlock()
 
 		if err == nil && result != nil {
 			// Success
+			hb.metricsCollector.mu.Lock()
 			hb.metricsCollector.requestsSucceeded++
+			hb.metricsCollector.mu.Unlock()
 			hb.circuitBreaker.RecordSuccess()
 
 			// Cache result
@@ -450,7 +463,9 @@ func (hb *HTTPLookupBackend) HTTPLookup(ctx context.Context, url string, params 
 	}
 
 	// All retries exhausted
+	hb.metricsCollector.mu.Lock()
 	hb.metricsCollector.requestsFailed++
+	hb.metricsCollector.mu.Unlock()
 	hb.logger.WarnContext(ctx, "HTTP lookup failed after all retries",
 		"url", url, "max_retries", hb.config.MaxRetries)
 	return nil, nil // Graceful degradation
@@ -517,8 +532,8 @@ func (hb *HTTPLookupBackend) CleanupCache() {
 
 // GetMetrics returns accumulated metrics for monitoring
 func (hb *HTTPLookupBackend) GetMetrics() HTTPMetrics {
-	hb.mu.Lock()
-	defer hb.mu.Unlock()
+	hb.metricsCollector.mu.Lock()
+	defer hb.metricsCollector.mu.Unlock()
 
 	return HTTPMetrics{
 		requestsTotal:      hb.metricsCollector.requestsTotal,

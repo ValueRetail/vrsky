@@ -6,7 +6,7 @@ metadata:
   labels:
     app: vrsky-ui
     component: frontend
-    phase: 12
+    phase: "12"
 
 spec:
   replicas: 3
@@ -25,7 +25,7 @@ spec:
       labels:
         app: vrsky-ui
         component: frontend
-        phase: 12
+        phase: "12"
       annotations:
         prometheus.io/scrape: "false"
 
@@ -79,7 +79,7 @@ spec:
         # Probes
         livenessProbe:
           httpGet:
-            path: /health
+            path: /index.html
             port: 80
           initialDelaySeconds: 30
           periodSeconds: 10

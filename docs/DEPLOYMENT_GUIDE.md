@@ -59,7 +59,7 @@ ghcr.io/ValueRetail/vrsky/<service>:<tag>
 - Docker 24.0+
 - Docker Compose 2.20+
 - Node.js 20+
-- Go 1.21+
+- Go 1.22+
 - Git
 
 ### Building Locally
@@ -93,10 +93,10 @@ docker-compose up -d
 ```bash
 # Build UI image locally
 cd vrsky
-docker build -t vrsky/ui:latest ui/
+docker build -t vrsky/ui:latest -f ui/Dockerfile .
 
 # Build individual backend service
-docker build -t vrsky/producer:latest src/cmd/producer/Dockerfile .
+docker build -t vrsky/producer:latest -f src/cmd/producer/Dockerfile .
 
 # Use Makefile for convenience
 cd src

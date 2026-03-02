@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -39,6 +40,23 @@ func LoadConfig(ctx context.Context, tenantID, converterID string, logger *slog.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Create reusable HTTP client with proper connection pooling
+	// This prevents goroutine leaks from creating new clients per attempt
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			MaxIdleConnsPerHost: 2,
+			IdleConnTimeout:     90 * time.Second,
+			DisableKeepAlives:   false,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+		},
+	}
+	defer client.CloseIdleConnections()
+
 	var lastErr error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -57,8 +75,8 @@ func LoadConfig(ctx context.Context, tenantID, converterID string, logger *slog.
 			time.Sleep(backoff)
 		}
 
-		// Fetch config
-		config, err := fetchConfigFromService(ctx, url, logger)
+		// Fetch config with the reusable client
+		config, err := fetchConfigFromService(ctx, url, client, logger)
 		if err == nil {
 			logger.InfoContext(ctx, "Config loaded successfully", "tenant_id", tenantID, "converter_id", converterID)
 			return config, nil
@@ -71,8 +89,8 @@ func LoadConfig(ctx context.Context, tenantID, converterID string, logger *slog.
 	return nil, fmt.Errorf("failed to load config after %d attempts: %w", maxAttempts, lastErr)
 }
 
-// fetchConfigFromService fetches config from a single endpoint
-func fetchConfigFromService(ctx context.Context, url string, logger *slog.Logger) (*ConverterConfig, error) {
+// fetchConfigFromService fetches config from a single endpoint using a reusable client
+func fetchConfigFromService(ctx context.Context, url string, client *http.Client, logger *slog.Logger) (*ConverterConfig, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -80,10 +98,6 @@ func fetchConfigFromService(ctx context.Context, url string, logger *slog.Logger
 
 	req.Header.Set("Accept", "application/yaml")
 	req.Header.Set("Content-Type", "application/yaml")
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
 
 	resp, err := client.Do(req)
 	if err != nil {

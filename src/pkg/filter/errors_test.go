@@ -3,6 +3,7 @@ package filter
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -81,9 +82,12 @@ func TestGracefulShutdown_RegisterHandler(t *testing.T) {
 func TestGracefulShutdown_MultipleHandlers(t *testing.T) {
 	gs := NewGracefulShutdown(5*time.Second, nil)
 
+	var mu sync.Mutex
 	count := 0
 	for i := 0; i < 3; i++ {
 		gs.Register(func(ctx context.Context) error {
+			mu.Lock()
+			defer mu.Unlock()
 			count++
 			return nil
 		})
@@ -94,6 +98,8 @@ func TestGracefulShutdown_MultipleHandlers(t *testing.T) {
 
 	gs.Shutdown(ctx)
 
+	mu.Lock()
+	defer mu.Unlock()
 	if count != 3 {
 		t.Errorf("Expected 3 handlers called, got %d", count)
 	}
