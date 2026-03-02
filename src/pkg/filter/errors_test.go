@@ -72,7 +72,7 @@ func TestGracefulShutdown_RegisterHandler(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	gs.Shutdown(ctx)
+	_ = gs.Shutdown(ctx)
 
 	if !called {
 		t.Errorf("Handler should have been called")
@@ -96,7 +96,7 @@ func TestGracefulShutdown_MultipleHandlers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	gs.Shutdown(ctx)
+	_ = gs.Shutdown(ctx)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -118,7 +118,7 @@ func TestGracefulShutdown_Timeout(t *testing.T) {
 	defer cancel()
 
 	// Should complete but log timeout
-	gs.Shutdown(ctx)
+	_ = gs.Shutdown(ctx)
 }
 
 func TestRetryableError_ShouldRetry(t *testing.T) {

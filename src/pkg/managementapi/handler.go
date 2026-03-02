@@ -82,7 +82,7 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
@@ -93,9 +93,9 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	var req CreateConnectionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if err == io.EOF {
-			writeError(w, http.StatusBadRequest, "InvalidRequest", "request body is empty", nil)
+			_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "request body is empty", nil)
 		} else {
-			writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
+			_ = writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
 		}
 		return
 	}

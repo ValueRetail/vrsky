@@ -141,7 +141,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 		},
 	}
 	data, _ := json.Marshal(connMsg)
-	w.Write([]byte("data: " + string(data) + "\n\n"))
+	_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 	flusher.Flush()
 
 	// Send initial metrics state
@@ -153,7 +153,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 				Data:      metrics,
 			}
 			data, _ := json.Marshal(msg)
-			w.Write([]byte("data: " + string(data) + "\n\n"))
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
 		}
 	}
@@ -181,7 +181,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 				Data:      map[string]string{"type": "heartbeat"},
 			}
 			data, _ := json.Marshal(heartbeat)
-			w.Write([]byte("data: " + string(data) + "\n\n"))
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
 			flusher.Flush()
 
 		case <-ctx.Done():

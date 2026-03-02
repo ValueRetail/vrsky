@@ -272,7 +272,7 @@ func TestListConnections(t *testing.T) {
 	}
 
 	var resp ListResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 	if resp.Total != 3 {
 		t.Errorf("expected 3 connections, got %d", resp.Total)
 	}
