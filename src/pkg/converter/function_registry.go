@@ -52,44 +52,44 @@ func NewFunctionRegistry(ctx context.Context, logger Logger) *FunctionRegistry {
 // registerStubs registers placeholder functions for Phase 3 implementation.
 func (fr *FunctionRegistry) registerStubs() {
 	// Aggregation functions
-	fr.Register("sum", sumFunc)
-	fr.Register("avg", avgFunc)
-	fr.Register("count", countFunc)
-	fr.Register("max", maxFunc)
-	fr.Register("min", minFunc)
+	_ = fr.Register("sum", sumFunc)
+	_ = fr.Register("avg", avgFunc)
+	_ = fr.Register("count", countFunc)
+	_ = fr.Register("max", maxFunc)
+	_ = fr.Register("min", minFunc)
 
 	// String functions
-	fr.Register("concat", concatFunc)
-	fr.Register("uppercase", uppercaseFunc)
-	fr.Register("lowercase", lowercaseFunc)
-	fr.Register("trim", trimFunc)
-	fr.Register("split", splitFunc)
-	fr.Register("replace", replaceFunc)
+	_ = fr.Register("concat", concatFunc)
+	_ = fr.Register("uppercase", uppercaseFunc)
+	_ = fr.Register("lowercase", lowercaseFunc)
+	_ = fr.Register("trim", trimFunc)
+	_ = fr.Register("split", splitFunc)
+	_ = fr.Register("replace", replaceFunc)
 
 	// Math functions
-	fr.Register("multiply", multiplyFunc)
-	fr.Register("divide", divideFunc)
+	_ = fr.Register("multiply", multiplyFunc)
+	_ = fr.Register("divide", divideFunc)
 
 	// Type conversion functions
-	fr.Register("as_string", asStringFunc)
-	fr.Register("as_number", asNumberFunc)
+	_ = fr.Register("as_string", asStringFunc)
+	_ = fr.Register("as_number", asNumberFunc)
 
 	// Date/Time functions
-	fr.Register("now", nowFunc)
-	fr.Register("date_format", dateFormatFunc)
-	fr.Register("date_add", dateAddFunc)
+	_ = fr.Register("now", nowFunc)
+	_ = fr.Register("date_format", dateFormatFunc)
+	_ = fr.Register("date_add", dateAddFunc)
 
 	// Lookup functions (mock implementations - Phase 3)
 	mockBackend := NewMockLookupBackend()
-	fr.Register("lookup", newLookupFunc(mockBackend))
-	fr.Register("http_lookup", newHTTPLookupFunc(mockBackend))
+	_ = fr.Register("lookup", newLookupFunc(mockBackend))
+	_ = fr.Register("http_lookup", newHTTPLookupFunc(mockBackend))
 
 	// Legacy lookup functions (for backward compatibility)
-	fr.Register("lookup_customer_account", stubLookupCustomerAccount)
-	fr.Register("get_product_info", stubGetProductInfo)
-	fr.Register("get_inventory_level", stubGetInventoryLevel)
-	fr.Register("get_pricing", stubGetPricing)
-	fr.Register("lookup_tax_rate", stubLookupTaxRate)
+	_ = fr.Register("lookup_customer_account", stubLookupCustomerAccount)
+	_ = fr.Register("get_product_info", stubGetProductInfo)
+	_ = fr.Register("get_inventory_level", stubGetInventoryLevel)
+	_ = fr.Register("get_pricing", stubGetPricing)
+	_ = fr.Register("lookup_tax_rate", stubLookupTaxRate)
 }
 
 // Register registers a custom function with the registry.
@@ -277,8 +277,8 @@ func (fr *FunctionRegistry) SetLookupBackend(backend LookupBackend) {
 		fr.mu.Unlock()
 
 		// Re-register lookup functions with new backend
-		fr.Register("lookup", newLookupFunc(backend))
-		fr.Register("http_lookup", newHTTPLookupFunc(backend))
+		_ = fr.Register("lookup", newLookupFunc(backend))
+		_ = fr.Register("http_lookup", newHTTPLookupFunc(backend))
 	}
 }
 
@@ -329,77 +329,4 @@ func stubGetPricing(ctx context.Context, args ...interface{}) (interface{}, erro
 func stubLookupTaxRate(ctx context.Context, args ...interface{}) (interface{}, error) {
 	// Phase 3: Implement tax rate lookup
 	return 0.0, nil
-}
-
-// Aggregation functions (stubs)
-func stubSum(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement array summation
-	return float64(0), nil
-}
-
-func stubAvg(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement array average
-	return float64(0), nil
-}
-
-func stubCount(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement array count
-	return float64(0), nil
-}
-
-func stubMax(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement array maximum
-	return float64(0), nil
-}
-
-func stubMin(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement array minimum
-	return float64(0), nil
-}
-
-// String functions (stubs)
-func stubConcat(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement string concatenation
-	return "", nil
-}
-
-func stubUppercase(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement uppercase conversion
-	return "", nil
-}
-
-func stubLowercase(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement lowercase conversion
-	return "", nil
-}
-
-func stubTrim(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement string trimming
-	return "", nil
-}
-
-func stubSplit(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement string splitting
-	return []interface{}{}, nil
-}
-
-func stubReplace(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement string replacement
-	return "", nil
-}
-
-// Date/Time functions (stubs)
-func stubNow(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Return current timestamp
-	return "", nil
-}
-
-func stubDateFormat(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement date formatting
-	return "", nil
-}
-
-func stubDateAdd(ctx context.Context, args ...interface{}) (interface{}, error) {
-	// Phase 3: Implement date arithmetic
-	return "", nil
 }

@@ -263,6 +263,10 @@ func (fc *FunctionCache) Call(funcName string, args ...interface{}) (interface{}
 
 	// Call through registry
 	result, err := fc.registry.Call(funcName, args...)
+	if err != nil {
+		// Log or handle error if needed
+		return nil, err
+	}
 
 	// Cache result if successful and function is pure
 	if err == nil && fc.IsPureFunction(funcName) {

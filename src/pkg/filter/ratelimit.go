@@ -31,15 +31,15 @@ type RateLimitEngine interface {
 
 // RateLimitEngineImpl implements the RateLimitEngine interface
 type RateLimitEngineImpl struct {
-	rules            map[string]*RateLimitRule
-	state            map[string]*RateLimitState
-	mu               sync.RWMutex
-	conditionEngine  *ConditionEngine
-	metrics          *FilterMetrics
-	logger           *slog.Logger
-	queueWorkerDone  chan struct{}
-	queueWorkerCtx   context.Context
-	queueWorkerStop  context.CancelFunc
+	rules           map[string]*RateLimitRule
+	state           map[string]*RateLimitState
+	mu              sync.RWMutex
+	conditionEngine *ConditionEngine
+	metrics         *FilterMetrics
+	logger          *slog.Logger
+	queueWorkerDone chan struct{}
+	queueWorkerCtx  context.Context
+	queueWorkerStop context.CancelFunc
 }
 
 // RateLimitRule defines a rate limit rule
@@ -65,13 +65,13 @@ type RateLimitState struct {
 	windowMutex        sync.Mutex
 
 	// Concurrent state
-	concurrentCount   int
-	concurrentMutex   sync.Mutex
+	concurrentCount int
+	concurrentMutex sync.Mutex
 
 	// Token bucket state
-	tokensAvailable      float64
-	lastTokenRefillTime  time.Time
-	tokenBucketMutex     sync.Mutex
+	tokensAvailable     float64
+	lastTokenRefillTime time.Time
+	tokenBucketMutex    sync.Mutex
 
 	// Queue state
 	queue *RateLimitQueue
@@ -79,30 +79,30 @@ type RateLimitState struct {
 
 // RateLimitDecision represents the outcome of rate limit evaluation
 type RateLimitDecision struct {
-	Action            string // "queue", "drop", "reject", or "" (allowed)
-	Allowed           bool   // true if message passed rate limit
-	Reason            string // Why accepted/rejected
-	Current           int    // Current count/tokens
-	Limit             int    // Max allowed
-	RuleID            string // Which rule applied
-	WindowOrSeconds   int    // Time window or token refill window
-	StrategyUsed      string // Which strategy applied (for debugging)
+	Action          string // "queue", "drop", "reject", or "" (allowed)
+	Allowed         bool   // true if message passed rate limit
+	Reason          string // Why accepted/rejected
+	Current         int    // Current count/tokens
+	Limit           int    // Max allowed
+	RuleID          string // Which rule applied
+	WindowOrSeconds int    // Time window or token refill window
+	StrategyUsed    string // Which strategy applied (for debugging)
 }
 
 // RateLimitStats tracks statistics for a rule
 type RateLimitStats struct {
-	RuleID             string
-	Strategy           string
-	CurrentValue       int      // Current count for time-window or concurrent
-	CurrentTokens      float64  // Current tokens for token bucket
-	Limit              int      // Configured limit
-	TotalProcessed     int      // Total messages processed by this rule
-	TotalRateLimited   int      // Total messages rate limited
-	TotalQueued        int      // Total messages queued
-	TotalDropped       int      // Total messages dropped
-	TotalRejected      int      // Total messages rejected
-	WindowResetTime    time.Time // Next window reset time (for time-window)
-	TokenRefillTime    time.Time // Next token refill time (for token bucket)
+	RuleID           string
+	Strategy         string
+	CurrentValue     int       // Current count for time-window or concurrent
+	CurrentTokens    float64   // Current tokens for token bucket
+	Limit            int       // Configured limit
+	TotalProcessed   int       // Total messages processed by this rule
+	TotalRateLimited int       // Total messages rate limited
+	TotalQueued      int       // Total messages queued
+	TotalDropped     int       // Total messages dropped
+	TotalRejected    int       // Total messages rejected
+	WindowResetTime  time.Time // Next window reset time (for time-window)
+	TokenRefillTime  time.Time // Next token refill time (for token bucket)
 }
 
 // NewRateLimitEngine creates a new rate limit engine
@@ -218,18 +218,7 @@ func (rle *RateLimitEngineImpl) EvaluateRules(
 	// Evaluate rules in order
 	for _, rule := range matchingRules {
 		decision := rle.evaluateRule(rule)
-		if decision.Allowed {
-			return &RateLimitDecision{
-				Allowed:        true,
-				Reason:         fmt.Sprintf("Rate limit rule '%s' allowed message", rule.ID),
-				RuleID:         rule.ID,
-				StrategyUsed:   rule.Strategy,
-				Current:        decision.Current,
-				Limit:          decision.Limit,
-			}, nil
-		}
-
-		// Rule exceeded - return the decision (action determined by exceed_action)
+		// Return on first matching rule result (allowed or denied)
 		return decision, nil
 	}
 
@@ -282,12 +271,12 @@ func (rle *RateLimitEngineImpl) checkTimeWindow(rule *RateLimitRule, state *Rate
 		state.windowStart = now
 		state.windowMessageCount = 1
 		return &RateLimitDecision{
-			Allowed:        true,
-			Reason:         fmt.Sprintf("Within limit: 1/%d in new window", rule.MaxMessagesPerWindow),
-			RuleID:         rule.ID,
-			StrategyUsed:   rule.Strategy,
-			Current:        1,
-			Limit:          rule.MaxMessagesPerWindow,
+			Allowed:         true,
+			Reason:          fmt.Sprintf("Within limit: 1/%d in new window", rule.MaxMessagesPerWindow),
+			RuleID:          rule.ID,
+			StrategyUsed:    rule.Strategy,
+			Current:         1,
+			Limit:           rule.MaxMessagesPerWindow,
 			WindowOrSeconds: rule.WindowDurationSeconds,
 		}
 	}
@@ -296,12 +285,12 @@ func (rle *RateLimitEngineImpl) checkTimeWindow(rule *RateLimitRule, state *Rate
 	if state.windowMessageCount < rule.MaxMessagesPerWindow {
 		state.windowMessageCount++
 		return &RateLimitDecision{
-			Allowed:        true,
-			Reason:         fmt.Sprintf("Within limit: %d/%d", state.windowMessageCount, rule.MaxMessagesPerWindow),
-			RuleID:         rule.ID,
-			StrategyUsed:   rule.Strategy,
-			Current:        state.windowMessageCount,
-			Limit:          rule.MaxMessagesPerWindow,
+			Allowed:         true,
+			Reason:          fmt.Sprintf("Within limit: %d/%d", state.windowMessageCount, rule.MaxMessagesPerWindow),
+			RuleID:          rule.ID,
+			StrategyUsed:    rule.Strategy,
+			Current:         state.windowMessageCount,
+			Limit:           rule.MaxMessagesPerWindow,
 			WindowOrSeconds: rule.WindowDurationSeconds,
 		}
 	}
@@ -309,13 +298,13 @@ func (rle *RateLimitEngineImpl) checkTimeWindow(rule *RateLimitRule, state *Rate
 	// Limit exceeded - determine action
 	timeUntilReset := windowDuration - now.Sub(state.windowStart)
 	return &RateLimitDecision{
-		Allowed:        false,
-		Action:         rule.ExceedAction,
-		Reason:         fmt.Sprintf("Rate limit exceeded: %d/%d in window, reset in %vs", state.windowMessageCount, rule.MaxMessagesPerWindow, timeUntilReset.Seconds()),
-		RuleID:         rule.ID,
-		StrategyUsed:   rule.Strategy,
-		Current:        state.windowMessageCount,
-		Limit:          rule.MaxMessagesPerWindow,
+		Allowed:         false,
+		Action:          rule.ExceedAction,
+		Reason:          fmt.Sprintf("Rate limit exceeded: %d/%d in window, reset in %vs", state.windowMessageCount, rule.MaxMessagesPerWindow, timeUntilReset.Seconds()),
+		RuleID:          rule.ID,
+		StrategyUsed:    rule.Strategy,
+		Current:         state.windowMessageCount,
+		Limit:           rule.MaxMessagesPerWindow,
 		WindowOrSeconds: rule.WindowDurationSeconds,
 	}
 }
@@ -371,25 +360,25 @@ func (rle *RateLimitEngineImpl) checkTokenBucket(rule *RateLimitRule, state *Rat
 	if state.tokensAvailable >= 1.0 {
 		state.tokensAvailable -= 1.0
 		return &RateLimitDecision{
-			Allowed:        true,
-			Reason:         fmt.Sprintf("Token available: %.2f remaining", state.tokensAvailable),
-			RuleID:         rule.ID,
-			StrategyUsed:   rule.Strategy,
-			Current:        int(state.tokensAvailable),
-			Limit:          rule.TokenBucketCapacity,
+			Allowed:         true,
+			Reason:          fmt.Sprintf("Token available: %.2f remaining", state.tokensAvailable),
+			RuleID:          rule.ID,
+			StrategyUsed:    rule.Strategy,
+			Current:         int(state.tokensAvailable),
+			Limit:           rule.TokenBucketCapacity,
 			WindowOrSeconds: rule.TokenBucketRate,
 		}
 	}
 
 	// No tokens available
 	return &RateLimitDecision{
-		Allowed:        false,
-		Action:         rule.ExceedAction,
-		Reason:         fmt.Sprintf("No tokens available: %.2f (need 1.0)", state.tokensAvailable),
-		RuleID:         rule.ID,
-		StrategyUsed:   rule.Strategy,
-		Current:        int(state.tokensAvailable),
-		Limit:          rule.TokenBucketCapacity,
+		Allowed:         false,
+		Action:          rule.ExceedAction,
+		Reason:          fmt.Sprintf("No tokens available: %.2f (need 1.0)", state.tokensAvailable),
+		RuleID:          rule.ID,
+		StrategyUsed:    rule.Strategy,
+		Current:         int(state.tokensAvailable),
+		Limit:           rule.TokenBucketCapacity,
 		WindowOrSeconds: rule.TokenBucketRate,
 	}
 }
@@ -534,9 +523,9 @@ func (rle *RateLimitEngineImpl) Stop() error {
 func validateRateLimitRule(rule *RateLimitRule) error {
 	// Validate strategy
 	validStrategies := map[string]bool{
-		"time_window":   true,
-		"concurrent":    true,
-		"token_bucket":  true,
+		"time_window":  true,
+		"concurrent":   true,
+		"token_bucket": true,
 	}
 
 	if !validStrategies[rule.Strategy] {

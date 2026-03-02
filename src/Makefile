@@ -1,4 +1,4 @@
-.PHONY: help build build-consumer build-filter build-converter docker-build docker-build-consumer docker-build-filter docker-build-converter docker-push docker-push-consumer docker-push-filter docker-push-converter clean test test-converter run run-consumer lint fmt vet e2e-test
+.PHONY: help build build-consumer build-filter build-converter docker-build docker-build-consumer docker-build-filter docker-build-converter docker-push docker-push-consumer docker-push-filter docker-push-converter docker-build-ui docker-push-ui clean test test-converter run run-consumer lint fmt vet e2e-test
 
 # Variables
 BINARY_NAME=producer
@@ -152,5 +152,15 @@ info: ## Show build information
 e2e-test: build build-consumer ## Run full end-to-end test (HTTP → NATS → HTTP)
 	@echo "$(BLUE)Running end-to-end test...$(NC)"
 	@bash ../scripts/e2e-test.sh
+
+docker-build-ui: ## Build UI Docker image: vrsky/ui:latest
+	@echo "$(BLUE)Building UI Docker image...$(NC)"
+	@docker build -t vrsky/ui:latest ../ui
+	@echo "$(GREEN)✓ UI Docker image built: vrsky/ui:latest$(NC)"
+
+docker-push-ui: docker-build-ui ## Push UI Docker image to registry
+	@echo "$(BLUE)Pushing UI Docker image...$(NC)"
+	@docker push vrsky/ui:latest
+	@echo "$(GREEN)✓ UI Docker image pushed$(NC)"
 
 .DEFAULT_GOAL := help

@@ -1,17 +1,17 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.22 AS builder
 
 WORKDIR /build
 
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY go.mod go.sum ./
-COPY cmd/converter/ ./cmd/converter/
-COPY pkg/ ./pkg/
-COPY internal/ ./internal/
+COPY src/go.mod src/go.sum ./
+COPY src/cmd/converter/ ./cmd/converter/
+COPY src/pkg/ ./pkg/
+COPY src/internal/ ./internal/
 
 RUN go mod download
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o converter \
     ./cmd/converter

@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-FROM golang:1.21-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /build
 
@@ -7,10 +7,10 @@ WORKDIR /build
 RUN apk add --no-cache git
 
 # Copy module and source files first
-COPY go.mod go.sum ./
-COPY cmd/consumer/ ./cmd/consumer/
-COPY pkg/ ./pkg/
-COPY internal/ ./internal/
+COPY src/go.mod src/go.sum ./
+COPY src/cmd/consumer/ ./cmd/consumer/
+COPY src/pkg/ ./pkg/
+COPY src/internal/ ./internal/
 
 # Download dependencies - must be after source code is copied
 # so go can identify all required packages

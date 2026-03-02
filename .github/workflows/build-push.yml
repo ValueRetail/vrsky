@@ -1,0 +1,163 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_USERNAME: ${{ github.actor }}
+
+jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      ui: ${{ steps.filter.outputs.ui }}
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui:
+              - 'ui/**'
+            src:
+              - 'src/**'
+              - 'infrastructure/**'
+              - 'docker-compose.yml'
+              - '.github/workflows/build-push.yml'
+
+  build-and-push:
+    name: Build and Push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          # Backend services
+          - { name: "producer", path: "src/cmd/producer" }
+          - { name: "consumer", path: "src/cmd/consumer" }
+          - { name: "converter", path: "src/cmd/converter" }
+          - { name: "filter", path: "src/cmd/filter" }
+          - { name: "management-api", path: "src/cmd/management-api" }
+          - { name: "file-consumer", path: "src/cmd/file-consumer" }
+          - { name: "file-producer", path: "src/cmd/file-producer" }
+          - { name: "postgres-consumer", path: "src/cmd/postgres-consumer" }
+          - { name: "postgres-producer", path: "src/cmd/postgres-producer" }
+          # Frontend
+          - { name: "ui", path: "ui", dockerfile: "ui/Dockerfile" }
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git tags
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="sha-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.service.dockerfile || format('{0}/Dockerfile', matrix.service.path) }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:latest
+            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+
+  test:
+    name: Test UI
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.ui == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ui
+        run: npm run test
+
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
+  go-tests:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Run Go tests
+        working-directory: src
+        run: go test -v -race -cover ./...
+
+      - name: Run Go linter
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          working-directory: src

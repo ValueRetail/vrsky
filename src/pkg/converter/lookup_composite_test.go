@@ -282,7 +282,7 @@ func TestCompositeBackend_Metrics_BackendHits(t *testing.T) {
 
 	// Make 3 successful lookups
 	for i := 0; i < 3; i++ {
-		composite.Lookup(ctx, "customers", "id", "CUST001")
+		_, _ = composite.Lookup(ctx, "customers", "id", "CUST001")
 	}
 
 	metrics := composite.GetMetrics()
@@ -455,7 +455,7 @@ func TestCompositeBackend_Metrics_HitRate(t *testing.T) {
 
 	// Make successful lookups
 	for i := 0; i < 5; i++ {
-		composite.Lookup(ctx, "customers", "id", "CUST001")
+		_, _ = composite.Lookup(ctx, "customers", "id", "CUST001")
 	}
 
 	hits, total, hitRate = composite.GetBackendHitRate(0)
@@ -520,7 +520,7 @@ func TestCompositeBackend_MetricsConcurrency(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		go func(id int) {
 			if id%2 == 0 {
-				composite.Lookup(ctx, "customers", "id", "CUST001")
+				_, _ = composite.Lookup(ctx, "customers", "id", "CUST001")
 			} else {
 				composite.GetMetrics()
 			}

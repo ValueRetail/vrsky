@@ -413,7 +413,7 @@ func TestPostgresConsumerProducerIntegration_BeforeAfterTracking(t *testing.T) {
 
 	// Verify payload contains before/after
 	var payload map[string]interface{}
-	json.Unmarshal(env.Payload, &payload)
+	_ = json.Unmarshal(env.Payload, &payload)
 
 	before := payload["before"].(map[string]interface{})
 	after := payload["after"].(map[string]interface{})
@@ -494,17 +494,17 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 		env := envelope.New()
 		env.ID = "delete-test-1"
 		env.ContentType = "application/cdc+json"
-		
+
 		// Simulate DELETE operation with before image
 		deleteOp := map[string]interface{}{
-			"op":     "D",
-			"table":  "test_table",
+			"op":    "D",
+			"table": "test_table",
 			"before": map[string]interface{}{
 				"id":   123,
 				"name": "to_delete",
 			},
 		}
-		
+
 		data, _ := json.Marshal(deleteOp)
 		env.Payload = data
 
@@ -526,18 +526,18 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 		env := envelope.New()
 		env.ID = "delete-test-2"
 		env.ContentType = "application/cdc+json"
-		
+
 		// DELETE with composite key (tenant_id, record_id)
 		deleteOp := map[string]interface{}{
-			"op":     "D",
-			"table":  "multi_tenant_table",
+			"op":    "D",
+			"table": "multi_tenant_table",
 			"before": map[string]interface{}{
 				"tenant_id": "tenant-001",
 				"record_id": 456,
 				"data":      "will_be_deleted",
 			},
 		}
-		
+
 		data, _ := json.Marshal(deleteOp)
 		env.Payload = data
 
@@ -559,16 +559,16 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 		env := envelope.New()
 		env.ID = "delete-test-3"
 		env.ContentType = "application/cdc+json"
-		
+
 		// DELETE with missing key - should be handled safely
 		deleteOp := map[string]interface{}{
-			"op":     "D",
-			"table":  "test_table",
+			"op":    "D",
+			"table": "test_table",
 			"before": map[string]interface{}{
 				"name": "no_id",
 			},
 		}
-		
+
 		data, _ := json.Marshal(deleteOp)
 		env.Payload = data
 
@@ -587,21 +587,21 @@ func TestPostgresConsumerProducerIntegration_DeleteOperations(t *testing.T) {
 		defer po.Close()
 
 		ctx := context.Background()
-		
+
 		// Send multiple DELETE operations
 		for i := 0; i < 5; i++ {
 			env := envelope.New()
 			env.ID = fmt.Sprintf("delete-batch-%d", i)
 			env.ContentType = "application/cdc+json"
-			
+
 			deleteOp := map[string]interface{}{
-				"op":     "D",
-				"table":  "test_table",
+				"op":    "D",
+				"table": "test_table",
 				"before": map[string]interface{}{
 					"id": 1000 + i,
 				},
 			}
-			
+
 			data, _ := json.Marshal(deleteOp)
 			env.Payload = data
 
@@ -927,7 +927,7 @@ func TestPostgresConsumerProducerIntegration_PerformanceBaseline(t *testing.T) {
 
 		ctx := context.Background()
 		batchSize := 100
-		
+
 		start := time.Now()
 		for i := 0; i < batchSize; i++ {
 			env := envelope.New()

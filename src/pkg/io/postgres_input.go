@@ -22,60 +22,59 @@ import (
 // PostgresInput implements a Consumer that captures changes from PostgreSQL via CDC
 type PostgresInput struct {
 	// Configuration
-	host               string
-	port               int
-	user               string
-	password           string
-	database           string
-	replicationSlot    string
-	publication        string
-	tableFilters       map[string]bool // Whitelist of tables to monitor
-	batchSize          int
-	batchTimeout       time.Duration
-	natsURL            string
-	natsSubject        string
-	dropSlotOnClose    bool            // Whether to drop replication slot on Close()
+	host            string
+	port            int
+	user            string
+	password        string
+	database        string
+	replicationSlot string
+	publication     string
+	tableFilters    map[string]bool // Whitelist of tables to monitor
+	batchSize       int
+	batchTimeout    time.Duration
+	natsURL         string
+	natsSubject     string
+	dropSlotOnClose bool // Whether to drop replication slot on Close()
 
 	// Connection
-	pool               *pgxpool.Pool
-	conn               *pgx.Conn
-	natsConn           *nats.Conn
+	pool     *pgxpool.Pool
+	natsConn *nats.Conn
 
 	// Runtime
-	logger             *slog.Logger
-	ctx                context.Context
-	cancel             context.CancelFunc
-	mu                 sync.Mutex
-	closed             bool
-	closedOnce         sync.Once
-	messages           chan *envelope.Envelope
-	lsn                uint64 // Last acknowledged LSN
-	pendingBatch       []*envelope.Envelope
-	batchTimer         *time.Timer
+	logger       *slog.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	closed       bool
+	closedOnce   sync.Once
+	messages     chan *envelope.Envelope
+	lsn          uint64 // Last acknowledged LSN
+	pendingBatch []*envelope.Envelope
+	batchTimer   *time.Timer
 
 	// CDC polling
-	lastPollTime       time.Time              // Track when we last checked for changes
-	seenRows           map[string]map[int64]bool // Track row IDs we've seen to detect changes (keyed by table name)
+	lastPollTime time.Time                 // Track when we last checked for changes
+	seenRows     map[string]map[int64]bool // Track row IDs we've seen to detect changes (keyed by table name)
 
 	// Observability
-	metricsRegistry    prometheus.Registerer
-	metrics            *PostgresConsumerMetrics
-	dlqPublisher       *DLQPublisher
-	backoffConfig      BackoffConfig
-	maxRetries         int
-	batchStartTime     time.Time // Track latency from capture to publish
+	metricsRegistry prometheus.Registerer
+	metrics         *PostgresConsumerMetrics
+	dlqPublisher    *DLQPublisher
+	backoffConfig   BackoffConfig
+	maxRetries      int
+	batchStartTime  time.Time // Track latency from capture to publish
 }
 
 // CDCChange represents a change captured from PostgreSQL WAL
 type CDCChange struct {
-	Operation   string                 `json:"operation"` // INSERT, UPDATE, DELETE
-	Schema      string                 `json:"schema"`
-	Table       string                 `json:"table"`
-	Before      map[string]interface{} `json:"before,omitempty"`
-	After       map[string]interface{} `json:"after,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
-	TransactionID uint32               `json:"transaction_id"`
-	LSN         uint64                 `json:"lsn"`
+	Operation     string                 `json:"operation"` // INSERT, UPDATE, DELETE
+	Schema        string                 `json:"schema"`
+	Table         string                 `json:"table"`
+	Before        map[string]interface{} `json:"before,omitempty"`
+	After         map[string]interface{} `json:"after,omitempty"`
+	Timestamp     time.Time              `json:"timestamp"`
+	TransactionID uint32                 `json:"transaction_id"`
+	LSN           uint64                 `json:"lsn"`
 }
 
 // NewPostgresInput creates a new PostgreSQL CDC consumer
@@ -89,17 +88,17 @@ func NewPostgresInput(logger *slog.Logger, metricsRegistry prometheus.Registerer
 	}
 
 	pi := &PostgresInput{
-		logger:           logger,
-		metricsRegistry:  metricsRegistry,
-		messages:         make(chan *envelope.Envelope, 100),
-		tableFilters:     make(map[string]bool),
-		batchSize:        100,
-		batchTimeout:     5 * time.Second,
-		seenRows:         make(map[string]map[int64]bool),
-		lastPollTime:     time.Now(),
-		backoffConfig:    DefaultBackoffConfig(),
-		maxRetries:       3,
-		metrics:          NewPostgresConsumerMetrics(metricsRegistry),
+		logger:          logger,
+		metricsRegistry: metricsRegistry,
+		messages:        make(chan *envelope.Envelope, 100),
+		tableFilters:    make(map[string]bool),
+		batchSize:       100,
+		batchTimeout:    5 * time.Second,
+		seenRows:        make(map[string]map[int64]bool),
+		lastPollTime:    time.Now(),
+		backoffConfig:   DefaultBackoffConfig(),
+		maxRetries:      3,
+		metrics:         NewPostgresConsumerMetrics(metricsRegistry),
 	}
 
 	// Read configuration from environment
@@ -237,7 +236,7 @@ func (pi *PostgresInput) Start(ctx context.Context) error {
 		pi.mu.Unlock()
 		return fmt.Errorf("consumer already closed")
 	}
-	
+
 	// Derive pi.ctx from the passed context so cancellation/timeouts work
 	// If ctx is nil, fall back to background context
 	if ctx == nil {
@@ -329,17 +328,17 @@ func (pi *PostgresInput) setupReplication() error {
 	// Pre-create replication slot using external tool
 	// The consumer can't create it via prepared statements due to PostgreSQL replication protocol limitations
 	// Instead, we'll try to create it and ignore errors if it already exists
-	
+
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
 		pi.user, pi.password, pi.host, pi.port, pi.database)
-	
+
 	// Open a temporary direct connection to setup replication
 	tmpConn, err := pgx.Connect(pi.ctx, connStr)
 	if err != nil {
 		return fmt.Errorf("failed to connect for replication setup: %w", err)
 	}
 	defer tmpConn.Close(pi.ctx)
-	
+
 	// Try to create replication slot using parameterized query
 	// Use pg_create_logical_replication_slot function with parameters
 	_, err = tmpConn.Exec(pi.ctx,
@@ -404,13 +403,13 @@ func (pi *PostgresInput) pollChanges() {
 func (pi *PostgresInput) fetchChanges() error {
 	// Instead of using the replication protocol (which requires pglogrepl and pgconn),
 	// we'll use polling with the regular connection pool to simulate CDC for this POC
-	
+
 	// Poll for new changes by checking the replication slot status
 	// In production, you would use:
 	// - pglogrepl.StartReplication() with pgconn
 	// - Receive and parse XLogData messages
 	// - Send StandbyStatusUpdate to acknowledge received data
-	
+
 	// Use parameterized query to safely query replication slot status
 	rows, err := pi.pool.Query(pi.ctx,
 		"SELECT restart_lsn, confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1",
@@ -561,13 +560,13 @@ func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, erro
 			}
 
 			change := CDCChange{
-				Operation:   "INSERT",
-				Table:       tableName,
-				Schema:      "public",
-				After:       fullRow,
-				Timestamp:   time.Now(),
+				Operation:     "INSERT",
+				Table:         tableName,
+				Schema:        "public",
+				After:         fullRow,
+				Timestamp:     time.Now(),
 				TransactionID: uint32(id % 1000000), // Placeholder
-				LSN:         uint64(id),               // Placeholder
+				LSN:           uint64(id),           // Placeholder
 			}
 			changes = append(changes, change)
 			pi.seenRows[tableName][id] = true
@@ -579,13 +578,13 @@ func (pi *PostgresInput) detectTableChanges(tableName string) ([]CDCChange, erro
 		if !currentRowIDs[seenID] {
 			pi.logger.Info("Detected row deletion", "table", tableName, "id", seenID)
 			change := CDCChange{
-				Operation:   "DELETE",
-				Table:       tableName,
-				Schema:      "public",
-				Before:      map[string]interface{}{"id": seenID},
-				Timestamp:   time.Now(),
+				Operation:     "DELETE",
+				Table:         tableName,
+				Schema:        "public",
+				Before:        map[string]interface{}{"id": seenID},
+				Timestamp:     time.Now(),
 				TransactionID: uint32(seenID % 1000000),
-				LSN:         uint64(seenID),
+				LSN:           uint64(seenID),
 			}
 			changes = append(changes, change)
 			delete(pi.seenRows[tableName], seenID)
@@ -667,7 +666,7 @@ func (pi *PostgresInput) createEnvelopeFromChange(change CDCChange) *envelope.En
 	env.ID = fmt.Sprintf("cdc-%d-%d", change.TransactionID, change.LSN)
 	env.ContentType = "application/cdc+json"
 	env.Source = "PostgresInput"
-	
+
 	// Populate metadata for downstream consumers
 	env.Metadata = map[string]interface{}{
 		"operation":      change.Operation,
@@ -743,12 +742,12 @@ func (pi *PostgresInput) createEnvelopeFromWAL(data []byte) *envelope.Envelope {
 
 	// Add CDC metadata
 	env.Metadata = map[string]interface{}{
-		"operation":       change.Operation,
-		"schema":          change.Schema,
-		"table":           change.Table,
-		"timestamp":       change.Timestamp,
-		"transaction_id":  change.TransactionID,
-		"lsn":             change.LSN,
+		"operation":      change.Operation,
+		"schema":         change.Schema,
+		"table":          change.Table,
+		"timestamp":      change.Timestamp,
+		"transaction_id": change.TransactionID,
+		"lsn":            change.LSN,
 	}
 
 	// Add payload with before/after values
