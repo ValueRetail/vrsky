@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"strings"
+
+	"github.com/ValueRetail/vrsky/pkg/managementapi"
 )
 
 // CORSMiddleware adds CORS headers to responses
@@ -53,7 +55,7 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 
 			// Store tenant ID in request context for handlers to use
 			ctx := r.Context()
-			r = r.WithContext(ContextWithTenantID(ctx, tenantID))
+			r = r.WithContext(managementapi.ContextWithTenantID(ctx, tenantID))
 
 			next.ServeHTTP(w, r)
 		})
