@@ -240,7 +240,7 @@ func RBACMiddleware(requiredRoles []string) func(http.Handler) http.Handler {
 func writeErrorResponse(w http.ResponseWriter, status int, errorType, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error":   errorType,
 		"message": message,
 		"status":  status,

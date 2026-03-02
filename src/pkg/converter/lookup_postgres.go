@@ -207,10 +207,7 @@ func (pb *PostgresLookupBackend) Close() error {
 	return nil
 }
 
-// GetMetrics returns accumulated metrics for monitoring.
-func (pb *PostgresLookupBackend) GetMetrics() PostgresMetrics {
-	return PostgresMetrics{
-		queriesTotal:  pb.metricsCollector.queriesTotal,
-		queriesFailed: pb.metricsCollector.queriesFailed,
-	}
+// GetMetricsValues returns the metrics values (not the atomic types themselves to avoid copy locks).
+func (pb *PostgresLookupBackend) GetMetricsValues() (queriesTotal, queriesFailed int64) {
+	return pb.metricsCollector.queriesTotal.Load(), pb.metricsCollector.queriesFailed.Load()
 }

@@ -170,8 +170,7 @@ func (wm *WASMModule) Call(ctx context.Context, funcName string, args ...interfa
 
 	// Call WASM function (with timeout enforcement)
 	var result interface{}
-	var err error
-	err = wm.callWithTimeout(ctx, func(callCtx context.Context) error {
+	err := wm.callWithTimeout(ctx, func(callCtx context.Context) error {
 		res, err := f.Call(wm.Store, args...)
 		if err != nil {
 			return err
@@ -325,16 +324,13 @@ func (wfl *WASMFunctionLoader) UnloadModule(moduleName string) error {
 	wfl.mu.Lock()
 	defer wfl.mu.Unlock()
 
-	module, exists := wfl.modules[moduleName]
+	_, exists := wfl.modules[moduleName]
 	if !exists {
 		return fmt.Errorf("module not found: %s", moduleName)
 	}
 
 	// Clean up resources
-	if module.Store != nil {
-		// Wasmtime store will be GC'd automatically
-	}
-
+	// Wasmtime store will be GC'd automatically
 	delete(wfl.modules, moduleName)
 
 	if wfl.logger != nil {

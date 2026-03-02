@@ -161,7 +161,7 @@ func TestNewWASMFunctionLoader(t *testing.T) {
 }
 
 func TestNewWASMFunctionLoaderNilContext(t *testing.T) {
-	loader := NewWASMFunctionLoader(nil, getMockLoggerWASM())
+	loader := NewWASMFunctionLoader(context.TODO(), getMockLoggerWASM())
 	if loader == nil {
 		t.Fatal("expected non-nil loader")
 	}

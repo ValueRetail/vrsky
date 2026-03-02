@@ -26,6 +26,7 @@ func TestMetricsCache_UpdateOrCreateConnection(t *testing.T) {
 	metrics := cache.UpdateOrCreateConnection("conn-1", "tenant-1", "running")
 	if metrics == nil {
 		t.Error("expected metrics to be created")
+		return
 	}
 	if metrics.ConnectionID != "conn-1" {
 		t.Errorf("expected connection ID 'conn-1', got '%s'", metrics.ConnectionID)
@@ -47,6 +48,7 @@ func TestMetricsCache_GetConnectionMetrics(t *testing.T) {
 	retrieved := cache.GetConnectionMetrics("conn-1")
 	if retrieved == nil {
 		t.Error("expected metrics to be retrieved")
+		return
 	}
 	if retrieved.ConnectionID != "conn-1" {
 		t.Errorf("expected connection ID 'conn-1', got '%s'", retrieved.ConnectionID)

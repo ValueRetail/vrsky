@@ -184,7 +184,7 @@ func (v *Validator) ValidateConverterConfig(config *ConverterConfig) error {
 
 // validateSchemaValidator validates schema validator configuration
 func (v *Validator) validateSchemaValidator(config *SchemaValidatorConfig) error {
-	if config.InputSchema != nil && len(config.InputSchema) > 0 {
+	if len(config.InputSchema) > 0 {
 		// Validate input schema is valid JSON
 		var schema interface{}
 		if err := json.Unmarshal(config.InputSchema, &schema); err != nil {
@@ -201,7 +201,7 @@ func (v *Validator) validateSchemaValidator(config *SchemaValidatorConfig) error
 		}
 	}
 
-	if config.OutputSchema != nil && len(config.OutputSchema) > 0 {
+	if len(config.OutputSchema) > 0 {
 		// Validate output schema is valid JSON
 		var schema interface{}
 		if err := json.Unmarshal(config.OutputSchema, &schema); err != nil {
@@ -223,7 +223,7 @@ func (v *Validator) validateSchemaValidator(config *SchemaValidatorConfig) error
 
 // validateFieldMapper validates field mapper configuration
 func (v *Validator) validateFieldMapper(config *FieldMapperConfig) error {
-	if config.Mappings == nil || len(config.Mappings) == 0 {
+	if len(config.Mappings) == 0 {
 		return &ConfigError{Component: "converter", Field: "field_mapper.mappings", Reason: "at least one mapping is required"}
 	}
 
@@ -242,7 +242,7 @@ func (v *Validator) validateFieldMapper(config *FieldMapperConfig) error {
 
 // validateRuleEngine validates rule engine configuration
 func (v *Validator) validateRuleEngine(config *RuleEngineConfig) error {
-	if config.Rules == nil || len(config.Rules) == 0 {
+	if len(config.Rules) == 0 {
 		return &ConfigError{Component: "converter", Field: "rule_engine.rules", Reason: "at least one rule is required"}
 	}
 
@@ -267,7 +267,7 @@ func (v *Validator) ValidateFilterConfig(config *FilterConfig) error {
 		return nil // Filter config is optional
 	}
 
-	if config.Rules != nil && len(config.Rules) > 0 {
+	if len(config.Rules) > 0 {
 		for i, rule := range config.Rules {
 			if strings.TrimSpace(rule.Name) == "" {
 				return &ConfigError{Component: "filter", Field: fmt.Sprintf("rules[%d].name", i), Reason: "rule name is required"}

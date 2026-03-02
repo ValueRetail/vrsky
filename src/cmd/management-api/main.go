@@ -131,7 +131,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// Health check endpoints
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":    "healthy",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
@@ -163,7 +163,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":       "ready",
 			"timestamp":    time.Now().UTC().Format(time.RFC3339),
 			"dependencies": deps,

@@ -289,7 +289,6 @@ type HTTPLookupBackend struct {
 	ctx              context.Context
 	config           HTTPConfig
 	metricsCollector *HTTPMetrics
-	mu               sync.Mutex
 }
 
 // HTTPConfig holds HTTP backend configuration

@@ -963,7 +963,6 @@ func TestPollChanges_SuccessfulRetryDoesNotApplyCooldown(t *testing.T) {
 
 	// Second iteration: simulate success
 	if lastErr != nil { // Retry because error occurred
-		attempt++
 		lastErr = nil // SUCCESS: This is the key fix - reset lastErr on success
 	}
 

@@ -121,26 +121,26 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID
 	connID := r.PathValue("id")
 	if connID == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
 	// Verify connection exists and belongs to tenant
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
@@ -149,16 +149,16 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 	var req TestMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if err == io.EOF {
-			writeError(w, http.StatusBadRequest, "InvalidRequest", "request body is empty", nil)
+			_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "request body is empty", nil)
 		} else {
-			writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
+			_ = writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
 		}
 		return
 	}
 
 	// Validate payload
 	if req.Payload == nil {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "payload is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "payload is required", nil)
 		return
 	}
 
@@ -173,12 +173,12 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 	// Publish test message via NATS if publisher is available
 	if h.publisher != nil {
 		if err := h.publisher.PublishTestMessage(ctx, connID, tenantID, testMsg); err != nil {
-			writeError(w, http.StatusInternalServerError, "PublishError", "failed to publish test message", nil)
+			_ = writeError(w, http.StatusInternalServerError, "PublishError", "failed to publish test message", nil)
 			return
 		}
 	}
 
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: map[string]interface{}{
 			"message_id": testMsg.ID,
 			"sent_at":    testMsg.Timestamp,
@@ -194,26 +194,26 @@ func (h *Handler) StartAutoGenerator(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID
 	connID := r.PathValue("id")
 	if connID == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
 	// Verify connection exists
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
@@ -225,7 +225,7 @@ func (h *Handler) StartAutoGenerator(w http.ResponseWriter, r *http.Request) {
 
 	// Validate rate
 	if req.RatePerSecond < 1 || req.RatePerSecond > 1000 {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "rate_per_second must be between 1 and 1000", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "rate_per_second must be between 1 and 1000", nil)
 		return
 	}
 
@@ -234,19 +234,19 @@ func (h *Handler) StartAutoGenerator(w http.ResponseWriter, r *http.Request) {
 
 	// Check if already running
 	if gen.Status().IsRunning {
-		writeError(w, http.StatusConflict, "AlreadyRunning", "test generator is already running for this connection", nil)
+		_ = writeError(w, http.StatusConflict, "AlreadyRunning", "test generator is already running for this connection", nil)
 		return
 	}
 
 	// Start the generator
 	if err := gen.Start(ctx, req.RatePerSecond, h.publisher); err != nil {
-		writeError(w, http.StatusInternalServerError, "StartError", fmt.Sprintf("failed to start generator: %v", err), nil)
+		_ = writeError(w, http.StatusInternalServerError, "StartError", fmt.Sprintf("failed to start generator: %v", err), nil)
 		return
 	}
 
 	// Return status
 	status := gen.Status()
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
 }
@@ -259,45 +259,45 @@ func (h *Handler) StopAutoGenerator(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID
 	connID := r.PathValue("id")
 	if connID == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
 	// Verify connection exists
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
 	// Get test generator for this connection
 	gen := h.generatorRegistry.Get(tenantID, connID)
 	if gen == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "no test generator running for this connection", nil)
+		_ = writeError(w, http.StatusNotFound, "NotFound", "no test generator running for this connection", nil)
 		return
 	}
 
 	// Stop the generator
 	if err := gen.Stop(); err != nil {
-		writeError(w, http.StatusConflict, "NotRunning", fmt.Sprintf("generator not running: %v", err), nil)
+		_ = writeError(w, http.StatusConflict, "NotRunning", fmt.Sprintf("generator not running: %v", err), nil)
 		return
 	}
 
 	// Return status
 	status := gen.Status()
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
 }
@@ -310,26 +310,26 @@ func (h *Handler) GetAutoGeneratorStatus(w http.ResponseWriter, r *http.Request)
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID
 	connID := r.PathValue("id")
 	if connID == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
 	// Verify connection exists
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
@@ -344,7 +344,7 @@ func (h *Handler) GetAutoGeneratorStatus(w http.ResponseWriter, r *http.Request)
 			ErrorCount:    0,
 			RatePerSecond: 0,
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{
+		_ = writeJSON(w, http.StatusOK, SuccessResponse{
 			Data: status,
 		})
 		return
@@ -352,7 +352,7 @@ func (h *Handler) GetAutoGeneratorStatus(w http.ResponseWriter, r *http.Request)
 
 	// Return actual generator status
 	status := gen.Status()
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: status,
 	})
 }

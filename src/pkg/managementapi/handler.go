@@ -132,9 +132,7 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 		"description": conn.Description,
 	})
 	event := NewConnectionEvent(conn.ID, conn.TenantID, "created", eventData)
-	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
-		// Log error but don't fail the request - connection is already created
-	}
+	_ = h.repo.CreateConnectionEvent(ctx, event)
 
 	// Return created response
 	w.Header().Set("Location", fmt.Sprintf("/api/v1/connections/%s", conn.ID))
@@ -182,7 +180,7 @@ func (h *Handler) ListConnections(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
@@ -377,9 +375,7 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		"deletedAt": time.Now().UTC().String(),
 	})
 	event := NewConnectionEvent(id, tenantID, "deleted", eventData)
-	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
-		// Log error but don't fail the request - connection is already deleted
-	}
+	_ = h.repo.CreateConnectionEvent(ctx, event)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -440,16 +436,11 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		"startedAt": conn.StartedAt,
 	})
 	event := NewConnectionEvent(connID, tenantID, "started", eventData)
-	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
-		// Log error but don't fail the request - status is already updated
-	}
+	_ = h.repo.CreateConnectionEvent(ctx, event)
 
 	// Publish start command to NATS if publisher is available
 	if h.publisher != nil {
-		if err := h.publisher.PublishConnectionStart(ctx, connID, tenantID); err != nil {
-			// Log error but don't fail the request - status is already updated
-			// The connection is marked as running in the database
-		}
+		_ = h.publisher.PublishConnectionStart(ctx, connID, tenantID)
 	}
 
 	_ = writeJSON(w, http.StatusOK, SuccessResponse{
@@ -513,16 +504,11 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 		"stoppedAt": conn.StoppedAt,
 	})
 	event := NewConnectionEvent(connID, tenantID, "stopped", eventData)
-	if err := h.repo.CreateConnectionEvent(ctx, event); err != nil {
-		// Log error but don't fail the request - status is already updated
-	}
+	_ = h.repo.CreateConnectionEvent(ctx, event)
 
 	// Publish stop command to NATS if publisher is available
 	if h.publisher != nil {
-		if err := h.publisher.PublishConnectionStop(ctx, connID, tenantID); err != nil {
-			// Log error but don't fail the request - status is already updated
-			// The connection is marked as stopped in the database
-		}
+		_ = h.publisher.PublishConnectionStop(ctx, connID, tenantID)
 	}
 
 	_ = writeJSON(w, http.StatusOK, SuccessResponse{

@@ -60,9 +60,7 @@ func (n *NATSOutput) Start(ctx context.Context) error {
 	}
 
 	timeout := time.Duration(n.config.Timeout) * time.Second
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	_ = timeout // Context with timeout not needed for nats.Connect
 
 	opts := []nats.Option{
 		nats.Name("VRSky-NATS-Output"),

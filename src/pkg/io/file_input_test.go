@@ -19,6 +19,7 @@ func TestFileConsumer_NewFileConsumer(t *testing.T) {
 	}
 	if consumer == nil {
 		t.Error("NewFileConsumer() returned nil")
+		return
 	}
 	if consumer.dir == "" {
 		t.Error("NewFileConsumer() dir is empty")
@@ -201,7 +202,7 @@ func TestFileConsumer_Metadata(t *testing.T) {
 	// Read envelope, waiting up to 5 seconds for the file to be processed
 	readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer readCancel()
-	env, err := consumer.Read(readCtx)
+	env, _ := consumer.Read(readCtx)
 
 	// Verify fields
 	if env.Source != "FileConsumer" {
@@ -325,7 +326,7 @@ waitLoop:
 	consumer.Close()
 
 	// Cleanup - restore permissions
-	os.Chmod(testFile, 0644)
+	_ = os.Chmod(testFile, 0644)
 }
 
 func TestFileConsumer_Stop(t *testing.T) {

@@ -53,7 +53,7 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 				// Return JSON error response consistent with API handlers
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"error":   "BadRequest",
 					"message": "Missing or invalid tenant ID header",
 					"status":  http.StatusBadRequest,

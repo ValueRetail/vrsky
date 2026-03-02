@@ -682,7 +682,7 @@ func (po *PostgresOutput) executeBatch(batch []*envelope.Envelope) error {
 		po.logger.Error("Failed to begin transaction", "error", err, "batch_size", len(batch))
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(po.ctx)
+	defer func() { _ = tx.Rollback(po.ctx) }()
 
 	for _, env := range batch {
 		if err := po.writeEnvelope(tx, env); err != nil {

@@ -339,7 +339,7 @@ func TestFieldMapper_ComplexJSONPath(t *testing.T) {
 						t.Errorf("expected %d results, got %d", tt.wantCount, len(result))
 					}
 				} else {
-					if result != nil && len(result) > 0 {
+					if len(result) > 0 {
 						t.Errorf("expected empty result, got %v", result)
 					}
 				}

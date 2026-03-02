@@ -147,6 +147,7 @@ func TestProcessMessage_PassThrough(t *testing.T) {
 
 	if result == nil {
 		t.Errorf("ProcessMessage() result is nil")
+		return
 	}
 
 	if result.ID != env.ID {

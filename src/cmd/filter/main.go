@@ -8,11 +8,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/filter"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/ValueRetail/vrsky/pkg/filter"
-	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 func main() {
@@ -73,7 +73,7 @@ func main() {
 		slog.Error("Failed to subscribe to input topic", "error", err)
 		os.Exit(1)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	slog.Info("Subscribed to input topic", "topic", config.InputTopic)
 
@@ -111,7 +111,7 @@ func main() {
 
 				// Publish to appropriate output topic based on decision
 				outputTopic := config.OutputTopic
-				
+
 				// Check decision and publish accordingly
 				if decision != nil && decision.Action == filter.ActionAccept {
 					// Publish to output topic
