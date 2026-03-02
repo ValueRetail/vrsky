@@ -72,7 +72,7 @@ func TestHTTPLookupBackend_SuccessfulRequest(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":    "123",
 			"name":  "Test",
 			"value": 42,
@@ -103,7 +103,7 @@ func TestHTTPLookupBackend_CachingWorks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 
@@ -140,7 +140,7 @@ func TestHTTPLookupBackend_RetryLogic(t *testing.T) {
 		}
 		// Succeed on 3rd attempt
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	}))
 	defer server.Close()
 
@@ -295,7 +295,7 @@ func TestHTTPLookupBackend_ConcurrentRequests(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -329,7 +329,7 @@ func TestHTTPLookupBackend_ClearCache(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -383,7 +383,7 @@ func TestHTTPLookupBackend_WithParams(t *testing.T) {
 			paramsReceived = true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -422,7 +422,7 @@ func TestHTTPLookupBackend_MetricsTracking(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -448,7 +448,7 @@ func TestHTTPLookupBackend_CacheExpiration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 
@@ -480,7 +480,7 @@ func TestHTTPLookupBackend_ContextCancellation(t *testing.T) {
 		// Simulate slow response
 		time.Sleep(5 * time.Second)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123"})
 	}))
 	defer server.Close()
 
@@ -535,7 +535,7 @@ func TestHTTPLookupBackend_DifferentParamsCacheSeparately(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"call": callCount})
 	}))
 	defer server.Close()
 

@@ -94,7 +94,7 @@ func main() {
 		slog.Info("Received signal, shutting down",
 			"signal", sig.String())
 		cancel()
-		prod.Stop(ctx)
+		_ = prod.Stop(ctx)
 	}
 }
 

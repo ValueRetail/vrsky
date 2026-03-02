@@ -64,7 +64,6 @@ type FilterImpl struct {
 	cancel          context.CancelFunc
 	mu              sync.RWMutex
 	closed          bool
-	closedOnce      sync.Once
 	wg              sync.WaitGroup
 	health          component.HealthStatus
 

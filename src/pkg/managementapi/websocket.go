@@ -76,14 +76,14 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	// Get tenant ID from context
 	tenantID, err := GetTenantIDFromContext(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Get connection ID from URL
 	connID := r.PathValue("id")
 	if connID == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
@@ -91,15 +91,15 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	conn, err := h.repo.GetConnection(r.Context(), connID)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
 		}
 		return
 	}
 
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "InternalError", "streaming not supported", nil)
+		_ = writeError(w, http.StatusInternalServerError, "InternalError", "streaming not supported", nil)
 		return
 	}
 

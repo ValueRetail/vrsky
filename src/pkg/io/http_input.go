@@ -17,12 +17,11 @@ import (
 
 // HTTPInput listens for webhooks on a configured HTTP port
 type HTTPInput struct {
-	port      string
-	server    *http.Server
-	messages  chan *envelope.Envelope
-	closeOnce sync.Once
-	closed    bool
-	mu        sync.Mutex
+	port     string
+	server   *http.Server
+	messages chan *envelope.Envelope
+	closed   bool
+	mu       sync.Mutex
 }
 
 // NewHTTPInput creates a new HTTP input handler

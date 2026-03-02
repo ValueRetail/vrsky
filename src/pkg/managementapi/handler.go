@@ -106,12 +106,12 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Validate configuration (fail fast)
 	if err := h.validator.ValidateConnection(conn); err != nil {
 		if cfgErr, ok := err.(*ConfigError); ok {
-			writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
 				"field":     cfgErr.Field,
 				"component": cfgErr.Component,
 			})
 		} else {
-			writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
 		}
 		return
 	}
@@ -119,9 +119,9 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Save to database
 	if err := h.repo.CreateConnection(ctx, conn); err != nil {
 		if conflictErr, ok := err.(*ConflictError); ok {
-			writeError(w, http.StatusConflict, "Conflict", conflictErr.Error(), nil)
+			_ = writeError(w, http.StatusConflict, "Conflict", conflictErr.Error(), nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to create connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to create connection", nil)
 		}
 		return
 	}
@@ -138,7 +138,7 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 
 	// Return created response
 	w.Header().Set("Location", fmt.Sprintf("/api/v1/connections/%s", conn.ID))
-	writeJSON(w, http.StatusCreated, SuccessResponse{Data: conn})
+	_ = writeJSON(w, http.StatusCreated, SuccessResponse{Data: conn})
 }
 
 // GetConnection handles GET /api/v1/connections/{id}
@@ -148,7 +148,7 @@ func (h *Handler) GetConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
@@ -159,20 +159,20 @@ func (h *Handler) GetConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.repo.GetConnection(ctx, id)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
 		}
 		return
 	}
 
 	// Verify tenant ownership
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, SuccessResponse{Data: conn})
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: conn})
 }
 
 // ListConnections handles GET /api/v1/connections
@@ -211,7 +211,7 @@ func (h *Handler) ListConnections(w http.ResponseWriter, r *http.Request) {
 	// Get connections
 	connections, total, err := h.repo.ListConnections(ctx, tenantID, filters)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to list connections", nil)
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to list connections", nil)
 		return
 	}
 
@@ -219,7 +219,7 @@ func (h *Handler) ListConnections(w http.ResponseWriter, r *http.Request) {
 		connections = []*Connection{} // Return empty array instead of null
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{
+	_ = writeJSON(w, http.StatusOK, ListResponse{
 		Data:   connections,
 		Total:  total,
 		Limit:  limit,
@@ -234,7 +234,7 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
@@ -245,22 +245,22 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	existingConn, err := h.repo.GetConnection(ctx, id)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
 		}
 		return
 	}
 
 	// Verify tenant ownership
 	if existingConn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
 		return
 	}
 
 	// Prevent updating running connections
 	if existingConn.Status == "running" {
-		writeError(w, http.StatusBadRequest, "InvalidState", "cannot update a running connection, please stop it first", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidState", "cannot update a running connection, please stop it first", nil)
 		return
 	}
 
@@ -270,7 +270,7 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var updateReq UpdateConnectionRequest
 	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidJSON", fmt.Sprintf("failed to parse request: %v", err), nil)
 		return
 	}
 
@@ -302,12 +302,12 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	// Validate updated configuration
 	if err := h.validator.ValidateConnection(existingConn); err != nil {
 		if cfgErr, ok := err.(*ConfigError); ok {
-			writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
 				"field":     cfgErr.Field,
 				"component": cfgErr.Component,
 			})
 		} else {
-			writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
 		}
 		return
 	}
@@ -315,14 +315,14 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	// Update in database
 	if err := h.repo.UpdateConnection(ctx, existingConn); err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection", nil)
 		}
 		return
 	}
 
-	writeJSON(w, http.StatusOK, SuccessResponse{Data: existingConn})
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: existingConn})
 }
 
 // DeleteConnection handles DELETE /api/v1/connections/{id}
@@ -332,7 +332,7 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
@@ -343,31 +343,31 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.repo.GetConnection(ctx, id)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to get connection", nil)
 		}
 		return
 	}
 
 	// Verify tenant ownership
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
 		return
 	}
 
 	// Prevent deleting running connections
 	if conn.Status == "running" {
-		writeError(w, http.StatusBadRequest, "InvalidState", "cannot delete a running connection, please stop it first", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidState", "cannot delete a running connection, please stop it first", nil)
 		return
 	}
 
 	// Delete connection (cascade delete events)
 	if err := h.repo.DeleteConnection(ctx, id); err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to delete connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to delete connection", nil)
 		}
 		return
 	}
@@ -391,14 +391,14 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID from URL path
 	connID := r.PathValue("id")
 	if strings.TrimSpace(connID) == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
@@ -406,22 +406,22 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
 		}
 		return
 	}
 
 	// Verify tenant ownership
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
 	// Check if connection is already running
 	if conn.Status == "running" {
-		writeError(w, http.StatusBadRequest, "InvalidState", "connection is already running", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidState", "connection is already running", nil)
 		return
 	}
 
@@ -430,7 +430,7 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	conn.StartedAt = pointerTo(time.Now().UTC())
 
 	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
-		writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
 	}
 
@@ -452,7 +452,7 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: conn,
 	})
 }
@@ -464,14 +464,14 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	// Get tenant ID
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
 
 	// Extract connection ID from URL path
 	connID := r.PathValue("id")
 	if strings.TrimSpace(connID) == "" {
-		writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
 		return
 	}
 
@@ -479,22 +479,22 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.repo.GetConnection(ctx, connID)
 	if err != nil {
 		if _, ok := err.(*NotFoundError); ok {
-			writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
 		} else {
-			writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
 		}
 		return
 	}
 
 	// Verify tenant ownership
 	if conn.TenantID != tenantID {
-		writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
 		return
 	}
 
 	// Check if connection is already stopped
 	if conn.Status == "stopped" {
-		writeError(w, http.StatusBadRequest, "InvalidState", "connection is already stopped", nil)
+		_ = writeError(w, http.StatusBadRequest, "InvalidState", "connection is already stopped", nil)
 		return
 	}
 
@@ -503,7 +503,7 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	conn.StoppedAt = pointerTo(time.Now().UTC())
 
 	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
-		writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
 	}
 
@@ -525,7 +525,7 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, SuccessResponse{
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{
 		Data: conn,
 	})
 }

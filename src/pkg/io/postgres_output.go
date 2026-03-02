@@ -1037,7 +1037,7 @@ func (po *PostgresOutput) Close() error {
 
 		// Unsubscribe from NATS first to stop accepting new messages
 		if po.natsSub != nil {
-			po.natsSub.Unsubscribe()
+			_ = po.natsSub.Unsubscribe()
 		}
 
 		// Wait for all in-flight writes to complete

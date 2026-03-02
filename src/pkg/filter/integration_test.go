@@ -62,7 +62,7 @@ func TestIntegration_FilterAcceptsMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe error = %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -136,7 +136,7 @@ func TestIntegration_FilterRejectsMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe error = %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -209,7 +209,7 @@ func TestIntegration_FilterWithComplexCondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe error = %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -305,7 +305,7 @@ func TestIntegration_MultipleFilters(t *testing.T) {
 	sub, _ := nc.Subscribe(filter2Config.OutputTopic, func(msg *nats.Msg) {
 		outputReceived <- msg.Data
 	})
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -372,7 +372,7 @@ func TestIntegration_RejectionHandling(t *testing.T) {
 		env, _ := envelope.Unmarshal(msg.Data)
 		rejectionReceived <- env
 	})
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -423,7 +423,7 @@ func TestIntegration_RejectionHandlerMetadata(t *testing.T) {
 		env, _ := envelope.Unmarshal(msg.Data)
 		rejectionReceived <- env
 	})
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -471,7 +471,7 @@ func TestIntegration_DeadLetterQueue(t *testing.T) {
 		env, _ := envelope.Unmarshal(msg.Data)
 		dlqReceived <- env
 	})
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -522,7 +522,7 @@ func TestIntegration_ErrorRecovery(t *testing.T) {
 		env, _ := envelope.Unmarshal(msg.Data)
 		dlqReceived <- env
 	})
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -277,8 +277,8 @@ func (fr *FunctionRegistry) SetLookupBackend(backend LookupBackend) {
 		fr.mu.Unlock()
 
 		// Re-register lookup functions with new backend
-		fr.Register("lookup", newLookupFunc(backend))
-		fr.Register("http_lookup", newHTTPLookupFunc(backend))
+		_ = fr.Register("lookup", newLookupFunc(backend))
+		_ = fr.Register("http_lookup", newHTTPLookupFunc(backend))
 	}
 }
 
