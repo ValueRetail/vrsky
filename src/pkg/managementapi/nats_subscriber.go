@@ -3,6 +3,7 @@ package managementapi
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"sync"
@@ -23,7 +24,7 @@ type NATSSubscriber struct {
 // NewNATSSubscriber creates a new NATS subscriber
 func NewNATSSubscriber(nc *nats.Conn, cache *MetricsCache, logger *log.Logger) *NATSSubscriber {
 	if logger == nil {
-		logger = log.New(nil, "", 0) // Silence logger if not provided
+		logger = log.New(io.Discard, "", 0) // Silence logger if not provided
 	}
 	return &NATSSubscriber{
 		nc:            nc,

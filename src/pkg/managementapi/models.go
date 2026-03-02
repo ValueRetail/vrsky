@@ -3,6 +3,7 @@ package managementapi
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -217,9 +218,9 @@ func (s *SourceConfig) Scan(value interface{}) error {
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
-		return nil
+		return fmt.Errorf("cannot convert %T to []byte", value)
 	}
-	return json.Unmarshal(bytes, &s)
+	return json.Unmarshal(bytes, s)
 }
 
 // Similar implementations for other JSONB types
@@ -233,9 +234,9 @@ func (c *ConverterConfig) Scan(value interface{}) error {
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
-		return nil
+		return fmt.Errorf("cannot convert %T to []byte", value)
 	}
-	return json.Unmarshal(bytes, &c)
+	return json.Unmarshal(bytes, c)
 }
 
 func (f FilterConfig) Value() (driver.Value, error) {
@@ -248,9 +249,9 @@ func (f *FilterConfig) Scan(value interface{}) error {
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
-		return nil
+		return fmt.Errorf("cannot convert %T to []byte", value)
 	}
-	return json.Unmarshal(bytes, &f)
+	return json.Unmarshal(bytes, f)
 }
 
 func (d DestinationConfig) Value() (driver.Value, error) {
@@ -263,9 +264,9 @@ func (d *DestinationConfig) Scan(value interface{}) error {
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
-		return nil
+		return fmt.Errorf("cannot convert %T to []byte", value)
 	}
-	return json.Unmarshal(bytes, &d)
+	return json.Unmarshal(bytes, d)
 }
 
 // CreateConnectionRequest is the request to create a new connection

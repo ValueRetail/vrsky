@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -19,7 +20,7 @@ type NATSPublisher struct {
 // NewNATSPublisher creates a new NATS publisher
 func NewNATSPublisher(nc *nats.Conn, logger *log.Logger) *NATSPublisher {
 	if logger == nil {
-		logger = log.New(nil, "", 0) // Silence logger if not provided
+		logger = log.New(io.Discard, "", 0) // Silence logger if not provided
 	}
 	return &NATSPublisher{
 		nc:     nc,
@@ -179,13 +180,18 @@ func (p *NATSPublisher) publishCommand(ctx context.Context, tenantID, cmdType st
 
 		// Create timer for publish timeout
 		timer := time.NewTimer(publishTimeout)
-		defer timer.Stop()
 
 		// Wait for publish with timeout
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return fmt.Errorf("publish context cancelled")
 		case err := <-done:
+			if !timer.Stop() {
+				<-timer.C
+			}
 			if err == nil {
 				p.logger.Printf("Published %s command to %s", cmdType, subject)
 				return nil

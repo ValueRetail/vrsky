@@ -26,7 +26,7 @@ COPY vitest.config.ts ./
 RUN npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.27-alpine
+FROM nginx:1.27-alpine AS nginx
 
 # Install curl for health checks
 RUN apk add --no-cache curl

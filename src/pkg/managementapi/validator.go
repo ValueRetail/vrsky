@@ -185,27 +185,35 @@ func (v *Validator) ValidateConverterConfig(config *ConverterConfig) error {
 // validateSchemaValidator validates schema validator configuration
 func (v *Validator) validateSchemaValidator(config *SchemaValidatorConfig) error {
 	if config.InputSchema != nil && len(config.InputSchema) > 0 {
-		// Validate input schema is valid JSON schema
+		// Validate input schema is valid JSON
 		var schema interface{}
 		if err := json.Unmarshal(config.InputSchema, &schema); err != nil {
-			return &ConfigError{Component: "converter", Field: "schema_validator.input_schema", Reason: fmt.Sprintf("invalid JSON schema: %v", err)}
+			return &ConfigError{Component: "converter", Field: "schema_validator.input_schema", Reason: fmt.Sprintf("invalid JSON: %v", err)}
 		}
 
-		// Try to compile the schema
-		if _, err := v.schemaCompiler.Compile(string(config.InputSchema)); err != nil {
+		// Create a temporary compiler and add the schema
+		c := jsonschema.NewCompiler()
+		if err := c.AddResource("input_schema.json", strings.NewReader(string(config.InputSchema))); err != nil {
+			return &ConfigError{Component: "converter", Field: "schema_validator.input_schema", Reason: fmt.Sprintf("invalid JSON schema: %v", err)}
+		}
+		if _, err := c.Compile("input_schema.json"); err != nil {
 			return &ConfigError{Component: "converter", Field: "schema_validator.input_schema", Reason: fmt.Sprintf("schema compilation failed: %v", err)}
 		}
 	}
 
 	if config.OutputSchema != nil && len(config.OutputSchema) > 0 {
-		// Validate output schema is valid JSON schema
+		// Validate output schema is valid JSON
 		var schema interface{}
 		if err := json.Unmarshal(config.OutputSchema, &schema); err != nil {
-			return &ConfigError{Component: "converter", Field: "schema_validator.output_schema", Reason: fmt.Sprintf("invalid JSON schema: %v", err)}
+			return &ConfigError{Component: "converter", Field: "schema_validator.output_schema", Reason: fmt.Sprintf("invalid JSON: %v", err)}
 		}
 
-		// Try to compile the schema
-		if _, err := v.schemaCompiler.Compile(string(config.OutputSchema)); err != nil {
+		// Create a temporary compiler and add the schema
+		c := jsonschema.NewCompiler()
+		if err := c.AddResource("output_schema.json", strings.NewReader(string(config.OutputSchema))); err != nil {
+			return &ConfigError{Component: "converter", Field: "schema_validator.output_schema", Reason: fmt.Sprintf("invalid JSON schema: %v", err)}
+		}
+		if _, err := c.Compile("output_schema.json"); err != nil {
 			return &ConfigError{Component: "converter", Field: "schema_validator.output_schema", Reason: fmt.Sprintf("schema compilation failed: %v", err)}
 		}
 	}

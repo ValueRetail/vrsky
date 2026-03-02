@@ -28,16 +28,16 @@ func AuthMiddleware() func(http.Handler) http.Handler {
 // Context key for tenant ID
 type contextKey string
 
-const tenantIDKey contextKey = "tenant_id"
+const TenantIDKey contextKey = "tenant_id"
 
-// contextWithTenantID adds tenant ID to request context
-func contextWithTenantID(ctx context.Context, tenantID string) context.Context {
-	return context.WithValue(ctx, tenantIDKey, tenantID)
+// ContextWithTenantID adds tenant ID to request context
+func ContextWithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, TenantIDKey, tenantID)
 }
 
-// GetTenantID retrieves tenant ID from request context
-func GetTenantID(ctx context.Context) string {
-	tenantID := ctx.Value(tenantIDKey)
+// GetTenantIDFromContext retrieves tenant ID from request context
+func GetTenantIDFromContext(ctx context.Context) string {
+	tenantID := ctx.Value(TenantIDKey)
 	if tenantID == nil {
 		return ""
 	}

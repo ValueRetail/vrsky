@@ -73,7 +73,7 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -146,7 +146,7 @@ func (h *Handler) StartAutoGenerator(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -205,7 +205,7 @@ func (h *Handler) StopAutoGenerator(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -251,7 +251,7 @@ func (h *Handler) GetAutoGeneratorStatus(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -357,11 +357,11 @@ func (tg *TestGenerator) Start(ctx context.Context, ratePerSecond int, publisher
 	tg.startTime = &now
 	tg.stopTime = nil
 
-	tg.mu.Unlock()
-
-	// Start generation goroutine
+	// Create context and cancel function while holding the lock
 	generatorCtx, cancel := context.WithCancel(ctx)
 	tg.cancel = cancel
+
+	tg.mu.Unlock()
 
 	go tg.generationLoop(generatorCtx, publisher)
 
@@ -381,10 +381,15 @@ func (tg *TestGenerator) Stop() error {
 	now := time.Now().UTC()
 	tg.stopTime = &now
 
+	// Capture the cancel function while holding the lock
+	cancel := tg.cancel
+	tg.cancel = nil
+
 	tg.mu.Unlock()
 
-	if tg.cancel != nil {
-		tg.cancel()
+	// Call cancel after releasing the lock
+	if cancel != nil {
+		cancel()
 	}
 
 	return nil

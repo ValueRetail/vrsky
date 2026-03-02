@@ -5,9 +5,10 @@ services:
     build:
       context: .
       dockerfile: ui/Dockerfile
+      target: builder
     container_name: vrsky-ui-dev
     ports:
-      - "5173:80"
+      - "5173:5173"
     environment:
       VITE_API_BASE_URL: "http://localhost:8080/api"
       VITE_ENVIRONMENT: "development"
@@ -15,7 +16,7 @@ services:
       - ./ui:/app
       - /app/node_modules
       - /app/dist
-    command: npm run dev
+    command: npm run dev -- --host 0.0.0.0
     profiles:
       - dev
     networks:

@@ -70,14 +70,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
+        id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ${{ matrix.service.dockerfile || format('{0}/Dockerfile', matrix.service.path) }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ${{ env.REGISTRY }}/ValueRetail/${{ matrix.service.name }}:latest
-            ${{ env.REGISTRY }}/ValueRetail/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/ValueRetail/vrsky/${{ matrix.service.name }}:latest
+            ${{ env.REGISTRY }}/ValueRetail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -87,7 +88,7 @@ jobs:
   test:
     name: Test UI
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.files[*].filename, 'ui/')
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.files.*.name, 'ui/')
 
     steps:
       - name: Checkout code
@@ -115,7 +116,7 @@ jobs:
   go-tests:
     name: Go Tests
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.files[*].filename, 'src/') || github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && contains(github.event.pull_request.files.*.name, 'src/'))
 
     steps:
       - name: Checkout code

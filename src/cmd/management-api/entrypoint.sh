@@ -19,11 +19,11 @@ RETRY_COUNT=0
 
 # Function to check if PostgreSQL is ready
 check_postgres() {
-    if command -v pg_isready &> /dev/null; then
+    if command -v pg_isready >/dev/null 2>&1; then
         pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1
     else
         # Fallback: try connecting with psql
-        if command -v psql &> /dev/null; then
+        if command -v psql >/dev/null 2>&1; then
             psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" >/dev/null 2>&1
         else
             # Final fallback: assume it's ready (this will fail in management-api if DB is actually down)
@@ -53,7 +53,7 @@ fi
 echo "[Management API] Running database migrations..."
 if [ -d "./migrations" ]; then
     # Using golang-migrate if available
-    if command -v migrate &> /dev/null; then
+    if command -v migrate >/dev/null 2>&1; then
         echo "[Management API] Using golang-migrate for schema migrations..."
         if migrate -path "./migrations" -database "$DATABASE_URL" up; then
             echo "[Management API] ✓ Database migrations completed successfully"

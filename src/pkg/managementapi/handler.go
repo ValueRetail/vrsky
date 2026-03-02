@@ -1,7 +1,6 @@
 package managementapi
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,21 +73,12 @@ func writeError(w http.ResponseWriter, status int, errType, message string, deta
 	})
 }
 
-// Helper to get tenant ID from context
-func getTenantID(ctx context.Context) (string, error) {
-	tenantID, ok := ctx.Value("tenant_id").(string)
-	if !ok || strings.TrimSpace(tenantID) == "" {
-		return "", &BadRequestError{Message: "tenant ID is missing"}
-	}
-	return tenantID, nil
-}
-
 // CreateConnection handles POST /api/v1/connections
 func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -144,7 +134,7 @@ func (h *Handler) GetConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -178,7 +168,7 @@ func (h *Handler) ListConnections(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -230,7 +220,7 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -328,7 +318,7 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -378,7 +368,7 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
@@ -441,7 +431,7 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get tenant ID
-	tenantID, err := getTenantID(ctx)
+	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return

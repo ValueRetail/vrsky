@@ -53,7 +53,7 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 
 			// Store tenant ID in request context for handlers to use
 			ctx := r.Context()
-			r = r.WithContext(contextWithTenantID(ctx, tenantID))
+			r = r.WithContext(ContextWithTenantID(ctx, tenantID))
 
 			next.ServeHTTP(w, r)
 		})

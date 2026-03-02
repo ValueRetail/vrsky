@@ -76,19 +76,27 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getDurationEnv retrieves a duration environment variable in milliseconds
+// getDurationEnv retrieves a duration environment variable
+// If the key ends with "_SEC", it parses the value as seconds
+// Otherwise, it parses as milliseconds for backward compatibility
 func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 	val := os.Getenv(key)
 	if val == "" {
 		return defaultValue
 	}
 
-	ms, err := strconv.Atoi(val)
+	num, err := strconv.Atoi(val)
 	if err != nil {
 		return defaultValue
 	}
 
-	return time.Duration(ms) * time.Millisecond
+	// Check if the key ends with "_SEC" to determine unit
+	if strings.HasSuffix(key, "_SEC") {
+		return time.Duration(num) * time.Second
+	}
+
+	// Default to milliseconds for backward compatibility
+	return time.Duration(num) * time.Millisecond
 }
 
 // parseEnvList parses a comma-separated list from environment variable

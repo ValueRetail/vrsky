@@ -1,3 +1,6 @@
+-- Enable pgcrypto extension for UUID generation
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Create connections table for Management API
 CREATE TABLE IF NOT EXISTS connections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
