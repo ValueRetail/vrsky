@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { connectionService } from '../services/connectionService'
 import { isAPIError, getErrorMessage } from '../utils/errors'
+import { buildSourceConfig, buildConverterConfig, buildFilterConfig, buildDestinationConfig, toSourceFormData, toConverterFormData, toFilterFormData, toDestinationFormData } from '../utils/typeGuards'
 import ConnectionWizard from '../components/ConnectionForm/ConnectionWizard'
 import type { Connection } from '../types/models'
 import type { ConnectionFormData } from '../types/forms'
@@ -45,25 +46,13 @@ export default function EditConnection() {
     if (!connection) return
 
     try {
-      const sourceConfig = {
-        type: formData.source.type,
-        ...(formData.source.config as any),
-      }
+      const sourceConfig = buildSourceConfig(formData.source.type, formData.source.config)
 
-      const converterConfig = {
-        type: formData.converter.type,
-        ...(formData.converter.config as any),
-      }
+      const converterConfig = buildConverterConfig(formData.converter.type, formData.converter.config)
 
-      const filterConfig = {
-        type: formData.filter.type,
-        ...(formData.filter.config as any),
-      }
+      const filterConfig = buildFilterConfig(formData.filter.type, formData.filter.config)
 
-      const destinationConfig = {
-        type: formData.destination.type,
-        ...(formData.destination.config as any),
-      }
+      const destinationConfig = buildDestinationConfig(formData.destination.type, formData.destination.config)
 
       const connectionData = {
         name: formData.basicInfo.name,
@@ -130,20 +119,20 @@ export default function EditConnection() {
       description: connection.description,
     },
     source: {
-      type: connection.source_config.type as any,
-      config: connection.source_config as any,
+      type: connection.source_config.type,
+      config: toSourceFormData(connection.source_config),
     },
     converter: {
-      type: connection.converter_config.type as any,
-      config: connection.converter_config as any,
+      type: connection.converter_config.type,
+      config: toConverterFormData(connection.converter_config),
     },
     filter: {
-      type: connection.filter_config.type as any,
-      config: connection.filter_config as any,
+      type: connection.filter_config.type,
+      config: toFilterFormData(connection.filter_config),
     },
     destination: {
-      type: connection.destination_config.type as any,
-      config: connection.destination_config as any,
+      type: connection.destination_config.type,
+      config: toDestinationFormData(connection.destination_config),
     },
   }
 

@@ -9,7 +9,7 @@ import ConverterStep from './steps/ConverterStep'
 import FilterStep from './steps/FilterStep'
 import DestinationStep from './steps/DestinationStep'
 import ReviewStep from './steps/ReviewStep'
-import type { ConnectionFormData } from '../../types/forms'
+import type { ConnectionFormData, BasicInfoFormData } from '../../types/forms'
 
 const basicInfoSchema = z.object({
   basicInfo: z.object({
@@ -79,7 +79,7 @@ export default function ConnectionWizard({ initialData, onSubmit, onCancel }: Co
   const handleBasicInfoUpdate = (_field: string, data: unknown) => {
     setFormData(prev => ({
       ...prev,
-      basicInfo: data as any,
+      basicInfo: data as BasicInfoFormData,
     }))
   }
 
@@ -146,7 +146,7 @@ export default function ConnectionWizard({ initialData, onSubmit, onCancel }: Co
               disabled={isSubmitting}
               className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
             >
-              {isSubmitting ? 'Creating...' : 'Create Connection'}
+              {isSubmitting ? (initialData ? 'Saving...' : 'Creating...') : (initialData ? 'Save Changes' : 'Create Connection')}
             </button>
           )}
         </div>
