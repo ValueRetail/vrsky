@@ -32,7 +32,7 @@ export default function Dashboard() {
     }
 
     loadConnections()
-  }, [])
+  }, [setConnections, setLoading, setError, showErrorNotification])
 
   return (
     <div className="space-y-6">
@@ -64,7 +64,12 @@ export default function Dashboard() {
       </div>
 
       <div className="card p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Recent Connections</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900">Recent Connections</h2>
+          <Link to="/connections" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+            View All →
+          </Link>
+        </div>
         {connections.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-gray-600 mb-4">No connections yet</p>

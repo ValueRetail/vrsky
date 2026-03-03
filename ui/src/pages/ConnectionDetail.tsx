@@ -103,6 +103,29 @@ export default function ConnectionDetail() {
     }
   }
 
+  const handleClone = async () => {
+    if (!connection) return
+    try {
+      setActionLoading(true)
+      const clonePayload = {
+        name: `Copy of ${connection.name}`,
+        description: connection.description,
+        source_config: connection.source_config,
+        converter_config: connection.converter_config,
+        filter_config: connection.filter_config,
+        destination_config: connection.destination_config,
+      }
+      const newConnection = await connectionService.create(clonePayload as unknown)
+      addNotification({ type: 'success', title: 'Cloned', message: `"${newConnection.name}" created` })
+      navigate(`/connections/${newConnection.id}`)
+    } catch (error) {
+      const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to clone connection'
+      addNotification({ type: 'error', title: 'Error', message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleDelete = () => {
     showConfirmDialog({
       title: 'Delete Connection',
@@ -212,6 +235,13 @@ export default function ConnectionDetail() {
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
         >
           Edit
+        </button>
+        <button
+          onClick={handleClone}
+          disabled={actionLoading}
+          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
+        >
+          Clone
         </button>
         <button
           onClick={handleDelete}
