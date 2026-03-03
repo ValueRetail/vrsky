@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard'
 import CreateConnection from './pages/CreateConnection'
 import EditConnection from './pages/EditConnection'
 import ConnectionDetail from './pages/ConnectionDetail'
+import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
 import NotFound from './pages/NotFound'
 
@@ -30,6 +31,7 @@ function App() {
         <Routes>
           <Route element={<RootLayout />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/connections" element={<ConnectionsList />} />
             <Route path="/connections/create" element={<CreateConnection />} />
             <Route path="/connections/:id" element={<ConnectionDetail />} />
             <Route path="/connections/:id/edit" element={<EditConnection />} />
