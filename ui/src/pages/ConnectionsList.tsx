@@ -39,9 +39,11 @@ export default function ConnectionsList() {
     load()
   }, [page, addNotification])
 
-  const filtered = statusFilter === 'all'
-    ? connections
-    : connections.filter(c => c.status === statusFilter)
+  const filtered = connections && connections.length > 0
+    ? (statusFilter === 'all'
+      ? connections
+      : connections.filter(c => c.status === statusFilter))
+    : []
 
   const handleDelete = (connection: Connection) => {
     showConfirmDialog({
@@ -70,140 +72,159 @@ export default function ConnectionsList() {
 
   const statusBadge = (status: ConnectionStatus) => {
     const classes: Record<ConnectionStatus, string> = {
-      running: 'bg-green-100 text-green-700',
-      stopped: 'bg-yellow-100 text-yellow-700',
-      error: 'bg-red-100 text-red-700',
+      running: 'badge badge-success',
+      stopped: 'badge badge-warning',
+      error: 'badge badge-danger',
     }
     return (
-      <span className={`px-3 py-1 rounded-full text-sm font-medium ${classes[status]}`}>
-        {status}
+      <span className={classes[status]}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     )
   }
 
   return (
-    <div className="space-y-6" data-testid="connections-list">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">All Connections</h1>
-        <Link
-          to="/connections/create"
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
-        >
-          New Connection
-        </Link>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <label className="text-sm font-medium text-gray-700">Status:</label>
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-        >
-          <option value="all">All</option>
-          <option value="running">Running</option>
-          <option value="stopped">Stopped</option>
-          <option value="error">Error</option>
-        </select>
-      </div>
-
-      {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-gray-500 text-lg mb-4">No connections yet. Create your first connection.</p>
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 py-8 px-4 sm:px-6 lg:px-8" data-testid="connections-list">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in">
+          <div>
+            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400 bg-clip-text text-transparent">
+              Connections
+            </h1>
+            <p className="text-neutral-600 dark:text-neutral-400 mt-2">
+              Manage your data pipeline integrations
+            </p>
+          </div>
           <Link
             to="/connections/create"
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+            className="btn-primary btn-lg"
           >
-            Create Connection
+            New Connection
           </Link>
         </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Destination</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filtered.map(connection => (
-                <tr key={connection.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div>
-                      <p className="font-medium text-gray-900">{connection.name}</p>
-                      {connection.description && (
-                        <p className="text-sm text-gray-500 truncate max-w-xs">{connection.description}</p>
-                      )}
+
+        {/* Filters Section */}
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center animate-fade-in">
+          <label className="label">Status Filter:</label>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+            className="input-base"
+          >
+            <option value="all">All Connections</option>
+            <option value="running">Running</option>
+            <option value="stopped">Stopped</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+
+        {/* Content Section */}
+        {loading ? (
+          <div className="space-y-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-20 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card-elevated text-center py-16 animate-fade-in">
+            <div className="space-y-4">
+              <div className="text-5xl">∅</div>
+              <p className="text-lg text-neutral-600 dark:text-neutral-400">
+                No connections yet
+              </p>
+              <p className="text-neutral-500 dark:text-neutral-500 mb-6">
+                Create your first connection to start building integrations
+              </p>
+              <Link
+                to="/connections/create"
+                className="btn-primary inline-block"
+              >
+                Create Connection
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 animate-fade-in">
+            {filtered.map(connection => (
+              <div
+                key={connection.id}
+                className="card-elevated hover:shadow-lg transition-shadow duration-base group"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  {/* Connection Info */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-50 truncate">
+                      {connection.name}
+                    </h3>
+                    {connection.description && (
+                      <p className="text-sm text-neutral-600 dark:text-neutral-400 truncate">
+                        {connection.description}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-4 mt-3 text-sm text-neutral-600 dark:text-neutral-400">
+                      <span>Source: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.source_config.type}</span></span>
+                      <span>Destination: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.destination_config.type}</span></span>
+                      <span>Created: <span className="font-medium text-neutral-900 dark:text-neutral-50">{new Date(connection.created_at).toLocaleDateString()}</span></span>
                     </div>
-                  </td>
-                  <td className="px-6 py-4">{statusBadge(connection.status)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{connection.source_config.type}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{connection.destination_config.type}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {new Date(connection.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
+                  </div>
+
+                  {/* Status & Actions */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                    <div>
+                      {statusBadge(connection.status)}
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
                       <button
                         onClick={() => navigate(`/connections/${connection.id}`)}
-                        className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                        className="btn-secondary btn-sm flex-1 sm:flex-none"
                       >
                         View
                       </button>
                       <button
                         onClick={() => navigate(`/connections/${connection.id}/edit`)}
-                        className="text-sm text-gray-600 hover:text-gray-700 font-medium"
+                        className="btn-secondary btn-sm flex-1 sm:flex-none"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(connection)}
                         disabled={actionLoading}
-                        className="text-sm text-red-600 hover:text-red-700 font-medium disabled:text-gray-400"
+                        className="btn-danger btn-sm flex-1 sm:flex-none"
                       >
                         Delete
                       </button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Previous
-          </button>
-          <span className="text-sm text-gray-700">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Next
-          </button>
-        </div>
-      )}
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-8 animate-fade-in">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="btn-secondary"
+            >
+              Previous
+            </button>
+            <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="btn-secondary"
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

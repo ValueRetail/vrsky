@@ -120,28 +120,19 @@ export interface TestMessageResponse {
 
 export interface AutoGeneratorStatusResponse {
   connection_id: string
-  running: boolean
-  rate: number // messages per second
-  message_size: 'small' | 'medium' | 'large'
-  total_generated: number
-  started_at?: string
-  stopped_at?: string
+  is_running: boolean
+  rate_per_second: number
+  message_count: number
+  error_count: number
+  start_time?: string
+  stop_time?: string
+  last_message_time?: string
+  uptime?: string
 }
 
-export interface StartGeneratorResponse {
-  connection_id: string
-  running: true
-  rate: number
-  message_size: string
-  started_at: string
-}
+export interface StartGeneratorResponse extends AutoGeneratorStatusResponse {}
 
-export interface StopGeneratorResponse {
-  connection_id: string
-  running: false
-  stopped_at: string
-  total_generated: number
-}
+export interface StopGeneratorResponse extends AutoGeneratorStatusResponse {}
 
 // Health & Status
 export interface HealthResponse {

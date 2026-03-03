@@ -42,7 +42,7 @@ export function MetricsChart({
   return (
     <div className="p-4 rounded-lg border border-gray-200 bg-white">
       {title && <h3 className="text-sm font-bold text-gray-900 mb-3">{title}</h3>}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-w-full">
         <svg width={chartWidth} height={height} viewBox={`0 0 ${chartWidth} ${height}`}>
           {/* Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((percentage) => {

@@ -132,14 +132,30 @@ export default function ConnectionWizard({ initialData, onSubmit, onCancel }: Co
               Previous
             </button>
           )}
-          {currentStep < steps.length - 1 && (
-            <button
-              onClick={handleNext}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              Next
-            </button>
-          )}
+           {currentStep < steps.length - 1 && (
+             <button
+               onClick={() => {
+                 console.log('Next clicked, current step:', currentStep)
+                 handleNext()
+               }}
+               style={{
+                 padding: '0.5rem 1.5rem',
+                 backgroundColor: '#2563eb',
+                 color: '#fff',
+                 border: 'none',
+                 borderRadius: '0.375rem',
+                 cursor: 'pointer',
+                 fontWeight: '500',
+                 transition: 'background-color 150ms ease-in-out',
+                 zIndex: 10,
+                 position: 'relative',
+               }}
+               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1d4ed8')}
+               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#2563eb')}
+             >
+               Next
+             </button>
+           )}
           {currentStep === steps.length - 1 && (
             <button
               onClick={handleFinalSubmit}

@@ -90,20 +90,27 @@ export default function EditConnection() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-950">
+        <div className="space-y-4 text-center">
+          <div className="flex justify-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-200 dark:border-primary-900 border-t-primary-600 dark:border-t-primary-400"></div>
+          </div>
+          <p className="text-neutral-600 dark:text-neutral-400 font-medium">Loading connection...</p>
+        </div>
       </div>
     )
   }
 
   if (!connection) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Connection not found</h1>
+      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center px-4">
+        <div className="card-elevated text-center py-12 max-w-md">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50 mb-2">Connection not found</h1>
+          <p className="text-neutral-600 dark:text-neutral-400 mb-6">The connection you're looking for doesn't exist or has been deleted.</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="btn-primary"
           >
             Back to Dashboard
           </button>
@@ -137,23 +144,36 @@ export default function EditConnection() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <button
-          onClick={() => navigate(`/connections/${connection.id}`)}
-          className="text-blue-600 hover:text-blue-700 mb-2"
-        >
-          ← Back
-        </button>
-        <h1 className="text-3xl font-bold text-gray-900">Edit Connection</h1>
-        <p className="text-gray-600 mt-1">{connection.name}</p>
-      </div>
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Header Section */}
+        <div className="mb-8 animate-fade-in">
+          <button
+            onClick={() => navigate(`/connections/${connection.id}`)}
+            className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium mb-4 transition-colors duration-base"
+          >
+            <span>←</span>
+            <span>Back to Connection</span>
+          </button>
+          <div className="space-y-2">
+            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400 bg-clip-text text-transparent">
+              Edit Connection
+            </h1>
+            <p className="text-lg text-neutral-600 dark:text-neutral-400">
+              Modify {connection.name}
+            </p>
+          </div>
+        </div>
 
-      <ConnectionWizard
-        initialData={initialFormData}
-        onSubmit={handleSubmit}
-        onCancel={handleCancel}
-      />
+        {/* Wizard Card */}
+        <div className="card-elevated animate-slide-in-up">
+          <ConnectionWizard
+            initialData={initialFormData}
+            onSubmit={handleSubmit}
+            onCancel={handleCancel}
+          />
+        </div>
+      </div>
     </div>
   )
 }

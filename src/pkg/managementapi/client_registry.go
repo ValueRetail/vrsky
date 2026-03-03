@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -171,4 +172,25 @@ func (cr *ClientRegistry) Close() error {
 
 	cr.clients = make(map[string][]*WSClient)
 	return nil
+}
+
+// OnMetricsUpdate implements MetricsListener interface
+// Converts metrics to JSON and broadcasts to all connected clients for this connection
+func (cr *ClientRegistry) OnMetricsUpdate(connID string, metrics *ConnectionMetrics) {
+	if metrics == nil {
+		return
+	}
+
+	message := &WebSocketMessage{
+		Type:      "metrics_update",
+		Timestamp: time.Now().UTC(),
+		Data:      metrics,
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+
+	cr.BroadcastToConnection(connID, data)
 }

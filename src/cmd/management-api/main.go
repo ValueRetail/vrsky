@@ -182,19 +182,31 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	restHandler.SetPublisher(publisher)
 	restHandler.RegisterRoutes(mux)
 
-	// TODO: Add WebSocket handler
-	// - WS /ws/metrics
+	// Initialize WebSocket infrastructure for real-time metrics streaming
+	clientRegistry := managementapi.NewClientRegistry()
+	metricsCache := managementapi.NewMetricsCache(5 * time.Minute)
+
+	// Register ClientRegistry as a listener so metrics updates are broadcast to WebSocket clients
+	metricsCache.AddListener(clientRegistry)
+
+	// Wire WebSocket support into handler
+	restHandler.InitializeWebSocketSupport(clientRegistry, metricsCache)
+
+	// Initialize metrics subscriber (subscriptions are per-tenant, created when connections are registered)
+	_ = managementapi.NewNATSSubscriber(nc, metricsCache, logger)
+
 	// TODO: Add test data generator
 	// - POST /api/v1/connections/{id}/test-message
 	// - POST /api/v1/connections/{id}/auto-generator/start
 	// - POST /api/v1/connections/{id}/auto-generator/stop
 	// - GET /api/v1/connections/{id}/auto-generator/status
 
-	// Wrap mux with middleware (applied in reverse order)
+	// Wrap mux with middleware (applied in reverse order, so innermost is rightmost)
+	// Logging → CORS (handles preflight) → TenantID validation → Routes
 	var handler http.Handler = mux
-	handler = LoggingMiddleware(logger)(handler)
-	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
+	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
+	handler = LoggingMiddleware(logger)(handler)
 
 	return &http.Server{
 		Addr:         config.ListenAddr,

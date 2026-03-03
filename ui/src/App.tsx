@@ -7,8 +7,7 @@ import ConfirmDialog from './components/Common/ConfirmDialog'
 import RootLayout from './components/Layout/RootLayout'
 import { useUIStore } from './store/uiStore'
 import Dashboard from './pages/Dashboard'
-import CreateConnection from './pages/CreateConnection'
-import EditConnection from './pages/EditConnection'
+import PipelineBuilder from './pages/PipelineBuilder'
 import ConnectionDetail from './pages/ConnectionDetail'
 import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
@@ -32,9 +31,8 @@ function App() {
           <Route element={<RootLayout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/connections" element={<ConnectionsList />} />
-            <Route path="/connections/create" element={<CreateConnection />} />
+            <Route path="/connections/create" element={<PipelineBuilder />} />
             <Route path="/connections/:id" element={<ConnectionDetail />} />
-            <Route path="/connections/:id/edit" element={<EditConnection />} />
             <Route path="/connections/:id/test-data" element={<TestDataPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
