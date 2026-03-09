@@ -58,12 +58,12 @@ export default function ComponentPalette({ onDragStart }: ComponentPaletteProps)
   return (
     <div className="h-full bg-white border-r border-gray-200 flex flex-col shadow-sm">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="font-bold text-gray-800">Components</h2>
+      <div className="p-4 border-b border-gray-300 flex items-center justify-between bg-gray-100">
+        <h2 className="font-bold text-gray-900 text-base">Components</h2>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="p-1 hover:bg-gray-100 rounded transition-colors"
-          title={isExpanded ? 'Collapse' : 'Expand'}
+          className="p-1 hover:bg-gray-200 rounded transition-colors text-gray-600"
+          title={isExpanded ? 'Collapse panel' : 'Expand panel'}
         >
           {isExpanded ? '▼' : '▶'}
         </button>
@@ -72,48 +72,49 @@ export default function ComponentPalette({ onDragStart }: ComponentPaletteProps)
       {/* Component List */}
       {isExpanded && (
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {COMPONENTS.map((component) => (
-            <div
-              key={component.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, component)}
-              className={`
-                p-3 rounded-lg cursor-move
-                ${component.color}
-                text-white font-medium text-sm
-                transition-all hover:shadow-md active:opacity-80
-                flex items-center gap-2
-                select-none
-              `}
-              title={`Drag ${component.label} to canvas`}
-            >
-              <span className="text-lg">{component.icon}</span>
-              <span>{component.label}</span>
-            </div>
-          ))}
+           {COMPONENTS.map((component) => (
+             <div
+               key={component.id}
+               draggable
+               onDragStart={(e) => handleDragStart(e, component)}
+               className={`
+                 px-4 py-3 rounded-md cursor-move select-none
+                 ${component.color}
+                 text-white font-semibold text-sm
+                 border-2 border-opacity-30 border-white
+                 transition-all hover:shadow-lg hover:scale-105
+                 active:opacity-80 active:scale-95
+                 flex items-center justify-center
+               `}
+               title={`Drag ${component.label} to canvas`}
+             >
+               {component.label}
+             </div>
+           ))}
         </div>
       )}
 
       {/* Collapsed state - show icons only */}
       {!isExpanded && (
         <div className="flex-1 overflow-y-auto p-2 space-y-2 flex flex-col items-center">
-          {COMPONENTS.map((component) => (
-            <div
-              key={component.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, component)}
-              className={`
-                p-2 rounded-lg cursor-move
-                ${component.color}
-                text-white text-xl
-                transition-all hover:shadow-md active:opacity-80
-                select-none
-              `}
-              title={`Drag ${component.label} to canvas`}
-            >
-              {component.icon}
-            </div>
-          ))}
+           {COMPONENTS.map((component) => (
+             <div
+               key={component.id}
+               draggable
+               onDragStart={(e) => handleDragStart(e, component)}
+               className={`
+                 p-3 rounded-md cursor-move select-none
+                 ${component.color}
+                 text-white text-lg
+                 border-2 border-opacity-30 border-white
+                 transition-all hover:shadow-lg hover:scale-110
+                 active:opacity-80 active:scale-95
+               `}
+               title={`Drag ${component.label} to canvas`}
+             >
+               {component.icon}
+             </div>
+           ))}
         </div>
       )}
     </div>

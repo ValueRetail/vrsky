@@ -193,12 +193,12 @@ export default function PipelineBuilder() {
       </div>
 
       {/* Main Canvas Area */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col">
         {/* Deploy Button - Top Right */}
         <button
           onClick={deployPipeline}
           disabled={isLoading}
-          className="absolute top-4 right-4 z-40 px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
+          className="fixed top-4 right-4 z-40 px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
         >
           {isLoading ? (
             <>
@@ -213,7 +213,7 @@ export default function PipelineBuilder() {
         {/* ReactFlow Canvas */}
         <div
           ref={reactFlowWrapper}
-          className="flex-1 bg-gradient-to-br from-slate-50 to-white"
+          className="flex-1 w-full h-full bg-gradient-to-br from-slate-50 to-white"
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
