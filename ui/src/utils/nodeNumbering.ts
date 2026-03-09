@@ -1,16 +1,10 @@
-import type { Node } from 'reactflow'
-
-interface NodeData {
-  type?: string
-  label?: string
-  config?: Record<string, unknown>
-}
+import type { Node } from '../types/pipeline'
 
 /**
  * Generates an auto-numbered label for a node based on type and existing nodes
  * Example: "Consumer 1", "Filter 2", etc.
  */
-export function getNodeLabel(nodeType: string, allNodes: Node<NodeData>[]): string {
+export function getNodeLabel(nodeType: string, allNodes: Node[]): string {
   const sameTypeCount = allNodes.filter((n) => n.data.type === nodeType).length + 1
   const capitalizedType = nodeType.charAt(0).toUpperCase() + nodeType.slice(1)
   return `${capitalizedType} ${sameTypeCount}`
@@ -21,11 +15,11 @@ export function getNodeLabel(nodeType: string, allNodes: Node<NodeData>[]): stri
  * Ensures no gaps in numbering (Consumer 1, 2, 3, not 1, 3, 5)
  */
 export function renumberNodesAfterDeletion(
-  nodes: Node<NodeData>[],
+  nodes: Node[],
   _deletedNodeId: string
-): Node<NodeData>[] {
+): Node[] {
   // Group remaining nodes by type
-  const nodesByType: Record<string, Node<NodeData>[]> = {}
+  const nodesByType: Record<string, Node[]> = {}
 
   nodes.forEach((node) => {
     const type = node.data.type || 'unknown'

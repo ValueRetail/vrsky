@@ -1,55 +1,34 @@
 import { useState, useCallback, useRef } from 'react'
-import {
-  ReactFlow,
-  addEdge,
-  useNodesState,
-  useEdgesState,
-  Background,
-  Controls,
-} from 'reactflow'
-import type { Node, Connection } from 'reactflow'
-import 'reactflow/dist/style.css'
-import ConsumerNode from '../components/Pipeline/ConsumerNode'
-import FilterNode from '../components/Pipeline/FilterNode'
-import ConverterNode from '../components/Pipeline/ConverterNode'
-import ProducerNode from '../components/Pipeline/ProducerNode'
+import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import apiClient from '../services/api'
 import { useUIStore } from '../store/uiStore'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
-
-const nodeTypes = {
-  consumer: ConsumerNode,
-  filter: FilterNode,
-  converter: ConverterNode,
-  producer: ProducerNode,
-}
-
-interface NodeData {
-  label: string
-  config?: Record<string, unknown>
-  type?: string
-}
+import { useNodeDrag } from '../hooks/useNodeDrag'
+import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
+import type { Node, Edge } from '../types/pipeline'
 
 export default function PipelineBuilder() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [selectedNode, setSelectedNode] = useState<Node<NodeData> | null>(null)
+  const [nodes, setNodes] = useState<Node[]>([])
+  const [edges, setEdges] = useState<Edge[]>([])
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const reactFlowWrapper = useRef<HTMLDivElement>(null)
+  const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
+  const canvasContainer = useRef<HTMLDivElement>(null)
   const { showErrorNotification, showSuccessNotification } = useUIStore()
 
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      setEdges((eds) => addEdge(connection, eds))
-    },
-    [setEdges]
-  )
-
-  const onNodeClick = useCallback((_event: React.MouseEvent, node: Node<NodeData>) => {
-    setSelectedNode(node)
-  }, [])
+  // Use custom hooks
+  const { handleNodeDrag } = useNodeDrag(nodes, setNodes)
+  const {
+    connectionDrawing,
+    connectionStart,
+    connectionPreviewEnd,
+    setConnectionPreviewEnd,
+    handlePortMouseDown,
+    handlePortMouseUp,
+  } = useConnectionDrawing(nodes, setEdges, edges)
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -60,7 +39,7 @@ export default function PipelineBuilder() {
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault()
 
-      if (!reactFlowWrapper.current) return
+      if (!canvasContainer.current) return
 
       const nodeType = event.dataTransfer.getData('nodeType') as
         | 'consumer'
@@ -70,14 +49,19 @@ export default function PipelineBuilder() {
 
       if (!nodeType) return
 
-      // Get canvas position
-      const rect = reactFlowWrapper.current.getBoundingClientRect()
-      const x = event.clientX - rect.left
-      const y = event.clientY - rect.top
+      // Get canvas position (relative to the canvas, accounting for stage position)
+      const rect = canvasContainer.current.getBoundingClientRect()
+      const x = event.clientX - rect.left - stagePos.x
+      const y = event.clientY - rect.top - stagePos.y
+
+      // Snap to grid
+      const GRID_SIZE = 20
+      const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
+      const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE
 
       // Create new node with auto-numbered label
       const label = getNodeLabel(nodeType, nodes)
-      const newNode: Node<NodeData> = {
+      const newNode: Node = {
         id: `${nodeType}-${Date.now()}-${Math.random()}`,
         type: nodeType,
         data: {
@@ -85,12 +69,12 @@ export default function PipelineBuilder() {
           type: nodeType,
           config: {},
         },
-        position: { x, y },
+        position: { x: snappedX, y: snappedY },
       }
 
       setNodes((nds) => [...nds, newNode])
     },
-    [nodes, setNodes]
+    [nodes, stagePos]
   )
 
   const updateNodeConfig = (config: Record<string, unknown>) => {
@@ -104,6 +88,7 @@ export default function PipelineBuilder() {
       )
     )
     setSelectedNode(null)
+    setSelectedNodeId(null)
   }
 
   const handleNodeDelete = useCallback(() => {
@@ -118,7 +103,13 @@ export default function PipelineBuilder() {
     // Renumber remaining nodes
     setNodes((nds) => renumberNodesAfterDeletion(nds, selectedNode.id))
     setSelectedNode(null)
-  }, [selectedNode, setNodes, setEdges])
+    setSelectedNodeId(null)
+  }, [selectedNode])
+
+  const handleClosePropertyEditor = useCallback(() => {
+    setSelectedNode(null)
+    setSelectedNodeId(null)
+  }, [])
 
   const validatePipeline = (): boolean => {
     const consumers = nodes.filter((n) => n.type === 'consumer')
@@ -176,6 +167,7 @@ export default function PipelineBuilder() {
       setNodes([])
       setEdges([])
       setSelectedNode(null)
+      setSelectedNodeId(null)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       showErrorNotification('Deployment failed', errorMsg)
@@ -186,78 +178,86 @@ export default function PipelineBuilder() {
   }
 
   return (
-    <div className="w-full h-screen flex bg-white">
-      {/* Left Sidebar - Component Palette */}
-      <div className="w-64 border-r border-gray-200 overflow-hidden">
-        <ComponentPalette onDragStart={() => {}} />
-      </div>
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-100">
+      {/* Deploy Button - Top Right (Node-RED style) */}
+      <button
+        onClick={deployPipeline}
+        disabled={isLoading}
+        className="absolute top-4 right-4 z-50 px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
+      >
+        {isLoading ? (
+          <>
+            <span className="animate-spin">⚙️</span>
+            Deploying...
+          </>
+        ) : (
+          <>Deploy</>
+        )}
+      </button>
 
-      {/* Main Canvas Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Deploy Button - Top Right */}
-        <button
-          onClick={deployPipeline}
-          disabled={isLoading}
-          className="fixed top-4 right-4 z-40 px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
-        >
-          {isLoading ? (
-            <>
-              <span className="animate-spin">⚙️</span>
-              Deploying...
-            </>
-          ) : (
-            <>🚀 Deploy</>
-          )}
-        </button>
+      {/* Main Content Area - Flex Row */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar - Component Palette */}
+        <div className="w-64 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+          <ComponentPalette onDragStart={() => {}} />
+        </div>
 
-        {/* ReactFlow Canvas */}
+        {/* Center - Canvas Area */}
         <div
-          ref={reactFlowWrapper}
-          className="flex-1 w-full h-full bg-gradient-to-br from-slate-50 to-white"
+          ref={canvasContainer}
+          className="flex-1 overflow-hidden relative"
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          <ReactFlow
+          <KonvaCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={onNodeClick}
-            nodeTypes={nodeTypes}
-            fitView
-          >
-            <Background color="#e2e8f0" gap={16} />
-            <Controls />
-          </ReactFlow>
+            selectedNodeId={selectedNodeId}
+            connectionDrawing={connectionDrawing}
+            connectionStart={connectionStart}
+            connectionPreviewEnd={connectionPreviewEnd}
+            onNodeDrag={handleNodeDrag}
+            onNodeSelect={(nodeId) => {
+              setSelectedNodeId(nodeId)
+              const node = nodes.find((n) => n.id === nodeId)
+              if (node) {
+                setSelectedNode(node)
+              } else {
+                // Clicked on canvas background
+                setSelectedNode(null)
+              }
+            }}
+            onPortMouseDown={handlePortMouseDown}
+            onPortMouseUp={handlePortMouseUp}
+            onStageDragMove={(x, y) => {
+              setStagePos({ x, y })
+              // Update connection preview while drawing
+              if (connectionDrawing) {
+                setConnectionPreviewEnd({ x: -x, y: -y })
+              }
+            }}
+          />
         </div>
 
-        {/* Right-Slide Property Editor Panel */}
-        {selectedNode && (
-          <>
-            {/* Semi-transparent overlay */}
-            <div
-              className="fixed inset-0 bg-black/10 z-30 cursor-pointer"
-              onClick={() => setSelectedNode(null)}
-            />
-
-            {/* Property Editor Slide-In */}
-            <div
-              className={`
-                fixed right-0 top-0 h-full w-96 bg-white shadow-2xl
-                transition-transform duration-300 ease-out
-                z-40 overflow-y-auto
-              `}
-            >
+        {/* Right Sidebar - Property Editor (Slide In/Out) */}
+        <div
+          className={`
+            bg-white border-l border-gray-200 overflow-hidden flex-shrink-0
+            transition-all duration-300 ease-in-out
+            ${selectedNode ? 'w-96' : 'w-0'}
+          `}
+        >
+          {selectedNode && (
+            <div className="w-96 h-full overflow-y-auto">
               <PropertyEditor
                 node={selectedNode}
                 onUpdate={updateNodeConfig}
-                onClose={() => setSelectedNode(null)}
+                onClose={handleClosePropertyEditor}
                 onDelete={handleNodeDelete}
               />
             </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

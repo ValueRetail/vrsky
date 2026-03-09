@@ -1,11 +1,5 @@
 import { useState } from 'react'
-import type { Node } from 'reactflow'
-
-interface NodeData {
-  label: string
-  config?: Record<string, unknown>
-  type?: string
-}
+import type { Node } from '../../types/pipeline'
 
 export default function PropertyEditor({
   node,
@@ -13,7 +7,7 @@ export default function PropertyEditor({
   onClose,
   onDelete,
 }: {
-  node: Node<NodeData>
+  node: Node
   onUpdate: (config: Record<string, unknown>) => void
   onClose: () => void
   onDelete?: () => void

@@ -6,7 +6,6 @@ import Toast from './components/Common/Toast'
 import ConfirmDialog from './components/Common/ConfirmDialog'
 import RootLayout from './components/Layout/RootLayout'
 import { useUIStore } from './store/uiStore'
-import Dashboard from './pages/Dashboard'
 import PipelineBuilderPage from './pages/PipelineBuilderPage'
 import ConnectionDetail from './pages/ConnectionDetail'
 import ConnectionsList from './pages/ConnectionsList'
@@ -28,12 +27,12 @@ function App() {
     <ErrorBoundary>
       <Router>
         <Routes>
-          {/* Full-screen pipeline builder route */}
+          {/* PipelineBuilder is now the main application */}
+          <Route path="/" element={<PipelineBuilderPage />} />
           <Route path="/connections/create" element={<PipelineBuilderPage />} />
           
-          {/* All other routes with layout */}
+          {/* Other routes with layout (kept for backward compatibility) */}
           <Route element={<RootLayout />}>
-            <Route path="/" element={<Dashboard />} />
             <Route path="/connections" element={<ConnectionsList />} />
             <Route path="/connections/:id" element={<ConnectionDetail />} />
             <Route path="/connections/:id/test-data" element={<TestDataPage />} />

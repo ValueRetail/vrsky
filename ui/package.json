@@ -14,18 +14,21 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "cytoscape": "^3.33.1",
+    "konva": "^10.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.14",
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@hookform/resolvers": "^5.2.2",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
+    "@testing-library/react": "^14.2.1",
     "@types/node": "^24.10.1",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.4.24",

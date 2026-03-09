@@ -21,21 +21,21 @@ const COMPONENTS: Component[] = [
     type: 'filter',
     label: 'Filter',
     icon: '🔍',
-    color: 'bg-yellow-500 hover:bg-yellow-600',
+    color: 'bg-orange-400 hover:bg-orange-500',
   },
   {
     id: 'converter',
     type: 'converter',
     label: 'Converter',
     icon: '🔄',
-    color: 'bg-purple-500 hover:bg-purple-600',
+    color: 'bg-pink-500 hover:bg-pink-600',
   },
   {
     id: 'producer',
     type: 'producer',
     label: 'Producer',
     icon: '📤',
-    color: 'bg-green-500 hover:bg-green-600',
+    color: 'bg-emerald-500 hover:bg-emerald-600',
   },
 ]
 
