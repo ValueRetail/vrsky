@@ -7,7 +7,7 @@ import ConfirmDialog from './components/Common/ConfirmDialog'
 import RootLayout from './components/Layout/RootLayout'
 import { useUIStore } from './store/uiStore'
 import Dashboard from './pages/Dashboard'
-import PipelineBuilder from './pages/PipelineBuilder'
+import PipelineBuilderPage from './pages/PipelineBuilderPage'
 import ConnectionDetail from './pages/ConnectionDetail'
 import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
@@ -29,7 +29,7 @@ function App() {
       <Router>
         <Routes>
           {/* Full-screen pipeline builder route */}
-          <Route path="/connections/create" element={<PipelineBuilder />} />
+          <Route path="/connections/create" element={<PipelineBuilderPage />} />
           
           {/* All other routes with layout */}
           <Route element={<RootLayout />}>
