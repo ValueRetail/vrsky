@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   ReactFlow,
   addEdge,
@@ -6,7 +6,6 @@ import {
   useEdgesState,
   Background,
   Controls,
-  MiniMap,
 } from 'reactflow'
 import type { Node, Connection } from 'reactflow'
 import 'reactflow/dist/style.css'
@@ -15,8 +14,10 @@ import FilterNode from '../components/Pipeline/FilterNode'
 import ConverterNode from '../components/Pipeline/ConverterNode'
 import ProducerNode from '../components/Pipeline/ProducerNode'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
+import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import apiClient from '../services/api'
 import { useUIStore } from '../store/uiStore'
+import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 
 const nodeTypes = {
   consumer: ConsumerNode,
@@ -35,8 +36,8 @@ export default function PipelineBuilder() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [selectedNode, setSelectedNode] = useState<Node<NodeData> | null>(null)
-  const [pipelineName, setPipelineName] = useState('New Pipeline')
   const [isLoading, setIsLoading] = useState(false)
+  const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const { showErrorNotification, showSuccessNotification } = useUIStore()
 
   const onConnect = useCallback(
@@ -50,19 +51,47 @@ export default function PipelineBuilder() {
     setSelectedNode(node)
   }, [])
 
-  const addNode = (nodeType: 'consumer' | 'filter' | 'converter' | 'producer') => {
-    const newNode: Node<NodeData> = {
-      id: `${nodeType}-${Date.now()}`,
-      type: nodeType,
-      data: {
-        label: nodeType.charAt(0).toUpperCase() + nodeType.slice(1),
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault()
+
+      if (!reactFlowWrapper.current) return
+
+      const nodeType = event.dataTransfer.getData('nodeType') as
+        | 'consumer'
+        | 'filter'
+        | 'converter'
+        | 'producer'
+
+      if (!nodeType) return
+
+      // Get canvas position
+      const rect = reactFlowWrapper.current.getBoundingClientRect()
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top
+
+      // Create new node with auto-numbered label
+      const label = getNodeLabel(nodeType, nodes)
+      const newNode: Node<NodeData> = {
+        id: `${nodeType}-${Date.now()}-${Math.random()}`,
         type: nodeType,
-        config: {},
-      },
-      position: { x: Math.random() * 400, y: Math.random() * 400 },
-    }
-    setNodes((nds) => [...nds, newNode])
-  }
+        data: {
+          label,
+          type: nodeType,
+          config: {},
+        },
+        position: { x, y },
+      }
+
+      setNodes((nds) => [...nds, newNode])
+    },
+    [nodes, setNodes]
+  )
 
   const updateNodeConfig = (config: Record<string, unknown>) => {
     if (!selectedNode) return
@@ -77,8 +106,21 @@ export default function PipelineBuilder() {
     setSelectedNode(null)
   }
 
+  const handleNodeDelete = useCallback(() => {
+    if (!selectedNode) return
+
+    // Remove node and its edges
+    setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id))
+    setEdges((eds) =>
+      eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
+    )
+
+    // Renumber remaining nodes
+    setNodes((nds) => renumberNodesAfterDeletion(nds, selectedNode.id))
+    setSelectedNode(null)
+  }, [selectedNode, setNodes, setEdges])
+
   const validatePipeline = (): boolean => {
-    // Must have exactly one consumer and one producer
     const consumers = nodes.filter((n) => n.type === 'consumer')
     const producers = nodes.filter((n) => n.type === 'producer')
 
@@ -91,24 +133,31 @@ export default function PipelineBuilder() {
       return false
     }
 
+    // Check that consumer and producer are configured
+    const consumerConfigured = consumers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
+    const producerConfigured = producers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
+
+    if (!consumerConfigured) {
+      showErrorNotification('Pipeline validation', 'Configure Consumer node before deploying')
+      return false
+    }
+    if (!producerConfigured) {
+      showErrorNotification('Pipeline validation', 'Configure Producer node before deploying')
+      return false
+    }
+
     return true
   }
 
   const buildConnectionPayload = () => {
-    // Extract consumer and producer from nodes
     const consumer = nodes.find((n) => n.type === 'consumer')
     const producer = nodes.find((n) => n.type === 'producer')
 
-    if (!consumer?.data.config || !producer?.data.config) {
-      showErrorNotification('Pipeline validation', 'Configure Consumer and Producer before deploying')
-      return null
-    }
-
     return {
-      name: pipelineName,
+      name: `Pipeline ${new Date().toLocaleTimeString()}`,
       description: 'Created via visual pipeline editor',
-      source_config: consumer.data.config,
-      destination_config: producer.data.config,
+      source_config: consumer?.data.config || {},
+      destination_config: producer?.data.config || {},
       converter_config: {},
       filter_config: {},
     }
@@ -118,90 +167,56 @@ export default function PipelineBuilder() {
     if (!validatePipeline()) return
 
     const payload = buildConnectionPayload()
-    if (!payload) return
-
     setIsLoading(true)
+
     try {
       await apiClient.post('/api/v1/connections', payload)
       showSuccessNotification('Success', 'Pipeline deployed successfully!')
-      // Reset
+      // Reset canvas
       setNodes([])
       setEdges([])
-      setPipelineName('New Pipeline')
+      setSelectedNode(null)
     } catch (error) {
-      showErrorNotification('Deployment failed', 'Failed to deploy pipeline')
-      console.error(error)
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+      showErrorNotification('Deployment failed', errorMsg)
+      console.error('Deploy error:', error)
     } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <div className="w-full h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
-      <div className="bg-slate-950 border-b border-slate-700 p-4 flex items-center justify-between shadow-lg">
-        <div className="flex-1">
-          <input
-            type="text"
-            value={pipelineName}
-            onChange={(e) => setPipelineName(e.target.value)}
-            className="text-2xl font-bold bg-transparent border-0 border-b border-transparent hover:border-slate-600 focus:border-blue-400 outline-none text-white placeholder-slate-400"
-            placeholder="Pipeline name"
-          />
-        </div>
+    <div className="w-full h-screen flex bg-white">
+      {/* Left Sidebar - Component Palette */}
+      <div className="w-64 border-r border-gray-200 overflow-hidden">
+        <ComponentPalette onDragStart={() => {}} />
+      </div>
 
-        {/* Node Palette */}
-        <div className="flex gap-2 mx-6">
-          <button
-            onClick={() => addNode('consumer')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 active:bg-blue-800 text-sm font-medium transition-colors shadow-md"
-            title="Add data source (Consumer)"
-          >
-            + Consumer
-          </button>
-          <button
-            onClick={() => addNode('filter')}
-            className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 active:bg-yellow-800 text-sm font-medium transition-colors shadow-md"
-            title="Add filtering logic (Filter)"
-          >
-            + Filter
-          </button>
-          <button
-            onClick={() => addNode('converter')}
-            className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 active:bg-purple-800 text-sm font-medium transition-colors shadow-md"
-            title="Add data transformation (Converter)"
-          >
-            + Converter
-          </button>
-          <button
-            onClick={() => addNode('producer')}
-            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 active:bg-green-800 text-sm font-medium transition-colors shadow-md"
-            title="Add data destination (Producer)"
-          >
-            + Producer
-          </button>
-        </div>
-
-        {/* Deploy Button */}
+      {/* Main Canvas Area */}
+      <div className="flex-1 flex flex-col relative">
+        {/* Deploy Button - Top Right */}
         <button
           onClick={deployPipeline}
           disabled={isLoading}
-          className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-md hover:from-indigo-700 hover:to-indigo-600 disabled:from-slate-600 disabled:to-slate-500 font-medium transition-all shadow-lg hover:shadow-indigo-500/20 disabled:shadow-none"
+          className="absolute top-4 right-4 z-40 px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
         >
           {isLoading ? (
-            <span className="flex items-center gap-2">
-              <span className="animate-spin">⚡</span> Deploying...
-            </span>
+            <>
+              <span className="animate-spin">⚙️</span>
+              Deploying...
+            </>
           ) : (
-            '🚀 Deploy'
+            <>🚀 Deploy</>
           )}
         </button>
-      </div>
 
-      {/* Canvas + Property Editor */}
-      <div className="flex-1 flex overflow-hidden bg-slate-800">
-        {/* Canvas */}
-        <div className="flex-1 w-full h-full">
+        {/* ReactFlow Canvas */}
+        <div
+          ref={reactFlowWrapper}
+          className="flex-1 bg-gradient-to-br from-slate-50 to-white"
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -212,24 +227,36 @@ export default function PipelineBuilder() {
             nodeTypes={nodeTypes}
             fitView
           >
-            <Background color="#334155" gap={16} />
+            <Background color="#e2e8f0" gap={16} />
             <Controls />
-            <MiniMap 
-              style={{ 
-                backgroundColor: '#1e293b',
-                border: '1px solid #475569'
-              }} 
-            />
           </ReactFlow>
         </div>
 
-        {/* Property Editor */}
+        {/* Right-Slide Property Editor Panel */}
         {selectedNode && (
-          <PropertyEditor
-            node={selectedNode}
-            onUpdate={updateNodeConfig}
-            onClose={() => setSelectedNode(null)}
-          />
+          <>
+            {/* Semi-transparent overlay */}
+            <div
+              className="fixed inset-0 bg-black/10 z-30 cursor-pointer"
+              onClick={() => setSelectedNode(null)}
+            />
+
+            {/* Property Editor Slide-In */}
+            <div
+              className={`
+                fixed right-0 top-0 h-full w-96 bg-white shadow-2xl
+                transition-transform duration-300 ease-out
+                z-40 overflow-y-auto
+              `}
+            >
+              <PropertyEditor
+                node={selectedNode}
+                onUpdate={updateNodeConfig}
+                onClose={() => setSelectedNode(null)}
+                onDelete={handleNodeDelete}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

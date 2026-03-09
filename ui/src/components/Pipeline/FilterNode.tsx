@@ -7,9 +7,8 @@ interface NodeData {
 
 export default function FilterNode({ data }: { data: NodeData }) {
   return (
-    <div className="px-4 py-3 shadow-lg rounded-lg bg-gradient-to-b from-yellow-500 to-yellow-600 text-white border-2 border-yellow-700 cursor-pointer hover:shadow-xl hover:from-yellow-600 hover:to-yellow-700 transition-all">
-      <div className="font-bold text-sm">🔍 {data.label}</div>
-      <div className="text-xs opacity-75 mt-1">Conditions</div>
+    <div className="px-4 py-2 shadow-md rounded-lg bg-yellow-400 text-white border-2 border-yellow-500 cursor-pointer hover:shadow-lg hover:bg-yellow-500 transition-all font-medium text-sm">
+      {data.label}
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
     </div>

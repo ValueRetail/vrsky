@@ -28,10 +28,13 @@ function App() {
     <ErrorBoundary>
       <Router>
         <Routes>
+          {/* Full-screen pipeline builder route */}
+          <Route path="/connections/create" element={<PipelineBuilder />} />
+          
+          {/* All other routes with layout */}
           <Route element={<RootLayout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/connections" element={<ConnectionsList />} />
-            <Route path="/connections/create" element={<PipelineBuilder />} />
             <Route path="/connections/:id" element={<ConnectionDetail />} />
             <Route path="/connections/:id/test-data" element={<TestDataPage />} />
             <Route path="*" element={<NotFound />} />

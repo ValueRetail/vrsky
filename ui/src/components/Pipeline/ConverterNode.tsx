@@ -7,9 +7,8 @@ interface NodeData {
 
 export default function ConverterNode({ data }: { data: NodeData }) {
   return (
-    <div className="px-4 py-3 shadow-lg rounded-lg bg-gradient-to-b from-purple-500 to-purple-600 text-white border-2 border-purple-700 cursor-pointer hover:shadow-xl hover:from-purple-600 hover:to-purple-700 transition-all">
-      <div className="font-bold text-sm">🔄 {data.label}</div>
-      <div className="text-xs opacity-75 mt-1">Transform</div>
+    <div className="px-4 py-2 shadow-md rounded-lg bg-purple-400 text-white border-2 border-purple-500 cursor-pointer hover:shadow-lg hover:bg-purple-500 transition-all font-medium text-sm">
+      {data.label}
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
     </div>
