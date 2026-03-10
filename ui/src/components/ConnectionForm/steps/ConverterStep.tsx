@@ -1,4 +1,4 @@
-import type { ConnectionFormData, ConverterStepData } from '../../../types/forms'
+import type { ConnectionFormData, ConverterStepData, SchemaValidatorFormData, FieldMapperFormData, RuleEngineFormData } from '../../../types/forms'
 
 interface ConverterStepProps {
   formData: ConnectionFormData
@@ -7,10 +7,13 @@ interface ConverterStepProps {
 
 export default function ConverterStep({ formData, onChange }: ConverterStepProps) {
   const converterType = formData.converter.type
-  const config = formData.converter.config as any
+  const config = formData.converter.config
+  const schemaConfig = converterType === 'schema' ? (config as SchemaValidatorFormData) : ({} as Partial<SchemaValidatorFormData>)
+  const mapperConfig = converterType === 'mapper' ? (config as FieldMapperFormData) : ({} as Partial<FieldMapperFormData>)
+  const rulesConfig = converterType === 'rules' ? (config as RuleEngineFormData) : ({} as Partial<RuleEngineFormData>)
 
   const handleTypeChange = (type: 'schema' | 'mapper' | 'rules') => {
-    let newConfig: any = {}
+    let newConfig: SchemaValidatorFormData | FieldMapperFormData | RuleEngineFormData
 
     switch (type) {
       case 'schema':
@@ -69,7 +72,7 @@ export default function ConverterStep({ formData, onChange }: ConverterStepProps
             Input Schema (JSON)
           </label>
           <textarea
-            value={JSON.stringify(config.inputSchema || {}, null, 2)}
+            value={JSON.stringify(schemaConfig.inputSchema || {}, null, 2)}
             onChange={e => {
               try {
                 const schema = JSON.parse(e.target.value)
@@ -96,7 +99,7 @@ export default function ConverterStep({ formData, onChange }: ConverterStepProps
               Define source field to target field mappings
             </p>
             <textarea
-              value={JSON.stringify(config.mappings || [], null, 2)}
+              value={JSON.stringify(mapperConfig.mappings || [], null, 2)}
               onChange={e => {
                 try {
                   const mappings = JSON.parse(e.target.value)
@@ -123,7 +126,7 @@ export default function ConverterStep({ formData, onChange }: ConverterStepProps
               Define rules for data transformation
             </p>
             <textarea
-              value={JSON.stringify(config.rules || [], null, 2)}
+              value={JSON.stringify(rulesConfig.rules || [], null, 2)}
               onChange={e => {
                 try {
                   const rules = JSON.parse(e.target.value)

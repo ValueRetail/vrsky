@@ -16,7 +16,7 @@ export default function BasicInfoStep({ formData, onChange }: BasicInfoStepProps
   return (
     <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium text-gray-900 mb-2">
+        <label className="label">
           Connection Name *
         </label>
         <input
@@ -24,13 +24,13 @@ export default function BasicInfoStep({ formData, onChange }: BasicInfoStepProps
           value={formData.basicInfo.name}
           onChange={e => handleChange('name', e.target.value)}
           placeholder="e.g., Customer Data Pipeline"
-          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-base"
         />
-        <p className="text-xs text-gray-600 mt-1">A unique name for this connection</p>
+        <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">A unique name for this connection</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-900 mb-2">
+        <label className="label">
           Description
         </label>
         <textarea
@@ -38,9 +38,9 @@ export default function BasicInfoStep({ formData, onChange }: BasicInfoStepProps
           onChange={e => handleChange('description', e.target.value)}
           placeholder="Optional description of what this connection does"
           rows={4}
-          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-base resize-none"
         />
-        <p className="text-xs text-gray-600 mt-1">Optional description for documentation</p>
+        <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">Optional description for documentation</p>
       </div>
     </div>
   )

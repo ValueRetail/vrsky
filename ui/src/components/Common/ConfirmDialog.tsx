@@ -24,25 +24,39 @@ export default function ConfirmDialog({ config, onClose }: ConfirmDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg max-w-md w-full mx-4 p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-2">{config.title}</h2>
-        <p className="text-gray-600 mb-6">{config.message}</p>
+    <div className="fixed inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+      <div className="card-elevated max-w-md w-full mx-4 p-8 space-y-6 animate-slide-in-up">
+        {/* Icon and Title */}
+        <div className="flex items-start gap-4">
+          <div className={`p-3 rounded-lg flex-shrink-0 text-2xl ${
+            config.destructive
+              ? 'bg-danger-100 dark:bg-danger-900/30'
+              : 'bg-primary-100 dark:bg-primary-900/30'
+          }`}>
+            {config.destructive ? '⚠' : 'ℹ'}
+          </div>
 
-        <div className="flex gap-3 justify-end">
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-50">
+              {config.title}
+            </h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
+              {config.message}
+            </p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 justify-end pt-4 border-t border-neutral-200 dark:border-neutral-700">
           <button
             onClick={handleCancel}
-            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+            className="btn-secondary"
           >
             {config.cancelLabel || 'Cancel'}
           </button>
           <button
             onClick={handleConfirm}
-            className={`px-4 py-2 text-white rounded-lg transition-colors font-medium ${
-              config.destructive
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-blue-500 hover:bg-blue-600'
-            }`}
+            className={config.destructive ? 'btn-danger' : 'btn-primary'}
           >
             {config.confirmLabel || 'Confirm'}
           </button>

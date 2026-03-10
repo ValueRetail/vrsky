@@ -63,13 +63,13 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
   return (
     <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium text-gray-900 mb-2">
+        <label className="label">
           Source Type *
         </label>
         <select
           value={sourceType}
           onChange={e => handleTypeChange(e.target.value as 'http' | 'file' | 'database')}
-          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-base"
         >
           <option value="http">HTTP Webhook</option>
           <option value="file">File System</option>
@@ -80,7 +80,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
       {sourceType === 'http' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               URL *
             </label>
             <input
@@ -88,18 +88,18 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               value={httpConfig.url || ''}
               onChange={e => handleFieldChange('url', e.target.value)}
               placeholder="https://api.example.com/webhook"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Method
             </label>
             <select
               value={httpConfig.method || 'GET'}
               onChange={e => handleFieldChange('method', e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             >
               <option value="GET">GET</option>
               <option value="POST">POST</option>
@@ -109,7 +109,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Timeout (seconds)
             </label>
             <input
@@ -117,12 +117,12 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               value={httpConfig.timeout || 30}
               onChange={e => handleFieldChange('timeout', parseInt(e.target.value) || 30)}
               min="1"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Max Attempts
             </label>
             <input
@@ -131,7 +131,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               onChange={e => handleFieldChange('maxAttempts', parseInt(e.target.value) || 3)}
               min="0"
               max="10"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
         </>
@@ -140,7 +140,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
       {sourceType === 'file' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               File Path *
             </label>
             <input
@@ -148,18 +148,18 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               value={fileConfig.path || ''}
               onChange={e => handleFieldChange('path', e.target.value)}
               placeholder="/data/input.json"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Format
             </label>
             <select
               value={fileConfig.format || 'json'}
               onChange={e => handleFieldChange('format', e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             >
               <option value="json">JSON</option>
               <option value="csv">CSV</option>
@@ -168,7 +168,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Poll Interval (milliseconds)
             </label>
             <input
@@ -177,19 +177,19 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               onChange={e => handleFieldChange('pollIntervalMs', parseInt(e.target.value) || 5000)}
               min="1000"
               step="1000"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <input
               type="checkbox"
               id="watch"
               checked={fileConfig.watch || false}
               onChange={e => handleFieldChange('watch', e.target.checked)}
-              className="rounded border-gray-300"
+              className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 dark:text-primary-400"
             />
-            <label htmlFor="watch" className="text-sm font-medium text-gray-900">
+            <label htmlFor="watch" className="text-sm font-medium text-neutral-900 dark:text-neutral-50 cursor-pointer">
               Watch for changes
             </label>
           </div>
@@ -199,7 +199,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
       {sourceType === 'database' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Connection String *
             </label>
             <input
@@ -207,12 +207,12 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               value={dbConfig.connectionString || ''}
               onChange={e => handleFieldChange('connectionString', e.target.value)}
               placeholder="postgresql://user:pass@localhost/db"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Query *
             </label>
             <textarea
@@ -220,12 +220,12 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               onChange={e => handleFieldChange('query', e.target.value)}
               placeholder="SELECT * FROM users"
               rows={4}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              className="input-base font-mono text-sm resize-none"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-2">
+            <label className="label">
               Polling Interval (milliseconds)
             </label>
             <input
@@ -234,7 +234,7 @@ export default function SourceStep({ formData, onChange }: SourceStepProps) {
               onChange={e => handleFieldChange('pollingIntervalMs', parseInt(e.target.value) || 10000)}
               min="1000"
               step="1000"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-base"
             />
           </div>
         </>

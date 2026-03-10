@@ -103,6 +103,29 @@ export default function ConnectionDetail() {
     }
   }
 
+  const handleClone = async () => {
+    if (!connection) return
+    try {
+      setActionLoading(true)
+      const clonePayload = {
+        name: `Copy of ${connection.name}`,
+        description: connection.description,
+        source_config: connection.source_config,
+        converter_config: connection.converter_config,
+        filter_config: connection.filter_config,
+        destination_config: connection.destination_config,
+      }
+      const newConnection = await connectionService.create(clonePayload as unknown)
+      addNotification({ type: 'success', title: 'Cloned', message: `"${newConnection.name}" created` })
+      navigate(`/connections/${newConnection.id}`)
+    } catch (error) {
+      const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to clone connection'
+      addNotification({ type: 'error', title: 'Error', message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleDelete = () => {
     showConfirmDialog({
       title: 'Delete Connection',
@@ -141,20 +164,27 @@ export default function ConnectionDetail() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-950">
+        <div className="space-y-4 text-center">
+          <div className="flex justify-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-200 dark:border-primary-900 border-t-primary-600 dark:border-t-primary-400"></div>
+          </div>
+          <p className="text-neutral-600 dark:text-neutral-400 font-medium">Loading connection...</p>
+        </div>
       </div>
     )
   }
 
   if (!connection) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Connection not found</h1>
+      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center px-4">
+        <div className="card-elevated text-center py-12 max-w-md">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50 mb-2">Connection not found</h1>
+          <p className="text-neutral-600 dark:text-neutral-400 mb-6">The connection you're looking for doesn't exist or has been deleted.</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="btn-primary"
           >
             Back to Dashboard
           </button>
@@ -163,72 +193,98 @@ export default function ConnectionDetail() {
     )
   }
 
-  const statusColors: Record<string, string> = {
-    running: 'bg-green-100 text-green-800',
-    stopped: 'bg-gray-100 text-gray-800',
-    error: 'bg-red-100 text-red-800',
+  const getStatusBadgeClass = (status: string) => {
+    const classes: Record<string, string> = {
+      running: 'badge badge-success',
+      stopped: 'badge badge-warning',
+      error: 'badge badge-danger',
+    }
+    return classes[status] || classes.stopped
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <button
-            onClick={() => navigate('/')}
-            className="text-blue-600 hover:text-blue-700 mb-2"
-          >
-            ← Back
-          </button>
-          <h1 className="text-3xl font-bold text-gray-900">{connection.name}</h1>
-          <p className="text-gray-600 mt-1">{connection.description}</p>
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto space-y-8">
+        {/* Hero Header */}
+        <div className="card-elevated animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-6">
+            {/* Info */}
+            <div className="flex-1">
+              <button
+                onClick={() => navigate('/')}
+                className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium mb-4 transition-colors duration-base"
+              >
+                <span>←</span>
+                <span>Back to Connections</span>
+              </button>
+              <h1 className="text-4xl sm:text-5xl font-bold text-neutral-900 dark:text-neutral-50 mb-2">
+                {connection.name}
+              </h1>
+              {connection.description && (
+                <p className="text-lg text-neutral-600 dark:text-neutral-400">
+                  {connection.description}
+                </p>
+              )}
+            </div>
+
+            {/* Status Badge */}
+            <div className="flex-shrink-0">
+              <div className={getStatusBadgeClass(connection.status)} />
+            </div>
+          </div>
         </div>
-        <div className={`px-4 py-2 rounded-full font-medium ${statusColors[connection.status] || statusColors.stopped}`}>
-          {connection.status.charAt(0).toUpperCase() + connection.status.slice(1)}
+
+        {/* Action Buttons */}
+        <div className="flex flex-wrap gap-2 animate-fade-in">
+          {connection.status === 'running' ? (
+            <button
+              onClick={handleStop}
+              disabled={actionLoading}
+              className="btn-danger"
+            >
+              {actionLoading ? 'Stopping...' : 'Stop Connection'}
+            </button>
+          ) : (
+            <button
+              onClick={handleStart}
+              disabled={actionLoading}
+              className="btn-success"
+            >
+              {actionLoading ? 'Starting...' : 'Start Connection'}
+            </button>
+          )}
+          <button
+            onClick={() => navigate(`/connections/${connection.id}/edit`)}
+            className="btn-primary"
+          >
+            Edit
+          </button>
+          <button
+            onClick={handleClone}
+            disabled={actionLoading}
+            className="btn-secondary"
+          >
+            Clone
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={actionLoading}
+            className="btn-outline"
+          >
+            Delete
+          </button>
         </div>
-      </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-3 mb-8">
-        {connection.status === 'running' ? (
-          <button
-            onClick={handleStop}
-            disabled={actionLoading}
-            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400"
-          >
-            {actionLoading ? 'Stopping...' : 'Stop'}
-          </button>
-        ) : (
-          <button
-            onClick={handleStart}
-            disabled={actionLoading}
-            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
-          >
-            {actionLoading ? 'Starting...' : 'Start'}
-          </button>
-        )}
-        <button
-          onClick={() => navigate(`/connections/${connection.id}/edit`)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          Edit
-        </button>
-        <button
-          onClick={handleDelete}
-          disabled={actionLoading}
-          className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400"
-        >
-          Delete
-        </button>
-      </div>
+        {/* Metrics Section - Show only when running */}
+        {connection.status === 'running' && (
+          <div className="space-y-6 animate-fade-in">
+            <div>
+              <h2 className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">Real-time Metrics</h2>
+              <p className="text-neutral-600 dark:text-neutral-400 mt-2">Live pipeline performance monitoring</p>
+            </div>
 
-      {/* Metrics Section - Show only when running */}
-      {connection.status === 'running' && (
-        <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Real-time Metrics</h2>
-
-          {/* Key Metrics Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* Key Metrics Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricsCard
               label="Throughput"
               value={metrics?.throughput_mps.toFixed(2) || '0'}
@@ -341,109 +397,117 @@ export default function ConnectionDetail() {
             />
           )}
 
-          {/* Last Update */}
-          {metrics && (
-            <p className="text-xs text-gray-500 text-right">
-              Last updated: {new Date(metrics.last_updated).toLocaleTimeString()}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Test Data Section - Show when running */}
-      {connection.status === 'running' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900">Test Messages</h2>
-            <button
-              onClick={() => navigate(`/connections/${connection.id}/test-data`)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-            >
-              Full Test Interface
-            </button>
+            {/* Last Update */}
+            {metrics && (
+              <p className="text-xs text-neutral-500 dark:text-neutral-600 text-right">
+                Last updated: {new Date(metrics.last_updated).toLocaleTimeString()}
+              </p>
+            )}
           </div>
+        )}
+
+        {/* Test Data Section - Show when running */}
+        {connection.status === 'running' && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">Test Messages</h2>
+                <p className="text-neutral-600 dark:text-neutral-400 mt-2">Send test data through your pipeline</p>
+              </div>
+              <button
+                onClick={() => navigate(`/connections/${connection.id}/test-data`)}
+                className="btn-primary"
+              >
+                Full Test Interface
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <TestMessageForm connectionId={connection.id} />
+            </div>
+
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              Send test messages to verify your pipeline configuration. View detailed test results in the{' '}
+              <button
+                onClick={() => navigate(`/connections/${connection.id}/test-data`)}
+                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
+              >
+                full test interface
+              </button>
+              .
+            </p>
+          </div>
+        )}
+
+        {/* Configuration Details */}
+        <div className="space-y-6 animate-fade-in">
+          <h2 className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">Configuration</h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <TestMessageForm connectionId={connection.id} />
+            {/* Source Configuration */}
+            <section className="card-elevated">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Source</h3>
+              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm font-mono text-neutral-100">
+                  {JSON.stringify(connection.source_config, null, 2)}
+                </pre>
+              </div>
+            </section>
+
+            {/* Converter Configuration */}
+            <section className="card-elevated">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Converter</h3>
+              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm font-mono text-neutral-100">
+                  {JSON.stringify(connection.converter_config, null, 2)}
+                </pre>
+              </div>
+            </section>
+
+            {/* Filter Configuration */}
+            <section className="card-elevated">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Filter</h3>
+              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm font-mono text-neutral-100">
+                  {JSON.stringify(connection.filter_config, null, 2)}
+                </pre>
+              </div>
+            </section>
+
+            {/* Destination Configuration */}
+            <section className="card-elevated">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Destination</h3>
+              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm font-mono text-neutral-100">
+                  {JSON.stringify(connection.destination_config, null, 2)}
+                </pre>
+              </div>
+            </section>
           </div>
 
-          <p className="text-sm text-gray-600">
-            Send test messages to verify your pipeline configuration. View detailed test results in the{' '}
-            <button
-              onClick={() => navigate(`/connections/${connection.id}/test-data`)}
-              className="text-blue-600 hover:text-blue-700 font-medium"
-            >
-              full test interface
-            </button>
-            .
-          </p>
+          {/* Metadata */}
+          <section className="card-elevated">
+            <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Details</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div>
+                <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400 mb-1">ID</p>
+                <p className="text-neutral-900 dark:text-neutral-50 font-mono text-sm break-all">{connection.id}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400 mb-1">Status</p>
+                <p className="text-neutral-900 dark:text-neutral-50 capitalize">{connection.status}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400 mb-1">Created</p>
+                <p className="text-neutral-900 dark:text-neutral-50 text-sm">{new Date(connection.created_at).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400 mb-1">Last Updated</p>
+                <p className="text-neutral-900 dark:text-neutral-50 text-sm">{new Date(connection.updated_at).toLocaleString()}</p>
+              </div>
+            </div>
+          </section>
         </div>
-      )}
-
-      {/* Configuration Details */}
-      <div className="space-y-8">
-        {/* Source Configuration */}
-        <section className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Source Configuration</h2>
-          <div className="bg-gray-50 rounded p-4 overflow-x-auto">
-            <pre className="text-sm font-mono text-gray-800">
-              {JSON.stringify(connection.source_config, null, 2)}
-            </pre>
-          </div>
-        </section>
-
-        {/* Converter Configuration */}
-        <section className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Converter Configuration</h2>
-          <div className="bg-gray-50 rounded p-4 overflow-x-auto">
-            <pre className="text-sm font-mono text-gray-800">
-              {JSON.stringify(connection.converter_config, null, 2)}
-            </pre>
-          </div>
-        </section>
-
-        {/* Filter Configuration */}
-        <section className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Filter Configuration</h2>
-          <div className="bg-gray-50 rounded p-4 overflow-x-auto">
-            <pre className="text-sm font-mono text-gray-800">
-              {JSON.stringify(connection.filter_config, null, 2)}
-            </pre>
-          </div>
-        </section>
-
-        {/* Destination Configuration */}
-        <section className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Destination Configuration</h2>
-          <div className="bg-gray-50 rounded p-4 overflow-x-auto">
-            <pre className="text-sm font-mono text-gray-800">
-              {JSON.stringify(connection.destination_config, null, 2)}
-            </pre>
-          </div>
-        </section>
-
-        {/* Metadata */}
-        <section className="bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Details</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-gray-600">ID</p>
-              <p className="text-gray-900 font-mono text-sm">{connection.id}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Status</p>
-              <p className="text-gray-900">{connection.status}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Created</p>
-              <p className="text-gray-900">{new Date(connection.created_at).toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Last Updated</p>
-              <p className="text-gray-900">{new Date(connection.updated_at).toLocaleString()}</p>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@ package managementapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -22,25 +23,39 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 
 // CreateConnection creates a new connection in the database
 func (r *PostgresRepository) CreateConnection(ctx context.Context, connection *Connection) error {
+	// Marshal nodes and edges to JSON for storage
+	nodesJSON, err := json.Marshal(connection.Nodes)
+	if err != nil {
+		return fmt.Errorf("failed to marshal nodes: %w", err)
+	}
+	edgesJSON, err := json.Marshal(connection.Edges)
+	if err != nil {
+		return fmt.Errorf("failed to marshal edges: %w", err)
+	}
+
 	query := `
 		INSERT INTO connections (
 			id, tenant_id, name, description,
+			nodes, edges,
 			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4,
-			$5, $6, $7, $8,
-			$9, $10, $11
+			$5, $6,
+			$7, $8, $9, $10,
+			$11, $12, $13
 		)
 	`
 
-	_, err := r.db.ExecContext(
+	_, err = r.db.ExecContext(
 		ctx,
 		query,
 		connection.ID,
 		connection.TenantID,
 		connection.Name,
 		connection.Description,
+		nodesJSON,
+		edgesJSON,
 		connection.SourceConfig,
 		connection.ConverterConfig,
 		connection.FilterConfig,
@@ -66,6 +81,7 @@ func (r *PostgresRepository) GetConnection(ctx context.Context, id string) (*Con
 	query := `
 		SELECT
 			id, tenant_id, name, description,
+			nodes, edges,
 			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at, started_at, stopped_at, last_error
 		FROM connections
@@ -73,11 +89,15 @@ func (r *PostgresRepository) GetConnection(ctx context.Context, id string) (*Con
 	`
 
 	conn := &Connection{}
+	var nodesJSON, edgesJSON []byte
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&conn.ID,
 		&conn.TenantID,
 		&conn.Name,
 		&conn.Description,
+		&nodesJSON,
+		&edgesJSON,
 		&conn.SourceConfig,
 		&conn.ConverterConfig,
 		&conn.FilterConfig,
@@ -95,6 +115,18 @@ func (r *PostgresRepository) GetConnection(ctx context.Context, id string) (*Con
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+
+	// Unmarshal nodes and edges from JSON
+	if len(nodesJSON) > 0 {
+		if err := json.Unmarshal(nodesJSON, &conn.Nodes); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal nodes: %w", err)
+		}
+	}
+	if len(edgesJSON) > 0 {
+		if err := json.Unmarshal(edgesJSON, &conn.Edges); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal edges: %w", err)
+		}
 	}
 
 	return conn, nil
@@ -145,6 +177,7 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 	listQuery := fmt.Sprintf(`
 		SELECT
 			id, tenant_id, name, description,
+			nodes, edges,
 			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at, started_at, stopped_at, last_error
 		FROM connections
@@ -164,11 +197,15 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 	var connections []*Connection
 	for rows.Next() {
 		conn := &Connection{}
+		var nodesJSON, edgesJSON []byte
+
 		err := rows.Scan(
 			&conn.ID,
 			&conn.TenantID,
 			&conn.Name,
 			&conn.Description,
+			&nodesJSON,
+			&edgesJSON,
 			&conn.SourceConfig,
 			&conn.ConverterConfig,
 			&conn.FilterConfig,
@@ -183,6 +220,19 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan connection: %w", err)
 		}
+
+		// Unmarshal nodes and edges from JSON
+		if len(nodesJSON) > 0 {
+			if err := json.Unmarshal(nodesJSON, &conn.Nodes); err != nil {
+				return nil, 0, fmt.Errorf("failed to unmarshal nodes: %w", err)
+			}
+		}
+		if len(edgesJSON) > 0 {
+			if err := json.Unmarshal(edgesJSON, &conn.Edges); err != nil {
+				return nil, 0, fmt.Errorf("failed to unmarshal edges: %w", err)
+			}
+		}
+
 		connections = append(connections, conn)
 	}
 
@@ -195,16 +245,28 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 
 // UpdateConnection updates an existing connection
 func (r *PostgresRepository) UpdateConnection(ctx context.Context, connection *Connection) error {
+	// Marshal nodes and edges to JSON for storage
+	nodesJSON, err := json.Marshal(connection.Nodes)
+	if err != nil {
+		return fmt.Errorf("failed to marshal nodes: %w", err)
+	}
+	edgesJSON, err := json.Marshal(connection.Edges)
+	if err != nil {
+		return fmt.Errorf("failed to marshal edges: %w", err)
+	}
+
 	query := `
 		UPDATE connections
 		SET
 			name = $2,
 			description = $3,
-			source_config = $4,
-			converter_config = $5,
-			filter_config = $6,
-			destination_config = $7,
-			updated_at = $8
+			nodes = $4,
+			edges = $5,
+			source_config = $6,
+			converter_config = $7,
+			filter_config = $8,
+			destination_config = $9,
+			updated_at = $10
 		WHERE id = $1
 	`
 
@@ -214,6 +276,8 @@ func (r *PostgresRepository) UpdateConnection(ctx context.Context, connection *C
 		connection.ID,
 		connection.Name,
 		connection.Description,
+		nodesJSON,
+		edgesJSON,
 		connection.SourceConfig,
 		connection.ConverterConfig,
 		connection.FilterConfig,

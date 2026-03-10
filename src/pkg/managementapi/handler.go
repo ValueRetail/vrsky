@@ -281,20 +281,29 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		existingConn.Description = *updateReq.Description
 	}
 
-	if updateReq.SourceConfig != nil {
-		existingConn.SourceConfig = *updateReq.SourceConfig
-	}
+	// NEW: Apply graph-based model updates (Phase 1)
+	// If Nodes are provided, use the new model; otherwise fall back to legacy
+	if len(updateReq.Nodes) > 0 {
+		existingConn.Nodes = updateReq.Nodes
+		existingConn.Edges = updateReq.Edges
+		// TODO(Phase 1b): Add ValidateConnection() call here to validate DAG structure
+	} else {
+		// DEPRECATED: Legacy linear model updates
+		if updateReq.SourceConfig != nil {
+			existingConn.SourceConfig = *updateReq.SourceConfig
+		}
 
-	if updateReq.ConverterConfig != nil {
-		existingConn.ConverterConfig = *updateReq.ConverterConfig
-	}
+		if updateReq.ConverterConfig != nil {
+			existingConn.ConverterConfig = *updateReq.ConverterConfig
+		}
 
-	if updateReq.FilterConfig != nil {
-		existingConn.FilterConfig = *updateReq.FilterConfig
-	}
+		if updateReq.FilterConfig != nil {
+			existingConn.FilterConfig = *updateReq.FilterConfig
+		}
 
-	if updateReq.DestinationConfig != nil {
-		existingConn.DestinationConfig = *updateReq.DestinationConfig
+		if updateReq.DestinationConfig != nil {
+			existingConn.DestinationConfig = *updateReq.DestinationConfig
+		}
 	}
 
 	// Validate updated configuration

@@ -1,0 +1,15 @@
+import { Handle, Position } from 'reactflow'
+
+interface NodeData {
+  label: string
+  config?: Record<string, unknown>
+}
+
+export default function ProducerNode({ data }: { data: NodeData }) {
+  return (
+    <div className="px-4 py-2 shadow-md rounded-lg bg-emerald-500 text-white border-2 border-emerald-600 cursor-pointer hover:shadow-lg hover:bg-emerald-600 transition-all font-medium text-sm">
+      {data.label}
+      <Handle type="target" position={Position.Left} />
+    </div>
+  )
+}

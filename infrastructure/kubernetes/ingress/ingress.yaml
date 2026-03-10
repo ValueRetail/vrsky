@@ -37,6 +37,25 @@ spec:
     - host: api.vrsky.example.com # CHANGE THIS!
       http:
         paths:
+          # Management API endpoints (Phase 3)
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-management-api
+                port:
+                  number: 8080
+          
+          # WebSocket metrics streaming (Phase 3)
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-management-api
+                port:
+                  number: 8080
+          
+          # Fallback to API Gateway for remaining routes
           - path: /
             pathType: Prefix
             backend:

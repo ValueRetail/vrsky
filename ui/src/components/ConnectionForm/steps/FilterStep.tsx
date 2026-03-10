@@ -1,4 +1,4 @@
-import type { ConnectionFormData, FilterStepData } from '../../../types/forms'
+import type { ConnectionFormData, FilterStepData, FilterRulesFormData, WasmScriptFormData } from '../../../types/forms'
 
 interface FilterStepProps {
   formData: ConnectionFormData
@@ -7,10 +7,12 @@ interface FilterStepProps {
 
 export default function FilterStep({ formData, onChange }: FilterStepProps) {
   const filterType = formData.filter.type
-  const config = formData.filter.config as any
+  const config = formData.filter.config
+  const rulesConfig = filterType === 'rules' ? (config as FilterRulesFormData) : ({} as Partial<FilterRulesFormData>)
+  const wasmConfig = filterType === 'wasm' ? (config as WasmScriptFormData) : ({} as Partial<WasmScriptFormData>)
 
   const handleTypeChange = (type: 'rules' | 'wasm') => {
-    let newConfig: any = {}
+    let newConfig: FilterRulesFormData | WasmScriptFormData
 
     switch (type) {
       case 'rules':
@@ -67,7 +69,7 @@ export default function FilterStep({ formData, onChange }: FilterStepProps) {
               Define conditions to filter messages. Messages matching all conditions will pass.
             </p>
             <textarea
-              value={JSON.stringify(config.rules || [], null, 2)}
+              value={JSON.stringify(rulesConfig.rules || [], null, 2)}
               onChange={e => {
                 try {
                   const rules = JSON.parse(e.target.value)
@@ -93,7 +95,7 @@ export default function FilterStep({ formData, onChange }: FilterStepProps) {
             Provide compiled WASM module code for custom filtering logic
           </p>
           <textarea
-            value={config.script || ''}
+            value={wasmConfig.script || ''}
             onChange={e => handleFieldChange('script', e.target.value)}
             placeholder="Base64-encoded WASM binary"
             rows={10}

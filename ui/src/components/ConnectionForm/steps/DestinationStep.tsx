@@ -1,4 +1,4 @@
-import type { ConnectionFormData, DestinationStepData } from '../../../types/forms'
+import type { ConnectionFormData, DestinationStepData, HttpDestinationFormData, FileDestinationFormData, DatabaseDestinationFormData } from '../../../types/forms'
 
 interface DestinationStepProps {
   formData: ConnectionFormData
@@ -7,10 +7,13 @@ interface DestinationStepProps {
 
 export default function DestinationStep({ formData, onChange }: DestinationStepProps) {
   const destType = formData.destination.type
-  const config = formData.destination.config as any
+  const config = formData.destination.config
+  const httpConfig = destType === 'http' ? (config as HttpDestinationFormData) : ({} as Partial<HttpDestinationFormData>)
+  const fileConfig = destType === 'file' ? (config as FileDestinationFormData) : ({} as Partial<FileDestinationFormData>)
+  const dbConfig = destType === 'database' ? (config as DatabaseDestinationFormData) : ({} as Partial<DatabaseDestinationFormData>)
 
   const handleTypeChange = (type: 'http' | 'file' | 'database') => {
-    let newConfig: any = {}
+    let newConfig: HttpDestinationFormData | FileDestinationFormData | DatabaseDestinationFormData
 
     switch (type) {
       case 'http':
@@ -80,7 +83,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="text"
-              value={config.url || ''}
+              value={httpConfig.url || ''}
               onChange={e => handleFieldChange('url', e.target.value)}
               placeholder="https://api.example.com/data"
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -92,7 +95,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
               Method
             </label>
             <select
-              value={config.method || 'POST'}
+              value={httpConfig.method || 'POST'}
               onChange={e => handleFieldChange('method', e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -109,7 +112,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="number"
-              value={config.timeout || 30}
+              value={httpConfig.timeout || 30}
               onChange={e => handleFieldChange('timeout', parseInt(e.target.value) || 30)}
               min="1"
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -122,7 +125,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="number"
-              value={config.maxAttempts || 3}
+              value={httpConfig.maxAttempts || 3}
               onChange={e => handleFieldChange('maxAttempts', parseInt(e.target.value) || 3)}
               min="0"
               max="10"
@@ -140,7 +143,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="text"
-              value={config.path || ''}
+              value={fileConfig.path || ''}
               onChange={e => handleFieldChange('path', e.target.value)}
               placeholder="/data/output.json"
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -152,7 +155,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
               Format
             </label>
             <select
-              value={config.format || 'json'}
+              value={fileConfig.format || 'json'}
               onChange={e => handleFieldChange('format', e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -166,7 +169,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             <input
               type="checkbox"
               id="append"
-              checked={config.append || false}
+              checked={fileConfig.append || false}
               onChange={e => handleFieldChange('append', e.target.checked)}
               className="rounded border-gray-300"
             />
@@ -185,7 +188,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="text"
-              value={config.connectionString || ''}
+              value={dbConfig.connectionString || ''}
               onChange={e => handleFieldChange('connectionString', e.target.value)}
               placeholder="postgresql://user:pass@localhost/db"
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -198,7 +201,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
             </label>
             <input
               type="text"
-              value={config.table || ''}
+              value={dbConfig.table || ''}
               onChange={e => handleFieldChange('table', e.target.value)}
               placeholder="users"
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -210,7 +213,7 @@ export default function DestinationStep({ formData, onChange }: DestinationStepP
               Operation
             </label>
             <select
-              value={config.operation || 'insert'}
+              value={dbConfig.operation || 'insert'}
               onChange={e => handleFieldChange('operation', e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             >

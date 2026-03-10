@@ -15,9 +15,15 @@ import type {
  * Send a test message to a connection
  */
 export async function sendTestMessage(connectionId: string, message: string): Promise<void> {
-  await apiClient.post<TestMessageResponse>('/test-message', {
-    connection_id: connectionId,
-    message,
+  let payload: unknown
+  try {
+    payload = JSON.parse(message)
+  } catch {
+    payload = message
+  }
+
+  await apiClient.post<TestMessageResponse>(`/api/v1/connections/${connectionId}/test-message`, {
+    payload,
   })
 }
 
@@ -26,13 +32,10 @@ export async function sendTestMessage(connectionId: string, message: string): Pr
  */
 export async function startAutoGenerator(
   connectionId: string,
-  rate: number = 1,
-  messageSize: 'small' | 'medium' | 'large' = 'small'
+  rate: number = 1
 ): Promise<void> {
-  await apiClient.post<StartGeneratorResponse>('/auto-generator/start', {
-    connection_id: connectionId,
-    rate,
-    message_size: messageSize,
+  await apiClient.post<StartGeneratorResponse>(`/api/v1/connections/${connectionId}/auto-generator/start`, {
+    rate_per_second: rate,
   })
 }
 
@@ -40,9 +43,7 @@ export async function startAutoGenerator(
  * Stop the auto-generator for a connection
  */
 export async function stopAutoGenerator(connectionId: string): Promise<void> {
-  await apiClient.post<StopGeneratorResponse>('/auto-generator/stop', {
-    connection_id: connectionId,
-  })
+  await apiClient.post<StopGeneratorResponse>(`/api/v1/connections/${connectionId}/auto-generator/stop`, {})
 }
 
 /**
@@ -52,7 +53,7 @@ export async function getAutoGeneratorStatus(
   connectionId: string
 ): Promise<AutoGeneratorStatusResponse> {
   const response = await apiClient.get<AutoGeneratorStatusResponse>(
-    `/auto-generator/status?connection_id=${connectionId}`
+    `/api/v1/connections/${connectionId}/auto-generator/status`
   )
   return response.data
 }
