@@ -235,7 +235,9 @@ test_metrics_broadcast() {
 	fi
 
 	# Listen for metrics on WebSocket (5 second timeout)
-	local metrics_received=$(timeout 5 websocat "ws://localhost:8080/api/v1/connections/$CONN_ID/metrics/stream" 2>/dev/null | grep -c "messagesProcessed" 2>/dev/null || echo 0)
+	# Derive WebSocket URL from API_ENDPOINT (http:// -> ws://, https:// -> wss://)
+	local ws_base=$(echo "$API_ENDPOINT" | sed 's|^http://|ws://|; s|^https://|wss://|')
+	local metrics_received=$(timeout 5 websocat "$ws_base/api/v1/connections/$CONN_ID/metrics/stream" 2>/dev/null | grep -c "messagesProcessed" 2>/dev/null || echo 0)
 
 	if [ "$metrics_received" -gt 0 ]; then
 		test_result 0 "Metrics received via WebSocket"
@@ -252,6 +254,9 @@ test_database_persistence() {
 
 	if [ -z "$CONN_ID" ]; then
 		test_result 1 "Skipping - no connection ID"
+		return 1
+	fi
+
 	# Ensure kubectl is available before querying the database
 	if ! command -v kubectl >/dev/null 2>&1; then
 		log_error "kubectl command not found in PATH; cannot query PostgreSQL pod in cluster"
@@ -264,9 +269,6 @@ test_database_persistence() {
 
 	if [ -z "$db_pod" ]; then
 		log_error "PostgreSQL pod not found in namespace 'vrsky-database' with label 'app=postgresql'. Ensure the database is deployed and the namespace/labels match this script's expectations."
-
-	if [ -z "$db_pod" ]; then
-		log_error "PostgreSQL pod not found"
 		test_result 1 "Cannot access database"
 		return 1
 	fi
