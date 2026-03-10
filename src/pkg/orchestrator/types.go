@@ -149,12 +149,14 @@ func IsValidNodeType(nodeType string) bool {
 }
 
 // Resource limits and requests for K8s deployments
+// Note: Requests are conservative to allow scheduling on memory-constrained nodes.
+// Limits are higher to allow bursting when needed.
 const (
-	// CPURequest is the CPU request for each component (100m = 0.1 CPU)
-	CPURequest = "100m"
+	// CPURequest is the CPU request for each component (50m = 0.05 CPU)
+	CPURequest = "50m"
 
 	// MemoryRequest is the memory request for each component
-	MemoryRequest = "128Mi"
+	MemoryRequest = "64Mi"
 
 	// CPULimit is the CPU limit for each component (500m = 0.5 CPU)
 	CPULimit = "500m"

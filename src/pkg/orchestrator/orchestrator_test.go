@@ -571,12 +571,12 @@ func TestCreateDeploymentSpec_ResourceLimits(t *testing.T) {
 
 	resources := spec.Deployment.Spec.Template.Spec.Containers[0].Resources
 
-	// Check requests
+	// Check requests (reduced for constrained clusters)
 	cpuRequest := resources.Requests.Cpu()
-	assert.Equal(t, "100m", cpuRequest.String())
+	assert.Equal(t, "50m", cpuRequest.String())
 
 	memRequest := resources.Requests.Memory()
-	assert.Equal(t, "128Mi", memRequest.String())
+	assert.Equal(t, "64Mi", memRequest.String())
 
 	// Check limits
 	cpuLimit := resources.Limits.Cpu()
