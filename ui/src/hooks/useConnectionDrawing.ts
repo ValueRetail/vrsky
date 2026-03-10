@@ -68,39 +68,53 @@ export function useConnectionDrawing(
     [connectionDrawing, connectionStart, edges, setEdges]
   )
 
-  // Handle stage mouse move (update preview line)
-  const handleStageDragMove = useCallback((_stageX: number, _stageY: number) => {
-    if (!connectionDrawing || !connectionStart) {
-      setConnectionPreviewEnd(null)
-      return
-    }
-
-    // Get the stage element to calculate mouse position
-    if (typeof window !== 'undefined') {
-      const stageElement = document.querySelector('canvas')
-      if (stageElement) {
-        const rect = stageElement.getBoundingClientRect()
-        const mouseX = (window.innerWidth - rect.left) / 2 // Approximate
-        const mouseY = (window.innerHeight - rect.top) / 2 // Approximate
-
-        setConnectionPreviewEnd({ x: mouseX, y: mouseY })
+  // Handle mouse move on stage (update preview line position)
+  const handleStageMouseMove = useCallback(
+    (x: number, y: number) => {
+      if (connectionDrawing && connectionStart) {
+        setConnectionPreviewEnd({ x, y })
       }
+    },
+    [connectionDrawing, connectionStart]
+  )
+
+  // Cancel connection drawing (called on mouseup anywhere or ESC)
+  const cancelConnectionDrawing = useCallback(() => {
+    if (connectionDrawing) {
+      setConnectionDrawing(false)
+      setConnectionStart(null)
+      setConnectionPreviewEnd(null)
     }
-  }, [connectionDrawing, connectionStart])
+  }, [connectionDrawing])
 
   // Handle ESC key to cancel connection drawing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && connectionDrawing) {
-        setConnectionDrawing(false)
-        setConnectionStart(null)
-        setConnectionPreviewEnd(null)
+        cancelConnectionDrawing()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [connectionDrawing])
+  }, [connectionDrawing, cancelConnectionDrawing])
+
+  // Handle global mouseup to cancel connection if not released on a valid port
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      // Small delay to allow port mouseup to fire first
+      setTimeout(() => {
+        if (connectionDrawing) {
+          cancelConnectionDrawing()
+        }
+      }, 10)
+    }
+
+    if (connectionDrawing) {
+      window.addEventListener('mouseup', handleGlobalMouseUp)
+      return () => window.removeEventListener('mouseup', handleGlobalMouseUp)
+    }
+  }, [connectionDrawing, cancelConnectionDrawing])
 
   return {
     connectionDrawing,
@@ -109,6 +123,7 @@ export function useConnectionDrawing(
     setConnectionPreviewEnd,
     handlePortMouseDown,
     handlePortMouseUp,
-    handleStageDragMove,
+    handleStageMouseMove,
+    cancelConnectionDrawing,
   }
 }

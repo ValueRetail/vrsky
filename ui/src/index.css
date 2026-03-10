@@ -7,10 +7,24 @@
 @layer base {
   html {
     @apply scroll-smooth;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
   }
 
   body {
     @apply bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
   }
 
   /* Remove default focus styles for better control */

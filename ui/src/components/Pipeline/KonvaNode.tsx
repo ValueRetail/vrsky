@@ -102,23 +102,25 @@ export default function KonvaNode({
         listening={false}
       />
 
-      {/* Input Port (Left Side) */}
-      <Circle
-        x={-NODE_WIDTH / 2}
-        y={0}
-        radius={PORT_RADIUS}
-        fill="#ef4444"
-        stroke="#ffffff"
-        strokeWidth={2}
-        onMouseDown={(evt) => onPortMouseDown('input', evt)}
-        onMouseUp={() => onPortMouseUp('input')}
-        onMouseEnter={(evt) => {
-          evt.currentTarget.to({ radius: PORT_RADIUS + 2, duration: 0.1 })
-        }}
-        onMouseLeave={(evt) => {
-          evt.currentTarget.to({ radius: PORT_RADIUS, duration: 0.1 })
-        }}
-      />
+      {/* Input Port (Left Side) - Only for Filter, Converter, Producer (not Consumer) */}
+      {node.type !== 'consumer' && (
+        <Circle
+          x={-NODE_WIDTH / 2}
+          y={0}
+          radius={PORT_RADIUS}
+          fill="#ef4444"
+          stroke="#ffffff"
+          strokeWidth={2}
+          onMouseDown={(evt) => onPortMouseDown('input', evt)}
+          onMouseUp={() => onPortMouseUp('input')}
+          onMouseEnter={(evt) => {
+            evt.currentTarget.to({ radius: PORT_RADIUS + 2, duration: 0.1 })
+          }}
+          onMouseLeave={(evt) => {
+            evt.currentTarget.to({ radius: PORT_RADIUS, duration: 0.1 })
+          }}
+        />
+      )}
 
       {/* Output Port (Right Side) - Only for Consumer, Filter, Converter (not Producer) */}
       {node.type !== 'producer' && (

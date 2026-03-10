@@ -16,6 +16,7 @@ export default function PipelineBuilder() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
+  const [paletteOpen, setPaletteOpen] = useState(true)
   const canvasContainer = useRef<HTMLDivElement>(null)
   const { showErrorNotification, showSuccessNotification } = useUIStore()
 
@@ -28,6 +29,7 @@ export default function PipelineBuilder() {
     setConnectionPreviewEnd,
     handlePortMouseDown,
     handlePortMouseUp,
+    handleStageMouseMove,
   } = useConnectionDrawing(nodes, setEdges, edges)
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -49,17 +51,14 @@ export default function PipelineBuilder() {
 
       if (!nodeType) return
 
-      // Get canvas position (relative to the canvas, accounting for stage position)
       const rect = canvasContainer.current.getBoundingClientRect()
       const x = event.clientX - rect.left - stagePos.x
       const y = event.clientY - rect.top - stagePos.y
 
-      // Snap to grid
       const GRID_SIZE = 20
       const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
       const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE
 
-      // Create new node with auto-numbered label
       const label = getNodeLabel(nodeType, nodes)
       const newNode: Node = {
         id: `${nodeType}-${Date.now()}-${Math.random()}`,
@@ -94,13 +93,11 @@ export default function PipelineBuilder() {
   const handleNodeDelete = useCallback(() => {
     if (!selectedNode) return
 
-    // Remove node and its edges
     setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id))
     setEdges((eds) =>
       eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
     )
 
-    // Renumber remaining nodes
     setNodes((nds) => renumberNodesAfterDeletion(nds, selectedNode.id))
     setSelectedNode(null)
     setSelectedNodeId(null)
@@ -124,7 +121,6 @@ export default function PipelineBuilder() {
       return false
     }
 
-    // Check that consumer and producer are configured
     const consumerConfigured = consumers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
     const producerConfigured = producers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
 
@@ -163,7 +159,6 @@ export default function PipelineBuilder() {
     try {
       await apiClient.post('/api/v1/connections', payload)
       showSuccessNotification('Success', 'Pipeline deployed successfully!')
-      // Reset canvas
       setNodes([])
       setEdges([])
       setSelectedNode(null)
@@ -177,88 +172,117 @@ export default function PipelineBuilder() {
     }
   }
 
+  // Determine if right sidebar should be open
+  const rightSidebarOpen = selectedNode !== null
+
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-100">
-      {/* Deploy Button - Top Right (Node-RED style) */}
-      <button
-        onClick={deployPipeline}
-        disabled={isLoading}
-        className="absolute top-4 right-4 z-50 px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors shadow-lg flex items-center gap-2"
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'row' }}>
+      {/* LEFT SIDEBAR - Component Palette */}
+      {paletteOpen && (
+        <aside style={{ width: '224px', height: '100%', backgroundColor: '#f9fafb', borderRight: '1px solid #e5e7eb', overflowY: 'auto', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+          <ComponentPalette onDragStart={() => {}} onClose={() => setPaletteOpen(false)} />
+        </aside>
+      )}
+
+      {/* Toggle button to open sidebar when closed */}
+      {!paletteOpen && (
+        <button
+          onClick={() => setPaletteOpen(true)}
+          style={{ 
+            position: 'absolute', 
+            left: 0, 
+            top: '50%', 
+            transform: 'translateY(-50%)',
+            width: '24px',
+            height: '48px',
+            backgroundColor: '#f3f4f6',
+            border: '1px solid #e5e7eb',
+            borderLeft: 'none',
+            borderRadius: '0 6px 6px 0',
+            cursor: 'pointer',
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#6b7280',
+            fontSize: '12px',
+            fontWeight: 500,
+          }}
+          title="Open component palette"
+        >
+          {'>'}
+        </button>
+      )}
+
+      {/* CENTER - Canvas Area (FILLS ALL REMAINING SPACE) */}
+      <div
+        ref={canvasContainer}
+        style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative', backgroundColor: '#f9fafb' }}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
-        {isLoading ? (
-          <>
-            <span className="animate-spin">⚙️</span>
-            Deploying...
-          </>
-        ) : (
-          <>Deploy</>
-        )}
-      </button>
-
-      {/* Main Content Area - Flex Row */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Component Palette */}
-        <div className="w-64 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
-          <ComponentPalette onDragStart={() => {}} />
-        </div>
-
-        {/* Center - Canvas Area */}
-        <div
-          ref={canvasContainer}
-          className="flex-1 overflow-hidden relative"
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
+        {/* Deploy Button - Top Right of Canvas */}
+        <button
+          onClick={deployPipeline}
+          disabled={isLoading}
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            zIndex: 20,
+            padding: '8px 24px',
+            backgroundColor: isLoading ? '#9ca3af' : '#2563eb',
+            color: 'white',
+            fontWeight: 600,
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isLoading ? 'not-allowed' : 'pointer'
+          }}
         >
-          <KonvaCanvas
-            nodes={nodes}
-            edges={edges}
-            selectedNodeId={selectedNodeId}
-            connectionDrawing={connectionDrawing}
-            connectionStart={connectionStart}
-            connectionPreviewEnd={connectionPreviewEnd}
-            onNodeDrag={handleNodeDrag}
-            onNodeSelect={(nodeId) => {
-              setSelectedNodeId(nodeId)
-              const node = nodes.find((n) => n.id === nodeId)
-              if (node) {
-                setSelectedNode(node)
-              } else {
-                // Clicked on canvas background
-                setSelectedNode(null)
-              }
-            }}
-            onPortMouseDown={handlePortMouseDown}
-            onPortMouseUp={handlePortMouseUp}
-            onStageDragMove={(x, y) => {
-              setStagePos({ x, y })
-              // Update connection preview while drawing
-              if (connectionDrawing) {
-                setConnectionPreviewEnd({ x: -x, y: -y })
-              }
-            }}
-          />
-        </div>
+          {isLoading ? 'Deploying...' : 'Deploy'}
+        </button>
 
-        {/* Right Sidebar - Property Editor (Slide In/Out) */}
-        <div
-          className={`
-            bg-white border-l border-gray-200 overflow-hidden flex-shrink-0
-            transition-all duration-300 ease-in-out
-            ${selectedNode ? 'w-96' : 'w-0'}
-          `}
-        >
-          {selectedNode && (
-            <div className="w-96 h-full overflow-y-auto">
-              <PropertyEditor
-                node={selectedNode}
-                onUpdate={updateNodeConfig}
-                onClose={handleClosePropertyEditor}
-                onDelete={handleNodeDelete}
-              />
-            </div>
-          )}
-        </div>
+        {/* Konva Canvas */}
+        <KonvaCanvas
+          nodes={nodes}
+          edges={edges}
+          selectedNodeId={selectedNodeId}
+          connectionDrawing={connectionDrawing}
+          connectionStart={connectionStart}
+          connectionPreviewEnd={connectionPreviewEnd}
+          onNodeDrag={handleNodeDrag}
+          onNodeSelect={(nodeId) => {
+            setSelectedNodeId(nodeId)
+            const node = nodes.find((n) => n.id === nodeId)
+            if (node) {
+              setSelectedNode(node)
+            } else {
+              setSelectedNode(null)
+            }
+          }}
+          onPortMouseDown={handlePortMouseDown}
+          onPortMouseUp={handlePortMouseUp}
+          onStageDragMove={(x, y) => {
+            setStagePos({ x, y })
+            if (connectionDrawing) {
+              setConnectionPreviewEnd({ x: -x, y: -y })
+            }
+          }}
+          onStageMouseMove={handleStageMouseMove}
+        />
       </div>
+
+      {/* RIGHT SIDEBAR - Property Editor */}
+      {rightSidebarOpen && (
+        <aside style={{ width: '320px', height: '100%', backgroundColor: 'white', borderLeft: '1px solid #d1d5db', overflowY: 'auto', flexShrink: 0 }}>
+          <PropertyEditor
+            node={selectedNode}
+            onUpdate={updateNodeConfig}
+            onClose={handleClosePropertyEditor}
+            onDelete={handleNodeDelete}
+          />
+        </aside>
+      )}
     </div>
   )
 }
