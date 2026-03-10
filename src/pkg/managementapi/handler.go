@@ -18,6 +18,9 @@ type Handler struct {
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
+
+	// K8s integration for graph-based pipelines (Phase 2)
+	orchestratorFactory OrchestratorFactory
 }
 
 // NewHandler creates a new handler
@@ -35,6 +38,12 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 // SetPublisher sets the NATS publisher for command publishing
 func (h *Handler) SetPublisher(publisher *NATSPublisher) {
 	h.publisher = publisher
+}
+
+// SetOrchestratorFactory sets the factory for creating pipeline orchestrators.
+// This enables K8s deployment for graph-based connections (Phase 2).
+func (h *Handler) SetOrchestratorFactory(factory OrchestratorFactory) {
+	h.orchestratorFactory = factory
 }
 
 // ErrorResponse represents an error response
@@ -459,6 +468,17 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For graph-based connections (Phase 2): Deploy to Kubernetes via orchestrator
+	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
+		orch := h.orchestratorFactory(conn)
+		if err := orch.StartPipeline(ctx, conn); err != nil {
+			// Deployment failed - don't update status to running
+			_ = writeError(w, http.StatusInternalServerError, "OrchestratorError",
+				fmt.Sprintf("failed to deploy pipeline: %v", err), nil)
+			return
+		}
+	}
+
 	// Update connection status to Running
 	conn.Status = "running"
 	conn.StartedAt = pointerTo(time.Now().UTC())
@@ -527,6 +547,15 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For graph-based connections (Phase 2): Remove K8s deployments via orchestrator
+	// Note: Even if K8s cleanup fails, we still update the connection status to stopped.
+	// Failed K8s resources can be cleaned up manually or by a garbage collector.
+	var orchestratorErr error
+	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
+		orch := h.orchestratorFactory(conn)
+		orchestratorErr = orch.StopPipeline(ctx, conn)
+	}
+
 	// Update connection status to Stopped
 	conn.Status = "stopped"
 	conn.StoppedAt = pointerTo(time.Now().UTC())
@@ -537,10 +566,14 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create connection stopped event
-	eventData, _ := json.Marshal(map[string]interface{}{
+	eventPayload := map[string]interface{}{
 		"status":    conn.Status,
 		"stoppedAt": conn.StoppedAt,
-	})
+	}
+	if orchestratorErr != nil {
+		eventPayload["orchestratorError"] = orchestratorErr.Error()
+	}
+	eventData, _ := json.Marshal(eventPayload)
 	event := NewConnectionEvent(connID, tenantID, "stopped", eventData)
 	_ = h.repo.CreateConnectionEvent(ctx, event)
 
