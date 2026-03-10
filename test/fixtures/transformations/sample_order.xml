@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Order xmlns="http://vrsky.example.com/order">
+    <OrderID>ORD-001</OrderID>
+    <Customer>
+        <Name>John Smith</Name>
+        <Email>john.smith@example.com</Email>
+    </Customer>
+    <Status>active</Status>
+    <TotalAmount currency="USD">259.99</TotalAmount>
+    <Items>
+        <Item>
+            <SKU>PROD-A100</SKU>
+            <Name>Premium Widget</Name>
+            <Quantity>2</Quantity>
+            <UnitPrice>89.99</UnitPrice>
+            <LineTotal>179.98</LineTotal>
+        </Item>
+        <Item>
+            <SKU>PROD-B200</SKU>
+            <Name>Standard Gadget</Name>
+            <Quantity>1</Quantity>
+            <UnitPrice>80.01</UnitPrice>
+            <LineTotal>80.01</LineTotal>
+        </Item>
+    </Items>
+    <Shipping method="express">
+        <Address>
+            <Street>123 Main St</Street>
+            <City>Springfield</City>
+            <State>IL</State>
+            <ZipCode>62701</ZipCode>
+            <Country>US</Country>
+        </Address>
+    </Shipping>
+    <CreatedAt>2026-01-15T10:30:00Z</CreatedAt>
+</Order>

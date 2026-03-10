@@ -1,0 +1,35 @@
+{
+  "order": {
+    "id": "ORD-001",
+    "customer_name": "John Smith",
+    "customer_email": "john.smith@example.com",
+    "status": "active",
+    "total_amount": 259.99,
+    "currency": "USD",
+    "items": [
+      {
+        "product_sku": "PROD-A100",
+        "product_name": "Premium Widget",
+        "quantity": 2,
+        "unit_price": 89.99,
+        "line_total": 179.98
+      },
+      {
+        "product_sku": "PROD-B200",
+        "product_name": "Standard Gadget",
+        "quantity": 1,
+        "unit_price": 80.01,
+        "line_total": 80.01
+      }
+    ],
+    "shipping_method": "express",
+    "shipping_address": {
+      "street": "123 Main St",
+      "city": "Springfield",
+      "state": "IL",
+      "zip_code": "62701",
+      "country": "US"
+    },
+    "created_timestamp": "2026-01-15T10:30:00Z"
+  }
+}
