@@ -201,7 +201,9 @@ test_websocket_connection() {
 	fi
 
 	# Attempt WebSocket connection with timeout
-	local ws_url="ws://localhost:8080/api/v1/connections/$CONN_ID/metrics/stream"
+	# Derive WebSocket URL from API_ENDPOINT (http:// -> ws://, https:// -> wss://)
+	local ws_base=$(echo "$API_ENDPOINT" | sed 's|^http://|ws://|; s|^https://|wss://|')
+	local ws_url="$ws_base/api/v1/connections/$CONN_ID/metrics/stream"
 	timeout 5 websocat "$ws_url" 2>/dev/null | head -1 | grep -q "metrics" 2>/dev/null
 	local result=$?
 
