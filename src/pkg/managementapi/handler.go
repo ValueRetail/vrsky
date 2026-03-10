@@ -103,17 +103,32 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Create connection
 	conn := NewConnection(tenantID, req)
 
-	// Validate configuration (fail fast)
-	if err := h.validator.ValidateConnection(conn); err != nil {
-		if cfgErr, ok := err.(*ConfigError); ok {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-				"field":     cfgErr.Field,
-				"component": cfgErr.Component,
-			})
-		} else {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+	// Validate configuration
+	// If using graph-based model (nodes present), validate DAG topology
+	if len(conn.Nodes) > 0 {
+		if err := h.validator.ValidateDAG(conn); err != nil {
+			if dagErr, ok := err.(*DAGValidationError); ok {
+				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
+					"errors": dagErr.Errors,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
 		}
-		return
+	} else {
+		// Legacy linear model validation (DEPRECATED)
+		if err := h.validator.ValidateConnection(conn); err != nil {
+			if cfgErr, ok := err.(*ConfigError); ok {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+					"field":     cfgErr.Field,
+					"component": cfgErr.Component,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
+		}
 	}
 
 	// Save to database
@@ -281,12 +296,11 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		existingConn.Description = *updateReq.Description
 	}
 
-	// NEW: Apply graph-based model updates (Phase 1)
+	// Apply graph-based model updates (Phase 1)
 	// If Nodes are provided, use the new model; otherwise fall back to legacy
 	if len(updateReq.Nodes) > 0 {
 		existingConn.Nodes = updateReq.Nodes
 		existingConn.Edges = updateReq.Edges
-		// TODO(Phase 1b): Add ValidateConnection() call here to validate DAG structure
 	} else {
 		// DEPRECATED: Legacy linear model updates
 		if updateReq.SourceConfig != nil {
@@ -307,16 +321,31 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate updated configuration
-	if err := h.validator.ValidateConnection(existingConn); err != nil {
-		if cfgErr, ok := err.(*ConfigError); ok {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-				"field":     cfgErr.Field,
-				"component": cfgErr.Component,
-			})
-		} else {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+	// If using graph-based model (nodes present), validate DAG topology
+	if len(existingConn.Nodes) > 0 {
+		if err := h.validator.ValidateDAG(existingConn); err != nil {
+			if dagErr, ok := err.(*DAGValidationError); ok {
+				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
+					"errors": dagErr.Errors,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
 		}
-		return
+	} else {
+		// Legacy linear model validation (DEPRECATED)
+		if err := h.validator.ValidateConnection(existingConn); err != nil {
+			if cfgErr, ok := err.(*ConfigError); ok {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+					"field":     cfgErr.Field,
+					"component": cfgErr.Component,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
+		}
 	}
 
 	// Update in database

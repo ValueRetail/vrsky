@@ -69,3 +69,93 @@ type ConflictError struct {
 func (ce *ConflictError) Error() string {
 	return ce.Message
 }
+
+// DAGValidationError represents multiple validation errors in pipeline topology
+// Returns all errors at once rather than fail-fast for better UX
+type DAGValidationError struct {
+	Errors []string
+}
+
+func (dve *DAGValidationError) Error() string {
+	if len(dve.Errors) == 1 {
+		return dve.Errors[0]
+	}
+	return fmt.Sprintf("pipeline validation failed with %d errors: %v", len(dve.Errors), dve.Errors)
+}
+
+// ConsumerCountError indicates invalid number of consumer nodes
+type ConsumerCountError struct {
+	Found    int
+	Expected int
+}
+
+func (e *ConsumerCountError) Error() string {
+	if e.Found == 0 {
+		return "no consumer node found: pipeline requires exactly 1 consumer"
+	}
+	return fmt.Sprintf("found %d consumer nodes: pipeline requires exactly 1 consumer", e.Found)
+}
+
+// ProducerCountError indicates invalid number of producer nodes
+type ProducerCountError struct {
+	Found    int
+	Expected int
+}
+
+func (e *ProducerCountError) Error() string {
+	if e.Found == 0 {
+		return "no producer node found: pipeline requires exactly 1 producer"
+	}
+	return fmt.Sprintf("found %d producer nodes: pipeline requires exactly 1 producer", e.Found)
+}
+
+// CircularDependencyError indicates a cycle was detected in the pipeline graph
+type CircularDependencyError struct {
+	Message string
+}
+
+func (e *CircularDependencyError) Error() string {
+	return e.Message
+}
+
+// ConsumerIsolatedError indicates the consumer has no outgoing edges
+type ConsumerIsolatedError struct {
+	ConsumerID string
+}
+
+func (e *ConsumerIsolatedError) Error() string {
+	return fmt.Sprintf("consumer node '%s' is isolated: no outgoing edges to other nodes", e.ConsumerID)
+}
+
+// ProducerUnreachableError indicates the producer cannot be reached from the consumer
+type ProducerUnreachableError struct {
+	ConsumerID string
+	ProducerID string
+}
+
+func (e *ProducerUnreachableError) Error() string {
+	return fmt.Sprintf("producer node '%s' is not reachable from consumer node '%s'", e.ProducerID, e.ConsumerID)
+}
+
+// OrphanedNodesError indicates nodes that are not on the path from consumer to producer
+type OrphanedNodesError struct {
+	Nodes []string
+}
+
+func (e *OrphanedNodesError) Error() string {
+	if len(e.Nodes) == 1 {
+		return fmt.Sprintf("orphaned node '%s': not on path from consumer to producer", e.Nodes[0])
+	}
+	return fmt.Sprintf("orphaned nodes %v: not on path from consumer to producer", e.Nodes)
+}
+
+// InvalidEdgeError indicates an edge references a non-existent node
+type InvalidEdgeError struct {
+	EdgeID     string
+	InvalidRef string
+	RefType    string // "source" or "target"
+}
+
+func (e *InvalidEdgeError) Error() string {
+	return fmt.Sprintf("edge '%s' has invalid %s: node '%s' does not exist", e.EdgeID, e.RefType, e.InvalidRef)
+}

@@ -489,3 +489,335 @@ func isValidFileFormat(format string) bool {
 	}
 	return validFormats[strings.ToLower(format)]
 }
+
+// =============================================================================
+// DAG Validation for Graph-Based Pipeline Model
+// =============================================================================
+
+// ValidateDAG validates the graph-based connection model (nodes and edges).
+// Returns a DAGValidationError with all validation errors found, or nil if valid.
+// This validates:
+// - Exactly 1 consumer node
+// - Exactly 1 producer node
+// - All edges reference existing nodes
+// - No circular dependencies (cycles)
+// - Consumer has outgoing edges
+// - Producer is reachable from consumer
+// - No orphaned nodes (all nodes on path from consumer to producer)
+func (v *Validator) ValidateDAG(conn *Connection) error {
+	if conn == nil {
+		return &BadRequestError{Message: "connection cannot be nil"}
+	}
+
+	// If no nodes, this is a legacy connection - skip DAG validation
+	if len(conn.Nodes) == 0 {
+		return nil
+	}
+
+	var errors []string
+
+	// Build node ID set for quick lookup
+	nodeIDs := make(map[string]*Node)
+	for _, node := range conn.Nodes {
+		if node != nil {
+			nodeIDs[node.ID] = node
+		}
+	}
+
+	// 1. Validate node counts (exactly 1 consumer, 1 producer)
+	consumerID, producerID, countErrors := v.validateNodeCounts(conn.Nodes)
+	errors = append(errors, countErrors...)
+
+	// 2. Validate all edges reference existing nodes
+	edgeErrors := v.validateEdgesReference(nodeIDs, conn.Edges)
+	errors = append(errors, edgeErrors...)
+
+	// If we have edge reference errors, skip graph traversal checks
+	if len(edgeErrors) > 0 {
+		return &DAGValidationError{Errors: errors}
+	}
+
+	// 3. Detect cycles
+	if v.hasCycle(conn.Nodes, conn.Edges) {
+		errors = append(errors, (&CircularDependencyError{
+			Message: "circular dependency detected: pipeline contains a cycle",
+		}).Error())
+	}
+
+	// 4. Check consumer has outgoing edges
+	if consumerID != "" {
+		outgoing := v.getOutgoingEdges(consumerID, conn.Edges)
+		if len(outgoing) == 0 {
+			errors = append(errors, (&ConsumerIsolatedError{
+				ConsumerID: consumerID,
+			}).Error())
+		}
+	}
+
+	// 5. Check producer is reachable from consumer
+	if consumerID != "" && producerID != "" {
+		if !v.isReachable(consumerID, producerID, conn.Edges) {
+			errors = append(errors, (&ProducerUnreachableError{
+				ConsumerID: consumerID,
+				ProducerID: producerID,
+			}).Error())
+		}
+	}
+
+	// 6. Find orphaned nodes
+	if consumerID != "" && producerID != "" {
+		orphaned := v.findOrphanedNodes(conn.Nodes, conn.Edges, consumerID, producerID)
+		if len(orphaned) > 0 {
+			errors = append(errors, (&OrphanedNodesError{
+				Nodes: orphaned,
+			}).Error())
+		}
+	}
+
+	if len(errors) > 0 {
+		return &DAGValidationError{Errors: errors}
+	}
+
+	return nil
+}
+
+// validateNodeCounts validates that there is exactly 1 consumer and 1 producer.
+// Returns the consumer ID, producer ID, and any errors found.
+func (v *Validator) validateNodeCounts(nodes []*Node) (consumerID, producerID string, errors []string) {
+	var consumers, producers []string
+
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		switch node.Type {
+		case "consumer":
+			consumers = append(consumers, node.ID)
+		case "producer":
+			producers = append(producers, node.ID)
+		}
+	}
+
+	if len(consumers) != 1 {
+		errors = append(errors, (&ConsumerCountError{
+			Found:    len(consumers),
+			Expected: 1,
+		}).Error())
+	} else {
+		consumerID = consumers[0]
+	}
+
+	if len(producers) != 1 {
+		errors = append(errors, (&ProducerCountError{
+			Found:    len(producers),
+			Expected: 1,
+		}).Error())
+	} else {
+		producerID = producers[0]
+	}
+
+	return consumerID, producerID, errors
+}
+
+// validateEdgesReference validates that all edges reference existing nodes.
+func (v *Validator) validateEdgesReference(nodeIDs map[string]*Node, edges []*Edge) []string {
+	var errors []string
+
+	for _, edge := range edges {
+		if edge == nil {
+			continue
+		}
+		if _, exists := nodeIDs[edge.Source]; !exists {
+			errors = append(errors, (&InvalidEdgeError{
+				EdgeID:     edge.ID,
+				InvalidRef: edge.Source,
+				RefType:    "source",
+			}).Error())
+		}
+		if _, exists := nodeIDs[edge.Target]; !exists {
+			errors = append(errors, (&InvalidEdgeError{
+				EdgeID:     edge.ID,
+				InvalidRef: edge.Target,
+				RefType:    "target",
+			}).Error())
+		}
+	}
+
+	return errors
+}
+
+// hasCycle detects if the graph contains a cycle using DFS with 3-state coloring.
+// WHITE (0) = unvisited, GRAY (1) = in progress, BLACK (2) = finished
+func (v *Validator) hasCycle(nodes []*Node, edges []*Edge) bool {
+	const (
+		WHITE = 0
+		GRAY  = 1
+		BLACK = 2
+	)
+
+	// Build adjacency list
+	adj := make(map[string][]string)
+	for _, edge := range edges {
+		if edge != nil {
+			adj[edge.Source] = append(adj[edge.Source], edge.Target)
+		}
+	}
+
+	color := make(map[string]int)
+	for _, node := range nodes {
+		if node != nil {
+			color[node.ID] = WHITE
+		}
+	}
+
+	var dfs func(nodeID string) bool
+	dfs = func(nodeID string) bool {
+		color[nodeID] = GRAY
+
+		for _, neighbor := range adj[nodeID] {
+			if color[neighbor] == GRAY {
+				// Found a back edge - cycle detected
+				return true
+			}
+			if color[neighbor] == WHITE {
+				if dfs(neighbor) {
+					return true
+				}
+			}
+		}
+
+		color[nodeID] = BLACK
+		return false
+	}
+
+	// Run DFS from each unvisited node
+	for _, node := range nodes {
+		if node != nil && color[node.ID] == WHITE {
+			if dfs(node.ID) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isReachable checks if targetID is reachable from sourceID using BFS.
+func (v *Validator) isReachable(sourceID, targetID string, edges []*Edge) bool {
+	if sourceID == targetID {
+		return true
+	}
+
+	// Build adjacency list
+	adj := make(map[string][]string)
+	for _, edge := range edges {
+		if edge != nil {
+			adj[edge.Source] = append(adj[edge.Source], edge.Target)
+		}
+	}
+
+	// BFS
+	visited := make(map[string]bool)
+	queue := []string{sourceID}
+	visited[sourceID] = true
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		for _, neighbor := range adj[current] {
+			if neighbor == targetID {
+				return true
+			}
+			if !visited[neighbor] {
+				visited[neighbor] = true
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	return false
+}
+
+// findOrphanedNodes finds nodes that are not on the path from consumer to producer.
+// A node is orphaned if it's not reachable from the consumer OR the producer is not reachable from it.
+func (v *Validator) findOrphanedNodes(nodes []*Node, edges []*Edge, consumerID, producerID string) []string {
+	// Build adjacency list and reverse adjacency list
+	adj := make(map[string][]string)    // forward edges
+	revAdj := make(map[string][]string) // reverse edges
+	for _, edge := range edges {
+		if edge != nil {
+			adj[edge.Source] = append(adj[edge.Source], edge.Target)
+			revAdj[edge.Target] = append(revAdj[edge.Target], edge.Source)
+		}
+	}
+
+	// Find all nodes reachable from consumer (forward BFS)
+	reachableFromConsumer := make(map[string]bool)
+	queue := []string{consumerID}
+	reachableFromConsumer[consumerID] = true
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, neighbor := range adj[current] {
+			if !reachableFromConsumer[neighbor] {
+				reachableFromConsumer[neighbor] = true
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	// Find all nodes that can reach producer (reverse BFS)
+	canReachProducer := make(map[string]bool)
+	queue = []string{producerID}
+	canReachProducer[producerID] = true
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, neighbor := range revAdj[current] {
+			if !canReachProducer[neighbor] {
+				canReachProducer[neighbor] = true
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	// A node is orphaned if it's not both reachable from consumer AND can reach producer
+	var orphaned []string
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		// Skip consumer and producer themselves
+		if node.ID == consumerID || node.ID == producerID {
+			continue
+		}
+		if !reachableFromConsumer[node.ID] || !canReachProducer[node.ID] {
+			orphaned = append(orphaned, node.ID)
+		}
+	}
+
+	return orphaned
+}
+
+// getOutgoingEdges returns all edges originating from the given node.
+func (v *Validator) getOutgoingEdges(nodeID string, edges []*Edge) []*Edge {
+	var outgoing []*Edge
+	for _, edge := range edges {
+		if edge != nil && edge.Source == nodeID {
+			outgoing = append(outgoing, edge)
+		}
+	}
+	return outgoing
+}
+
+// getIncomingEdges returns all edges targeting the given node.
+func (v *Validator) getIncomingEdges(nodeID string, edges []*Edge) []*Edge {
+	var incoming []*Edge
+	for _, edge := range edges {
+		if edge != nil && edge.Target == nodeID {
+			incoming = append(incoming, edge)
+		}
+	}
+	return incoming
+}
