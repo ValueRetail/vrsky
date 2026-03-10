@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-management-api
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-management-api
+    component: management-api
+    version: v1
+  annotations:
+    # Prometheus service discovery - scrape metrics port
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: vrsky-management-api
+  ports:
+  - name: http-api
+    # Application listens on container port 3000; exposed as 8080 within the cluster.
+    port: 8080
+    targetPort: 3000
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  sessionAffinity: None
