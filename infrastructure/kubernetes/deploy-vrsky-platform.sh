@@ -188,6 +188,59 @@ deploy_filter() {
 	print_success "Filter deployment complete"
 }
 
+deploy_management_api() {
+	print_header "Deploying Management API"
+
+	cd "$SCRIPT_DIR/management-api"
+
+	kubectl apply -f deployment.yaml
+
+	print_success "Management API manifests applied"
+
+	echo "Waiting for Management API pod to be ready..."
+	kubectl wait --for=condition=ready pod -l app=vrsky-management-api -n vrsky-platform --timeout=300s || {
+		print_error "Management API pod did not become ready in time"
+		kubectl get pods -n vrsky-platform -l app=vrsky-management-api
+		exit 1
+	}
+
+	print_success "Management API is ready"
+
+	# Print service endpoint
+	echo ""
+	echo "Management API Service Endpoint:"
+	kubectl get svc vrsky-management-api -n vrsky-platform -o wide
+
+	print_success "Management API deployment complete"
+}
+
+deploy_data_plane() {
+	print_header "Deploying Data Plane (Message Processing Runtime)"
+
+	cd "$SCRIPT_DIR/data-plane"
+
+	# Check if deployment.yaml exists
+	if [ ! -f deployment.yaml ]; then
+		print_warning "Data Plane deployment.yaml not found - skipping deployment"
+		print_warning "Data Plane is the message processing runtime that will be implemented in Phase 2"
+		return
+	fi
+
+	kubectl apply -f deployment.yaml
+
+	print_success "Data Plane manifests applied"
+
+	echo "Waiting for Data Plane pods to be ready..."
+	kubectl wait --for=condition=ready pod -l app=vrsky-data-plane -n vrsky-platform --timeout=300s || {
+		print_error "Data Plane pods did not become ready in time"
+		kubectl get pods -n vrsky-platform -l app=vrsky-data-plane
+		exit 1
+	}
+
+	print_success "Data Plane is ready"
+	print_success "Data Plane deployment complete"
+}
+
 deploy_monitoring() {
 	print_header "Deploying Monitoring Stack (Prometheus + Grafana)"
 
@@ -297,31 +350,42 @@ print_summary() {
 	echo ""
 	print_success "VRSky Platform deployment complete!"
 	echo ""
+	echo "Service Endpoints:"
+	echo "  Platform NATS: nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+	echo "  PostgreSQL: postgresql.vrsky-database.svc.cluster.local:5432"
+	echo "  MinIO: minio.vrsky-storage.svc.cluster.local:9000"
+	echo "  Management API: http://vrsky-management-api.vrsky-platform.svc.cluster.local:8080"
+	echo ""
 	echo "Next Steps:"
 	echo "1. Verify all pods are running:"
 	echo "     kubectl get pods -A | grep vrsky"
 	echo ""
-	echo "2. Run filter smoke test:"
+	echo "2. Test Management API:"
+	echo "     kubectl port-forward -n vrsky-platform svc/vrsky-management-api 8080:8080"
+	echo "     curl http://localhost:8080/health"
+	echo ""
+	echo "3. Run filter smoke test:"
 	echo "     bash infrastructure/scripts/test-filter-smoke.sh"
 	echo ""
-	echo "3. Access Grafana:"
+	echo "4. Access Grafana:"
 	echo "     kubectl port-forward -n vrsky-monitoring svc/grafana 3000:80"
 	echo "     Open: http://localhost:3000 (admin/changeme-grafana-password)"
 	echo ""
-	echo "4. Test PostgreSQL connection:"
+	echo "5. Test PostgreSQL connection:"
 	echo "     kubectl port-forward -n vrsky-database svc/postgresql 5432:5432"
 	echo "     psql -h localhost -U vrsky -d vrsky"
 	echo ""
-	echo "5. Test MinIO console:"
+	echo "6. Test MinIO console:"
 	echo "     kubectl port-forward -n vrsky-storage svc/minio 9001:9001"
 	echo "     Open: http://localhost:9001"
 	echo ""
-	echo "6. Monitor filter logs:"
+	echo "7. Monitor filter logs:"
 	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-filter"
 	echo ""
-	echo "7. Deploy VRSky application services (API Gateway, Data Plane)"
+	echo "8. Monitor Management API logs:"
+	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-management-api"
 	echo ""
-	echo "8. Apply Ingress rules (after API Gateway is deployed):"
+	echo "9. Apply Ingress rules (after API Gateway is deployed):"
 	echo "     kubectl apply -f infrastructure/kubernetes/ingress/ingress.yaml"
 	echo ""
 }
@@ -335,9 +399,12 @@ main() {
 	echo "  1. Platform NATS (3-node cluster with JetStream)"
 	echo "  2. PostgreSQL (single instance with Longhorn storage)"
 	echo "  3. MinIO (S3-compatible object storage)"
-	echo "  4. Monitoring (Prometheus + Grafana) [optional]"
-	echo "  5. Ingress & TLS (cert-manager + Let's Encrypt) [optional]"
-	echo "  6. Demo Tenant NATS [optional]"
+	echo "  4. Filter Component (Phase 1E)"
+	echo "  5. Management API (Tenant & Integration Management)"
+	echo "  6. Data Plane (Message Processing Runtime) [placeholder]"
+	echo "  7. Monitoring (Prometheus + Grafana) [optional]"
+	echo "  8. Ingress & TLS (cert-manager + Let's Encrypt) [optional]"
+	echo "  9. Demo Tenant NATS [optional]"
 	echo ""
 	echo "Press Enter to continue or Ctrl+C to cancel..."
 	read -r
@@ -351,6 +418,10 @@ main() {
 	deploy_minio
 
 	deploy_filter
+
+	deploy_management_api
+
+	deploy_data_plane
 
 	deploy_monitoring
 

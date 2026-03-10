@@ -59,12 +59,14 @@ class SSEConnection {
     try {
       this.eventSource = new EventSource(url)
 
-      this.eventSource.addEventListener('metrics', (event) => {
+      this.eventSource.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data) as ConnectionMetricsResponse
-          this.retryCount = 0 // Reset retry count on success
-          if (this.onMessageCallback) {
-            this.onMessageCallback(data)
+          const message = JSON.parse(event.data) as { type: string; data: ConnectionMetricsResponse }
+          if (message.type === 'metrics') {
+            this.retryCount = 0 // Reset retry count on success
+            if (this.onMessageCallback) {
+              this.onMessageCallback(message.data)
+            }
           }
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err))
@@ -72,7 +74,7 @@ class SSEConnection {
             this.onErrorCallback(error)
           }
         }
-      })
+      }
 
       this.eventSource.addEventListener('error', () => {
         this._handleError()

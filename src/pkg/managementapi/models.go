@@ -9,22 +9,58 @@ import (
 	"github.com/google/uuid"
 )
 
+// Node represents a component in the pipeline graph
+// Nodes can be consumers, filters, converters, or producers
+type Node struct {
+	ID         string               `json:"id"`                   // Unique node ID (e.g., "consumer-0", "filter-1", "converter-0", "producer-0")
+	Type       string               `json:"type"`                 // "consumer", "filter", "converter", "producer"
+	Config     json.RawMessage      `json:"config"`               // Type-specific configuration (SourceConfig, FilterConfig, etc.)
+	Enabled    bool                 `json:"enabled"`              // Whether this node is active
+	Checkpoint *ComponentCheckpoint `json:"checkpoint,omitempty"` // For stateful components (runtime state, not persisted with connection)
+}
+
+// Edge represents a connection between two nodes in the pipeline graph
+type Edge struct {
+	ID     string `json:"id"`     // Unique edge ID (e.g., "edge-0", "edge-1")
+	Source string `json:"source"` // Source node ID
+	Target string `json:"target"` // Target node ID
+	Order  int    `json:"order"`  // Ordering for UI rendering and execution (0 = first)
+}
+
+// ComponentCheckpoint stores the last processed message info for a component
+// Used for resumable processing and exactly-once semantics
+type ComponentCheckpoint struct {
+	LastProcessedMessageID string    `json:"last_processed_message_id"`
+	LastProcessedAt        time.Time `json:"last_processed_at"`
+	MessageCount           int64     `json:"message_count"`
+}
+
 // Connection represents a data pipeline connection
+// Supports both the new graph-based model (Nodes/Edges) and the legacy linear model
 type Connection struct {
-	ID                string            `json:"id" db:"id"`
-	TenantID          string            `json:"tenant_id" db:"tenant_id"`
-	Name              string            `json:"name" db:"name"`
-	Description       string            `json:"description" db:"description"`
+	ID          string `json:"id" db:"id"`
+	TenantID    string `json:"tenant_id" db:"tenant_id"`
+	Name        string `json:"name" db:"name"`
+	Description string `json:"description" db:"description"`
+
+	// NEW: Graph-based pipeline model (Phase 1)
+	// When Nodes/Edges are populated, they take precedence over legacy fields
+	Nodes []*Node `json:"nodes" db:"nodes"`
+	Edges []*Edge `json:"edges" db:"edges"`
+
+	Status    string     `json:"status" db:"status"` // stopped, running, error
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+	StartedAt *time.Time `json:"started_at" db:"started_at"`
+	StoppedAt *time.Time `json:"stopped_at" db:"stopped_at"`
+	LastError *string    `json:"last_error" db:"last_error"`
+
+	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
+	// These fields will be removed in v2.0. Use Nodes/Edges instead.
 	SourceConfig      SourceConfig      `json:"source_config" db:"source_config"`
 	ConverterConfig   ConverterConfig   `json:"converter_config" db:"converter_config"`
 	FilterConfig      FilterConfig      `json:"filter_config" db:"filter_config"`
 	DestinationConfig DestinationConfig `json:"destination_config" db:"destination_config"`
-	Status            string            `json:"status" db:"status"` // stopped, running, error
-	CreatedAt         time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time         `json:"updated_at" db:"updated_at"`
-	StartedAt         *time.Time        `json:"started_at" db:"started_at"`
-	StoppedAt         *time.Time        `json:"stopped_at" db:"stopped_at"`
-	LastError         *string           `json:"last_error" db:"last_error"`
 }
 
 // SourceConfig represents the source/consumer configuration
@@ -270,9 +306,18 @@ func (d *DestinationConfig) Scan(value interface{}) error {
 }
 
 // CreateConnectionRequest is the request to create a new connection
+// Supports both the new graph-based model (Nodes/Edges) and the legacy linear model
 type CreateConnectionRequest struct {
-	Name              string            `json:"name"`
-	Description       string            `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+
+	// NEW: Graph-based pipeline model (Phase 1)
+	// When provided, these take precedence over legacy fields
+	Nodes []*Node `json:"nodes,omitempty"`
+	Edges []*Edge `json:"edges,omitempty"`
+
+	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
+	// These fields will be removed in v2.0. Use Nodes/Edges instead.
 	SourceConfig      SourceConfig      `json:"source_config"`
 	ConverterConfig   ConverterConfig   `json:"converter_config"`
 	FilterConfig      FilterConfig      `json:"filter_config"`
@@ -280,9 +325,18 @@ type CreateConnectionRequest struct {
 }
 
 // UpdateConnectionRequest is the request to update a connection
+// Supports both the new graph-based model (Nodes/Edges) and the legacy linear model
 type UpdateConnectionRequest struct {
-	Name              *string            `json:"name"`
-	Description       *string            `json:"description"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+
+	// NEW: Graph-based pipeline model (Phase 1)
+	// When provided, these take precedence over legacy fields
+	Nodes []*Node `json:"nodes,omitempty"`
+	Edges []*Edge `json:"edges,omitempty"`
+
+	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
+	// These fields will be removed in v2.0. Use Nodes/Edges instead.
 	SourceConfig      *SourceConfig      `json:"source_config"`
 	ConverterConfig   *ConverterConfig   `json:"converter_config"`
 	FilterConfig      *FilterConfig      `json:"filter_config"`
@@ -290,21 +344,34 @@ type UpdateConnectionRequest struct {
 }
 
 // NewConnection creates a new Connection with default values
+// Automatically detects whether to use the new graph-based model or legacy model
+// based on whether Nodes are provided in the request
 func NewConnection(tenantID string, req CreateConnectionRequest) *Connection {
 	now := time.Now().UTC()
-	return &Connection{
-		ID:                uuid.New().String(),
-		TenantID:          tenantID,
-		Name:              req.Name,
-		Description:       req.Description,
-		SourceConfig:      req.SourceConfig,
-		ConverterConfig:   req.ConverterConfig,
-		FilterConfig:      req.FilterConfig,
-		DestinationConfig: req.DestinationConfig,
-		Status:            "stopped",
-		CreatedAt:         now,
-		UpdatedAt:         now,
+	conn := &Connection{
+		ID:          uuid.New().String(),
+		TenantID:    tenantID,
+		Name:        req.Name,
+		Description: req.Description,
+		Status:      "stopped",
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
+
+	// Use new graph-based model if Nodes are provided
+	if len(req.Nodes) > 0 {
+		conn.Nodes = req.Nodes
+		conn.Edges = req.Edges
+		// TODO(Phase 1b): Add ValidateConnection() call here to validate DAG structure
+	} else {
+		// Fall back to legacy linear model for backward compatibility
+		conn.SourceConfig = req.SourceConfig
+		conn.ConverterConfig = req.ConverterConfig
+		conn.FilterConfig = req.FilterConfig
+		conn.DestinationConfig = req.DestinationConfig
+	}
+
+	return conn
 }
 
 // NewConnectionEvent creates a new connection event

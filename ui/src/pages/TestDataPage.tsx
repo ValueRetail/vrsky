@@ -1,8 +1,3 @@
-/**
- * TestData Page
- * Comprehensive test data management interface
- */
-
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { connectionService } from '@/services/connectionService'
@@ -51,20 +46,27 @@ export default function TestDataPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-950">
+        <div className="space-y-4 text-center">
+          <div className="flex justify-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-200 dark:border-primary-900 border-t-primary-600 dark:border-t-primary-400"></div>
+          </div>
+          <p className="text-neutral-600 dark:text-neutral-400 font-medium">Loading connection...</p>
+        </div>
       </div>
     )
   }
 
   if (!connection || !id) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Connection not found</h1>
+      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center px-4">
+        <div className="card-elevated text-center py-12 max-w-md">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50 mb-2">Connection not found</h1>
+          <p className="text-neutral-600 dark:text-neutral-400 mb-6">The connection you're looking for doesn't exist or has been deleted.</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="btn-primary"
           >
             Back to Dashboard
           </button>
@@ -86,64 +88,113 @@ export default function TestDataPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <button onClick={() => navigate(`/connections/${id}`)} className="text-blue-600 hover:text-blue-700 mb-2">
-          ← Back to Connection
-        </button>
-        <h1 className="text-3xl font-bold text-gray-900">Test Data & Messages</h1>
-        <p className="text-gray-600 mt-1">{connection.name}</p>
-      </div>
-
-      {/* Status Warning */}
-      {connection.status !== 'running' && (
-        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-sm text-yellow-900">
-            <strong>Note:</strong> This connection is {connection.status}. Start it to test message sending.
-          </p>
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="animate-fade-in">
+          <button
+            onClick={() => navigate(`/connections/${id}`)}
+            className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium mb-4 transition-colors duration-base"
+          >
+            <span>←</span>
+            <span>Back to Connection</span>
+          </button>
+          <div className="space-y-2">
+            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400 bg-clip-text text-transparent">
+              Test Data & Messages
+            </h1>
+            <p className="text-lg text-neutral-600 dark:text-neutral-400">
+              Test {connection.name}
+            </p>
+          </div>
         </div>
-      )}
 
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column - Controls */}
-        <div className="space-y-6">
-          {connection.status === 'running' && (
-            <>
-              <TestMessageForm connectionId={id} onMessageSent={handleMessageSent} />
-              <AutoGeneratorControls connectionId={id} />
-            </>
-          )}
-
-          {connection.status !== 'running' && (
-            <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 text-center">
-              <p className="text-gray-600 text-sm">Start the connection to send test messages</p>
-              <button
-                onClick={() => navigate(`/connections/${id}`)}
-                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                Go to Connection
-              </button>
+        {/* Status Warning */}
+        {connection.status !== 'running' && (
+          <div className="alert alert-warning animate-fade-in">
+            <div className="flex gap-3">
+              <span className="text-xl">⚠️</span>
+              <div>
+                <p className="font-semibold">Connection is {connection.status}</p>
+                <p className="text-sm">Start the connection to send test messages.</p>
+              </div>
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Success Message */}
+        {connection.status === 'running' && (
+          <div className="alert alert-success animate-fade-in">
+            <div className="flex gap-3">
+              <span className="text-xl">✓</span>
+              <div>
+                <p className="font-semibold">Connection is running</p>
+                <p className="text-sm">Send test messages to verify your pipeline.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+          {/* Left Column - Controls */}
+          <div className="space-y-6">
+            {connection.status === 'running' ? (
+              <>
+                <div className="card-elevated">
+                  <TestMessageForm connectionId={id} onMessageSent={handleMessageSent} />
+                </div>
+                <div className="card-elevated">
+                  <AutoGeneratorControls connectionId={id} />
+                </div>
+              </>
+            ) : (
+              <div className="card-elevated text-center py-12 space-y-4">
+                <div className="text-4xl">🔒</div>
+                <div>
+                  <p className="text-neutral-600 dark:text-neutral-400 font-medium mb-4">
+                    Start the connection to test messages
+                  </p>
+                  <button
+                    onClick={() => navigate(`/connections/${id}`)}
+                    className="btn-primary"
+                  >
+                    Go to Connection
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column - Message Log */}
+          <div className="card-elevated">
+            <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-50 mb-4">Message Log</h3>
+            <MessageLog messages={messages} pageSize={15} />
+          </div>
         </div>
 
-        {/* Right Column - Message Log */}
-        <div>
-          <MessageLog messages={messages} pageSize={15} />
+        {/* Info Section */}
+        <div className="card-accent animate-fade-in">
+          <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-50 mb-4">How to test your pipeline</h3>
+          <ul className="space-y-2 text-neutral-600 dark:text-neutral-400">
+            <li className="flex gap-3">
+              <span className="font-semibold text-primary-600 dark:text-primary-400">1.</span>
+              <span>Send individual test messages using the form above</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="font-semibold text-primary-600 dark:text-primary-400">2.</span>
+              <span>Or use the auto-generator to send messages at a specific rate</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="font-semibold text-primary-600 dark:text-primary-400">3.</span>
+              <span>Messages are processed through your pipeline in real-time</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="font-semibold text-primary-600 dark:text-primary-400">4.</span>
+              <span>Check the connection metrics to see throughput and errors</span>
+            </li>
+          </ul>
         </div>
-      </div>
-
-      {/* Info Section */}
-      <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <h3 className="text-sm font-bold text-blue-900 mb-2">How to test your pipeline:</h3>
-        <ul className="text-sm text-blue-900 space-y-1 list-disc list-inside">
-          <li>Send individual test messages using the form above</li>
-          <li>Or use the auto-generator to send messages at a specific rate</li>
-          <li>Messages are processed through your pipeline in real-time</li>
-          <li>Check the connection metrics to see throughput and errors</li>
-        </ul>
       </div>
     </div>
   )

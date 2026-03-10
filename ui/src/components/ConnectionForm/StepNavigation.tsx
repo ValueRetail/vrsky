@@ -17,15 +17,29 @@ export default function StepNavigation({ currentStep, steps, onSelectStep }: Ste
           <div key={index} className="flex-1">
             <div className="flex items-center">
               <button
-                onClick={() => onSelectStep(index)}
+                onClick={() => {
+                  console.log('Clicking step', index)
+                  onSelectStep(index)
+                }}
                 disabled={index > currentStep}
-                className={`flex items-center justify-center w-10 h-10 rounded-full font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  index === currentStep
-                    ? 'bg-blue-600 text-white'
-                    : index < currentStep
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-200 text-gray-700'
-                }`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  fontWeight: 'bold',
+                  fontSize: '16px',
+                  border: 'none',
+                  cursor: index > currentStep ? 'not-allowed' : 'pointer',
+                  backgroundColor: index === currentStep ? '#2563eb' : index < currentStep ? '#16a34a' : '#d1d5db',
+                  color: index > currentStep ? '#9ca3af' : index === currentStep ? '#fff' : index < currentStep ? '#fff' : '#374151',
+                  opacity: index > currentStep ? 0.5 : 1,
+                  transition: 'all 150ms ease-in-out',
+                  zIndex: 10,
+                  position: 'relative',
+                }}
               >
                 {index < currentStep ? '✓' : index + 1}
               </button>

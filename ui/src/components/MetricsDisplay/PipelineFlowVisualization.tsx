@@ -69,7 +69,7 @@ export function PipelineFlowVisualization({ metrics }: PipelineFlowVisualization
 
       {/* SVG Flow Diagram */}
       <div className="overflow-x-auto mb-4">
-        <svg height="120" viewBox="0 0 600 120" className="min-w-max">
+        <svg width="100%" height="120" viewBox="0 0 600 120" preserveAspectRatio="xMidYMid meet" style={{ maxWidth: '100%', display: 'block' }}>
           {/* Arrows and components */}
           {components.map((component, index) => {
             const x = 50 + index * 140

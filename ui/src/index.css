@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,31 +7,152 @@
 @layer base {
   html {
     @apply scroll-smooth;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
   }
 
   body {
-    @apply bg-white text-gray-900;
+    @apply bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Remove default focus styles for better control */
+  :focus {
+    @apply outline-none;
   }
 }
 
 @layer components {
+  /* Buttons - Primary */
   .btn-primary {
-    @apply px-4 py-2 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition-colors;
+    @apply px-4 py-2 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-lg font-medium shadow-base hover:shadow-md hover:from-primary-600 hover:to-primary-700 active:scale-95 transition-all duration-fast disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
+  /* Buttons - Secondary */
   .btn-secondary {
-    @apply px-4 py-2 bg-gray-200 text-gray-900 rounded-lg font-medium hover:bg-gray-300 transition-colors;
+    @apply px-4 py-2 bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50 rounded-lg font-medium shadow-xs hover:shadow-base hover:bg-neutral-300 dark:hover:bg-neutral-600 active:scale-95 transition-all duration-fast disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
+  /* Buttons - Outline */
+  .btn-outline {
+    @apply px-4 py-2 border-2 border-primary-500 text-primary-600 dark:text-primary-400 rounded-lg font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 active:scale-95 transition-all duration-fast disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Buttons - Danger */
   .btn-danger {
-    @apply px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition-colors;
+    @apply px-4 py-2 bg-gradient-to-r from-danger-500 to-danger-600 text-white rounded-lg font-medium shadow-base hover:shadow-md hover:from-danger-600 hover:to-danger-700 active:scale-95 transition-all duration-fast disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
+  /* Buttons - Success */
+  .btn-success {
+    @apply px-4 py-2 bg-gradient-to-r from-success-500 to-success-600 text-white rounded-lg font-medium shadow-base hover:shadow-md hover:from-success-600 hover:to-success-700 active:scale-95 transition-all duration-fast disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Buttons - Small */
+  .btn-sm {
+    @apply px-3 py-1 text-sm rounded-md;
+  }
+
+  /* Buttons - Large */
+  .btn-lg {
+    @apply px-6 py-3 text-lg rounded-xl;
+  }
+
+  /* Cards - Modern with subtle shadows */
   .card {
-    @apply bg-white border border-gray-200 rounded-lg shadow-sm;
+    @apply bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xs hover:shadow-base transition-shadow duration-base;
   }
 
+  /* Cards - Elevated */
+  .card-elevated {
+    @apply bg-white dark:bg-neutral-800 rounded-xl shadow-md hover:shadow-lg transition-shadow duration-base;
+  }
+
+  /* Cards - Bordered with accent */
+  .card-accent {
+    @apply bg-white dark:bg-neutral-800 border-2 border-primary-500/20 dark:border-primary-500/30 rounded-xl shadow-xs;
+  }
+
+  /* Input fields - Modern styling */
   .input-base {
-    @apply px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply w-full px-4 py-2.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 text-neutral-900 dark:text-neutral-50 rounded-lg font-medium placeholder-neutral-400 dark:placeholder-neutral-500 transition-colors duration-fast focus:border-primary-500 dark:focus:border-primary-400 focus:ring-1 focus:ring-primary-500/50;
+  }
+
+  /* Input fields - Error state */
+  .input-error {
+    @apply border-danger-500 dark:border-danger-400 focus:border-danger-500 focus:ring-danger-500/50;
+  }
+
+  /* Input fields - Success state */
+  .input-success {
+    @apply border-success-500 dark:border-success-400 focus:border-success-500 focus:ring-success-500/50;
+  }
+
+  /* Labels */
+  .label {
+    @apply block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2;
+  }
+
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .badge-primary {
+    @apply bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300;
+  }
+
+  .badge-success {
+    @apply bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-300;
+  }
+
+  .badge-warning {
+    @apply bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300;
+  }
+
+  .badge-danger {
+    @apply bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300;
+  }
+
+  /* Alerts */
+  .alert {
+    @apply px-4 py-3 rounded-lg border text-sm;
+  }
+
+  .alert-info {
+    @apply bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700/50 text-primary-800 dark:text-primary-300;
+  }
+
+  .alert-success {
+    @apply bg-success-50 dark:bg-success-900/20 border-success-200 dark:border-success-700/50 text-success-800 dark:text-success-300;
+  }
+
+  .alert-warning {
+    @apply bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-700/50 text-warning-800 dark:text-warning-300;
+  }
+
+  .alert-danger {
+    @apply bg-danger-50 dark:bg-danger-900/20 border-danger-200 dark:border-danger-700/50 text-danger-800 dark:text-danger-300;
+  }
+
+  /* Dividers */
+  .divider {
+    @apply h-px bg-neutral-200 dark:bg-neutral-700;
+  }
+
+  /* Skeleton loading */
+  .skeleton {
+    @apply bg-neutral-200 dark:bg-neutral-700 rounded-lg animate-pulse;
   }
 }

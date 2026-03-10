@@ -18,7 +18,6 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
   const [status, setStatus] = useState<AutoGeneratorStatusResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [rate, setRate] = useState(1)
-  const [messageSize, setMessageSize] = useState<'small' | 'medium' | 'large'>('small')
   const { addNotification } = useUIStore()
 
   // Fetch initial status
@@ -39,7 +38,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
 
   // Poll for status updates when running
   useEffect(() => {
-    if (!status?.running) return
+    if (!status?.is_running) return
 
     const interval = setInterval(async () => {
       try {
@@ -52,7 +51,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
     }, 2000) // Poll every 2 seconds
 
     return () => clearInterval(interval)
-  }, [status?.running, connectionId, onStatusChange])
+  }, [status?.is_running, connectionId, onStatusChange])
 
   const handleStart = async () => {
     if (rate < 1 || rate > 1000) {
@@ -66,7 +65,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
 
     try {
       setLoading(true)
-      await testDataService.startAutoGenerator(connectionId, rate, messageSize)
+      await testDataService.startAutoGenerator(connectionId, rate)
       
       // Refresh status
       const result = await testDataService.getGeneratorStatus(connectionId)
@@ -123,25 +122,25 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
 
       {/* Status Display */}
       {status && (
-        <div className={`mb-4 p-3 rounded border ${status.running ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+        <div className={`mb-4 p-3 rounded border ${status.is_running ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div
-                className={`w-3 h-3 rounded-full ${status.running ? 'bg-green-500' : 'bg-gray-500'} animate-pulse`}
+                className={`w-3 h-3 rounded-full ${status.is_running ? 'bg-green-500' : 'bg-gray-500'} animate-pulse`}
               />
-              <span className={`text-sm font-medium ${status.running ? 'text-green-900' : 'text-gray-900'}`}>
-                {status.running ? 'Running' : 'Stopped'}
+              <span className={`text-sm font-medium ${status.is_running ? 'text-green-900' : 'text-gray-900'}`}>
+                {status.is_running ? 'Running' : 'Stopped'}
               </span>
             </div>
-            {status.running && (
+            {status.is_running && (
               <span className="text-xs text-gray-600">
-                {status.rate} msgs/sec · {status.message_size}
+                {status.rate_per_second} msgs/sec
               </span>
             )}
           </div>
-          {status.total_generated > 0 && (
+          {status.message_count > 0 && (
             <p className="text-xs text-gray-600 mt-2">
-              Total generated: {status.total_generated}
+              Total generated: {status.message_count}
             </p>
           )}
         </div>
@@ -149,7 +148,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
 
       {/* Controls */}
       <div className="space-y-3">
-        {!status?.running ? (
+        {!status?.is_running ? (
           <>
             {/* Rate Control */}
             <div>
@@ -169,29 +168,6 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
                 <span>1</span>
                 <span>500</span>
                 <span>1000</span>
-              </div>
-            </div>
-
-            {/* Message Size Control */}
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-2">
-                Message Size
-              </label>
-              <div className="flex gap-2">
-                {(['small', 'medium', 'large'] as const).map((size) => (
-                  <button
-                    key={size}
-                    onClick={() => setMessageSize(size)}
-                    disabled={loading}
-                    className={`flex-1 px-3 py-2 rounded text-xs font-medium transition-colors ${
-                      messageSize === size
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    } disabled:bg-gray-400 disabled:text-gray-600`}
-                  >
-                    {size.charAt(0).toUpperCase() + size.slice(1)}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -219,7 +195,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
       </div>
 
       <p className="text-xs text-gray-600 mt-3">
-        {status?.running
+        {status?.is_running
           ? 'Generator is running. Press Stop to end.'
           : 'Configure settings and press Start to generate test messages.'}
       </p>
