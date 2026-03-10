@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
@@ -16,10 +16,37 @@ export default function PipelineBuilder() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const [paletteOpen, setPaletteOpen] = useState(true)
+  const [deployAttempted, setDeployAttempted] = useState(false)
+  const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
   const canvasContainer = useRef<HTMLDivElement>(null)
   const { showErrorNotification, showSuccessNotification } = useUIStore()
+
+  // Measure canvas container width and update when layout changes
+  useEffect(() => {
+    const updateCanvasWidth = () => {
+      if (canvasContainer.current) {
+        setCanvasWidth(canvasContainer.current.offsetWidth)
+      }
+    }
+
+    // Initial measurement after DOM render
+    updateCanvasWidth()
+
+    // Update on window resize
+    window.addEventListener('resize', updateCanvasWidth)
+
+    // Use ResizeObserver to detect container size changes (e.g., sidebar open/close)
+    const observer = new ResizeObserver(updateCanvasWidth)
+    if (canvasContainer.current) {
+      observer.observe(canvasContainer.current)
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateCanvasWidth)
+      observer.disconnect()
+    }
+  }, [])
 
   // Use custom hooks
   const { handleNodeDrag } = useNodeDrag(nodes, setNodes)
@@ -27,7 +54,6 @@ export default function PipelineBuilder() {
     connectionDrawing,
     connectionStart,
     connectionPreviewEnd,
-    setConnectionPreviewEnd,
     handlePortMouseDown,
     handlePortMouseUp,
     handleStageMouseMove,
@@ -53,8 +79,10 @@ export default function PipelineBuilder() {
       if (!nodeType) return
 
       const rect = canvasContainer.current.getBoundingClientRect()
-      const x = event.clientX - rect.left - stagePos.x
-      const y = event.clientY - rect.top - stagePos.y
+      // Account for scroll position of the canvas container
+      const scrollTop = canvasContainer.current.scrollTop || 0
+      const x = event.clientX - rect.left
+      const y = event.clientY - rect.top + scrollTop
 
       const GRID_SIZE = 20
       const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE
@@ -74,7 +102,7 @@ export default function PipelineBuilder() {
 
       setNodes((nds) => [...nds, newNode])
     },
-    [nodes, stagePos]
+    [nodes]
   )
 
   const updateNodeConfig = (config: Record<string, unknown>) => {
@@ -161,12 +189,11 @@ export default function PipelineBuilder() {
   }
 
   const deployPipeline = async () => {
+    // Mark that user attempted to deploy (shows validation errors if any)
+    setDeployAttempted(true)
+
     // First check graph validation (connectivity, cycles, orphans)
     if (!validationResult.valid) {
-      showErrorNotification(
-        'Pipeline Validation Failed',
-        validationResult.errors.join('\n')
-      )
       return
     }
 
@@ -185,6 +212,7 @@ export default function PipelineBuilder() {
       setEdges([])
       setSelectedNode(null)
       setSelectedNodeId(null)
+      setDeployAttempted(false)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       showErrorNotification('Deployment failed', errorMsg)
@@ -239,7 +267,7 @@ export default function PipelineBuilder() {
       {/* CENTER - Canvas Area (FILLS ALL REMAINING SPACE) */}
       <div
         ref={canvasContainer}
-        style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative', backgroundColor: '#f9fafb' }}
+        style={{ flex: 1, height: '100%', overflowY: 'auto', overflowX: 'hidden', position: 'relative', backgroundColor: '#f9fafb' }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -256,68 +284,63 @@ export default function PipelineBuilder() {
             gap: '8px',
           }}
         >
-          {/* Validation Status Badge */}
-          {nodes.length > 0 && (
-            <div
-              style={{
-                padding: '6px 12px',
-                backgroundColor: validationResult.valid ? '#dcfce7' : '#fee2e2',
-                color: validationResult.valid ? '#166534' : '#991b1b',
-                borderRadius: '4px',
-                fontSize: '13px',
-                fontWeight: 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                maxWidth: '280px',
-              }}
-            >
-              <span>{validationResult.valid ? '✓' : '✗'}</span>
-              <span>
-                {validationResult.valid
-                  ? 'Ready to Deploy'
-                  : `${validationResult.errors.length} validation error${validationResult.errors.length > 1 ? 's' : ''}`}
-              </span>
-            </div>
-          )}
-
-          {/* Validation Errors List (collapsed by default, shown on hover or when there are errors) */}
-          {!validationResult.valid && validationResult.errors.length > 0 && (
-            <div
-              style={{
-                padding: '8px 12px',
-                backgroundColor: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '4px',
-                fontSize: '12px',
-                color: '#991b1b',
-                maxWidth: '280px',
-              }}
-            >
-              <ul style={{ margin: 0, paddingLeft: '16px' }}>
-                {validationResult.errors.map((error, index) => (
-                  <li key={index} style={{ marginBottom: index < validationResult.errors.length - 1 ? '4px' : 0 }}>
-                    {error}
-                  </li>
-                ))}
-              </ul>
-            </div>
+          {/* Validation Errors - Only shown after deploy attempt with errors */}
+          {deployAttempted && !validationResult.valid && (
+            <>
+              <div
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#fee2e2',
+                  color: '#991b1b',
+                  borderRadius: '4px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  maxWidth: '280px',
+                }}
+              >
+                <span>✗</span>
+                <span>
+                  {`${validationResult.errors.length} validation error${validationResult.errors.length > 1 ? 's' : ''}`}
+                </span>
+              </div>
+              <div
+                style={{
+                  padding: '8px 12px',
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#991b1b',
+                  maxWidth: '280px',
+                }}
+              >
+                <ul style={{ margin: 0, paddingLeft: '16px' }}>
+                  {validationResult.errors.map((error, index) => (
+                    <li key={index} style={{ marginBottom: index < validationResult.errors.length - 1 ? '4px' : 0 }}>
+                      {error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
           )}
 
           {/* Deploy Button */}
           <button
             onClick={deployPipeline}
-            disabled={isLoading || !validationResult.valid}
+            disabled={isLoading}
             style={{
               padding: '8px 24px',
-              backgroundColor: isLoading || !validationResult.valid ? '#9ca3af' : '#2563eb',
+              backgroundColor: isLoading ? '#9ca3af' : '#2563eb',
               color: 'white',
               fontWeight: 600,
               border: 'none',
               borderRadius: '4px',
-              cursor: isLoading || !validationResult.valid ? 'not-allowed' : 'pointer',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
             }}
-            title={!validationResult.valid ? 'Fix validation errors before deploying' : ''}
           >
             {isLoading ? 'Deploying...' : 'Deploy'}
           </button>
@@ -331,6 +354,7 @@ export default function PipelineBuilder() {
           connectionDrawing={connectionDrawing}
           connectionStart={connectionStart}
           connectionPreviewEnd={connectionPreviewEnd}
+          containerWidth={canvasWidth}
           onNodeDrag={handleNodeDrag}
           onNodeSelect={(nodeId) => {
             setSelectedNodeId(nodeId)
@@ -343,12 +367,6 @@ export default function PipelineBuilder() {
           }}
           onPortMouseDown={handlePortMouseDown}
           onPortMouseUp={handlePortMouseUp}
-          onStageDragMove={(x, y) => {
-            setStagePos({ x, y })
-            if (connectionDrawing) {
-              setConnectionPreviewEnd({ x: -x, y: -y })
-            }
-          }}
           onStageMouseMove={handleStageMouseMove}
         />
       </div>
