@@ -18,6 +18,11 @@ func NewInput(inputType string, configJSON json.RawMessage) (component.Input, er
 	case "file":
 		logger := slog.Default()
 		return NewFileConsumer(logger)
+	case "api":
+		logger := slog.Default()
+		// Note: Pass nil for stateStore to use in-memory state (non-persistent)
+		// For production, inject a PostgresStateStore implementation
+		return NewAPIConsumer(configJSON, nil, logger)
 	default:
 		return nil, fmt.Errorf("unknown input type: %s", inputType)
 	}
