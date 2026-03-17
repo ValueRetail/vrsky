@@ -5,7 +5,7 @@
 
 export type ConnectionStatus = 'running' | 'stopped' | 'error'
 
-export type SourceType = 'http' | 'file' | 'database'
+export type SourceType = 'http' | 'file' | 'database' | 'api'
 export type ConverterType = 'schema' | 'mapper' | 'rules'
 export type FilterType = 'rules' | 'wasm'
 export type DestinationType = 'http' | 'file' | 'database'
@@ -43,7 +43,21 @@ export interface DatabaseSourceConfig {
   polling_interval_ms?: number
 }
 
-export type SourceConfig = HttpSourceConfig | FileSourceConfig | DatabaseSourceConfig
+// API Consumer Source Configuration
+export interface ApiConsumerEndpoint {
+  path: string
+  auth_type: 'none' | 'bearer' | 'api_key'
+  auth_value: string
+}
+
+export interface ApiConsumerSourceConfig {
+  type: 'api'
+  base_url: string
+  endpoints: ApiConsumerEndpoint[]
+  poll_interval_seconds: number
+}
+
+export type SourceConfig = HttpSourceConfig | FileSourceConfig | DatabaseSourceConfig | ApiConsumerSourceConfig
 
 // Converter Configurations
 export interface SchemaValidatorConfig {

@@ -614,4 +614,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/start", h.StartAutoGenerator)
 	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/stop", h.StopAutoGenerator)
 	mux.HandleFunc("GET /api/v1/connections/{id}/auto-generator/status", h.GetAutoGeneratorStatus)
+
+	// API Consumer routes
+	h.RegisterAPIConsumerRoutes(mux)
 }

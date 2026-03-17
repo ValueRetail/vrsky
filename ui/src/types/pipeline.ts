@@ -20,3 +20,12 @@ export interface NodeData {
   config?: Record<string, unknown>
   type?: string
 }
+
+export interface Canvas {
+  id: string
+  name: string
+  nodes: Node[]
+  edges: Edge[]
+  createdAt: number
+  updatedAt: number
+}

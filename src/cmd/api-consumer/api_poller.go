@@ -1,0 +1,272 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/google/uuid"
+)
+
+// pollConnection runs the main polling loop for an API consumer
+func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, tenantID string, config *APIConsumerConfig) {
+	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
+	logger.Info("Starting API polling",
+		"base_url", config.BaseURL,
+		"endpoints", len(config.Endpoints),
+		"poll_interval", config.PollIntervalSeconds,
+		"one_time_only", config.OneTimeOnly)
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: s.config.PollTimeout,
+	}
+
+	// If one-time-only mode, just poll once and return
+	if config.OneTimeOnly {
+		logger.Info("One-time-only mode: retrieving data once")
+		s.pollAllEndpoints(ctx, client, connectionID, tenantID, config, logger)
+		logger.Info("One-time-only mode: data retrieval complete")
+		return
+	}
+
+	// Calculate poll interval for continuous polling
+	pollInterval := time.Duration(config.PollIntervalSeconds) * time.Second
+	if pollInterval <= 0 {
+		pollInterval = s.config.DefaultPollInterval
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Poll immediately on start
+	s.pollAllEndpoints(ctx, client, connectionID, tenantID, config, logger)
+
+	// Then poll on interval
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Polling stopped")
+			return
+		case <-ticker.C:
+			s.pollAllEndpoints(ctx, client, connectionID, tenantID, config, logger)
+		}
+	}
+}
+
+// pollAllEndpoints polls all configured endpoints
+func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.Client, connectionID, tenantID string, config *APIConsumerConfig, logger *slog.Logger) {
+	for i, endpoint := range config.Endpoints {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Build full URL
+		url := strings.TrimSuffix(config.BaseURL, "/") + endpoint.Path
+		if endpoint.Params != "" {
+			// Add query parameters
+			if strings.Contains(url, "?") {
+				url += "&" + endpoint.Params
+			} else {
+				url += "?" + endpoint.Params
+			}
+		}
+
+		logger.Debug("Polling endpoint", "url", url, "endpoint_index", i)
+
+		// Make the API call
+		payload, contentType, err := s.callEndpoint(ctx, client, url, endpoint, logger)
+		if err != nil {
+			logger.Error("Failed to poll endpoint", "url", url, "error", err)
+			// Continue to next endpoint, don't fail the whole polling cycle
+			continue
+		}
+
+		logger.Info("Successfully polled endpoint", "url", url, "payload_size", len(payload), "content_type", contentType)
+
+		// Publish to NATS
+		if err := s.publishToNATS(connectionID, tenantID, payload, contentType, url); err != nil {
+			logger.Error("Failed to publish to NATS", "error", err)
+			continue
+		}
+
+		logger.Debug("Published to NATS", "connection_id", connectionID)
+	}
+}
+
+// callEndpoint makes an HTTP request to the specified endpoint
+func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Client, url string, endpoint APIEndpoint, logger *slog.Logger) ([]byte, string, error) {
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add auth headers
+	applyAuth(req, endpoint.AuthType, endpoint.AuthValue)
+
+	// Add standard headers
+	req.Header.Set("User-Agent", "VRSky-API-Consumer/1.0")
+	req.Header.Set("Accept", "*/*")
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code - only accept 2xx responses
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) // Read first 1KB for error message
+		return nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Get content type
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = detectContentType(body)
+	}
+
+	return body, contentType, nil
+}
+
+// applyAuth adds authentication headers to the request
+func applyAuth(req *http.Request, authType, authValue string) {
+	if authValue == "" {
+		return
+	}
+
+	switch authType {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+authValue)
+	case "api_key":
+		// Common API key header names
+		req.Header.Set("X-API-Key", authValue)
+	case "none", "":
+		// No authentication
+	}
+}
+
+// detectContentType attempts to detect content type from payload
+func detectContentType(payload []byte) string {
+	if len(payload) == 0 {
+		return "application/octet-stream"
+	}
+
+	// Try to detect JSON
+	payload = trimWhitespace(payload)
+	if len(payload) > 0 && (payload[0] == '{' || payload[0] == '[') {
+		// Validate it's actually JSON
+		var js json.RawMessage
+		if json.Unmarshal(payload, &js) == nil {
+			return "application/json"
+		}
+	}
+
+	// Try to detect XML
+	if len(payload) > 0 && payload[0] == '<' {
+		return "application/xml"
+	}
+
+	// Try to detect CSV (simple heuristic)
+	if containsCSVPattern(payload) {
+		return "text/csv"
+	}
+
+	// Default to plain text if printable, otherwise binary
+	if isPrintable(payload) {
+		return "text/plain"
+	}
+
+	return "application/octet-stream"
+}
+
+// trimWhitespace removes leading whitespace from payload
+func trimWhitespace(b []byte) []byte {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t' || b[0] == '\n' || b[0] == '\r') {
+		b = b[1:]
+	}
+	return b
+}
+
+// containsCSVPattern checks if payload looks like CSV
+func containsCSVPattern(payload []byte) bool {
+	// Simple heuristic: contains commas and newlines
+	hasComma := false
+	hasNewline := false
+	for _, b := range payload {
+		if b == ',' {
+			hasComma = true
+		}
+		if b == '\n' {
+			hasNewline = true
+		}
+		if hasComma && hasNewline {
+			return true
+		}
+	}
+	return false
+}
+
+// isPrintable checks if payload contains only printable ASCII
+func isPrintable(payload []byte) bool {
+	for _, b := range payload {
+		if b < 32 && b != '\t' && b != '\n' && b != '\r' {
+			return false
+		}
+	}
+	return true
+}
+
+// publishToNATS wraps the payload in an envelope and publishes to NATS
+func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payload []byte, contentType, source string) error {
+	// Create envelope
+	env := &envelope.Envelope{
+		ID:            uuid.New().String(),
+		TenantID:      tenantID,
+		IntegrationID: connectionID, // Used for routing to the correct producer
+		Payload:       payload,
+		PayloadSize:   int64(len(payload)),
+		ContentType:   contentType,
+		Source:        source,
+		CurrentStep:   0,
+		StepHistory:   []string{"api-consumer"},
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	// Serialize envelope
+	data, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("failed to marshal envelope: %w", err)
+	}
+
+	// Publish to NATS topic for this pipeline
+	// Topic format: vrsky.data.{tenantId}.pipeline.{connectionId}
+	topic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", tenantID, connectionID)
+
+	if err := s.nc.Publish(topic, data); err != nil {
+		return fmt.Errorf("failed to publish to NATS: %w", err)
+	}
+
+	s.logger.Debug("Published envelope to NATS",
+		"topic", topic,
+		"envelope_id", env.ID,
+		"payload_size", env.PayloadSize)
+
+	return nil
+}

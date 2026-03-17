@@ -1,5 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Node } from '../../types/pipeline'
+
+// Type for API Consumer endpoint
+interface ApiEndpoint {
+  path: string
+  auth_type: 'none' | 'bearer' | 'api_key'
+  auth_value: string
+}
 
 // Muted color palette matching ComponentPalette
 const NODE_COLORS: Record<string, { bg: string; hoverBg: string; text: string }> = {
@@ -129,10 +136,12 @@ function StyledButton({
   children,
   onClick,
   variant = 'primary',
+  disabled = false,
 }: {
   children: React.ReactNode
   onClick: () => void
   variant?: 'primary' | 'danger'
+  disabled?: boolean
 }) {
   const [hovered, setHovered] = useState(false)
 
@@ -147,32 +156,336 @@ function StyledButton({
       hoverBg: '#f87171',
       text: '#7f1d1d',
     },
+    disabled: {
+      bg: '#e5e7eb',
+      hoverBg: '#e5e7eb',
+      text: '#9ca3af',
+    },
   }
 
-  const colorSet = colors[variant]
+  const colorSet = disabled ? colors.disabled : colors[variant]
 
   return (
     <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => !disabled && setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      disabled={disabled}
       style={{
         width: '100%',
         padding: '10px 16px',
-        backgroundColor: hovered ? colorSet.hoverBg : colorSet.bg,
+        backgroundColor: hovered && !disabled ? colorSet.hoverBg : colorSet.bg,
         color: colorSet.text,
         border: '1px solid rgba(0, 0, 0, 0.08)',
         borderRadius: '6px',
         fontSize: '13px',
         fontWeight: 500,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'all 150ms ease',
-        transform: hovered ? 'scale(1.02)' : 'scale(1)',
-        boxShadow: hovered ? '0 2px 4px rgba(0, 0, 0, 0.1)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
+        transform: hovered && !disabled ? 'scale(1.02)' : 'scale(1)',
+        boxShadow: hovered && !disabled ? '0 2px 4px rgba(0, 0, 0, 0.1)' : '0 1px 2px rgba(0, 0, 0, 0.05)',
+        opacity: disabled ? 0.7 : 1,
       }}
     >
       {children}
     </button>
+  )
+}
+
+// API Consumer configuration component
+// Minimal by default - just Base URL
+// Advanced options (poll interval, endpoints) expandable
+function ApiConsumerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [advHovered, setAdvHovered] = useState(false)
+
+  // Get current API config or initialize defaults
+  const apiConfig = (config.api as Record<string, unknown>) || {}
+  const baseUrl = (apiConfig.base_url as string) || ''
+  const pollInterval = (apiConfig.poll_interval_seconds as number) || 60
+  const oneTimeOnly = (apiConfig.one_time_only as boolean) || false
+  const endpoints = (apiConfig.endpoints as ApiEndpoint[]) || []
+
+  const updateApiConfig = (updates: Record<string, unknown>) => {
+    setConfig({
+      ...config,
+      api: { ...apiConfig, ...updates },
+    })
+  }
+
+  const addEndpoint = () => {
+    const newEndpoints = [...endpoints, { path: '/', auth_type: 'none' as const, auth_value: '' }]
+    updateApiConfig({ endpoints: newEndpoints })
+  }
+
+  const updateEndpoint = (index: number, field: keyof ApiEndpoint, value: string) => {
+    const newEndpoints = [...endpoints]
+    newEndpoints[index] = { ...newEndpoints[index], [field]: value }
+    updateApiConfig({ endpoints: newEndpoints })
+  }
+
+  const removeEndpoint = (index: number) => {
+    const newEndpoints = endpoints.filter((_, i) => i !== index)
+    updateApiConfig({ endpoints: newEndpoints })
+  }
+
+  return (
+    <div>
+      {/* Base URL - always visible, minimal */}
+      <StyledInput
+        label="API Base URL"
+        placeholder="https://api.met.no"
+        value={baseUrl}
+        onChange={(value) => updateApiConfig({ base_url: value })}
+      />
+
+      {/* Advanced toggle */}
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        onMouseEnter={() => setAdvHovered(true)}
+        onMouseLeave={() => setAdvHovered(false)}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          marginBottom: '16px',
+          backgroundColor: advHovered ? '#f3f4f6' : '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: '#6b7280',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          transition: 'all 150ms ease',
+        }}
+      >
+        <span>{showAdvanced ? 'Hide' : 'Show'} Advanced Options</span>
+        <span style={{ transform: showAdvanced ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 150ms' }}>
+          ▼
+        </span>
+      </button>
+
+      {/* Advanced options - collapsible */}
+      {showAdvanced && (
+        <div
+          style={{
+            padding: '16px',
+            backgroundColor: '#f9fafb',
+            borderRadius: '6px',
+            border: '1px solid #e5e7eb',
+            marginBottom: '16px',
+          }}
+        >
+          {/* Retrieval Mode Toggle */}
+          <div style={{ marginBottom: '16px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#374151',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.025em',
+              }}
+            >
+              Retrieval Mode
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => updateApiConfig({ one_time_only: false })}
+                style={{
+                  flex: 1,
+                  padding: '10px 12px',
+                  backgroundColor: !oneTimeOnly ? '#dbeafe' : '#ffffff',
+                  border: !oneTimeOnly ? '2px solid #3b82f6' : '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: !oneTimeOnly ? 600 : 400,
+                  color: !oneTimeOnly ? '#1d4ed8' : '#6b7280',
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                Poll Continuously
+              </button>
+              <button
+                onClick={() => updateApiConfig({ one_time_only: true })}
+                style={{
+                  flex: 1,
+                  padding: '10px 12px',
+                  backgroundColor: oneTimeOnly ? '#dbeafe' : '#ffffff',
+                  border: oneTimeOnly ? '2px solid #3b82f6' : '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: oneTimeOnly ? 600 : 400,
+                  color: oneTimeOnly ? '#1d4ed8' : '#6b7280',
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                Retrieve Once
+              </button>
+            </div>
+            <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px', fontStyle: 'italic' }}>
+              {oneTimeOnly 
+                ? 'Data will be fetched once when the pipeline starts'
+                : 'Data will be fetched repeatedly at the specified interval'
+              }
+            </p>
+          </div>
+
+          {/* Poll Interval - only shown when polling continuously */}
+          {!oneTimeOnly && (
+            <StyledSelect
+              label="Poll Interval"
+              value={String(pollInterval)}
+              onChange={(value) => updateApiConfig({ poll_interval_seconds: parseInt(value, 10) })}
+              options={[
+                { value: '10', label: '10 seconds' },
+                { value: '30', label: '30 seconds' },
+                { value: '60', label: '1 minute' },
+                { value: '300', label: '5 minutes' },
+                { value: '600', label: '10 minutes' },
+              ]}
+            />
+          )}
+
+          {/* Endpoints */}
+          <div style={{ marginBottom: '12px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#374151',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.025em',
+              }}
+            >
+              Endpoints
+            </label>
+
+            {endpoints.length === 0 && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', margin: '8px 0' }}>
+                No endpoints configured. A default "/" endpoint will be used.
+              </p>
+            )}
+
+            {endpoints.map((ep, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: '12px',
+                  backgroundColor: '#ffffff',
+                  borderRadius: '6px',
+                  border: '1px solid #e5e7eb',
+                  marginBottom: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: '#374151' }}>
+                    Endpoint {idx + 1}
+                  </span>
+                  <button
+                    onClick={() => removeEndpoint(idx)}
+                    style={{
+                      padding: '2px 8px',
+                      backgroundColor: '#fef2f2',
+                      color: '#dc2626',
+                      border: '1px solid #fecaca',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="/api/v2/forecast"
+                  value={ep.path}
+                  onChange={(e) => updateEndpoint(idx, 'path', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    marginBottom: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select
+                    value={ep.auth_type}
+                    onChange={(e) => updateEndpoint(idx, 'auth_type', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <option value="none">No Auth</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="api_key">API Key</option>
+                  </select>
+
+                  {ep.auth_type !== 'none' && (
+                    <input
+                      type="text"
+                      placeholder={ep.auth_type === 'bearer' ? 'Token' : 'API Key'}
+                      value={ep.auth_value}
+                      onChange={(e) => updateEndpoint(idx, 'auth_value', e.target.value)}
+                      style={{
+                        flex: 2,
+                        padding: '8px 10px',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={addEndpoint}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                backgroundColor: '#ffffff',
+                border: '1px dashed #d1d5db',
+                borderRadius: '6px',
+                fontSize: '12px',
+                color: '#6b7280',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+              }}
+            >
+              <span style={{ fontSize: '14px' }}>+</span> Add Endpoint
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -189,9 +502,32 @@ export default function PropertyEditor({
 }) {
   const [config, setConfig] = useState(node.data.config || {})
   const [closeHovered, setCloseHovered] = useState(false)
+  
+  // Track which node we're editing to detect when it changes
+  const currentNodeIdRef = useRef<string>(node.id)
+  
+  // Only sync config from node when we switch to editing a DIFFERENT node
+  // This prevents the config from being overwritten when the same node re-renders
+  useEffect(() => {
+    if (currentNodeIdRef.current !== node.id) {
+      // Different node selected - load its config
+      setConfig(node.data.config || {})
+      currentNodeIdRef.current = node.id
+    }
+    // If same node, keep local config state (preserves unsaved changes)
+  }, [node.id, node.data.config])
 
   const nodeType = node.type as string
   const nodeColor = NODE_COLORS[nodeType] || NODE_COLORS.consumer
+
+  // Check if configuration is ready to save
+  // Consumer and producer nodes need a type selected, other nodes are always ready
+  const isReadyToSave = (): boolean => {
+    if (nodeType === 'consumer' || nodeType === 'producer') {
+      return Boolean(config.type)
+    }
+    return true // Filter and converter nodes are always ready
+  }
 
   const renderConfigFields = () => {
     switch (nodeType) {
@@ -200,14 +536,41 @@ export default function PropertyEditor({
           <div>
             <StyledSelect
               label="Source Type"
-              value={(config.type as string) || 'http'}
+              value={(config.type as string) || ''}
               onChange={(value) => setConfig({ ...config, type: value })}
               options={[
+                { value: '', label: 'Select source type...' },
+                { value: 'api', label: 'API Consumer' },
                 { value: 'http', label: 'HTTP Webhook' },
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
               ]}
             />
+
+            {/* Help message when no source type selected */}
+            {!config.type && (
+              <div
+                style={{
+                  padding: '24px 16px',
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '6px',
+                  border: '1px solid #e5e7eb',
+                  marginTop: '16px',
+                  textAlign: 'center',
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: '13px',
+                    color: '#9ca3af',
+                    fontStyle: 'italic',
+                    margin: 0,
+                  }}
+                >
+                  Select a source type from the dropdown above to configure this consumer
+                </p>
+              </div>
+            )}
 
             {config.type === 'http' && (
               <>
@@ -253,6 +616,13 @@ export default function PropertyEditor({
                 }
               />
             )}
+
+            {config.type === 'api' && (
+              <ApiConsumerConfig
+                config={config}
+                setConfig={setConfig}
+              />
+            )}
           </div>
         )
 
@@ -261,14 +631,40 @@ export default function PropertyEditor({
           <div>
             <StyledSelect
               label="Destination Type"
-              value={(config.type as string) || 'http'}
+              value={(config.type as string) || ''}
               onChange={(value) => setConfig({ ...config, type: value })}
               options={[
+                { value: '', label: 'Select destination type...' },
                 { value: 'http', label: 'HTTP API' },
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
               ]}
             />
+
+            {/* Help message when no destination type selected */}
+            {!config.type && (
+              <div
+                style={{
+                  padding: '24px 16px',
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '6px',
+                  border: '1px solid #e5e7eb',
+                  marginTop: '16px',
+                  textAlign: 'center',
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: '13px',
+                    color: '#9ca3af',
+                    fontStyle: 'italic',
+                    margin: 0,
+                  }}
+                >
+                  Select a destination type from the dropdown above to configure this producer
+                </p>
+              </div>
+            )}
 
             {config.type === 'http' && (
               <>
@@ -434,6 +830,7 @@ export default function PropertyEditor({
             onClose()
           }}
           variant="primary"
+          disabled={!isReadyToSave()}
         >
           Save Configuration
         </StyledButton>

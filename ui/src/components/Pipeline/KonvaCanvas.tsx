@@ -9,12 +9,16 @@ interface KonvaCanvasProps {
   nodes: Node[]
   edges: Edge[]
   selectedNodeId: string | null
+  selectedEdgeId: string | null
   connectionDrawing: boolean
   connectionStart: { nodeId: string; port: 'input' | 'output' } | null
   connectionPreviewEnd: { x: number; y: number } | null
   containerWidth: number
   onNodeDrag: (nodeId: string, x: number, y: number) => void
   onNodeSelect: (nodeId: string) => void
+  onEdgeSelect: (edgeId: string) => void
+  onEdgeDelete: (edgeId: string) => void
+  onEdgeContextMenu: (edgeId: string, x: number, y: number) => void
   onPortMouseDown: (nodeId: string, port: 'input' | 'output', event: Konva.KonvaEventObject<MouseEvent>) => void
   onPortMouseUp: (nodeId: string, port: 'input' | 'output') => void
   onStageMouseMove: (x: number, y: number) => void
@@ -63,12 +67,16 @@ export default function KonvaCanvas({
   nodes,
   edges,
   selectedNodeId,
+  selectedEdgeId,
   connectionDrawing,
   connectionStart,
   connectionPreviewEnd,
   containerWidth,
   onNodeDrag,
   onNodeSelect,
+  onEdgeSelect,
+  onEdgeDelete,
+  onEdgeContextMenu,
   onPortMouseDown,
   onPortMouseUp,
   onStageMouseMove,
@@ -114,10 +122,11 @@ export default function KonvaCanvas({
     }
   }
 
-  // Handle stage click (deselect nodes)
+  // Handle stage click (deselect nodes and edges)
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.target === e.currentTarget) {
       onNodeSelect('')
+      onEdgeSelect('')
     }
   }
 
@@ -136,7 +145,15 @@ export default function KonvaCanvas({
 
         {/* Edges/Connections */}
         {edges.map((edge) => (
-          <KonvaConnection key={edge.id} edge={edge} nodes={nodes} />
+          <KonvaConnection 
+            key={edge.id} 
+            edge={edge} 
+            nodes={nodes}
+            isSelected={selectedEdgeId === edge.id}
+            onSelect={onEdgeSelect}
+            onDelete={onEdgeDelete}
+            onContextMenu={onEdgeContextMenu}
+          />
         ))}
 
         {/* Preview connection line while drawing (bezier curve like actual connections) */}

@@ -53,6 +53,9 @@ func NewFileProducer(logger *slog.Logger) (*FileProducer, error) {
 		outputDir = "/tmp/file-output"
 	}
 
+	// Expand ~ to user's home directory
+	outputDir = expandHomePath(outputDir)
+
 	fileNameFormat := os.Getenv("FILE_OUTPUT_FILENAME_FORMAT")
 	if fileNameFormat == "" {
 		fileNameFormat = "{{.ID}}.{{.Extension}}"
@@ -522,6 +525,24 @@ func sanitizeForFilename(s string) string {
 		"\x00", "_",
 	)
 	return replacer.Replace(s)
+}
+
+// expandHomePath expands ~ or ~/ at the start of a path to the user's home directory
+func expandHomePath(path string) string {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return home
+		}
+		return path
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 // validateFileOutputConfig validates the file output configuration

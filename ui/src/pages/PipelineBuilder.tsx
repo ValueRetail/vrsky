@@ -2,8 +2,10 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
+import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
 import { useUIStore } from '../store/uiStore'
+import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
@@ -11,10 +13,29 @@ import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
 import type { Node, Edge } from '../types/pipeline'
 
 export default function PipelineBuilder() {
+  // Canvas persistence
+  const {
+    activeCanvas,
+    canvases,
+    currentCanvasId,
+    isInitialized,
+    canCreateMore,
+    updateCanvas,
+    forceUpdateCanvas,
+    createCanvas,
+    deleteCanvas,
+    switchCanvas,
+    renameCanvas,
+  } = useCanvasPersistence()
+
+  // Local state initialized from active canvas
   const [nodes, setNodes] = useState<Node[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
+  const [hasInitializedFromCanvas, setHasInitializedFromCanvas] = useState(false)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [edgeContextMenu, setEdgeContextMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [deployAttempted, setDeployAttempted] = useState(false)
@@ -47,6 +68,37 @@ export default function PipelineBuilder() {
       observer.disconnect()
     }
   }, [])
+
+  // Initialize local state from active canvas when it becomes available
+  useEffect(() => {
+    if (isInitialized && activeCanvas && !hasInitializedFromCanvas) {
+      setNodes(activeCanvas.nodes)
+      setEdges(activeCanvas.edges)
+      setHasInitializedFromCanvas(true)
+    }
+  }, [isInitialized, activeCanvas, hasInitializedFromCanvas])
+
+  // When switching canvases, load the new canvas state
+  useEffect(() => {
+    if (isInitialized && activeCanvas && hasInitializedFromCanvas) {
+      // Only update if we're switching to a different canvas
+      setNodes(activeCanvas.nodes)
+      setEdges(activeCanvas.edges)
+      // Clear selection when switching canvases
+      setSelectedNode(null)
+      setSelectedNodeId(null)
+      setSelectedEdgeId(null)
+      setDeployAttempted(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCanvasId]) // Intentionally only trigger on canvas ID change
+
+  // Auto-save nodes/edges to canvas store (debounced in hook)
+  useEffect(() => {
+    if (isInitialized && hasInitializedFromCanvas) {
+      updateCanvas(nodes, edges)
+    }
+  }, [nodes, edges, isInitialized, hasInitializedFromCanvas, updateCanvas])
 
   // Use custom hooks
   const { handleNodeDrag } = useNodeDrag(nodes, setNodes)
@@ -137,6 +189,62 @@ export default function PipelineBuilder() {
     setSelectedNodeId(null)
   }, [])
 
+  // Edge selection handler
+  const handleEdgeSelect = useCallback((edgeId: string) => {
+    setSelectedEdgeId(edgeId || null)
+    // Deselect node when selecting edge
+    if (edgeId) {
+      setSelectedNode(null)
+      setSelectedNodeId(null)
+    }
+    // Close context menu when selecting different edge
+    setEdgeContextMenu(null)
+  }, [])
+
+  // Edge deletion handler
+  const handleEdgeDelete = useCallback((edgeId: string) => {
+    setEdges((eds) => eds.filter((e) => e.id !== edgeId))
+    setSelectedEdgeId(null)
+    setEdgeContextMenu(null)
+  }, [])
+
+  // Edge context menu handler
+  const handleEdgeContextMenu = useCallback((edgeId: string, x: number, y: number) => {
+    setSelectedEdgeId(edgeId)
+    setEdgeContextMenu({ edgeId, x, y })
+  }, [])
+
+  // Close context menu when clicking elsewhere
+  const handleCloseContextMenu = useCallback(() => {
+    setEdgeContextMenu(null)
+  }, [])
+
+  // Handle Delete key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Don't delete if user is typing in an input
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+          return
+        }
+        
+        // Delete selected edge
+        if (selectedEdgeId) {
+          handleEdgeDelete(selectedEdgeId)
+          e.preventDefault()
+        }
+      }
+      
+      // Close context menu on Escape
+      if (e.key === 'Escape') {
+        setEdgeContextMenu(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedEdgeId, handleEdgeDelete])
+
   // Validate pipeline on every change to nodes/edges
   const validationResult: ValidationResult = useMemo(() => {
     return validatePipelineConnections(nodes, edges)
@@ -206,13 +314,41 @@ export default function PipelineBuilder() {
     setIsLoading(true)
 
     try {
-      await apiClient.post('/api/v1/connections', payload)
-      showSuccessNotification('Success', 'Pipeline deployed successfully!')
-      setNodes([])
-      setEdges([])
+      // Step 1: Create the connection
+      const response = await apiClient.post('/api/v1/connections', payload)
+      const connectionId = response.data?.data?.id
+      
+      if (!connectionId) {
+        throw new Error('No connection ID returned from server')
+      }
+
+      // Step 2: Auto-start the pipeline
+      try {
+        await apiClient.post(`/api/v1/connections/${connectionId}/start`)
+      } catch (startError) {
+        console.error('Failed to auto-start pipeline:', startError)
+        // Continue anyway - pipeline is created, just not started
+      }
+
+      // Step 3: Extract file path from producer node config for notification
+      const producerNode = nodes.find(n => n.type === 'producer')
+      let filePath = ''
+      if (producerNode?.data?.config?.type === 'file') {
+        filePath = (producerNode.data.config.file as any)?.path || ''
+      }
+
+      // Step 4: Show success notification with details
+      const message = filePath 
+        ? `Pipeline ${connectionId.substring(0, 8)}... deployed and running! Output: ${filePath}`
+        : `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
+      
+      showSuccessNotification('Pipeline Started', message)
+      
+      // Keep canvas visible - just close property editor and reset deploy state
       setSelectedNode(null)
       setSelectedNodeId(null)
       setDeployAttempted(false)
+      
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       showErrorNotification('Deployment failed', errorMsg)
@@ -266,12 +402,28 @@ export default function PipelineBuilder() {
 
       {/* CENTER - Canvas Area (FILLS ALL REMAINING SPACE) */}
       <div
-        ref={canvasContainer}
-        style={{ flex: 1, height: '100%', overflowY: 'auto', overflowX: 'hidden', position: 'relative', backgroundColor: '#f9fafb' }}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f9fafb' }}
       >
-        {/* Validation Status & Deploy Button - Top Right of Canvas */}
+        {/* Canvas Selector Tabs */}
+        <CanvasSelector
+          canvases={canvases}
+          currentCanvasId={currentCanvasId}
+          canCreateMore={canCreateMore}
+          onSwitch={switchCanvas}
+          onCreate={createCanvas}
+          onRename={renameCanvas}
+          onDelete={deleteCanvas}
+          onBeforeSwitch={() => forceUpdateCanvas(nodes, edges)}
+        />
+
+        {/* Canvas Content Area */}
+        <div
+          ref={canvasContainer}
+          style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {/* Validation Status & Deploy Button - Top Right of Canvas */}
         <div
           style={{
             position: 'absolute',
@@ -351,6 +503,7 @@ export default function PipelineBuilder() {
           nodes={nodes}
           edges={edges}
           selectedNodeId={selectedNodeId}
+          selectedEdgeId={selectedEdgeId}
           connectionDrawing={connectionDrawing}
           connectionStart={connectionStart}
           connectionPreviewEnd={connectionPreviewEnd}
@@ -358,17 +511,81 @@ export default function PipelineBuilder() {
           onNodeDrag={handleNodeDrag}
           onNodeSelect={(nodeId) => {
             setSelectedNodeId(nodeId)
-            const node = nodes.find((n) => n.id === nodeId)
-            if (node) {
-              setSelectedNode(node)
-            } else {
-              setSelectedNode(null)
-            }
+            // Deselect edge when selecting node
+            setSelectedEdgeId(null)
+            setEdgeContextMenu(null)
+            // Always get fresh node reference from current nodes array
+            // This ensures we never use stale node data
+            setNodes((currentNodes) => {
+              const node = currentNodes.find((n) => n.id === nodeId)
+              setSelectedNode(node || null)
+              return currentNodes // Return unchanged
+            })
           }}
+          onEdgeSelect={handleEdgeSelect}
+          onEdgeDelete={handleEdgeDelete}
+          onEdgeContextMenu={handleEdgeContextMenu}
           onPortMouseDown={handlePortMouseDown}
           onPortMouseUp={handlePortMouseUp}
           onStageMouseMove={handleStageMouseMove}
         />
+
+        {/* Edge Context Menu */}
+        {edgeContextMenu && (
+          <div
+            style={{
+              position: 'absolute',
+              left: edgeContextMenu.x,
+              top: edgeContextMenu.y,
+              backgroundColor: 'white',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+              zIndex: 100,
+              minWidth: '140px',
+              overflow: 'hidden',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => handleEdgeDelete(edgeContextMenu.edgeId)}
+              style={{
+                width: '100%',
+                padding: '10px 16px',
+                backgroundColor: 'white',
+                border: 'none',
+                fontSize: '13px',
+                color: '#dc2626',
+                cursor: 'pointer',
+                textAlign: 'left',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#fef2f2')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'white')}
+            >
+              <span style={{ fontSize: '14px' }}>×</span>
+              Delete Connection
+            </button>
+          </div>
+        )}
+
+        {/* Click overlay to close context menu */}
+        {edgeContextMenu && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 99,
+            }}
+            onClick={handleCloseContextMenu}
+          />
+        )}
+        </div>
       </div>
 
       {/* RIGHT SIDEBAR - Property Editor */}
