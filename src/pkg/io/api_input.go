@@ -189,10 +189,12 @@ type APIInput struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	ticker      *time.Ticker
+	tickerMu    sync.Mutex // protects ticker access
 	messages    chan *envelope.Envelope
 	httpClient  *http.Client
 	stateStore  StateStore
 	rateLimiter *tokenBucket
+	wg          sync.WaitGroup // tracks pollLoop goroutine
 
 	// State management
 	state      *apiInputState
@@ -344,6 +346,7 @@ func (a *APIInput) Start(ctx context.Context) error {
 	}
 
 	// Launch polling goroutine
+	a.wg.Add(1)
 	go a.pollLoop()
 
 	a.logger.Info("API consumer started",
@@ -385,10 +388,15 @@ func (a *APIInput) Close() error {
 			a.cancel()
 		}
 
-		// Stop ticker
+		// Wait for pollLoop to finish before accessing shared resources
+		a.wg.Wait()
+
+		// Stop ticker (now safe since pollLoop has exited)
+		a.tickerMu.Lock()
 		if a.ticker != nil {
 			a.ticker.Stop()
 		}
+		a.tickerMu.Unlock()
 
 		// Save final state
 		if err := a.saveState(); err != nil {
@@ -413,11 +421,19 @@ func (a *APIInput) Close() error {
 // ============================================================================
 
 func (a *APIInput) pollLoop() {
+	defer a.wg.Done()
+
 	// Initial poll immediately
 	a.poll()
 
+	a.tickerMu.Lock()
 	a.ticker = time.NewTicker(a.pollInterval)
-	defer a.ticker.Stop()
+	a.tickerMu.Unlock()
+	defer func() {
+		a.tickerMu.Lock()
+		a.ticker.Stop()
+		a.tickerMu.Unlock()
+	}()
 
 	for {
 		select {

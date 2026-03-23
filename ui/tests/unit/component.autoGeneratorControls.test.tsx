@@ -25,10 +25,11 @@ vi.mock('@/store/uiStore', () => ({
 describe('AutoGeneratorControls Component', () => {
   let mockAddNotification: any
   const mockStatus: AutoGeneratorStatusResponse = {
-    running: false,
-    rate: 0,
-    message_size: 'small',
-    total_generated: 0,
+    connection_id: 'test-conn',
+    is_running: false,
+    rate_per_second: 0,
+    message_count: 0,
+    error_count: 0,
   }
 
   beforeEach(() => {
@@ -65,16 +66,6 @@ describe('AutoGeneratorControls Component', () => {
       })
     })
 
-    it('should render message size buttons when stopped', async () => {
-      render(<AutoGeneratorControls connectionId="test-conn" />)
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Small' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Medium' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Large' })).toBeInTheDocument()
-      })
-    })
-
     it('should render Start button when stopped', async () => {
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -85,10 +76,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should render Stop button when running', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
@@ -101,10 +93,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should display running status indicator', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
@@ -119,10 +112,11 @@ describe('AutoGeneratorControls Component', () => {
   describe('Status display', () => {
     it('should show total generated messages when running', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'medium',
-        total_generated: 1000,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 1000,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
@@ -135,10 +129,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should display rate when running', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 50,
-        message_size: 'large',
-        total_generated: 500,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 50,
+        message_count: 500,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
@@ -146,22 +141,6 @@ describe('AutoGeneratorControls Component', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/50 msgs\/sec/)).toBeInTheDocument()
-      })
-    })
-
-    it('should display message size when running', async () => {
-      const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'medium',
-        total_generated: 100,
-      }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
-
-      render(<AutoGeneratorControls connectionId="test-conn" />)
-
-      await waitFor(() => {
-        expect(screen.getByText(/medium/)).toBeInTheDocument()
       })
     })
 
@@ -222,40 +201,6 @@ describe('AutoGeneratorControls Component', () => {
     })
   })
 
-  describe('Message size control', () => {
-    it('should have three size options', async () => {
-      render(<AutoGeneratorControls connectionId="test-conn" />)
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Small' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Medium' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Large' })).toBeInTheDocument()
-      })
-    })
-
-    it('should select Small by default', async () => {
-      render(<AutoGeneratorControls connectionId="test-conn" />)
-
-      await waitFor(() => {
-        const smallBtn = screen.getByRole('button', { name: 'Small' }) as HTMLButtonElement
-        expect(smallBtn).toHaveClass('bg-blue-600')
-      })
-    })
-
-    it('should change selection when clicked', async () => {
-      render(<AutoGeneratorControls connectionId="test-conn" />)
-
-      await waitFor(() => {
-        const mediumBtn = screen.getByRole('button', { name: 'Medium' })
-        fireEvent.click(mediumBtn)
-      })
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Medium' })).toHaveClass('bg-blue-600')
-      })
-    })
-  })
-
   describe('Start generator', () => {
     it('should call startAutoGenerator with correct params', async () => {
       render(<AutoGeneratorControls connectionId="test-conn-123" />)
@@ -268,8 +213,7 @@ describe('AutoGeneratorControls Component', () => {
       await waitFor(() => {
         expect(testDataService.testDataService.startAutoGenerator).toHaveBeenCalledWith(
           'test-conn-123',
-          expect.any(Number),
-          expect.any(String)
+          expect.any(Number)
         )
       })
     })
@@ -288,7 +232,15 @@ describe('AutoGeneratorControls Component', () => {
     })
 
     it('should show success notification on start', async () => {
+      const runningStatus: AutoGeneratorStatusResponse = {
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 1,
+        message_count: 0,
+        error_count: 0,
+      }
       ;(testDataService.testDataService.startAutoGenerator as any).mockResolvedValue(undefined)
+      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -310,10 +262,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should call onStatusChange on start', async () => {
       const newStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 1,
-        message_size: 'small',
-        total_generated: 0,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 1,
+        message_count: 0,
+        error_count: 0,
       }
       ;(testDataService.testDataService.startAutoGenerator as any).mockResolvedValue(undefined)
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(newStatus)
@@ -359,10 +312,11 @@ describe('AutoGeneratorControls Component', () => {
   describe('Stop generator', () => {
     it('should call stopAutoGenerator', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn-123',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
       ;(testDataService.testDataService.stopAutoGenerator as any).mockResolvedValue(undefined)
@@ -383,12 +337,22 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should show success notification on stop', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      const stoppedStatus: AutoGeneratorStatusResponse = {
+        connection_id: 'test-conn',
+        is_running: false,
+        rate_per_second: 0,
+        message_count: 100,
+        error_count: 0,
+      }
+      ;(testDataService.testDataService.getGeneratorStatus as any)
+        .mockResolvedValueOnce(runningStatus)
+        .mockResolvedValue(stoppedStatus)
       ;(testDataService.testDataService.stopAutoGenerator as any).mockResolvedValue(undefined)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
@@ -411,16 +375,18 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should call onStatusChange on stop', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       const stoppedStatus: AutoGeneratorStatusResponse = {
-        running: false,
-        rate: 0,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: false,
+        rate_per_second: 0,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any)
         .mockResolvedValueOnce(runningStatus)
@@ -448,10 +414,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should show error notification on stop failure', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
       ;(testDataService.testDataService.stopAutoGenerator as any).mockRejectedValue(
@@ -492,10 +459,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should show stop help when running', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
 
@@ -508,7 +476,7 @@ describe('AutoGeneratorControls Component', () => {
   })
 
   describe('Loading states', () => {
-    it('should disable all controls while starting', async () => {
+    it('should disable slider while starting', async () => {
       ;(testDataService.testDataService.startAutoGenerator as any).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
@@ -522,9 +490,7 @@ describe('AutoGeneratorControls Component', () => {
 
       await waitFor(() => {
         const slider = screen.getByRole('slider', { name: '' }) as HTMLInputElement
-        const smallBtn = screen.getByRole('button', { name: 'Small' }) as HTMLButtonElement
         expect(slider.disabled).toBe(true)
-        expect(smallBtn.disabled).toBe(true)
       })
     })
 
@@ -547,10 +513,11 @@ describe('AutoGeneratorControls Component', () => {
 
     it('should show Stopping... text while stopping', async () => {
       const runningStatus: AutoGeneratorStatusResponse = {
-        running: true,
-        rate: 10,
-        message_size: 'small',
-        total_generated: 100,
+        connection_id: 'test-conn',
+        is_running: true,
+        rate_per_second: 10,
+        message_count: 100,
+        error_count: 0,
       }
       ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
       ;(testDataService.testDataService.stopAutoGenerator as any).mockImplementation(

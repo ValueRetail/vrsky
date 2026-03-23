@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	appsv1 "k8s.io/api/apps/v1"
@@ -243,7 +244,5 @@ func BuildLabelSelector(labels map[string]string) string {
 	for k, v := range labels {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
 	}
-	return joinStrings(parts, ",")
+	return strings.Join(parts, ",")
 }
-
-
