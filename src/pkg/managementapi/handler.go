@@ -18,6 +18,9 @@ type Handler struct {
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
+
+	// K8s integration for graph-based pipelines (Phase 2)
+	orchestratorFactory OrchestratorFactory
 }
 
 // NewHandler creates a new handler
@@ -35,6 +38,12 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 // SetPublisher sets the NATS publisher for command publishing
 func (h *Handler) SetPublisher(publisher *NATSPublisher) {
 	h.publisher = publisher
+}
+
+// SetOrchestratorFactory sets the factory for creating pipeline orchestrators.
+// This enables K8s deployment for graph-based connections (Phase 2).
+func (h *Handler) SetOrchestratorFactory(factory OrchestratorFactory) {
+	h.orchestratorFactory = factory
 }
 
 // ErrorResponse represents an error response
@@ -103,17 +112,32 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Create connection
 	conn := NewConnection(tenantID, req)
 
-	// Validate configuration (fail fast)
-	if err := h.validator.ValidateConnection(conn); err != nil {
-		if cfgErr, ok := err.(*ConfigError); ok {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-				"field":     cfgErr.Field,
-				"component": cfgErr.Component,
-			})
-		} else {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+	// Validate configuration
+	// If using graph-based model (nodes present), validate DAG topology
+	if len(conn.Nodes) > 0 {
+		if err := h.validator.ValidateDAG(conn); err != nil {
+			if dagErr, ok := err.(*DAGValidationError); ok {
+				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
+					"errors": dagErr.Errors,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
 		}
-		return
+	} else {
+		// Legacy linear model validation (DEPRECATED)
+		if err := h.validator.ValidateConnection(conn); err != nil {
+			if cfgErr, ok := err.(*ConfigError); ok {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+					"field":     cfgErr.Field,
+					"component": cfgErr.Component,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
+		}
 	}
 
 	// Save to database
@@ -281,12 +305,11 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		existingConn.Description = *updateReq.Description
 	}
 
-	// NEW: Apply graph-based model updates (Phase 1)
+	// Apply graph-based model updates (Phase 1)
 	// If Nodes are provided, use the new model; otherwise fall back to legacy
 	if len(updateReq.Nodes) > 0 {
 		existingConn.Nodes = updateReq.Nodes
 		existingConn.Edges = updateReq.Edges
-		// TODO(Phase 1b): Add ValidateConnection() call here to validate DAG structure
 	} else {
 		// DEPRECATED: Legacy linear model updates
 		if updateReq.SourceConfig != nil {
@@ -307,16 +330,31 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate updated configuration
-	if err := h.validator.ValidateConnection(existingConn); err != nil {
-		if cfgErr, ok := err.(*ConfigError); ok {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-				"field":     cfgErr.Field,
-				"component": cfgErr.Component,
-			})
-		} else {
-			_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+	// If using graph-based model (nodes present), validate DAG topology
+	if len(existingConn.Nodes) > 0 {
+		if err := h.validator.ValidateDAG(existingConn); err != nil {
+			if dagErr, ok := err.(*DAGValidationError); ok {
+				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
+					"errors": dagErr.Errors,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
 		}
-		return
+	} else {
+		// Legacy linear model validation (DEPRECATED)
+		if err := h.validator.ValidateConnection(existingConn); err != nil {
+			if cfgErr, ok := err.(*ConfigError); ok {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
+					"field":     cfgErr.Field,
+					"component": cfgErr.Component,
+				})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
+		}
 	}
 
 	// Update in database
@@ -430,6 +468,17 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For graph-based connections (Phase 2): Deploy to Kubernetes via orchestrator
+	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
+		orch := h.orchestratorFactory(conn)
+		if err := orch.StartPipeline(ctx, conn); err != nil {
+			// Deployment failed - don't update status to running
+			_ = writeError(w, http.StatusInternalServerError, "OrchestratorError",
+				fmt.Sprintf("failed to deploy pipeline: %v", err), nil)
+			return
+		}
+	}
+
 	// Update connection status to Running
 	conn.Status = "running"
 	conn.StartedAt = pointerTo(time.Now().UTC())
@@ -498,6 +547,15 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For graph-based connections (Phase 2): Remove K8s deployments via orchestrator
+	// Note: Even if K8s cleanup fails, we still update the connection status to stopped.
+	// Failed K8s resources can be cleaned up manually or by a garbage collector.
+	var orchestratorErr error
+	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
+		orch := h.orchestratorFactory(conn)
+		orchestratorErr = orch.StopPipeline(ctx, conn)
+	}
+
 	// Update connection status to Stopped
 	conn.Status = "stopped"
 	conn.StoppedAt = pointerTo(time.Now().UTC())
@@ -508,10 +566,14 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create connection stopped event
-	eventData, _ := json.Marshal(map[string]interface{}{
+	eventPayload := map[string]interface{}{
 		"status":    conn.Status,
 		"stoppedAt": conn.StoppedAt,
-	})
+	}
+	if orchestratorErr != nil {
+		eventPayload["orchestratorError"] = orchestratorErr.Error()
+	}
+	eventData, _ := json.Marshal(eventPayload)
 	event := NewConnectionEvent(connID, tenantID, "stopped", eventData)
 	_ = h.repo.CreateConnectionEvent(ctx, event)
 
@@ -552,4 +614,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/start", h.StartAutoGenerator)
 	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/stop", h.StopAutoGenerator)
 	mux.HandleFunc("GET /api/v1/connections/{id}/auto-generator/status", h.GetAutoGeneratorStatus)
+
+	// API Consumer routes
+	h.RegisterAPIConsumerRoutes(mux)
+
+	// Auth routes (these bypass TenantIDMiddleware)
+	h.RegisterAuthRoutes(mux)
+}
+
+// RegisterAuthRoutes registers authentication routes
+// These routes do NOT require X-Tenant-ID header (auth is global in Phase 1)
+func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
+	// Public auth routes (no authentication required)
+	mux.HandleFunc("POST /api/v1/auth/register", h.RegisterUser)
+	mux.HandleFunc("POST /api/v1/auth/login", h.LoginUser)
+	mux.HandleFunc("GET /api/v1/auth/verify-email", h.VerifyEmail)
+	mux.HandleFunc("POST /api/v1/auth/forgot-password", h.ForgotPassword)
+	mux.HandleFunc("POST /api/v1/auth/reset-password", h.ResetPassword)
+
+	// Protected auth routes (require valid session)
+	mux.HandleFunc("GET /api/v1/auth/me", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.GetMe)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/logout", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/change-password", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
 }

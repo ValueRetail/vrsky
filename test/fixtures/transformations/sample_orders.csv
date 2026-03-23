@@ -1,0 +1,11 @@
+order_id,customer_name,customer_email,status,total_amount,currency,shipping_method,shipping_city,shipping_country,created_at
+ORD-001,John Smith,john.smith@example.com,active,259.99,USD,express,Springfield,US,2026-01-15T10:30:00Z
+ORD-002,Jane Doe,jane.doe@example.com,pending,149.50,USD,standard,Portland,US,2026-01-15T11:45:00Z
+ORD-003,Bob Johnson,bob.johnson@example.com,inactive,45.00,USD,economy,Denver,US,2026-01-14T09:00:00Z
+ORD-004,Alice Williams,alice.williams@example.com,active,1299.99,USD,overnight,San Francisco,US,2026-01-15T14:20:00Z
+ORD-005,Charlie Brown,charlie.brown@example.com,active,89.99,EUR,international,Paris,FR,2026-01-15T16:00:00Z
+ORD-006,Diana Prince,diana.prince@example.com,cancelled,199.99,USD,express,Metropolis,US,2026-01-13T08:30:00Z
+ORD-007,Edward Norton,edward.norton@example.com,active,599.97,USD,freight,Chicago,US,2026-01-15T17:45:00Z
+ORD-008,Fiona Green,fiona.green@example.com,pending,324.50,GBP,uk_next_day,London,GB,2026-01-15T18:30:00Z
+ORD-009,George Hamilton,george.hamilton@example.com,active,175.00,USD,standard,Los Angeles,US,2026-01-15T19:15:00Z
+ORD-010,Hannah Lee,hannah.lee@example.com,active,2499.99,USD,white_glove,New York,US,2026-01-15T20:00:00Z

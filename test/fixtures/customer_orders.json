@@ -1,0 +1,418 @@
+{
+  "description": "Sample customer orders for E2E testing",
+  "orders": [
+    {
+      "id": "ORD-001",
+      "customer": {
+        "id": "CUST-1001",
+        "name": "John Smith",
+        "email": "john.smith@example.com",
+        "tier": "gold"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T10:30:00Z",
+      "amount": 259.99,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-A100",
+          "name": "Premium Widget",
+          "quantity": 2,
+          "unit_price": 89.99,
+          "total": 179.98
+        },
+        {
+          "sku": "PROD-B200",
+          "name": "Standard Gadget",
+          "quantity": 1,
+          "unit_price": 80.01,
+          "total": 80.01
+        }
+      ],
+      "shipping": {
+        "method": "express",
+        "address": {
+          "street": "123 Main St",
+          "city": "Springfield",
+          "state": "IL",
+          "zip": "62701",
+          "country": "US"
+        },
+        "tracking_number": "1Z999AA10123456784"
+      },
+      "metadata": {
+        "source": "web",
+        "campaign": "summer_sale_2026",
+        "affiliate_code": "AFF123"
+      }
+    },
+    {
+      "id": "ORD-002",
+      "customer": {
+        "id": "CUST-1002",
+        "name": "Jane Doe",
+        "email": "jane.doe@example.com",
+        "tier": "silver"
+      },
+      "status": "pending",
+      "created_at": "2026-01-15T11:45:00Z",
+      "amount": 149.50,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-C300",
+          "name": "Deluxe Gizmo",
+          "quantity": 1,
+          "unit_price": 149.50,
+          "total": 149.50
+        }
+      ],
+      "shipping": {
+        "method": "standard",
+        "address": {
+          "street": "456 Oak Ave",
+          "city": "Portland",
+          "state": "OR",
+          "zip": "97201",
+          "country": "US"
+        },
+        "tracking_number": null
+      },
+      "metadata": {
+        "source": "mobile_app",
+        "campaign": null,
+        "affiliate_code": null
+      }
+    },
+    {
+      "id": "ORD-003",
+      "customer": {
+        "id": "CUST-1003",
+        "name": "Bob Johnson",
+        "email": "bob.johnson@example.com",
+        "tier": "bronze"
+      },
+      "status": "inactive",
+      "created_at": "2026-01-14T09:00:00Z",
+      "amount": 45.00,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-D400",
+          "name": "Basic Tool",
+          "quantity": 3,
+          "unit_price": 15.00,
+          "total": 45.00
+        }
+      ],
+      "shipping": {
+        "method": "economy",
+        "address": {
+          "street": "789 Pine Rd",
+          "city": "Denver",
+          "state": "CO",
+          "zip": "80202",
+          "country": "US"
+        },
+        "tracking_number": null
+      },
+      "metadata": {
+        "source": "web",
+        "campaign": "winter_clearance",
+        "affiliate_code": null
+      }
+    },
+    {
+      "id": "ORD-004",
+      "customer": {
+        "id": "CUST-1004",
+        "name": "Alice Williams",
+        "email": "alice.williams@example.com",
+        "tier": "platinum"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T14:20:00Z",
+      "amount": 1299.99,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-E500",
+          "name": "Enterprise Suite",
+          "quantity": 1,
+          "unit_price": 999.99,
+          "total": 999.99
+        },
+        {
+          "sku": "PROD-F600",
+          "name": "Support Package",
+          "quantity": 1,
+          "unit_price": 300.00,
+          "total": 300.00
+        }
+      ],
+      "shipping": {
+        "method": "overnight",
+        "address": {
+          "street": "100 Corporate Blvd",
+          "city": "San Francisco",
+          "state": "CA",
+          "zip": "94105",
+          "country": "US"
+        },
+        "tracking_number": "1Z999AA10123456785"
+      },
+      "metadata": {
+        "source": "sales_rep",
+        "campaign": null,
+        "affiliate_code": null,
+        "sales_rep_id": "REP-042"
+      }
+    },
+    {
+      "id": "ORD-005",
+      "customer": {
+        "id": "CUST-1005",
+        "name": "Charlie Brown",
+        "email": "charlie.brown@example.com",
+        "tier": "gold"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T16:00:00Z",
+      "amount": 89.99,
+      "currency": "EUR",
+      "items": [
+        {
+          "sku": "PROD-A100",
+          "name": "Premium Widget",
+          "quantity": 1,
+          "unit_price": 89.99,
+          "total": 89.99
+        }
+      ],
+      "shipping": {
+        "method": "international",
+        "address": {
+          "street": "10 Rue de Paris",
+          "city": "Paris",
+          "state": null,
+          "zip": "75001",
+          "country": "FR"
+        },
+        "tracking_number": "FR123456789"
+      },
+      "metadata": {
+        "source": "web",
+        "campaign": "eu_expansion",
+        "affiliate_code": "EU_AFF001"
+      }
+    },
+    {
+      "id": "ORD-006",
+      "customer": {
+        "id": "CUST-1006",
+        "name": "Diana Prince",
+        "email": "diana.prince@example.com",
+        "tier": "silver"
+      },
+      "status": "cancelled",
+      "created_at": "2026-01-13T08:30:00Z",
+      "amount": 199.99,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-G700",
+          "name": "Special Edition",
+          "quantity": 1,
+          "unit_price": 199.99,
+          "total": 199.99
+        }
+      ],
+      "shipping": {
+        "method": "express",
+        "address": {
+          "street": "200 Hero Lane",
+          "city": "Metropolis",
+          "state": "NY",
+          "zip": "10001",
+          "country": "US"
+        },
+        "tracking_number": null
+      },
+      "metadata": {
+        "source": "mobile_app",
+        "campaign": null,
+        "affiliate_code": null,
+        "cancellation_reason": "customer_request"
+      }
+    },
+    {
+      "id": "ORD-007",
+      "customer": {
+        "id": "CUST-1007",
+        "name": "Edward Norton",
+        "email": "edward.norton@example.com",
+        "tier": "bronze"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T17:45:00Z",
+      "amount": 599.97,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-H800",
+          "name": "Bulk Pack",
+          "quantity": 10,
+          "unit_price": 59.997,
+          "total": 599.97
+        }
+      ],
+      "shipping": {
+        "method": "freight",
+        "address": {
+          "street": "500 Warehouse Dr",
+          "city": "Chicago",
+          "state": "IL",
+          "zip": "60601",
+          "country": "US"
+        },
+        "tracking_number": "FREIGHT12345"
+      },
+      "metadata": {
+        "source": "b2b_portal",
+        "campaign": null,
+        "affiliate_code": null,
+        "po_number": "PO-2026-00123"
+      }
+    },
+    {
+      "id": "ORD-008",
+      "customer": {
+        "id": "CUST-1008",
+        "name": "Fiona Green",
+        "email": "fiona.green@example.com",
+        "tier": "gold"
+      },
+      "status": "pending",
+      "created_at": "2026-01-15T18:30:00Z",
+      "amount": 324.50,
+      "currency": "GBP",
+      "items": [
+        {
+          "sku": "PROD-I900",
+          "name": "Premium Bundle UK",
+          "quantity": 1,
+          "unit_price": 324.50,
+          "total": 324.50
+        }
+      ],
+      "shipping": {
+        "method": "uk_next_day",
+        "address": {
+          "street": "15 London Road",
+          "city": "London",
+          "state": null,
+          "zip": "SW1A 1AA",
+          "country": "GB"
+        },
+        "tracking_number": null
+      },
+      "metadata": {
+        "source": "web",
+        "campaign": "uk_launch",
+        "affiliate_code": "UK_AFF001"
+      }
+    },
+    {
+      "id": "ORD-009",
+      "customer": {
+        "id": "CUST-1009",
+        "name": "George Hamilton",
+        "email": "george.hamilton@example.com",
+        "tier": "silver"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T19:15:00Z",
+      "amount": 175.00,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-J1000",
+          "name": "Standard Package",
+          "quantity": 1,
+          "unit_price": 125.00,
+          "total": 125.00
+        },
+        {
+          "sku": "PROD-K1100",
+          "name": "Add-on Module",
+          "quantity": 2,
+          "unit_price": 25.00,
+          "total": 50.00
+        }
+      ],
+      "shipping": {
+        "method": "standard",
+        "address": {
+          "street": "300 Sunset Blvd",
+          "city": "Los Angeles",
+          "state": "CA",
+          "zip": "90028",
+          "country": "US"
+        },
+        "tracking_number": "1Z999AA10123456786"
+      },
+      "metadata": {
+        "source": "web",
+        "campaign": "la_promo",
+        "affiliate_code": null
+      }
+    },
+    {
+      "id": "ORD-010",
+      "customer": {
+        "id": "CUST-1010",
+        "name": "Hannah Lee",
+        "email": "hannah.lee@example.com",
+        "tier": "platinum"
+      },
+      "status": "active",
+      "created_at": "2026-01-15T20:00:00Z",
+      "amount": 2499.99,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "PROD-L1200",
+          "name": "Executive Suite",
+          "quantity": 1,
+          "unit_price": 1999.99,
+          "total": 1999.99
+        },
+        {
+          "sku": "PROD-M1300",
+          "name": "Premium Support 1yr",
+          "quantity": 1,
+          "unit_price": 500.00,
+          "total": 500.00
+        }
+      ],
+      "shipping": {
+        "method": "white_glove",
+        "address": {
+          "street": "1 Executive Plaza",
+          "city": "New York",
+          "state": "NY",
+          "zip": "10022",
+          "country": "US"
+        },
+        "tracking_number": "WG12345678"
+      },
+      "metadata": {
+        "source": "sales_rep",
+        "campaign": "enterprise_q1",
+        "affiliate_code": null,
+        "sales_rep_id": "REP-001",
+        "contract_id": "ENT-2026-0042"
+      }
+    }
+  ]
+}

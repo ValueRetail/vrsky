@@ -1,66 +1,42 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { useConnectionsStore } from '../../store/connectionsStore'
+import { useAuthStore } from '../../store/authStore'
 
 export default function Header() {
+  const navigate = useNavigate()
   const { toggleSidebar } = useUIStore()
   const { connections = [] } = useConnectionsStore()
-  const runningCount = (connections || []).filter((c) => c.status === 'running').length
-  
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return document.documentElement.classList.contains('dark')
-  })
+  const { user, isAuthenticated, logout } = useAuthStore()
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
 
+  // Close user menu when clicking outside
   useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.classList.contains('dark'))
-    })
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as globalThis.Node)) {
+        setShowUserMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const toggleDarkMode = () => {
-    try {
-      const html = document.documentElement
-      console.log('Current dark class:', html.classList.contains('dark'))
-      if (html.classList.contains('dark')) {
-        html.classList.remove('dark')
-        try {
-          localStorage.setItem('theme', 'light')
-        } catch (e) {
-          console.warn('localStorage not available:', e)
-        }
-        console.log('Removed dark class')
-        setIsDark(false)
-      } else {
-        html.classList.add('dark')
-        try {
-          localStorage.setItem('theme', 'dark')
-        } catch (e) {
-          console.warn('localStorage not available:', e)
-        }
-        console.log('Added dark class')
-        setIsDark(true)
-      }
-      console.log('Dark class after toggle:', html.classList.contains('dark'))
-    } catch (e) {
-      console.error('Error toggling dark mode:', e)
-    }
+  const handleLogout = async () => {
+    setShowUserMenu(false)
+    await logout()
+    navigate('/login')
   }
 
   return (
     <header className="bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700 shadow-xs sticky top-0 z-40 transition-colors duration-base">
-      <div className="max-w-7xl mx-auto px-6 py-4">
+      <div className="max-w-7xl mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Left: Logo and Menu Toggle */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => {
-                console.log('Menu button clicked, calling toggleSidebar')
-                toggleSidebar()
-                console.log('toggleSidebar called')
-              }}
+              onClick={() => toggleSidebar()}
               style={{
                 padding: '0.5rem',
                 backgroundColor: 'transparent',
@@ -71,8 +47,6 @@ export default function Header() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                zIndex: 10,
-                position: 'relative',
               }}
               title="Toggle sidebar"
               aria-label="Toggle navigation sidebar"
@@ -80,18 +54,18 @@ export default function Header() {
               ☰
             </button>
 
-            <div className="hidden sm:flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <div className="flex flex-col">
-                <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">VRSky</h1>
+                <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-50">VRSky</h1>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">Integration Platform</p>
               </div>
             </div>
           </div>
 
-          {/* Right: Status and Info */}
-          <div className="flex items-center gap-4 sm:gap-6">
+          {/* Right: Connections Count + User Menu */}
+          <div className="flex items-center gap-3">
             {/* Connections Counter */}
-            <div className="hidden xs:flex items-center gap-2 px-3 py-2 bg-neutral-100 dark:bg-neutral-700 rounded-lg">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-neutral-100 dark:bg-neutral-700 rounded-lg">
               <div className="w-2 h-2 bg-primary-500 rounded-full"></div>
               <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
                 {(connections || []).length}
@@ -99,47 +73,67 @@ export default function Header() {
               <span className="text-xs text-neutral-600 dark:text-neutral-400">connections</span>
             </div>
 
-            {/* Status Indicator */}
-            <div className="flex items-center gap-2 px-3 py-2 bg-success-50 dark:bg-success-900/20 border border-success-200 dark:border-success-700/50 rounded-full">
-              <div className="w-2 h-2 bg-success-500 rounded-full animate-pulse-gentle"></div>
-              <span className="text-xs font-semibold text-success-700 dark:text-success-300">
-                {runningCount > 0 ? 'Live' : 'Idle'}
-              </span>
+            {/* User Menu */}
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 px-3 py-2 border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+                title={isAuthenticated ? `Logged in as ${user?.email}` : 'Menu'}
+                aria-label="Open user menu"
+                aria-expanded={showUserMenu}
+              >
+                <span style={{ fontSize: '18px' }}>⚙️</span>
+                {isAuthenticated && user && (
+                  <span className="hidden sm:inline text-sm text-neutral-700 dark:text-neutral-300 max-w-28 truncate">
+                    {user.full_name || user.email}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Menu */}
+              {showUserMenu && (
+                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-50">
+                  {isAuthenticated && user ? (
+                    <>
+                      {/* User Info */}
+                      <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-700">
+                        <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                          {user.full_name || 'User'}
+                        </p>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                          {user.email}
+                        </p>
+                      </div>
+                      {/* Menu Items */}
+                      <div className="p-2">
+                        {/* Logout */}
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                        >
+                          <span>🚪</span>
+                          <span>Logout</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-2">
+                      {/* Login */}
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          navigate('/login')
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
+                      >
+                        <span>🔑</span>
+                        <span>Login</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-
-            {/* Dark Mode Toggle */}
-            <button
-              onClick={() => {
-                console.log('Dark mode button clicked')
-                toggleDarkMode()
-              }}
-              style={{
-                padding: '0.5rem',
-                backgroundColor: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '1.25rem',
-                borderRadius: '0.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 10,
-                position: 'relative',
-              }}
-              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              aria-label="Toggle dark mode"
-            >
-              {isDark ? '☀️' : '🌙'}
-            </button>
-
-            {/* User Menu (Placeholder for future) */}
-            <button
-              className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors duration-fast"
-              title="User menu"
-              aria-label="Open user menu"
-            >
-              👤
-            </button>
           </div>
         </div>
       </div>

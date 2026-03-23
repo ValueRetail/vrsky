@@ -1,0 +1,275 @@
+{
+  "description": "Product catalog for E2E testing and filtering scenarios",
+  "products": [
+    {
+      "sku": "PROD-A100",
+      "name": "Premium Widget",
+      "category": "widgets",
+      "price": 89.99,
+      "currency": "USD",
+      "status": "active",
+      "stock": 150,
+      "weight_kg": 0.5,
+      "dimensions": {
+        "length_cm": 10,
+        "width_cm": 8,
+        "height_cm": 5
+      },
+      "tags": ["premium", "bestseller", "widget"],
+      "created_at": "2025-06-01T00:00:00Z",
+      "updated_at": "2026-01-10T12:00:00Z"
+    },
+    {
+      "sku": "PROD-B200",
+      "name": "Standard Gadget",
+      "category": "gadgets",
+      "price": 80.01,
+      "currency": "USD",
+      "status": "active",
+      "stock": 200,
+      "weight_kg": 0.3,
+      "dimensions": {
+        "length_cm": 8,
+        "width_cm": 6,
+        "height_cm": 4
+      },
+      "tags": ["standard", "gadget"],
+      "created_at": "2025-07-15T00:00:00Z",
+      "updated_at": "2026-01-08T10:00:00Z"
+    },
+    {
+      "sku": "PROD-C300",
+      "name": "Deluxe Gizmo",
+      "category": "gizmos",
+      "price": 149.50,
+      "currency": "USD",
+      "status": "active",
+      "stock": 75,
+      "weight_kg": 1.2,
+      "dimensions": {
+        "length_cm": 15,
+        "width_cm": 12,
+        "height_cm": 8
+      },
+      "tags": ["deluxe", "gizmo", "featured"],
+      "created_at": "2025-08-20T00:00:00Z",
+      "updated_at": "2026-01-12T14:30:00Z"
+    },
+    {
+      "sku": "PROD-D400",
+      "name": "Basic Tool",
+      "category": "tools",
+      "price": 15.00,
+      "currency": "USD",
+      "status": "active",
+      "stock": 500,
+      "weight_kg": 0.2,
+      "dimensions": {
+        "length_cm": 5,
+        "width_cm": 3,
+        "height_cm": 2
+      },
+      "tags": ["basic", "tool", "budget"],
+      "created_at": "2025-03-01T00:00:00Z",
+      "updated_at": "2025-12-15T08:00:00Z"
+    },
+    {
+      "sku": "PROD-E500",
+      "name": "Enterprise Suite",
+      "category": "enterprise",
+      "price": 999.99,
+      "currency": "USD",
+      "status": "active",
+      "stock": 25,
+      "weight_kg": 2.5,
+      "dimensions": {
+        "length_cm": 30,
+        "width_cm": 25,
+        "height_cm": 10
+      },
+      "tags": ["enterprise", "premium", "suite"],
+      "created_at": "2025-09-01T00:00:00Z",
+      "updated_at": "2026-01-14T16:00:00Z"
+    },
+    {
+      "sku": "PROD-F600",
+      "name": "Support Package",
+      "category": "services",
+      "price": 300.00,
+      "currency": "USD",
+      "status": "active",
+      "stock": 999,
+      "weight_kg": 0,
+      "dimensions": null,
+      "tags": ["service", "support", "annual"],
+      "created_at": "2025-09-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "sku": "PROD-G700",
+      "name": "Special Edition",
+      "category": "widgets",
+      "price": 199.99,
+      "currency": "USD",
+      "status": "inactive",
+      "stock": 0,
+      "weight_kg": 0.8,
+      "dimensions": {
+        "length_cm": 12,
+        "width_cm": 10,
+        "height_cm": 6
+      },
+      "tags": ["special", "limited", "widget"],
+      "created_at": "2025-11-01T00:00:00Z",
+      "updated_at": "2026-01-05T09:00:00Z"
+    },
+    {
+      "sku": "PROD-H800",
+      "name": "Bulk Pack",
+      "category": "bundles",
+      "price": 59.997,
+      "currency": "USD",
+      "status": "active",
+      "stock": 100,
+      "weight_kg": 5.0,
+      "dimensions": {
+        "length_cm": 40,
+        "width_cm": 30,
+        "height_cm": 20
+      },
+      "tags": ["bulk", "bundle", "b2b"],
+      "created_at": "2025-10-15T00:00:00Z",
+      "updated_at": "2026-01-10T11:00:00Z"
+    },
+    {
+      "sku": "PROD-I900",
+      "name": "Premium Bundle UK",
+      "category": "bundles",
+      "price": 324.50,
+      "currency": "GBP",
+      "status": "active",
+      "stock": 50,
+      "weight_kg": 3.0,
+      "dimensions": {
+        "length_cm": 35,
+        "width_cm": 25,
+        "height_cm": 15
+      },
+      "tags": ["premium", "bundle", "uk"],
+      "created_at": "2025-12-01T00:00:00Z",
+      "updated_at": "2026-01-12T10:00:00Z"
+    },
+    {
+      "sku": "PROD-J1000",
+      "name": "Standard Package",
+      "category": "bundles",
+      "price": 125.00,
+      "currency": "USD",
+      "status": "active",
+      "stock": 200,
+      "weight_kg": 1.5,
+      "dimensions": {
+        "length_cm": 20,
+        "width_cm": 15,
+        "height_cm": 10
+      },
+      "tags": ["standard", "package"],
+      "created_at": "2025-08-01T00:00:00Z",
+      "updated_at": "2026-01-08T14:00:00Z"
+    },
+    {
+      "sku": "PROD-K1100",
+      "name": "Add-on Module",
+      "category": "accessories",
+      "price": 25.00,
+      "currency": "USD",
+      "status": "active",
+      "stock": 500,
+      "weight_kg": 0.1,
+      "dimensions": {
+        "length_cm": 5,
+        "width_cm": 5,
+        "height_cm": 2
+      },
+      "tags": ["addon", "accessory", "module"],
+      "created_at": "2025-08-01T00:00:00Z",
+      "updated_at": "2025-12-20T09:00:00Z"
+    },
+    {
+      "sku": "PROD-L1200",
+      "name": "Executive Suite",
+      "category": "enterprise",
+      "price": 1999.99,
+      "currency": "USD",
+      "status": "active",
+      "stock": 10,
+      "weight_kg": 4.0,
+      "dimensions": {
+        "length_cm": 50,
+        "width_cm": 40,
+        "height_cm": 20
+      },
+      "tags": ["executive", "enterprise", "premium"],
+      "created_at": "2025-10-01T00:00:00Z",
+      "updated_at": "2026-01-15T08:00:00Z"
+    },
+    {
+      "sku": "PROD-M1300",
+      "name": "Premium Support 1yr",
+      "category": "services",
+      "price": 500.00,
+      "currency": "USD",
+      "status": "active",
+      "stock": 999,
+      "weight_kg": 0,
+      "dimensions": null,
+      "tags": ["service", "support", "premium", "annual"],
+      "created_at": "2025-10-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "sku": "PROD-N1400",
+      "name": "Discontinued Widget",
+      "category": "widgets",
+      "price": 49.99,
+      "currency": "USD",
+      "status": "discontinued",
+      "stock": 0,
+      "weight_kg": 0.4,
+      "dimensions": {
+        "length_cm": 8,
+        "width_cm": 6,
+        "height_cm": 4
+      },
+      "tags": ["discontinued", "widget"],
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2025-06-01T00:00:00Z"
+    },
+    {
+      "sku": "PROD-O1500",
+      "name": "Coming Soon Gadget",
+      "category": "gadgets",
+      "price": 129.99,
+      "currency": "USD",
+      "status": "pending",
+      "stock": 0,
+      "weight_kg": 0.6,
+      "dimensions": {
+        "length_cm": 10,
+        "width_cm": 8,
+        "height_cm": 5
+      },
+      "tags": ["upcoming", "gadget", "new"],
+      "created_at": "2026-01-10T00:00:00Z",
+      "updated_at": "2026-01-10T00:00:00Z"
+    }
+  ],
+  "filter_test_scenarios": {
+    "active_products": "Filter by status=active, expected 12 results",
+    "high_value": "Filter by price > 100, expected 8 results", 
+    "us_currency": "Filter by currency=USD, expected 14 results",
+    "in_stock": "Filter by stock > 0, expected 13 results",
+    "premium_tag": "Filter by tags contains 'premium', expected 5 results",
+    "widgets_category": "Filter by category=widgets, expected 3 results"
+  }
+}

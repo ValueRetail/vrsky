@@ -10,6 +10,8 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/filter"
+	"github.com/ValueRetail/vrsky/pkg/health"
+	"github.com/ValueRetail/vrsky/pkg/runtime"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,12 +19,145 @@ import (
 
 func main() {
 	// Setup logging
-	setupLogging()
+	logger := setupLogging()
 
+	logger.Info("Starting VRSky filter component")
+
+	// Try to load new K8s runtime config first
+	rtCfg, err := runtime.LoadFromEnv()
+	if err != nil {
+		logger.Error("Failed to load runtime config", "error", err)
+		os.Exit(1)
+	}
+
+	// Check if we're running in K8s mode (new env vars) or legacy mode
+	if rtCfg.NodeID != "" && rtCfg.TenantID != "" {
+		// New K8s mode - use runtime config
+		runK8sMode(logger, rtCfg)
+	} else {
+		// Legacy mode - use old config approach
+		runLegacyMode(logger)
+	}
+}
+
+// runK8sMode runs the filter with K8s orchestrator-injected configuration
+func runK8sMode(logger *slog.Logger, rtCfg *runtime.Config) {
+	logger.Info("Running in K8s mode",
+		"tenant_id", rtCfg.TenantID,
+		"connection_id", rtCfg.ConnectionID,
+		"node_id", rtCfg.NodeID,
+		"input_subject", rtCfg.InputNATSSubject,
+		"output_subject", rtCfg.OutputNATSSubject)
+
+	// Validate configuration
+	if err := rtCfg.Validate(); err != nil {
+		logger.Error("Invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start health server
+	healthServer := health.NewServer(health.Config{
+		Port:        rtCfg.HealthPort,
+		ComponentID: "filter",
+		NodeID:      rtCfg.NodeID,
+		Logger:      logger,
+	})
+
+	// Mark as not ready until filter is started
+	healthServer.SetReady(false)
+
+	if err := healthServer.Start(ctx); err != nil {
+		logger.Error("Failed to start health server", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = healthServer.Stop(shutdownCtx)
+	}()
+
+	// Connect to NATS
+	logger.Info("Connecting to NATS", "url", rtCfg.NATSURLs)
+	nc, err := nats.Connect(rtCfg.NATSURLs,
+		nats.Name("vrsky-filter-"+rtCfg.NodeID),
+		nats.ReconnectWait(2*time.Second),
+		nats.MaxReconnects(-1),
+	)
+	if err != nil {
+		logger.Error("Failed to connect to NATS", "error", err)
+		os.Exit(1)
+	}
+	defer nc.Close()
+
+	logger.Info("Connected to NATS")
+
+	// Parse filter-specific configuration
+	var filterCfg filter.Config
+	if err := rtCfg.ParseConfig(&filterCfg); err != nil {
+		logger.Error("Failed to parse filter config", "error", err)
+		os.Exit(1)
+	}
+
+	// Override topics with runtime config
+	filterCfg.FilterID = rtCfg.NodeID
+	filterCfg.InputTopic = rtCfg.InputNATSSubject
+	filterCfg.OutputTopic = rtCfg.OutputNATSSubject
+	if filterCfg.RejectionTopic == "" {
+		filterCfg.RejectionTopic = rtCfg.OutputNATSSubject + ".rejected"
+	}
+
+	// Create metrics registry
+	registry := prometheus.NewRegistry()
+
+	// Create the filter
+	f, err := filter.NewFilter(rtCfg.NodeID, &filterCfg, nc, logger, registry)
+	if err != nil {
+		logger.Error("Failed to create filter", "error", err)
+		os.Exit(1)
+	}
+
+	// Start the filter
+	if err := f.Start(ctx); err != nil {
+		logger.Error("Failed to start filter", "error", err)
+		os.Exit(1)
+	}
+
+	// Mark as ready
+	healthServer.SetReady(true)
+	logger.Info("Filter ready for traffic")
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Wait for signal
+	sig := <-sigChan
+	logger.Info("Received signal, shutting down", "signal", sig.String())
+
+	// Mark as not ready
+	healthServer.SetReady(false)
+
+	// Graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := f.Stop(shutdownCtx); err != nil {
+		logger.Error("Error stopping filter", "error", err)
+	}
+
+	logger.Info("Filter shutdown complete")
+}
+
+// runLegacyMode runs the filter with the old configuration style
+func runLegacyMode(logger *slog.Logger) {
 	// Load configuration from environment
 	config := loadFilterConfig()
 
-	slog.Info("Filter configuration loaded",
+	logger.Info("Filter configuration loaded (legacy mode)",
 		"filter_id", config.FilterID,
 		"input_topic", config.InputTopic,
 		"output_topic", config.OutputTopic)
@@ -33,18 +168,15 @@ func main() {
 		natsURL = "nats://localhost:4222"
 	}
 
-	slog.Info("Connecting to NATS", "url", natsURL)
+	logger.Info("Connecting to NATS", "url", natsURL)
 	nc, err := nats.Connect(natsURL)
 	if err != nil {
-		slog.Error("Failed to connect to NATS", "error", err)
+		logger.Error("Failed to connect to NATS", "error", err)
 		os.Exit(1)
 	}
 	defer nc.Close()
 
-	slog.Info("Connected to NATS")
-
-	// Create logger
-	logger := slog.Default()
+	logger.Info("Connected to NATS")
 
 	// Create metrics registry
 	registry := prometheus.NewRegistry()
@@ -52,7 +184,7 @@ func main() {
 	// Create the filter
 	f, err := filter.NewFilter(config.FilterID, config, nc, logger, registry)
 	if err != nil {
-		slog.Error("Failed to create filter", "error", err)
+		logger.Error("Failed to create filter", "error", err)
 		os.Exit(1)
 	}
 
@@ -60,9 +192,29 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start health server (even in legacy mode)
+	healthPort := 8080
+	healthServer := health.NewServer(health.Config{
+		Port:        healthPort,
+		ComponentID: "filter",
+		NodeID:      config.FilterID,
+		Logger:      logger,
+	})
+
+	healthServer.SetReady(false)
+	if err := healthServer.Start(ctx); err != nil {
+		logger.Error("Failed to start health server", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = healthServer.Stop(shutdownCtx)
+	}()
+
 	// Start the filter
 	if err := f.Start(ctx); err != nil {
-		slog.Error("Failed to start filter", "error", err)
+		logger.Error("Failed to start filter", "error", err)
 		os.Exit(1)
 	}
 
@@ -70,12 +222,15 @@ func main() {
 	msgChan := make(chan *nats.Msg, 100)
 	sub, err := nc.ChanSubscribe(config.InputTopic, msgChan)
 	if err != nil {
-		slog.Error("Failed to subscribe to input topic", "error", err)
+		logger.Error("Failed to subscribe to input topic", "error", err)
 		os.Exit(1)
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	slog.Info("Subscribed to input topic", "topic", config.InputTopic)
+	logger.Info("Subscribed to input topic", "topic", config.InputTopic)
+
+	// Mark as ready
+	healthServer.SetReady(true)
 
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -103,7 +258,7 @@ func main() {
 				// Process the message through filter
 				decision, err := f.ProcessMessage(ctx, env)
 				if err != nil {
-					slog.Error("Failed to process message",
+					logger.Error("Failed to process message",
 						"error", err,
 						"envelope_id", env.ID)
 					continue
@@ -116,22 +271,22 @@ func main() {
 				if decision != nil && decision.Action == filter.ActionAccept {
 					// Publish to output topic
 					if err := nc.Publish(outputTopic, env.Payload); err != nil {
-						slog.Error("Failed to publish to output topic",
+						logger.Error("Failed to publish to output topic",
 							"topic", outputTopic,
 							"error", err)
 					} else {
-						slog.Debug("Message published to output topic",
+						logger.Debug("Message published to output topic",
 							"topic", outputTopic,
 							"envelope_id", env.ID)
 					}
 				} else {
 					// Publish to rejection topic for non-accepted messages
 					if err := nc.Publish(config.RejectionTopic, env.Payload); err != nil {
-						slog.Error("Failed to publish to rejection topic",
+						logger.Error("Failed to publish to rejection topic",
 							"topic", config.RejectionTopic,
 							"error", err)
 					} else {
-						slog.Debug("Message published to rejection topic",
+						logger.Debug("Message published to rejection topic",
 							"topic", config.RejectionTopic,
 							"envelope_id", env.ID)
 					}
@@ -144,11 +299,11 @@ func main() {
 	select {
 	case err := <-errChan:
 		if err != nil {
-			slog.Error("Filter error", "error", err)
+			logger.Error("Filter error", "error", err)
 			os.Exit(1)
 		}
 	case sig := <-sigChan:
-		slog.Info("Received signal, shutting down", "signal", sig.String())
+		logger.Info("Received signal, shutting down", "signal", sig.String())
 		cancel()
 
 		// Stop filter with timeout
@@ -156,10 +311,10 @@ func main() {
 		defer shutdownCancel()
 
 		if err := f.Stop(shutdownCtx); err != nil {
-			slog.Error("Error stopping filter", "error", err)
+			logger.Error("Error stopping filter", "error", err)
 		}
 
-		slog.Info("Filter shutdown complete")
+		logger.Info("Filter shutdown complete")
 	}
 }
 
@@ -197,7 +352,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 // setupLogging configures structured logging
-func setupLogging() {
+func setupLogging() *slog.Logger {
 	logLevel := slog.LevelInfo
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		logLevel = slog.LevelDebug
@@ -208,5 +363,8 @@ func setupLogging() {
 	}
 
 	handler := slog.NewJSONHandler(os.Stdout, opts)
-	slog.SetDefault(slog.New(handler))
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	return logger
 }

@@ -31,9 +31,10 @@ describe('Test Data Service', () => {
 
       await testDataService.sendTestMessage('conn-1', '{"test": "data"}')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/test-message', {
-        connection_id: 'conn-1',
-        message: '{"test": "data"}',
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/connections/conn-1/test-message', {
+        payload: {
+          test: 'data',
+        },
       })
     })
 
@@ -61,10 +62,8 @@ describe('Test Data Service', () => {
 
       await testDataService.startAutoGenerator('conn-1')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-generator/start', {
-        connection_id: 'conn-1',
-        rate: 1,
-        message_size: 'small',
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/connections/conn-1/auto-generator/start', {
+        rate_per_second: 1,
       })
     })
 
@@ -81,10 +80,8 @@ describe('Test Data Service', () => {
 
       await testDataService.startAutoGenerator('conn-1', 100, 'large')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-generator/start', {
-        connection_id: 'conn-1',
-        rate: 100,
-        message_size: 'large',
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/connections/conn-1/auto-generator/start', {
+        rate_per_second: 100,
       })
     })
 
@@ -100,9 +97,7 @@ describe('Test Data Service', () => {
 
       await testDataService.stopAutoGenerator('conn-1')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/auto-generator/stop', {
-        connection_id: 'conn-1',
-      })
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/connections/conn-1/auto-generator/stop', {})
     })
 
     it('should get auto generator status', async () => {
@@ -121,7 +116,7 @@ describe('Test Data Service', () => {
 
       expect(result).toEqual(status)
       expect(apiClient.get).toHaveBeenCalledWith(
-        '/auto-generator/status?connection_id=conn-1'
+        '/api/v1/connections/conn-1/auto-generator/status'
       )
     })
   })
