@@ -221,15 +221,30 @@ func runLegacyMode(logger *slog.Logger) {
 		"input_type", inputType,
 		"output_type", outputType)
 
+	// Normalize empty configs to an empty JSON object
+	var inputConfigJSON []byte
+	if inputConfigStr == "" {
+		inputConfigJSON = []byte(`{}`)
+	} else {
+		inputConfigJSON = []byte(inputConfigStr)
+	}
+
+	var outputConfigJSON []byte
+	if outputConfigStr == "" {
+		outputConfigJSON = []byte(`{}`)
+	} else {
+		outputConfigJSON = []byte(outputConfigStr)
+	}
+
 	// Create input from configuration
-	input, err := io.NewInput(inputType, json.RawMessage(inputConfigStr))
+	input, err := io.NewInput(inputType, json.RawMessage(inputConfigJSON))
 	if err != nil {
 		logger.Error("Failed to create input", "error", err)
 		os.Exit(1)
 	}
 
 	// Create output from configuration
-	output, err := io.NewOutput(outputType, json.RawMessage(outputConfigStr))
+	output, err := io.NewOutput(outputType, json.RawMessage(outputConfigJSON))
 	if err != nil {
 		logger.Error("Failed to create output", "error", err)
 		os.Exit(1)

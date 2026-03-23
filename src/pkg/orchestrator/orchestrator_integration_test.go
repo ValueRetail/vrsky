@@ -203,9 +203,26 @@ func TestIntegration_OrchestratorDeploysPipeline(t *testing.T) {
 	err = orch.StartConnection(ctx)
 	require.NoError(t, err, "StartConnection should succeed")
 
-	// Wait for deployments to be created
-	time.Sleep(deploymentWaitTime)
+	// Wait for deployments to be created using polling with a timeout
+	timeout := time.After(deploymentWaitTime)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
+	deploymentsReady := false
+	for !deploymentsReady {
+		select {
+		case <-timeout:
+			t.Fatalf("timed out after %s waiting for deployments to be created", deploymentWaitTime)
+		case <-ticker.C:
+			deployments, err := client.AppsV1().Deployments(testNamespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fmt.Sprintf("%s=conn-int-001", LabelPipeline),
+			})
+			require.NoError(t, err, "should list deployments while waiting for creation")
+			if len(deployments.Items) == 3 {
+				deploymentsReady = true
+			}
+		}
+	}
 	// Verify deployments were created
 	deployments, err := client.AppsV1().Deployments(testNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=conn-int-001", LabelPipeline),

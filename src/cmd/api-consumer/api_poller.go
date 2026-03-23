@@ -126,7 +126,10 @@ func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Clie
 
 	// Check status code - only accept 2xx responses
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) // Read first 1KB for error message
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024)) // Read first 1KB for error message
+		if readErr != nil {
+			logger.Warn("Failed to read error response body", "error", readErr)
+		}
 		return nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 

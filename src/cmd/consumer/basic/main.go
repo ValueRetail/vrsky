@@ -214,6 +214,9 @@ func runLegacyMode(logger *slog.Logger) {
 		"output_type", outputType)
 
 	// Create input from configuration
+	if inputConfigStr == "" {
+		inputConfigStr = "{}"
+	}
 	input, err := io.NewInput(inputType, json.RawMessage(inputConfigStr))
 	if err != nil {
 		logger.Error("Failed to create input", "error", err)
@@ -221,6 +224,9 @@ func runLegacyMode(logger *slog.Logger) {
 	}
 
 	// Create output from configuration
+	if outputConfigStr == "" {
+		outputConfigStr = "{}"
+	}
 	output, err := io.NewOutput(outputType, json.RawMessage(outputConfigStr))
 	if err != nil {
 		logger.Error("Failed to create output", "error", err)
