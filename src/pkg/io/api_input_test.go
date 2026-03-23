@@ -509,7 +509,7 @@ func TestAPIInput_StartAndClose(t *testing.T) {
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[{"id": 1}]`))
+		_, _ = w.Write([]byte(`[{"id": 1}]`))
 	}))
 	defer server.Close()
 
@@ -547,7 +547,7 @@ func TestAPIInput_Read(t *testing.T) {
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[{"id": 1}, {"id": 2}]`))
+		_, _ = w.Write([]byte(`[{"id": 1}, {"id": 2}]`))
 	}))
 	defer server.Close()
 
@@ -596,7 +596,7 @@ func TestAPIInput_4xxError_NoRetry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad request"}`))
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
 	}))
 	defer server.Close()
 
@@ -634,12 +634,12 @@ func TestAPIInput_5xxError_Retries(t *testing.T) {
 		count := atomic.AddInt32(&requestCount, 1)
 		if count < 3 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "server error"}`))
+			_, _ = w.Write([]byte(`{"error": "server error"}`))
 			return
 		}
 		// Success on 3rd try
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[{"id": 1}]`))
+		_, _ = w.Write([]byte(`[{"id": 1}]`))
 	}))
 	defer server.Close()
 
@@ -921,7 +921,7 @@ func TestAPIInput_FullPollCycle_MockServer(t *testing.T) {
 
 		// Return different data each poll
 		data := fmt.Sprintf(`[{"id": %d, "poll": %d}]`, count, count)
-		w.Write([]byte(data))
+		_, _ = w.Write([]byte(data))
 	}))
 	defer server.Close()
 
@@ -958,7 +958,7 @@ func TestAPIInput_FullPollCycle_MockServer(t *testing.T) {
 		}
 
 		var record pollRecord
-		json.Unmarshal(env.Payload, &record)
+		_ = json.Unmarshal(env.Payload, &record)
 		envelopes = append(envelopes, record)
 	}
 
@@ -975,7 +975,7 @@ func TestAPIInput_StateRecovery_MockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		offset := r.URL.Query().Get("offset")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(fmt.Sprintf(`[{"offset": "%s"}]`, offset)))
+		_, _ = w.Write([]byte(fmt.Sprintf(`[{"offset": "%s"}]`, offset)))
 	}))
 	defer server.Close()
 
@@ -995,7 +995,7 @@ func TestAPIInput_StateRecovery_MockServer(t *testing.T) {
 
 	// Pre-populate state (simulating previous run)
 	ctx := context.Background()
-	stateStore.Save(ctx, "recovery-test", &apiInputState{
+	_ = stateStore.Save(ctx, "recovery-test", &apiInputState{
 		ConsumerID:     "recovery-test",
 		Offset:         50,
 		PaginationType: "offset",
@@ -1024,7 +1024,7 @@ func TestAPIInput_StateRecovery_MockServer(t *testing.T) {
 	var record struct {
 		Offset string `json:"offset"`
 	}
-	json.Unmarshal(env.Payload, &record)
+	_ = json.Unmarshal(env.Payload, &record)
 
 	if record.Offset != "50" {
 		t.Errorf("expected recovered offset '50', got '%s'", record.Offset)
@@ -1054,6 +1054,6 @@ func BenchmarkParseAsRecords_SmallArray(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		consumer.parseAsRecords([]byte(data))
+		_, _ = consumer.parseAsRecords([]byte(data))
 	}
 }

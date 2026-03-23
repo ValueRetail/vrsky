@@ -167,7 +167,7 @@ func (s *FileProducerService) Start(ctx context.Context) error {
 	// Handle stop signal
 	go func() {
 		<-s.stopCh
-		sub.Unsubscribe()
+		_ = sub.Unsubscribe()
 		close(s.stoppedCh)
 	}()
 

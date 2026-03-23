@@ -55,7 +55,7 @@ func CreateDeploymentSpec(node *managementapi.Node, graph *ExecutionGraph, confi
 func buildEnvironmentVariables(node *managementapi.Node, graph *ExecutionGraph, config *OrchestratorConfig) ([]corev1.EnvVar, error) {
 	// Serialize node config to JSON
 	configJSON := "{}"
-	if node.Config != nil && len(node.Config) > 0 {
+	if len(node.Config) > 0 {
 		// Validate it's valid JSON
 		var temp interface{}
 		if err := json.Unmarshal(node.Config, &temp); err != nil {

@@ -810,14 +810,3 @@ func (v *Validator) getOutgoingEdges(nodeID string, edges []*Edge) []*Edge {
 	}
 	return outgoing
 }
-
-// getIncomingEdges returns all edges targeting the given node.
-func (v *Validator) getIncomingEdges(nodeID string, edges []*Edge) []*Edge {
-	var incoming []*Edge
-	for _, edge := range edges {
-		if edge != nil && edge.Target == nodeID {
-			incoming = append(incoming, edge)
-		}
-	}
-	return incoming
-}
