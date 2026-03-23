@@ -58,9 +58,19 @@ func CORSMiddleware(allowedOrigins []string, tenantHeader string) func(http.Hand
 }
 
 // TenantIDMiddleware extracts and validates tenant ID from request header
+// Skips validation for routes that don't require tenant context (auth, health checks)
 func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip tenant validation for auth routes and health checks
+			// Auth is global (not tenant-scoped) in Phase 1
+			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
+				r.URL.Path == "/health" ||
+				r.URL.Path == "/ready" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			tenantID := r.Header.Get(tenantHeader)
 
 			// Validate tenant ID is present and non-empty

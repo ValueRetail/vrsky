@@ -31,7 +31,6 @@ export default function CanvasSelector({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Focus input when editing starts
@@ -41,15 +40,6 @@ export default function CanvasSelector({
       inputRef.current.select()
     }
   }, [editingId])
-
-  // Close delete confirmation when clicking elsewhere
-  useEffect(() => {
-    if (!deleteConfirmId) return
-
-    const handleClick = () => setDeleteConfirmId(null)
-    window.addEventListener('click', handleClick)
-    return () => window.removeEventListener('click', handleClick)
-  }, [deleteConfirmId])
 
   const handleDoubleClick = useCallback((canvas: Canvas) => {
     setEditingId(canvas.id)
@@ -91,16 +81,13 @@ export default function CanvasSelector({
     onCreate()
   }, [canCreateMore, onCreate, onBeforeSwitch])
 
-  const handleDeleteClick = useCallback((e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    setDeleteConfirmId(id)
-  }, [])
-
-  const handleConfirmDelete = useCallback(
-    (e: React.MouseEvent, id: string) => {
+  const handleDeleteClick = useCallback(
+    (e: React.MouseEvent, canvas: Canvas) => {
       e.stopPropagation()
-      onDelete(id)
-      setDeleteConfirmId(null)
+      // Use native browser confirm dialog
+      if (window.confirm(`Delete "${canvas.name}"?`)) {
+        onDelete(canvas.id)
+      }
     },
     [onDelete]
   )
@@ -126,7 +113,6 @@ export default function CanvasSelector({
         const isHovered = hoveredId === canvas.id
         const isEditing = editingId === canvas.id
         const showDelete = (isHovered || isActive) && canvases.length > 1
-        const isConfirmingDelete = deleteConfirmId === canvas.id
 
         return (
           <div
@@ -206,7 +192,7 @@ export default function CanvasSelector({
             {/* Delete Button (X) */}
             {showDelete && !isEditing && (
               <button
-                onClick={(e) => handleDeleteClick(e, canvas.id)}
+                onClick={(e) => handleDeleteClick(e, canvas)}
                 style={{
                   position: 'absolute',
                   right: '6px',
@@ -239,65 +225,6 @@ export default function CanvasSelector({
               >
                 ×
               </button>
-            )}
-
-            {/* Delete Confirmation Popup */}
-            {isConfirmingDelete && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  marginTop: '8px',
-                  padding: '12px',
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '6px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                  zIndex: 100,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#374151' }}>
-                  Delete "{canvas.name}"?
-                </p>
-                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDeleteConfirmId(null)
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '12px',
-                      backgroundColor: '#f3f4f6',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      color: '#374151',
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={(e) => handleConfirmDelete(e, canvas.id)}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '12px',
-                      backgroundColor: '#dc2626',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      color: 'white',
-                      fontWeight: 500,
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
             )}
           </div>
         )

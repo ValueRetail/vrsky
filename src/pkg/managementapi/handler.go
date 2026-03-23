@@ -617,4 +617,23 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// API Consumer routes
 	h.RegisterAPIConsumerRoutes(mux)
+
+	// Auth routes (these bypass TenantIDMiddleware)
+	h.RegisterAuthRoutes(mux)
+}
+
+// RegisterAuthRoutes registers authentication routes
+// These routes do NOT require X-Tenant-ID header (auth is global in Phase 1)
+func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
+	// Public auth routes (no authentication required)
+	mux.HandleFunc("POST /api/v1/auth/register", h.RegisterUser)
+	mux.HandleFunc("POST /api/v1/auth/login", h.LoginUser)
+	mux.HandleFunc("GET /api/v1/auth/verify-email", h.VerifyEmail)
+	mux.HandleFunc("POST /api/v1/auth/forgot-password", h.ForgotPassword)
+	mux.HandleFunc("POST /api/v1/auth/reset-password", h.ResetPassword)
+
+	// Protected auth routes (require valid session)
+	mux.HandleFunc("GET /api/v1/auth/me", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.GetMe)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/logout", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/change-password", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
 }

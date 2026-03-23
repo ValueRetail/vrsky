@@ -1,10 +1,12 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
@@ -13,6 +15,11 @@ import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
 import type { Node, Edge } from '../types/pipeline'
 
 export default function PipelineBuilder() {
+  const navigate = useNavigate()
+  const { user, isAuthenticated, logout } = useAuthStore()
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+
   // Canvas persistence
   const {
     activeCanvas,
@@ -43,11 +50,32 @@ export default function PipelineBuilder() {
   const canvasContainer = useRef<HTMLDivElement>(null)
   const { showErrorNotification, showSuccessNotification } = useUIStore()
 
+  // Close user menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as globalThis.Node)) {
+        setShowUserMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Logout handler
+  const handleLogout = async () => {
+    setShowUserMenu(false)
+    await logout()
+    navigate('/login')
+  }
+
   // Measure canvas container width and update when layout changes
   useEffect(() => {
     const updateCanvasWidth = () => {
       if (canvasContainer.current) {
-        setCanvasWidth(canvasContainer.current.offsetWidth)
+        const containerWidth = canvasContainer.current.offsetWidth
+        // Cap width to viewport minus left sidebar (64px) to prevent infinite expansion
+        const maxWidth = window.innerWidth - 64
+        setCanvasWidth(Math.min(containerWidth, maxWidth))
       }
     }
 
@@ -362,7 +390,182 @@ export default function PipelineBuilder() {
   const rightSidebarOpen = selectedNode !== null
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'row' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* TOP HEADER BAR */}
+      <header style={{ 
+        height: '56px', 
+        backgroundColor: '#ffffff', 
+        borderBottom: '1px solid #e5e7eb', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between', 
+        padding: '0 16px',
+        flexShrink: 0,
+        zIndex: 30,
+      }}>
+        {/* Left: Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>VRSky</h1>
+            <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Integration Platform</p>
+          </div>
+        </div>
+
+        {/* Right: Validation + Deploy + User Menu */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Validation Errors Indicator */}
+          {deployAttempted && !validationResult.valid && (
+            <div
+              style={{
+                padding: '6px 12px',
+                backgroundColor: '#fee2e2',
+                color: '#991b1b',
+                borderRadius: '4px',
+                fontSize: '13px',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>✗</span>
+              <span>{validationResult.errors.length} error{validationResult.errors.length > 1 ? 's' : ''}</span>
+            </div>
+          )}
+
+          {/* Deploy Button */}
+          <button
+            onClick={deployPipeline}
+            disabled={isLoading}
+            style={{
+              padding: '8px 24px',
+              backgroundColor: isLoading ? '#9ca3af' : '#2563eb',
+              color: 'white',
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: '4px',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            {isLoading ? 'Deploying...' : 'Deploy'}
+          </button>
+
+          {/* User Menu */}
+          <div style={{ position: 'relative' }} ref={userMenuRef}>
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              style={{
+                padding: '8px 12px',
+                backgroundColor: 'transparent',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                color: '#374151',
+              }}
+              title={isAuthenticated ? `Logged in as ${user?.email}` : 'Menu'}
+            >
+              <span style={{ fontSize: '16px' }}>⚙️</span>
+              {isAuthenticated && user && (
+                <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.full_name || user.email}
+                </span>
+              )}
+            </button>
+
+            {/* Dropdown Menu */}
+            {showUserMenu && (
+              <div style={{
+                position: 'absolute',
+                right: 0,
+                top: '100%',
+                marginTop: '8px',
+                width: '220px',
+                backgroundColor: '#ffffff',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                zIndex: 50,
+              }}>
+                {isAuthenticated && user ? (
+                  <>
+                    {/* User Info */}
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                      <p style={{ margin: 0, fontSize: '14px', fontWeight: 500, color: '#111827' }}>
+                        {user.full_name || 'User'}
+                      </p>
+                      <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6b7280' }}>
+                        {user.email}
+                      </p>
+                    </div>
+                    {/* Menu Items */}
+                    <div style={{ padding: '8px' }}>
+                      {/* Logout */}
+                      <button
+                        onClick={handleLogout}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '14px',
+                          color: '#dc2626',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <span>🚪</span>
+                        <span>Logout</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ padding: '8px' }}>
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false)
+                        navigate('/login')
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '14px',
+                        color: '#374151',
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <span>🔑</span>
+                      <span>Login</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT AREA - Sidebar + Canvas */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
       {/* LEFT SIDEBAR - Component Palette */}
       {paletteOpen && (
         <aside style={{ width: '224px', height: '100%', backgroundColor: '#f9fafb', borderRight: '1px solid #e5e7eb', overflowY: 'auto', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
@@ -419,116 +622,80 @@ export default function PipelineBuilder() {
         {/* Canvas Content Area */}
         <div
           ref={canvasContainer}
-          style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}
+          style={{ 
+            flex: 1, 
+            overflowY: 'auto', 
+            overflowX: 'hidden', 
+            position: 'relative',
+            width: '100%',
+            maxWidth: 'calc(100vw - 64px)', // Viewport width minus left sidebar (64px) - prevents infinite expansion
+            paddingRight: rightSidebarOpen ? '320px' : '0px',
+            transition: 'padding-right 150ms ease'
+          }}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          {/* Validation Status & Deploy Button - Top Right of Canvas */}
-        <div
-          style={{
-            position: 'absolute',
-            top: '12px',
-            right: '12px',
-            zIndex: 20,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '8px',
-          }}
-        >
-          {/* Validation Errors - Only shown after deploy attempt with errors */}
+          {/* Validation Errors Tooltip - shown below header when errors exist */}
           {deployAttempted && !validationResult.valid && (
-            <>
-              <div
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: '#fee2e2',
-                  color: '#991b1b',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  maxWidth: '280px',
-                }}
-              >
-                <span>✗</span>
-                <span>
-                  {`${validationResult.errors.length} validation error${validationResult.errors.length > 1 ? 's' : ''}`}
-                </span>
-              </div>
-              <div
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  color: '#991b1b',
-                  maxWidth: '280px',
-                }}
-              >
-                <ul style={{ margin: 0, paddingLeft: '16px' }}>
-                  {validationResult.errors.map((error, index) => (
-                    <li key={index} style={{ marginBottom: index < validationResult.errors.length - 1 ? '4px' : 0 }}>
-                      {error}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </>
+            <div
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                zIndex: 20,
+                padding: '8px 12px',
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '4px',
+                fontSize: '12px',
+                color: '#991b1b',
+                maxWidth: '280px',
+              }}
+            >
+              <ul style={{ margin: 0, paddingLeft: '16px' }}>
+                {validationResult.errors.map((error, index) => (
+                  <li key={index} style={{ marginBottom: index < validationResult.errors.length - 1 ? '4px' : 0 }}>
+                    {error}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
-          {/* Deploy Button */}
-          <button
-            onClick={deployPipeline}
-            disabled={isLoading}
-            style={{
-              padding: '8px 24px',
-              backgroundColor: isLoading ? '#9ca3af' : '#2563eb',
-              color: 'white',
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: '4px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
+        {/* Konva Canvas - wrapped to prevent expansion */}
+        <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+          <KonvaCanvas
+            nodes={nodes}
+            edges={edges}
+            selectedNodeId={selectedNodeId}
+            selectedEdgeId={selectedEdgeId}
+            connectionDrawing={connectionDrawing}
+            connectionStart={connectionStart}
+            connectionPreviewEnd={connectionPreviewEnd}
+            containerWidth={canvasWidth}
+            onNodeDrag={handleNodeDrag}
+            onNodeSelect={(nodeId) => {
+              // Set node ID for visual selection
+              setSelectedNodeId(nodeId || null)
+              // Deselect edge when selecting node
+              setSelectedEdgeId(null)
+              setEdgeContextMenu(null)
+              // Find and set the selected node object
+              if (nodeId) {
+                const node = nodes.find((n) => n.id === nodeId)
+                setSelectedNode(node || null)
+              } else {
+                setSelectedNode(null)
+              }
             }}
-          >
-            {isLoading ? 'Deploying...' : 'Deploy'}
-          </button>
+            onEdgeSelect={handleEdgeSelect}
+            onEdgeDelete={handleEdgeDelete}
+            onEdgeContextMenu={handleEdgeContextMenu}
+            onPortMouseDown={handlePortMouseDown}
+            onPortMouseUp={handlePortMouseUp}
+            onStageMouseMove={handleStageMouseMove}
+          />
         </div>
-
-        {/* Konva Canvas */}
-        <KonvaCanvas
-          nodes={nodes}
-          edges={edges}
-          selectedNodeId={selectedNodeId}
-          selectedEdgeId={selectedEdgeId}
-          connectionDrawing={connectionDrawing}
-          connectionStart={connectionStart}
-          connectionPreviewEnd={connectionPreviewEnd}
-          containerWidth={canvasWidth}
-          onNodeDrag={handleNodeDrag}
-          onNodeSelect={(nodeId) => {
-            setSelectedNodeId(nodeId)
-            // Deselect edge when selecting node
-            setSelectedEdgeId(null)
-            setEdgeContextMenu(null)
-            // Always get fresh node reference from current nodes array
-            // This ensures we never use stale node data
-            setNodes((currentNodes) => {
-              const node = currentNodes.find((n) => n.id === nodeId)
-              setSelectedNode(node || null)
-              return currentNodes // Return unchanged
-            })
-          }}
-          onEdgeSelect={handleEdgeSelect}
-          onEdgeDelete={handleEdgeDelete}
-          onEdgeContextMenu={handleEdgeContextMenu}
-          onPortMouseDown={handlePortMouseDown}
-          onPortMouseUp={handlePortMouseUp}
-          onStageMouseMove={handleStageMouseMove}
-        />
 
         {/* Edge Context Menu */}
         {edgeContextMenu && (
@@ -587,10 +754,21 @@ export default function PipelineBuilder() {
         )}
         </div>
       </div>
+      </div>
 
-      {/* RIGHT SIDEBAR - Property Editor */}
+      {/* RIGHT SIDEBAR - Property Editor (Fixed Overlay) */}
       {rightSidebarOpen && (
-        <aside style={{ width: '320px', height: '100%', backgroundColor: 'white', borderLeft: '1px solid #d1d5db', overflowY: 'auto', flexShrink: 0 }}>
+        <aside style={{ 
+          position: 'fixed', 
+          right: 0, 
+          top: '56px', 
+          width: '320px', 
+          height: 'calc(100% - 56px)', 
+          backgroundColor: 'white', 
+          borderLeft: '1px solid #d1d5db', 
+          overflowY: 'auto',
+          zIndex: 40
+        }}>
           <PropertyEditor
             node={selectedNode}
             onUpdate={updateNodeConfig}

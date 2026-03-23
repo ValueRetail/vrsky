@@ -400,3 +400,84 @@ func (m *MockRepository) GetConnectionByNameAndTenant(ctx context.Context, name,
 	}
 	return nil, ErrConnectionNotFound
 }
+
+// ============================================
+// Auth Mock Methods (Phase 1)
+// These are stub implementations for testing non-auth handlers
+// ============================================
+
+func (m *MockRepository) CreateUser(ctx context.Context, user *User) error {
+	return nil
+}
+
+func (m *MockRepository) GetUserByID(ctx context.Context, id string) (*User, error) {
+	return nil, &NotFoundError{ResourceType: "User", ResourceID: id}
+}
+
+func (m *MockRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	return nil, &NotFoundError{ResourceType: "User", ResourceID: email}
+}
+
+func (m *MockRepository) UpdateUserLastLogin(ctx context.Context, userID string) error {
+	return nil
+}
+
+func (m *MockRepository) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	return nil
+}
+
+func (m *MockRepository) VerifyUserEmail(ctx context.Context, userID string) error {
+	return nil
+}
+
+func (m *MockRepository) CreateSession(ctx context.Context, session *Session) error {
+	return nil
+}
+
+func (m *MockRepository) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
+	return nil, &NotFoundError{ResourceType: "Session", ResourceID: tokenHash}
+}
+
+func (m *MockRepository) ValidateSession(ctx context.Context, tokenHash string) (*Session, *User, error) {
+	return nil, nil, &NotFoundError{ResourceType: "Session", ResourceID: tokenHash}
+}
+
+func (m *MockRepository) UpdateSessionActivity(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (m *MockRepository) InvalidateSession(ctx context.Context, tokenHash string) error {
+	return nil
+}
+
+func (m *MockRepository) InvalidateAllUserSessions(ctx context.Context, userID string) error {
+	return nil
+}
+
+func (m *MockRepository) CreateEmailVerificationToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *MockRepository) GetEmailVerificationToken(ctx context.Context, tokenHash string) (*EmailVerificationToken, error) {
+	return nil, &NotFoundError{ResourceType: "EmailVerificationToken", ResourceID: tokenHash}
+}
+
+func (m *MockRepository) UseEmailVerificationToken(ctx context.Context, tokenHash string) error {
+	return nil
+}
+
+func (m *MockRepository) CreatePasswordResetToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *MockRepository) GetPasswordResetToken(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
+	return nil, &NotFoundError{ResourceType: "PasswordResetToken", ResourceID: tokenHash}
+}
+
+func (m *MockRepository) UsePasswordResetToken(ctx context.Context, tokenHash, newPasswordHash string) error {
+	return nil
+}
+
+func (m *MockRepository) CreateAuthAuditLog(ctx context.Context, log *AuthAuditLog) error {
+	return nil
+}

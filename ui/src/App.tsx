@@ -5,15 +5,20 @@ import ErrorBoundary from './components/Common/ErrorBoundary'
 import Toast from './components/Common/Toast'
 import ConfirmDialog from './components/Common/ConfirmDialog'
 import RootLayout from './components/Layout/RootLayout'
+import ProtectedRoute from './components/Auth/ProtectedRoute'
 import { useUIStore } from './store/uiStore'
+import { useAuthStore } from './store/authStore'
 import PipelineBuilderPage from './pages/PipelineBuilderPage'
 import ConnectionDetail from './pages/ConnectionDetail'
 import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
 import NotFound from './pages/NotFound'
 
 function App() {
   const { confirmDialog, hideConfirmDialog } = useUIStore()
+  const { checkAuth } = useAuthStore()
 
   useEffect(() => {
     try {
@@ -21,21 +26,47 @@ function App() {
     } catch (error) {
       console.error('Configuration validation failed:', error)
     }
-  }, [])
+    // Check authentication status on app load
+    checkAuth()
+  }, [checkAuth])
 
   return (
     <ErrorBoundary>
       <Router>
         <Routes>
-          {/* PipelineBuilder is now the main application */}
-          <Route path="/" element={<PipelineBuilderPage />} />
-          <Route path="/connections/create" element={<PipelineBuilderPage />} />
+          {/* Public auth routes */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           
-          {/* Other routes with layout (kept for backward compatibility) */}
+          {/* Protected routes - PipelineBuilder is the main application */}
+          <Route path="/" element={
+            <ProtectedRoute>
+              <PipelineBuilderPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/connections/create" element={
+            <ProtectedRoute>
+              <PipelineBuilderPage />
+            </ProtectedRoute>
+          } />
+          
+          {/* Other protected routes with layout */}
           <Route element={<RootLayout />}>
-            <Route path="/connections" element={<ConnectionsList />} />
-            <Route path="/connections/:id" element={<ConnectionDetail />} />
-            <Route path="/connections/:id/test-data" element={<TestDataPage />} />
+            <Route path="/connections" element={
+              <ProtectedRoute>
+                <ConnectionsList />
+              </ProtectedRoute>
+            } />
+            <Route path="/connections/:id" element={
+              <ProtectedRoute>
+                <ConnectionDetail />
+              </ProtectedRoute>
+            } />
+            <Route path="/connections/:id/test-data" element={
+              <ProtectedRoute>
+                <TestDataPage />
+              </ProtectedRoute>
+            } />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

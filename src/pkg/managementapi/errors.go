@@ -159,3 +159,21 @@ type InvalidEdgeError struct {
 func (e *InvalidEdgeError) Error() string {
 	return fmt.Sprintf("edge '%s' has invalid %s: node '%s' does not exist", e.EdgeID, e.RefType, e.InvalidRef)
 }
+
+// UnauthorizedError represents a 401 Unauthorized error
+type UnauthorizedError struct {
+	Message string
+}
+
+func (ue *UnauthorizedError) Error() string {
+	return ue.Message
+}
+
+// ForbiddenError represents a 403 Forbidden error
+type ForbiddenError struct {
+	Message string
+}
+
+func (fe *ForbiddenError) Error() string {
+	return fe.Message
+}

@@ -229,3 +229,63 @@ export interface ConfirmDialogConfig {
   onConfirm: () => void | Promise<void>
   onCancel?: () => void
 }
+
+// ============================================
+// Authentication Models (Phase 1)
+// ============================================
+
+export type UserStatus = 'pending_verification' | 'active' | 'suspended' | 'deactivated'
+
+export interface User {
+  id: string
+  email: string
+  full_name: string
+  status: UserStatus
+  email_verified: boolean
+  created_at: string
+  last_login_at?: string
+}
+
+export interface Session {
+  token: string
+  user: User
+  expires_at: string
+}
+
+// Auth Request/Response types
+export interface RegisterRequest {
+  email: string
+  password: string
+  full_name: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface ChangePasswordRequest {
+  current_password: string
+  new_password: string
+}
+
+export interface ForgotPasswordRequest {
+  email: string
+}
+
+export interface ResetPasswordRequest {
+  token: string
+  new_password: string
+}
+
+export interface AuthResponse {
+  success: boolean
+  message?: string
+  user?: User
+  session_token?: string
+  expires_at?: string
+}
+
+export interface MeResponse {
+  user: User
+}
