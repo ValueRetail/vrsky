@@ -13,7 +13,7 @@ export default function ConnectionRequestsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!currentTenant) return
+    if (!currentTenant) { setLoading(false); return }
     setLoading(true)
     Promise.all([
       tenantDataService.listIncomingRequests(currentTenant.id),

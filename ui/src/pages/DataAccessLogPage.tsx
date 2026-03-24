@@ -13,7 +13,7 @@ export default function DataAccessLogPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!currentTenant) return
+    if (!currentTenant) { setLoading(false); return }
     setLoading(true)
     tenantDataService.getDataAccessLog(currentTenant.id, page)
       .then(data => { setEntries(data.entries); setPageInfo(data.page_info) })

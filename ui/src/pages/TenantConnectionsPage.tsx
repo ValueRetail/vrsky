@@ -11,7 +11,7 @@ export default function TenantConnectionsPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!currentTenant) return
+    if (!currentTenant) { setLoading(false); return }
     setLoading(true)
     tenantDataService.listDataConnections(currentTenant.id)
       .then(setConnections)

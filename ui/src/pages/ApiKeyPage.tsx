@@ -13,7 +13,7 @@ export default function ApiKeyPage() {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!currentTenant) return
+    if (!currentTenant) { setLoading(false); return }
     setLoading(true)
     tenantDataService.getApiKey(currentTenant.id)
       .then(setApiKey)

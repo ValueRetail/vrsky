@@ -504,6 +504,37 @@ export default function PipelineBuilder() {
                     </div>
                     {/* Menu Items */}
                     <div style={{ padding: '8px' }}>
+                      {/* Settings Links */}
+                      {[
+                        { label: 'Connection Requests', path: '/settings/connection-requests' },
+                        { label: 'Data Connections', path: '/settings/tenant-connections' },
+                        { label: 'API Key', path: '/settings/api-key' },
+                        { label: 'Audit Log', path: '/settings/audit-log' },
+                      ].map(({ label, path }) => (
+                        <button
+                          key={path}
+                          onClick={() => { setShowUserMenu(false); navigate(path) }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '14px',
+                            color: '#374151',
+                            textAlign: 'left' as const,
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      <div style={{ borderTop: '1px solid #e5e7eb', margin: '4px 0' }} />
                       {/* Logout */}
                       <button
                         onClick={handleLogout}
