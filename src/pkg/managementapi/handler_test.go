@@ -481,3 +481,55 @@ func (m *MockRepository) UsePasswordResetToken(ctx context.Context, tokenHash, n
 func (m *MockRepository) CreateAuthAuditLog(ctx context.Context, log *AuthAuditLog) error {
 	return nil
 }
+
+// ============================================
+// Tenant Operations (Phase 1 Refactor)
+// ============================================
+
+func (m *MockRepository) CreateTenant(ctx context.Context, userID, name, slug string) (*Tenant, error) {
+	return &Tenant{ID: "test-tenant-id", Name: name, Slug: slug, OwnerID: userID, SubscriptionPlan: "free"}, nil
+}
+
+func (m *MockRepository) GetTenantByID(ctx context.Context, tenantID string) (*Tenant, error) {
+	return nil, ErrTenantNotFound
+}
+
+func (m *MockRepository) GetUserTenants(ctx context.Context, userID string) ([]*TenantResponse, error) {
+	return []*TenantResponse{}, nil
+}
+
+func (m *MockRepository) GetUserTenantRole(ctx context.Context, userID, tenantID string) (string, error) {
+	return "", nil
+}
+
+func (m *MockRepository) DeleteTenant(ctx context.Context, tenantID string) error {
+	return nil
+}
+
+func (m *MockRepository) UpdateTenantStatus(ctx context.Context, tenantID, status string, natsSlug *string) error {
+	return nil
+}
+
+func (m *MockRepository) CreateProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error) {
+	return &ProvisioningJob{ID: "test-job-id", TenantID: tenantID, Status: "queued"}, nil
+}
+
+func (m *MockRepository) UpdateProvisioningJob(ctx context.Context, jobID, status string, progress int, step, errMsg string) error {
+	return nil
+}
+
+func (m *MockRepository) UpdateProvisioningJobCompleted(ctx context.Context, jobID string, completedAt *time.Time) error {
+	return nil
+}
+
+func (m *MockRepository) GetLatestProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error) {
+	return nil, nil
+}
+
+func (m *MockRepository) UpsertTenantAPIKey(ctx context.Context, tenantID, keyHash string) (*TenantAPIKey, error) {
+	return &TenantAPIKey{ID: "test-key-id", TenantID: tenantID, IsActive: true}, nil
+}
+
+func (m *MockRepository) GetTenantAPIKey(ctx context.Context, tenantID string) (*TenantAPIKey, error) {
+	return nil, ErrTenantNotFound
+}

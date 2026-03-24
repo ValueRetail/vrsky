@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { useConnectionsStore } from '../../store/connectionsStore'
 import { useAuthStore } from '../../store/authStore'
+import TenantSelector from '../Tenants/TenantSelector'
 
 export default function Header() {
   const navigate = useNavigate()
@@ -61,6 +62,9 @@ export default function Header() {
               </div>
             </div>
           </div>
+
+          {/* Center: Tenant Selector */}
+          {isAuthenticated && <TenantSelector />}
 
           {/* Right: Connections Count + User Menu */}
           <div className="flex items-center gap-3">

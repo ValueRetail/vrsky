@@ -8,6 +8,17 @@ import type { AxiosInstance } from 'axios'
 import { config } from '@/config/env'
 import type { APIError } from '@/types/api'
 
+// Dynamic tenant ID — updated by authStore when switching tenants
+let activeTenantId: string = config.tenantId
+
+export function setActiveTenantId(id: string) {
+  activeTenantId = id
+}
+
+export function getActiveTenantId(): string {
+  return activeTenantId
+}
+
 // Create Axios instance
 const apiClient: AxiosInstance = axios.create({
   baseURL: config.apiUrl,
@@ -20,7 +31,7 @@ const apiClient: AxiosInstance = axios.create({
 // Request interceptor: Add X-Tenant-ID header
 apiClient.interceptors.request.use(
   (requestConfig) => {
-    requestConfig.headers['X-Tenant-ID'] = config.tenantId
+    requestConfig.headers['X-Tenant-ID'] = activeTenantId
     return requestConfig
   },
   (error) => Promise.reject(error)

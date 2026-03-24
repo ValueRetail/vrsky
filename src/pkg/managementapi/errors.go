@@ -17,6 +17,9 @@ var (
 	ErrPayloadTooLarge         = fmt.Errorf("payload exceeds maximum size")
 	ErrInvalidPayload          = fmt.Errorf("invalid payload format")
 	ErrGeneratorAlreadyRunning = fmt.Errorf("generator is already running for this connection")
+	ErrTenantNotFound          = fmt.Errorf("tenant not found")
+	ErrSlugAlreadyExists       = fmt.Errorf("slug already exists")
+	ErrNotTenantMember         = fmt.Errorf("not a member of this tenant")
 )
 
 // ValidationError provides detailed validation error information

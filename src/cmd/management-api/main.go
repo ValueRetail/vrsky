@@ -14,6 +14,9 @@ import (
 
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/nats-io/nats.go"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 )
@@ -180,6 +183,15 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// Initialize handler and register REST routes
 	restHandler := managementapi.NewHandler(repo, validator)
 	restHandler.SetPublisher(publisher)
+
+	// Initialize tenant NATS provisioning (Phase 2)
+	k8sProvisioner := initK8sNATSProvisioner(logger)
+	tenantSSEHub := managementapi.NewTenantSSEHub()
+	tenantProvisioner := managementapi.NewTenantProvisioner(repo, k8sProvisioner, tenantSSEHub, logger)
+	tenantProvisioner.Start()
+	restHandler.SetTenantProvisioner(tenantProvisioner)
+	restHandler.SetTenantSSEHub(tenantSSEHub)
+
 	restHandler.RegisterRoutes(mux)
 
 	// Initialize WebSocket infrastructure for real-time metrics streaming
@@ -215,4 +227,29 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 		WriteTimeout: config.WriteTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
+}
+
+// initK8sNATSProvisioner tries to create a K8s client for tenant NATS provisioning.
+// Returns nil (not fatal) if K8s is not available (e.g., local dev without a cluster).
+func initK8sNATSProvisioner(logger *log.Logger) *managementapi.K8sNATSProvisioner {
+	// Try in-cluster config first (running inside K8s)
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		// Fall back to kubeconfig (local dev)
+		kubeconfig := clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			logger.Printf("K8s client not available (no in-cluster config or kubeconfig): tenant NATS provisioning disabled")
+			return nil
+		}
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		logger.Printf("Failed to create K8s client: %v — tenant NATS provisioning disabled", err)
+		return nil
+	}
+
+	logger.Printf("K8s client initialized for tenant NATS provisioning")
+	return managementapi.NewK8sNATSProvisioner(clientset, logger)
 }

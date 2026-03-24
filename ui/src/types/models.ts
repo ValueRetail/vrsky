@@ -191,11 +191,42 @@ export interface ConnectionMetrics {
 }
 
 // Tenant
+export type TenantRole = 'owner' | 'admin' | 'editor' | 'viewer'
+
+export type TenantStatus = 'provisioning' | 'active' | 'failed' | 'terminating'
+
 export interface Tenant {
   id: string
   name: string
+  slug: string
+  owner_id: string
+  subscription_plan: string
+  is_verified: boolean
+  user_role: TenantRole
+  max_integrations: number
+  max_messages_per_month: number
+  status: TenantStatus
+  nats_slug?: string
   created_at: string
   updated_at: string
+}
+
+export interface ProvisioningStatus {
+  tenant_id: string
+  status: TenantStatus
+  progress: number
+  current_step: string
+  nats_url?: string
+  error?: string
+}
+
+export interface TenantAPIKey {
+  id: string
+  tenant_id: string
+  created_at: string
+  rotated_at?: string
+  is_active: boolean
+  raw_key?: string
 }
 
 // Pagination
@@ -257,6 +288,7 @@ export interface RegisterRequest {
   email: string
   password: string
   full_name: string
+  workspace_name: string
 }
 
 export interface LoginRequest {
@@ -288,4 +320,7 @@ export interface AuthResponse {
 
 export interface MeResponse {
   user: User
+  session_expires_at: string
+  tenants: Tenant[]
+  current_tenant: Tenant | null
 }

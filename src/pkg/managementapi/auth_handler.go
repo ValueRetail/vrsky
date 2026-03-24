@@ -50,6 +50,15 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate workspace name
+	workspaceName := strings.TrimSpace(req.WorkspaceName)
+	if workspaceName == "" {
+		workspaceName = req.FullName + "'s Workspace"
+	} else if len(workspaceName) < 3 {
+		_ = writeError(w, http.StatusBadRequest, "ValidationError", "workspace name must be at least 3 characters", nil)
+		return
+	}
+
 	// Hash password
 	passwordHash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -72,6 +81,14 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-create default tenant
+	slug := GenerateSlug(workspaceName)
+	tenant, err := h.repo.CreateTenant(ctx, user.ID, workspaceName, slug)
+	if err != nil {
+		// Log but don't fail registration — user can create a tenant later
+		h.logAuthEvent(ctx, r, &user.ID, req.Email, "tenant_creation", "failed", stringPtr(err.Error()))
+	}
+
 	// Generate email verification token
 	rawToken, hashedToken, err := auth.GenerateVerificationToken()
 	if err != nil {
@@ -89,14 +106,32 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	// Log success
 	h.logAuthEvent(ctx, r, &user.ID, req.Email, "registration", "success", nil)
 
-	// TODO: Send verification email
-	// For now, include the token in the response for testing (remove in production!)
-	_ = writeJSON(w, http.StatusCreated, map[string]interface{}{
+	// Build response
+	response := map[string]interface{}{
 		"success":            true,
 		"message":            "Check your email to verify your account",
 		"user_id":            user.ID,
 		"verification_token": rawToken, // TODO: Remove in production - only for testing
-	})
+	}
+	if tenant != nil {
+		response["tenant"] = TenantResponse{
+			ID:                  tenant.ID,
+			Name:                tenant.Name,
+			Slug:                tenant.Slug,
+			OwnerID:             tenant.OwnerID,
+			SubscriptionPlan:    tenant.SubscriptionPlan,
+			IsVerified:          tenant.IsVerified,
+			MaxIntegrations:     tenant.MaxIntegrations,
+			MaxMessagesPerMonth: tenant.MaxMessagesPerMonth,
+			Status:              tenant.Status,
+			NATSSlug:            tenant.NATSSlug,
+			UserRole:            "owner",
+			CreatedAt:           tenant.CreatedAt,
+			UpdatedAt:           tenant.UpdatedAt,
+		}
+	}
+
+	_ = writeJSON(w, http.StatusCreated, response)
 }
 
 // VerifyEmail handles GET /api/v1/auth/verify-email?token=xxx
@@ -228,9 +263,25 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch user's tenants
+	tenants, err := h.repo.GetUserTenants(ctx, user.ID)
+	if err != nil {
+		tenants = []*TenantResponse{}
+	}
+	if tenants == nil {
+		tenants = []*TenantResponse{}
+	}
+
+	var currentTenant *TenantResponse
+	if len(tenants) > 0 {
+		currentTenant = tenants[0]
+	}
+
 	_ = writeJSON(w, http.StatusOK, MeResponse{
 		User:             user.ToResponse(),
 		SessionExpiresAt: session.ExpiresAt,
+		Tenants:          tenants,
+		CurrentTenant:    currentTenant,
 	})
 }
 
