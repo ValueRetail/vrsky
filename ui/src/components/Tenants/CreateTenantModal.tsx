@@ -8,7 +8,6 @@ import { useAuthStore } from '@/store/authStore'
 import ProvisioningSpinner from './ProvisioningSpinner'
 import * as authService from '@/services/authService'
 import { config } from '@/config/env'
-import { WORKSPACE_NAME_MIN_LENGTH, VALIDATION_MESSAGES } from '@/constants/validation'
 
 interface CreateTenantModalProps {
   isOpen: boolean
@@ -28,8 +27,8 @@ export default function CreateTenantModal({ isOpen, onClose }: CreateTenantModal
     e.preventDefault()
     setError(null)
 
-    if (!name || name.trim().length < WORKSPACE_NAME_MIN_LENGTH) {
-      setError(VALIDATION_MESSAGES.WORKSPACE_NAME_TOO_SHORT)
+    if (!name || name.trim().length < 3) {
+      setError('Workspace name must be at least 3 characters')
       return
     }
 
@@ -59,8 +58,12 @@ export default function CreateTenantModal({ isOpen, onClose }: CreateTenantModal
       } else {
         handleComplete()
       }
-    } catch {
-      setError('Failed to create workspace')
+    } catch (err: unknown) {
+      let message = 'Failed to create workspace'
+      if (err instanceof Error && err.message) {
+        message = `${message}: ${err.message}`
+      }
+      setError(message)
       setIsSubmitting(false)
     }
   }
