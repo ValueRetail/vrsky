@@ -50,6 +50,51 @@ export default function Sidebar() {
           )}
         </Link>
 
+        {/* Settings Section */}
+        <div className="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+          <p className="px-4 py-1 text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Settings</p>
+          <Link
+            to="/settings/connection-requests"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/connection-requests')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Requests
+          </Link>
+          <Link
+            to="/settings/tenant-connections"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/tenant-connections')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Data Connections
+          </Link>
+          <Link
+            to="/settings/api-key"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/api-key')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            API Key
+          </Link>
+          <Link
+            to="/settings/audit-log"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/audit-log')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Audit Log
+          </Link>
+        </div>
+
         {/* Status Cards */}
         {(connections || []).length > 0 && (
           <div className="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-700 space-y-2">
