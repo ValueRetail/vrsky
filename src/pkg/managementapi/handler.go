@@ -423,10 +423,11 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prevent deleting running connections
-	if conn.Status == "running" {
-		_ = writeError(w, http.StatusBadRequest, "InvalidState", "cannot delete a running connection, please stop it first", nil)
-		return
+	// Auto-stop running connections before deleting
+	if conn.Status == "running" && h.publisher != nil {
+		_ = h.publisher.PublishConnectionStop(ctx, id, tenantID)
+		// Update status in DB
+		_ = h.repo.UpdateConnectionStatus(ctx, id, "stopped", nil)
 	}
 
 	// Delete connection (cascade delete events)
@@ -692,6 +693,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections", sessionMW(tenantMW(http.HandlerFunc(h.ListDataConnections))).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}", sessionMW(tenantMW(http.HandlerFunc(h.GetDataConnection))).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/revoke", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.RevokeDataConnection)))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/shared-connections", sessionMW(tenantMW(http.HandlerFunc(h.GetSharedConnections))).ServeHTTP)
 
 	// Audit log
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-access-log", sessionMW(tenantMW(RequireRole("admin")(http.HandlerFunc(h.GetDataAccessLog)))).ServeHTTP)

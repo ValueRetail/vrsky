@@ -559,7 +559,7 @@ func (m *MockRepository) ListOutgoingConnectionRequests(ctx context.Context, req
 	return []*DataConnectionRequest{}, nil
 }
 
-func (m *MockRepository) ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields []string) (*TenantDataConnection, error) {
+func (m *MockRepository) ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields, sharedConnectionIDs []string) (*TenantDataConnection, error) {
 	return &TenantDataConnection{ID: "test-conn-id", Status: "active"}, nil
 }
 
@@ -577,6 +577,10 @@ func (m *MockRepository) GetDataConnectionByID(ctx context.Context, id string) (
 
 func (m *MockRepository) GetActiveDataConnection(ctx context.Context, requesterID, targetID string) (*TenantDataConnection, error) {
 	return nil, ErrDataConnectionNotFound
+}
+
+func (m *MockRepository) GetSharedConnectionsForTenant(ctx context.Context, requesterID, targetID string) ([]string, error) {
+	return []string{}, nil
 }
 
 func (m *MockRepository) RevokeDataConnection(ctx context.Context, connectionID string) error {

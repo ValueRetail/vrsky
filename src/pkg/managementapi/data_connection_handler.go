@@ -153,7 +153,7 @@ func (h *Handler) ApproveConnectionRequest(w http.ResponseWriter, r *http.Reques
 	// Merge auto-denied unsafe patterns into denied fields
 	denied := mergeUnsafeDeniedFields(payload.DeniedFields)
 
-	conn, err := h.repo.ApproveConnectionRequest(r.Context(), requestID, payload.AllowedFields, denied)
+	conn, err := h.repo.ApproveConnectionRequest(r.Context(), requestID, payload.AllowedFields, denied, payload.SharedConnectionIDs)
 	if err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "ServerError", "failed to approve connection request", nil)
 		return
@@ -285,6 +285,55 @@ func (h *Handler) RevokeDataConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "data connection revoked"})
+}
+
+// GetSharedConnections handles GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/shared-connections
+// Returns the pipeline connections that the target tenant has shared with the requester.
+func (h *Handler) GetSharedConnections(w http.ResponseWriter, r *http.Request) {
+	tenant := GetTenantFromContext(r.Context())
+	if tenant == nil {
+		_ = writeError(w, http.StatusNotFound, "NotFound", "tenant not found", nil)
+		return
+	}
+
+	connectionID := r.PathValue("connection_id")
+	if connectionID == "" {
+		_ = writeError(w, http.StatusBadRequest, "BadRequest", "connection_id is required", nil)
+		return
+	}
+
+	// Get the data connection
+	dataConn, err := h.repo.GetDataConnectionByID(r.Context(), connectionID)
+	if err != nil {
+		_ = writeError(w, http.StatusNotFound, "NotFound", "data connection not found", nil)
+		return
+	}
+
+	// Verify tenant is part of this connection
+	if dataConn.RequesterTenantID != tenant.ID && dataConn.TargetTenantID != tenant.ID {
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "access denied", nil)
+		return
+	}
+
+	// Return the shared connection IDs along with their names
+	type SharedConnection struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+
+	var result []SharedConnection
+	for _, connID := range dataConn.SharedConnectionIDs {
+		conn, err := h.repo.GetConnection(r.Context(), connID)
+		if err != nil {
+			continue
+		}
+		result = append(result, SharedConnection{ID: conn.ID, Name: conn.Name})
+	}
+	if result == nil {
+		result = []SharedConnection{}
+	}
+
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{"shared_connections": result})
 }
 
 // GetDataAccessLog handles GET /api/v1/tenants/{tenant_id}/data-access-log

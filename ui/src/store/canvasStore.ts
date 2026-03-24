@@ -74,6 +74,7 @@ interface CanvasStore {
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
+  setDeployedConnectionId: (canvasId: string, connectionId: string | null) => void
 
   // Helpers
   getActiveCanvas: () => Canvas | null
@@ -216,6 +217,17 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         : c
     )
 
+    set({ canvases: updatedCanvases })
+    saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
+  },
+
+  setDeployedConnectionId: (canvasId, connectionId) => {
+    const { canvases, currentCanvasId, tenantId } = get()
+    const updatedCanvases = canvases.map((c) =>
+      c.id === canvasId
+        ? { ...c, deployedConnectionId: connectionId || undefined, updatedAt: Date.now() }
+        : c
+    )
     set({ canvases: updatedCanvases })
     saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
   },

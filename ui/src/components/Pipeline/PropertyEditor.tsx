@@ -7,6 +7,7 @@ import type { TenantDataConnection, DataConnectionRequest } from '../../types/mo
 // Type for API Consumer endpoint
 interface ApiEndpoint {
   path: string
+  params: string
   auth_type: 'none' | 'bearer' | 'api_key'
   auth_value: string
 }
@@ -213,6 +214,8 @@ function TenantConsumerConfig({
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [sharedConns, setSharedConns] = useState<{ id: string; name: string }[]>([])
+  const [loadingShared, setLoadingShared] = useState(false)
 
   const loadData = () => {
     if (!currentTenant) { setLoading(false); return }
@@ -232,6 +235,20 @@ function TenantConsumerConfig({
   useEffect(() => { loadData() }, [currentTenant]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const tenant = (config.tenant as Record<string, unknown>) || {}
+  const selectedDataConnectionId = (tenant.connection_id as string) || ''
+
+  // Load shared connections when a data connection is selected
+  useEffect(() => {
+    if (!currentTenant || !selectedDataConnectionId) {
+      setSharedConns([])
+      return
+    }
+    setLoadingShared(true)
+    tenantDataService.getSharedConnections(currentTenant.id, selectedDataConnectionId)
+      .then(setSharedConns)
+      .catch(() => setSharedConns([]))
+      .finally(() => setLoadingShared(false))
+  }, [currentTenant, selectedDataConnectionId])
 
   const handleSubmitRequest = async () => {
     if (!currentTenant || !targetTenantId.trim()) return
@@ -318,18 +335,45 @@ function TenantConsumerConfig({
     <div style={{ marginTop: '16px' }}>
       {/* Active connections dropdown */}
       {connections.length > 0 && (
-        <StyledSelect
-          label="Data Connection"
-          value={(tenant.connection_id as string) || ''}
-          onChange={(value) => setConfig({ ...config, tenant: { ...tenant, connection_id: value } })}
-          options={[
-            { value: '', label: 'Select a connection...' },
-            ...connections.map(c => ({
-              value: c.id,
-              label: `${c.requester_tenant_id === currentTenant?.id ? 'To' : 'From'}: ${c.requester_tenant_id === currentTenant?.id ? c.target_tenant_id.slice(0, 8) : c.requester_tenant_id.slice(0, 8)}... (${c.permission_type})`,
-            })),
-          ]}
-        />
+        <>
+          <StyledSelect
+            label="Data Connection"
+            value={selectedDataConnectionId}
+            onChange={(value) => {
+              const selected = connections.find(c => c.id === value)
+              const sourceTenantId = selected
+                ? (selected.requester_tenant_id === currentTenant?.id ? selected.target_tenant_id : selected.requester_tenant_id)
+                : ''
+              setConfig({ ...config, tenant: { ...tenant, connection_id: value, source_tenant_id: sourceTenantId, source_connection_id: '' } })
+            }}
+            options={[
+              { value: '', label: 'Select a data connection...' },
+              ...connections.map(c => ({
+                value: c.id,
+                label: `${c.requester_tenant_id === currentTenant?.id ? 'To' : 'From'}: ${c.requester_tenant_id === currentTenant?.id ? c.target_tenant_id.slice(0, 8) : c.requester_tenant_id.slice(0, 8)}... (${c.permission_type})`,
+              })),
+            ]}
+          />
+
+          {/* Shared pipeline picker */}
+          {selectedDataConnectionId && (
+            loadingShared ? (
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>Loading shared pipelines...</p>
+            ) : sharedConns.length > 0 ? (
+              <StyledSelect
+                label="Source Pipeline"
+                value={(tenant.source_connection_id as string) || ''}
+                onChange={(value) => setConfig({ ...config, tenant: { ...tenant, source_connection_id: value } })}
+                options={[
+                  { value: '', label: 'All shared pipelines' },
+                  ...sharedConns.map(sc => ({ value: sc.id, label: sc.name })),
+                ]}
+              />
+            ) : (
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>No specific pipelines shared — will receive all data from this connection.</p>
+            )
+          )}
+        </>
       )}
 
       {/* Pending outgoing requests */}
@@ -410,7 +454,7 @@ function ApiConsumerConfig({
   }
 
   const addEndpoint = () => {
-    const newEndpoints = [...endpoints, { path: '/', auth_type: 'none' as const, auth_value: '' }]
+    const newEndpoints = [...endpoints, { path: '/', params: '', auth_type: 'none' as const, auth_value: '' }]
     updateApiConfig({ endpoints: newEndpoints })
   }
 
@@ -616,6 +660,23 @@ function ApiConsumerConfig({
                     boxSizing: 'border-box',
                   }}
                 />
+
+                <input
+                  type="text"
+                  placeholder="lat=59.9&lon=10.7"
+                  value={ep.params || ''}
+                  onChange={(e) => updateEndpoint(idx, 'params', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    marginBottom: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <select

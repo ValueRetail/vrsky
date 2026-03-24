@@ -9,6 +9,7 @@ import * as authService from '../services/authService'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
+import TenantSelector from '../components/Tenants/TenantSelector'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
@@ -34,6 +35,7 @@ export default function PipelineBuilder() {
     deleteCanvas,
     switchCanvas,
     renameCanvas,
+    setDeployedConnectionId,
   } = useCanvasPersistence()
 
   // Local state initialized from active canvas
@@ -343,12 +345,27 @@ export default function PipelineBuilder() {
     setIsLoading(true)
 
     try {
+      // Step 0: Stop and delete previous deployment if exists
+      const prevConnectionId = activeCanvas?.deployedConnectionId
+      if (prevConnectionId) {
+        try {
+          await apiClient.post(`/api/v1/connections/${prevConnectionId}/stop`)
+        } catch { /* may already be stopped */ }
+        try {
+          await apiClient.delete(`/api/v1/connections/${prevConnectionId}`)
+        } catch { /* best effort */ }
+      }
+
       // Step 1: Create the connection
       const response = await apiClient.post('/api/v1/connections', payload)
       const connectionId = response.data?.data?.id
       
       if (!connectionId) {
         throw new Error('No connection ID returned from server')
+      }
+
+      if (currentCanvasId) {
+        setDeployedConnectionId(currentCanvasId, connectionId)
       }
 
       // Step 2: Auto-start the pipeline
@@ -411,6 +428,9 @@ export default function PipelineBuilder() {
             <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Integration Platform</p>
           </div>
         </div>
+
+        {/* Center: Workspace Selector */}
+        {isAuthenticated && <TenantSelector />}
 
         {/* Right: Validation + Deploy + User Menu */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -507,6 +527,7 @@ export default function PipelineBuilder() {
                     <div style={{ padding: '8px' }}>
                       {/* Settings Links */}
                       {[
+                        { label: 'Connections', path: '/connections' },
                         { label: 'Connection Requests', path: '/settings/connection-requests' },
                         { label: 'Data Connections', path: '/settings/tenant-connections' },
                         { label: 'API Key', path: '/settings/api-key' },

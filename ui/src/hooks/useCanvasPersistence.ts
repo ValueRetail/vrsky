@@ -26,6 +26,7 @@ interface UseCanvasPersistenceReturn {
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
+  setDeployedConnectionId: (canvasId: string, connectionId: string | null) => void
 }
 
 export function useCanvasPersistence(): UseCanvasPersistenceReturn {
@@ -41,6 +42,7 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     renameCanvas,
     getActiveCanvas,
     canCreateMore,
+    setDeployedConnectionId,
   } = useCanvasStore()
 
   const { currentTenant } = useAuthStore()
@@ -107,5 +109,6 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     deleteCanvas,
     switchCanvas,
     renameCanvas,
+    setDeployedConnectionId,
   }
 }

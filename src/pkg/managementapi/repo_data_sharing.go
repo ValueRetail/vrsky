@@ -127,7 +127,7 @@ func (r *PostgresRepository) listConnectionRequests(ctx context.Context, query, 
 	return results, rows.Err()
 }
 
-func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields []string) (*TenantDataConnection, error) {
+func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields, sharedConnectionIDs []string) (*TenantDataConnection, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -141,6 +141,10 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 	}
 	if deniedFields == nil {
 		deniedJSON = nil
+	}
+	var sharedJSON []byte
+	if sharedConnectionIDs != nil {
+		sharedJSON, _ = json.Marshal(sharedConnectionIDs)
 	}
 
 	// Update request status
@@ -161,16 +165,16 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 
 	// Create data connection
 	var conn TenantDataConnection
-	var aJSON, dJSON []byte
+	var aJSON, dJSON, sJSON []byte
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO tenant_data_connections
-			(request_id, requester_tenant_id, target_tenant_id, permission_type, allowed_fields, denied_fields)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			(request_id, requester_tenant_id, target_tenant_id, permission_type, allowed_fields, denied_fields, shared_connection_ids)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, request_id, requester_tenant_id, target_tenant_id, permission_type,
-		          allowed_fields, denied_fields, rate_limit_per_hour, status, created_at, updated_at
-	`, requestID, requesterID, targetID, permType, allowedJSON, deniedJSON).Scan(
+		          allowed_fields, denied_fields, shared_connection_ids, rate_limit_per_hour, status, created_at, updated_at
+	`, requestID, requesterID, targetID, permType, allowedJSON, deniedJSON, sharedJSON).Scan(
 		&conn.ID, &conn.RequestID, &conn.RequesterTenantID, &conn.TargetTenantID, &conn.PermissionType,
-		&aJSON, &dJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt,
+		&aJSON, &dJSON, &sJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -180,6 +184,9 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 	}
 	if dJSON != nil {
 		_ = json.Unmarshal(dJSON, &conn.DeniedFields)
+	}
+	if sJSON != nil {
+		_ = json.Unmarshal(sJSON, &conn.SharedConnectionIDs)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -210,7 +217,7 @@ func (r *PostgresRepository) DenyConnectionRequest(ctx context.Context, requestI
 func (r *PostgresRepository) ListDataConnections(ctx context.Context, tenantID string) ([]*TenantDataConnection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, request_id, requester_tenant_id, target_tenant_id, permission_type,
-		       allowed_fields, denied_fields, rate_limit_per_hour, status, created_at, updated_at, revoked_at
+		       allowed_fields, denied_fields, shared_connection_ids, rate_limit_per_hour, status, created_at, updated_at, revoked_at
 		FROM tenant_data_connections
 		WHERE requester_tenant_id = $1 OR target_tenant_id = $1
 		ORDER BY created_at DESC
@@ -234,7 +241,7 @@ func (r *PostgresRepository) ListDataConnections(ctx context.Context, tenantID s
 func (r *PostgresRepository) GetDataConnectionByID(ctx context.Context, id string) (*TenantDataConnection, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, request_id, requester_tenant_id, target_tenant_id, permission_type,
-		       allowed_fields, denied_fields, rate_limit_per_hour, status, created_at, updated_at, revoked_at
+		       allowed_fields, denied_fields, shared_connection_ids, rate_limit_per_hour, status, created_at, updated_at, revoked_at
 		FROM tenant_data_connections WHERE id = $1
 	`, id)
 	conn, err := scanDataConnectionRow(row)
@@ -247,7 +254,7 @@ func (r *PostgresRepository) GetDataConnectionByID(ctx context.Context, id strin
 func (r *PostgresRepository) GetActiveDataConnection(ctx context.Context, requesterID, targetID string) (*TenantDataConnection, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, request_id, requester_tenant_id, target_tenant_id, permission_type,
-		       allowed_fields, denied_fields, rate_limit_per_hour, status, created_at, updated_at, revoked_at
+		       allowed_fields, denied_fields, shared_connection_ids, rate_limit_per_hour, status, created_at, updated_at, revoked_at
 		FROM tenant_data_connections
 		WHERE requester_tenant_id = $1 AND target_tenant_id = $2 AND status = 'active'
 		LIMIT 1
@@ -392,10 +399,10 @@ type scannable interface {
 
 func scanDataConnection(s scannable) (*TenantDataConnection, error) {
 	var conn TenantDataConnection
-	var aJSON, dJSON []byte
+	var aJSON, dJSON, sJSON []byte
 	err := s.Scan(
 		&conn.ID, &conn.RequestID, &conn.RequesterTenantID, &conn.TargetTenantID, &conn.PermissionType,
-		&aJSON, &dJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt, &conn.RevokedAt,
+		&aJSON, &dJSON, &sJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt, &conn.RevokedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -405,16 +412,19 @@ func scanDataConnection(s scannable) (*TenantDataConnection, error) {
 	}
 	if dJSON != nil {
 		_ = json.Unmarshal(dJSON, &conn.DeniedFields)
+	}
+	if sJSON != nil {
+		_ = json.Unmarshal(sJSON, &conn.SharedConnectionIDs)
 	}
 	return &conn, nil
 }
 
 func scanDataConnectionRow(row *sql.Row) (*TenantDataConnection, error) {
 	var conn TenantDataConnection
-	var aJSON, dJSON []byte
+	var aJSON, dJSON, sJSON []byte
 	err := row.Scan(
 		&conn.ID, &conn.RequestID, &conn.RequesterTenantID, &conn.TargetTenantID, &conn.PermissionType,
-		&aJSON, &dJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt, &conn.RevokedAt,
+		&aJSON, &dJSON, &sJSON, &conn.RateLimitPerHour, &conn.Status, &conn.CreatedAt, &conn.UpdatedAt, &conn.RevokedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -425,7 +435,33 @@ func scanDataConnectionRow(row *sql.Row) (*TenantDataConnection, error) {
 	if dJSON != nil {
 		_ = json.Unmarshal(dJSON, &conn.DeniedFields)
 	}
+	if sJSON != nil {
+		_ = json.Unmarshal(sJSON, &conn.SharedConnectionIDs)
+	}
 	return &conn, nil
+}
+
+// GetSharedConnectionsForTenant returns the shared connection IDs from an active data connection
+// where requesterID is the tenant wanting to consume data and targetID is the tenant sharing data.
+func (r *PostgresRepository) GetSharedConnectionsForTenant(ctx context.Context, requesterID, targetID string) ([]string, error) {
+	var sJSON []byte
+	err := r.db.QueryRowContext(ctx, `
+		SELECT shared_connection_ids
+		FROM tenant_data_connections
+		WHERE requester_tenant_id = $1 AND target_tenant_id = $2 AND status = 'active'
+		LIMIT 1
+	`, requesterID, targetID).Scan(&sJSON)
+	if err == sql.ErrNoRows {
+		return nil, ErrDataConnectionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	if sJSON != nil {
+		_ = json.Unmarshal(sJSON, &ids)
+	}
+	return ids, nil
 }
 
 func nullIfEmpty(s string) interface{} {

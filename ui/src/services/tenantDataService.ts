@@ -61,7 +61,7 @@ export async function listOutgoingRequests(tenantId: string): Promise<DataConnec
 export async function approveRequest(
   tenantId: string,
   requestId: string,
-  fields?: { allowed_fields?: string[]; denied_fields?: string[] }
+  fields?: { allowed_fields?: string[]; denied_fields?: string[]; shared_connection_ids?: string[] }
 ): Promise<TenantDataConnection> {
   return fetchJSON(`/api/v1/tenants/${tenantId}/connection-requests/${requestId}/approve`, {
     method: 'POST',
@@ -91,6 +91,17 @@ export async function revokeDataConnection(tenantId: string, connectionId: strin
   await fetchJSON(`/api/v1/tenants/${tenantId}/data-connections/${connectionId}/revoke`, {
     method: 'POST',
   })
+}
+
+// Shared connections (what a target tenant has shared with requester)
+export async function getSharedConnections(
+  tenantId: string,
+  dataConnectionId: string
+): Promise<{ id: string; name: string }[]> {
+  const data = await fetchJSON<{ shared_connections: { id: string; name: string }[] }>(
+    `/api/v1/tenants/${tenantId}/data-connections/${dataConnectionId}/shared-connections`
+  )
+  return data.shared_connections
 }
 
 // Audit log

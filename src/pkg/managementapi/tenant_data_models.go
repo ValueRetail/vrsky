@@ -3,6 +3,8 @@ package managementapi
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/fieldfilter"
 )
 
 // DataConnectionRequest represents a request from one tenant to connect with another
@@ -33,8 +35,9 @@ type TenantDataConnection struct {
 	AllowedFields     []string   `json:"allowed_fields,omitempty"`
 	DeniedFields      []string   `json:"denied_fields,omitempty"`
 	RateLimitPerHour  int        `json:"rate_limit_per_hour"`
-	Status            string     `json:"status"` // active|paused|revoked
-	CreatedAt         time.Time  `json:"created_at"`
+	SharedConnectionIDs []string `json:"shared_connection_ids,omitempty"`
+	Status              string     `json:"status"` // active|paused|revoked
+	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
 }
@@ -62,72 +65,17 @@ type CreateConnectionRequestPayload struct {
 
 // ApproveConnectionRequestPayload is the request body for approving a connection request
 type ApproveConnectionRequestPayload struct {
-	AllowedFields []string `json:"allowed_fields,omitempty"`
-	DeniedFields  []string `json:"denied_fields,omitempty"`
+	AllowedFields       []string `json:"allowed_fields,omitempty"`
+	DeniedFields        []string `json:"denied_fields,omitempty"`
+	SharedConnectionIDs []string `json:"shared_connection_ids,omitempty"`
 }
 
-// unsafeFieldPatterns are auto-denied during approval to prevent leaking sensitive data.
-// Any JSON key containing one of these substrings (case-insensitive) is blocked.
-var unsafeFieldPatterns = []string{
-	"password", "secret", "token", "key", "price", "credential", "private",
-}
+// unsafeFieldPatterns re-exported for backward compatibility in this package.
+var unsafeFieldPatterns = fieldfilter.UnsafeFieldPatterns
 
-// filterFields strips denied fields and restricts to allowed fields.
-// Applies unsafeFieldPatterns auto-filter regardless of explicit lists.
+// filterFields delegates to the shared fieldfilter package.
 func filterFields(data json.RawMessage, allowed, denied []string) json.RawMessage {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return data // not a JSON object, return as-is
-	}
-
-	// Build denied set (lowercase for case-insensitive comparison)
-	deniedSet := make(map[string]bool, len(denied))
-	for _, d := range denied {
-		deniedSet[toLower(d)] = true
-	}
-
-	// Build allowed set (empty means allow all)
-	allowedSet := make(map[string]bool, len(allowed))
-	for _, a := range allowed {
-		allowedSet[toLower(a)] = true
-	}
-
-	filtered := make(map[string]json.RawMessage)
-	for k, v := range obj {
-		kLower := toLower(k)
-
-		// Check explicit denied list
-		if deniedSet[kLower] {
-			continue
-		}
-
-		// Check unsafe patterns
-		if matchesUnsafePattern(kLower) {
-			continue
-		}
-
-		// Check allowed list (empty = allow all)
-		if len(allowedSet) > 0 && !allowedSet[kLower] {
-			continue
-		}
-
-		filtered[k] = v
-	}
-
-	result, err := json.Marshal(filtered)
-	if err != nil {
-		return data
-	}
-	return result
-}
-
-func matchesUnsafePattern(fieldLower string) bool {
-	for _, pattern := range unsafeFieldPatterns {
-		if containsLower(fieldLower, pattern) {
-			return true
-		}
-	}
-	return false
+	return fieldfilter.FilterFields(data, allowed, denied)
 }
 
 func toLower(s string) string {
@@ -140,16 +88,4 @@ func toLower(s string) string {
 		b[i] = c
 	}
 	return string(b)
-}
-
-func containsLower(s, substr string) bool {
-	if len(substr) > len(s) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -26,6 +26,7 @@ export interface Canvas {
   name: string
   nodes: Node[]
   edges: Edge[]
+  deployedConnectionId?: string
   createdAt: number
   updatedAt: number
 }

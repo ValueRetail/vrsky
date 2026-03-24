@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import * as tenantDataService from '@/services/tenantDataService'
-import type { DataConnectionRequest } from '@/types/models'
+import { connectionService } from '@/services/connectionService'
+import type { DataConnectionRequest, Connection } from '@/types/models'
 
 export default function ConnectionRequestsPage() {
   const { currentTenant, tenants } = useAuthStore()
@@ -16,6 +17,10 @@ export default function ConnectionRequestsPage() {
   const [permissionType, setPermissionType] = useState('both')
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [approveRequestId, setApproveRequestId] = useState<string | null>(null)
+  const [myConnections, setMyConnections] = useState<Connection[]>([])
+  const [selectedSharedIds, setSelectedSharedIds] = useState<string[]>([])
+  const [loadingConnections, setLoadingConnections] = useState(false)
 
   const otherTenants = tenants.filter(t => t.id !== currentTenant?.id)
 
@@ -54,23 +59,40 @@ export default function ConnectionRequestsPage() {
       .finally(() => setLoading(false))
   }, [currentTenant, addNotification])
 
-  const handleApprove = (requestId: string) => {
+  const handleApproveClick = async (requestId: string) => {
     if (!currentTenant) return
-    showConfirmDialog({
-      title: 'Approve Connection Request',
-      message: 'This will allow the requesting tenant to share data with your workspace. You can revoke access later.',
-      confirmLabel: 'Approve',
-      onConfirm: async () => {
-        hideConfirmDialog()
-        try {
-          await tenantDataService.approveRequest(currentTenant.id, requestId)
-          addNotification({ id: Date.now().toString(), type: 'success', title: 'Approved', message: 'Connection request approved' })
-          setIncoming(prev => prev.filter(r => r.id !== requestId))
-        } catch {
-          addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to approve request' })
-        }
-      },
-    })
+    setApproveRequestId(requestId)
+    setSelectedSharedIds([])
+    setLoadingConnections(true)
+    try {
+      const resp = await connectionService.list(1, 100) as any
+      const items = resp.connections || resp.data || []
+      setMyConnections(items as Connection[])
+    } catch {
+      setMyConnections([])
+    } finally {
+      setLoadingConnections(false)
+    }
+  }
+
+  const handleApproveConfirm = async () => {
+    if (!currentTenant || !approveRequestId) return
+    try {
+      await tenantDataService.approveRequest(currentTenant.id, approveRequestId, {
+        shared_connection_ids: selectedSharedIds.length > 0 ? selectedSharedIds : undefined,
+      })
+      addNotification({ id: Date.now().toString(), type: 'success', title: 'Approved', message: 'Connection request approved' })
+      setIncoming(prev => prev.filter(r => r.id !== approveRequestId))
+      setApproveRequestId(null)
+    } catch {
+      addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to approve request' })
+    }
+  }
+
+  const toggleSharedConnection = (connId: string) => {
+    setSelectedSharedIds(prev =>
+      prev.includes(connId) ? prev.filter(id => id !== connId) : [...prev, connId]
+    )
   }
 
   const handleDeny = (requestId: string) => {
@@ -203,13 +225,62 @@ export default function ConnectionRequestsPage() {
                 </div>
                 {tab === 'incoming' && req.status === 'pending' && (
                   <div className="flex gap-2">
-                    <button onClick={() => handleApprove(req.id)} className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Approve</button>
+                    <button onClick={() => handleApproveClick(req.id)} className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Approve</button>
                     <button onClick={() => handleDeny(req.id)} className="px-3 py-1 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors">Deny</button>
                   </div>
                 )}
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {/* Approve Dialog */}
+      {approveRequestId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">Approve Connection Request</h3>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
+              Select which of your connections (pipelines) to share with the requesting workspace. They will only be able to consume data from the connections you select.
+            </p>
+
+            {loadingConnections ? (
+              <p className="text-sm text-neutral-500">Loading your connections...</p>
+            ) : myConnections.length === 0 ? (
+              <p className="text-sm text-neutral-500">No connections found. You can still approve without sharing specific connections.</p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                {myConnections.map(conn => (
+                  <label key={conn.id} className="flex items-center gap-3 p-2 rounded hover:bg-neutral-50 dark:hover:bg-neutral-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedSharedIds.includes(conn.id)}
+                      onChange={() => toggleSharedConnection(conn.id)}
+                      className="w-4 h-4 rounded border-neutral-300"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{conn.name}</p>
+                      <p className="text-xs text-neutral-500">{conn.status} &middot; {conn.id.slice(0, 8)}...</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setApproveRequestId(null)}
+                className="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApproveConfirm}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+              >
+                Approve{selectedSharedIds.length > 0 ? ` (${selectedSharedIds.length} shared)` : ''}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

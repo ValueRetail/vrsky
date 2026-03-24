@@ -169,7 +169,7 @@ type Repository interface {
 	ListOutgoingConnectionRequests(ctx context.Context, requesterTenantID string) ([]*DataConnectionRequest, error)
 
 	// ApproveConnectionRequest approves a request and creates an active data connection
-	ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields []string) (*TenantDataConnection, error)
+	ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields, sharedConnectionIDs []string) (*TenantDataConnection, error)
 
 	// DenyConnectionRequest denies a pending request
 	DenyConnectionRequest(ctx context.Context, requestID string) error
@@ -182,6 +182,9 @@ type Repository interface {
 
 	// GetActiveDataConnection finds an active connection between two tenants
 	GetActiveDataConnection(ctx context.Context, requesterID, targetID string) (*TenantDataConnection, error)
+
+	// GetSharedConnectionsForTenant returns shared connection IDs for a data connection
+	GetSharedConnectionsForTenant(ctx context.Context, requesterID, targetID string) ([]string, error)
 
 	// RevokeDataConnection revokes an active data connection
 	RevokeDataConnection(ctx context.Context, connectionID string) error
