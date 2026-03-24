@@ -199,6 +199,13 @@ type Repository interface {
 	GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error)
 
 	// ============================================
+	// User Account Deletion
+	// ============================================
+
+	// DeleteUser soft-deletes a user and invalidates all their sessions
+	DeleteUser(ctx context.Context, userID string) error
+
+	// ============================================
 	// Lifecycle
 	// ============================================
 

@@ -26,9 +26,10 @@ export default function ConnectionsList() {
     const load = async () => {
       try {
         setLoading(true)
-        const response = await connectionService.list(page, PAGE_SIZE)
-        setConnections(response.connections as unknown as Connection[])
-        setTotal(response.total)
+        const response = await connectionService.list(page, PAGE_SIZE) as any
+        const items = response.connections || response.data || []
+        setConnections(items as Connection[])
+        setTotal(response.total || 0)
       } catch (error) {
         const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to load connections'
         addNotification({ type: 'error', title: 'Error', message })
@@ -68,6 +69,34 @@ export default function ConnectionsList() {
         }
       },
     })
+  }
+
+  const handleStop = async (connection: Connection) => {
+    try {
+      setActionLoading(true)
+      await connectionService.stop(connection.id)
+      addNotification({ type: 'success', title: 'Stopped', message: `"${connection.name}" stopped` })
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'stopped' as ConnectionStatus } : c))
+    } catch (error) {
+      const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to stop connection'
+      addNotification({ type: 'error', title: 'Error', message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleStart = async (connection: Connection) => {
+    try {
+      setActionLoading(true)
+      await connectionService.start(connection.id)
+      addNotification({ type: 'success', title: 'Started', message: `"${connection.name}" started` })
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'running' as ConnectionStatus } : c))
+    } catch (error) {
+      const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to start connection'
+      addNotification({ type: 'error', title: 'Error', message })
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   const statusBadge = (status: ConnectionStatus) => {
@@ -175,6 +204,23 @@ export default function ConnectionsList() {
                       {statusBadge(connection.status)}
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
+                      {connection.status === 'running' ? (
+                        <button
+                          onClick={() => handleStop(connection)}
+                          disabled={actionLoading}
+                          className="btn-secondary btn-sm flex-1 sm:flex-none text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-900/20"
+                        >
+                          Stop
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleStart(connection)}
+                          disabled={actionLoading}
+                          className="btn-secondary btn-sm flex-1 sm:flex-none text-green-600 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-900/20"
+                        >
+                          Start
+                        </button>
+                      )}
                       <button
                         onClick={() => navigate(`/connections/${connection.id}`)}
                         className="btn-secondary btn-sm flex-1 sm:flex-none"

@@ -659,6 +659,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/me", sessionMW(http.HandlerFunc(h.GetMe)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/logout", sessionMW(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/change-password", sessionMW(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/auth/me", sessionMW(http.HandlerFunc(h.DeleteAccount)).ServeHTTP)
 
 	// Tenant routes (require valid session, no X-Tenant-ID header)
 	mux.HandleFunc("POST /api/v1/tenants", sessionMW(http.HandlerFunc(h.CreateTenantHandler)).ServeHTTP)

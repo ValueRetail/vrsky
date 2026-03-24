@@ -8,6 +8,8 @@ import type { User, Tenant } from '@/types/models'
 import * as authService from '@/services/authService'
 import { setActiveTenantId } from '@/services/api'
 
+const SELECTED_TENANT_KEY = 'vrsky:selectedTenantId'
+
 interface AuthState {
   // State
   user: User | null
@@ -115,6 +117,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await authService.logout()
     } finally {
+      localStorage.removeItem(SELECTED_TENANT_KEY)
       set({
         user: null,
         tenants: [],
@@ -149,11 +152,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (meData && meData.user) {
         const tenants = meData.tenants || []
-        const currentTenant = meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
+        // Restore previously selected tenant if still valid
+        const savedTenantId = localStorage.getItem(SELECTED_TENANT_KEY)
+        const savedTenant = savedTenantId
+          ? tenants.find((t) => t.id === savedTenantId && (t as any).status === 'active')
+          : null
+        const currentTenant = savedTenant || meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
 
         // Update the API client's tenant ID
         if (currentTenant) {
           setActiveTenantId(currentTenant.id)
+          localStorage.setItem(SELECTED_TENANT_KEY, currentTenant.id)
         }
 
         set({
@@ -203,6 +212,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     setActiveTenantId(validTenant.id)
+    localStorage.setItem(SELECTED_TENANT_KEY, validTenant.id)
     set({ currentTenant: validTenant })
   },
 

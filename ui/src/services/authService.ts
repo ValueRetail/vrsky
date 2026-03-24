@@ -166,6 +166,23 @@ export async function changePassword(data: ChangePasswordRequest): Promise<AuthR
   return response.data
 }
 
+/**
+ * Delete the current user's account
+ */
+export async function deleteAccount(): Promise<void> {
+  const token = getSessionToken()
+  if (!token) {
+    throw new Error('Not authenticated')
+  }
+
+  await authClient.delete('/api/v1/auth/me', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  clearSessionToken()
+}
+
 export default {
   register,
   login,
@@ -175,6 +192,7 @@ export default {
   forgotPassword,
   resetPassword,
   changePassword,
+  deleteAccount,
   getSessionToken,
   setSessionToken,
   clearSessionToken,

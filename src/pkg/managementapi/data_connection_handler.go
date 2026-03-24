@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/ValueRetail/vrsky/pkg/auth"
 )
 
 // CreateConnectionRequest handles POST /api/v1/tenants/{tenant_id}/connection-requests
@@ -20,8 +22,19 @@ func (h *Handler) CreateConnectionRequest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// If API key provided, resolve to tenant ID
+	if payload.TargetAPIKey != "" && payload.TargetTenantID == "" {
+		keyHash := auth.HashToken(payload.TargetAPIKey)
+		target, err := h.repo.GetTenantByAPIKeyHash(r.Context(), keyHash)
+		if err != nil || target == nil {
+			_ = writeError(w, http.StatusNotFound, "NotFound", "no tenant found for this API key", nil)
+			return
+		}
+		payload.TargetTenantID = target.ID
+	}
+
 	if payload.TargetTenantID == "" {
-		_ = writeError(w, http.StatusBadRequest, "BadRequest", "target_tenant_id is required", nil)
+		_ = writeError(w, http.StatusBadRequest, "BadRequest", "target_tenant_id or target_api_key is required", nil)
 		return
 	}
 	if payload.TargetTenantID == tenant.ID {

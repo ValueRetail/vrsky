@@ -5,7 +5,7 @@
 
 export type ConnectionStatus = 'running' | 'stopped' | 'error'
 
-export type SourceType = 'http' | 'file' | 'database' | 'api'
+export type SourceType = 'http' | 'file' | 'database' | 'api' | 'tenant'
 export type ConverterType = 'schema' | 'mapper' | 'rules'
 export type FilterType = 'rules' | 'wasm'
 export type DestinationType = 'http' | 'file' | 'database'

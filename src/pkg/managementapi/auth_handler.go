@@ -471,6 +471,32 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteAccount handles DELETE /api/v1/auth/me
+func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get authenticated user
+	user, _, err := h.getAuthenticatedUser(ctx, r)
+	if err != nil {
+		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error(), nil)
+		return
+	}
+
+	// Soft-delete user and invalidate all sessions
+	if err := h.repo.DeleteUser(ctx, user.ID); err != nil {
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to delete account", nil)
+		return
+	}
+
+	// Log the event
+	h.logAuthEvent(ctx, r, &user.ID, user.Email, "account_deleted", "success", nil)
+
+	_ = writeJSON(w, http.StatusOK, MessageResponse{
+		Success: true,
+		Message: "Account deleted successfully",
+	})
+}
+
 // ============================================
 // Helper Functions
 // ============================================

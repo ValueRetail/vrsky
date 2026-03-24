@@ -7,7 +7,11 @@
 import { create } from 'zustand'
 import type { Canvas, Node, Edge } from '../types/pipeline'
 
-const STORAGE_KEY = 'vrsky:canvases:v1'
+const STORAGE_KEY_PREFIX = 'vrsky:canvases:v1'
+
+const getStorageKey = (tenantId?: string): string => {
+  return tenantId ? `${STORAGE_KEY_PREFIX}:${tenantId}` : STORAGE_KEY_PREFIX
+}
 const MAX_CANVASES = 10
 
 // Helper to generate UUID
@@ -32,9 +36,9 @@ const generateTenantName = (existingCanvases: Canvas[]): string => {
 }
 
 // Helper to load from localStorage
-const loadFromStorage = (): { canvases: Canvas[]; currentCanvasId: string | null } => {
+const loadFromStorage = (tenantId?: string): { canvases: Canvas[]; currentCanvasId: string | null } => {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
+    const stored = localStorage.getItem(getStorageKey(tenantId))
     if (stored) {
       const data = JSON.parse(stored)
       return {
@@ -49,9 +53,9 @@ const loadFromStorage = (): { canvases: Canvas[]; currentCanvasId: string | null
 }
 
 // Helper to save to localStorage
-const saveToStorage = (canvases: Canvas[], currentCanvasId: string | null): void => {
+const saveToStorage = (canvases: Canvas[], currentCanvasId: string | null, tenantId?: string): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ canvases, currentCanvasId }))
+    localStorage.setItem(getStorageKey(tenantId), JSON.stringify({ canvases, currentCanvasId }))
   } catch (error) {
     console.warn('Failed to save canvases to localStorage:', error)
   }
@@ -61,9 +65,10 @@ interface CanvasStore {
   canvases: Canvas[]
   currentCanvasId: string | null
   isInitialized: boolean
+  tenantId: string | null
 
   // Actions
-  initialize: () => void
+  initialize: (tenantId?: string) => void
   createCanvas: (name?: string) => Canvas | null
   updateCanvas: (id: string, nodes: Node[], edges: Edge[]) => void
   deleteCanvas: (id: string) => void
@@ -80,12 +85,14 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   canvases: [],
   currentCanvasId: null,
   isInitialized: false,
+  tenantId: null,
 
-  initialize: () => {
-    const { isInitialized } = get()
-    if (isInitialized) return
+  initialize: (tenantId?: string) => {
+    const { isInitialized, tenantId: currentTenantId } = get()
+    // Re-initialize if tenant changed
+    if (isInitialized && tenantId === currentTenantId) return
 
-    const { canvases, currentCanvasId } = loadFromStorage()
+    const { canvases, currentCanvasId } = loadFromStorage(tenantId)
 
     // If no canvases exist, create a default one
     if (canvases.length === 0) {
@@ -102,8 +109,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         canvases: [defaultCanvas],
         currentCanvasId: defaultCanvas.id,
         isInitialized: true,
+        tenantId: tenantId || null,
       })
-      saveToStorage([defaultCanvas], defaultCanvas.id)
+      saveToStorage([defaultCanvas], defaultCanvas.id, tenantId)
     } else {
       // Validate currentCanvasId exists, fallback to first canvas
       const validCurrentId = canvases.some((c) => c.id === currentCanvasId)
@@ -114,12 +122,13 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         canvases,
         currentCanvasId: validCurrentId,
         isInitialized: true,
+        tenantId: tenantId || null,
       })
     }
   },
 
   createCanvas: (name?: string) => {
-    const { canvases } = get()
+    const { canvases, tenantId } = get()
 
     if (canvases.length >= MAX_CANVASES) {
       console.warn(`Cannot create more than ${MAX_CANVASES} canvases`)
@@ -141,13 +150,13 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       canvases: updatedCanvases,
       currentCanvasId: newCanvas.id,
     })
-    saveToStorage(updatedCanvases, newCanvas.id)
+    saveToStorage(updatedCanvases, newCanvas.id, tenantId || undefined)
 
     return newCanvas
   },
 
   updateCanvas: (id, nodes, edges) => {
-    const { canvases, currentCanvasId } = get()
+    const { canvases, currentCanvasId, tenantId } = get()
     const updatedCanvases = canvases.map((c) =>
       c.id === id
         ? { ...c, nodes, edges, updatedAt: Date.now() }
@@ -155,11 +164,11 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     )
 
     set({ canvases: updatedCanvases })
-    saveToStorage(updatedCanvases, currentCanvasId)
+    saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
   },
 
   deleteCanvas: (id) => {
-    const { canvases, currentCanvasId } = get()
+    const { canvases, currentCanvasId, tenantId } = get()
 
     // Don't allow deleting the last tenant canvas
     if (canvases.length <= 1) {
@@ -179,21 +188,21 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       canvases: updatedCanvases,
       currentCanvasId: newCurrentId,
     })
-    saveToStorage(updatedCanvases, newCurrentId)
+    saveToStorage(updatedCanvases, newCurrentId, tenantId || undefined)
   },
 
   switchCanvas: (id) => {
-    const { canvases, currentCanvasId } = get()
+    const { canvases, currentCanvasId, tenantId } = get()
     const exists = canvases.some((c) => c.id === id)
 
     if (exists && id !== currentCanvasId) {
       set({ currentCanvasId: id })
-      saveToStorage(canvases, id)
+      saveToStorage(canvases, id, tenantId || undefined)
     }
   },
 
   renameCanvas: (id, newName) => {
-    const { canvases, currentCanvasId } = get()
+    const { canvases, currentCanvasId, tenantId } = get()
     const trimmedName = newName.trim()
 
     if (!trimmedName) {
@@ -208,7 +217,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     )
 
     set({ canvases: updatedCanvases })
-    saveToStorage(updatedCanvases, currentCanvasId)
+    saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
   },
 
   getActiveCanvas: () => {

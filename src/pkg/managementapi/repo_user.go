@@ -129,6 +129,29 @@ func (r *PostgresRepository) VerifyUserEmail(ctx context.Context, userID string)
 	return nil
 }
 
+// DeleteUser soft-deletes a user and invalidates all their sessions
+func (r *PostgresRepository) DeleteUser(ctx context.Context, userID string) error {
+	now := time.Now().UTC()
+
+	// Soft-delete user
+	query := `UPDATE users SET status = $1, deleted_at = $2, updated_at = $3 WHERE id = $4 AND deleted_at IS NULL`
+	result, err := r.db.ExecContext(ctx, query, UserStatusDeleted, now, now, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return auth.ErrUserNotFound
+	}
+
+	// Invalidate all sessions
+	if err := r.InvalidateAllUserSessions(ctx, userID); err != nil {
+		return fmt.Errorf("failed to invalidate sessions: %w", err)
+	}
+
+	return nil
+}
+
 // ============================================
 // Session Repository Methods
 // ============================================

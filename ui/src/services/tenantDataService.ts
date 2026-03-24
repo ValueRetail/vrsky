@@ -36,7 +36,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 // Connection requests
 export async function createConnectionRequest(
   tenantId: string,
-  body: { target_tenant_id: string; permission_type: string; message?: string }
+  body: { target_tenant_id?: string; target_api_key?: string; permission_type: string; message?: string }
 ): Promise<DataConnectionRequest> {
   return fetchJSON(`/api/v1/tenants/${tenantId}/connection-requests`, {
     method: 'POST',

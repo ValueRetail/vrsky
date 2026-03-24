@@ -482,6 +482,10 @@ func (m *MockRepository) CreateAuthAuditLog(ctx context.Context, log *AuthAuditL
 	return nil
 }
 
+func (m *MockRepository) DeleteUser(ctx context.Context, userID string) error {
+	return nil
+}
+
 // ============================================
 // Tenant Operations (Phase 1 Refactor)
 // ============================================

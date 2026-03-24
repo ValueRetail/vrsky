@@ -55,6 +55,7 @@ type DataAccessLogEntry struct {
 // CreateConnectionRequestPayload is the request body for creating a connection request
 type CreateConnectionRequestPayload struct {
 	TargetTenantID string `json:"target_tenant_id"`
+	TargetAPIKey   string `json:"target_api_key"`
 	PermissionType string `json:"permission_type"`
 	Message        string `json:"message,omitempty"`
 }

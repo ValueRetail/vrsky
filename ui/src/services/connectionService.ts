@@ -44,8 +44,10 @@ export async function listConnections(
   pageSize?: number
 ): Promise<ListConnectionsResponse> {
   const params = new URLSearchParams()
-  if (page !== undefined) params.append('page', page.toString())
-  if (pageSize !== undefined) params.append('page_size', pageSize.toString())
+  const limit = pageSize || 20
+  const offset = page !== undefined ? (page - 1) * limit : 0
+  params.append('limit', limit.toString())
+  params.append('offset', offset.toString())
 
   const queryString = params.toString()
   const url = queryString ? `/api/v1/connections?${queryString}` : '/api/v1/connections'

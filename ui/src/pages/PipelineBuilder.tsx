@@ -5,6 +5,7 @@ import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
+import * as authService from '../services/authService'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
@@ -48,7 +49,7 @@ export default function PipelineBuilder() {
   const [deployAttempted, setDeployAttempted] = useState(false)
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
   const canvasContainer = useRef<HTMLDivElement>(null)
-  const { showErrorNotification, showSuccessNotification } = useUIStore()
+  const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -535,6 +536,46 @@ export default function PipelineBuilder() {
                         </button>
                       ))}
                       <div style={{ borderTop: '1px solid #e5e7eb', margin: '4px 0' }} />
+                      {/* Delete Account */}
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          showConfirmDialog({
+                            title: 'Delete Account',
+                            message: 'This will permanently delete your account and all associated data. This action cannot be undone.',
+                            confirmLabel: 'Delete Account',
+                            destructive: true,
+                            onConfirm: async () => {
+                              hideConfirmDialog()
+                              try {
+                                await authService.deleteAccount()
+                                await logout()
+                                navigate('/login')
+                              } catch {
+                                // Token already cleared by deleteAccount on success
+                              }
+                            },
+                          })
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '14px',
+                          color: '#dc2626',
+                          textAlign: 'left' as const,
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <span>Delete Account</span>
+                      </button>
                       {/* Logout */}
                       <button
                         onClick={handleLogout}
