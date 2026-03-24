@@ -17,7 +17,7 @@ export default function DataAccessLogPage() {
     setLoading(true)
     tenantDataService.getDataAccessLog(currentTenant.id, page)
       .then(data => { setEntries(data.entries); setPageInfo(data.page_info) })
-      .catch(() => addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to load audit log' }))
+      .catch(() => addNotification({ type: 'error', title: 'Error', message: 'Failed to load audit log' }))
       .finally(() => setLoading(false))
   }, [currentTenant, page, addNotification])
 

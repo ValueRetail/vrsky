@@ -70,7 +70,7 @@ describe('Connection Service', () => {
 
       const result = await connectionService.list()
       expect(result).toEqual(response)
-      expect(apiClient.get).toHaveBeenCalledWith('/api/v1/connections')
+      expect(apiClient.get).toHaveBeenCalledWith('/api/v1/connections?limit=20&offset=0')
     })
 
     it('should support pagination', async () => {
@@ -84,7 +84,7 @@ describe('Connection Service', () => {
       vi.mocked(apiClient.get).mockResolvedValue({ data: response })
 
       await connectionService.list(2, 10)
-      expect(apiClient.get).toHaveBeenCalledWith('/api/v1/connections?page=2&page_size=10')
+      expect(apiClient.get).toHaveBeenCalledWith('/api/v1/connections?limit=10&offset=10')
     })
   })
 

@@ -23,7 +23,7 @@ export default function ApiKeyPage() {
 
   const handleRotate = () => {
     if (!currentTenant) {
-      addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'No workspace selected' })
+      addNotification({ type: 'error', title: 'Error', message: 'No workspace selected' })
       return
     }
     showConfirmDialog({
@@ -37,9 +37,9 @@ export default function ApiKeyPage() {
           const result = await tenantDataService.rotateApiKey(currentTenant.id)
           setApiKey(result)
           setRawKey(result.raw_key)
-          addNotification({ id: Date.now().toString(), type: 'success', title: 'Key Rotated', message: 'New API key generated. Copy it now — it will not be shown again.' })
+          addNotification({ type: 'success', title: 'Key Rotated', message: 'New API key generated. Copy it now — it will not be shown again.' })
         } catch {
-          addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to rotate API key' })
+          addNotification({ type: 'error', title: 'Error', message: 'Failed to rotate API key' })
         }
       },
     })

@@ -15,7 +15,7 @@ export default function TenantConnectionsPage() {
     setLoading(true)
     tenantDataService.listDataConnections(currentTenant.id)
       .then(setConnections)
-      .catch(() => addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to load data connections' }))
+      .catch(() => addNotification({ type: 'error', title: 'Error', message: 'Failed to load data connections' }))
       .finally(() => setLoading(false))
   }, [currentTenant, addNotification])
 
@@ -30,10 +30,10 @@ export default function TenantConnectionsPage() {
         hideConfirmDialog()
         try {
           await tenantDataService.revokeDataConnection(currentTenant.id, connectionId)
-          addNotification({ id: Date.now().toString(), type: 'success', title: 'Revoked', message: 'Data connection revoked' })
+          addNotification({ type: 'success', title: 'Revoked', message: 'Data connection revoked' })
           setConnections(prev => prev.map(c => c.id === connectionId ? { ...c, status: 'revoked' as const } : c))
         } catch {
-          addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to revoke connection' })
+          addNotification({ type: 'error', title: 'Error', message: 'Failed to revoke connection' })
         }
       },
     })

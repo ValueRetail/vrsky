@@ -34,14 +34,14 @@ export default function ConnectionRequestsPage() {
         permission_type: permissionType,
         message: message || undefined,
       })
-      addNotification({ id: Date.now().toString(), type: 'success', title: 'Sent', message: 'Connection request sent' })
+      addNotification({ type: 'success', title: 'Sent', message: 'Connection request sent' })
       setOutgoing(prev => [req, ...prev])
       setShowCreateForm(false)
       setTargetTenantId('')
       setMessage('')
       setTab('outgoing')
     } catch {
-      addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to send connection request' })
+      addNotification({ type: 'error', title: 'Error', message: 'Failed to send connection request' })
     } finally {
       setSubmitting(false)
     }
@@ -55,7 +55,7 @@ export default function ConnectionRequestsPage() {
       tenantDataService.listOutgoingRequests(currentTenant.id),
     ])
       .then(([inc, out]) => { setIncoming(inc); setOutgoing(out) })
-      .catch(() => addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to load connection requests' }))
+      .catch(() => addNotification({ type: 'error', title: 'Error', message: 'Failed to load connection requests' }))
       .finally(() => setLoading(false))
   }, [currentTenant, addNotification])
 
@@ -81,11 +81,11 @@ export default function ConnectionRequestsPage() {
       await tenantDataService.approveRequest(currentTenant.id, approveRequestId, {
         shared_connection_ids: selectedSharedIds.length > 0 ? selectedSharedIds : undefined,
       })
-      addNotification({ id: Date.now().toString(), type: 'success', title: 'Approved', message: 'Connection request approved' })
+      addNotification({ type: 'success', title: 'Approved', message: 'Connection request approved' })
       setIncoming(prev => prev.filter(r => r.id !== approveRequestId))
       setApproveRequestId(null)
     } catch {
-      addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to approve request' })
+      addNotification({ type: 'error', title: 'Error', message: 'Failed to approve request' })
     }
   }
 
@@ -106,10 +106,10 @@ export default function ConnectionRequestsPage() {
         hideConfirmDialog()
         try {
           await tenantDataService.denyRequest(currentTenant.id, requestId)
-          addNotification({ id: Date.now().toString(), type: 'success', title: 'Denied', message: 'Connection request denied' })
+          addNotification({ type: 'success', title: 'Denied', message: 'Connection request denied' })
           setIncoming(prev => prev.filter(r => r.id !== requestId))
         } catch {
-          addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'Failed to deny request' })
+          addNotification({ type: 'error', title: 'Error', message: 'Failed to deny request' })
         }
       },
     })
