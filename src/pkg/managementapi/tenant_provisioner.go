@@ -23,6 +23,9 @@ type TenantProvisioner struct {
 
 // NewTenantProvisioner creates a new provisioner. k8s may be nil (provisioning will be skipped).
 func NewTenantProvisioner(repo Repository, k8s *K8sNATSProvisioner, sseHub *TenantSSEHub, logger *log.Logger) *TenantProvisioner {
+	if logger == nil {
+		logger = log.Default()
+	}
 	return &TenantProvisioner{
 		jobs:   make(chan ProvisionJob, provisionQueueSize),
 		repo:   repo,

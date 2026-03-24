@@ -85,6 +85,10 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	slug := GenerateSlug(workspaceName)
 	tenant, err := h.repo.CreateTenant(ctx, user.ID, workspaceName, slug)
 	if err != nil {
+		// Provide feedback to the client that the default workspace was not created,
+		// but keep the registration flow successful so the user can create a tenant later.
+		w.Header().Add("X-Default-Workspace-Status", "creation_failed")
+		w.Header().Add("X-Default-Workspace-Message", "Default workspace could not be created; you can create one later.")
 		// Log but don't fail registration — user can create a tenant later
 		h.logAuthEvent(ctx, r, &user.ID, req.Email, "tenant_creation", "failed", stringPtr(err.Error()))
 	}

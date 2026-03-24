@@ -189,6 +189,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	tenantSSEHub := managementapi.NewTenantSSEHub()
 	tenantProvisioner := managementapi.NewTenantProvisioner(repo, k8sProvisioner, tenantSSEHub, logger)
 	tenantProvisioner.Start()
+	defer tenantProvisioner.Stop()
 	restHandler.SetTenantProvisioner(tenantProvisioner)
 	restHandler.SetTenantSSEHub(tenantSSEHub)
 

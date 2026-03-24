@@ -66,9 +66,14 @@ func TenantMemberMiddleware(repo Repository) func(http.Handler) http.Handler {
 // RequireRole returns middleware that checks the user has at least the specified role.
 // Must be used after TenantMemberMiddleware.
 func RequireRole(minRole string) func(http.Handler) http.Handler {
-	minLevel := roleHierarchy[strings.ToLower(minRole)]
+	minLevel, ok := roleHierarchy[strings.ToLower(minRole)]
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// If an invalid minRole was configured, fail closed instead of granting access.
+			if !ok {
+				_ = writeError(w, http.StatusInternalServerError, "ServerError", "invalid minimum role configured", nil)
+				return
+			}
 			userRole := GetTenantRoleFromContext(r.Context())
 			if roleHierarchy[userRole] < minLevel {
 				_ = writeError(w, http.StatusForbidden, "Forbidden", "insufficient permissions", nil)

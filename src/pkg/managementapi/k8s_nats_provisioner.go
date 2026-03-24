@@ -282,6 +282,7 @@ func (p *K8sNATSProvisioner) createNetworkPolicy(ctx context.Context, tenantSlug
 				},
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
+				// Allow DNS queries to kube-system
 				{
 					To: []networkingv1.NetworkPolicyPeer{
 						{
@@ -294,7 +295,20 @@ func (p *K8sNATSProvisioner) createNetworkPolicy(ctx context.Context, tenantSlug
 						{Protocol: &udpProto, Port: &port53},
 					},
 				},
-				{}, // Allow all other egress
+				// Allow communication between NATS pods within the same tenant namespace
+				{
+					To: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"tenant-id": tenantSlug},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{Protocol: &tcpProto, Port: &port4222},
+						{Protocol: &tcpProto, Port: &port8222},
+					},
+				},
 			},
 		},
 	}

@@ -190,8 +190,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * Switch to a different tenant
    */
   switchTenant: (tenant: Tenant) => {
-    setActiveTenantId(tenant.id)
-    set({ currentTenant: tenant })
+    const { tenants } = get()
+    const validTenant = tenants.find(
+      (t) => t.id === tenant.id && (t as any).status === 'active',
+    )
+
+    if (!validTenant) {
+      set({
+        error: 'Unable to switch tenant. The selected tenant is not active or not assigned to this user.',
+      })
+      return
+    }
+
+    setActiveTenantId(validTenant.id)
+    set({ currentTenant: validTenant })
   },
 
   /**

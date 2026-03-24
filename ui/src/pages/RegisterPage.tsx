@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
+import { WORKSPACE_NAME_MIN_LENGTH, VALIDATION_MESSAGES } from '@/constants/validation'
 
 type Step = 'credentials' | 'workspace'
 
@@ -83,8 +84,8 @@ export default function RegisterPage() {
     setLocalError(null)
     setSuccessMessage(null)
 
-    if (!workspaceName || workspaceName.trim().length < 3) {
-      setLocalError('Workspace name must be at least 3 characters')
+    if (!workspaceName || workspaceName.trim().length < WORKSPACE_NAME_MIN_LENGTH) {
+      setLocalError(VALIDATION_MESSAGES.WORKSPACE_NAME_TOO_SHORT)
       return
     }
 
