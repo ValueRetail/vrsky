@@ -22,7 +22,10 @@ export default function ApiKeyPage() {
   }, [currentTenant])
 
   const handleRotate = () => {
-    if (!currentTenant) return
+    if (!currentTenant) {
+      addNotification({ id: Date.now().toString(), type: 'error', title: 'Error', message: 'No workspace selected' })
+      return
+    }
     showConfirmDialog({
       title: 'Rotate API Key',
       message: 'This will invalidate the current key immediately. Any services using the old key will stop working. The new key will only be shown once.',
