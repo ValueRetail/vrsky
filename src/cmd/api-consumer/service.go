@@ -280,6 +280,11 @@ func (s *APIConsumerService) extractAPIConsumerConfig(conn *Connection) (*APICon
 		// Use the parsed API config directly
 		apiConfig := nodeConfig.API
 
+		// Default to a single "/" endpoint if none configured
+		if len(apiConfig.Endpoints) == 0 {
+			apiConfig.Endpoints = []APIEndpoint{{Path: "/", AuthType: "none"}}
+		}
+
 		// Set default poll interval if not specified
 		if apiConfig.PollIntervalSeconds <= 0 {
 			apiConfig.PollIntervalSeconds = int(s.config.DefaultPollInterval.Seconds())

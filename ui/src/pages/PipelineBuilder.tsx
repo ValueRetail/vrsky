@@ -5,9 +5,11 @@ import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
+import * as authService from '../services/authService'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
+import TenantSelector from '../components/Tenants/TenantSelector'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
@@ -33,6 +35,7 @@ export default function PipelineBuilder() {
     deleteCanvas,
     switchCanvas,
     renameCanvas,
+    setDeployedConnectionId,
   } = useCanvasPersistence()
 
   // Local state initialized from active canvas
@@ -48,7 +51,7 @@ export default function PipelineBuilder() {
   const [deployAttempted, setDeployAttempted] = useState(false)
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
   const canvasContainer = useRef<HTMLDivElement>(null)
-  const { showErrorNotification, showSuccessNotification } = useUIStore()
+  const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -342,12 +345,27 @@ export default function PipelineBuilder() {
     setIsLoading(true)
 
     try {
+      // Step 0: Stop and delete previous deployment if exists
+      const prevConnectionId = activeCanvas?.deployedConnectionId
+      if (prevConnectionId) {
+        try {
+          await apiClient.post(`/api/v1/connections/${prevConnectionId}/stop`)
+        } catch { /* may already be stopped */ }
+        try {
+          await apiClient.delete(`/api/v1/connections/${prevConnectionId}`)
+        } catch { /* best effort */ }
+      }
+
       // Step 1: Create the connection
       const response = await apiClient.post('/api/v1/connections', payload)
       const connectionId = response.data?.data?.id
       
       if (!connectionId) {
         throw new Error('No connection ID returned from server')
+      }
+
+      if (currentCanvasId) {
+        setDeployedConnectionId(currentCanvasId, connectionId)
       }
 
       // Step 2: Auto-start the pipeline
@@ -410,6 +428,9 @@ export default function PipelineBuilder() {
             <p style={{ margin: 0, fontSize: '11px', color: '#6b7280' }}>Integration Platform</p>
           </div>
         </div>
+
+        {/* Center: Workspace Selector */}
+        {isAuthenticated && <TenantSelector />}
 
         {/* Right: Validation + Deploy + User Menu */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -504,6 +525,78 @@ export default function PipelineBuilder() {
                     </div>
                     {/* Menu Items */}
                     <div style={{ padding: '8px' }}>
+                      {/* Settings Links */}
+                      {[
+                        { label: 'Connections', path: '/connections' },
+                        { label: 'Connection Requests', path: '/settings/connection-requests' },
+                        { label: 'Data Connections', path: '/settings/tenant-connections' },
+                        { label: 'API Key', path: '/settings/api-key' },
+                        { label: 'Audit Log', path: '/settings/audit-log' },
+                      ].map(({ label, path }) => (
+                        <button
+                          key={path}
+                          onClick={() => { setShowUserMenu(false); navigate(path) }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '14px',
+                            color: '#374151',
+                            textAlign: 'left' as const,
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      <div style={{ borderTop: '1px solid #e5e7eb', margin: '4px 0' }} />
+                      {/* Delete Account */}
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          showConfirmDialog({
+                            title: 'Delete Account',
+                            message: 'This will permanently delete your account and all associated data. This action cannot be undone.',
+                            confirmLabel: 'Delete Account',
+                            destructive: true,
+                            onConfirm: async () => {
+                              hideConfirmDialog()
+                              try {
+                                await authService.deleteAccount()
+                                await logout()
+                                navigate('/login')
+                              } catch {
+                                // Token already cleared by deleteAccount on success
+                              }
+                            },
+                          })
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '14px',
+                          color: '#dc2626',
+                          textAlign: 'left' as const,
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <span>Delete Account</span>
+                      </button>
                       {/* Logout */}
                       <button
                         onClick={handleLogout}

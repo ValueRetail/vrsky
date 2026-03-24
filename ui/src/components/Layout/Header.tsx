@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { useConnectionsStore } from '../../store/connectionsStore'
 import { useAuthStore } from '../../store/authStore'
+import * as authService from '../../services/authService'
 import TenantSelector from '../Tenants/TenantSelector'
 
 export default function Header() {
   const navigate = useNavigate()
-  const { toggleSidebar } = useUIStore()
+  const { toggleSidebar, showConfirmDialog, hideConfirmDialog } = useUIStore()
   const { connections = [] } = useConnectionsStore()
   const { user, isAuthenticated, logout } = useAuthStore()
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -110,6 +111,60 @@ export default function Header() {
                       </div>
                       {/* Menu Items */}
                       <div className="p-2">
+                        <Link
+                          to="/settings/connection-requests"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
+                        >
+                          Connection Requests
+                        </Link>
+                        <Link
+                          to="/settings/tenant-connections"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
+                        >
+                          Data Connections
+                        </Link>
+                        <Link
+                          to="/settings/api-key"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
+                        >
+                          API Key
+                        </Link>
+                        <Link
+                          to="/settings/audit-log"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
+                        >
+                          Audit Log
+                        </Link>
+                        <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />
+                        {/* Delete Account */}
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false)
+                            showConfirmDialog({
+                              title: 'Delete Account',
+                              message: 'This will permanently delete your account and all associated data. This action cannot be undone.',
+                              confirmLabel: 'Delete Account',
+                              destructive: true,
+                              onConfirm: async () => {
+                                hideConfirmDialog()
+                                try {
+                                  await authService.deleteAccount()
+                                  await logout()
+                                  navigate('/login')
+                                } catch {
+                                  // Token already cleared by deleteAccount on success
+                                }
+                              },
+                            })
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                        >
+                          <span>Delete Account</span>
+                        </button>
                         {/* Logout */}
                         <button
                           onClick={handleLogout}

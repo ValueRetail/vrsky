@@ -33,6 +33,14 @@ func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, t
 		logger.Info("One-time-only mode: retrieving data once")
 		s.pollAllEndpoints(ctx, client, connectionID, tenantID, config, logger)
 		logger.Info("One-time-only mode: data retrieval complete")
+		// Update status to stopped since poll is done
+		if err := s.updateConnectionStatus(connectionID, tenantID, "stopped"); err != nil {
+			logger.Error("Failed to update connection status after one-time poll", "error", err)
+		}
+		// Remove from active pipelines
+		s.mu.Lock()
+		delete(s.activePipelines, connectionID)
+		s.mu.Unlock()
 		return
 	}
 
@@ -270,6 +278,9 @@ func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payloa
 		"topic", topic,
 		"envelope_id", env.ID,
 		"payload_size", env.PayloadSize)
+
+	// Store last payload in DB for tenant-consumer bridges to read
+	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, connectionID)
 
 	return nil
 }

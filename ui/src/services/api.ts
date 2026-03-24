@@ -6,6 +6,7 @@
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance } from 'axios'
 import { config } from '@/config/env'
+import { getSessionToken } from '@/services/authService'
 import type { APIError } from '@/types/api'
 
 // Dynamic tenant ID — updated by authStore when switching tenants
@@ -32,6 +33,10 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   (requestConfig) => {
     requestConfig.headers['X-Tenant-ID'] = activeTenantId
+    const token = getSessionToken()
+    if (token) {
+      requestConfig.headers['Authorization'] = `Bearer ${token}`
+    }
     return requestConfig
   },
   (error) => Promise.reject(error)

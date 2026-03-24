@@ -302,6 +302,25 @@ services:
      restart: unless-stopped
 
 
+  # Tenant Consumer - bridges data between tenant workspaces via NATS
+  tenant-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/tenant-consumer/Dockerfile
+    container_name: vrsky-tenant-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
 networks:
   vrsky-network:
     driver: bridge

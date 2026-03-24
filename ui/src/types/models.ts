@@ -5,7 +5,7 @@
 
 export type ConnectionStatus = 'running' | 'stopped' | 'error'
 
-export type SourceType = 'http' | 'file' | 'database' | 'api'
+export type SourceType = 'http' | 'file' | 'database' | 'api' | 'tenant'
 export type ConverterType = 'schema' | 'mapper' | 'rules'
 export type FilterType = 'rules' | 'wasm'
 export type DestinationType = 'http' | 'file' | 'database'
@@ -323,4 +323,55 @@ export interface MeResponse {
   session_expires_at: string
   tenants: Tenant[]
   current_tenant: Tenant | null
+}
+
+// ============================================
+// Data Sharing Models (Phase 3)
+// ============================================
+
+export type DataConnectionRequestStatus = 'pending' | 'approved' | 'denied' | 'revoked'
+export type DataConnectionPermission = 'send' | 'receive' | 'both'
+export type DataConnectionStatus = 'active' | 'paused' | 'revoked'
+
+export interface DataConnectionRequest {
+  id: string
+  requester_tenant_id: string
+  target_tenant_id: string
+  permission_type: DataConnectionPermission
+  status: DataConnectionRequestStatus
+  message?: string
+  allowed_fields?: string[]
+  denied_fields?: string[]
+  created_at: string
+  updated_at: string
+  responded_at?: string
+  requester_tenant_name?: string
+  target_tenant_name?: string
+}
+
+export interface TenantDataConnection {
+  id: string
+  request_id: string
+  requester_tenant_id: string
+  target_tenant_id: string
+  permission_type: DataConnectionPermission
+  allowed_fields?: string[]
+  denied_fields?: string[]
+  rate_limit_per_hour: number
+  status: DataConnectionStatus
+  created_at: string
+  updated_at: string
+  revoked_at?: string
+}
+
+export interface DataAccessLogEntry {
+  id: string
+  connection_id: string
+  requester_tenant_id: string
+  target_tenant_id: string
+  request_time: string
+  fields_accessed?: string[]
+  bytes_received: number
+  status_code: number
+  ip_address?: string
 }

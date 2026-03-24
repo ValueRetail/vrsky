@@ -1,12 +1,35 @@
 import { useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
+import { useUIStore } from '../../store/uiStore'
 import CreateTenantModal from './CreateTenantModal'
+import apiClient from '../../services/api'
 
 export default function TenantSelector() {
-  const { tenants, currentTenant, switchTenant } = useAuthStore()
+  const { tenants, currentTenant, switchTenant, checkAuth } = useAuthStore()
+  const { showConfirmDialog, hideConfirmDialog } = useUIStore()
   const [showCreateModal, setShowCreateModal] = useState(false)
 
   if (tenants.length === 0) return null
+
+  const handleDeleteWorkspace = () => {
+    if (!currentTenant) return
+    if (tenants.length <= 1) return
+    showConfirmDialog({
+      title: 'Delete Workspace',
+      message: `This will permanently delete "${currentTenant.name}" and all its connections and data. This cannot be undone.`,
+      confirmLabel: 'Delete Workspace',
+      destructive: true,
+      onConfirm: async () => {
+        hideConfirmDialog()
+        try {
+          await apiClient.delete(`/api/v1/tenants/${currentTenant.id}`)
+          await checkAuth()
+        } catch {
+          // checkAuth will refresh state regardless
+        }
+      },
+    })
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -32,6 +55,15 @@ export default function TenantSelector() {
       >
         +
       </button>
+      {tenants.length > 1 && (
+        <button
+          onClick={handleDeleteWorkspace}
+          className="px-2 py-1 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+          title="Delete current workspace"
+        >
+          🗑
+        </button>
+      )}
       <CreateTenantModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} />
     </div>
   )

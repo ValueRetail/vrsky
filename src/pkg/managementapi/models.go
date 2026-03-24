@@ -65,10 +65,16 @@ type Connection struct {
 
 // SourceConfig represents the source/consumer configuration
 type SourceConfig struct {
-	Type     string                `json:"type"` // http, file, database
+	Type     string                `json:"type"` // http, file, database, tenant
 	HTTP     *HTTPSourceConfig     `json:"http,omitempty"`
 	File     *FileSourceConfig     `json:"file,omitempty"`
 	Database *DatabaseSourceConfig `json:"database,omitempty"`
+	Tenant   *TenantSourceConfig   `json:"tenant,omitempty"`
+}
+
+// TenantSourceConfig represents a tenant-to-tenant data consumer
+type TenantSourceConfig struct {
+	ConnectionID string `json:"connection_id"`
 }
 
 // HTTPSourceConfig represents HTTP source/webhook configuration

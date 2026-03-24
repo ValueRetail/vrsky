@@ -482,6 +482,10 @@ func (m *MockRepository) CreateAuthAuditLog(ctx context.Context, log *AuthAuditL
 	return nil
 }
 
+func (m *MockRepository) DeleteUser(ctx context.Context, userID string) error {
+	return nil
+}
+
 // ============================================
 // Tenant Operations (Phase 1 Refactor)
 // ============================================
@@ -532,4 +536,139 @@ func (m *MockRepository) UpsertTenantAPIKey(ctx context.Context, tenantID, keyHa
 
 func (m *MockRepository) GetTenantAPIKey(ctx context.Context, tenantID string) (*TenantAPIKey, error) {
 	return nil, ErrTenantNotFound
+}
+
+// ============================================
+// Data Sharing Operations (Phase 3)
+// ============================================
+
+func (m *MockRepository) CreateConnectionRequest(ctx context.Context, req *DataConnectionRequest) error {
+	req.ID = "test-request-id"
+	return nil
+}
+
+func (m *MockRepository) GetConnectionRequest(ctx context.Context, requestID string) (*DataConnectionRequest, error) {
+	return nil, ErrConnectionRequestNotFound
+}
+
+func (m *MockRepository) ListIncomingConnectionRequests(ctx context.Context, targetTenantID string) ([]*DataConnectionRequest, error) {
+	return []*DataConnectionRequest{}, nil
+}
+
+func (m *MockRepository) ListOutgoingConnectionRequests(ctx context.Context, requesterTenantID string) ([]*DataConnectionRequest, error) {
+	return []*DataConnectionRequest{}, nil
+}
+
+func (m *MockRepository) ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields, sharedConnectionIDs []string) (*TenantDataConnection, error) {
+	return &TenantDataConnection{ID: "test-conn-id", Status: "active"}, nil
+}
+
+func (m *MockRepository) DenyConnectionRequest(ctx context.Context, requestID string) error {
+	return nil
+}
+
+func (m *MockRepository) ListDataConnections(ctx context.Context, tenantID string) ([]*TenantDataConnection, error) {
+	return []*TenantDataConnection{}, nil
+}
+
+func (m *MockRepository) GetDataConnectionByID(ctx context.Context, id string) (*TenantDataConnection, error) {
+	return nil, ErrDataConnectionNotFound
+}
+
+func (m *MockRepository) GetActiveDataConnection(ctx context.Context, requesterID, targetID string) (*TenantDataConnection, error) {
+	return nil, ErrDataConnectionNotFound
+}
+
+func (m *MockRepository) GetSharedConnectionsForTenant(ctx context.Context, requesterID, targetID string) ([]string, error) {
+	return []string{}, nil
+}
+
+func (m *MockRepository) RevokeDataConnection(ctx context.Context, connectionID string) error {
+	return nil
+}
+
+func (m *MockRepository) CreateDataAccessLog(ctx context.Context, entry *DataAccessLogEntry) error {
+	return nil
+}
+
+func (m *MockRepository) ListDataAccessLog(ctx context.Context, targetTenantID string, filters *ListFilters) ([]*DataAccessLogEntry, int64, error) {
+	return []*DataAccessLogEntry{}, 0, nil
+}
+
+func (m *MockRepository) PauseConnectionsByDataConnection(ctx context.Context, tenantID, dataConnectionID string) (int64, error) {
+	return 0, nil
+}
+
+func (m *MockRepository) GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error) {
+	return nil, ErrTenantNotFound
+}
+
+// ============================================
+// Phase 3: Unit Tests
+// ============================================
+
+func TestFilterFields_Basic(t *testing.T) {
+	data := json.RawMessage(`{"name":"test","email":"a@b.com","password":"secret123","api_key":"abc"}`)
+	result := filterFields(data, nil, nil)
+
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(result, &obj)
+
+	if _, exists := obj["password"]; exists {
+		t.Error("password should be filtered out by unsafe pattern")
+	}
+	if _, exists := obj["api_key"]; exists {
+		t.Error("api_key should be filtered out by unsafe pattern (contains 'key')")
+	}
+	if _, exists := obj["name"]; !exists {
+		t.Error("name should be present")
+	}
+	if _, exists := obj["email"]; !exists {
+		t.Error("email should be present")
+	}
+}
+
+func TestFilterFields_AllowedList(t *testing.T) {
+	data := json.RawMessage(`{"name":"test","email":"a@b.com","phone":"123"}`)
+	result := filterFields(data, []string{"name", "email"}, nil)
+
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(result, &obj)
+
+	if _, exists := obj["phone"]; exists {
+		t.Error("phone should be filtered out (not in allowed list)")
+	}
+	if _, exists := obj["name"]; !exists {
+		t.Error("name should be present (in allowed list)")
+	}
+}
+
+func TestFilterFields_DeniedList(t *testing.T) {
+	data := json.RawMessage(`{"name":"test","email":"a@b.com","internal_id":"123"}`)
+	result := filterFields(data, nil, []string{"internal_id"})
+
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(result, &obj)
+
+	if _, exists := obj["internal_id"]; exists {
+		t.Error("internal_id should be filtered out (in denied list)")
+	}
+	if _, exists := obj["name"]; !exists {
+		t.Error("name should be present")
+	}
+}
+
+func TestRateLimiter_Allow(t *testing.T) {
+	rl := NewConnectionRateLimiter()
+
+	// With a high limit, first request should always be allowed
+	if !rl.Allow("conn-1", 1000) {
+		t.Error("first request should be allowed")
+	}
+
+	// Remove and verify no panic
+	rl.Remove("conn-1")
+	if !rl.Allow("conn-1", 1000) {
+		t.Error("request after remove should create new limiter and allow")
+	}
 }

@@ -68,8 +68,13 @@ func (v *Validator) ValidateSourceConfig(config *SourceConfig) error {
 		return v.validateFileSource(config.File)
 	case "database":
 		return v.validateDatabaseSource(config.Database)
+	case "tenant":
+		if config.Tenant == nil || config.Tenant.ConnectionID == "" {
+			return &ConfigError{Component: "source", Field: "tenant.connection_id", Reason: "connection_id is required for tenant source"}
+		}
+		return nil
 	default:
-		return &ConfigError{Component: "source", Field: "type", Reason: fmt.Sprintf("invalid type '%s', must be http, file, or database", config.Type)}
+		return &ConfigError{Component: "source", Field: "type", Reason: fmt.Sprintf("invalid type '%s', must be http, file, database, or tenant", config.Type)}
 	}
 }
 

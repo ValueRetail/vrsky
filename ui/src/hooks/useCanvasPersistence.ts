@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useCanvasStore } from '../store/canvasStore'
+import { useAuthStore } from '../store/authStore'
 import type { Node, Edge, Canvas } from '../types/pipeline'
 
 const DEBOUNCE_MS = 2000 // Auto-save after 2 seconds of inactivity
@@ -25,6 +26,7 @@ interface UseCanvasPersistenceReturn {
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
+  setDeployedConnectionId: (canvasId: string, connectionId: string | null) => void
 }
 
 export function useCanvasPersistence(): UseCanvasPersistenceReturn {
@@ -40,14 +42,16 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     renameCanvas,
     getActiveCanvas,
     canCreateMore,
+    setDeployedConnectionId,
   } = useCanvasStore()
 
+  const { currentTenant } = useAuthStore()
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Initialize store on mount
+  // Initialize store on mount and re-initialize when tenant changes
   useEffect(() => {
-    initialize()
-  }, [initialize])
+    initialize(currentTenant?.id)
+  }, [initialize, currentTenant?.id])
 
   // Debounced update function
   const updateCanvas = useCallback(
@@ -105,5 +109,6 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     deleteCanvas,
     switchCanvas,
     renameCanvas,
+    setDeployedConnectionId,
   }
 }

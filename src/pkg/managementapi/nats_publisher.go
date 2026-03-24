@@ -216,6 +216,15 @@ func (p *NATSPublisher) publishCommand(ctx context.Context, tenantID, cmdType st
 	return fmt.Errorf("failed to publish command after %d attempts: %w", maxRetries, lastErr)
 }
 
+// PublishRaw publishes raw bytes to a NATS subject (used for tenant data sharing).
+func (p *NATSPublisher) PublishRaw(_ context.Context, subject string, data []byte) error {
+	if err := p.nc.Publish(subject, data); err != nil {
+		p.logger.Printf("Failed to publish to %s: %v", subject, err)
+		return err
+	}
+	return nil
+}
+
 // HealthCheck checks if the NATS connection is healthy
 func (p *NATSPublisher) HealthCheck() error {
 	if !p.nc.IsConnected() {

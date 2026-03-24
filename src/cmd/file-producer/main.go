@@ -394,6 +394,8 @@ func (s *FileProducerService) deriveExtension(contentType string) string {
 		return "xml"
 	case strings.Contains(contentType, "application/yaml"), strings.Contains(contentType, "text/yaml"):
 		return "yaml"
+	case strings.Contains(contentType, "text/html"):
+		return "html"
 	default:
 		return "bin"
 	}
@@ -409,16 +411,25 @@ func getEnv(key, defaultValue string) string {
 }
 
 func expandHomePath(path string) string {
-	if path == "~" {
+	// Prefer FILE_OUTPUT_DIR env var over $HOME (important in containers where $HOME=/root)
+	resolveHome := func() string {
+		if dir := os.Getenv("FILE_OUTPUT_DIR"); dir != "" {
+			return dir
+		}
 		home, err := os.UserHomeDir()
 		if err == nil {
+			return home
+		}
+		return ""
+	}
+	if path == "~" {
+		if home := resolveHome(); home != "" {
 			return home
 		}
 		return path
 	}
 	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
+		if home := resolveHome(); home != "" {
 			return filepath.Join(home, path[2:])
 		}
 	}

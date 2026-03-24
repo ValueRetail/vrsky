@@ -193,6 +193,10 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	restHandler.SetTenantProvisioner(tenantProvisioner)
 	restHandler.SetTenantSSEHub(tenantSSEHub)
 
+	// Phase 3: Data sharing rate limiter
+	rateLimiter := managementapi.NewConnectionRateLimiter()
+	restHandler.SetRateLimiter(rateLimiter)
+
 	restHandler.RegisterRoutes(mux)
 
 	// Initialize WebSocket infrastructure for real-time metrics streaming

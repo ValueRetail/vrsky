@@ -153,6 +153,62 @@ type Repository interface {
 	GetTenantAPIKey(ctx context.Context, tenantID string) (*TenantAPIKey, error)
 
 	// ============================================
+	// Data Sharing Operations (Phase 3)
+	// ============================================
+
+	// CreateConnectionRequest creates a new tenant-to-tenant connection request
+	CreateConnectionRequest(ctx context.Context, req *DataConnectionRequest) error
+
+	// GetConnectionRequest retrieves a connection request by ID
+	GetConnectionRequest(ctx context.Context, requestID string) (*DataConnectionRequest, error)
+
+	// ListIncomingConnectionRequests returns pending requests targeting a tenant
+	ListIncomingConnectionRequests(ctx context.Context, targetTenantID string) ([]*DataConnectionRequest, error)
+
+	// ListOutgoingConnectionRequests returns requests sent by a tenant
+	ListOutgoingConnectionRequests(ctx context.Context, requesterTenantID string) ([]*DataConnectionRequest, error)
+
+	// ApproveConnectionRequest approves a request and creates an active data connection
+	ApproveConnectionRequest(ctx context.Context, requestID string, allowedFields, deniedFields, sharedConnectionIDs []string) (*TenantDataConnection, error)
+
+	// DenyConnectionRequest denies a pending request
+	DenyConnectionRequest(ctx context.Context, requestID string) error
+
+	// ListDataConnections returns data connections involving a tenant
+	ListDataConnections(ctx context.Context, tenantID string) ([]*TenantDataConnection, error)
+
+	// GetDataConnectionByID retrieves a data connection by ID
+	GetDataConnectionByID(ctx context.Context, id string) (*TenantDataConnection, error)
+
+	// GetActiveDataConnection finds an active connection between two tenants
+	GetActiveDataConnection(ctx context.Context, requesterID, targetID string) (*TenantDataConnection, error)
+
+	// GetSharedConnectionsForTenant returns shared connection IDs for a data connection
+	GetSharedConnectionsForTenant(ctx context.Context, requesterID, targetID string) ([]string, error)
+
+	// RevokeDataConnection revokes an active data connection
+	RevokeDataConnection(ctx context.Context, connectionID string) error
+
+	// CreateDataAccessLog records a data access event
+	CreateDataAccessLog(ctx context.Context, entry *DataAccessLogEntry) error
+
+	// ListDataAccessLog returns paginated audit log entries for a tenant
+	ListDataAccessLog(ctx context.Context, targetTenantID string, filters *ListFilters) ([]*DataAccessLogEntry, int64, error)
+
+	// PauseConnectionsByDataConnection stops pipeline connections using a revoked data connection
+	PauseConnectionsByDataConnection(ctx context.Context, tenantID, dataConnectionID string) (int64, error)
+
+	// GetTenantByAPIKeyHash retrieves a tenant by the hash of its API key
+	GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error)
+
+	// ============================================
+	// User Account Deletion
+	// ============================================
+
+	// DeleteUser soft-deletes a user and invalidates all their sessions
+	DeleteUser(ctx context.Context, userID string) error
+
+	// ============================================
 	// Lifecycle
 	// ============================================
 

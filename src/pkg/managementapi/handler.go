@@ -25,6 +25,9 @@ type Handler struct {
 	// Tenant NATS provisioning (Phase 2)
 	tenantProvisioner *TenantProvisioner
 	tenantSSEHub      *TenantSSEHub
+
+	// Data sharing rate limiter (Phase 3)
+	rateLimiter *ConnectionRateLimiter
 }
 
 // NewHandler creates a new handler
@@ -58,6 +61,11 @@ func (h *Handler) SetTenantProvisioner(provisioner *TenantProvisioner) {
 // SetTenantSSEHub sets the SSE hub for tenant provisioning status streaming.
 func (h *Handler) SetTenantSSEHub(hub *TenantSSEHub) {
 	h.tenantSSEHub = hub
+}
+
+// SetRateLimiter sets the rate limiter for tenant data ingestion.
+func (h *Handler) SetRateLimiter(rl *ConnectionRateLimiter) {
+	h.rateLimiter = rl
 }
 
 // ErrorResponse represents an error response
@@ -415,10 +423,11 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prevent deleting running connections
-	if conn.Status == "running" {
-		_ = writeError(w, http.StatusBadRequest, "InvalidState", "cannot delete a running connection, please stop it first", nil)
-		return
+	// Auto-stop running connections before deleting
+	if conn.Status == "running" && h.publisher != nil {
+		_ = h.publisher.PublishConnectionStop(ctx, id, tenantID)
+		// Update status in DB
+		_ = h.repo.UpdateConnectionStatus(ctx, id, "stopped", nil)
 	}
 
 	// Delete connection (cascade delete events)
@@ -651,6 +660,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/me", sessionMW(http.HandlerFunc(h.GetMe)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/logout", sessionMW(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/change-password", sessionMW(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/auth/me", sessionMW(http.HandlerFunc(h.DeleteAccount)).ServeHTTP)
 
 	// Tenant routes (require valid session, no X-Tenant-ID header)
 	mux.HandleFunc("POST /api/v1/tenants", sessionMW(http.HandlerFunc(h.CreateTenantHandler)).ServeHTTP)
@@ -667,4 +677,28 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// Tenant API key management (Phase 2)
 	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/api-key/rotate", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.RotateTenantAPIKey)))).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/api-key", sessionMW(tenantMW(RequireRole("admin")(http.HandlerFunc(h.GetTenantAPIKey)))).ServeHTTP)
+
+	// ============================================
+	// Data Sharing Routes (Phase 3)
+	// ============================================
+
+	// Connection requests
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/connection-requests", sessionMW(tenantMW(http.HandlerFunc(h.CreateConnectionRequest))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/connection-requests/incoming", sessionMW(tenantMW(RequireRole("admin")(http.HandlerFunc(h.ListIncomingConnectionRequests)))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/connection-requests/outgoing", sessionMW(tenantMW(http.HandlerFunc(h.ListOutgoingConnectionRequests))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/connection-requests/{request_id}/approve", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.ApproveConnectionRequest)))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/connection-requests/{request_id}/deny", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.DenyConnectionRequest)))).ServeHTTP)
+
+	// Active data connections
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections", sessionMW(tenantMW(http.HandlerFunc(h.ListDataConnections))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}", sessionMW(tenantMW(http.HandlerFunc(h.GetDataConnection))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/revoke", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.RevokeDataConnection)))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/shared-connections", sessionMW(tenantMW(http.HandlerFunc(h.GetSharedConnections))).ServeHTTP)
+
+	// Audit log
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/data-access-log", sessionMW(tenantMW(RequireRole("admin")(http.HandlerFunc(h.GetDataAccessLog)))).ServeHTTP)
+
+	// Tenant data ingestion endpoint (API key auth, not session auth)
+	apiKeyMW := TenantAPIKeyMiddleware(h.repo)
+	mux.HandleFunc("POST /api/v1/tenant/{tenant_id}/data", apiKeyMW(http.HandlerFunc(h.HandleTenantDataIngestion)).ServeHTTP)
 }

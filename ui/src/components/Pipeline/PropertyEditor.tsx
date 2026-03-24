@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Node } from '../../types/pipeline'
+import { useAuthStore } from '../../store/authStore'
+import * as tenantDataService from '../../services/tenantDataService'
+import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 
 // Type for API Consumer endpoint
 interface ApiEndpoint {
   path: string
+  params: string
   auth_type: 'none' | 'bearer' | 'api_key'
   auth_value: string
 }
@@ -192,6 +196,236 @@ function StyledButton({
   )
 }
 
+// Tenant Consumer configuration component — inline connection management
+function TenantConsumerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const { currentTenant } = useAuthStore()
+  const [connections, setConnections] = useState<TenantDataConnection[]>([])
+  const [pendingRequests, setPendingRequests] = useState<DataConnectionRequest[]>([])
+  const [loading, setLoading] = useState(true)
+  const [view, setView] = useState<'main' | 'create'>('main')
+  const [targetTenantId, setTargetTenantId] = useState('')
+  const [permissionType, setPermissionType] = useState('both')
+  const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [sharedConns, setSharedConns] = useState<{ id: string; name: string }[]>([])
+  const [loadingShared, setLoadingShared] = useState(false)
+
+  const loadData = () => {
+    if (!currentTenant) { setLoading(false); return }
+    setLoading(true)
+    Promise.all([
+      tenantDataService.listDataConnections(currentTenant.id),
+      tenantDataService.listOutgoingRequests(currentTenant.id),
+    ])
+      .then(([conns, reqs]) => {
+        setConnections(conns.filter(c => c.status === 'active'))
+        setPendingRequests(reqs.filter(r => r.status === 'pending'))
+      })
+      .catch(() => { setConnections([]); setPendingRequests([]) })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { loadData() }, [currentTenant]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tenant = (config.tenant as Record<string, unknown>) || {}
+  const selectedDataConnectionId = (tenant.connection_id as string) || ''
+
+  // Load shared connections when a data connection is selected
+  useEffect(() => {
+    if (!currentTenant || !selectedDataConnectionId) {
+      setSharedConns([])
+      return
+    }
+    setLoadingShared(true)
+    tenantDataService.getSharedConnections(currentTenant.id, selectedDataConnectionId)
+      .then(setSharedConns)
+      .catch(() => setSharedConns([]))
+      .finally(() => setLoadingShared(false))
+  }, [currentTenant, selectedDataConnectionId])
+
+  const handleSubmitRequest = async () => {
+    if (!currentTenant || !targetTenantId.trim()) return
+    setSubmitting(true)
+    setError('')
+    try {
+      await tenantDataService.createConnectionRequest(currentTenant.id, {
+        target_api_key: targetTenantId.trim(),
+        permission_type: permissionType,
+        message: message || undefined,
+      })
+      setView('main')
+      setTargetTenantId('')
+      setMessage('')
+      loadData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '16px' }}>Loading...</p>
+  }
+
+  if (view === 'create') {
+    return (
+      <div style={{ marginTop: '16px' }}>
+        <p style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>Request New Connection</p>
+        <StyledInput
+          label="Target API Key"
+          placeholder="Paste the other workspace's API key"
+          value={targetTenantId}
+          onChange={setTargetTenantId}
+        />
+        <StyledSelect
+          label="Permission Type"
+          value={permissionType}
+          onChange={setPermissionType}
+          options={[
+            { value: 'both', label: 'Both (send & receive)' },
+            { value: 'send', label: 'Send only' },
+            { value: 'receive', label: 'Receive only' },
+          ]}
+        />
+        <StyledInput
+          label="Message (optional)"
+          placeholder="Why are you requesting this connection?"
+          value={message}
+          onChange={setMessage}
+        />
+        {error && (
+          <p style={{ fontSize: '12px', color: '#dc2626', margin: '8px 0' }}>{error}</p>
+        )}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+          <button
+            onClick={handleSubmitRequest}
+            disabled={!targetTenantId.trim() || submitting}
+            style={{
+              padding: '8px 16px', fontSize: '13px', fontWeight: 500,
+              backgroundColor: submitting ? '#9ca3af' : '#2563eb', color: '#fff',
+              border: 'none', borderRadius: '6px', cursor: submitting ? 'default' : 'pointer',
+            }}
+          >
+            {submitting ? 'Sending...' : 'Send Request'}
+          </button>
+          <button
+            onClick={() => { setView('main'); setError('') }}
+            style={{
+              padding: '8px 16px', fontSize: '13px', fontWeight: 500,
+              backgroundColor: '#f3f4f6', color: '#374151',
+              border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: '16px' }}>
+      {/* Active connections dropdown */}
+      {connections.length > 0 && (
+        <>
+          <StyledSelect
+            label="Data Connection"
+            value={selectedDataConnectionId}
+            onChange={(value) => {
+              const selected = connections.find(c => c.id === value)
+              const sourceTenantId = selected
+                ? (selected.requester_tenant_id === currentTenant?.id ? selected.target_tenant_id : selected.requester_tenant_id)
+                : ''
+              setConfig({ ...config, tenant: { ...tenant, connection_id: value, source_tenant_id: sourceTenantId, source_connection_id: '' } })
+            }}
+            options={[
+              { value: '', label: 'Select a data connection...' },
+              ...connections.map(c => ({
+                value: c.id,
+                label: `${c.requester_tenant_id === currentTenant?.id ? 'To' : 'From'}: ${c.requester_tenant_id === currentTenant?.id ? c.target_tenant_id.slice(0, 8) : c.requester_tenant_id.slice(0, 8)}... (${c.permission_type})`,
+              })),
+            ]}
+          />
+
+          {/* Shared pipeline picker */}
+          {selectedDataConnectionId && (
+            loadingShared ? (
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>Loading shared pipelines...</p>
+            ) : sharedConns.length > 0 ? (
+              <StyledSelect
+                label="Source Pipeline"
+                value={(tenant.source_connection_id as string) || ''}
+                onChange={(value) => setConfig({ ...config, tenant: { ...tenant, source_connection_id: value } })}
+                options={[
+                  { value: '', label: 'All shared pipelines' },
+                  ...sharedConns.map(sc => ({ value: sc.id, label: sc.name })),
+                ]}
+              />
+            ) : (
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>No specific pipelines shared — will receive all data from this connection.</p>
+            )
+          )}
+        </>
+      )}
+
+      {/* Pending outgoing requests */}
+      {pendingRequests.length > 0 && (
+        <div style={{ marginTop: '12px' }}>
+          <p style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', marginBottom: '6px' }}>Pending Requests</p>
+          {pendingRequests.map(req => (
+            <div key={req.id} style={{
+              padding: '8px 12px', marginBottom: '4px',
+              backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px',
+              fontSize: '12px', color: '#92400e',
+            }}>
+              To: {req.target_tenant_id.slice(0, 8)}... — <span style={{ fontWeight: 600 }}>{req.status}</span>
+              {req.message && <span style={{ color: '#b45309' }}> · {req.message}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state or new request button */}
+      {connections.length === 0 && pendingRequests.length === 0 && (
+        <div style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb', textAlign: 'center' }}>
+          <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 8px' }}>No active data connections yet.</p>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+        <button
+          onClick={() => setView('create')}
+          style={{
+            padding: '8px 16px', fontSize: '13px', fontWeight: 500,
+            backgroundColor: '#2563eb', color: '#fff',
+            border: 'none', borderRadius: '6px', cursor: 'pointer',
+          }}
+        >
+          Request New Connection
+        </button>
+        <button
+          onClick={loadData}
+          style={{
+            padding: '8px 16px', fontSize: '13px', fontWeight: 500,
+            backgroundColor: '#f3f4f6', color: '#374151',
+            border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer',
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -220,7 +454,7 @@ function ApiConsumerConfig({
   }
 
   const addEndpoint = () => {
-    const newEndpoints = [...endpoints, { path: '/', auth_type: 'none' as const, auth_value: '' }]
+    const newEndpoints = [...endpoints, { path: '/', params: '', auth_type: 'none' as const, auth_value: '' }]
     updateApiConfig({ endpoints: newEndpoints })
   }
 
@@ -427,6 +661,23 @@ function ApiConsumerConfig({
                   }}
                 />
 
+                <input
+                  type="text"
+                  placeholder="lat=59.9&lon=10.7"
+                  value={ep.params || ''}
+                  onChange={(e) => updateEndpoint(idx, 'params', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    marginBottom: '8px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
+
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <select
                     value={ep.auth_type}
@@ -544,6 +795,7 @@ export default function PropertyEditor({
                 { value: 'http', label: 'HTTP Webhook' },
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
+                { value: 'tenant', label: 'Tenant Consumer' },
               ]}
             />
 
@@ -619,6 +871,13 @@ export default function PropertyEditor({
 
             {config.type === 'api' && (
               <ApiConsumerConfig
+                config={config}
+                setConfig={setConfig}
+              />
+            )}
+
+            {config.type === 'tenant' && (
+              <TenantConsumerConfig
                 config={config}
                 setConfig={setConfig}
               />
