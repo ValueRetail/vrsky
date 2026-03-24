@@ -4,12 +4,15 @@
  */
 
 import { create } from 'zustand'
-import type { User } from '@/types/models'
+import type { User, Tenant } from '@/types/models'
 import * as authService from '@/services/authService'
+import { setActiveTenantId } from '@/services/api'
 
 interface AuthState {
   // State
   user: User | null
+  tenants: Tenant[]
+  currentTenant: Tenant | null
   isAuthenticated: boolean
   isLoading: boolean
   isInitialized: boolean
@@ -17,15 +20,18 @@ interface AuthState {
 
   // Actions
   login: (email: string, password: string) => Promise<boolean>
-  register: (email: string, password: string, fullName: string) => Promise<{ success: boolean; message?: string }>
+  register: (email: string, password: string, fullName: string, workspaceName: string) => Promise<{ success: boolean; message?: string }>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
+  switchTenant: (tenant: Tenant) => void
   clearError: () => void
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   // Initial state
   user: null,
+  tenants: [],
+  currentTenant: null,
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,
@@ -39,7 +45,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const response = await authService.login({ email, password })
-      
+
       if (response.success && response.user) {
         set({
           user: response.user,
@@ -47,6 +53,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isLoading: false,
           error: null,
         })
+        // Fetch tenants after login
+        await get().checkAuth()
         return true
       } else {
         set({
@@ -68,7 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   /**
    * Register a new user
    */
-  register: async (email: string, password: string, fullName: string) => {
+  register: async (email: string, password: string, fullName: string, workspaceName: string) => {
     set({ isLoading: true, error: null })
 
     try {
@@ -76,10 +84,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         email,
         password,
         full_name: fullName,
+        workspace_name: workspaceName,
       })
-      
+
       set({ isLoading: false })
-      
+
       return {
         success: response.success,
         message: response.message,
@@ -108,6 +117,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } finally {
       set({
         user: null,
+        tenants: [],
+        currentTenant: null,
         isAuthenticated: false,
         isLoading: false,
         error: null,
@@ -119,17 +130,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * Check if user is authenticated (on app load)
    */
   checkAuth: async (): Promise<void> => {
-    // Skip if already initialized or no token
-    if (get().isInitialized) {
-      return
-    }
-
     // If no session token, mark as initialized but not authenticated
     if (!authService.hasSessionToken()) {
       set({
         isInitialized: true,
         isAuthenticated: false,
         user: null,
+        tenants: [],
+        currentTenant: null,
       })
       return
     }
@@ -137,11 +145,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true })
 
     try {
-      const user = await authService.getMe()
-      
-      if (user) {
+      const meData = await authService.getMe()
+
+      if (meData && meData.user) {
+        const tenants = meData.tenants || []
+        const currentTenant = meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
+
+        // Update the API client's tenant ID
+        if (currentTenant) {
+          setActiveTenantId(currentTenant.id)
+        }
+
         set({
-          user,
+          user: meData.user,
+          tenants,
+          currentTenant,
           isAuthenticated: true,
           isInitialized: true,
           isLoading: false,
@@ -149,19 +167,43 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } else {
         set({
           user: null,
+          tenants: [],
+          currentTenant: null,
           isAuthenticated: false,
           isInitialized: true,
           isLoading: false,
         })
       }
-    } catch (error) {
+    } catch {
       set({
         user: null,
+        tenants: [],
+        currentTenant: null,
         isAuthenticated: false,
         isInitialized: true,
         isLoading: false,
       })
     }
+  },
+
+  /**
+   * Switch to a different tenant
+   */
+  switchTenant: (tenant: Tenant) => {
+    const { tenants } = get()
+    const validTenant = tenants.find(
+      (t) => t.id === tenant.id && (t as any).status === 'active',
+    )
+
+    if (!validTenant) {
+      set({
+        error: 'Unable to switch tenant. The selected tenant is not active or not assigned to this user.',
+      })
+      return
+    }
+
+    setActiveTenantId(validTenant.id)
+    set({ currentTenant: validTenant })
   },
 
   /**

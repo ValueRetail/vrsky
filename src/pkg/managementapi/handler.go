@@ -21,6 +21,10 @@ type Handler struct {
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
+
+	// Tenant NATS provisioning (Phase 2)
+	tenantProvisioner *TenantProvisioner
+	tenantSSEHub      *TenantSSEHub
 }
 
 // NewHandler creates a new handler
@@ -44,6 +48,16 @@ func (h *Handler) SetPublisher(publisher *NATSPublisher) {
 // This enables K8s deployment for graph-based connections (Phase 2).
 func (h *Handler) SetOrchestratorFactory(factory OrchestratorFactory) {
 	h.orchestratorFactory = factory
+}
+
+// SetTenantProvisioner sets the background provisioner for tenant NATS instances.
+func (h *Handler) SetTenantProvisioner(provisioner *TenantProvisioner) {
+	h.tenantProvisioner = provisioner
+}
+
+// SetTenantSSEHub sets the SSE hub for tenant provisioning status streaming.
+func (h *Handler) SetTenantSSEHub(hub *TenantSSEHub) {
+	h.tenantSSEHub = hub
 }
 
 // ErrorResponse represents an error response
@@ -633,7 +647,24 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/reset-password", h.ResetPassword)
 
 	// Protected auth routes (require valid session)
-	mux.HandleFunc("GET /api/v1/auth/me", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.GetMe)).ServeHTTP)
-	mux.HandleFunc("POST /api/v1/auth/logout", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
-	mux.HandleFunc("POST /api/v1/auth/change-password", SessionAuthMiddleware(h.repo)(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
+	sessionMW := SessionAuthMiddleware(h.repo)
+	mux.HandleFunc("GET /api/v1/auth/me", sessionMW(http.HandlerFunc(h.GetMe)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/logout", sessionMW(http.HandlerFunc(h.LogoutUser)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/change-password", sessionMW(http.HandlerFunc(h.ChangePassword)).ServeHTTP)
+
+	// Tenant routes (require valid session, no X-Tenant-ID header)
+	mux.HandleFunc("POST /api/v1/tenants", sessionMW(http.HandlerFunc(h.CreateTenantHandler)).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants", sessionMW(http.HandlerFunc(h.ListTenantsHandler)).ServeHTTP)
+
+	// Tenant routes with membership validation
+	tenantMW := TenantMemberMiddleware(h.repo)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}", sessionMW(tenantMW(http.HandlerFunc(h.GetTenantHandler))).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.DeleteTenantHandler)))).ServeHTTP)
+
+	// Tenant provisioning status stream (Phase 2)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/status/stream", sessionMW(tenantMW(http.HandlerFunc(h.HandleTenantStatusSSE))).ServeHTTP)
+
+	// Tenant API key management (Phase 2)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/api-key/rotate", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.RotateTenantAPIKey)))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/api-key", sessionMW(tenantMW(RequireRole("admin")(http.HandlerFunc(h.GetTenantAPIKey)))).ServeHTTP)
 }

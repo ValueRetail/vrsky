@@ -109,6 +109,50 @@ type Repository interface {
 	CreateAuthAuditLog(ctx context.Context, log *AuthAuditLog) error
 
 	// ============================================
+	// Tenant Operations (Phase 1 Refactor)
+	// ============================================
+
+	// CreateTenant creates a new tenant and assigns the user as owner
+	CreateTenant(ctx context.Context, userID, name, slug string) (*Tenant, error)
+
+	// GetTenantByID fetches a tenant by ID
+	GetTenantByID(ctx context.Context, tenantID string) (*Tenant, error)
+
+	// GetUserTenants returns all tenants a user has access to
+	GetUserTenants(ctx context.Context, userID string) ([]*TenantResponse, error)
+
+	// GetUserTenantRole returns the user's role in a tenant
+	GetUserTenantRole(ctx context.Context, userID, tenantID string) (string, error)
+
+	// DeleteTenant soft-deletes a tenant
+	DeleteTenant(ctx context.Context, tenantID string) error
+
+	// ============================================
+	// Tenant Provisioning (Phase 2)
+	// ============================================
+
+	// UpdateTenantStatus updates the status and optional NATS slug
+	UpdateTenantStatus(ctx context.Context, tenantID, status string, natsSlug *string) error
+
+	// CreateProvisioningJob creates a new provisioning job record
+	CreateProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error)
+
+	// UpdateProvisioningJob updates job progress
+	UpdateProvisioningJob(ctx context.Context, jobID, status string, progress int, step, errMsg string) error
+
+	// UpdateProvisioningJobCompleted sets the completed_at timestamp
+	UpdateProvisioningJobCompleted(ctx context.Context, jobID string, completedAt *time.Time) error
+
+	// GetLatestProvisioningJob returns the most recent job for a tenant
+	GetLatestProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error)
+
+	// UpsertTenantAPIKey creates or replaces an API key for a tenant
+	UpsertTenantAPIKey(ctx context.Context, tenantID, keyHash string) (*TenantAPIKey, error)
+
+	// GetTenantAPIKey retrieves the current API key metadata for a tenant
+	GetTenantAPIKey(ctx context.Context, tenantID string) (*TenantAPIKey, error)
+
+	// ============================================
 	// Lifecycle
 	// ============================================
 

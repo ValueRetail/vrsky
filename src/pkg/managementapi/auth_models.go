@@ -134,9 +134,10 @@ func (u *User) ToResponse() *UserResponse {
 
 // RegisterRequest is the request body for user registration
 type RegisterRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	FullName string `json:"full_name"`
+	Email         string `json:"email"`
+	Password      string `json:"password"`
+	FullName      string `json:"full_name"`
+	WorkspaceName string `json:"workspace_name"`
 }
 
 // LoginRequest is the request body for user login
@@ -179,8 +180,10 @@ type ChangePasswordRequest struct {
 
 // MeResponse is the response body for GET /auth/me
 type MeResponse struct {
-	User             *UserResponse `json:"user"`
-	SessionExpiresAt time.Time     `json:"session_expires_at"`
+	User             *UserResponse    `json:"user"`
+	SessionExpiresAt time.Time        `json:"session_expires_at"`
+	Tenants          []*TenantResponse `json:"tenants"`
+	CurrentTenant    *TenantResponse   `json:"current_tenant"`
 }
 
 // MessageResponse is a simple success/error message response

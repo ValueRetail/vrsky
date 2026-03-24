@@ -15,7 +15,6 @@ import type {
   ResetPasswordRequest,
   AuthResponse,
   MeResponse,
-  User,
 } from '@/types/models'
 
 // Session token storage key
@@ -81,9 +80,9 @@ export async function login(data: LoginRequest): Promise<AuthResponse> {
 }
 
 /**
- * Get the current authenticated user
+ * Get the current authenticated user and their tenants
  */
-export async function getMe(): Promise<User | null> {
+export async function getMe(): Promise<MeResponse | null> {
   const token = getSessionToken()
   if (!token) {
     return null
@@ -95,7 +94,7 @@ export async function getMe(): Promise<User | null> {
         Authorization: `Bearer ${token}`,
       },
     })
-    return response.data.user
+    return response.data
   } catch (error) {
     // If unauthorized, clear the invalid token
     if (axios.isAxiosError(error) && error.response?.status === 401) {
