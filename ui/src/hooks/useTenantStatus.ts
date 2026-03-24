@@ -57,12 +57,12 @@ export function useTenantStatus(tenantId: string | null) {
                 if (msg.type === 'status' && msg.data) {
                   setStatus(msg.data as ProvisioningStatus)
                 }
-              } catch (err) {
-                if (process.env.NODE_ENV !== 'production') {
-                  console.error('Failed to parse SSE status message:', { error: err, line })
-                }
-                // skip invalid JSON
-              }
+               } catch (err) {
+                 if (import.meta.env.MODE !== 'production') {
+                   console.error('Failed to parse SSE status message:', { error: err, line })
+                 }
+                 // skip invalid JSON
+               }
             }
           }
         }

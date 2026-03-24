@@ -15,7 +15,6 @@ import type {
   ResetPasswordRequest,
   AuthResponse,
   MeResponse,
-  User,
 } from '@/types/models'
 
 // Session token storage key
