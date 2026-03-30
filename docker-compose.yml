@@ -321,6 +321,172 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # File Consumer - watches directories and accepts file uploads, publishes to NATS
+  file-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/file-consumer/Dockerfile
+    container_name: vrsky-file-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      FILE_CONSUMER_PORT: "9200"
+      FILE_CONSUMER_BASE_DIR: "/data/input"
+      HOST_HOME: "${HOME}"
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./data/input:/data/input
+      - ${HOME}:${HOME}
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Webhook Consumer - receives inbound HTTP webhooks and publishes to NATS
+  webhook-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/webhook-consumer/Dockerfile
+    container_name: vrsky-webhook-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      WEBHOOK_PORT: "9100"
+    ports:
+      - "9100:9100"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # HTTP Producer - receives data from NATS and forwards to external HTTP endpoints
+  http-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/http-producer/Dockerfile
+    container_name: vrsky-http-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      HTTP_PRODUCER_PORT: "9400"
+      NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+    ports:
+      - "9400:9400"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # File Producer - receives data from NATS and writes to files
+  file-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/file-producer/Dockerfile
+    container_name: vrsky-file-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      FILE_OUTPUT_NATS_URL: "nats://nats:4222"
+      FILE_OUTPUT_SUBSCRIBE_SUBJECT: "vrsky.data.*.pipeline.*"
+      FILE_OUTPUT_DIR: "/data/output"
+      HOST_HOME: "${HOME}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    volumes:
+      - ${HOME}:${HOME}
+      - ./data/output:/data/output
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Data Converter - transforms data payloads between consumer and producer
+  data-converter:
+    build:
+      context: .
+      dockerfile: src/cmd/data-converter/Dockerfile
+    container_name: vrsky-data-converter
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      CONVERTER_PORT: "9600"
+      NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+    ports:
+      - "9600:9600"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # DB Producer - receives data from NATS and writes to target databases
+  db-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/db-producer/Dockerfile
+    container_name: vrsky-db-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      DB_PRODUCER_PORT: "9500"
+      NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+    ports:
+      - "9500:9500"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # DB Consumer - connects to external databases and publishes query results to NATS
+  db-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/db-consumer/Dockerfile
+    container_name: vrsky-db-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      DB_CONSUMER_PORT: "9300"
+    ports:
+      - "9300:9300"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
 networks:
   vrsky-network:
     driver: bridge

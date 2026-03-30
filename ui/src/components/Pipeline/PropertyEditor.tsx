@@ -429,6 +429,563 @@ function TenantConsumerConfig({
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
+function DatabaseConsumerConfig({
+  config,
+  setConfig,
+  deployedConnectionId,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  deployedConnectionId?: string
+}) {
+  const [testStatus, setTestStatus] = useState<{ ok?: boolean; error?: string; tables?: string[] } | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const dbConfig = (config.database as Record<string, unknown>) || {}
+  const host = (dbConfig.host as string) || ''
+  const port = (dbConfig.port as number) || 5432
+  const user = (dbConfig.user as string) || ''
+  const password = (dbConfig.password as string) || ''
+  const database = (dbConfig.database as string) || ''
+  const table = (dbConfig.table as string) || ''
+  const query = (dbConfig.query as string) || ''
+  const pollInterval = (dbConfig.poll_interval_seconds as number) || 0
+
+  const updateDB = (updates: Record<string, unknown>) => {
+    setConfig({
+      ...config,
+      database: { ...dbConfig, ...updates },
+    })
+  }
+
+  const testConnection = async () => {
+    setTesting(true)
+    setTestStatus(null)
+    try {
+      const resp = await fetch('http://localhost:9300/test-connection/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host, port, user, password, database, table }),
+      })
+      const data = await resp.json()
+      setTestStatus(data)
+    } catch (err) {
+      setTestStatus({ ok: false, error: 'Cannot reach db-consumer service. Is it running?' })
+    }
+    setTesting(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="localhost or db.example.com"
+          value={host}
+          onChange={(v) => updateDB({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          placeholder="5432"
+          value={String(port)}
+          onChange={(v) => updateDB({ port: parseInt(v) || 5432 })}
+        />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Username"
+          placeholder="postgres"
+          value={user}
+          onChange={(v) => updateDB({ user: v })}
+        />
+        <StyledInput
+          label="Password"
+          placeholder="••••••••"
+          value={password}
+          onChange={(v) => updateDB({ password: v })}
+        />
+      </div>
+      <StyledInput
+        label="Database"
+        placeholder="my_database"
+        value={database}
+        onChange={(v) => updateDB({ database: v })}
+      />
+
+      <button
+        onClick={testConnection}
+        disabled={testing || !host || !database || !user}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          backgroundColor: testing ? '#9ca3af' : '#2563eb',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '13px',
+          fontWeight: 600,
+          cursor: testing ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {testing ? 'Testing...' : 'Test Connection'}
+      </button>
+
+      {testStatus && (
+        <div style={{
+          padding: '8px 12px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          backgroundColor: testStatus.ok ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${testStatus.ok ? '#bbf7d0' : '#fecaca'}`,
+          color: testStatus.ok ? '#166534' : '#991b1b',
+        }}>
+          {testStatus.ok ? (
+            <>
+              <strong>Connected!</strong>
+              {testStatus.tables && testStatus.tables.length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                  Tables: {testStatus.tables.join(', ')}
+                </div>
+              )}
+            </>
+          ) : (
+            <>{testStatus.error}</>
+          )}
+        </div>
+      )}
+
+      {testStatus?.ok && testStatus.tables && testStatus.tables.length > 0 ? (
+        <StyledSelect
+          label="Table"
+          value={table}
+          onChange={(v) => updateDB({ table: v, query: '' })}
+          options={[
+            { value: '', label: 'Select a table...' },
+            ...testStatus.tables.map((t) => ({ value: t, label: t })),
+          ]}
+        />
+      ) : (
+        <StyledInput
+          label="Table"
+          placeholder="users"
+          value={table}
+          onChange={(v) => updateDB({ table: v })}
+        />
+      )}
+
+      <StyledInput
+        label="Custom Query (optional, overrides table)"
+        placeholder="SELECT * FROM users WHERE active = true"
+        value={query}
+        onChange={(v) => updateDB({ query: v })}
+      />
+
+      <StyledInput
+        label="Poll Interval (seconds, 0 = one-shot)"
+        placeholder="0"
+        value={String(pollInterval)}
+        onChange={(v) => updateDB({ poll_interval_seconds: parseInt(v) || 0 })}
+      />
+
+      {deployedConnectionId ? (
+        <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+          <p className="text-xs text-green-600 dark:text-green-300">
+            Pipeline deployed. The database consumer is running and publishing rows to NATS.
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+          Configure the source database, then deploy the pipeline to start pulling data.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function DatabaseProducerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const [testStatus, setTestStatus] = useState<{ ok?: boolean; error?: string; tables?: string[] } | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const dbConfig = (config.database as Record<string, unknown>) || {}
+  const host = (dbConfig.host as string) || ''
+  const port = (dbConfig.port as number) || 5432
+  const user = (dbConfig.user as string) || ''
+  const password = (dbConfig.password as string) || ''
+  const database = (dbConfig.database as string) || ''
+  const table = (dbConfig.table as string) || ''
+  const mode = (dbConfig.mode as string) || 'create_insert'
+
+  const updateDB = (updates: Record<string, unknown>) => {
+    setConfig({
+      ...config,
+      database: { ...dbConfig, ...updates },
+    })
+  }
+
+  const testConnection = async () => {
+    setTesting(true)
+    setTestStatus(null)
+    try {
+      const resp = await fetch('http://localhost:9500/test-connection/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host, port, user, password, database }),
+      })
+      const data = await resp.json()
+      setTestStatus(data)
+    } catch (err) {
+      setTestStatus({ ok: false, error: 'Cannot reach db-producer service. Is it running?' })
+    }
+    setTesting(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="localhost or db.example.com"
+          value={host}
+          onChange={(v) => updateDB({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          placeholder="5432"
+          value={String(port)}
+          onChange={(v) => updateDB({ port: parseInt(v) || 5432 })}
+        />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Username"
+          placeholder="postgres"
+          value={user}
+          onChange={(v) => updateDB({ user: v })}
+        />
+        <StyledInput
+          label="Password"
+          placeholder="••••••••"
+          value={password}
+          onChange={(v) => updateDB({ password: v })}
+        />
+      </div>
+      <StyledInput
+        label="Database"
+        placeholder="my_database"
+        value={database}
+        onChange={(v) => updateDB({ database: v })}
+      />
+
+      <button
+        onClick={testConnection}
+        disabled={testing || !host || !database || !user}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          backgroundColor: testing ? '#9ca3af' : '#2563eb',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '13px',
+          fontWeight: 600,
+          cursor: testing ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {testing ? 'Testing...' : 'Test Connection'}
+      </button>
+
+      {testStatus && (
+        <div style={{
+          padding: '8px 12px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          backgroundColor: testStatus.ok ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${testStatus.ok ? '#bbf7d0' : '#fecaca'}`,
+          color: testStatus.ok ? '#166534' : '#991b1b',
+        }}>
+          {testStatus.ok ? (
+            <>
+              <strong>Connected!</strong>
+              {testStatus.tables && testStatus.tables.length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                  Existing tables: {testStatus.tables.join(', ')}
+                </div>
+              )}
+            </>
+          ) : (
+            <>{testStatus.error}</>
+          )}
+        </div>
+      )}
+
+      <StyledInput
+        label="Target Table"
+        placeholder="my_table"
+        value={table}
+        onChange={(v) => updateDB({ table: v })}
+      />
+
+      <StyledSelect
+        label="Write Mode"
+        value={mode}
+        onChange={(v) => updateDB({ mode: v })}
+        options={[
+          { value: 'create_insert', label: 'Create table + Insert rows' },
+          { value: 'insert', label: 'Insert into existing table' },
+        ]}
+      />
+
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+        Data flowing through the pipeline will be written to this database. For testing, use <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">postgres-target</code> (port 5433).
+      </p>
+    </div>
+  )
+}
+
+function ConverterConfig({
+  config,
+  setConfig,
+  allNodes,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  allNodes?: Node[]
+}) {
+  const outputFormat = (config.output_format as string) || ''
+  const csvDelimiter = (config.csv_delimiter as string) || ','
+  const csvHeaders = (config.csv_headers as boolean) !== false
+  const textTemplate = (config.text_template as string) || ''
+  const xmlRootTag = (config.xml_root_tag as string) || 'records'
+  const xmlRowTag = (config.xml_row_tag as string) || 'record'
+  const mappings = (config.mappings as Array<{ source: string; target: string; type: string; value?: unknown; expression?: string }>) || []
+  const dropUnmapped = (config.drop_unmapped as boolean) || false
+  const [previewInput, setPreviewInput] = useState('')
+  const [previewOutput, setPreviewOutput] = useState('')
+  const [previewing, setPreviewing] = useState(false)
+  const [fetchingSample, setFetchingSample] = useState(false)
+
+  // Get consumer node config for fetching sample data
+  const consumerNode = allNodes?.find(n => n.type === 'consumer')
+  const consumerConfig = consumerNode?.data?.config as Record<string, unknown> | undefined
+  const consumerType = consumerConfig?.type as string | undefined
+
+  const fetchSampleData = async () => {
+    if (!consumerConfig) return
+    setFetchingSample(true)
+    try {
+      if (consumerType === 'database') {
+        const dc = (consumerConfig.database as Record<string, unknown>) || {}
+        const resp = await fetch('http://localhost:9300/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: dc.host, port: dc.port || 5432, user: dc.user,
+            password: dc.password, database: dc.database,
+            table: dc.table, query: dc.query, limit: 3,
+          }),
+        })
+        const data = await resp.json()
+        if (data.ok && data.rows) {
+          setPreviewInput(JSON.stringify(data.rows, null, 2))
+        } else {
+          setPreviewInput('// Error: ' + (data.error || 'No data'))
+        }
+      }
+    } catch (err) {
+      setPreviewInput('// Error fetching sample: ' + (err instanceof Error ? err.message : 'unknown'))
+    }
+    setFetchingSample(false)
+  }
+
+  const updateMapping = (index: number, updates: Record<string, unknown>) => {
+    const newMappings = [...mappings]
+    newMappings[index] = { ...newMappings[index], ...updates } as typeof mappings[number]
+    setConfig({ ...config, mappings: newMappings })
+  }
+
+  const addMapping = () => {
+    setConfig({
+      ...config,
+      mappings: [...mappings, { source: '', target: '', type: 'rename' }],
+    })
+  }
+
+  const removeMapping = (index: number) => {
+    setConfig({
+      ...config,
+      mappings: mappings.filter((_, i) => i !== index),
+    })
+  }
+
+  const runPreview = async () => {
+    setPreviewing(true)
+    try {
+      const resp = await fetch('http://localhost:9600/preview/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mappings, drop_unmapped: dropUnmapped,
+          output_format: outputFormat,
+          csv_delimiter: csvDelimiter, csv_headers: csvHeaders,
+          text_template: textTemplate,
+          xml_root_tag: xmlRootTag, xml_row_tag: xmlRowTag,
+          sample_data: previewInput,
+        }),
+      })
+      const data = await resp.json()
+      setPreviewOutput(data.result_text || JSON.stringify(data.result, null, 2))
+    } catch (err) {
+      setPreviewOutput('Error: ' + (err instanceof Error ? err.message : 'Preview failed'))
+    }
+    setPreviewing(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Output Format */}
+      <StyledSelect
+        label="Output Format"
+        value={outputFormat}
+        onChange={(v) => setConfig({ ...config, output_format: v })}
+        options={[
+          { value: '', label: 'JSON (no conversion)' },
+          { value: 'csv', label: 'CSV' },
+          { value: 'tsv', label: 'TSV (Tab-separated)' },
+          { value: 'xml', label: 'XML' },
+          { value: 'text', label: 'Plain Text (custom template)' },
+          { value: 'yaml', label: 'YAML' },
+          { value: 'ndjson', label: 'NDJSON (line-delimited JSON)' },
+        ]}
+      />
+
+      {outputFormat === 'csv' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'end' }}>
+          <StyledInput
+            label="Delimiter"
+            placeholder=","
+            value={csvDelimiter}
+            onChange={(v) => setConfig({ ...config, csv_delimiter: v })}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#374151', paddingBottom: '8px' }}>
+            <input type="checkbox" checked={csvHeaders} onChange={(e) => setConfig({ ...config, csv_headers: e.target.checked })} />
+            Headers
+          </label>
+        </div>
+      )}
+
+      {outputFormat === 'xml' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <StyledInput label="Root Tag" placeholder="records" value={xmlRootTag} onChange={(v) => setConfig({ ...config, xml_root_tag: v })} />
+          <StyledInput label="Row Tag" placeholder="record" value={xmlRowTag} onChange={(v) => setConfig({ ...config, xml_row_tag: v })} />
+        </div>
+      )}
+
+      {outputFormat === 'text' && (
+        <>
+          <StyledInput
+            label="Text Template (per row)"
+            placeholder="{name} <{email}>"
+            value={textTemplate}
+            onChange={(v) => setConfig({ ...config, text_template: v })}
+          />
+          <p className="text-xs text-neutral-500">Use <code className="bg-neutral-100 px-1 rounded">{'{field_name}'}</code> to insert field values. One line per row.</p>
+        </>
+      )}
+
+      {/* Field Mappings - optional, applied before format conversion */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+          Field Mappings <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional, applied before format conversion)</span>
+        </div>
+
+        {mappings.map((m, i) => (
+          <div key={i} style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+              <select
+                value={m.type || 'rename'}
+                onChange={(e) => updateMapping(i, { type: e.target.value })}
+                style={{ fontSize: '11px', padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: '4px', backgroundColor: '#fff' }}
+              >
+                <option value="rename">Rename</option>
+                <option value="copy">Copy</option>
+                <option value="remove">Remove</option>
+                <option value="static">Static Value</option>
+                <option value="template">Template</option>
+                <option value="to_string">To String</option>
+                <option value="to_number">To Number</option>
+              </select>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => removeMapping(i)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>×</button>
+            </div>
+            {m.type !== 'static' && m.type !== 'template' && (
+              <StyledInput label="Source Field" placeholder="e.g. name or user.email" value={m.source} onChange={(v) => updateMapping(i, { source: v })} />
+            )}
+            {m.type !== 'remove' && (
+              <StyledInput label="Target Field" placeholder="e.g. full_name" value={m.target} onChange={(v) => updateMapping(i, { target: v })} />
+            )}
+            {m.type === 'static' && (
+              <StyledInput label="Value" placeholder="e.g. default_value" value={String(m.value || '')} onChange={(v) => updateMapping(i, { value: v })} />
+            )}
+            {m.type === 'template' && (
+              <StyledInput label="Template" placeholder="e.g. {first_name} {last_name}" value={m.expression || ''} onChange={(v) => updateMapping(i, { expression: v })} />
+            )}
+          </div>
+        ))}
+
+        <button
+          onClick={addMapping}
+          style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
+        >
+          + Add Mapping
+        </button>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', marginTop: '8px' }}>
+          <input type="checkbox" checked={dropUnmapped} onChange={(e) => setConfig({ ...config, drop_unmapped: e.target.checked })} />
+          Drop unmapped fields
+        </label>
+      </div>
+
+      {/* Preview */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Preview</div>
+          {consumerType === 'database' && (
+            <button
+              onClick={fetchSampleData}
+              disabled={fetchingSample}
+              style={{ fontSize: '11px', padding: '2px 8px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: fetchingSample ? 'not-allowed' : 'pointer', color: '#374151' }}
+            >
+              {fetchingSample ? 'Fetching...' : 'Fetch from Consumer'}
+            </button>
+          )}
+        </div>
+        <textarea
+          value={previewInput}
+          onChange={(e) => setPreviewInput(e.target.value)}
+          style={{ width: '100%', height: '80px', padding: '6px 8px', fontSize: '11px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'vertical', boxSizing: 'border-box' }}
+          placeholder={consumerType === 'database' ? 'Click "Fetch from Consumer" to load real data, or paste JSON here' : '[{"field": "value"}]'}
+        />
+        <button
+          onClick={runPreview}
+          disabled={previewing || !previewInput.trim() || (!outputFormat && mappings.length === 0)}
+          style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: previewing ? '#9ca3af' : '#7c3aed', color: '#fff', border: 'none', borderRadius: '6px', cursor: previewing ? 'not-allowed' : 'pointer', marginTop: '4px' }}
+        >
+          {previewing ? 'Running...' : 'Test Transform'}
+        </button>
+        {previewOutput && (
+          <pre style={{ marginTop: '4px', padding: '6px 8px', fontSize: '11px', fontFamily: 'monospace', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', maxHeight: '120px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{previewOutput}</pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ApiConsumerConfig({
   config,
   setConfig,
@@ -745,11 +1302,15 @@ export default function PropertyEditor({
   onUpdate,
   onClose,
   onDelete,
+  deployedConnectionId,
+  allNodes,
 }: {
   node: Node
   onUpdate: (config: Record<string, unknown>) => void
   onClose: () => void
   onDelete?: () => void
+  deployedConnectionId?: string
+  allNodes?: Node[]
 }) {
   const [config, setConfig] = useState(node.data.config || {})
   const [closeHovered, setCloseHovered] = useState(false)
@@ -825,47 +1386,60 @@ export default function PropertyEditor({
             )}
 
             {config.type === 'http' && (
-              <>
-                <StyledInput
-                  label="Webhook URL"
-                  placeholder="https://example.com/webhook"
-                  value={(config.http as any)?.url || ''}
-                  onChange={(value) =>
-                    setConfig({
-                      ...config,
-                      http: { ...(config.http as any), url: value },
-                    })
-                  }
-                />
-                <StyledSelect
-                  label="HTTP Method"
-                  value={(config.http as any)?.method || 'POST'}
-                  onChange={(value) =>
-                    setConfig({
-                      ...config,
-                      http: { ...(config.http as any), method: value },
-                    })
-                  }
-                  options={[
-                    { value: 'POST', label: 'POST' },
-                    { value: 'GET', label: 'GET' },
-                    { value: 'PUT', label: 'PUT' },
-                  ]}
-                />
-              </>
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+                <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">Inbound Webhook</p>
+                {deployedConnectionId ? (
+                  <>
+                    <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">Live webhook URL:</p>
+                    <code className="block text-xs text-blue-800 dark:text-blue-200 bg-blue-100 dark:bg-blue-900/40 p-2 rounded font-mono break-all">
+                      POST http://localhost:9100/webhook/{deployedConnectionId}
+                    </code>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-blue-600 dark:text-blue-300">
+                      Deploy this pipeline to get your webhook URL. External services can POST data to it and it will flow through the pipeline.
+                    </p>
+                    <p className="text-xs text-blue-500 dark:text-blue-400 mt-2 font-mono">
+                      POST http://localhost:9100/webhook/{'<connection-id>'}
+                    </p>
+                  </>
+                )}
+              </div>
             )}
 
             {config.type === 'file' && (
-              <StyledInput
-                label="Watch Directory"
-                placeholder="/tmp/input"
-                value={(config.file as any)?.path || ''}
-                onChange={(value) =>
-                  setConfig({
-                    ...config,
-                    file: { ...(config.file as any), path: value },
-                  })
-                }
+              <div className="space-y-3">
+                <StyledInput
+                  label="Watch Directory"
+                  placeholder="/home/user/my-data"
+                  value={(config.file as any)?.path || ''}
+                  onChange={(value) =>
+                    setConfig({
+                      ...config,
+                      file: { ...(config.file as any), path: value },
+                    })
+                  }
+                />
+                {deployedConnectionId ? (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <p className="text-xs text-green-600 dark:text-green-300">
+                      Watching for new files. You can also upload files via the panel below.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Specify a folder path on your machine. The pipeline will watch it for new files and process them automatically. You can also upload files via the UI after deploying.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {config.type === 'database' && (
+              <DatabaseConsumerConfig
+                config={config}
+                setConfig={setConfig}
+                deployedConnectionId={deployedConnectionId}
               />
             )}
 
@@ -953,6 +1527,10 @@ export default function PropertyEditor({
                     { value: 'PATCH', label: 'PATCH' },
                   ]}
                 />
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                  Data flowing through the pipeline will be forwarded to this URL.
+                  For testing, use <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">http://httpbin:80/post</code>
+                </p>
               </>
             )}
 
@@ -969,11 +1547,22 @@ export default function PropertyEditor({
                 }
               />
             )}
+
+            {config.type === 'database' && (
+              <DatabaseProducerConfig
+                config={config}
+                setConfig={setConfig}
+              />
+            )}
           </div>
         )
 
-      case 'filter':
       case 'converter':
+        return (
+          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} />
+        )
+
+      case 'filter':
         return (
           <div
             style={{

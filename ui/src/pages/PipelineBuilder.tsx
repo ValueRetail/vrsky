@@ -51,6 +51,24 @@ export default function PipelineBuilder() {
   const [deployAttempted, setDeployAttempted] = useState(false)
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
   const canvasContainer = useRef<HTMLDivElement>(null)
+  const [webhookTestPanel, setWebhookTestPanel] = useState<{ url: string; connectionId: string } | null>(null)
+  const [webhookPayload, setWebhookPayload] = useState('{\n  "test": "hello from webhook"\n}')
+  const [webhookSending, setWebhookSending] = useState(false)
+  const [webhookLastStatus, setWebhookLastStatus] = useState<string | null>(null)
+  const [fileUploadPanel, setFileUploadPanel] = useState<{ uploadUrl: string; watchDir: string; connectionId: string } | null>(null)
+  const [fileUploading, setFileUploading] = useState(false)
+  const [fileUploadStatus, setFileUploadStatus] = useState<string | null>(null)
+  const [fileEvents, setFileEvents] = useState<Array<{ type: string; filename?: string; size?: number; time: string; message?: string }>>([])
+  const [httpProducerPanel, setHttpProducerPanel] = useState<{ url: string; connectionId: string } | null>(null)
+  const [httpProducerEvents, setHttpProducerEvents] = useState<Array<{ type: string; message?: string; status_code?: number; time: string; payload?: string; response?: string }>>([])
+  const [expandedEvent, setExpandedEvent] = useState<number | null>(null)
+  const [dbProducerPanel, setDbProducerPanel] = useState<{ table: string; connectionId: string } | null>(null)
+  const [dbProducerEvents, setDbProducerEvents] = useState<Array<{ type: string; message?: string; time: string; count?: number; payload?: string; table?: string; columns?: string[] }>>([])
+  const [expandedDbEvent, setExpandedDbEvent] = useState<number | null>(null)
+  const [deploymentInfo, setDeploymentInfo] = useState<{ connectionId: string; consumerType: string; consumerDetail: string; producerType: string; producerDetail: string; time: string } | null>(null)
+  const [converterPanel, setConverterPanel] = useState<{ connectionId: string } | null>(null)
+  const [converterEvents, setConverterEvents] = useState<Array<{ type: string; message?: string; time: string; before?: string; after?: string; fields?: number }>>([])
+  const [expandedConverterEvent, setExpandedConverterEvent] = useState<number | null>(null)
   const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
@@ -276,6 +294,65 @@ export default function PipelineBuilder() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedEdgeId, handleEdgeDelete])
 
+  // SSE connection for file watcher events
+  useEffect(() => {
+    if (!fileUploadPanel) return
+    setFileEvents([])
+    const evtSource = new EventSource(`http://localhost:9200/events/${fileUploadPanel.connectionId}`)
+    evtSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        setFileEvents((prev) => [event, ...prev].slice(0, 50))
+      } catch { /* ignore parse errors */ }
+    }
+    evtSource.onerror = () => {
+      // Will auto-reconnect
+    }
+    return () => evtSource.close()
+  }, [fileUploadPanel?.connectionId])
+
+  // SSE connection for HTTP producer events
+  useEffect(() => {
+    if (!httpProducerPanel) return
+    setHttpProducerEvents([])
+    const evtSource = new EventSource(`http://localhost:9400/events/${httpProducerPanel.connectionId}`)
+    evtSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        setHttpProducerEvents((prev) => [event, ...prev].slice(0, 50))
+      } catch { /* ignore */ }
+    }
+    return () => evtSource.close()
+  }, [httpProducerPanel?.connectionId])
+
+  // SSE connection for DB producer events
+  useEffect(() => {
+    if (!dbProducerPanel) return
+    setDbProducerEvents([])
+    const evtSource = new EventSource(`http://localhost:9500/events/${dbProducerPanel.connectionId}`)
+    evtSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        setDbProducerEvents((prev) => [event, ...prev].slice(0, 50))
+      } catch { /* ignore */ }
+    }
+    return () => evtSource.close()
+  }, [dbProducerPanel?.connectionId])
+
+  // SSE connection for converter events
+  useEffect(() => {
+    if (!converterPanel) return
+    setConverterEvents([])
+    const evtSource = new EventSource(`http://localhost:9600/events/${converterPanel.connectionId}`)
+    evtSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        setConverterEvents((prev) => [event, ...prev].slice(0, 50))
+      } catch { /* ignore */ }
+    }
+    return () => evtSource.close()
+  }, [converterPanel?.connectionId])
+
   // Validate pipeline on every change to nodes/edges
   const validationResult: ValidationResult = useMemo(() => {
     return validatePipelineConnections(nodes, edges)
@@ -384,12 +461,99 @@ export default function PipelineBuilder() {
       }
 
       // Step 4: Show success notification with details
-      const message = filePath 
-        ? `Pipeline ${connectionId.substring(0, 8)}... deployed and running! Output: ${filePath}`
-        : `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
-      
+      const consumerNode = nodes.find(n => n.type === 'consumer')
+      const isWebhook = consumerNode?.data?.config?.type === 'http'
+      const webhookUrl = isWebhook ? `http://localhost:9100/webhook/${connectionId}` : ''
+
+      let message = `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
+      if (webhookUrl) {
+        message += ` Webhook URL: ${webhookUrl}`
+      } else if (filePath) {
+        message += ` Output: ${filePath}`
+      }
+
       showSuccessNotification('Pipeline Started', message)
-      
+
+      // Build deployment info summary
+      const consumerType = (consumerNode?.data?.config?.type as string) || 'unknown'
+      const producerType = (producerNode?.data?.config?.type as string) || 'unknown'
+      let consumerDetail = ''
+      let producerDetail = ''
+      if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as any)?.path || ''
+      if (consumerType === 'http') consumerDetail = `http://localhost:9100/webhook/${connectionId}`
+      if (consumerType === 'database') {
+        const dc = (consumerNode?.data?.config?.database as any) || {}
+        consumerDetail = `${dc.host || ''}:${dc.port || 5432}/${dc.database || ''} → ${dc.table || dc.query || ''}`
+      }
+      if (producerType === 'file') producerDetail = (producerNode?.data?.config?.file as any)?.path || ''
+      if (producerType === 'http') producerDetail = (producerNode?.data?.config?.http as any)?.url || ''
+      if (producerType === 'database') {
+        const dp = (producerNode?.data?.config?.database as any) || {}
+        producerDetail = `${dp.host || ''}:${dp.port || 5432}/${dp.database || ''} → ${dp.table || ''}`
+      }
+      setDeploymentInfo({ connectionId, consumerType, consumerDetail, producerType, producerDetail, time: new Date().toLocaleTimeString() })
+
+      // Show test panels based on consumer/producer type
+      const isFileWatcher = consumerNode?.data?.config?.type === 'file'
+      const isHttpProducer = producerNode?.data?.config?.type === 'http'
+      const httpTargetUrl = isHttpProducer ? (producerNode?.data?.config?.http as any)?.url || '' : ''
+
+      if (webhookUrl) {
+        setWebhookTestPanel({ url: webhookUrl, connectionId })
+        setWebhookLastStatus(null)
+        setFileUploadPanel(null)
+      } else if (isFileWatcher) {
+        setFileUploadPanel({
+          uploadUrl: `http://localhost:9200/upload/${connectionId}`,
+          watchDir: `./data/input/${connectionId}`,
+          connectionId,
+        })
+        setFileUploadStatus(null)
+        setWebhookTestPanel(null)
+      } else {
+        setWebhookTestPanel(null)
+        setFileUploadPanel(null)
+      }
+
+      // Show HTTP producer panel if applicable
+      const payloadProducer = payload.nodes.find((n: { type: string; config?: Record<string, unknown> }) => n.type === 'producer')
+      const resolvedIsHttp = isHttpProducer || payloadProducer?.config?.type === 'http'
+      const resolvedUrl = httpTargetUrl || (payloadProducer?.config?.http as any)?.url || ''
+
+      if (resolvedIsHttp) {
+        setHttpProducerEvents([])
+        setExpandedEvent(null)
+        setHttpProducerPanel({ url: resolvedUrl, connectionId })
+        setDbProducerPanel(null)
+        console.log('[deploy] HTTP producer panel set', { url: resolvedUrl, connectionId })
+      } else {
+        setHttpProducerPanel(null)
+        console.log('[deploy] No HTTP producer found', { producerConfig: producerNode?.data?.config, payloadConfig: payloadProducer?.config })
+      }
+
+      // Show DB producer panel if applicable
+      const isDbProducer = producerNode?.data?.config?.type === 'database' || payloadProducer?.config?.type === 'database'
+      if (isDbProducer) {
+        const dbTable = (producerNode?.data?.config?.database as any)?.table || (payloadProducer?.config?.database as any)?.table || ''
+        setDbProducerEvents([])
+        setExpandedDbEvent(null)
+        setDbProducerPanel({ table: dbTable, connectionId })
+        setHttpProducerPanel(null)
+      } else {
+        setDbProducerPanel(null)
+      }
+
+      // Show converter panel if pipeline has a converter node with mappings
+      const converterNode = nodes.find(n => n.type === 'converter')
+      const hasMappings = converterNode?.data?.config?.mappings && (converterNode.data.config.mappings as unknown[]).length > 0
+      if (hasMappings) {
+        setConverterEvents([])
+        setExpandedConverterEvent(null)
+        setConverterPanel({ connectionId })
+      } else {
+        setConverterPanel(null)
+      }
+
       // Keep canvas visible - just close property editor and reset deploy state
       setSelectedNode(null)
       setSelectedNodeId(null)
@@ -401,6 +565,48 @@ export default function PipelineBuilder() {
       console.error('Deploy error:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const uploadCountRef = { current: 0 }
+  const handleFileUpload = async (file: File) => {
+    if (!fileUploadPanel) return
+    setFileUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const resp = await fetch(fileUploadPanel.uploadUrl, {
+        method: 'POST',
+        body: formData,
+      })
+      uploadCountRef.current++
+      if (resp.ok) {
+        setFileUploadStatus(`${uploadCountRef.current} file(s) uploaded — last: ${file.name}`)
+      } else {
+        setFileUploadStatus(`${resp.status} ${resp.statusText} — ${file.name}`)
+      }
+    } catch (err) {
+      setFileUploadStatus(`Error: ${err instanceof Error ? err.message : 'Network error'}`)
+    } finally {
+      setFileUploading(false)
+    }
+  }
+
+  const sendWebhookTest = async () => {
+    if (!webhookTestPanel || !webhookPayload.trim()) return
+    setWebhookSending(true)
+    setWebhookLastStatus(null)
+    try {
+      const resp = await fetch(webhookTestPanel.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: webhookPayload,
+      })
+      setWebhookLastStatus(resp.ok ? `${resp.status} Accepted` : `${resp.status} ${resp.statusText}`)
+    } catch (err) {
+      setWebhookLastStatus(`Error: ${err instanceof Error ? err.message : 'Network error'}`)
+    } finally {
+      setWebhookSending(false)
     }
   }
 
@@ -849,6 +1055,275 @@ export default function PipelineBuilder() {
       </div>
       </div>
 
+      {/* UNIFIED BOTTOM PANEL - Shows tabs for active panels */}
+      {(webhookTestPanel || fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel) && (() => {
+        const tabs: Array<{ id: string; label: string; color: string }> = []
+        if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
+        if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
+        if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
+        if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
+        if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
+        const [activeTab, setActiveTab] = [
+          (httpProducerPanel && !webhookTestPanel && !fileUploadPanel) ? 'http'
+            : fileUploadPanel ? 'files'
+            : 'webhook',
+          // We need state for this — use a workaround with the existing state
+          () => {}
+        ]
+        // Actually we need proper state for this. Use a simple approach:
+        // Show the tab content based on which panel was set last.
+        return null
+      })()}
+      {(() => {
+        const tabs: Array<{ id: string; label: string; color: string }> = []
+        if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
+        if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
+        if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
+        if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
+        if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
+        if (tabs.length === 0) return null
+
+        return (
+          <div style={{
+            position: 'fixed', bottom: 0,
+            left: paletteOpen ? '224px' : '0px',
+            right: rightSidebarOpen ? '320px' : '0px',
+            height: '220px', backgroundColor: '#ffffff',
+            borderTop: '2px solid #2563eb', zIndex: 35,
+            display: 'flex', flexDirection: 'column',
+            transition: 'left 150ms ease, right 150ms ease',
+          }}>
+            {/* Tab bar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', borderBottom: '1px solid #e5e7eb',
+              backgroundColor: '#f9fafb', flexShrink: 0,
+            }}>
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    // Switch to this tab by ensuring only its content shows
+                    // We use a data attribute on the panel container
+                    const panel = document.getElementById('bottom-panel-content')
+                    if (panel) panel.setAttribute('data-active-tab', tab.id)
+                    // Force re-render by toggling a dummy state isn't ideal, so we use DOM
+                    document.querySelectorAll('.bottom-tab-content').forEach(el => {
+                      (el as HTMLElement).style.display = el.getAttribute('data-tab') === tab.id ? 'flex' : 'none'
+                    })
+                    document.querySelectorAll('.bottom-tab-btn').forEach(el => {
+                      const isActive = el.getAttribute('data-tab') === tab.id;
+                      (el as HTMLElement).style.borderBottom = isActive ? `2px solid ${tab.color}` : '2px solid transparent';
+                      (el as HTMLElement).style.color = isActive ? tab.color : '#6b7280'
+                    })
+                  }}
+                  className="bottom-tab-btn"
+                  data-tab={tab.id}
+                  style={{
+                    padding: '6px 16px', fontSize: '12px', fontWeight: 600,
+                    background: 'none', border: 'none',
+                    borderBottom: tab.id === tabs[tabs.length - 1].id ? `2px solid ${tab.color}` : '2px solid transparent',
+                    color: tab.id === tabs[tabs.length - 1].id ? tab.color : '#6b7280',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => { setWebhookTestPanel(null); setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setDeploymentInfo(null) }}
+                style={{ padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '16px' }}
+              >×</button>
+            </div>
+
+            {/* Deployment info bar */}
+            {deploymentInfo && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '16px', padding: '4px 16px',
+                backgroundColor: '#f0fdf4', borderBottom: '1px solid #bbf7d0', fontSize: '11px', flexShrink: 0,
+              }}>
+                <span style={{ color: '#16a34a', fontWeight: 700 }}>● DEPLOYED</span>
+                <span style={{ color: '#374151' }}>
+                  <span style={{ color: '#6b7280' }}>Source:</span>{' '}
+                  <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{deploymentInfo.consumerType}</span>
+                  {deploymentInfo.consumerDetail && <code style={{ marginLeft: '4px', backgroundColor: '#e5e7eb', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>{deploymentInfo.consumerDetail}</code>}
+                </span>
+                <span style={{ color: '#d1d5db' }}>→</span>
+                <span style={{ color: '#374151' }}>
+                  <span style={{ color: '#6b7280' }}>Destination:</span>{' '}
+                  <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{deploymentInfo.producerType}</span>
+                  {deploymentInfo.producerDetail && <code style={{ marginLeft: '4px', backgroundColor: '#e5e7eb', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>{deploymentInfo.producerDetail}</code>}
+                </span>
+                <span style={{ color: '#9ca3af', marginLeft: 'auto' }}>ID: {deploymentInfo.connectionId.substring(0, 8)}… · {deploymentInfo.time}</span>
+              </div>
+            )}
+
+            {/* Tab content */}
+            <div id="bottom-panel-content" style={{ flex: 1, overflow: 'hidden' }}>
+              {/* Webhook tab */}
+              {webhookTestPanel && (
+                <div className="bottom-tab-content" data-tab="webhook" style={{ display: tabs[tabs.length - 1].id === 'webhook' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <code style={{ flex: 1, fontSize: '11px', backgroundColor: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{webhookTestPanel.url}</code>
+                      <button onClick={() => { navigator.clipboard.writeText(webhookTestPanel.url); showSuccessNotification('Copied', 'URL copied') }} style={{ padding: '3px 8px', fontSize: '11px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}>Copy</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                      <textarea value={webhookPayload} onChange={(e) => setWebhookPayload(e.target.value)} style={{ flex: 1, height: '80px', padding: '6px 8px', fontSize: '12px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'none' }} placeholder='{"key": "value"}' />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <button onClick={sendWebhookTest} disabled={webhookSending || !webhookPayload.trim()} style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 600, backgroundColor: webhookSending ? '#9ca3af' : '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: webhookSending ? 'not-allowed' : 'pointer' }}>{webhookSending ? 'Sending...' : 'Send Test'}</button>
+                        {webhookLastStatus && <span style={{ fontSize: '11px', color: webhookLastStatus.startsWith('2') ? '#16a34a' : '#dc2626', fontWeight: 500, textAlign: 'center' }}>{webhookLastStatus}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* File watcher tab */}
+              {fileUploadPanel && (
+                <div className="bottom-tab-content" data-tab="files" style={{ display: tabs[tabs.length - 1].id === 'files' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '10px' }}>
+                  <label style={{ width: '180px', flexShrink: 0, border: '2px dashed #d1d5db', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', cursor: fileUploading ? 'not-allowed' : 'pointer', backgroundColor: '#f9fafb', fontSize: '12px', color: '#6b7280', padding: '8px' }}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#16a34a'; e.currentTarget.style.backgroundColor = '#f0fdf4' }}
+                    onDragLeave={(e) => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                    onDrop={async (e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.backgroundColor = '#f9fafb'; const items = e.dataTransfer.items; if (items) { const files: File[] = []; const readEntry = (entry: FileSystemEntry): Promise<void> => new Promise((resolve) => { if (entry.isFile) { (entry as FileSystemFileEntry).file((f) => { files.push(f); resolve() }) } else if (entry.isDirectory) { (entry as FileSystemDirectoryEntry).createReader().readEntries(async (entries) => { for (const ent of entries) await readEntry(ent); resolve() }) } else { resolve() } }); for (let i = 0; i < items.length; i++) { const entry = items[i].webkitGetAsEntry?.(); if (entry) await readEntry(entry) } for (const file of files) await handleFileUpload(file) } else { const file = e.dataTransfer.files[0]; if (file) handleFileUpload(file) } }}
+                  >
+                    <input type="file" multiple style={{ display: 'none' }} onChange={(e) => { const files = e.target.files; if (files) Array.from(files).forEach((f) => handleFileUpload(f)); e.target.value = '' }} disabled={fileUploading} />
+                    <span>{fileUploading ? 'Uploading...' : 'Drop files here\nor click to browse'}</span>
+                  </label>
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px 8px' }}>
+                    {fileEvents.length === 0 ? (
+                      <div style={{ color: '#9ca3af', textAlign: 'center', padding: '12px' }}>Waiting for file activity...</div>
+                    ) : fileEvents.map((evt, i) => (
+                      <div key={i} style={{ padding: '2px 0', color: evt.type === 'error' ? '#dc2626' : '#374151' }}>
+                        <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
+                        <span style={{ fontWeight: 600, color: evt.type === 'added' ? '#2563eb' : evt.type === 'uploaded' ? '#7c3aed' : evt.type === 'deleted' ? '#ea580c' : evt.type === 'error' ? '#dc2626' : '#6b7280' }}>{evt.type.toUpperCase()}</span>{' '}
+                        {evt.filename && <span>{evt.filename}</span>}
+                        {evt.size != null && evt.size > 0 && <span style={{ color: '#9ca3af' }}> ({(evt.size / 1024).toFixed(1)} KB)</span>}
+                        {evt.message && <span> — {evt.message}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Converter tab */}
+              {converterPanel && (
+                <div className="bottom-tab-content" data-tab="converter" style={{ display: tabs[tabs.length - 1].id === 'converter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
+                    {converterEvents.length === 0 ? (
+                      <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for converter activity...</p>
+                    ) : converterEvents.map((evt, i) => (
+                      <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
+                        <div style={{ padding: '2px 0', cursor: (evt.before || evt.after) ? 'pointer' : 'default' }} onClick={() => (evt.before || evt.after) && setExpandedConverterEvent(expandedConverterEvent === i ? null : i)}>
+                          <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
+                          <span style={{ fontWeight: 600, color: evt.type === 'converted' ? '#16a34a' : evt.type === 'error' ? '#dc2626' : evt.type === 'info' ? '#2563eb' : '#6b7280' }}>
+                            {evt.type === 'converted' ? '\u2713 CONVERTED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
+                          </span>{' '}
+                          {evt.message && <span style={{ color: '#374151' }}>{evt.message}</span>}
+                          {(evt.before || evt.after) && <span style={{ color: '#9ca3af', marginLeft: '8px' }}>{expandedConverterEvent === i ? '\u25BC' : '\u25B6'} details</span>}
+                        </div>
+                        {expandedConverterEvent === i && (
+                          <div style={{ marginTop: '4px', display: 'flex', gap: '8px' }}>
+                            {evt.before && (
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>BEFORE</div>
+                                <pre style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.before), null, 2) } catch { return evt.before } })()}</pre>
+                              </div>
+                            )}
+                            {evt.after && (
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>AFTER</div>
+                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.after), null, 2) } catch { return evt.after } })()}</pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* HTTP producer tab */}
+              {httpProducerPanel && (
+                <div className="bottom-tab-content" data-tab="http" style={{ display: tabs[tabs.length - 1].id === 'http' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                  <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>
+                    Target: <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: '3px' }}>{httpProducerPanel.url}</code>
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
+                    {httpProducerEvents.length === 0 ? (
+                      <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for HTTP activity...</p>
+                    ) : httpProducerEvents.map((evt, i) => (
+                      <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
+                        <div style={{ padding: '2px 0', cursor: (evt.payload || evt.response) ? 'pointer' : 'default' }} onClick={() => (evt.payload || evt.response) && setExpandedEvent(expandedEvent === i ? null : i)}>
+                          <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
+                          <span style={{ fontWeight: 600, color: evt.type === 'sent' ? '#16a34a' : evt.type === 'error' ? '#dc2626' : evt.type === 'info' ? '#2563eb' : '#6b7280' }}>
+                            {evt.type === 'sent' ? '\u2713 SENT' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
+                          </span>{' '}
+                          {evt.message && <span style={{ color: '#374151' }}>{evt.message}</span>}
+                          {(evt.payload || evt.response) && <span style={{ color: '#9ca3af', marginLeft: '8px' }}>{expandedEvent === i ? '\u25BC' : '\u25B6'} details</span>}
+                        </div>
+                        {expandedEvent === i && (
+                          <div style={{ marginTop: '4px', display: 'flex', gap: '8px' }}>
+                            {evt.payload && (
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>REQUEST BODY</div>
+                                <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
+                              </div>
+                            )}
+                            {evt.response && (
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>RESPONSE</div>
+                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.response), null, 2) } catch { return evt.response } })()}</pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* DB producer tab */}
+              {dbProducerPanel && (
+                <div className="bottom-tab-content" data-tab="dbout" style={{ display: tabs[tabs.length - 1].id === 'dbout' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                  <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>
+                    Target table: <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: '3px' }}>{dbProducerPanel.table || '(auto)'}</code>
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
+                    {dbProducerEvents.length === 0 ? (
+                      <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for database write activity...</p>
+                    ) : dbProducerEvents.map((evt, i) => (
+                      <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
+                        <div style={{ padding: '2px 0', cursor: evt.payload ? 'pointer' : 'default' }} onClick={() => evt.payload && setExpandedDbEvent(expandedDbEvent === i ? null : i)}>
+                          <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
+                          <span style={{ fontWeight: 600, color: evt.type === 'inserted' ? '#16a34a' : evt.type === 'created' ? '#2563eb' : evt.type === 'error' ? '#dc2626' : '#6b7280' }}>
+                            {evt.type === 'inserted' ? '\u2713 INSERTED' : evt.type === 'created' ? '\u2713 CREATED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
+                          </span>{' '}
+                          {evt.message && <span style={{ color: '#374151' }}>{evt.message}</span>}
+                          {evt.payload && <span style={{ color: '#9ca3af', marginLeft: '8px' }}>{expandedDbEvent === i ? '\u25BC' : '\u25B6'} details</span>}
+                        </div>
+                        {expandedDbEvent === i && evt.payload && (
+                          <div style={{ marginTop: '4px', display: 'flex', gap: '8px' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>
+                                DATA{evt.table ? ` → ${evt.table}` : ''}{evt.columns ? ` (${evt.columns.join(', ')})` : ''}
+                              </div>
+                              <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '120px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* RIGHT SIDEBAR - Property Editor (Fixed Overlay) */}
       {rightSidebarOpen && (
         <aside style={{ 
@@ -867,6 +1342,8 @@ export default function PipelineBuilder() {
             onUpdate={updateNodeConfig}
             onClose={handleClosePropertyEditor}
             onDelete={handleNodeDelete}
+            deployedConnectionId={activeCanvas?.deployedConnectionId}
+            allNodes={nodes}
           />
         </aside>
       )}

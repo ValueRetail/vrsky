@@ -49,10 +49,11 @@ type FileProducerService struct {
 
 // ConnectionConfig holds the file output configuration for a connection
 type ConnectionConfig struct {
-	ID          string
-	TenantID    string
-	OutputPath  string
-	FilePattern string
+	ID           string
+	TenantID     string
+	OutputPath   string
+	FilePattern  string
+	HasConverter bool // true if pipeline has a converter node
 }
 
 func main() {
@@ -213,6 +214,17 @@ func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		return
 	}
 
+	// If pipeline has a converter, only process converted messages
+	if config.HasConverter {
+		if env.Metadata == nil {
+			return
+		}
+		if _, ok := env.Metadata["_converted"]; !ok {
+			s.logger.Debug("Skipping unconverted message (converter in pipeline)", "connection_id", connectionID)
+			return
+		}
+	}
+
 	// Determine output path
 	outputPath := config.OutputPath
 	if outputPath == "" {
@@ -280,6 +292,15 @@ func (s *FileProducerService) getConnectionConfig(ctx context.Context, connectio
 		return config, nil
 	}
 
+	// Check if pipeline has a converter node
+	hasConverter := false
+	for _, node := range nodes {
+		if node.Type == "converter" {
+			hasConverter = true
+			break
+		}
+	}
+
 	// Find the file producer node
 	for _, node := range nodes {
 		if node.Type != "producer" {
@@ -303,9 +324,10 @@ func (s *FileProducerService) getConnectionConfig(ctx context.Context, connectio
 		}
 
 		config := &ConnectionConfig{
-			ID:          connectionID,
-			OutputPath:  expandHomePath(nodeConfig.File.Path),
-			FilePattern: nodeConfig.File.FilePattern,
+			ID:           connectionID,
+			OutputPath:   expandHomePath(nodeConfig.File.Path),
+			FilePattern:  nodeConfig.File.FilePattern,
+			HasConverter: hasConverter,
 		}
 
 		s.cacheConfig(connectionID, config)
@@ -366,8 +388,22 @@ func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envel
 // generateFilename creates a filename from the envelope and pattern
 func (s *FileProducerService) generateFilename(env *envelope.Envelope, pattern string) string {
 	if pattern == "" {
-		// Default pattern: {id}.{extension}
 		ext := s.deriveExtension(env.ContentType)
+		// Prefer original filename from metadata if available
+		if env.Metadata != nil {
+			if fn, ok := env.Metadata["filename"].(string); ok && fn != "" {
+				// If the data was converted to a different format, update the extension
+				if _, converted := env.Metadata["_converted"]; converted {
+					baseName := fn
+					if dotIdx := strings.LastIndex(fn, "."); dotIdx >= 0 {
+						baseName = fn[:dotIdx]
+					}
+					return sanitizeForFilename(baseName + "." + ext)
+				}
+				return sanitizeForFilename(fn)
+			}
+		}
+		// Default pattern: {id}.{extension}
 		return fmt.Sprintf("%s.%s", env.ID, ext)
 	}
 
@@ -394,8 +430,12 @@ func (s *FileProducerService) deriveExtension(contentType string) string {
 		return "xml"
 	case strings.Contains(contentType, "application/yaml"), strings.Contains(contentType, "text/yaml"):
 		return "yaml"
+	case strings.Contains(contentType, "application/x-ndjson"):
+		return "ndjson"
 	case strings.Contains(contentType, "text/html"):
 		return "html"
+	case strings.Contains(contentType, "text/tab-separated-values"):
+		return "tsv"
 	default:
 		return "bin"
 	}

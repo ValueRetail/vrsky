@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	// Setup logging
 	logLevel := slog.LevelInfo
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		logLevel = slog.LevelDebug
@@ -23,14 +24,16 @@ func main() {
 		Level: logLevel,
 	}))
 
+	// Load configuration
 	config := LoadConfig()
 	if err := config.Validate(); err != nil {
 		logger.Error("Invalid configuration", "error", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Starting File Consumer Service", "version", "1.0.0", "port", config.Port, "base_dir", config.BaseDir)
+	logger.Info("Starting Webhook Consumer Service", "version", "1.0.0", "port", config.WebhookPort)
 
+	// Initialize database connection
 	db, err := initDatabase(config.DatabaseURL, logger)
 	if err != nil {
 		logger.Error("Failed to initialize database", "error", err)
@@ -38,6 +41,7 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize NATS connection
 	nc, err := initNATS(config.NATSUrl, logger)
 	if err != nil {
 		logger.Error("Failed to initialize NATS", "error", err)
@@ -45,21 +49,25 @@ func main() {
 	}
 	defer nc.Close()
 
-	service := NewFileConsumerService(db, nc, logger, config)
+	// Create Webhook Consumer Service
+	service := NewWebhookConsumerService(db, nc, logger, config)
 
+	// Start service
 	ctx := context.Background()
 	if err := service.Start(ctx); err != nil {
-		logger.Error("Failed to start File Consumer Service", "error", err)
+		logger.Error("Failed to start Webhook Consumer Service", "error", err)
 		os.Exit(1)
 	}
 
+	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	logger.Info("File Consumer Service running. Press Ctrl+C to stop.")
+	logger.Info("Webhook Consumer Service running. Press Ctrl+C to stop.")
 	<-sigChan
 
-	logger.Info("Shutting down File Consumer Service...")
+	// Graceful shutdown
+	logger.Info("Shutting down Webhook Consumer Service...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -67,9 +75,10 @@ func main() {
 		logger.Error("Error during shutdown", "error", err)
 	}
 
-	logger.Info("File Consumer Service stopped")
+	logger.Info("Webhook Consumer Service stopped")
 }
 
+// initDatabase initializes PostgreSQL connection pool
 func initDatabase(dbURL string, logger *slog.Logger) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
@@ -91,6 +100,7 @@ func initDatabase(dbURL string, logger *slog.Logger) (*sql.DB, error) {
 	return db, nil
 }
 
+// initNATS initializes NATS connection
 func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {
 	nc, err := nats.Connect(
 		natsURL,
@@ -103,6 +113,7 @@ func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {
 			logger.Info("NATS reconnected", "url", nc.ConnectedUrl())
 		}),
 	)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
