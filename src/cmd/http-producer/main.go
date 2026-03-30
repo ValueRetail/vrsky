@@ -36,8 +36,8 @@ type HTTPProducerService struct {
 	logger *slog.Logger
 	config *Config
 
-	// Cache for connection HTTP configs
-	configCache     map[string]*HTTPConfig
+	// Cache for connection HTTP configs (multiple producer nodes per connection)
+	configCache     map[string][]*HTTPConfig
 	configCacheMu   sync.RWMutex
 	configCacheTime map[string]time.Time
 	configCacheTTL  time.Duration
@@ -117,7 +117,7 @@ func main() {
 		db:              db,
 		logger:          logger,
 		config:          config,
-		configCache:     make(map[string]*HTTPConfig),
+		configCache:     make(map[string][]*HTTPConfig),
 		configCacheTime: make(map[string]time.Time),
 		configCacheTTL:  5 * time.Minute,
 		eventSubs:       make(map[string][]chan HTTPEvent),
@@ -169,10 +169,11 @@ func (s *HTTPProducerService) Start(ctx context.Context) error {
 }
 
 type HTTPConfig struct {
-	URL          string            `json:"url"`
-	Method       string            `json:"method"`
-	Headers      map[string]string `json:"headers"`
-	HasConverter bool
+	URL            string            `json:"url"`
+	Method         string            `json:"method"`
+	Headers        map[string]string `json:"headers"`
+	PredecessorID  string
+	PredIsConsumer bool
 }
 
 func (s *HTTPProducerService) Stop() {
@@ -199,23 +200,33 @@ func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		return
 	}
 
-	httpCfg, err := s.getHTTPConfig(ctx, connectionID)
+	httpConfigs, err := s.getHTTPConfigs(ctx, connectionID)
 	if err != nil {
 		s.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
 		return
 	}
 
-	// If pipeline has a converter, only process converted messages
-	if httpCfg.HasConverter {
-		if env.Metadata == nil {
-			return
-		}
-		if _, ok := env.Metadata["_converted"]; !ok {
-			return
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
 		}
 	}
 
-	// Truncate payload for UI display
+	for _, httpCfg := range httpConfigs {
+		// Predecessor-based routing
+		if httpCfg.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !httpCfg.PredIsConsumer && httpCfg.PredecessorID != "" && lastProcessedBy != httpCfg.PredecessorID {
+			continue
+		}
+
+		s.sendHTTPRequest(ctx, connectionID, httpCfg, &env)
+	}
+}
+
+func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID string, httpCfg *HTTPConfig, env *envelope.Envelope) {
 	payloadPreview := string(env.Payload)
 	if len(payloadPreview) > 2000 {
 		payloadPreview = payloadPreview[:2000] + "..."
@@ -228,7 +239,6 @@ func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		Time:    time.Now().UTC().Format(time.RFC3339),
 	})
 
-	// Make the HTTP request directly so we can capture the response
 	method := httpCfg.Method
 	if method == "" {
 		method = "POST"
@@ -265,33 +275,27 @@ func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 	}
 	defer resp.Body.Close()
 
-	// Read response body (truncated)
 	respBody, _ := iolib.ReadAll(iolib.LimitReader(resp.Body, 4096))
 	respPreview := string(respBody)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		s.logger.Info("HTTP request sent", "connection_id", connectionID, "status", resp.StatusCode, "size", len(env.Payload))
 		s.emitEvent(connectionID, HTTPEvent{
-			Type:       "sent",
-			Message:    fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
-			StatusCode: resp.StatusCode,
-			Payload:    payloadPreview,
-			Response:   respPreview,
-			Time:       time.Now().UTC().Format(time.RFC3339),
+			Type: "sent", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
+			StatusCode: resp.StatusCode, Payload: payloadPreview, Response: respPreview,
+			Time: time.Now().UTC().Format(time.RFC3339),
 		})
 	} else {
 		s.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID)
 		s.emitEvent(connectionID, HTTPEvent{
-			Type:       "error",
-			Message:    fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
-			StatusCode: resp.StatusCode,
-			Response:   respPreview,
-			Time:       time.Now().UTC().Format(time.RFC3339),
+			Type: "error", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
+			StatusCode: resp.StatusCode, Response: respPreview,
+			Time: time.Now().UTC().Format(time.RFC3339),
 		})
 	}
 }
 
-func (s *HTTPProducerService) getHTTPConfig(ctx context.Context, connectionID string) (*HTTPConfig, error) {
+func (s *HTTPProducerService) getHTTPConfigs(ctx context.Context, connectionID string) ([]*HTTPConfig, error) {
 	// Check cache
 	s.configCacheMu.RLock()
 	if cfg, ok := s.configCache[connectionID]; ok {
@@ -303,8 +307,8 @@ func (s *HTTPProducerService) getHTTPConfig(ctx context.Context, connectionID st
 	s.configCacheMu.RUnlock()
 
 	// Query DB for connection config
-	var nodesJSON []byte
-	err := s.db.QueryRowContext(ctx, `SELECT nodes FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON)
+	var nodesJSON, edgesJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
@@ -318,14 +322,15 @@ func (s *HTTPProducerService) getHTTPConfig(ctx context.Context, connectionID st
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
 	}
 
-	hasConverter := false
-	for _, node := range nodes {
-		if node.Type == "converter" {
-			hasConverter = true
-			break
-		}
+	var edges []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	if edgesJSON != nil {
+		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	var configs []*HTTPConfig
 	for _, node := range nodes {
 		if node.Type != "producer" {
 			continue
@@ -346,23 +351,40 @@ func (s *HTTPProducerService) getHTTPConfig(ctx context.Context, connectionID st
 			continue
 		}
 
-		cfg := &HTTPConfig{
-			URL:          nodeConfig.HTTP.URL,
-			Method:       nodeConfig.HTTP.Method,
-			Headers:      nodeConfig.HTTP.Headers,
-			HasConverter: hasConverter,
+		var predID string
+		var predIsConsumer bool
+		for _, e := range edges {
+			if e.Target == node.ID {
+				predID = e.Source
+				for _, n := range nodes {
+					if n.ID == predID && n.Type == "consumer" {
+						predIsConsumer = true
+						break
+					}
+				}
+				break
+			}
 		}
 
-		// Cache it
-		s.configCacheMu.Lock()
-		s.configCache[connectionID] = cfg
-		s.configCacheTime[connectionID] = time.Now()
-		s.configCacheMu.Unlock()
-
-		return cfg, nil
+		configs = append(configs, &HTTPConfig{
+			URL:            nodeConfig.HTTP.URL,
+			Method:         nodeConfig.HTTP.Method,
+			Headers:        nodeConfig.HTTP.Headers,
+			PredecessorID:  predID,
+			PredIsConsumer: predIsConsumer,
+		})
 	}
 
-	return nil, fmt.Errorf("no HTTP producer config found")
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("no HTTP producer config found")
+	}
+
+	s.configCacheMu.Lock()
+	s.configCache[connectionID] = configs
+	s.configCacheTime[connectionID] = time.Now()
+	s.configCacheMu.Unlock()
+
+	return configs, nil
 }
 
 // --- Event broadcasting ---

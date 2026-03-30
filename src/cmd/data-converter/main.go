@@ -52,16 +52,29 @@ type ConverterNodeConfig struct {
 	XmlRowTag    string `json:"xml_row_tag"`
 }
 
+// ConverterEntry represents one converter node in the pipeline with its routing info
+type ConverterEntry struct {
+	NodeID         string
+	Config         *ConverterNodeConfig
+	PredecessorID  string // node that must have processed before us
+	PredIsConsumer bool   // if true, process when _last_processed_by is empty
+}
+
+// ConverterPipelineInfo holds all converter entries for a connection
+type ConverterPipelineInfo struct {
+	Entries []*ConverterEntry
+}
+
 type ConverterService struct {
 	nc     *nats.Conn
 	db     *sql.DB
 	logger *slog.Logger
 	config *Config
 
-	configCache     map[string]*ConverterNodeConfig
-	configCacheMu   sync.RWMutex
-	configCacheTime map[string]time.Time
-	configCacheTTL  time.Duration
+	pipelineCache     map[string]*ConverterPipelineInfo
+	pipelineCacheMu   sync.RWMutex
+	pipelineCacheTime map[string]time.Time
+	pipelineCacheTTL  time.Duration
 
 	eventSubs      map[string][]chan ConvertEvent
 	eventSubsMu    sync.RWMutex
@@ -131,13 +144,13 @@ func main() {
 	defer nc.Close()
 
 	service := &ConverterService{
-		nc:              nc,
-		db:              db,
-		logger:          logger,
-		config:          config,
-		configCache:     make(map[string]*ConverterNodeConfig),
-		configCacheTime: make(map[string]time.Time),
-		configCacheTTL:  5 * time.Minute,
+		nc:                nc,
+		db:                db,
+		logger:            logger,
+		config:            config,
+		pipelineCache:     make(map[string]*ConverterPipelineInfo),
+		pipelineCacheTime: make(map[string]time.Time),
+		pipelineCacheTTL:  5 * time.Minute,
 		eventSubs:       make(map[string][]chan ConvertEvent),
 		recentEvents:    make(map[string][]ConvertEvent),
 		stopCh:          make(chan struct{}),
@@ -194,13 +207,6 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	// Skip messages already converted (prevent loop)
-	if env.Metadata != nil {
-		if _, ok := env.Metadata["_converted"]; ok {
-			return
-		}
-	}
-
 	connectionID := env.IntegrationID
 	if connectionID == "" {
 		parts := strings.Split(msg.Subject, ".")
@@ -212,20 +218,45 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	converterCfg, err := s.getConverterConfig(ctx, connectionID)
-	if err != nil {
-		s.logger.Debug("No converter config", "connection_id", connectionID)
+	info, err := s.getPipelineInfo(ctx, connectionID)
+	if err != nil || info == nil || len(info.Entries) == 0 {
 		return
 	}
+
+	// Find which converter entry should handle this message based on predecessor
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
+		}
+	}
+
+	// Process ALL matching entries (not just the first) for branching pipelines
+	for _, entry := range info.Entries {
+		if entry.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !entry.PredIsConsumer && entry.PredecessorID != "" && lastProcessedBy != entry.PredecessorID {
+			continue
+		}
+
+		s.processEntry(ctx, connectionID, msg.Subject, &env, entry)
+	}
+}
+
+func (s *ConverterService) processEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *ConverterEntry) {
+	converterCfg := entry.Config
 	hasMapping := len(converterCfg.Mappings) > 0
 	hasFormat := converterCfg.OutputFormat != ""
 	if !hasMapping && !hasFormat {
-		return // nothing to do
+		return
 	}
 
-	// Parse the payload as JSON
+	// Work on a copy of the original payload to avoid mutating shared state
+	payload := make([]byte, len(origEnv.Payload))
+	copy(payload, origEnv.Payload)
+
 	var data interface{}
-	payload := env.Payload
 	if err := json.Unmarshal(payload, &data); err != nil {
 		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload is not valid JSON: " + err.Error(), Time: now()})
 		return
@@ -236,7 +267,6 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		beforePreview = beforePreview[:2000] + "..."
 	}
 
-	// Step 1: Apply field mappings (if any)
 	var transformed interface{} = data
 	var fieldCount int
 	if hasMapping {
@@ -260,7 +290,6 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		}
 	}
 
-	// Step 2: Apply format conversion (if any)
 	var newPayload []byte
 	var newContentType string
 	formatLabel := "JSON"
@@ -285,14 +314,17 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		afterPreview = afterPreview[:2000] + "..."
 	}
 
-	// Update envelope
+	// Build a new envelope copy for this branch
+	env := *origEnv
 	env.Payload = newPayload
 	if newContentType != "" {
 		env.ContentType = newContentType
 	}
-	if env.Metadata == nil {
-		env.Metadata = make(map[string]interface{})
+	env.Metadata = make(map[string]interface{})
+	for k, v := range origEnv.Metadata {
+		env.Metadata[k] = v
 	}
+	env.Metadata["_last_processed_by"] = entry.NodeID
 	env.Metadata["_converted"] = true
 	if hasFormat {
 		env.Metadata["_output_format"] = converterCfg.OutputFormat
@@ -303,7 +335,7 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	if err := s.nc.Publish(msg.Subject, envData); err != nil {
+	if err := s.nc.Publish(subject, envData); err != nil {
 		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
 		return
 	}
@@ -632,20 +664,20 @@ func convertNDJSON(rows []map[string]interface{}) string {
 	return sb.String()
 }
 
-// --- Config lookup ---
+// --- Pipeline info with predecessor-based routing ---
 
-func (s *ConverterService) getConverterConfig(ctx context.Context, connectionID string) (*ConverterNodeConfig, error) {
-	s.configCacheMu.RLock()
-	if cfg, ok := s.configCache[connectionID]; ok {
-		if time.Since(s.configCacheTime[connectionID]) < s.configCacheTTL {
-			s.configCacheMu.RUnlock()
-			return cfg, nil
+func (s *ConverterService) getPipelineInfo(ctx context.Context, connectionID string) (*ConverterPipelineInfo, error) {
+	s.pipelineCacheMu.RLock()
+	if info, ok := s.pipelineCache[connectionID]; ok {
+		if time.Since(s.pipelineCacheTime[connectionID]) < s.pipelineCacheTTL {
+			s.pipelineCacheMu.RUnlock()
+			return info, nil
 		}
 	}
-	s.configCacheMu.RUnlock()
+	s.pipelineCacheMu.RUnlock()
 
-	var nodesJSON []byte
-	err := s.db.QueryRowContext(ctx, `SELECT nodes FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON)
+	var nodesJSON, edgesJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
@@ -659,6 +691,22 @@ func (s *ConverterService) getConverterConfig(ctx context.Context, connectionID 
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
 	}
 
+	var edges []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	if edgesJSON != nil {
+		_ = json.Unmarshal(edgesJSON, &edges)
+	}
+
+	// Build node type lookup
+	nodeTypes := make(map[string]string)
+	for _, n := range nodes {
+		nodeTypes[n.ID] = n.Type
+	}
+
+	// For each converter node, find its predecessor (incoming edge source)
+	var entries []*ConverterEntry
 	for _, node := range nodes {
 		if node.Type != "converter" {
 			continue
@@ -668,15 +716,36 @@ func (s *ConverterService) getConverterConfig(ctx context.Context, connectionID 
 			continue
 		}
 
-		s.configCacheMu.Lock()
-		s.configCache[connectionID] = &cfg
-		s.configCacheTime[connectionID] = time.Now()
-		s.configCacheMu.Unlock()
+		// Find incoming edge to this converter
+		var predID string
+		var predIsConsumer bool
+		for _, e := range edges {
+			if e.Target == node.ID {
+				predID = e.Source
+				predIsConsumer = nodeTypes[e.Source] == "consumer"
+				break
+			}
+		}
 
-		return &cfg, nil
+		entries = append(entries, &ConverterEntry{
+			NodeID:         node.ID,
+			Config:         &cfg,
+			PredecessorID:  predID,
+			PredIsConsumer: predIsConsumer,
+		})
 	}
 
-	return nil, fmt.Errorf("no converter config found")
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("no converter config found")
+	}
+
+	info := &ConverterPipelineInfo{Entries: entries}
+	s.pipelineCacheMu.Lock()
+	s.pipelineCache[connectionID] = info
+	s.pipelineCacheTime[connectionID] = time.Now()
+	s.pipelineCacheMu.Unlock()
+
+	return info, nil
 }
 
 // --- Events ---

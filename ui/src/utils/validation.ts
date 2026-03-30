@@ -290,24 +290,20 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     }
   }
 
-  // Rule 1: Exactly 1 consumer
+  // Rule 1: At least 1 consumer
   const consumers = nodes.filter((n) => n.type === 'consumer')
   if (consumers.length === 0) {
-    errors.push('Pipeline must have exactly 1 Consumer (found 0)')
-  } else if (consumers.length > 1) {
-    errors.push(`Pipeline must have exactly 1 Consumer (found ${consumers.length})`)
+    errors.push('Pipeline must have at least 1 Consumer')
   }
 
-  // Rule 2: Exactly 1 producer
+  // Rule 2: At least 1 producer
   const producers = nodes.filter((n) => n.type === 'producer')
   if (producers.length === 0) {
-    errors.push('Pipeline must have exactly 1 Producer (found 0)')
-  } else if (producers.length > 1) {
-    errors.push(`Pipeline must have exactly 1 Producer (found ${producers.length})`)
+    errors.push('Pipeline must have at least 1 Producer')
   }
 
-  // If we don't have exactly 1 consumer and 1 producer, can't continue validation
-  if (consumers.length !== 1 || producers.length !== 1) {
+  // If we don't have at least 1 consumer and 1 producer, can't continue validation
+  if (consumers.length === 0 || producers.length === 0) {
     return { valid: false, errors, warnings }
   }
 
@@ -334,22 +330,26 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     }
   }
 
-  // Rule 4: Consumer has outgoing edges
-  if (!hasOutgoingEdge(consumer.id, edges)) {
-    errors.push(`Consumer '${getNodeLabel(consumer)}' is not connected to any other nodes`)
+  // Rule 4: Each consumer has outgoing edges
+  for (const c of consumers) {
+    if (!hasOutgoingEdge(c.id, edges)) {
+      errors.push(`Consumer '${getNodeLabel(c)}' is not connected to any other nodes`)
+    }
   }
 
-  // Rule 5: Producer has incoming edges
-  if (!hasIncomingEdge(producer.id, edges)) {
-    errors.push(`Producer '${getNodeLabel(producer)}' has no incoming connections`)
+  // Rule 5: Each producer has incoming edges
+  for (const p of producers) {
+    if (!hasIncomingEdge(p.id, edges)) {
+      errors.push(`Producer '${getNodeLabel(p)}' has no incoming connections`)
+    }
   }
 
-  // Rule 6: Producer is reachable from consumer
-  if (hasOutgoingEdge(consumer.id, edges) && hasIncomingEdge(producer.id, edges)) {
-    if (!isReachable(consumer.id, producer.id, edges)) {
-      errors.push(
-        `Producer '${getNodeLabel(producer)}' is not reachable from Consumer '${getNodeLabel(consumer)}'`
-      )
+  // Rule 6: Each producer is reachable from at least one consumer
+  for (const p of producers) {
+    if (!hasIncomingEdge(p.id, edges)) continue
+    const reachable = consumers.some((c) => hasOutgoingEdge(c.id, edges) && isReachable(c.id, p.id, edges))
+    if (!reachable) {
+      errors.push(`Producer '${getNodeLabel(p)}' is not reachable from any Consumer`)
     }
   }
 
@@ -364,9 +364,41 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     errors.push(`Cycle detected in pipeline: ${cycleLabels.join(' -> ')}`)
   }
 
-  // Rule 8: No orphaned nodes (only check if no cycles and producer is reachable)
-  if (cyclePath === null && isReachable(consumer.id, producer.id, edges)) {
-    const orphaned = findOrphanedNodes(nodes, edges, consumer.id, producer.id)
+  // Rule 8: No orphaned nodes (only check if no cycles)
+  if (cyclePath === null) {
+    // Collect all nodes reachable from any consumer
+    const reachableFromConsumers = new Set<string>()
+    for (const c of consumers) {
+      const visited = new Set<string>()
+      const queue = [c.id]
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        if (visited.has(current)) continue
+        visited.add(current)
+        reachableFromConsumers.add(current)
+        for (const edge of edges) {
+          if (edge.source === current) queue.push(edge.target)
+        }
+      }
+    }
+    // Collect all nodes that can reach any producer (reverse traversal)
+    const canReachProducers = new Set<string>()
+    for (const p of producers) {
+      const visited = new Set<string>()
+      const queue = [p.id]
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        if (visited.has(current)) continue
+        visited.add(current)
+        canReachProducers.add(current)
+        for (const edge of edges) {
+          if (edge.target === current) queue.push(edge.source)
+        }
+      }
+    }
+    const orphaned = nodes
+      .filter((n) => !reachableFromConsumers.has(n.id) || !canReachProducers.has(n.id))
+      .map((n) => n.id)
     if (orphaned.length > 0) {
       const orphanedLabels = orphaned.map((id) => {
         const node = nodes.find((n) => n.id === id)

@@ -69,6 +69,9 @@ export default function PipelineBuilder() {
   const [converterPanel, setConverterPanel] = useState<{ connectionId: string } | null>(null)
   const [converterEvents, setConverterEvents] = useState<Array<{ type: string; message?: string; time: string; before?: string; after?: string; fields?: number }>>([])
   const [expandedConverterEvent, setExpandedConverterEvent] = useState<number | null>(null)
+  const [filterPanel, setFilterPanel] = useState<{ connectionId: string } | null>(null)
+  const [filterEvents, setFilterEvents] = useState<Array<{ type: string; message?: string; time: string; data?: string; rules?: number }>>([])
+  const [expandedFilterEvent, setExpandedFilterEvent] = useState<number | null>(null)
   const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
@@ -353,6 +356,20 @@ export default function PipelineBuilder() {
     return () => evtSource.close()
   }, [converterPanel?.connectionId])
 
+  // SSE connection for filter events
+  useEffect(() => {
+    if (!filterPanel) return
+    setFilterEvents([])
+    const evtSource = new EventSource(`http://localhost:9700/events/${filterPanel.connectionId}`)
+    evtSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        setFilterEvents((prev) => [event, ...prev].slice(0, 50))
+      } catch { /* ignore */ }
+    }
+    return () => evtSource.close()
+  }, [filterPanel?.connectionId])
+
   // Validate pipeline on every change to nodes/edges
   const validationResult: ValidationResult = useMemo(() => {
     return validatePipelineConnections(nodes, edges)
@@ -543,15 +560,29 @@ export default function PipelineBuilder() {
         setDbProducerPanel(null)
       }
 
-      // Show converter panel if pipeline has a converter node with mappings
+      // Show converter panel if pipeline has a converter node with config
       const converterNode = nodes.find(n => n.type === 'converter')
-      const hasMappings = converterNode?.data?.config?.mappings && (converterNode.data.config.mappings as unknown[]).length > 0
-      if (hasMappings) {
+      const hasConverterConfig = converterNode?.data?.config && (
+        ((converterNode.data.config.mappings as unknown[])?.length > 0) ||
+        (converterNode.data.config.output_format as string)
+      )
+      if (hasConverterConfig) {
         setConverterEvents([])
         setExpandedConverterEvent(null)
         setConverterPanel({ connectionId })
       } else {
         setConverterPanel(null)
+      }
+
+      // Show filter panel if pipeline has a filter node with rules
+      const filterNode = nodes.find(n => n.type === 'filter')
+      const hasFilterRules = filterNode?.data?.config?.rules && (filterNode.data.config.rules as unknown[]).length > 0
+      if (hasFilterRules) {
+        setFilterEvents([])
+        setExpandedFilterEvent(null)
+        setFilterPanel({ connectionId })
+      } else {
+        setFilterPanel(null)
       }
 
       // Keep canvas visible - just close property editor and reset deploy state
@@ -1056,7 +1087,7 @@ export default function PipelineBuilder() {
       </div>
 
       {/* UNIFIED BOTTOM PANEL - Shows tabs for active panels */}
-      {(webhookTestPanel || fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel) && (() => {
+      {(webhookTestPanel || fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel || filterPanel) && (() => {
         const tabs: Array<{ id: string; label: string; color: string }> = []
         if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
         if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
@@ -1079,6 +1110,7 @@ export default function PipelineBuilder() {
         if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
         if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
         if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
+        if (filterPanel) tabs.push({ id: 'filter', label: 'Filter', color: '#f59e0b' })
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
         if (tabs.length === 0) return null
@@ -1131,7 +1163,7 @@ export default function PipelineBuilder() {
               ))}
               <div style={{ flex: 1 }} />
               <button
-                onClick={() => { setWebhookTestPanel(null); setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setDeploymentInfo(null) }}
+                onClick={() => { setWebhookTestPanel(null); setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setDeploymentInfo(null) }}
                 style={{ padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '16px' }}
               >×</button>
             </div>
@@ -1237,6 +1269,32 @@ export default function PipelineBuilder() {
                               </div>
                             )}
                           </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Filter tab */}
+              {filterPanel && (
+                <div className="bottom-tab-content" data-tab="filter" style={{ display: tabs[tabs.length - 1].id === 'filter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
+                    {filterEvents.length === 0 ? (
+                      <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for filter activity...</p>
+                    ) : filterEvents.map((evt, i) => (
+                      <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
+                        <div style={{ padding: '2px 0', cursor: evt.data ? 'pointer' : 'default' }} onClick={() => evt.data && setExpandedFilterEvent(expandedFilterEvent === i ? null : i)}>
+                          <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
+                          <span style={{ fontWeight: 600, color: evt.type === 'passed' ? '#16a34a' : evt.type === 'dropped' ? '#ea580c' : evt.type === 'error' ? '#dc2626' : '#6b7280' }}>
+                            {evt.type === 'passed' ? '\u2713 PASSED' : evt.type === 'dropped' ? '\u2717 DROPPED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
+                          </span>{' '}
+                          {evt.message && <span style={{ color: '#374151' }}>{evt.message}</span>}
+                          {evt.rules != null && evt.rules > 0 && <span style={{ color: '#9ca3af', marginLeft: '4px' }}>({evt.rules} rules)</span>}
+                          {evt.data && <span style={{ color: '#9ca3af', marginLeft: '8px' }}>{expandedFilterEvent === i ? '\u25BC' : '\u25B6'} data</span>}
+                        </div>
+                        {expandedFilterEvent === i && evt.data && (
+                          <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '4px 0 0 0' }}>{(() => { try { return JSON.stringify(JSON.parse(evt.data), null, 2) } catch { return evt.data } })()}</pre>
                         )}
                       </div>
                     ))}

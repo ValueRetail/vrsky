@@ -465,6 +465,48 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # Data Filter - applies filtering rules to messages in the pipeline
+  # API Consumer - fetches data from external HTTP APIs
+  api-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/api-consumer/Dockerfile
+    container_name: vrsky-api-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  data-filter:
+    build:
+      context: .
+      dockerfile: src/cmd/data-filter/Dockerfile
+    container_name: vrsky-data-filter
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      FILTER_PORT: "9700"
+      NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+    ports:
+      - "9700:9700"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
   # DB Consumer - connects to external databases and publishes query results to NATS
   db-consumer:
     build:

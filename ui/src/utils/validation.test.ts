@@ -483,10 +483,10 @@ describe('validatePipelineConnections', () => {
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have exactly 1 Consumer (found 0)')
+      expect(result.errors).toContain('Pipeline must have at least 1 Consumer')
     })
 
-    it('fails when multiple consumers', () => {
+    it('allows multiple consumers', () => {
       const nodes = [
         createNode('consumer1', 'consumer'),
         createNode('consumer2', 'consumer'),
@@ -499,8 +499,7 @@ describe('validatePipelineConnections', () => {
 
       const result = validatePipelineConnections(nodes, edges)
 
-      expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have exactly 1 Consumer (found 2)')
+      expect(result.valid).toBe(true)
     })
   })
 
@@ -515,10 +514,10 @@ describe('validatePipelineConnections', () => {
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have exactly 1 Producer (found 0)')
+      expect(result.errors).toContain('Pipeline must have at least 1 Producer')
     })
 
-    it('fails when multiple producers', () => {
+    it('allows multiple producers', () => {
       const nodes = [
         createNode('consumer', 'consumer'),
         createNode('producer1', 'producer'),
@@ -531,8 +530,7 @@ describe('validatePipelineConnections', () => {
 
       const result = validatePipelineConnections(nodes, edges)
 
-      expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have exactly 1 Producer (found 2)')
+      expect(result.valid).toBe(true)
     })
   })
 
@@ -608,7 +606,7 @@ describe('validatePipelineConnections', () => {
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors.some((e) => e.includes('not reachable from Consumer'))).toBe(true)
+      expect(result.errors.some((e) => e.includes('not reachable from any Consumer') || e.includes('Orphaned'))).toBe(true)
     })
   })
 

@@ -533,7 +533,7 @@ func TestValidateDAG_ErrorNoProducer(t *testing.T) {
 }
 
 // Test ValidateDAG with multiple consumers
-func TestValidateDAG_ErrorMultipleConsumers(t *testing.T) {
+func TestValidateDAG_AllowMultipleConsumers(t *testing.T) {
 	validator := NewValidator()
 
 	conn := &Connection{
@@ -552,30 +552,13 @@ func TestValidateDAG_ErrorMultipleConsumers(t *testing.T) {
 	}
 
 	err := validator.ValidateDAG(conn)
-	if err == nil {
-		t.Error("expected error for multiple consumers")
-	}
-
-	dagErr, ok := err.(*DAGValidationError)
-	if !ok {
-		t.Errorf("expected DAGValidationError, got %T", err)
-		return
-	}
-
-	found := false
-	for _, e := range dagErr.Errors {
-		if contains(e, "2 consumer") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected error about multiple consumers, got %v", dagErr.Errors)
+	if err != nil {
+		t.Errorf("expected no error for multiple consumers, got %v", err)
 	}
 }
 
-// Test ValidateDAG with multiple producers
-func TestValidateDAG_ErrorMultipleProducers(t *testing.T) {
+// Test ValidateDAG allows multiple producers
+func TestValidateDAG_AllowMultipleProducers(t *testing.T) {
 	validator := NewValidator()
 
 	conn := &Connection{
@@ -594,25 +577,8 @@ func TestValidateDAG_ErrorMultipleProducers(t *testing.T) {
 	}
 
 	err := validator.ValidateDAG(conn)
-	if err == nil {
-		t.Error("expected error for multiple producers")
-	}
-
-	dagErr, ok := err.(*DAGValidationError)
-	if !ok {
-		t.Errorf("expected DAGValidationError, got %T", err)
-		return
-	}
-
-	found := false
-	for _, e := range dagErr.Errors {
-		if contains(e, "2 producer") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected error about multiple producers, got %v", dagErr.Errors)
+	if err != nil {
+		t.Errorf("expected no error for multiple producers, got %v", err)
 	}
 }
 

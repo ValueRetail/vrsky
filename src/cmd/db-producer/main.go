@@ -46,8 +46,8 @@ type DBProducerService struct {
 	logger *slog.Logger
 	config *Config
 
-	// Cache target DB connections per connection ID
-	targetCache     map[string]*TargetConnection
+	// Cache target DB connections per connection ID (multiple producers per connection)
+	targetCache     map[string][]*TargetConnection
 	targetCacheMu   sync.RWMutex
 	targetCacheTime map[string]time.Time
 	targetCacheTTL  time.Duration
@@ -63,9 +63,10 @@ type DBProducerService struct {
 }
 
 type TargetConnection struct {
-	DB           *sql.DB
-	Config       TargetDBConfig
-	HasConverter bool
+	DB            *sql.DB
+	Config        TargetDBConfig
+	PredecessorID string // direct predecessor node ID
+	PredIsConsumer bool  // if true, process when _last_processed_by is empty
 }
 
 type DBProdEvent struct {
@@ -132,7 +133,7 @@ func main() {
 		db:              db,
 		logger:          logger,
 		config:          config,
-		targetCache:     make(map[string]*TargetConnection),
+		targetCache:     make(map[string][]*TargetConnection),
 		targetCacheTime: make(map[string]time.Time),
 		targetCacheTTL:  5 * time.Minute,
 		eventSubs:       make(map[string][]chan DBProdEvent),
@@ -176,8 +177,10 @@ func (s *DBProducerService) Start(ctx context.Context) error {
 		_ = sub.Unsubscribe()
 		// Close all target connections
 		s.targetCacheMu.Lock()
-		for _, tc := range s.targetCache {
-			tc.DB.Close()
+		for _, tcs := range s.targetCache {
+			for _, tc := range tcs {
+				tc.DB.Close()
+			}
 		}
 		s.targetCacheMu.Unlock()
 		close(s.stoppedCh)
@@ -208,22 +211,33 @@ func (s *DBProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	tc, err := s.getTargetConnection(ctx, connectionID)
+	tcs, err := s.getTargetConnections(ctx, connectionID)
 	if err != nil {
 		s.logger.Debug("No DB producer config", "connection_id", connectionID, "error", err)
 		return
 	}
 
-	// If pipeline has a converter, only process converted messages
-	if tc.HasConverter {
-		if env.Metadata == nil {
-			return
-		}
-		if _, ok := env.Metadata["_converted"]; !ok {
-			return
+	// Predecessor-based routing
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
 		}
 	}
 
+	for _, tc := range tcs {
+		if tc.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !tc.PredIsConsumer && tc.PredecessorID != "" && lastProcessedBy != tc.PredecessorID {
+			continue
+		}
+
+		s.processForTarget(connectionID, tc, &env)
+	}
+}
+
+func (s *DBProducerService) processForTarget(connectionID string, tc *TargetConnection, env *envelope.Envelope) {
 	// Parse payload — could be a single object or an array of objects
 	var rows []map[string]interface{}
 	payload := bytes.TrimSpace(env.Payload)
@@ -254,7 +268,6 @@ func (s *DBProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		mode = "create_insert"
 	}
 
-	// Build payload preview and extract columns
 	payloadPreview := string(payload)
 	if len(payloadPreview) > 3000 {
 		payloadPreview = payloadPreview[:3000] + "..."
@@ -266,7 +279,6 @@ func (s *DBProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
 
 	s.emitEvent(connectionID, DBProdEvent{Type: "info", Message: fmt.Sprintf("Writing %d rows to %s", len(rows), table), Time: now(), Payload: payloadPreview, Table: table, Columns: columns})
 
-	// If create_insert mode, auto-create table from first row's keys
 	if mode == "create_insert" {
 		if err := s.ensureTable(tc, table, rows[0]); err != nil {
 			s.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Failed to create table: " + err.Error(), Time: now()})
@@ -274,7 +286,6 @@ func (s *DBProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		}
 	}
 
-	// Insert rows
 	inserted := 0
 	for _, row := range rows {
 		if err := s.insertRow(tc, table, row); err != nil {
@@ -359,19 +370,18 @@ func quoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
-func (s *DBProducerService) getTargetConnection(ctx context.Context, connectionID string) (*TargetConnection, error) {
+func (s *DBProducerService) getTargetConnections(ctx context.Context, connectionID string) ([]*TargetConnection, error) {
 	s.targetCacheMu.RLock()
-	if tc, ok := s.targetCache[connectionID]; ok {
+	if tcs, ok := s.targetCache[connectionID]; ok {
 		if time.Since(s.targetCacheTime[connectionID]) < s.targetCacheTTL {
 			s.targetCacheMu.RUnlock()
-			return tc, nil
+			return tcs, nil
 		}
 	}
 	s.targetCacheMu.RUnlock()
 
-	// Query management DB for connection config
-	var nodesJSON []byte
-	err := s.db.QueryRowContext(ctx, `SELECT nodes FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON)
+	var nodesJSON, edgesJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("connection not found: %w", err)
 	}
@@ -385,14 +395,15 @@ func (s *DBProducerService) getTargetConnection(ctx context.Context, connectionI
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
 	}
 
-	hasConverter := false
-	for _, node := range nodes {
-		if node.Type == "converter" {
-			hasConverter = true
-			break
-		}
+	var edges []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	if edgesJSON != nil {
+		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	var tcs []*TargetConnection
 	for _, node := range nodes {
 		if node.Type != "producer" {
 			continue
@@ -421,23 +432,43 @@ func (s *DBProducerService) getTargetConnection(ctx context.Context, connectionI
 
 		targetDB, err := sql.Open("postgres", connStr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open target DB: %w", err)
+			s.logger.Error("Failed to open target DB", "error", err)
+			continue
 		}
 		if err := targetDB.Ping(); err != nil {
 			targetDB.Close()
-			return nil, fmt.Errorf("failed to ping target DB: %w", err)
+			s.logger.Error("Failed to ping target DB", "error", err)
+			continue
 		}
 
-		tc := &TargetConnection{DB: targetDB, Config: cfg, HasConverter: hasConverter}
-		s.targetCacheMu.Lock()
-		s.targetCache[connectionID] = tc
-		s.targetCacheTime[connectionID] = time.Now()
-		s.targetCacheMu.Unlock()
+		var predID string
+		var predIsConsumer bool
+		for _, e := range edges {
+			if e.Target == node.ID {
+				predID = e.Source
+				for _, n := range nodes {
+					if n.ID == predID && n.Type == "consumer" {
+						predIsConsumer = true
+						break
+					}
+				}
+				break
+			}
+		}
 
-		return tc, nil
+		tcs = append(tcs, &TargetConnection{DB: targetDB, Config: cfg, PredecessorID: predID, PredIsConsumer: predIsConsumer})
 	}
 
-	return nil, fmt.Errorf("no database producer config found")
+	if len(tcs) == 0 {
+		return nil, fmt.Errorf("no database producer config found")
+	}
+
+	s.targetCacheMu.Lock()
+	s.targetCache[connectionID] = tcs
+	s.targetCacheTime[connectionID] = time.Now()
+	s.targetCacheMu.Unlock()
+
+	return tcs, nil
 }
 
 // --- Events ---

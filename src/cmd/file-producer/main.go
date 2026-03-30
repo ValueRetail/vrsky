@@ -36,8 +36,8 @@ type FileProducerService struct {
 	logger *slog.Logger
 	config *Config
 
-	// Cache for connection configs
-	configCache     map[string]*ConnectionConfig
+	// Cache for connection configs (multiple producer nodes per connection)
+	configCache     map[string][]*ConnectionConfig
 	configCacheMu   sync.RWMutex
 	configCacheTTL  time.Duration
 	configCacheTime map[string]time.Time
@@ -49,11 +49,12 @@ type FileProducerService struct {
 
 // ConnectionConfig holds the file output configuration for a connection
 type ConnectionConfig struct {
-	ID           string
-	TenantID     string
-	OutputPath   string
-	FilePattern  string
-	HasConverter bool // true if pipeline has a converter node
+	ID             string
+	TenantID       string
+	OutputPath     string
+	FilePattern    string
+	PredecessorID  string
+	PredIsConsumer bool
 }
 
 func main() {
@@ -117,7 +118,7 @@ func main() {
 		db:              db,
 		logger:          logger,
 		config:          config,
-		configCache:     make(map[string]*ConnectionConfig),
+		configCache:     make(map[string][]*ConnectionConfig),
 		configCacheTTL:  5 * time.Minute,
 		configCacheTime: make(map[string]time.Time),
 		stopCh:          make(chan struct{}),
@@ -207,108 +208,96 @@ func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		return
 	}
 
-	// Get output path from connection config
-	config, err := s.getConnectionConfig(ctx, connectionID)
+	// Get all file producer configs for this connection
+	configs, err := s.getConnectionConfigs(ctx, connectionID)
 	if err != nil {
 		s.logger.Error("Failed to get connection config", "error", err, "connection_id", connectionID)
 		return
 	}
 
-	// If pipeline has a converter, only process converted messages
-	if config.HasConverter {
-		if env.Metadata == nil {
-			return
-		}
-		if _, ok := env.Metadata["_converted"]; !ok {
-			s.logger.Debug("Skipping unconverted message (converter in pipeline)", "connection_id", connectionID)
-			return
+	// Predecessor-based routing: process for each matching producer node
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
 		}
 	}
 
-	// Determine output path
-	outputPath := config.OutputPath
-	if outputPath == "" {
-		outputPath = s.config.DefaultOutputDir
-	}
+	for _, config := range configs {
+		if config.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !config.PredIsConsumer && config.PredecessorID != "" && lastProcessedBy != config.PredecessorID {
+			continue
+		}
 
-	// Write the file
-	if err := s.writeFile(ctx, &env, outputPath, config.FilePattern); err != nil {
-		s.logger.Error("Failed to write file", "error", err, "envelope_id", env.ID, "path", outputPath)
-		return
-	}
+		outputPath := config.OutputPath
+		if outputPath == "" {
+			outputPath = s.config.DefaultOutputDir
+		}
 
-	s.logger.Info("File written successfully",
-		"envelope_id", env.ID,
-		"connection_id", connectionID,
-		"path", outputPath,
-		"size", len(env.Payload))
+		if err := s.writeFile(ctx, &env, outputPath, config.FilePattern); err != nil {
+			s.logger.Error("Failed to write file", "error", err, "envelope_id", env.ID, "path", outputPath)
+			continue
+		}
+
+		s.logger.Info("File written successfully",
+			"envelope_id", env.ID,
+			"connection_id", connectionID,
+			"path", outputPath,
+			"size", len(env.Payload))
+	}
 }
 
-// getConnectionConfig retrieves the connection configuration from the database (with caching)
-func (s *FileProducerService) getConnectionConfig(ctx context.Context, connectionID string) (*ConnectionConfig, error) {
-	// Check cache first
+// getConnectionConfigs retrieves ALL file producer configs for a connection (with caching)
+func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connectionID string) ([]*ConnectionConfig, error) {
 	s.configCacheMu.RLock()
-	if config, ok := s.configCache[connectionID]; ok {
+	if configs, ok := s.configCache[connectionID]; ok {
 		if time.Since(s.configCacheTime[connectionID]) < s.configCacheTTL {
 			s.configCacheMu.RUnlock()
-			return config, nil
+			return configs, nil
 		}
 	}
 	s.configCacheMu.RUnlock()
 
-	// Query database for connection config
-	// The nodes are stored as a JSON array in the connections table
-	query := `SELECT nodes FROM connections WHERE id = $1`
-
-	var nodesJSON []byte
-	err := s.db.QueryRowContext(ctx, query, connectionID).Scan(&nodesJSON)
+	var nodesJSON, edgesJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Connection not found, use defaults
-			s.logger.Debug("Connection not found, using defaults", "connection_id", connectionID)
-			config := &ConnectionConfig{
-				ID:         connectionID,
-				OutputPath: s.config.DefaultOutputDir,
-			}
-			s.cacheConfig(connectionID, config)
-			return config, nil
+			configs := []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
+			s.cacheConfigs(connectionID, configs)
+			return configs, nil
 		}
 		return nil, fmt.Errorf("query connection config: %w", err)
 	}
 
-	// Parse nodes array to find file producer
 	var nodes []struct {
 		ID     string          `json:"id"`
 		Type   string          `json:"type"`
 		Config json.RawMessage `json:"config"`
 	}
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		s.logger.Warn("Failed to parse nodes, using defaults", "error", err, "connection_id", connectionID)
-		config := &ConnectionConfig{
-			ID:         connectionID,
-			OutputPath: s.config.DefaultOutputDir,
-		}
-		s.cacheConfig(connectionID, config)
-		return config, nil
+		configs := []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
+		s.cacheConfigs(connectionID, configs)
+		return configs, nil
 	}
 
-	// Check if pipeline has a converter node
-	hasConverter := false
-	for _, node := range nodes {
-		if node.Type == "converter" {
-			hasConverter = true
-			break
-		}
+	var edges []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	if edgesJSON != nil {
+		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
-	// Find the file producer node
+	var configs []*ConnectionConfig
 	for _, node := range nodes {
 		if node.Type != "producer" {
 			continue
 		}
 
-		// Parse the node config to extract file output settings
 		var nodeConfig struct {
+			Type string `json:"type"`
 			File struct {
 				Path        string `json:"path"`
 				FilePattern string `json:"file_pattern"`
@@ -317,38 +306,52 @@ func (s *FileProducerService) getConnectionConfig(ctx context.Context, connectio
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
 			continue
 		}
-
-		// Check if it has file config
-		if nodeConfig.File.Path == "" {
+		// Accept nodes with type "file" or with a file path set
+		if nodeConfig.Type != "file" && nodeConfig.File.Path == "" {
 			continue
 		}
 
-		config := &ConnectionConfig{
-			ID:           connectionID,
-			OutputPath:   expandHomePath(nodeConfig.File.Path),
-			FilePattern:  nodeConfig.File.FilePattern,
-			HasConverter: hasConverter,
+		var predID string
+		var predIsConsumer bool
+		for _, e := range edges {
+			if e.Target == node.ID {
+				predID = e.Source
+				for _, n := range nodes {
+					if n.ID == predID && n.Type == "consumer" {
+						predIsConsumer = true
+						break
+					}
+				}
+				break
+			}
 		}
 
-		s.cacheConfig(connectionID, config)
-		return config, nil
+		path := nodeConfig.File.Path
+		if path == "" {
+			path = s.config.DefaultOutputDir
+		}
+
+		configs = append(configs, &ConnectionConfig{
+			ID:             connectionID,
+			OutputPath:     expandHomePath(path),
+			FilePattern:    nodeConfig.File.FilePattern,
+			PredecessorID:  predID,
+			PredIsConsumer: predIsConsumer,
+		})
 	}
 
-	// No file producer found, use defaults
-	s.logger.Debug("No file producer config found, using defaults", "connection_id", connectionID)
-	config := &ConnectionConfig{
-		ID:         connectionID,
-		OutputPath: s.config.DefaultOutputDir,
+	if len(configs) == 0 {
+		configs = []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
 	}
-	s.cacheConfig(connectionID, config)
-	return config, nil
+
+	s.cacheConfigs(connectionID, configs)
+	return configs, nil
 }
 
-// cacheConfig stores a connection config in the cache
-func (s *FileProducerService) cacheConfig(connectionID string, config *ConnectionConfig) {
+func (s *FileProducerService) cacheConfigs(connectionID string, configs []*ConnectionConfig) {
 	s.configCacheMu.Lock()
 	defer s.configCacheMu.Unlock()
-	s.configCache[connectionID] = config
+	s.configCache[connectionID] = configs
 	s.configCacheTime[connectionID] = time.Now()
 }
 

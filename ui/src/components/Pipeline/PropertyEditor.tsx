@@ -748,6 +748,312 @@ function DatabaseProducerConfig({
   )
 }
 
+const FILTER_OPERATORS: Array<{ value: string; label: string }> = [
+  { value: 'equals', label: 'Equals' },
+  { value: 'not_equals', label: 'Not Equals' },
+  { value: 'contains', label: 'Contains' },
+  { value: 'not_contains', label: 'Not Contains' },
+  { value: 'starts_with', label: 'Starts With' },
+  { value: 'ends_with', label: 'Ends With' },
+  { value: 'gt', label: 'Greater Than' },
+  { value: 'gte', label: 'Greater or Equal' },
+  { value: 'lt', label: 'Less Than' },
+  { value: 'lte', label: 'Less or Equal' },
+  { value: 'is_empty', label: 'Is Empty' },
+  { value: 'is_not_empty', label: 'Is Not Empty' },
+]
+
+function FilterConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (c: Record<string, unknown>) => void
+}) {
+  const rules = (config.rules as Array<{ field: string; operator: string; value: string }>) || []
+  const logic = (config.logic as string) || 'and'
+  const extractFields = (config.extract_fields as string[]) || []
+  const flattenPath = (config.flatten_path as string) || ''
+  const flattenFields = (config.flatten_fields as Record<string, string>) || {}
+  const flattenInclude = (config.flatten_include as Record<string, string>) || {}
+
+  const updateRule = (index: number, field: string, value: string) => {
+    const newRules = [...rules]
+    newRules[index] = { ...newRules[index], [field]: value }
+    setConfig({ ...config, rules: newRules })
+  }
+
+  const addRule = () => {
+    setConfig({ ...config, rules: [...rules, { field: '', operator: 'equals', value: '' }] })
+  }
+
+  const removeRule = (index: number) => {
+    setConfig({ ...config, rules: rules.filter((_, i) => i !== index) })
+  }
+
+  return (
+    <div>
+      {/* Logic toggle */}
+      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Match:</span>
+        {['and', 'or'].map((l) => (
+          <button
+            key={l}
+            onClick={() => setConfig({ ...config, logic: l })}
+            style={{
+              padding: '4px 12px', fontSize: '12px', fontWeight: 600,
+              backgroundColor: logic === l ? (l === 'and' ? '#dbeafe' : '#fef3c7') : '#f3f4f6',
+              color: logic === l ? (l === 'and' ? '#1d4ed8' : '#92400e') : '#6b7280',
+              border: `1px solid ${logic === l ? (l === 'and' ? '#93c5fd' : '#fcd34d') : '#d1d5db'}`,
+              borderRadius: '4px', cursor: 'pointer',
+            }}
+          >
+            {l.toUpperCase()}
+          </button>
+        ))}
+        <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+          {logic === 'and' ? 'All rules must match' : 'Any rule can match'}
+        </span>
+      </div>
+
+      {/* Rules */}
+      {rules.map((rule, i) => (
+        <div key={i} style={{
+          display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px',
+          padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb',
+        }}>
+          <input
+            placeholder="field"
+            value={rule.field}
+            onChange={(e) => updateRule(i, 'field', e.target.value)}
+            style={{
+              flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
+              borderRadius: '4px', fontFamily: 'monospace',
+            }}
+          />
+          <select
+            value={rule.operator}
+            onChange={(e) => updateRule(i, 'operator', e.target.value)}
+            style={{
+              padding: '6px 4px', fontSize: '12px', border: '1px solid #d1d5db',
+              borderRadius: '4px', backgroundColor: 'white',
+            }}
+          >
+            {FILTER_OPERATORS.map((op) => (
+              <option key={op.value} value={op.value}>{op.label}</option>
+            ))}
+          </select>
+          {!['is_empty', 'is_not_empty'].includes(rule.operator) && (
+            <input
+              placeholder="value"
+              value={rule.value}
+              onChange={(e) => updateRule(i, 'value', e.target.value)}
+              style={{
+                flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
+                borderRadius: '4px',
+              }}
+            />
+          )}
+          <button
+            onClick={() => removeRule(i)}
+            style={{
+              padding: '4px 8px', fontSize: '14px', background: 'none', border: 'none',
+              color: '#dc2626', cursor: 'pointer',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+
+      <button
+        onClick={addRule}
+        style={{
+          padding: '6px 12px', fontSize: '12px', fontWeight: 600,
+          backgroundColor: '#f3f4f6', border: '1px solid #d1d5db',
+          borderRadius: '4px', cursor: 'pointer', color: '#374151',
+        }}
+      >
+        + Add Rule
+      </button>
+
+      {rules.length === 0 && !extractFields.length && (
+        <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', marginTop: '8px' }}>
+          No filter rules configured. Add rules to filter rows, or extract fields to pick specific data.
+        </p>
+      )}
+
+      {/* Extract Fields */}
+      <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Extract Fields</span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Keep only these JSON paths</span>
+        </div>
+        {extractFields.map((field: string, i: number) => (
+          <div key={i} style={{
+            display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px',
+          }}>
+            <input
+              placeholder="e.g. properties.timeseries.data.instant.details.air_temperature"
+              value={field}
+              onChange={(e) => {
+                const newFields = [...extractFields]
+                newFields[i] = e.target.value
+                setConfig({ ...config, extract_fields: newFields })
+              }}
+              style={{
+                flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
+                borderRadius: '4px', fontFamily: 'monospace',
+              }}
+            />
+            <button
+              onClick={() => setConfig({ ...config, extract_fields: extractFields.filter((_: string, j: number) => j !== i) })}
+              style={{
+                padding: '4px 8px', fontSize: '14px', background: 'none', border: 'none',
+                color: '#dc2626', cursor: 'pointer',
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={() => setConfig({ ...config, extract_fields: [...extractFields, ''] })}
+          style={{
+            padding: '6px 12px', fontSize: '12px', fontWeight: 600,
+            backgroundColor: '#f3f4f6', border: '1px solid #d1d5db',
+            borderRadius: '4px', cursor: 'pointer', color: '#374151',
+          }}
+        >
+          + Add Field
+        </button>
+        {extractFields.length > 0 && (
+          <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px' }}>
+            Use dot notation for nested paths. Arrays are traversed automatically.
+            <br />Example: <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>geometry.coordinates</code>, <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>properties.timeseries.time</code>
+          </p>
+        )}
+      </div>
+
+      {/* Flatten Array */}
+      <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Flatten Array</span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Unroll nested array into flat rows</span>
+        </div>
+
+        <div style={{ marginBottom: '8px' }}>
+          <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: '4px' }}>Array Path</label>
+          <input
+            placeholder="e.g. properties.timeseries"
+            value={flattenPath}
+            onChange={(e) => setConfig({ ...config, flatten_path: e.target.value })}
+            style={{
+              width: '100%', padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
+              borderRadius: '4px', fontFamily: 'monospace', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {flattenPath && (
+          <>
+            <div style={{ marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Row Fields</label>
+                <span style={{ fontSize: '10px', color: '#9ca3af' }}>Fields from each array element</span>
+              </div>
+              {Object.entries(flattenFields).map(([path, name], i) => (
+                <div key={i} style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
+                  <input
+                    placeholder="source path"
+                    value={path}
+                    onChange={(e) => {
+                      const newFields = { ...flattenFields }
+                      delete newFields[path]
+                      newFields[e.target.value] = name
+                      setConfig({ ...config, flatten_fields: newFields })
+                    }}
+                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>→</span>
+                  <input
+                    placeholder="output name"
+                    value={name}
+                    onChange={(e) => {
+                      setConfig({ ...config, flatten_fields: { ...flattenFields, [path]: e.target.value } })
+                    }}
+                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    onClick={() => {
+                      const newFields = { ...flattenFields }
+                      delete newFields[path]
+                      setConfig({ ...config, flatten_fields: newFields })
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '14px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
+                  >×</button>
+                </div>
+              ))}
+              <button
+                onClick={() => setConfig({ ...config, flatten_fields: { ...flattenFields, '': '' } })}
+                style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 600, backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#374151' }}
+              >+ Add Row Field</button>
+            </div>
+
+            <div style={{ marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Include from Parent</label>
+                <span style={{ fontSize: '10px', color: '#9ca3af' }}>Fields from root added to every row</span>
+              </div>
+              {Object.entries(flattenInclude).map(([path, name], i) => (
+                <div key={i} style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
+                  <input
+                    placeholder="e.g. geometry.coordinates[0]"
+                    value={path}
+                    onChange={(e) => {
+                      const newInc = { ...flattenInclude }
+                      delete newInc[path]
+                      newInc[e.target.value] = name
+                      setConfig({ ...config, flatten_include: newInc })
+                    }}
+                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>→</span>
+                  <input
+                    placeholder="output name"
+                    value={name}
+                    onChange={(e) => {
+                      setConfig({ ...config, flatten_include: { ...flattenInclude, [path]: e.target.value } })
+                    }}
+                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
+                  />
+                  <button
+                    onClick={() => {
+                      const newInc = { ...flattenInclude }
+                      delete newInc[path]
+                      setConfig({ ...config, flatten_include: newInc })
+                    }}
+                    style={{ padding: '2px 6px', fontSize: '14px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
+                  >×</button>
+                </div>
+              ))}
+              <button
+                onClick={() => setConfig({ ...config, flatten_include: { ...flattenInclude, '': '' } })}
+                style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 600, backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#374151' }}
+              >+ Add Parent Field</button>
+            </div>
+
+            <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+              Use <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>[0]</code> for array indexes in parent paths.
+              Example: <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>geometry.coordinates[1]</code> → <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>lat</code>
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ConverterConfig({
   config,
   setConfig,
@@ -1564,26 +1870,7 @@ export default function PropertyEditor({
 
       case 'filter':
         return (
-          <div
-            style={{
-              padding: '16px',
-              backgroundColor: '#f9fafb',
-              borderRadius: '6px',
-              border: '1px solid #e5e7eb',
-            }}
-          >
-            <p
-              style={{
-                fontSize: '13px',
-                color: '#6b7280',
-                fontStyle: 'italic',
-                margin: 0,
-                textAlign: 'center',
-              }}
-            >
-              Configuration coming soon
-            </p>
-          </div>
+          <FilterConfig config={config} setConfig={setConfig} />
         )
 
       default:
