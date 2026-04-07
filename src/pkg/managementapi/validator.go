@@ -645,9 +645,9 @@ func (v *Validator) validateNodeCounts(nodes []*Node) (consumerIDs, producerIDs 
 			continue
 		}
 		switch node.Type {
-		case "consumer":
+		case "consumer", "input":
 			consumerIDs = append(consumerIDs, node.ID)
-		case "producer":
+		case "producer", "output":
 			producerIDs = append(producerIDs, node.ID)
 		}
 	}

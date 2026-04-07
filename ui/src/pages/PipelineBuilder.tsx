@@ -48,13 +48,11 @@ export default function PipelineBuilder() {
   const [edgeContextMenu, setEdgeContextMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
+  const [sidebarWidth, setSidebarWidth] = useState(320)
+  const isResizing = useRef(false)
   const [deployAttempted, setDeployAttempted] = useState(false)
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
   const canvasContainer = useRef<HTMLDivElement>(null)
-  const [webhookTestPanel, setWebhookTestPanel] = useState<{ url: string; connectionId: string } | null>(null)
-  const [webhookPayload, setWebhookPayload] = useState('{\n  "test": "hello from webhook"\n}')
-  const [webhookSending, setWebhookSending] = useState(false)
-  const [webhookLastStatus, setWebhookLastStatus] = useState<string | null>(null)
   const [fileUploadPanel, setFileUploadPanel] = useState<{ uploadUrl: string; watchDir: string; connectionId: string } | null>(null)
   const [fileUploading, setFileUploading] = useState(false)
   const [fileUploadStatus, setFileUploadStatus] = useState<string | null>(null)
@@ -121,6 +119,31 @@ export default function PipelineBuilder() {
     }
   }, [])
 
+  // Sidebar resize via drag
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizing.current = true
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return
+      const newWidth = Math.max(280, Math.min(800, startWidth + (startX - ev.clientX)))
+      setSidebarWidth(newWidth)
+    }
+    const onMouseUp = () => {
+      isResizing.current = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [sidebarWidth])
+
   // Initialize local state from active canvas when it becomes available
   useEffect(() => {
     if (isInitialized && activeCanvas && !hasInitializedFromCanvas) {
@@ -175,10 +198,10 @@ export default function PipelineBuilder() {
       if (!canvasContainer.current) return
 
       const nodeType = event.dataTransfer.getData('nodeType') as
-        | 'consumer'
+        | 'input'
         | 'filter'
         | 'converter'
-        | 'producer'
+        | 'output'
 
       if (!nodeType) return
 
@@ -212,10 +235,11 @@ export default function PipelineBuilder() {
   const updateNodeConfig = (config: Record<string, unknown>) => {
     if (!selectedNode) return
 
+    const { _label, ...restConfig } = config
     setNodes((nds) =>
       nds.map((node) =>
         node.id === selectedNode.id
-          ? { ...node, data: { ...node.data, config } }
+          ? { ...node, data: { ...node.data, config: restConfig, ...(_label ? { label: _label as string } : {}) } }
           : node
       )
     )
@@ -380,18 +404,18 @@ export default function PipelineBuilder() {
    * This is separate from graph validation - ensures nodes are configured before deploy.
    */
   const checkNodeConfigurations = (): boolean => {
-    const consumers = nodes.filter((n) => n.type === 'consumer')
-    const producers = nodes.filter((n) => n.type === 'producer')
+    const consumers = nodes.filter((n) => n.type === 'input')
+    const producers = nodes.filter((n) => n.type === 'output')
 
     const consumerConfigured = consumers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
     const producerConfigured = producers.some((n) => n.data.config && Object.keys(n.data.config).length > 0)
 
     if (!consumerConfigured) {
-      showErrorNotification('Pipeline validation', 'Configure Consumer node before deploying')
+      showErrorNotification('Pipeline validation', 'Configure Input node before deploying')
       return false
     }
     if (!producerConfigured) {
-      showErrorNotification('Pipeline validation', 'Configure Producer node before deploying')
+      showErrorNotification('Pipeline validation', 'Configure Output node before deploying')
       return false
     }
 
@@ -408,7 +432,7 @@ export default function PipelineBuilder() {
       description: 'Created via visual pipeline editor',
       nodes: nodes.map((node) => ({
         id: node.id,
-        type: node.type,
+        type: node.type === 'input' ? 'consumer' : node.type === 'output' ? 'producer' : node.type,
         config: node.data.config || {},
         enabled: true,
       })),
@@ -471,14 +495,14 @@ export default function PipelineBuilder() {
       }
 
       // Step 3: Extract file path from producer node config for notification
-      const producerNode = nodes.find(n => n.type === 'producer')
+      const producerNode = nodes.find(n => n.type === 'output')
       let filePath = ''
       if (producerNode?.data?.config?.type === 'file') {
         filePath = (producerNode.data.config.file as any)?.path || ''
       }
 
       // Step 4: Show success notification with details
-      const consumerNode = nodes.find(n => n.type === 'consumer')
+      const consumerNode = nodes.find(n => n.type === 'input')
       const isWebhook = consumerNode?.data?.config?.type === 'http'
       const webhookUrl = isWebhook ? `http://localhost:9100/webhook/${connectionId}` : ''
 
@@ -515,25 +539,19 @@ export default function PipelineBuilder() {
       const isHttpProducer = producerNode?.data?.config?.type === 'http'
       const httpTargetUrl = isHttpProducer ? (producerNode?.data?.config?.http as any)?.url || '' : ''
 
-      if (webhookUrl) {
-        setWebhookTestPanel({ url: webhookUrl, connectionId })
-        setWebhookLastStatus(null)
-        setFileUploadPanel(null)
-      } else if (isFileWatcher) {
+      if (isFileWatcher) {
         setFileUploadPanel({
           uploadUrl: `http://localhost:9200/upload/${connectionId}`,
           watchDir: `./data/input/${connectionId}`,
           connectionId,
         })
         setFileUploadStatus(null)
-        setWebhookTestPanel(null)
       } else {
-        setWebhookTestPanel(null)
         setFileUploadPanel(null)
       }
 
       // Show HTTP producer panel if applicable
-      const payloadProducer = payload.nodes.find((n: { type: string; config?: Record<string, unknown> }) => n.type === 'producer')
+      const payloadProducer = payload.nodes.find((n: { type: string; config?: Record<string, unknown> }) => n.type === 'output')
       const resolvedIsHttp = isHttpProducer || payloadProducer?.config?.type === 'http'
       const resolvedUrl = httpTargetUrl || (payloadProducer?.config?.http as any)?.url || ''
 
@@ -620,24 +638,6 @@ export default function PipelineBuilder() {
       setFileUploadStatus(`Error: ${err instanceof Error ? err.message : 'Network error'}`)
     } finally {
       setFileUploading(false)
-    }
-  }
-
-  const sendWebhookTest = async () => {
-    if (!webhookTestPanel || !webhookPayload.trim()) return
-    setWebhookSending(true)
-    setWebhookLastStatus(null)
-    try {
-      const resp = await fetch(webhookTestPanel.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: webhookPayload,
-      })
-      setWebhookLastStatus(resp.ok ? `${resp.status} Accepted` : `${resp.status} ${resp.statusText}`)
-    } catch (err) {
-      setWebhookLastStatus(`Error: ${err instanceof Error ? err.message : 'Network error'}`)
-    } finally {
-      setWebhookSending(false)
     }
   }
 
@@ -768,7 +768,6 @@ export default function PipelineBuilder() {
                         { label: 'Connection Requests', path: '/settings/connection-requests' },
                         { label: 'Data Connections', path: '/settings/tenant-connections' },
                         { label: 'API Key', path: '/settings/api-key' },
-                        { label: 'Audit Log', path: '/settings/audit-log' },
                       ].map(({ label, path }) => (
                         <button
                           key={path}
@@ -959,7 +958,7 @@ export default function PipelineBuilder() {
             position: 'relative',
             width: '100%',
             maxWidth: 'calc(100vw - 64px)', // Viewport width minus left sidebar (64px) - prevents infinite expansion
-            paddingRight: rightSidebarOpen ? '320px' : '0px',
+            paddingRight: rightSidebarOpen ? `${sidebarWidth}px` : '0px',
             transition: 'padding-right 150ms ease'
           }}
           onDragOver={handleDragOver}
@@ -1087,17 +1086,16 @@ export default function PipelineBuilder() {
       </div>
 
       {/* UNIFIED BOTTOM PANEL - Shows tabs for active panels */}
-      {(webhookTestPanel || fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel || filterPanel) && (() => {
+      {(fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel || filterPanel) && (() => {
         const tabs: Array<{ id: string; label: string; color: string }> = []
-        if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
         if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
         if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
         const [activeTab, setActiveTab] = [
-          (httpProducerPanel && !webhookTestPanel && !fileUploadPanel) ? 'http'
+          (httpProducerPanel && !fileUploadPanel) ? 'http'
             : fileUploadPanel ? 'files'
-            : 'webhook',
+            : 'files',
           // We need state for this — use a workaround with the existing state
           () => {}
         ]
@@ -1107,7 +1105,6 @@ export default function PipelineBuilder() {
       })()}
       {(() => {
         const tabs: Array<{ id: string; label: string; color: string }> = []
-        if (webhookTestPanel) tabs.push({ id: 'webhook', label: 'Webhook', color: '#2563eb' })
         if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
         if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
         if (filterPanel) tabs.push({ id: 'filter', label: 'Filter', color: '#f59e0b' })
@@ -1119,7 +1116,7 @@ export default function PipelineBuilder() {
           <div style={{
             position: 'fixed', bottom: 0,
             left: paletteOpen ? '224px' : '0px',
-            right: rightSidebarOpen ? '320px' : '0px',
+            right: rightSidebarOpen ? `${sidebarWidth}px` : '0px',
             height: '220px', backgroundColor: '#ffffff',
             borderTop: '2px solid #2563eb', zIndex: 35,
             display: 'flex', flexDirection: 'column',
@@ -1163,7 +1160,7 @@ export default function PipelineBuilder() {
               ))}
               <div style={{ flex: 1 }} />
               <button
-                onClick={() => { setWebhookTestPanel(null); setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setDeploymentInfo(null) }}
+                onClick={() => { setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setDeploymentInfo(null) }}
                 style={{ padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '16px' }}
               >×</button>
             </div>
@@ -1192,25 +1189,6 @@ export default function PipelineBuilder() {
 
             {/* Tab content */}
             <div id="bottom-panel-content" style={{ flex: 1, overflow: 'hidden' }}>
-              {/* Webhook tab */}
-              {webhookTestPanel && (
-                <div className="bottom-tab-content" data-tab="webhook" style={{ display: tabs[tabs.length - 1].id === 'webhook' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '8px', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <code style={{ flex: 1, fontSize: '11px', backgroundColor: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{webhookTestPanel.url}</code>
-                      <button onClick={() => { navigator.clipboard.writeText(webhookTestPanel.url); showSuccessNotification('Copied', 'URL copied') }} style={{ padding: '3px 8px', fontSize: '11px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}>Copy</button>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                      <textarea value={webhookPayload} onChange={(e) => setWebhookPayload(e.target.value)} style={{ flex: 1, height: '80px', padding: '6px 8px', fontSize: '12px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'none' }} placeholder='{"key": "value"}' />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <button onClick={sendWebhookTest} disabled={webhookSending || !webhookPayload.trim()} style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 600, backgroundColor: webhookSending ? '#9ca3af' : '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: webhookSending ? 'not-allowed' : 'pointer' }}>{webhookSending ? 'Sending...' : 'Send Test'}</button>
-                        {webhookLastStatus && <span style={{ fontSize: '11px', color: webhookLastStatus.startsWith('2') ? '#16a34a' : '#dc2626', fontWeight: 500, textAlign: 'center' }}>{webhookLastStatus}</span>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* File watcher tab */}
               {fileUploadPanel && (
                 <div className="bottom-tab-content" data-tab="files" style={{ display: tabs[tabs.length - 1].id === 'files' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '10px' }}>
@@ -1384,17 +1362,32 @@ export default function PipelineBuilder() {
 
       {/* RIGHT SIDEBAR - Property Editor (Fixed Overlay) */}
       {rightSidebarOpen && (
-        <aside style={{ 
-          position: 'fixed', 
-          right: 0, 
-          top: '56px', 
-          width: '320px', 
-          height: 'calc(100% - 56px)', 
-          backgroundColor: 'white', 
-          borderLeft: '1px solid #d1d5db', 
+        <aside style={{
+          position: 'fixed',
+          right: 0,
+          top: '56px',
+          width: `${sidebarWidth}px`,
+          height: 'calc(100% - 56px)',
+          backgroundColor: 'white',
+          borderLeft: '1px solid #d1d5db',
           overflowY: 'auto',
           zIndex: 40
         }}>
+          {/* Resize handle */}
+          <div
+            onMouseDown={handleResizeStart}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '4px',
+              height: '100%',
+              cursor: 'col-resize',
+              zIndex: 50,
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.backgroundColor = '#3b82f6' }}
+            onMouseLeave={(e) => { if (!isResizing.current) (e.target as HTMLElement).style.backgroundColor = 'transparent' }}
+          />
           <PropertyEditor
             node={selectedNode}
             onUpdate={updateNodeConfig}

@@ -59,6 +59,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start HTTP server for sample-data endpoint
+	startHTTPServer(config.Port, logger)
+
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

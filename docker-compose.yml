@@ -476,6 +476,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
+      API_CONSUMER_PORT: "9800"
+    ports:
+      - "9800:9800"
     depends_on:
       nats:
         condition: service_healthy

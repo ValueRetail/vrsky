@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 interface Component {
   id: string
-  type: 'consumer' | 'filter' | 'converter' | 'producer'
+  type: 'input' | 'filter' | 'converter' | 'output'
   label: string
   color: string
   hoverColor: string
@@ -11,9 +11,9 @@ interface Component {
 // Muted color palette matching Node-RED aesthetic
 const COMPONENTS: Component[] = [
   {
-    id: 'consumer',
-    type: 'consumer',
-    label: 'Consumer',
+    id: 'input',
+    type: 'input',
+    label: 'Input',
     color: '#93c5fd', // Soft blue
     hoverColor: '#7cb3f0',
   },
@@ -32,9 +32,9 @@ const COMPONENTS: Component[] = [
     hoverColor: '#f08ec2',
   },
   {
-    id: 'producer',
-    type: 'producer',
-    label: 'Producer',
+    id: 'output',
+    type: 'output',
+    label: 'Output',
     color: '#86efac', // Soft green
     hoverColor: '#6de095',
   },

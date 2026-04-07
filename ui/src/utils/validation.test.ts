@@ -34,7 +34,7 @@ import {
 
 function createNode(
   id: string,
-  type: 'consumer' | 'filter' | 'converter' | 'producer',
+  type: 'input' | 'filter' | 'converter' | 'output',
   label?: string
 ): Node {
   return {
@@ -62,29 +62,29 @@ function createEdge(source: string, target: string, id?: string): Edge {
 
 describe('hasOutgoingEdge', () => {
   it('returns true when node has outgoing edge', () => {
-    const edges = [createEdge('consumer', 'producer')]
-    expect(hasOutgoingEdge('consumer', edges)).toBe(true)
+    const edges = [createEdge('input', 'output')]
+    expect(hasOutgoingEdge('input', edges)).toBe(true)
   })
 
   it('returns false when node has no outgoing edge', () => {
-    const edges = [createEdge('consumer', 'producer')]
-    expect(hasOutgoingEdge('producer', edges)).toBe(false)
+    const edges = [createEdge('input', 'output')]
+    expect(hasOutgoingEdge('output', edges)).toBe(false)
   })
 
   it('returns false for empty edges array', () => {
-    expect(hasOutgoingEdge('consumer', [])).toBe(false)
+    expect(hasOutgoingEdge('input', [])).toBe(false)
   })
 })
 
 describe('hasIncomingEdge', () => {
   it('returns true when node has incoming edge', () => {
-    const edges = [createEdge('consumer', 'producer')]
-    expect(hasIncomingEdge('producer', edges)).toBe(true)
+    const edges = [createEdge('input', 'output')]
+    expect(hasIncomingEdge('output', edges)).toBe(true)
   })
 
   it('returns false when node has no incoming edge', () => {
-    const edges = [createEdge('consumer', 'producer')]
-    expect(hasIncomingEdge('consumer', edges)).toBe(false)
+    const edges = [createEdge('input', 'output')]
+    expect(hasIncomingEdge('input', edges)).toBe(false)
   })
 })
 
@@ -203,9 +203,9 @@ describe('getNodesReachingTarget', () => {
 describe('hasCycle', () => {
   it('returns false for acyclic graph', () => {
     const nodes = [
-      createNode('a', 'consumer'),
+      createNode('a', 'input'),
       createNode('b', 'filter'),
-      createNode('c', 'producer'),
+      createNode('c', 'output'),
     ]
     const edges = [
       createEdge('a', 'b'),
@@ -217,7 +217,7 @@ describe('hasCycle', () => {
 
   it('returns true for simple cycle', () => {
     const nodes = [
-      createNode('a', 'consumer'),
+      createNode('a', 'input'),
       createNode('b', 'filter'),
     ]
     const edges = [
@@ -230,10 +230,10 @@ describe('hasCycle', () => {
 
   it('returns true for longer cycle', () => {
     const nodes = [
-      createNode('a', 'consumer'),
+      createNode('a', 'input'),
       createNode('b', 'filter'),
       createNode('c', 'converter'),
-      createNode('d', 'producer'),
+      createNode('d', 'output'),
     ]
     const edges = [
       createEdge('a', 'b'),
@@ -247,10 +247,10 @@ describe('hasCycle', () => {
 
   it('returns false for diamond-shaped DAG', () => {
     const nodes = [
-      createNode('a', 'consumer'),
+      createNode('a', 'input'),
       createNode('b', 'filter'),
       createNode('c', 'filter'),
-      createNode('d', 'producer'),
+      createNode('d', 'output'),
     ]
     const edges = [
       createEdge('a', 'b'),
@@ -266,8 +266,8 @@ describe('hasCycle', () => {
 describe('findCycle', () => {
   it('returns null for acyclic graph', () => {
     const nodes = [
-      createNode('a', 'consumer'),
-      createNode('b', 'producer'),
+      createNode('a', 'input'),
+      createNode('b', 'output'),
     ]
     const edges = [createEdge('a', 'b')]
 
@@ -276,7 +276,7 @@ describe('findCycle', () => {
 
   it('returns cycle path for cyclic graph', () => {
     const nodes = [
-      createNode('a', 'consumer'),
+      createNode('a', 'input'),
       createNode('b', 'filter'),
     ]
     const edges = [
@@ -297,101 +297,101 @@ describe('findCycle', () => {
 describe('findOrphanedNodes', () => {
   it('returns empty array for valid pipeline', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
+      createNode('input', 'input'),
       createNode('filter', 'filter'),
-      createNode('producer', 'producer'),
+      createNode('output', 'output'),
     ]
     const edges = [
-      createEdge('consumer', 'filter'),
-      createEdge('filter', 'producer'),
+      createEdge('input', 'filter'),
+      createEdge('filter', 'output'),
     ]
 
-    const orphaned = findOrphanedNodes(nodes, edges, 'consumer', 'producer')
+    const orphaned = findOrphanedNodes(nodes, edges, 'input', 'output')
     expect(orphaned).toEqual([])
   })
 
   it('detects node not reachable from consumer', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
+      createNode('input', 'input'),
       createNode('filter', 'filter'),
-      createNode('producer', 'producer'),
+      createNode('output', 'output'),
     ]
     const edges = [
-      createEdge('consumer', 'producer'),
+      createEdge('input', 'output'),
       // filter is not connected
     ]
 
-    const orphaned = findOrphanedNodes(nodes, edges, 'consumer', 'producer')
+    const orphaned = findOrphanedNodes(nodes, edges, 'input', 'output')
     expect(orphaned).toContain('filter')
   })
 
   it('detects node that cannot reach producer', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
+      createNode('input', 'input'),
       createNode('filter1', 'filter'),
       createNode('filter2', 'filter'),
-      createNode('producer', 'producer'),
+      createNode('output', 'output'),
     ]
     const edges = [
-      createEdge('consumer', 'filter1'),
-      createEdge('consumer', 'filter2'),
-      createEdge('filter1', 'producer'),
+      createEdge('input', 'filter1'),
+      createEdge('input', 'filter2'),
+      createEdge('filter1', 'output'),
       // filter2 cannot reach producer
     ]
 
-    const orphaned = findOrphanedNodes(nodes, edges, 'consumer', 'producer')
+    const orphaned = findOrphanedNodes(nodes, edges, 'input', 'output')
     expect(orphaned).toContain('filter2')
   })
 
   it('does not include consumer or producer as orphaned', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
-      createNode('producer', 'producer'),
+      createNode('input', 'input'),
+      createNode('output', 'output'),
     ]
     const edges: Edge[] = []
 
-    const orphaned = findOrphanedNodes(nodes, edges, 'consumer', 'producer')
-    expect(orphaned).not.toContain('consumer')
-    expect(orphaned).not.toContain('producer')
+    const orphaned = findOrphanedNodes(nodes, edges, 'input', 'output')
+    expect(orphaned).not.toContain('input')
+    expect(orphaned).not.toContain('output')
   })
 })
 
 describe('getNodesOnPath', () => {
   it('returns all nodes on valid path', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
+      createNode('input', 'input'),
       createNode('filter', 'filter'),
-      createNode('producer', 'producer'),
+      createNode('output', 'output'),
     ]
     const edges = [
-      createEdge('consumer', 'filter'),
-      createEdge('filter', 'producer'),
+      createEdge('input', 'filter'),
+      createEdge('filter', 'output'),
     ]
 
-    const onPath = getNodesOnPath(nodes, edges, 'consumer', 'producer')
+    const onPath = getNodesOnPath(nodes, edges, 'input', 'output')
 
-    expect(onPath.has('consumer')).toBe(true)
+    expect(onPath.has('input')).toBe(true)
     expect(onPath.has('filter')).toBe(true)
-    expect(onPath.has('producer')).toBe(true)
+    expect(onPath.has('output')).toBe(true)
   })
 
   it('excludes orphaned nodes', () => {
     const nodes = [
-      createNode('consumer', 'consumer'),
+      createNode('input', 'input'),
       createNode('filter', 'filter'),
       createNode('orphan', 'converter'),
-      createNode('producer', 'producer'),
+      createNode('output', 'output'),
     ]
     const edges = [
-      createEdge('consumer', 'filter'),
-      createEdge('filter', 'producer'),
+      createEdge('input', 'filter'),
+      createEdge('filter', 'output'),
     ]
 
-    const onPath = getNodesOnPath(nodes, edges, 'consumer', 'producer')
+    const onPath = getNodesOnPath(nodes, edges, 'input', 'output')
 
-    expect(onPath.has('consumer')).toBe(true)
+    expect(onPath.has('input')).toBe(true)
     expect(onPath.has('filter')).toBe(true)
-    expect(onPath.has('producer')).toBe(true)
+    expect(onPath.has('output')).toBe(true)
     expect(onPath.has('orphan')).toBe(false)
   })
 })
@@ -404,10 +404,10 @@ describe('validatePipelineConnections', () => {
   describe('Valid Pipelines', () => {
     it('validates simple consumer -> producer pipeline', () => {
       const nodes = [
-        createNode('consumer', 'consumer', 'HTTP Consumer'),
-        createNode('producer', 'producer', 'File Producer'),
+        createNode('input', 'input', 'HTTP Consumer'),
+        createNode('output', 'output', 'File Producer'),
       ]
-      const edges = [createEdge('consumer', 'producer')]
+      const edges = [createEdge('input', 'output')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -417,13 +417,13 @@ describe('validatePipelineConnections', () => {
 
     it('validates consumer -> filter -> producer pipeline', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter'),
-        createEdge('filter', 'producer'),
+        createEdge('input', 'filter'),
+        createEdge('filter', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -434,15 +434,15 @@ describe('validatePipelineConnections', () => {
 
     it('validates consumer -> filter -> converter -> producer pipeline', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter'),
         createNode('converter', 'converter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter'),
+        createEdge('input', 'filter'),
         createEdge('filter', 'converter'),
-        createEdge('converter', 'producer'),
+        createEdge('converter', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -453,16 +453,16 @@ describe('validatePipelineConnections', () => {
 
     it('validates diamond-shaped pipeline', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter1', 'filter'),
         createNode('filter2', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter1'),
-        createEdge('consumer', 'filter2'),
-        createEdge('filter1', 'producer'),
-        createEdge('filter2', 'producer'),
+        createEdge('input', 'filter1'),
+        createEdge('input', 'filter2'),
+        createEdge('filter1', 'output'),
+        createEdge('filter2', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -472,29 +472,29 @@ describe('validatePipelineConnections', () => {
     })
   })
 
-  describe('Consumer Validation', () => {
+  describe('Input Validation', () => {
     it('fails when no consumer', () => {
       const nodes = [
         createNode('filter', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
-      const edges = [createEdge('filter', 'producer')]
+      const edges = [createEdge('filter', 'output')]
 
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have at least 1 Consumer')
+      expect(result.errors).toContain('Pipeline must have at least 1 Input')
     })
 
     it('allows multiple consumers', () => {
       const nodes = [
-        createNode('consumer1', 'consumer'),
-        createNode('consumer2', 'consumer'),
-        createNode('producer', 'producer'),
+        createNode('consumer1', 'input'),
+        createNode('consumer2', 'input'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer1', 'producer'),
-        createEdge('consumer2', 'producer'),
+        createEdge('consumer1', 'output'),
+        createEdge('consumer2', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -503,29 +503,29 @@ describe('validatePipelineConnections', () => {
     })
   })
 
-  describe('Producer Validation', () => {
+  describe('Output Validation', () => {
     it('fails when no producer', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter'),
       ]
-      const edges = [createEdge('consumer', 'filter')]
+      const edges = [createEdge('input', 'filter')]
 
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Pipeline must have at least 1 Producer')
+      expect(result.errors).toContain('Pipeline must have at least 1 Output')
     })
 
     it('allows multiple producers', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
-        createNode('producer1', 'producer'),
-        createNode('producer2', 'producer'),
+        createNode('input', 'input'),
+        createNode('producer1', 'output'),
+        createNode('producer2', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'producer1'),
-        createEdge('consumer', 'producer2'),
+        createEdge('input', 'producer1'),
+        createEdge('input', 'producer2'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -537,10 +537,10 @@ describe('validatePipelineConnections', () => {
   describe('Edge Validation', () => {
     it('fails when edge references invalid source node', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
-        createNode('producer', 'producer'),
+        createNode('input', 'input'),
+        createNode('output', 'output'),
       ]
-      const edges = [createEdge('unknown', 'producer')]
+      const edges = [createEdge('unknown', 'output')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -550,10 +550,10 @@ describe('validatePipelineConnections', () => {
 
     it('fails when edge references invalid target node', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
-        createNode('producer', 'producer'),
+        createNode('input', 'input'),
+        createNode('output', 'output'),
       ]
-      const edges = [createEdge('consumer', 'unknown')]
+      const edges = [createEdge('input', 'unknown')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -565,8 +565,8 @@ describe('validatePipelineConnections', () => {
   describe('Connectivity Validation', () => {
     it('fails when consumer is isolated (no outgoing edges)', () => {
       const nodes = [
-        createNode('consumer', 'consumer', 'HTTP Consumer'),
-        createNode('producer', 'producer'),
+        createNode('input', 'input', 'HTTP Consumer'),
+        createNode('output', 'output'),
       ]
       const edges: Edge[] = []
 
@@ -578,11 +578,11 @@ describe('validatePipelineConnections', () => {
 
     it('fails when producer has no incoming edges', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter'),
-        createNode('producer', 'producer', 'File Producer'),
+        createNode('output', 'output', 'File Producer'),
       ]
-      const edges = [createEdge('consumer', 'filter')]
+      const edges = [createEdge('input', 'filter')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -593,34 +593,34 @@ describe('validatePipelineConnections', () => {
     it('fails when producer is not reachable from consumer', () => {
       // Case where consumer and producer both have connections but no path exists
       const nodes = [
-        createNode('consumer', 'consumer', 'HTTP Consumer'),
+        createNode('input', 'input', 'HTTP Consumer'),
         createNode('filter1', 'filter'),
         createNode('filter2', 'filter'),
-        createNode('producer', 'producer', 'File Producer'),
+        createNode('output', 'output', 'File Producer'),
       ]
       const edges = [
-        createEdge('consumer', 'filter1'),
-        createEdge('filter2', 'producer'),
+        createEdge('input', 'filter1'),
+        createEdge('filter2', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
 
       expect(result.valid).toBe(false)
-      expect(result.errors.some((e) => e.includes('not reachable from any Consumer') || e.includes('Orphaned'))).toBe(true)
+      expect(result.errors.some((e) => e.includes('not reachable from any Input') || e.includes('Orphaned'))).toBe(true)
     })
   })
 
   describe('Cycle Detection', () => {
     it('fails when graph has a simple cycle', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter'),
-        createEdge('filter', 'consumer'), // Cycle
-        createEdge('filter', 'producer'),
+        createEdge('input', 'filter'),
+        createEdge('filter', 'input'), // Cycle
+        createEdge('filter', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -631,16 +631,16 @@ describe('validatePipelineConnections', () => {
 
     it('fails when graph has a longer cycle', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter1', 'filter'),
         createNode('filter2', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter1'),
+        createEdge('input', 'filter1'),
         createEdge('filter1', 'filter2'),
         createEdge('filter2', 'filter1'), // Cycle
-        createEdge('filter2', 'producer'),
+        createEdge('filter2', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)
@@ -653,11 +653,11 @@ describe('validatePipelineConnections', () => {
   describe('Orphaned Node Detection', () => {
     it('fails when node is not connected to main flow', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter', 'filter', 'Orphan Filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
-      const edges = [createEdge('consumer', 'producer')]
+      const edges = [createEdge('input', 'output')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -668,12 +668,12 @@ describe('validatePipelineConnections', () => {
 
     it('fails with multiple orphaned nodes', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter1', 'filter', 'Filter 1'),
         createNode('filter2', 'filter', 'Filter 2'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
-      const edges = [createEdge('consumer', 'producer')]
+      const edges = [createEdge('input', 'output')]
 
       const result = validatePipelineConnections(nodes, edges)
 
@@ -683,15 +683,15 @@ describe('validatePipelineConnections', () => {
 
     it('detects node reachable from consumer but not to producer', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
+        createNode('input', 'input'),
         createNode('filter1', 'filter', 'Dead End Filter'),
         createNode('filter2', 'filter'),
-        createNode('producer', 'producer'),
+        createNode('output', 'output'),
       ]
       const edges = [
-        createEdge('consumer', 'filter1'),
-        createEdge('consumer', 'filter2'),
-        createEdge('filter2', 'producer'),
+        createEdge('input', 'filter1'),
+        createEdge('input', 'filter2'),
+        createEdge('filter2', 'output'),
         // filter1 goes nowhere
       ]
 
@@ -719,8 +719,8 @@ describe('validatePipelineConnections', () => {
 
     it('validates with empty edges array (consumer and producer only)', () => {
       const nodes = [
-        createNode('consumer', 'consumer'),
-        createNode('producer', 'producer'),
+        createNode('input', 'input'),
+        createNode('output', 'output'),
       ]
       const edges: Edge[] = []
 
@@ -735,8 +735,8 @@ describe('validatePipelineConnections', () => {
   describe('Error Message Quality', () => {
     it('includes node labels in error messages', () => {
       const nodes = [
-        createNode('consumer', 'consumer', 'My HTTP Consumer'),
-        createNode('producer', 'producer', 'My File Producer'),
+        createNode('input', 'input', 'My HTTP Consumer'),
+        createNode('output', 'output', 'My File Producer'),
       ]
       const edges: Edge[] = []
 
@@ -747,14 +747,14 @@ describe('validatePipelineConnections', () => {
 
     it('provides clear error for cycle detection', () => {
       const nodes = [
-        createNode('consumer', 'consumer', 'Start'),
+        createNode('input', 'input', 'Start'),
         createNode('filter', 'filter', 'Middle'),
-        createNode('producer', 'producer', 'End'),
+        createNode('output', 'output', 'End'),
       ]
       const edges = [
-        createEdge('consumer', 'filter'),
-        createEdge('filter', 'consumer'),
-        createEdge('filter', 'producer'),
+        createEdge('input', 'filter'),
+        createEdge('filter', 'input'),
+        createEdge('filter', 'output'),
       ]
 
       const result = validatePipelineConnections(nodes, edges)

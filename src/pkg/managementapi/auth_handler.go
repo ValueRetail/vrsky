@@ -93,18 +93,11 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		h.logAuthEvent(ctx, r, &user.ID, req.Email, "tenant_creation", "failed", stringPtr(err.Error()))
 	}
 
-	// Generate email verification token
-	rawToken, hashedToken, err := auth.GenerateVerificationToken()
-	if err != nil {
-		_ = writeError(w, http.StatusInternalServerError, "ServerError", "failed to generate verification token", nil)
-		return
-	}
-
-	// Save verification token
-	expiresAt := auth.CalculateVerificationTokenExpiry()
-	if err := h.repo.CreateEmailVerificationToken(ctx, user.ID, hashedToken, expiresAt); err != nil {
-		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to create verification token", nil)
-		return
+	// Auto-verify email (no email service configured yet)
+	// TODO: When email service is added, remove auto-verify and send verification email instead
+	if err := h.repo.VerifyUserEmail(ctx, user.ID); err != nil {
+		// Non-fatal: user can still verify later
+		h.logAuthEvent(ctx, r, &user.ID, req.Email, "auto_verify", "failed", stringPtr(err.Error()))
 	}
 
 	// Log success
@@ -112,10 +105,9 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 
 	// Build response
 	response := map[string]interface{}{
-		"success":            true,
-		"message":            "Check your email to verify your account",
-		"user_id":            user.ID,
-		"verification_token": rawToken, // TODO: Remove in production - only for testing
+		"success": true,
+		"message": "Registration successful! You can now log in.",
+		"user_id": user.ID,
 	}
 	if tenant != nil {
 		response["tenant"] = TenantResponse{

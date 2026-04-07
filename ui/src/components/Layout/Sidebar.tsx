@@ -19,7 +19,7 @@ export default function Sidebar() {
     <aside className="w-64 bg-white dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 flex flex-col transition-colors duration-base">
       {/* Navigation Menu */}
       <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-        {/* Dashboard Link */}
+        {/* Home Link */}
         <Link
           to="/"
           className={`flex items-center gap-3 px-4 py-2 rounded-lg font-semibold text-sm transition-all duration-fast ${
@@ -28,7 +28,7 @@ export default function Sidebar() {
               : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
           }`}
         >
-          <span>📊 Dashboard</span>
+          <span>🏠 Home</span>
         </Link>
 
         {/* Connections Link */}
@@ -83,16 +83,6 @@ export default function Sidebar() {
           >
             API Key
           </Link>
-          <Link
-            to="/settings/audit-log"
-            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
-              isActive('/settings/audit-log')
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
-                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
-            }`}
-          >
-            Audit Log
-          </Link>
         </div>
 
         {/* Status Cards */}
@@ -131,10 +121,10 @@ export default function Sidebar() {
       {/* Footer: Create Button */}
       <div className="p-4 border-t border-neutral-200 dark:border-neutral-700">
         <Link
-          to="/connections/create"
+          to="/pipeline-builder"
           className="btn-primary w-full inline-flex items-center justify-center gap-2 h-10"
         >
-          <span className="text-sm">➕ New Connection</span>
+          <span className="text-sm">➕ New Pipeline</span>
         </Link>
       </div>
     </aside>

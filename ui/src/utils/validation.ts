@@ -290,16 +290,16 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     }
   }
 
-  // Rule 1: At least 1 consumer
-  const consumers = nodes.filter((n) => n.type === 'consumer')
+  // Rule 1: At least 1 input
+  const consumers = nodes.filter((n) => n.type === 'input')
   if (consumers.length === 0) {
-    errors.push('Pipeline must have at least 1 Consumer')
+    errors.push('Pipeline must have at least 1 Input')
   }
 
-  // Rule 2: At least 1 producer
-  const producers = nodes.filter((n) => n.type === 'producer')
+  // Rule 2: At least 1 output
+  const producers = nodes.filter((n) => n.type === 'output')
   if (producers.length === 0) {
-    errors.push('Pipeline must have at least 1 Producer')
+    errors.push('Pipeline must have at least 1 Output')
   }
 
   // If we don't have at least 1 consumer and 1 producer, can't continue validation
@@ -333,14 +333,14 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
   // Rule 4: Each consumer has outgoing edges
   for (const c of consumers) {
     if (!hasOutgoingEdge(c.id, edges)) {
-      errors.push(`Consumer '${getNodeLabel(c)}' is not connected to any other nodes`)
+      errors.push(`Input '${getNodeLabel(c)}' is not connected to any other nodes`)
     }
   }
 
   // Rule 5: Each producer has incoming edges
   for (const p of producers) {
     if (!hasIncomingEdge(p.id, edges)) {
-      errors.push(`Producer '${getNodeLabel(p)}' has no incoming connections`)
+      errors.push(`Output '${getNodeLabel(p)}' has no incoming connections`)
     }
   }
 
@@ -349,7 +349,7 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     if (!hasIncomingEdge(p.id, edges)) continue
     const reachable = consumers.some((c) => hasOutgoingEdge(c.id, edges) && isReachable(c.id, p.id, edges))
     if (!reachable) {
-      errors.push(`Producer '${getNodeLabel(p)}' is not reachable from any Consumer`)
+      errors.push(`Output '${getNodeLabel(p)}' is not reachable from any Input`)
     }
   }
 

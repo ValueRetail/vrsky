@@ -14,6 +14,7 @@ type Config struct {
 	DatabaseURL string
 
 	// Optional with defaults
+	Port                string
 	EncryptionKey       string        // Hex-encoded 32-byte key for AES-256
 	LogLevel            string        // debug, info, warn, error
 	PollTimeout         time.Duration // HTTP request timeout
@@ -47,6 +48,7 @@ func LoadConfig() *Config {
 	return &Config{
 		NATSUrl:             getEnv("NATS_URL", "nats://localhost:4222"),
 		DatabaseURL:         getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/vrsky?sslmode=disable"),
+		Port:                getEnv("API_CONSUMER_PORT", "9800"),
 		EncryptionKey:       os.Getenv("ENCRYPTION_KEY"), // Optional, empty means no encryption
 		LogLevel:            getEnv("LOG_LEVEL", "info"),
 		PollTimeout:         pollTimeout,

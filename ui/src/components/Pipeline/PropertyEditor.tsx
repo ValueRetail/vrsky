@@ -766,16 +766,26 @@ const FILTER_OPERATORS: Array<{ value: string; label: string }> = [
 function FilterConfig({
   config,
   setConfig,
+  allNodes,
+  deployedConnectionId,
 }: {
   config: Record<string, unknown>
   setConfig: (c: Record<string, unknown>) => void
+  allNodes?: Node[]
+  deployedConnectionId?: string
 }) {
   const rules = (config.rules as Array<{ field: string; operator: string; value: string }>) || []
   const logic = (config.logic as string) || 'and'
-  const extractFields = (config.extract_fields as string[]) || []
   const flattenPath = (config.flatten_path as string) || ''
   const flattenFields = (config.flatten_fields as Record<string, string>) || {}
   const flattenInclude = (config.flatten_include as Record<string, string>) || {}
+
+  // Data structure browser state
+  const [sampleData, setSampleData] = useState<unknown>(null)
+  const [loadingData, setLoadingData] = useState(false)
+  const [dataError, setDataError] = useState('')
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  const [searchTerm, setSearchTerm] = useState('')
 
   const updateRule = (index: number, field: string, value: string) => {
     const newRules = [...rules]
@@ -791,264 +801,496 @@ function FilterConfig({
     setConfig({ ...config, rules: rules.filter((_, i) => i !== index) })
   }
 
+  // Collect all paths up to a given depth for auto-expanding
+  const collectPaths = (data: unknown, path: string, depth: number, maxDepth: number): string[] => {
+    if (depth >= maxDepth || data === null || data === undefined) return []
+    const paths: string[] = []
+    if (Array.isArray(data)) {
+      if (path) paths.push(path)
+      if (data.length > 0) paths.push(...collectPaths(data[0], path, depth + 1, maxDepth))
+    } else if (typeof data === 'object') {
+      for (const [key, val] of Object.entries(data as Record<string, unknown>)) {
+        const fullPath = path ? `${path}.${key}` : key
+        if (val !== null && typeof val === 'object') {
+          paths.push(fullPath)
+          paths.push(...collectPaths(val, fullPath, depth + 1, maxDepth))
+        }
+      }
+    }
+    return paths
+  }
+
+  // Check if a key or any descendant matches the search
+  const matchesSearch = (data: unknown, key: string): boolean => {
+    if (!searchTerm) return true
+    const term = searchTerm.toLowerCase()
+    if (key.toLowerCase().includes(term)) return true
+    if (data === null || data === undefined) return false
+    if (Array.isArray(data)) return data.length > 0 && matchesSearch(data[0], '')
+    if (typeof data === 'object') {
+      return Object.entries(data as Record<string, unknown>).some(([k, v]) => matchesSearch(v, k))
+    }
+    return String(data).toLowerCase().includes(term)
+  }
+
+  // Fetch sample data from upstream consumer
+  const fetchSampleData = async () => {
+    const consumer = allNodes?.find(n => n.type === 'input')
+    if (!consumer) { setDataError('No consumer node found'); return }
+
+    const consumerConfig = consumer.data?.config as Record<string, unknown> | undefined
+    const consumerType = consumerConfig?.type as string
+
+    setLoadingData(true)
+    setDataError('')
+
+    try {
+      if (consumerType === 'api') {
+        const api = consumerConfig?.api as { base_url?: string; endpoints?: Array<{ path?: string; params?: string; auth_type?: string; auth_value?: string }> } | undefined
+        const endpoint = api?.endpoints?.[0]
+        if (!api?.base_url || !endpoint) { setDataError('Input has no API config'); return }
+
+        const resp = await fetch('http://localhost:9800/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_url: api.base_url,
+            path: endpoint.path || '/',
+            params: endpoint.params || '',
+            auth_type: endpoint.auth_type || 'none',
+            auth_value: endpoint.auth_value || '',
+          }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'Failed to fetch')
+        }
+      } else if (consumerType === 'database') {
+        const db = consumerConfig?.database as Record<string, unknown> | undefined
+        if (!db?.host) { setDataError('Input has no database config'); return }
+        const resp = await fetch('http://localhost:9300/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...db, limit: 5 }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.rows)
+          setExpandedPaths(new Set(collectPaths(result.rows, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'Failed to fetch')
+        }
+      } else if (consumerType === 'http' || consumerType === 'tenant' || consumerType === 'file') {
+        // Fetch last received payload via management API
+        const connId = deployedConnectionId
+        if (!connId) { setDataError('Deploy the pipeline and send data first'); return }
+        const { default: apiClient } = await import('../../services/api')
+        const resp = await apiClient.get(`/api/v1/connections/${connId}/sample-data`)
+        const result = resp.data
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No data yet — send data through the pipeline first')
+        }
+      } else {
+        setDataError(`Preview not available for "${consumerType || 'unknown'}" input type`)
+      }
+    } catch (err) {
+      setDataError('Connection failed — is the service running?')
+    } finally {
+      setLoadingData(false)
+    }
+  }
+
+  // Add a field from the tree browser
+  const addFieldFromTree = (fullPath: string, name: string, isInsideList: boolean, isParentField: boolean) => {
+    if (isParentField || !flattenPath) {
+      // Add as "include from parent" if flatten is active, or as flatten_include
+      if (flattenPath) {
+        setConfig({ ...config, flatten_include: { ...flattenInclude, [fullPath]: name } })
+      } else {
+        // No flatten — just add as flatten field with the path as flatten_path auto-detect
+        setConfig({ ...config, flatten_include: { ...flattenInclude, [fullPath]: name } })
+      }
+    } else {
+      // Field inside the list — add as flatten_fields
+      setConfig({ ...config, flatten_fields: { ...flattenFields, [fullPath]: name } })
+    }
+  }
+
+  // Recursive tree renderer
+  const renderTree = (data: unknown, path: string, depth: number, insideListPath: boolean, parentMatched: boolean = false): JSX.Element | null => {
+    if (data === null || data === undefined) return null
+    const indent = depth * 12
+    const isSearching = searchTerm.length > 0
+
+    if (Array.isArray(data)) {
+      const isExpanded = isSearching || expandedPaths.has(path)
+      const isSelectedAsList = flattenPath === path
+      const label = path.split('.').pop() || 'root'
+      return (
+        <div>
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '4px 4px 4px ' + indent + 'px', cursor: 'pointer',
+              borderRadius: '4px', backgroundColor: isSelectedAsList ? '#eff6ff' : 'transparent',
+              overflow: 'hidden',
+            }}
+            onClick={() => {
+              const next = new Set(expandedPaths)
+              isExpanded ? next.delete(path) : next.add(path)
+              setExpandedPaths(next)
+            }}
+          >
+            <span style={{ fontSize: '10px', color: '#6b7280', width: '12px', textAlign: 'center', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
+            <span style={{ fontSize: '11px', color: '#1e40af', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {label}
+            </span>
+            <span style={{ fontSize: '9px', color: '#94a3b8', flexShrink: 0 }}>
+              {data.length}
+            </span>
+            {!isSelectedAsList ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfig({ ...config, flatten_path: path }) }}
+                style={{ fontSize: '9px', padding: '2px 6px', background: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd', borderRadius: '3px', cursor: 'pointer', marginLeft: 'auto', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}
+              >Split into rows</button>
+            ) : (
+              <span style={{ fontSize: '9px', padding: '2px 6px', background: '#dcfce7', color: '#16a34a', borderRadius: '3px', marginLeft: 'auto', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                Splitting
+              </span>
+            )}
+          </div>
+          {isExpanded && data.length > 0 && (
+            <div style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
+              {renderTree(data[0], path, depth + 1, isSelectedAsList || insideListPath, parentMatched)}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (typeof data === 'object') {
+      return (
+        <div>
+          {Object.entries(data as Record<string, unknown>).map(([key, val]) => {
+            const fullPath = path ? `${path}.${key}` : key
+
+            // Search filtering — match key, full path, or parent path prefix
+            const term = searchTerm.toLowerCase()
+            const fp = fullPath.toLowerCase()
+            // "issue.title" matches fullPath "issue.title"; "issue" matches key "issue"
+            // "issue." keeps parent visible so children can render
+            const pathMatches = fp.includes(term) || term.includes(fp)
+            const keyMatches = isSearching && (key.toLowerCase().includes(term) || pathMatches)
+            if (isSearching && !parentMatched && !keyMatches && !matchesSearch(val, key)) return null
+
+            const isExpanded = expandedPaths.has(fullPath) || (isSearching && !expandedPaths.has('_collapsed_' + fullPath))
+
+            if (val !== null && typeof val === 'object') {
+              return (
+                <div key={key}>
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      padding: '3px 4px 3px ' + indent + 'px', cursor: 'pointer',
+                      borderRadius: '4px',
+                    }}
+                    onClick={() => {
+                      const next = new Set(expandedPaths)
+                      if (isExpanded) {
+                        next.delete(fullPath)
+                        if (isSearching) next.add('_collapsed_' + fullPath)
+                      } else {
+                        next.add(fullPath)
+                        next.delete('_collapsed_' + fullPath)
+                      }
+                      setExpandedPaths(next)
+                    }}
+                  >
+                    <span style={{ fontSize: '10px', color: '#6b7280', width: '12px', textAlign: 'center', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
+                    <span style={{ fontSize: '11px', color: '#374151', fontFamily: 'monospace', fontWeight: 500 }}>{key}</span>
+                  </div>
+                  {isExpanded && (
+                    <div style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
+                      {renderTree(val, fullPath, depth + 1, insideListPath, (keyMatches && !term.includes('.')) || parentMatched)}
+                    </div>
+                  )}
+                </div>
+              )
+            }
+
+            // Leaf value
+            const displayVal = String(val)
+            const shortVal = displayVal.length > 25 ? displayVal.slice(0, 25) + '...' : displayVal
+            const leafName = key
+            let fieldPath = fullPath
+            if (flattenPath && insideListPath && fullPath.startsWith(flattenPath + '.')) {
+              fieldPath = fullPath.slice(flattenPath.length + 1)
+            }
+            const extractFields = (config.extract_fields as string[]) || []
+            const isAlreadyAdded = Object.keys(flattenFields).includes(fieldPath) || Object.keys(flattenInclude).includes(fullPath) || extractFields.includes(fullPath)
+            const highlightMatch = isSearching && key.toLowerCase().includes(searchTerm.toLowerCase())
+
+            const addField = () => {
+              if (isAlreadyAdded) return
+              if (flattenPath && insideListPath) {
+                setConfig({ ...config, flatten_fields: { ...flattenFields, [fieldPath]: leafName } })
+              } else if (flattenPath) {
+                setConfig({ ...config, flatten_include: { ...flattenInclude, [fullPath]: leafName } })
+              } else {
+                setConfig({ ...config, extract_fields: [...extractFields, fullPath] })
+              }
+            }
+
+            return (
+              <div key={key} style={{
+                display: 'flex', alignItems: 'center', gap: '4px',
+                padding: '2px 4px 2px ' + (indent + 12) + 'px',
+                borderRadius: '4px', overflow: 'hidden',
+                backgroundColor: highlightMatch ? '#fefce8' : (isAlreadyAdded ? '#f0fdf4' : 'transparent'),
+                cursor: isAlreadyAdded ? 'default' : 'pointer',
+              }}
+              onClick={addField}
+              >
+                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: isAlreadyAdded ? '#16a34a' : '#374151', fontWeight: highlightMatch || isAlreadyAdded ? 600 : 400, whiteSpace: 'nowrap' }}>{key}</span>
+                <span style={{ fontSize: '10px', color: '#94a3b8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{shortVal}</span>
+                {isAlreadyAdded ? (
+                  <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: 600, flexShrink: 0 }}>✓</span>
+                ) : (
+                  <span style={{ fontSize: '9px', padding: '1px 6px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: '3px', fontWeight: 600, flexShrink: 0 }}>+</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
+
+    return null
+  }
+
+  // Count total picked fields
+  const extractFields = (config.extract_fields as string[]) || []
+  const pickedCount = Object.keys(flattenFields).length + Object.keys(flattenInclude).length + extractFields.length
+
   return (
     <div>
-      {/* Logic toggle */}
-      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Match:</span>
-        {['and', 'or'].map((l) => (
-          <button
-            key={l}
-            onClick={() => setConfig({ ...config, logic: l })}
-            style={{
-              padding: '4px 12px', fontSize: '12px', fontWeight: 600,
-              backgroundColor: logic === l ? (l === 'and' ? '#dbeafe' : '#fef3c7') : '#f3f4f6',
-              color: logic === l ? (l === 'and' ? '#1d4ed8' : '#92400e') : '#6b7280',
-              border: `1px solid ${logic === l ? (l === 'and' ? '#93c5fd' : '#fcd34d') : '#d1d5db'}`,
-              borderRadius: '4px', cursor: 'pointer',
-            }}
-          >
-            {l.toUpperCase()}
-          </button>
-        ))}
-        <span style={{ fontSize: '11px', color: '#9ca3af' }}>
-          {logic === 'and' ? 'All rules must match' : 'Any rule can match'}
-        </span>
-      </div>
-
-      {/* Rules */}
-      {rules.map((rule, i) => (
-        <div key={i} style={{
-          display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px',
-          padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb',
-        }}>
-          <input
-            placeholder="field"
-            value={rule.field}
-            onChange={(e) => updateRule(i, 'field', e.target.value)}
-            style={{
-              flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
-              borderRadius: '4px', fontFamily: 'monospace',
-            }}
-          />
-          <select
-            value={rule.operator}
-            onChange={(e) => updateRule(i, 'operator', e.target.value)}
-            style={{
-              padding: '6px 4px', fontSize: '12px', border: '1px solid #d1d5db',
-              borderRadius: '4px', backgroundColor: 'white',
-            }}
-          >
-            {FILTER_OPERATORS.map((op) => (
-              <option key={op.value} value={op.value}>{op.label}</option>
-            ))}
-          </select>
-          {!['is_empty', 'is_not_empty'].includes(rule.operator) && (
-            <input
-              placeholder="value"
-              value={rule.value}
-              onChange={(e) => updateRule(i, 'value', e.target.value)}
-              style={{
-                flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
-                borderRadius: '4px',
-              }}
-            />
-          )}
-          <button
-            onClick={() => removeRule(i)}
-            style={{
-              padding: '4px 8px', fontSize: '14px', background: 'none', border: 'none',
-              color: '#dc2626', cursor: 'pointer',
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-
-      <button
-        onClick={addRule}
-        style={{
-          padding: '6px 12px', fontSize: '12px', fontWeight: 600,
-          backgroundColor: '#f3f4f6', border: '1px solid #d1d5db',
-          borderRadius: '4px', cursor: 'pointer', color: '#374151',
-        }}
-      >
-        + Add Rule
-      </button>
-
-      {rules.length === 0 && !extractFields.length && (
-        <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', marginTop: '8px' }}>
-          No filter rules configured. Add rules to filter rows, or extract fields to pick specific data.
-        </p>
-      )}
-
-      {/* Extract Fields */}
-      <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+      {/* ---- Pick Fields Section ---- */}
+      <div style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Extract Fields</span>
-          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Keep only these JSON paths</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#374151' }}>Pick Fields</span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Choose which data to keep</span>
         </div>
-        {extractFields.map((field: string, i: number) => (
-          <div key={i} style={{
-            display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px',
-          }}>
-            <input
-              placeholder="e.g. properties.timeseries.data.instant.details.air_temperature"
-              value={field}
-              onChange={(e) => {
-                const newFields = [...extractFields]
-                newFields[i] = e.target.value
-                setConfig({ ...config, extract_fields: newFields })
-              }}
-              style={{
-                flex: 1, padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
-                borderRadius: '4px', fontFamily: 'monospace',
-              }}
-            />
-            <button
-              onClick={() => setConfig({ ...config, extract_fields: extractFields.filter((_: string, j: number) => j !== i) })}
-              style={{
-                padding: '4px 8px', fontSize: '14px', background: 'none', border: 'none',
-                color: '#dc2626', cursor: 'pointer',
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
+
+        {/* Show Data Structure button */}
         <button
-          onClick={() => setConfig({ ...config, extract_fields: [...extractFields, ''] })}
+          onClick={fetchSampleData}
+          disabled={loadingData}
           style={{
-            padding: '6px 12px', fontSize: '12px', fontWeight: 600,
-            backgroundColor: '#f3f4f6', border: '1px solid #d1d5db',
-            borderRadius: '4px', cursor: 'pointer', color: '#374151',
+            padding: '8px 14px', fontSize: '12px', fontWeight: 600, width: '100%',
+            backgroundColor: loadingData ? '#e5e7eb' : '#eff6ff', color: loadingData ? '#9ca3af' : '#1d4ed8',
+            border: '1px solid ' + (loadingData ? '#d1d5db' : '#93c5fd'),
+            borderRadius: '6px', cursor: loadingData ? 'default' : 'pointer', marginBottom: '8px',
           }}
         >
-          + Add Field
+          {loadingData ? 'Loading...' : sampleData ? 'Refresh Data Structure' : 'Show Data Structure'}
         </button>
-        {extractFields.length > 0 && (
-          <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px' }}>
-            Use dot notation for nested paths. Arrays are traversed automatically.
-            <br />Example: <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>geometry.coordinates</code>, <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>properties.timeseries.time</code>
+        {dataError && <p style={{ fontSize: '11px', color: '#dc2626', margin: '4px 0' }}>{dataError}</p>}
+
+        {/* Data structure tree */}
+        {sampleData && (
+          <div style={{
+            border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#fafafa', marginBottom: '8px', overflow: 'hidden',
+          }}>
+            <div style={{ padding: '8px 8px 4px', borderBottom: '1px solid #e5e7eb', background: '#f8fafc' }}>
+              <input
+                placeholder="Search fields... (e.g. temperature)"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%', padding: '6px 10px', fontSize: '12px', border: '1px solid #d1d5db',
+                  borderRadius: '4px', boxSizing: 'border-box', outline: 'none',
+                }}
+              />
+              <p style={{ fontSize: '10px', color: '#94a3b8', margin: '4px 0 2px' }}>
+                Click fields to add them. Click a list to "Split into rows".
+              </p>
+            </div>
+            <div style={{ maxHeight: '350px', overflowY: 'auto', overflowX: 'hidden', padding: '4px 0' }}>
+              {renderTree(sampleData, '', 0, false)}
+            </div>
+          </div>
+        )}
+
+        {/* Split into rows indicator */}
+        {flattenPath && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 8px', marginBottom: '8px',
+            backgroundColor: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '6px',
+          }}>
+            <span style={{ fontSize: '11px', color: '#1d4ed8' }}>
+              Splitting <code style={{ background: '#dbeafe', padding: '1px 4px', borderRadius: '2px' }}>{flattenPath}</code> into rows
+            </span>
+            <button
+              onClick={() => setConfig({ ...config, flatten_path: '', flatten_fields: {}, flatten_include: {} })}
+              style={{ fontSize: '11px', padding: '1px 6px', background: 'none', border: '1px solid #93c5fd', borderRadius: '3px', color: '#1d4ed8', cursor: 'pointer', marginLeft: 'auto' }}
+            >Clear</button>
+          </div>
+        )}
+
+        {/* Selected fields summary */}
+        {pickedCount > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+              Selected fields ({pickedCount})
+            </p>
+            {extractFields.map((path) => (
+              <div key={'ef-' + path} style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', marginBottom: '3px',
+                backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', fontSize: '11px',
+              }}>
+                <code style={{ fontFamily: 'monospace', color: '#374151', flex: 1 }}>{path}</code>
+                <button
+                  onClick={() => {
+                    setConfig({ ...config, extract_fields: extractFields.filter(f => f !== path) })
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px', padding: '0 4px' }}
+                >×</button>
+              </div>
+            ))}
+            {Object.entries(flattenFields).map(([path, name]) => (
+              <div key={'ff-' + path} style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', marginBottom: '3px',
+                backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', fontSize: '11px',
+              }}>
+                <code style={{ fontFamily: 'monospace', color: '#374151', flex: 1 }}>{path}</code>
+                <span style={{ color: '#9ca3af' }}>→</span>
+                <input
+                  value={name}
+                  onChange={(e) => setConfig({ ...config, flatten_fields: { ...flattenFields, [path]: e.target.value } })}
+                  style={{ width: '80px', padding: '2px 4px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '3px', fontFamily: 'monospace' }}
+                />
+                <button
+                  onClick={() => {
+                    const nf = { ...flattenFields }; delete nf[path]
+                    setConfig({ ...config, flatten_fields: nf })
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px', padding: '0 4px' }}
+                >×</button>
+              </div>
+            ))}
+            {Object.entries(flattenInclude).map(([path, name]) => (
+              <div key={'fi-' + path} style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', marginBottom: '3px',
+                backgroundColor: '#fefce8', border: '1px solid #fde68a', borderRadius: '4px', fontSize: '11px',
+              }}>
+                <code style={{ fontFamily: 'monospace', color: '#374151', flex: 1 }}>{path}</code>
+                <span style={{ color: '#9ca3af' }}>→</span>
+                <input
+                  value={name}
+                  onChange={(e) => setConfig({ ...config, flatten_include: { ...flattenInclude, [path]: e.target.value } })}
+                  style={{ width: '80px', padding: '2px 4px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '3px', fontFamily: 'monospace' }}
+                />
+                <button
+                  onClick={() => {
+                    const ni = { ...flattenInclude }; delete ni[path]
+                    setConfig({ ...config, flatten_include: ni })
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '13px', padding: '0 4px' }}
+                >×</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!sampleData && pickedCount === 0 && (
+          <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+            Click "Show Data Structure" to browse and pick the fields you want to keep.
           </p>
         )}
       </div>
 
-      {/* Flatten Array */}
-      <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+      {/* ---- Filter Rules Section ---- */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Flatten Array</span>
-          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Unroll nested array into flat rows</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#374151' }}>Filter Rules</span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>Optional — drop rows that don't match</span>
         </div>
 
-        <div style={{ marginBottom: '8px' }}>
-          <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', display: 'block', marginBottom: '4px' }}>Array Path</label>
-          <input
-            placeholder="e.g. properties.timeseries"
-            value={flattenPath}
-            onChange={(e) => setConfig({ ...config, flatten_path: e.target.value })}
-            style={{
-              width: '100%', padding: '6px 8px', fontSize: '12px', border: '1px solid #d1d5db',
-              borderRadius: '4px', fontFamily: 'monospace', boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {flattenPath && (
-          <>
-            <div style={{ marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Row Fields</label>
-                <span style={{ fontSize: '10px', color: '#9ca3af' }}>Fields from each array element</span>
-              </div>
-              {Object.entries(flattenFields).map(([path, name], i) => (
-                <div key={i} style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
-                  <input
-                    placeholder="source path"
-                    value={path}
-                    onChange={(e) => {
-                      const newFields = { ...flattenFields }
-                      delete newFields[path]
-                      newFields[e.target.value] = name
-                      setConfig({ ...config, flatten_fields: newFields })
-                    }}
-                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
-                  />
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>→</span>
-                  <input
-                    placeholder="output name"
-                    value={name}
-                    onChange={(e) => {
-                      setConfig({ ...config, flatten_fields: { ...flattenFields, [path]: e.target.value } })
-                    }}
-                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
-                  />
-                  <button
-                    onClick={() => {
-                      const newFields = { ...flattenFields }
-                      delete newFields[path]
-                      setConfig({ ...config, flatten_fields: newFields })
-                    }}
-                    style={{ padding: '2px 6px', fontSize: '14px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
-                  >×</button>
-                </div>
-              ))}
+        {rules.length > 0 && (
+          <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Match:</span>
+            {['and', 'or'].map((l) => (
               <button
-                onClick={() => setConfig({ ...config, flatten_fields: { ...flattenFields, '': '' } })}
-                style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 600, backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#374151' }}
-              >+ Add Row Field</button>
-            </div>
-
-            <div style={{ marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <label style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280' }}>Include from Parent</label>
-                <span style={{ fontSize: '10px', color: '#9ca3af' }}>Fields from root added to every row</span>
-              </div>
-              {Object.entries(flattenInclude).map(([path, name], i) => (
-                <div key={i} style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
-                  <input
-                    placeholder="e.g. geometry.coordinates[0]"
-                    value={path}
-                    onChange={(e) => {
-                      const newInc = { ...flattenInclude }
-                      delete newInc[path]
-                      newInc[e.target.value] = name
-                      setConfig({ ...config, flatten_include: newInc })
-                    }}
-                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
-                  />
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>→</span>
-                  <input
-                    placeholder="output name"
-                    value={name}
-                    onChange={(e) => {
-                      setConfig({ ...config, flatten_include: { ...flattenInclude, [path]: e.target.value } })
-                    }}
-                    style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
-                  />
-                  <button
-                    onClick={() => {
-                      const newInc = { ...flattenInclude }
-                      delete newInc[path]
-                      setConfig({ ...config, flatten_include: newInc })
-                    }}
-                    style={{ padding: '2px 6px', fontSize: '14px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
-                  >×</button>
-                </div>
-              ))}
-              <button
-                onClick={() => setConfig({ ...config, flatten_include: { ...flattenInclude, '': '' } })}
-                style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 600, backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: '#374151' }}
-              >+ Add Parent Field</button>
-            </div>
-
-            <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-              Use <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>[0]</code> for array indexes in parent paths.
-              Example: <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>geometry.coordinates[1]</code> → <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: '2px' }}>lat</code>
-            </p>
-          </>
+                key={l}
+                onClick={() => setConfig({ ...config, logic: l })}
+                style={{
+                  padding: '3px 10px', fontSize: '11px', fontWeight: 600,
+                  backgroundColor: logic === l ? (l === 'and' ? '#dbeafe' : '#fef3c7') : '#f3f4f6',
+                  color: logic === l ? (l === 'and' ? '#1d4ed8' : '#92400e') : '#6b7280',
+                  border: `1px solid ${logic === l ? (l === 'and' ? '#93c5fd' : '#fcd34d') : '#d1d5db'}`,
+                  borderRadius: '4px', cursor: 'pointer',
+                }}
+              >
+                {l.toUpperCase()}
+              </button>
+            ))}
+            <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+              {logic === 'and' ? 'All must match' : 'Any can match'}
+            </span>
+          </div>
         )}
+
+        {rules.map((rule, i) => (
+          <div key={i} style={{
+            display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '6px',
+            padding: '6px', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb',
+          }}>
+            <input
+              placeholder="field"
+              value={rule.field}
+              onChange={(e) => updateRule(i, 'field', e.target.value)}
+              style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', fontFamily: 'monospace' }}
+            />
+            <select
+              value={rule.operator}
+              onChange={(e) => updateRule(i, 'operator', e.target.value)}
+              style={{ padding: '5px 4px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px', backgroundColor: 'white' }}
+            >
+              {FILTER_OPERATORS.map((op) => (
+                <option key={op.value} value={op.value}>{op.label}</option>
+              ))}
+            </select>
+            {!['is_empty', 'is_not_empty'].includes(rule.operator) && (
+              <input
+                placeholder="value"
+                value={rule.value}
+                onChange={(e) => updateRule(i, 'value', e.target.value)}
+                style={{ flex: 1, padding: '5px 6px', fontSize: '11px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+              />
+            )}
+            <button
+              onClick={() => removeRule(i)}
+              style={{ padding: '2px 6px', fontSize: '14px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
+            >×</button>
+          </div>
+        ))}
+
+        <button
+          onClick={addRule}
+          style={{
+            padding: '5px 10px', fontSize: '11px', fontWeight: 600,
+            backgroundColor: '#f3f4f6', border: '1px solid #d1d5db',
+            borderRadius: '4px', cursor: 'pointer', color: '#374151',
+          }}
+        >
+          + Add Rule
+        </button>
       </div>
     </div>
   )
@@ -1077,7 +1319,7 @@ function ConverterConfig({
   const [fetchingSample, setFetchingSample] = useState(false)
 
   // Get consumer node config for fetching sample data
-  const consumerNode = allNodes?.find(n => n.type === 'consumer')
+  const consumerNode = allNodes?.find(n => n.type === 'input')
   const consumerConfig = consumerNode?.data?.config as Record<string, unknown> | undefined
   const consumerType = consumerConfig?.type as string | undefined
 
@@ -1267,7 +1509,7 @@ function ConverterConfig({
               disabled={fetchingSample}
               style={{ fontSize: '11px', padding: '2px 8px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: fetchingSample ? 'not-allowed' : 'pointer', color: '#374151' }}
             >
-              {fetchingSample ? 'Fetching...' : 'Fetch from Consumer'}
+              {fetchingSample ? 'Fetching...' : 'Fetch from Input'}
             </button>
           )}
         </div>
@@ -1275,7 +1517,7 @@ function ConverterConfig({
           value={previewInput}
           onChange={(e) => setPreviewInput(e.target.value)}
           style={{ width: '100%', height: '80px', padding: '6px 8px', fontSize: '11px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'vertical', boxSizing: 'border-box' }}
-          placeholder={consumerType === 'database' ? 'Click "Fetch from Consumer" to load real data, or paste JSON here' : '[{"field": "value"}]'}
+          placeholder={consumerType === 'database' ? 'Click "Fetch from Input" to load real data, or paste JSON here' : '[{"field": "value"}]'}
         />
         <button
           onClick={runPreview}
@@ -1620,7 +1862,22 @@ export default function PropertyEditor({
 }) {
   const [config, setConfig] = useState(node.data.config || {})
   const [closeHovered, setCloseHovered] = useState(false)
-  
+  const [tunnelUrl, setTunnelUrl] = useState('')
+  const [tunnelLoading, setTunnelLoading] = useState(false)
+  const [testBody, setTestBody] = useState('{\n  "test": true,\n  "message": "Hello from VRSky!"\n}')
+  const [testResponse, setTestResponse] = useState<{ status: number; body: string } | null>(null)
+  const [testSending, setTestSending] = useState(false)
+  const [editingLabel, setEditingLabel] = useState(false)
+  const [labelValue, setLabelValue] = useState(node.data.label || '')
+
+  // Check tunnel status on mount
+  useEffect(() => {
+    fetch('http://localhost:9100/tunnel/status')
+      .then(r => r.json())
+      .then(d => { if (d.running && d.url) setTunnelUrl(d.url) })
+      .catch(() => {})
+  }, [])
+
   // Track which node we're editing to detect when it changes
   const currentNodeIdRef = useRef<string>(node.id)
   
@@ -1630,6 +1887,8 @@ export default function PropertyEditor({
     if (currentNodeIdRef.current !== node.id) {
       // Different node selected - load its config
       setConfig(node.data.config || {})
+      setLabelValue(node.data.label || '')
+      setEditingLabel(false)
       currentNodeIdRef.current = node.id
     }
     // If same node, keep local config state (preserves unsaved changes)
@@ -1639,9 +1898,9 @@ export default function PropertyEditor({
   const nodeColor = NODE_COLORS[nodeType] || NODE_COLORS.consumer
 
   // Check if configuration is ready to save
-  // Consumer and producer nodes need a type selected, other nodes are always ready
+  // Input and output nodes need a type selected, other nodes are always ready
   const isReadyToSave = (): boolean => {
-    if (nodeType === 'consumer' || nodeType === 'producer') {
+    if (nodeType === 'input' || nodeType === 'output') {
       return Boolean(config.type)
     }
     return true // Filter and converter nodes are always ready
@@ -1649,7 +1908,7 @@ export default function PropertyEditor({
 
   const renderConfigFields = () => {
     switch (nodeType) {
-      case 'consumer':
+      case 'input':
         return (
           <div>
             <StyledSelect
@@ -1658,11 +1917,11 @@ export default function PropertyEditor({
               onChange={(value) => setConfig({ ...config, type: value })}
               options={[
                 { value: '', label: 'Select source type...' },
-                { value: 'api', label: 'API Consumer' },
-                { value: 'http', label: 'HTTP Webhook' },
+                { value: 'api', label: 'API Input' },
+                { value: 'http', label: 'Webhook (HTTP)' },
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
-                { value: 'tenant', label: 'Tenant Consumer' },
+                { value: 'tenant', label: 'Tenant Input' },
               ]}
             />
 
@@ -1686,30 +1945,80 @@ export default function PropertyEditor({
                     margin: 0,
                   }}
                 >
-                  Select a source type from the dropdown above to configure this consumer
+                  Select a source type from the dropdown above to configure this input
                 </p>
               </div>
             )}
 
             {config.type === 'http' && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">Inbound Webhook</p>
-                {deployedConnectionId ? (
-                  <>
-                    <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">Live webhook URL:</p>
-                    <code className="block text-xs text-blue-800 dark:text-blue-200 bg-blue-100 dark:bg-blue-900/40 p-2 rounded font-mono break-all">
-                      POST http://localhost:9100/webhook/{deployedConnectionId}
-                    </code>
-                  </>
+              <div className="space-y-3">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Listens for incoming POST requests from external services like GitHub, Stripe, or Bruno. Click Connect to get a public URL.
+                </p>
+
+                {tunnelUrl ? (
+                  <div className="space-y-3">
+                    {/* Connection status */}
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs text-green-600 dark:text-green-400 font-medium">Connected</p>
+                        <button
+                          onClick={async () => {
+                            setTunnelLoading(true)
+                            try {
+                              await fetch('http://localhost:9100/tunnel/stop', { method: 'POST' })
+                              setTunnelUrl('')
+                              setTestResponse(null)
+                            } catch (e) { console.error(e) }
+                            setTunnelLoading(false)
+                          }}
+                          disabled={tunnelLoading}
+                          className="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+                        >
+                          {tunnelLoading ? '...' : 'Disconnect'}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs text-green-800 dark:text-green-200 bg-green-100 dark:bg-green-900/40 p-1.5 rounded font-mono break-all">
+                          {tunnelUrl}/webhook/{deployedConnectionId || '<deploy first>'}
+                        </code>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${tunnelUrl}/webhook/${deployedConnectionId || ''}`)
+                          }}
+                          className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
                 ) : (
-                  <>
-                    <p className="text-xs text-blue-600 dark:text-blue-300">
-                      Deploy this pipeline to get your webhook URL. External services can POST data to it and it will flow through the pipeline.
-                    </p>
-                    <p className="text-xs text-blue-500 dark:text-blue-400 mt-2 font-mono">
-                      POST http://localhost:9100/webhook/{'<connection-id>'}
-                    </p>
-                  </>
+                  <button
+                    onClick={async () => {
+                      setTunnelLoading(true)
+                      try {
+                        const res = await fetch('http://localhost:9100/tunnel/start', { method: 'POST' })
+                        const data = await res.json()
+                        if (data.url) {
+                          setTunnelUrl(data.url)
+                        } else {
+                          for (let i = 0; i < 10; i++) {
+                            await new Promise(r => setTimeout(r, 2000))
+                            const s = await fetch('http://localhost:9100/tunnel/status')
+                            const st = await s.json()
+                            if (st.url) { setTunnelUrl(st.url); break }
+                          }
+                        }
+                      } catch (e) { console.error(e) }
+                      setTunnelLoading(false)
+                    }}
+                    disabled={tunnelLoading}
+                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+                  >
+                    {tunnelLoading ? 'Connecting...' : 'Connect'}
+                  </button>
                 )}
               </div>
             )}
@@ -1765,7 +2074,7 @@ export default function PropertyEditor({
           </div>
         )
 
-      case 'producer':
+      case 'output':
         return (
           <div>
             <StyledSelect
@@ -1774,7 +2083,7 @@ export default function PropertyEditor({
               onChange={(value) => setConfig({ ...config, type: value })}
               options={[
                 { value: '', label: 'Select destination type...' },
-                { value: 'http', label: 'HTTP API' },
+                { value: 'http', label: 'Webhook (HTTP)' },
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
               ]}
@@ -1800,7 +2109,7 @@ export default function PropertyEditor({
                     margin: 0,
                   }}
                 >
-                  Select a destination type from the dropdown above to configure this producer
+                  Select a destination type from the dropdown above to configure this output
                 </p>
               </div>
             )}
@@ -1808,8 +2117,8 @@ export default function PropertyEditor({
             {config.type === 'http' && (
               <>
                 <StyledInput
-                  label="Target URL"
-                  placeholder="https://example.com/api"
+                  label="Destination URL"
+                  placeholder="https://example.com/api/webhook"
                   value={(config.http as any)?.url || ''}
                   onChange={(value) =>
                     setConfig({
@@ -1834,8 +2143,7 @@ export default function PropertyEditor({
                   ]}
                 />
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                  Data flowing through the pipeline will be forwarded to this URL.
-                  For testing, use <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">http://httpbin:80/post</code>
+                  Pipeline data will be POSTed to this URL. Paste a webhook URL from any external service (e.g. webhook.site, Slack, Discord).
                 </p>
               </>
             )}
@@ -1870,7 +2178,7 @@ export default function PropertyEditor({
 
       case 'filter':
         return (
-          <FilterConfig config={config} setConfig={setConfig} />
+          <FilterConfig config={config} setConfig={setConfig} allNodes={allNodes} deployedConnectionId={deployedConnectionId} />
         )
 
       default:
@@ -1910,7 +2218,37 @@ export default function PropertyEditor({
             color: nodeColor.text,
           }}
         >
-          {node.data.label}
+          {editingLabel ? (
+            <input
+              autoFocus
+              value={labelValue}
+              onChange={(e) => setLabelValue(e.target.value)}
+              onBlur={() => setEditingLabel(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setEditingLabel(false)
+                if (e.key === 'Escape') { setLabelValue(node.data.label || ''); setEditingLabel(false) }
+              }}
+              style={{
+                fontSize: '15px',
+                fontWeight: 600,
+                color: nodeColor.text,
+                background: 'rgba(255,255,255,0.3)',
+                border: '1px solid rgba(0,0,0,0.2)',
+                borderRadius: '4px',
+                padding: '1px 6px',
+                outline: 'none',
+                width: '100%',
+              }}
+            />
+          ) : (
+            <span
+              onClick={() => setEditingLabel(true)}
+              style={{ cursor: 'pointer' }}
+              title="Click to rename"
+            >
+              {labelValue || node.data.label}
+            </span>
+          )}
         </h3>
         <button
           onClick={onClose}
@@ -1961,7 +2299,7 @@ export default function PropertyEditor({
       >
         <StyledButton
           onClick={() => {
-            onUpdate(config)
+            onUpdate(labelValue !== node.data.label ? { ...config, _label: labelValue } : config)
             onClose()
           }}
           variant="primary"
