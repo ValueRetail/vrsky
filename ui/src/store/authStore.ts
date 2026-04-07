@@ -89,7 +89,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         workspace_name: workspaceName,
       })
 
-      set({ isLoading: false })
+      set({ isLoading: false, error: response.success ? null : (response.message || 'Registration failed') })
 
       return {
         success: response.success,

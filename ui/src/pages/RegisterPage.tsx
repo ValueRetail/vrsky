@@ -91,7 +91,7 @@ export default function RegisterPage() {
 
     const result = await register(email, password, fullName, workspaceName.trim())
     if (result.success) {
-      setSuccessMessage(result.message || 'Registration successful! Please check your email to verify your account.')
+      setSuccessMessage(result.message || 'Registration successful! You can now log in.')
     }
   }
 

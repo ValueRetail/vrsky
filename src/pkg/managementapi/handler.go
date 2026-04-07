@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ type Handler struct {
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
+	db                *sql.DB // Direct DB access for raw queries (e.g. sample-data)
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
@@ -40,6 +42,11 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 		metricsCache:      nil, // Will be set via InitializeWebSocketSupport if needed
 		generatorRegistry: NewTestGeneratorRegistry(),
 	}
+}
+
+// SetDB sets the direct database connection for raw queries
+func (h *Handler) SetDB(db *sql.DB) {
+	h.db = db
 }
 
 // SetPublisher sets the NATS publisher for command publishing
@@ -610,6 +617,96 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSampleData returns the last received payload for a connection (used by filter data structure preview)
+func (h *Handler) GetSampleData(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+
+	// Extract connection ID from path: /api/v1/connections/{id}/sample-data
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/connections/")
+	id := strings.TrimSuffix(path, "/sample-data")
+
+	// Try exact connection first
+	var lastPayload []byte
+	err = h.db.QueryRowContext(ctx,
+		"SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL",
+		id, tenantID).Scan(&lastPayload)
+
+	// Fallback: find any connection in the same tenant with payload
+	if err != nil || len(lastPayload) == 0 {
+		err = h.db.QueryRowContext(ctx, `
+			SELECT last_payload FROM connections
+			WHERE tenant_id = $1 AND last_payload IS NOT NULL
+			ORDER BY updated_at DESC LIMIT 1`,
+			tenantID).Scan(&lastPayload)
+	}
+
+	if err != nil || len(lastPayload) == 0 {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "No data received yet. Deploy the pipeline and send data first.",
+		})
+		return
+	}
+
+	// last_payload is a serialized envelope — extract the payload field
+	// Payload is []byte which json.Marshal encodes as base64
+	var env struct {
+		Payload []byte `json:"payload"`
+	}
+	if err := json.Unmarshal(lastPayload, &env); err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "Failed to parse stored payload",
+		})
+		return
+	}
+
+	// Try to parse the decoded payload as JSON
+	var parsed interface{}
+	if err := json.Unmarshal(env.Payload, &parsed); err != nil {
+		// Payload isn't valid JSON — check source tenant connections as fallback
+		// (tenant consumer may have corrupted data while source has original JSON)
+		var sourceTenantID string
+		_ = h.db.QueryRowContext(ctx, `
+			SELECT n->'config'->'tenant'->>'source_tenant_id' FROM connections c,
+			jsonb_array_elements(c.nodes) n
+			WHERE c.id = $1 AND n->>'type' = 'consumer'
+			AND n->'config'->'tenant'->>'source_tenant_id' IS NOT NULL
+			LIMIT 1`, id).Scan(&sourceTenantID)
+
+		if sourceTenantID != "" {
+			var sourcePayload []byte
+			_ = h.db.QueryRowContext(ctx, `
+				SELECT last_payload FROM connections
+				WHERE tenant_id = $1 AND last_payload IS NOT NULL
+				ORDER BY updated_at DESC LIMIT 1`,
+				sourceTenantID).Scan(&sourcePayload)
+			if sourcePayload != nil {
+				var srcEnv struct{ Payload []byte `json:"payload"` }
+				if json.Unmarshal(sourcePayload, &srcEnv) == nil {
+					if json.Unmarshal(srcEnv.Payload, &parsed) == nil {
+						_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
+						return
+					}
+				}
+			}
+		}
+
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": true, "data": string(env.Payload),
+		})
+		return
+	}
+
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok": true, "data": parsed,
+	})
+}
+
 // pointerTo is a helper to create a pointer to a value
 func pointerTo[T any](v T) *T {
 	return &v
@@ -631,6 +728,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Metrics streaming via Server-Sent Events
 	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/stream", h.HandleMetricsSSE)
 	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/ws", h.HandleMetricsWebSocket)
+
+	// Sample data for filter preview
+	mux.HandleFunc("GET /api/v1/connections/{id}/sample-data", h.GetSampleData)
 
 	// Test data generation
 	mux.HandleFunc("POST /api/v1/connections/{id}/test-message", h.SendSingleTestMessage)

@@ -151,6 +151,9 @@ func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *na
 		return
 	}
 
+	// Store last_payload for the target connection (used by filter data structure preview)
+	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, targetConnectionID)
+
 	logger.Info("Bridged envelope",
 		"source_envelope_id", env.ID,
 		"new_envelope_id", newEnv.ID,

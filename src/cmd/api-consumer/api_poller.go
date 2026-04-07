@@ -77,8 +77,13 @@ func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.
 		default:
 		}
 
-		// Build full URL
-		url := strings.TrimSuffix(config.BaseURL, "/") + endpoint.Path
+		// Build full URL — if path is already a full URL, use it directly
+		var url string
+		if strings.HasPrefix(endpoint.Path, "http://") || strings.HasPrefix(endpoint.Path, "https://") {
+			url = endpoint.Path
+		} else {
+			url = strings.TrimSuffix(config.BaseURL, "/") + endpoint.Path
+		}
 		if endpoint.Params != "" {
 			// Add query parameters
 			if strings.Contains(url, "?") {

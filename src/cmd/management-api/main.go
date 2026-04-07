@@ -183,6 +183,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// Initialize handler and register REST routes
 	restHandler := managementapi.NewHandler(repo, validator)
 	restHandler.SetPublisher(publisher)
+	restHandler.SetDB(db)
 
 	// Initialize tenant NATS provisioning (Phase 2)
 	k8sProvisioner := initK8sNATSProvisioner(logger)

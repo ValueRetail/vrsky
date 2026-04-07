@@ -18,13 +18,13 @@ const PORT_RADIUS = 6
 
 function getBgColor(type?: string): string {
   switch (type) {
-    case 'consumer':
+    case 'input':
       return '#3b82f6' // Blue
     case 'filter':
       return '#fb923c' // Orange
     case 'converter':
       return '#ec4899' // Pink
-    case 'producer':
+    case 'output':
       return '#10b981' // Emerald
     default:
       return '#6b7280' // Gray
@@ -102,8 +102,8 @@ export default function KonvaNode({
         listening={false}
       />
 
-      {/* Input Port (Left Side) - Only for Filter, Converter, Producer (not Consumer) */}
-      {node.type !== 'consumer' && (
+      {/* Input Port (Left Side) - Only for Filter, Converter, Output (not Input) */}
+      {node.type !== 'input' && (
         <Circle
           x={-NODE_WIDTH / 2}
           y={0}
@@ -122,8 +122,8 @@ export default function KonvaNode({
         />
       )}
 
-      {/* Output Port (Right Side) - Only for Consumer, Filter, Converter (not Producer) */}
-      {node.type !== 'producer' && (
+      {/* Output Port (Right Side) - Only for Input, Filter, Converter (not Output) */}
+      {node.type !== 'output' && (
         <Circle
           x={NODE_WIDTH / 2}
           y={0}

@@ -1,6 +1,6 @@
 export interface Node {
   id: string
-  type: 'consumer' | 'filter' | 'converter' | 'producer'
+  type: 'input' | 'filter' | 'converter' | 'output'
   data: {
     label: string
     config?: Record<string, unknown>

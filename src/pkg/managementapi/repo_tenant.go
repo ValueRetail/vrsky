@@ -38,7 +38,7 @@ func (r *PostgresRepository) CreateTenant(ctx context.Context, userID, name, slu
 	var tenant Tenant
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO tenants (name, slug, owner_id, subscription_plan, status, created_at, updated_at)
-		VALUES ($1, $2, $3, 'free', 'provisioning', NOW(), NOW())
+		VALUES ($1, $2, $3, 'free', 'active', NOW(), NOW())
 		RETURNING id, name, slug, owner_id, subscription_plan, is_verified,
 		          max_integrations, max_messages_per_month, status, nats_slug, created_at, updated_at
 	`, name, slug, userID).Scan(

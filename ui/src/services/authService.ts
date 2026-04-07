@@ -61,22 +61,45 @@ export function hasSessionToken(): boolean {
  * Register a new user
  */
 export async function register(data: RegisterRequest): Promise<AuthResponse> {
-  const response = await authClient.post<AuthResponse>('/api/v1/auth/register', data)
-  return response.data
+  try {
+    const response = await authClient.post<AuthResponse>('/api/v1/auth/register', data)
+    return response.data
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      const serverMessage = error.response.data?.message
+      return { success: false, message: serverMessage || `Registration failed (error ${error.response.status})` }
+    }
+    throw error
+  }
 }
 
 /**
  * Login with email and password
  */
 export async function login(data: LoginRequest): Promise<AuthResponse> {
-  const response = await authClient.post<AuthResponse>('/api/v1/auth/login', data)
-  
-  // Store the session token if login was successful
-  if (response.data.success && response.data.session_token) {
-    setSessionToken(response.data.session_token)
+  try {
+    const response = await authClient.post<AuthResponse>('/api/v1/auth/login', data)
+
+    // Store the session token if login was successful
+    if (response.data.success && response.data.session_token) {
+      setSessionToken(response.data.session_token)
+    }
+
+    return response.data
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      const status = error.response.status
+      const serverMessage = error.response.data?.message
+      if (status === 401) {
+        return { success: false, message: serverMessage || 'Invalid email or password. If you just registered, please verify your email first.' }
+      }
+      if (status === 403) {
+        return { success: false, message: serverMessage || 'Your account is not verified. Please check your email for a verification link.' }
+      }
+      return { success: false, message: serverMessage || `Login failed (error ${status})` }
+    }
+    throw error
   }
-  
-  return response.data
 }
 
 /**

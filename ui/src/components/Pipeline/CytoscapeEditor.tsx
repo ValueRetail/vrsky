@@ -252,13 +252,13 @@ function updateGraph(
 // Helper functions for node colors
 function getBgColor(type?: string): string {
   switch (type) {
-    case 'consumer':
+    case 'input':
       return '#3b82f6' // Blue
     case 'filter':
       return '#fb923c' // Orange
     case 'converter':
       return '#ec4899' // Pink
-    case 'producer':
+    case 'output':
       return '#10b981' // Emerald
     default:
       return '#6b7280' // Gray
@@ -267,13 +267,13 @@ function getBgColor(type?: string): string {
 
 function getBorderColor(type?: string): string {
   switch (type) {
-    case 'consumer':
+    case 'input':
       return '#1e40af' // Darker blue
     case 'filter':
       return '#d97706' // Darker orange
     case 'converter':
       return '#be185d' // Darker pink
-    case 'producer':
+    case 'output':
       return '#065f46' // Darker emerald
     default:
       return '#374151' // Dark gray

@@ -18,7 +18,6 @@ import NotFound from './pages/NotFound'
 import ConnectionRequestsPage from './pages/ConnectionRequestsPage'
 import TenantConnectionsPage from './pages/TenantConnectionsPage'
 import ApiKeyPage from './pages/ApiKeyPage'
-import DataAccessLogPage from './pages/DataAccessLogPage'
 
 function App() {
   const { confirmDialog, hideConfirmDialog } = useUIStore()
@@ -74,7 +73,6 @@ function App() {
             <Route path="/settings/connection-requests" element={<ProtectedRoute><ConnectionRequestsPage /></ProtectedRoute>} />
             <Route path="/settings/tenant-connections" element={<ProtectedRoute><TenantConnectionsPage /></ProtectedRoute>} />
             <Route path="/settings/api-key" element={<ProtectedRoute><ApiKeyPage /></ProtectedRoute>} />
-            <Route path="/settings/audit-log" element={<ProtectedRoute><DataAccessLogPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

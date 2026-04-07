@@ -529,17 +529,20 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 		}
 	}
 
-	// 1. Validate node counts (exactly 1 consumer, 1 producer)
-	consumerID, producerID, countErrors := v.validateNodeCounts(conn.Nodes)
+	// 1. Validate node counts (at least 1 consumer, 1 producer)
+	consumerIDs, producerIDs, countErrors := v.validateNodeCounts(conn.Nodes)
 	errors = append(errors, countErrors...)
 
 	// 2. Validate all edges reference existing nodes
 	edgeErrors := v.validateEdgesReference(nodeIDs, conn.Edges)
 	errors = append(errors, edgeErrors...)
 
-	// If we have edge reference errors, skip graph traversal checks
-	if len(edgeErrors) > 0 {
-		return &DAGValidationError{Errors: errors}
+	// If we have edge reference errors or missing nodes, skip graph traversal checks
+	if len(edgeErrors) > 0 || len(consumerIDs) == 0 || len(producerIDs) == 0 {
+		if len(errors) > 0 {
+			return &DAGValidationError{Errors: errors}
+		}
+		return nil
 	}
 
 	// 3. Detect cycles
@@ -549,34 +552,82 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 		}).Error())
 	}
 
-	// 4. Check consumer has outgoing edges
-	if consumerID != "" {
-		outgoing := v.getOutgoingEdges(consumerID, conn.Edges)
+	// 4. Check each consumer has outgoing edges
+	for _, cID := range consumerIDs {
+		outgoing := v.getOutgoingEdges(cID, conn.Edges)
 		if len(outgoing) == 0 {
 			errors = append(errors, (&ConsumerIsolatedError{
-				ConsumerID: consumerID,
+				ConsumerID: cID,
 			}).Error())
 		}
 	}
 
-	// 5. Check producer is reachable from consumer
-	if consumerID != "" && producerID != "" {
-		if !v.isReachable(consumerID, producerID, conn.Edges) {
+	// 5. Check each producer is reachable from at least one consumer
+	for _, pID := range producerIDs {
+		reachable := false
+		for _, cID := range consumerIDs {
+			if v.isReachable(cID, pID, conn.Edges) {
+				reachable = true
+				break
+			}
+		}
+		if !reachable {
 			errors = append(errors, (&ProducerUnreachableError{
-				ConsumerID: consumerID,
-				ProducerID: producerID,
+				ConsumerID: consumerIDs[0],
+				ProducerID: pID,
 			}).Error())
 		}
 	}
 
-	// 6. Find orphaned nodes
-	if consumerID != "" && producerID != "" {
-		orphaned := v.findOrphanedNodes(conn.Nodes, conn.Edges, consumerID, producerID)
-		if len(orphaned) > 0 {
-			errors = append(errors, (&OrphanedNodesError{
-				Nodes: orphaned,
-			}).Error())
+	// 6. Find orphaned nodes (nodes not on any consumer→producer path)
+	reachableFromConsumers := make(map[string]bool)
+	for _, cID := range consumerIDs {
+		visited := make(map[string]bool)
+		queue := []string{cID}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if visited[cur] {
+				continue
+			}
+			visited[cur] = true
+			reachableFromConsumers[cur] = true
+			for _, e := range conn.Edges {
+				if e != nil && e.Source == cur {
+					queue = append(queue, e.Target)
+				}
+			}
 		}
+	}
+	canReachProducers := make(map[string]bool)
+	for _, pID := range producerIDs {
+		visited := make(map[string]bool)
+		queue := []string{pID}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if visited[cur] {
+				continue
+			}
+			visited[cur] = true
+			canReachProducers[cur] = true
+			for _, e := range conn.Edges {
+				if e != nil && e.Target == cur {
+					queue = append(queue, e.Source)
+				}
+			}
+		}
+	}
+	var orphaned []string
+	for _, node := range conn.Nodes {
+		if node != nil && (!reachableFromConsumers[node.ID] || !canReachProducers[node.ID]) {
+			orphaned = append(orphaned, node.ID)
+		}
+	}
+	if len(orphaned) > 0 {
+		errors = append(errors, (&OrphanedNodesError{
+			Nodes: orphaned,
+		}).Error())
 	}
 
 	if len(errors) > 0 {
@@ -586,42 +637,36 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 	return nil
 }
 
-// validateNodeCounts validates that there is exactly 1 consumer and 1 producer.
-// Returns the consumer ID, producer ID, and any errors found.
-func (v *Validator) validateNodeCounts(nodes []*Node) (consumerID, producerID string, errors []string) {
-	var consumers, producers []string
-
+// validateNodeCounts validates that there is at least 1 consumer and 1 producer.
+// Returns the consumer IDs, producer IDs, and any errors found.
+func (v *Validator) validateNodeCounts(nodes []*Node) (consumerIDs, producerIDs []string, errors []string) {
 	for _, node := range nodes {
 		if node == nil {
 			continue
 		}
 		switch node.Type {
-		case "consumer":
-			consumers = append(consumers, node.ID)
-		case "producer":
-			producers = append(producers, node.ID)
+		case "consumer", "input":
+			consumerIDs = append(consumerIDs, node.ID)
+		case "producer", "output":
+			producerIDs = append(producerIDs, node.ID)
 		}
 	}
 
-	if len(consumers) != 1 {
+	if len(consumerIDs) == 0 {
 		errors = append(errors, (&ConsumerCountError{
-			Found:    len(consumers),
+			Found:    0,
 			Expected: 1,
 		}).Error())
-	} else {
-		consumerID = consumers[0]
 	}
 
-	if len(producers) != 1 {
+	if len(producerIDs) == 0 {
 		errors = append(errors, (&ProducerCountError{
-			Found:    len(producers),
+			Found:    0,
 			Expected: 1,
 		}).Error())
-	} else {
-		producerID = producers[0]
 	}
 
-	return consumerID, producerID, errors
+	return consumerIDs, producerIDs, errors
 }
 
 // validateEdgesReference validates that all edges reference existing nodes.
@@ -742,67 +787,6 @@ func (v *Validator) isReachable(sourceID, targetID string, edges []*Edge) bool {
 	}
 
 	return false
-}
-
-// findOrphanedNodes finds nodes that are not on the path from consumer to producer.
-// A node is orphaned if it's not reachable from the consumer OR the producer is not reachable from it.
-func (v *Validator) findOrphanedNodes(nodes []*Node, edges []*Edge, consumerID, producerID string) []string {
-	// Build adjacency list and reverse adjacency list
-	adj := make(map[string][]string)    // forward edges
-	revAdj := make(map[string][]string) // reverse edges
-	for _, edge := range edges {
-		if edge != nil {
-			adj[edge.Source] = append(adj[edge.Source], edge.Target)
-			revAdj[edge.Target] = append(revAdj[edge.Target], edge.Source)
-		}
-	}
-
-	// Find all nodes reachable from consumer (forward BFS)
-	reachableFromConsumer := make(map[string]bool)
-	queue := []string{consumerID}
-	reachableFromConsumer[consumerID] = true
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, neighbor := range adj[current] {
-			if !reachableFromConsumer[neighbor] {
-				reachableFromConsumer[neighbor] = true
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	// Find all nodes that can reach producer (reverse BFS)
-	canReachProducer := make(map[string]bool)
-	queue = []string{producerID}
-	canReachProducer[producerID] = true
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, neighbor := range revAdj[current] {
-			if !canReachProducer[neighbor] {
-				canReachProducer[neighbor] = true
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	// A node is orphaned if it's not both reachable from consumer AND can reach producer
-	var orphaned []string
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		// Skip consumer and producer themselves
-		if node.ID == consumerID || node.ID == producerID {
-			continue
-		}
-		if !reachableFromConsumer[node.ID] || !canReachProducer[node.ID] {
-			orphaned = append(orphaned, node.ID)
-		}
-	}
-
-	return orphaned
 }
 
 // getOutgoingEdges returns all edges originating from the given node.
