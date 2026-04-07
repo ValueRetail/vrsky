@@ -421,12 +421,6 @@ func (s *DBConsumerService) emitEvent(connectionID string, event DBEvent) {
 	}
 }
 
-func (s *DBConsumerService) getActiveConnection(connectionID string) *ActiveDBConnection {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.activeConnections[connectionID]
-}
-
 // --- DB helpers ---
 
 type Connection struct {

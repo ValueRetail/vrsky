@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ValueRetail/vrsky/pkg/envelope"
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -324,39 +322,6 @@ func (s *FileConsumerService) listFiles(dir string) map[string]bool {
 		}
 	}
 	return files
-}
-
-func (s *FileConsumerService) publishFile(connectionID, tenantID, filename string, data []byte) error {
-	contentType := detectContentType(filename, data)
-
-	env := &envelope.Envelope{
-		ID:            uuid.New().String(),
-		TenantID:      tenantID,
-		IntegrationID: connectionID,
-		Payload:       data,
-		PayloadSize:   int64(len(data)),
-		ContentType:   contentType,
-		Source:        "file:" + filename,
-		CurrentStep:   0,
-		StepHistory:   []string{"file-consumer"},
-		CreatedAt:     time.Now().UTC(),
-		Metadata:      map[string]interface{}{"filename": filename},
-	}
-
-	envData, err := json.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("failed to marshal envelope: %w", err)
-	}
-
-	topic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", tenantID, connectionID)
-	if err := s.nc.Publish(topic, envData); err != nil {
-		return fmt.Errorf("failed to publish to NATS: %w", err)
-	}
-
-	// Cache last payload
-	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, connectionID)
-
-	return nil
 }
 
 func detectContentType(filename string, data []byte) string {

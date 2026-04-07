@@ -789,67 +789,6 @@ func (v *Validator) isReachable(sourceID, targetID string, edges []*Edge) bool {
 	return false
 }
 
-// findOrphanedNodes finds nodes that are not on the path from consumer to producer.
-// A node is orphaned if it's not reachable from the consumer OR the producer is not reachable from it.
-func (v *Validator) findOrphanedNodes(nodes []*Node, edges []*Edge, consumerID, producerID string) []string {
-	// Build adjacency list and reverse adjacency list
-	adj := make(map[string][]string)    // forward edges
-	revAdj := make(map[string][]string) // reverse edges
-	for _, edge := range edges {
-		if edge != nil {
-			adj[edge.Source] = append(adj[edge.Source], edge.Target)
-			revAdj[edge.Target] = append(revAdj[edge.Target], edge.Source)
-		}
-	}
-
-	// Find all nodes reachable from consumer (forward BFS)
-	reachableFromConsumer := make(map[string]bool)
-	queue := []string{consumerID}
-	reachableFromConsumer[consumerID] = true
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, neighbor := range adj[current] {
-			if !reachableFromConsumer[neighbor] {
-				reachableFromConsumer[neighbor] = true
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	// Find all nodes that can reach producer (reverse BFS)
-	canReachProducer := make(map[string]bool)
-	queue = []string{producerID}
-	canReachProducer[producerID] = true
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		for _, neighbor := range revAdj[current] {
-			if !canReachProducer[neighbor] {
-				canReachProducer[neighbor] = true
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	// A node is orphaned if it's not both reachable from consumer AND can reach producer
-	var orphaned []string
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		// Skip consumer and producer themselves
-		if node.ID == consumerID || node.ID == producerID {
-			continue
-		}
-		if !reachableFromConsumer[node.ID] || !canReachProducer[node.ID] {
-			orphaned = append(orphaned, node.ID)
-		}
-	}
-
-	return orphaned
-}
-
 // getOutgoingEdges returns all edges originating from the given node.
 func (v *Validator) getOutgoingEdges(nodeID string, edges []*Edge) []*Edge {
 	var outgoing []*Edge
