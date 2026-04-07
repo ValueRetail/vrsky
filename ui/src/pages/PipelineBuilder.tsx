@@ -55,7 +55,7 @@ export default function PipelineBuilder() {
   const canvasContainer = useRef<HTMLDivElement>(null)
   const [fileUploadPanel, setFileUploadPanel] = useState<{ uploadUrl: string; watchDir: string; connectionId: string } | null>(null)
   const [fileUploading, setFileUploading] = useState(false)
-  const [fileUploadStatus, setFileUploadStatus] = useState<string | null>(null)
+  const [_fileUploadStatus, setFileUploadStatus] = useState<string | null>(null)
   const [fileEvents, setFileEvents] = useState<Array<{ type: string; filename?: string; size?: number; time: string; message?: string }>>([])
   const [httpProducerPanel, setHttpProducerPanel] = useState<{ url: string; connectionId: string } | null>(null)
   const [httpProducerEvents, setHttpProducerEvents] = useState<Array<{ type: string; message?: string; status_code?: number; time: string; payload?: string; response?: string }>>([])
@@ -1092,15 +1092,7 @@ export default function PipelineBuilder() {
         if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
-        const [activeTab, setActiveTab] = [
-          (httpProducerPanel && !fileUploadPanel) ? 'http'
-            : fileUploadPanel ? 'files'
-            : 'files',
-          // We need state for this — use a workaround with the existing state
-          () => {}
-        ]
-        // Actually we need proper state for this. Use a simple approach:
-        // Show the tab content based on which panel was set last.
+        // TODO: proper tab state needed here
         return null
       })()}
       {(() => {

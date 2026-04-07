@@ -906,22 +906,6 @@ function FilterConfig({
     }
   }
 
-  // Add a field from the tree browser
-  const addFieldFromTree = (fullPath: string, name: string, isInsideList: boolean, isParentField: boolean) => {
-    if (isParentField || !flattenPath) {
-      // Add as "include from parent" if flatten is active, or as flatten_include
-      if (flattenPath) {
-        setConfig({ ...config, flatten_include: { ...flattenInclude, [fullPath]: name } })
-      } else {
-        // No flatten — just add as flatten field with the path as flatten_path auto-detect
-        setConfig({ ...config, flatten_include: { ...flattenInclude, [fullPath]: name } })
-      }
-    } else {
-      // Field inside the list — add as flatten_fields
-      setConfig({ ...config, flatten_fields: { ...flattenFields, [fullPath]: name } })
-    }
-  }
-
   // Recursive tree renderer
   const renderTree = (data: unknown, path: string, depth: number, insideListPath: boolean, parentMatched: boolean = false): JSX.Element | null => {
     if (data === null || data === undefined) return null
@@ -1100,10 +1084,10 @@ function FilterConfig({
         >
           {loadingData ? 'Loading...' : sampleData ? 'Refresh Data Structure' : 'Show Data Structure'}
         </button>
-        {dataError && <p style={{ fontSize: '11px', color: '#dc2626', margin: '4px 0' }}>{dataError}</p>}
+        {dataError ? <p style={{ fontSize: '11px', color: '#dc2626', margin: '4px 0' }}>{dataError}</p> : null}
 
         {/* Data structure tree */}
-        {sampleData && (
+        {sampleData ? (
           <div style={{
             border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#fafafa', marginBottom: '8px', overflow: 'hidden',
           }}>
@@ -1125,7 +1109,7 @@ function FilterConfig({
               {renderTree(sampleData, '', 0, false)}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Split into rows indicator */}
         {flattenPath && (
@@ -1864,9 +1848,9 @@ export default function PropertyEditor({
   const [closeHovered, setCloseHovered] = useState(false)
   const [tunnelUrl, setTunnelUrl] = useState('')
   const [tunnelLoading, setTunnelLoading] = useState(false)
-  const [testBody, setTestBody] = useState('{\n  "test": true,\n  "message": "Hello from VRSky!"\n}')
-  const [testResponse, setTestResponse] = useState<{ status: number; body: string } | null>(null)
-  const [testSending, setTestSending] = useState(false)
+  const [_testBody, _setTestBody] = useState('{\n  "test": true,\n  "message": "Hello from VRSky!"\n}')
+  const [_testResponse, _setTestResponse] = useState<{ status: number; body: string } | null>(null)
+  const [_testSending, _setTestSending] = useState(false)
   const [editingLabel, setEditingLabel] = useState(false)
   const [labelValue, setLabelValue] = useState(node.data.label || '')
 
@@ -1968,7 +1952,7 @@ export default function PropertyEditor({
                             try {
                               await fetch('http://localhost:9100/tunnel/stop', { method: 'POST' })
                               setTunnelUrl('')
-                              setTestResponse(null)
+                              _setTestResponse(null)
                             } catch (e) { console.error(e) }
                             setTunnelLoading(false)
                           }}

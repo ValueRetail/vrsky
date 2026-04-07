@@ -307,9 +307,6 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
     return { valid: false, errors, warnings }
   }
 
-  const consumer = consumers[0]
-  const producer = producers[0]
-
   // Rule 3: All edges reference valid nodes
   const nodeIds = new Set(nodes.map((n) => n.id))
   for (const edge of edges) {
