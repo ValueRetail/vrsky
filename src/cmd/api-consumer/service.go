@@ -248,7 +248,8 @@ type Node struct {
 // NodeConfig wraps the type-specific configuration
 // The config structure is: {"api": {...}} or {"file": {...}}, etc.
 type NodeConfig struct {
-	API *APIConsumerConfig `json:"api"`
+	Type string             `json:"type"`
+	API  *APIConsumerConfig `json:"api"`
 }
 
 // extractAPIConsumerConfig extracts API Consumer config from connection nodes
@@ -271,9 +272,10 @@ func (s *APIConsumerService) extractAPIConsumerConfig(conn *Connection) (*APICon
 			continue
 		}
 
-		// Check if it has API config
-		if nodeConfig.API == nil {
-			s.logger.Debug("Node is not an API consumer", "node_id", node.ID)
+		// Only pick up nodes explicitly typed as "api" — stale `api` blobs from
+		// other consumer types (e.g. http/webhook) must be ignored.
+		if nodeConfig.Type != "api" || nodeConfig.API == nil {
+			s.logger.Debug("Node is not an API consumer", "node_id", node.ID, "type", nodeConfig.Type)
 			continue
 		}
 
