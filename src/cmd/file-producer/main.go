@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -140,6 +143,14 @@ func main() {
 		logger.Error("Failed to start service", "error", err)
 		os.Exit(1)
 	}
+
+	// Start HTTP server for file management
+	httpPort := getEnv("FILE_PRODUCER_HTTP_PORT", "9500")
+	allowedRoots := []string{config.DefaultOutputDir}
+	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
+		allowedRoots = append(allowedRoots, hostHome)
+	}
+	startFileHTTPServer(httpPort, allowedRoots, logger)
 
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)
@@ -357,8 +368,9 @@ func (s *FileProducerService) cacheConfigs(connectionID string, configs []*Conne
 
 // writeFile writes the envelope payload to a file
 func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envelope, outputPath, filePattern string) error {
-	// Ensure output directory exists
-	if err := os.MkdirAll(outputPath, 0755); err != nil {
+	// Ensure output directory exists. Track which dirs we actually create so
+	// we only chown those — pre-existing parent directories are never touched.
+	if err := mkdirAllAndChown(outputPath); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -383,6 +395,10 @@ func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envel
 	if err := os.WriteFile(absPath, env.Payload, 0644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
+
+	// Chown to host user so files are deletable without sudo
+	chownToHostUser(absPath)
+	chownToHostUser(absOutputPath)
 
 	s.logger.Debug("Wrote file", "path", absPath, "size", len(env.Payload))
 	return nil
@@ -492,6 +508,258 @@ func sanitizeForFilename(s string) string {
 		"|", "_",
 	)
 	return replacer.Replace(s)
+}
+
+// --- File management HTTP server ---
+
+func startFileHTTPServer(port string, allowedRoots []string, logger *slog.Logger) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	mux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			handleListFiles(w, r, allowedRoots, logger)
+		case http.MethodDelete:
+			handleDeleteFiles(w, r, allowedRoots, logger)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	server := &http.Server{Addr: ":" + port, Handler: mux}
+	go func() {
+		logger.Info("File management HTTP server started", "port", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("File HTTP server error", "error", err)
+		}
+	}()
+}
+
+// isPathAllowed checks that the resolved path is under one of the allowed roots.
+func isPathAllowed(path string, allowedRoots []string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	// Resolve symlinks for safety
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// Path may not exist yet; fall back to the abs path
+		resolved = absPath
+	}
+	for _, root := range allowedRoots {
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(resolved, absRoot+"/") || resolved == absRoot {
+			return true
+		}
+	}
+	return false
+}
+
+type fileEntry struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"isDir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"modTime"`
+}
+
+func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []string, logger *slog.Logger) {
+	dirPath := r.URL.Query().Get("path")
+	if dirPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
+		return
+	}
+
+	if !isPathAllowed(dirPath, allowedRoots) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
+		return
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, map[string]interface{}{"files": []fileEntry{}, "path": dirPath})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	files := make([]fileEntry, 0, len(entries))
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileEntry{
+			Name:    e.Name(),
+			Path:    filepath.Join(dirPath, e.Name()),
+			IsDir:   e.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"files": files, "path": dirPath})
+}
+
+func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []string, logger *slog.Logger) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
+		return
+	}
+
+	if !isPathAllowed(targetPath, allowedRoots) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
+		return
+	}
+
+	// Don't allow deleting the root directories themselves
+	absTarget, _ := filepath.Abs(targetPath)
+	for _, root := range allowedRoots {
+		absRoot, _ := filepath.Abs(root)
+		if absTarget == absRoot {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot delete root output directory"})
+			return
+		}
+	}
+
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var count int
+	if info.IsDir() {
+		// Count files before deleting for feedback
+		_ = filepath.WalkDir(targetPath, func(_ string, d fs.DirEntry, _ error) error {
+			if d != nil && !d.IsDir() {
+				count++
+			}
+			return nil
+		})
+		err = os.RemoveAll(targetPath)
+	} else {
+		count = 1
+		err = os.Remove(targetPath)
+	}
+
+	if err != nil {
+		logger.Error("Failed to delete", "path", targetPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	logger.Info("Deleted path", "path", targetPath, "files", count)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": targetPath,
+		"files":   count,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+// chownToHostUser changes ownership of a path to the host user (FILE_OWNER_UID/GID env vars).
+// Silently does nothing if env vars are not set or chown fails (best-effort).
+func chownToHostUser(path string) {
+	uid, gid := getHostOwner()
+	if uid < 0 {
+		return
+	}
+	_ = os.Chown(path, uid, gid)
+}
+
+// mkdirAllAndChown creates path and all missing parents, chowning *only* the
+// directories it actually creates. Pre-existing directories are never touched,
+// so this can never escape the intended subtree.
+func mkdirAllAndChown(path string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	// Walk upward to find which ancestors are missing — those are the ones
+	// MkdirAll will create, and the only ones we'll chown afterwards.
+	var toChown []string
+	p := absPath
+	for {
+		if _, err := os.Stat(p); err == nil {
+			break
+		}
+		toChown = append(toChown, p)
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		p = parent
+	}
+	if err := os.MkdirAll(absPath, 0755); err != nil {
+		return err
+	}
+	for _, d := range toChown {
+		chownToHostUser(d)
+	}
+	return nil
+}
+
+func getHostOwner() (int, int) {
+	// Prefer explicit env vars when set
+	uidStr := os.Getenv("FILE_OWNER_UID")
+	gidStr := os.Getenv("FILE_OWNER_GID")
+	if uidStr != "" && gidStr != "" {
+		uid, err1 := strconv.Atoi(uidStr)
+		gid, err2 := strconv.Atoi(gidStr)
+		if err1 == nil && err2 == nil {
+			// Sanity-check: does this UID actually own the host home?
+			// If HOST_HOME is mounted and owned by someone else, prefer the
+			// mount's real owner — env vars on this machine were stale.
+			if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
+				if info, err := os.Stat(hostHome); err == nil {
+					if st, ok := info.Sys().(*syscall.Stat_t); ok {
+						if int(st.Uid) != uid {
+							return int(st.Uid), int(st.Gid)
+						}
+					}
+				}
+			}
+			return uid, gid
+		}
+	}
+	// Fall back to stat-ing the mounted HOST_HOME
+	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
+		if info, err := os.Stat(hostHome); err == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				return int(st.Uid), int(st.Gid)
+			}
+		}
+	}
+	return -1, -1
 }
 
 func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {

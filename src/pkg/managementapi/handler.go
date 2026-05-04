@@ -707,6 +707,84 @@ func (h *Handler) GetSampleData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSourceSampleData returns the last_payload of a SOURCE tenant's connection,
+// for previewing tenant-consumer data before deploying the local pipeline. The
+// caller must have an approved data connection with the source tenant.
+//
+//	GET /api/v1/sample-data/source?source_tenant_id=X&source_connection_id=Y
+func (h *Handler) GetSourceSampleData(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+
+	sourceTenantID := r.URL.Query().Get("source_tenant_id")
+	sourceConnID := r.URL.Query().Get("source_connection_id")
+	if sourceTenantID == "" {
+		_ = writeError(w, http.StatusBadRequest, "MissingParam", "source_tenant_id required", nil)
+		return
+	}
+
+	// Verify the caller has an approved data connection with this source tenant.
+	// In tenant_data_connections, the requester is the consumer of the data and
+	// the target is the source tenant whose data is being shared.
+	var approved bool
+	err = h.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM tenant_data_connections
+			WHERE requester_tenant_id = $1 AND target_tenant_id = $2 AND status = 'active'
+		)`, tenantID, sourceTenantID).Scan(&approved)
+	if err != nil || !approved {
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "no active data connection with that source tenant", nil)
+		return
+	}
+
+	// Fetch last_payload from the source. Prefer the specific connection if
+	// provided, otherwise pick the most recent one with payload.
+	var lastPayload []byte
+	if sourceConnID != "" {
+		err = h.db.QueryRowContext(ctx,
+			"SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL",
+			sourceConnID, sourceTenantID).Scan(&lastPayload)
+	}
+	if err != nil || len(lastPayload) == 0 {
+		err = h.db.QueryRowContext(ctx, `
+			SELECT last_payload FROM connections
+			WHERE tenant_id = $1 AND last_payload IS NOT NULL
+			ORDER BY updated_at DESC LIMIT 1`,
+			sourceTenantID).Scan(&lastPayload)
+	}
+	if err != nil || len(lastPayload) == 0 {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "No sample data available from source tenant yet.",
+		})
+		return
+	}
+
+	// last_payload is a serialized envelope — extract the payload field
+	var env struct {
+		Payload []byte `json:"payload"`
+	}
+	if err := json.Unmarshal(lastPayload, &env); err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "Failed to parse stored payload",
+		})
+		return
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal(env.Payload, &parsed); err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": true, "data": string(env.Payload),
+		})
+		return
+	}
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
+}
+
 // pointerTo is a helper to create a pointer to a value
 func pointerTo[T any](v T) *T {
 	return &v
@@ -731,6 +809,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Sample data for filter preview
 	mux.HandleFunc("GET /api/v1/connections/{id}/sample-data", h.GetSampleData)
+	mux.HandleFunc("GET /api/v1/sample-data/source", h.GetSourceSampleData)
 
 	// Test data generation
 	mux.HandleFunc("POST /api/v1/connections/{id}/test-message", h.SendSingleTestMessage)

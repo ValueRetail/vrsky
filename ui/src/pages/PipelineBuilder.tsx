@@ -70,6 +70,9 @@ export default function PipelineBuilder() {
   const [filterPanel, setFilterPanel] = useState<{ connectionId: string } | null>(null)
   const [filterEvents, setFilterEvents] = useState<Array<{ type: string; message?: string; time: string; data?: string; rules?: number }>>([])
   const [expandedFilterEvent, setExpandedFilterEvent] = useState<number | null>(null)
+  const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string } | null>(null)
+  const [fileManagerFiles, setFileManagerFiles] = useState<Array<{ name: string; path: string; isDir: boolean; size: number; modTime: string }>>([])
+  const [fileManagerLoading, setFileManagerLoading] = useState(false)
   const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
@@ -463,35 +466,39 @@ export default function PipelineBuilder() {
     setIsLoading(true)
 
     try {
-      // Step 0: Stop and delete previous deployment if exists
+      // Step 0: Determine connection ID — reuse existing or create new
+      let connectionId: string
       const prevConnectionId = activeCanvas?.deployedConnectionId
+
       if (prevConnectionId) {
+        // Redeploy: stop → update in place → restart (preserves webhook URL)
         try {
           await apiClient.post(`/api/v1/connections/${prevConnectionId}/stop`)
         } catch { /* may already be stopped */ }
+
         try {
-          await apiClient.delete(`/api/v1/connections/${prevConnectionId}`)
-        } catch { /* best effort */ }
+          await apiClient.put(`/api/v1/connections/${prevConnectionId}`, payload)
+          connectionId = prevConnectionId
+        } catch {
+          // Connection may have been deleted externally — fall back to create
+          const response = await apiClient.post('/api/v1/connections', payload)
+          connectionId = response.data?.data?.id
+          if (!connectionId) throw new Error('No connection ID returned from server')
+          if (currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
+        }
+      } else {
+        // First deploy: create new connection
+        const response = await apiClient.post('/api/v1/connections', payload)
+        connectionId = response.data?.data?.id
+        if (!connectionId) throw new Error('No connection ID returned from server')
+        if (currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
       }
 
-      // Step 1: Create the connection
-      const response = await apiClient.post('/api/v1/connections', payload)
-      const connectionId = response.data?.data?.id
-      
-      if (!connectionId) {
-        throw new Error('No connection ID returned from server')
-      }
-
-      if (currentCanvasId) {
-        setDeployedConnectionId(currentCanvasId, connectionId)
-      }
-
-      // Step 2: Auto-start the pipeline
+      // Step 1: Auto-start the pipeline
       try {
         await apiClient.post(`/api/v1/connections/${connectionId}/start`)
       } catch (startError) {
         console.error('Failed to auto-start pipeline:', startError)
-        // Continue anyway - pipeline is created, just not started
       }
 
       // Step 3: Extract file path from producer node config for notification
@@ -603,6 +610,16 @@ export default function PipelineBuilder() {
         setFilterPanel(null)
       }
 
+      // Show file manager panel if producer is file type
+      const isFileProducer = producerNode?.data?.config?.type === 'file' || payloadProducer?.config?.type === 'file'
+      if (isFileProducer) {
+        const outputPath = (producerNode?.data?.config?.file as any)?.path || (payloadProducer?.config?.file as any)?.path || '/data/output'
+        setFileManagerPanel({ basePath: outputPath, currentPath: outputPath })
+        setFileManagerFiles([])
+      } else {
+        setFileManagerPanel(null)
+      }
+
       // Keep canvas visible - just close property editor and reset deploy state
       setSelectedNode(null)
       setSelectedNodeId(null)
@@ -638,6 +655,38 @@ export default function PipelineBuilder() {
       setFileUploadStatus(`Error: ${err instanceof Error ? err.message : 'Network error'}`)
     } finally {
       setFileUploading(false)
+    }
+  }
+
+  // File manager helpers
+  const fetchFileList = async (dirPath: string) => {
+    setFileManagerLoading(true)
+    try {
+      const resp = await fetch(`http://localhost:9900/files?path=${encodeURIComponent(dirPath)}`)
+      const data = await resp.json()
+      setFileManagerFiles(data.files || [])
+      setFileManagerPanel(prev => prev ? { ...prev, currentPath: dirPath } : null)
+    } catch {
+      setFileManagerFiles([])
+    } finally {
+      setFileManagerLoading(false)
+    }
+  }
+
+  const deleteFileOrDir = async (targetPath: string) => {
+    const name = targetPath.split('/').pop() || targetPath
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return
+    try {
+      const resp = await fetch(`http://localhost:9900/files?path=${encodeURIComponent(targetPath)}`, { method: 'DELETE' })
+      if (resp.ok) {
+        showSuccessNotification('Deleted', `Deleted ${name}`)
+        if (fileManagerPanel) fetchFileList(fileManagerPanel.currentPath)
+      } else {
+        const data = await resp.json()
+        showErrorNotification('Delete failed', data.error || 'Unknown error')
+      }
+    } catch (err) {
+      showErrorNotification('Delete failed', err instanceof Error ? err.message : 'Network error')
     }
   }
 
@@ -1102,6 +1151,7 @@ export default function PipelineBuilder() {
         if (filterPanel) tabs.push({ id: 'filter', label: 'Filter', color: '#f59e0b' })
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
+        if (fileManagerPanel) tabs.push({ id: 'filemanager', label: 'File Output', color: '#059669' })
         if (tabs.length === 0) return null
 
         return (
@@ -1152,7 +1202,7 @@ export default function PipelineBuilder() {
               ))}
               <div style={{ flex: 1 }} />
               <button
-                onClick={() => { setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setDeploymentInfo(null) }}
+                onClick={() => { setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setFileManagerPanel(null); setDeploymentInfo(null) }}
                 style={{ padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '16px' }}
               >×</button>
             </div>
@@ -1347,6 +1397,83 @@ export default function PipelineBuilder() {
                   </div>
                 </div>
               )}
+
+              {/* File manager tab */}
+              {fileManagerPanel && (
+                <div className="bottom-tab-content" data-tab="filemanager" style={{ display: tabs[tabs.length - 1].id === 'filemanager' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                  {/* Breadcrumb + refresh */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '11px' }}>
+                    <span style={{ color: '#6b7280' }}>Path:</span>
+                    {(() => {
+                      const parts = fileManagerPanel.currentPath.split('/').filter(Boolean)
+                      return parts.map((part, i) => {
+                        const fullPath = '/' + parts.slice(0, i + 1).join('/')
+                        return (
+                          <span key={fullPath}>
+                            {i > 0 && <span style={{ color: '#d1d5db', margin: '0 2px' }}>/</span>}
+                            <button
+                              onClick={() => fetchFileList(fullPath)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: i === parts.length - 1 ? '#111827' : '#2563eb', fontWeight: i === parts.length - 1 ? 600 : 400, padding: 0, fontSize: '11px' }}
+                            >{part}</button>
+                          </span>
+                        )
+                      })
+                    })()}
+                    <button
+                      onClick={() => fetchFileList(fileManagerPanel.currentPath)}
+                      style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: '11px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer' }}
+                    >Refresh</button>
+                  </div>
+                  {/* File listing */}
+                  <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '4px' }}>
+                    {fileManagerFiles.length === 0 && !fileManagerLoading ? (
+                      <div style={{ color: '#9ca3af', textAlign: 'center', padding: '16px' }}>
+                        {fileManagerPanel.currentPath ? 'No files yet. Deploy and trigger your pipeline to generate output.' : 'No path set.'}
+                        <div style={{ marginTop: '8px' }}>
+                          <button onClick={() => fetchFileList(fileManagerPanel.currentPath)} style={{ padding: '4px 12px', fontSize: '11px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            Load Files
+                          </button>
+                        </div>
+                      </div>
+                    ) : fileManagerLoading ? (
+                      <div style={{ color: '#9ca3af', textAlign: 'center', padding: '16px' }}>Loading...</div>
+                    ) : (
+                      <>
+                        {/* Back button if not at base */}
+                        {fileManagerPanel.currentPath !== fileManagerPanel.basePath && (
+                          <div
+                            onClick={() => {
+                              const parent = fileManagerPanel.currentPath.substring(0, fileManagerPanel.currentPath.lastIndexOf('/')) || '/'
+                              fetchFileList(parent)
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', cursor: 'pointer', borderBottom: '1px solid #e5e7eb', color: '#2563eb' }}
+                          >
+                            .. (up)
+                          </div>
+                        )}
+                        {fileManagerFiles.map((file) => (
+                          <div key={file.path} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', borderBottom: '1px solid #f3f4f6' }}>
+                            <span style={{ fontSize: '14px' }}>{file.isDir ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</span>
+                            {file.isDir ? (
+                              <button onClick={() => fetchFileList(file.path)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb', fontWeight: 600, padding: 0, fontSize: '12px', fontFamily: 'monospace' }}>{file.name}</button>
+                            ) : (
+                              <span style={{ color: '#374151' }}>{file.name}</span>
+                            )}
+                            <span style={{ color: '#9ca3af', fontSize: '10px', marginLeft: 'auto' }}>
+                              {file.isDir ? '' : file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`}
+                            </span>
+                            <span style={{ color: '#9ca3af', fontSize: '10px' }}>{file.modTime ? new Date(file.modTime).toLocaleString() : ''}</span>
+                            <button
+                              onClick={() => deleteFileOrDir(file.path)}
+                              style={{ padding: '1px 6px', fontSize: '10px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '3px', cursor: 'pointer' }}
+                            >Delete</button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )
@@ -1387,6 +1514,7 @@ export default function PipelineBuilder() {
             onDelete={handleNodeDelete}
             deployedConnectionId={activeCanvas?.deployedConnectionId}
             allNodes={nodes}
+            allEdges={edges}
           />
         </aside>
       )}

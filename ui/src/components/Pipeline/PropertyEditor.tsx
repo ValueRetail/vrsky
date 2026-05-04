@@ -1,5 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Node } from '../../types/pipeline'
+import type { Node, Edge } from '../../types/pipeline'
+
+// Walk upstream from a node via edges, returning the first ancestor that's
+// an 'input' (consumer). Returns undefined if none reachable.
+function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Node | undefined {
+  const visited = new Set<string>()
+  const queue = [nodeId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
+    for (const edge of edges) {
+      if (edge.target !== current) continue
+      const src = nodes.find(n => n.id === edge.source)
+      if (!src) continue
+      if (src.type === 'input') return src
+      queue.push(src.id)
+    }
+  }
+  return undefined
+}
 import { useAuthStore } from '../../store/authStore'
 import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
@@ -767,11 +787,15 @@ function FilterConfig({
   config,
   setConfig,
   allNodes,
+  allEdges,
+  currentNodeId,
   deployedConnectionId,
 }: {
   config: Record<string, unknown>
   setConfig: (c: Record<string, unknown>) => void
   allNodes?: Node[]
+  allEdges?: Edge[]
+  currentNodeId?: string
   deployedConnectionId?: string
 }) {
   const rules = (config.rules as Array<{ field: string; operator: string; value: string }>) || []
@@ -835,8 +859,12 @@ function FilterConfig({
 
   // Fetch sample data from upstream consumer
   const fetchSampleData = async () => {
-    const consumer = allNodes?.find(n => n.type === 'input')
-    if (!consumer) { setDataError('No consumer node found'); return }
+    // Walk upstream via edges to find the consumer that *actually* feeds this
+    // filter, not just the first input in the pipeline.
+    const consumer = (currentNodeId && allNodes && allEdges)
+      ? findUpstreamConsumer(currentNodeId, allNodes, allEdges)
+      : allNodes?.find(n => n.type === 'input')
+    if (!consumer) { setDataError('No upstream consumer connected to this node'); return }
 
     const consumerConfig = consumer.data?.config as Record<string, unknown> | undefined
     const consumerType = consumerConfig?.type as string
@@ -883,8 +911,26 @@ function FilterConfig({
         } else {
           setDataError(result.error || 'Failed to fetch')
         }
-      } else if (consumerType === 'http' || consumerType === 'tenant' || consumerType === 'file') {
-        // Fetch last received payload via management API
+      } else if (consumerType === 'tenant') {
+        // Tenant consumers: fetch directly from the source tenant's last_payload
+        // — no need to deploy our own pipeline first.
+        const tenantCfg = consumerConfig?.tenant as { source_tenant_id?: string; source_connection_id?: string } | undefined
+        const srcTenant = tenantCfg?.source_tenant_id
+        const srcConn = tenantCfg?.source_connection_id
+        if (!srcTenant) { setDataError('Tenant consumer has no source configured'); return }
+        const { default: apiClient } = await import('../../services/api')
+        const params = new URLSearchParams({ source_tenant_id: srcTenant })
+        if (srcConn) params.set('source_connection_id', srcConn)
+        const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
+        const result = resp.data
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No sample available from source tenant yet')
+        }
+      } else if (consumerType === 'http' || consumerType === 'file') {
+        // These types still rely on the local pipeline having received data
         const connId = deployedConnectionId
         if (!connId) { setDataError('Deploy the pipeline and send data first'); return }
         const { default: apiClient } = await import('../../services/api')
@@ -1284,10 +1330,14 @@ function ConverterConfig({
   config,
   setConfig,
   allNodes,
+  allEdges,
+  currentNodeId,
 }: {
   config: Record<string, unknown>
   setConfig: (config: Record<string, unknown>) => void
   allNodes?: Node[]
+  allEdges?: Edge[]
+  currentNodeId?: string
 }) {
   const outputFormat = (config.output_format as string) || ''
   const csvDelimiter = (config.csv_delimiter as string) || ','
@@ -1302,8 +1352,10 @@ function ConverterConfig({
   const [previewing, setPreviewing] = useState(false)
   const [fetchingSample, setFetchingSample] = useState(false)
 
-  // Get consumer node config for fetching sample data
-  const consumerNode = allNodes?.find(n => n.type === 'input')
+  // Get the consumer that actually feeds this converter (walk edges upstream)
+  const consumerNode = (currentNodeId && allNodes && allEdges)
+    ? findUpstreamConsumer(currentNodeId, allNodes, allEdges)
+    : allNodes?.find(n => n.type === 'input')
   const consumerConfig = consumerNode?.data?.config as Record<string, unknown> | undefined
   const consumerType = consumerConfig?.type as string | undefined
 
@@ -1836,6 +1888,7 @@ export default function PropertyEditor({
   onDelete,
   deployedConnectionId,
   allNodes,
+  allEdges,
 }: {
   node: Node
   onUpdate: (config: Record<string, unknown>) => void
@@ -1843,6 +1896,7 @@ export default function PropertyEditor({
   onDelete?: () => void
   deployedConnectionId?: string
   allNodes?: Node[]
+  allEdges?: Edge[]
 }) {
   const [config, setConfig] = useState(node.data.config || {})
   const [closeHovered, setCloseHovered] = useState(false)
@@ -2157,12 +2211,12 @@ export default function PropertyEditor({
 
       case 'converter':
         return (
-          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} />
+          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} />
         )
 
       case 'filter':
         return (
-          <FilterConfig config={config} setConfig={setConfig} allNodes={allNodes} deployedConnectionId={deployedConnectionId} />
+          <FilterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} deployedConnectionId={deployedConnectionId} />
         )
 
       default:
