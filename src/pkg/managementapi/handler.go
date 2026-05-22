@@ -737,7 +737,11 @@ func (h *Handler) GetSourceSampleData(w http.ResponseWriter, r *http.Request) {
 			SELECT 1 FROM tenant_data_connections
 			WHERE requester_tenant_id = $1 AND target_tenant_id = $2 AND status = 'active'
 		)`, tenantID, sourceTenantID).Scan(&approved)
-	if err != nil || !approved {
+	if err != nil {
+		_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to verify data connection", nil)
+		return
+	}
+	if !approved {
 		_ = writeError(w, http.StatusForbidden, "Forbidden", "no active data connection with that source tenant", nil)
 		return
 	}

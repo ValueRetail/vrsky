@@ -18,6 +18,12 @@ export const config = {
   logLevel: (getEnv('VITE_LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error'),
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
+  fileProducerUrl: getEnv('VITE_FILE_PRODUCER_URL', 'http://localhost:9900'),
+  // Optional bearer token for the file-producer's /files API. Empty in local
+  // dev (the server leaves auth disabled); set in deployments that enable
+  // FILE_PRODUCER_AUTH_TOKEN on the file-producer. Read directly because an
+  // empty value is valid here (getEnv would reject it).
+  fileProducerToken: (import.meta.env.VITE_FILE_PRODUCER_TOKEN as string | undefined) ?? '',
 }
 
 // Validate configuration on load

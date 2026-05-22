@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -515,17 +516,38 @@ func sanitizeForFilename(s string) string {
 func startFileHTTPServer(port string, allowedRoots []string, logger *slog.Logger) {
 	mux := http.NewServeMux()
 
+	// The /files endpoint can list and delete files, so it must not be callable
+	// by arbitrary websites loaded in the user's browser. Two controls guard it:
+	//   - CORS is restricted to the UI origin (not "*"), so a malicious cross-
+	//     origin page can neither read GET responses nor issue the (preflighted)
+	//     DELETE request.
+	//   - When FILE_PRODUCER_AUTH_TOKEN is set, a matching bearer token is
+	//     required, giving defense-in-depth against non-browser clients too.
+	allowedOrigin := getEnv("FILE_PRODUCER_ALLOWED_ORIGIN", "http://localhost:5173")
+	authToken := os.Getenv("FILE_PRODUCER_AUTH_TOKEN")
+
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	mux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// Only echo the allow-origin header back when the request originates from
+		// the configured UI origin. Vary: Origin keeps caches from leaking it.
+		w.Header().Set("Vary", "Origin")
+		if r.Header.Get("Origin") == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
+		// Preflight carries no credentials; answer it before the auth check.
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if !authorizedFileRequest(r, authToken) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
 
@@ -539,13 +561,32 @@ func startFileHTTPServer(port string, allowedRoots []string, logger *slog.Logger
 		}
 	})
 
+	// NOTE: binds to all interfaces because in Docker the published port is what
+	// reaches this server, and Docker forwards to the container's bridge IP, not
+	// its loopback. Network exposure is constrained at the host via the
+	// "127.0.0.1:9900:9900" mapping in docker-compose.yml.
 	server := &http.Server{Addr: ":" + port, Handler: mux}
 	go func() {
-		logger.Info("File management HTTP server started", "port", port)
+		logger.Info("File management HTTP server started", "port", port, "auth", authToken != "")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("File HTTP server error", "error", err)
 		}
 	}()
+}
+
+// authorizedFileRequest reports whether a /files request is permitted. When no
+// token is configured the endpoint stays open (default local-dev behaviour);
+// when a token is set, the request must present a matching bearer token.
+func authorizedFileRequest(r *http.Request, token string) bool {
+	if token == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	got := r.Header.Get("Authorization")
+	if !strings.HasPrefix(got, prefix) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) == 1
 }
 
 // isPathAllowed checks that the resolved path is under one of the allowed roots.

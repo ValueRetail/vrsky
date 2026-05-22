@@ -73,6 +73,36 @@ export function buildReverseAdjacencyList(edges: Edge[]): Map<string, string[]> 
 }
 
 /**
+ * Multi-source BFS over a precomputed adjacency map.
+ *
+ * Uses an index-based queue (no array shift) so the whole traversal is
+ * O(V + E) instead of O(V^2) from repeated shift() calls.
+ */
+function reachableFrom(sources: string[], adjacency: Map<string, string[]>): Set<string> {
+  const visited = new Set<string>()
+  const queue: string[] = [...sources]
+  let head = 0
+
+  while (head < queue.length) {
+    const current = queue[head++]
+
+    if (visited.has(current)) {
+      continue
+    }
+    visited.add(current)
+
+    const neighbors = adjacency.get(current) || []
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor)) {
+        queue.push(neighbor)
+      }
+    }
+  }
+
+  return visited
+}
+
+/**
  * Check if targetId is reachable from sourceId using BFS
  */
 export function isReachable(sourceId: string, targetId: string, edges: Edge[]): boolean {
@@ -80,85 +110,21 @@ export function isReachable(sourceId: string, targetId: string, edges: Edge[]): 
     return true
   }
 
-  const adjacency = buildAdjacencyList(edges)
-  const visited = new Set<string>()
-  const queue: string[] = [sourceId]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-
-    if (current === targetId) {
-      return true
-    }
-
-    if (visited.has(current)) {
-      continue
-    }
-    visited.add(current)
-
-    const neighbors = adjacency.get(current) || []
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        queue.push(neighbor)
-      }
-    }
-  }
-
-  return false
+  return reachableFrom([sourceId], buildAdjacencyList(edges)).has(targetId)
 }
 
 /**
  * Get all nodes reachable from a source node using BFS
  */
 export function getReachableNodes(sourceId: string, edges: Edge[]): Set<string> {
-  const adjacency = buildAdjacencyList(edges)
-  const visited = new Set<string>()
-  const queue: string[] = [sourceId]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-
-    if (visited.has(current)) {
-      continue
-    }
-    visited.add(current)
-
-    const neighbors = adjacency.get(current) || []
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        queue.push(neighbor)
-      }
-    }
-  }
-
-  return visited
+  return reachableFrom([sourceId], buildAdjacencyList(edges))
 }
 
 /**
  * Get all nodes that can reach a target node (backward BFS)
  */
 export function getNodesReachingTarget(targetId: string, edges: Edge[]): Set<string> {
-  const reverseAdjacency = buildReverseAdjacencyList(edges)
-  const visited = new Set<string>()
-  const queue: string[] = [targetId]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-
-    if (visited.has(current)) {
-      continue
-    }
-    visited.add(current)
-
-    const predecessors = reverseAdjacency.get(current) || []
-    for (const predecessor of predecessors) {
-      if (!visited.has(predecessor)) {
-        queue.push(predecessor)
-      }
-    }
-  }
-
-  return visited
+  return reachableFrom([targetId], buildReverseAdjacencyList(edges))
 }
 
 /**
@@ -308,7 +274,8 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
   }
 
   // Rule 3: All edges reference valid nodes
-  const nodeIds = new Set(nodes.map((n) => n.id))
+  const nodeById = new Map(nodes.map((n) => [n.id, n]))
+  const nodeIds = new Set(nodeById.keys())
   for (const edge of edges) {
     if (!nodeIds.has(edge.source)) {
       errors.push(`Edge references invalid source node: '${edge.source}'`)
@@ -355,7 +322,7 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
   if (cyclePath !== null) {
     // Get labels for cycle nodes
     const cycleLabels = cyclePath.map((id) => {
-      const node = nodes.find((n) => n.id === id)
+      const node = nodeById.get(id)
       return node ? getNodeLabel(node) : id
     })
     errors.push(`Cycle detected in pipeline: ${cycleLabels.join(' -> ')}`)
@@ -363,42 +330,19 @@ export function validatePipelineConnections(nodes: Node[], edges: Edge[]): Valid
 
   // Rule 8: No orphaned nodes (only check if no cycles)
   if (cyclePath === null) {
-    // Collect all nodes reachable from any consumer
-    const reachableFromConsumers = new Set<string>()
-    for (const c of consumers) {
-      const visited = new Set<string>()
-      const queue = [c.id]
-      while (queue.length > 0) {
-        const current = queue.shift()!
-        if (visited.has(current)) continue
-        visited.add(current)
-        reachableFromConsumers.add(current)
-        for (const edge of edges) {
-          if (edge.source === current) queue.push(edge.target)
-        }
-      }
-    }
-    // Collect all nodes that can reach any producer (reverse traversal)
-    const canReachProducers = new Set<string>()
-    for (const p of producers) {
-      const visited = new Set<string>()
-      const queue = [p.id]
-      while (queue.length > 0) {
-        const current = queue.shift()!
-        if (visited.has(current)) continue
-        visited.add(current)
-        canReachProducers.add(current)
-        for (const edge of edges) {
-          if (edge.target === current) queue.push(edge.source)
-        }
-      }
-    }
+    // Build adjacency maps once, then run a single multi-source BFS in each
+    // direction: forward from all consumers, backward from all producers.
+    const forward = buildAdjacencyList(edges)
+    const reverse = buildReverseAdjacencyList(edges)
+    const reachableFromConsumers = reachableFrom(consumers.map((c) => c.id), forward)
+    const canReachProducers = reachableFrom(producers.map((p) => p.id), reverse)
+
     const orphaned = nodes
       .filter((n) => !reachableFromConsumers.has(n.id) || !canReachProducers.has(n.id))
       .map((n) => n.id)
     if (orphaned.length > 0) {
       const orphanedLabels = orphaned.map((id) => {
-        const node = nodes.find((n) => n.id === id)
+        const node = nodeById.get(id)
         return node ? getNodeLabel(node) : id
       })
       errors.push(`Orphaned node(s) not connected to data flow: ${orphanedLabels.join(', ')}`)

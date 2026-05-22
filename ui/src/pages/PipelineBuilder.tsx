@@ -11,10 +11,16 @@ import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
 import TenantSelector from '../components/Tenants/TenantSelector'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
+import { config } from '../config/env'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
 import type { Node, Edge } from '../types/pipeline'
+
+// Auth header for the file-producer /files API. Empty unless a token is
+// configured (see config.fileProducerToken), in which case the server requires it.
+const fileProducerHeaders = (): HeadersInit =>
+  config.fileProducerToken ? { Authorization: `Bearer ${config.fileProducerToken}` } : {}
 
 export default function PipelineBuilder() {
   const navigate = useNavigate()
@@ -662,11 +668,20 @@ export default function PipelineBuilder() {
   const fetchFileList = async (dirPath: string) => {
     setFileManagerLoading(true)
     try {
-      const resp = await fetch(`http://localhost:9900/files?path=${encodeURIComponent(dirPath)}`)
+      const resp = await fetch(`${config.fileProducerUrl}/files?path=${encodeURIComponent(dirPath)}`, {
+        headers: fileProducerHeaders(),
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        showErrorNotification('File manager', data.error || `Failed to load files (${resp.status})`)
+        setFileManagerFiles([])
+        return
+      }
       const data = await resp.json()
       setFileManagerFiles(data.files || [])
       setFileManagerPanel(prev => prev ? { ...prev, currentPath: dirPath } : null)
-    } catch {
+    } catch (err) {
+      showErrorNotification('File manager', err instanceof Error ? err.message : 'Network error')
       setFileManagerFiles([])
     } finally {
       setFileManagerLoading(false)
@@ -677,7 +692,10 @@ export default function PipelineBuilder() {
     const name = targetPath.split('/').pop() || targetPath
     if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return
     try {
-      const resp = await fetch(`http://localhost:9900/files?path=${encodeURIComponent(targetPath)}`, { method: 'DELETE' })
+      const resp = await fetch(`${config.fileProducerUrl}/files?path=${encodeURIComponent(targetPath)}`, {
+        method: 'DELETE',
+        headers: fileProducerHeaders(),
+      })
       if (resp.ok) {
         showSuccessNotification('Deleted', `Deleted ${name}`)
         if (fileManagerPanel) fetchFileList(fileManagerPanel.currentPath)
