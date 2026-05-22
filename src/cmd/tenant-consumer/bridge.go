@@ -9,6 +9,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/fieldfilter"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
@@ -72,10 +73,28 @@ func (s *TenantConsumerService) runBridge(ctx context.Context, connectionID, ten
 		topic = fmt.Sprintf("vrsky.data.%s.pipeline.>", config.SourceTenantID)
 	}
 
-	logger.Info("Subscribing to source NATS topic", "topic", topic)
+	logger.Info("Subscribing to source via JetStream", "filter_subject", topic)
 
-	sub, err := s.nc.Subscribe(topic, func(msg *nats.Msg) {
+	js, jsErr := s.nc.JetStream()
+	if jsErr != nil {
+		logger.Error("JetStream context", "error", jsErr)
+		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
+		s.mu.Lock()
+		delete(s.activeBridges, connectionID)
+		s.mu.Unlock()
+		return
+	}
+	// Each bridge gets its own durable consumer with a FilterSubject set
+	// to the specific source pipeline(s) — durable name encodes the
+	// requester's connection so two bridges to the same source maintain
+	// independent ack state.
+	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
+		DurableName:   "tenant-bridge-" + connectionID,
+		FilterSubject: topic,
+		Logger:        logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
 		s.handleSourceMessage(ctx, msg, connectionID, tenantID, dcInfo, logger)
+		return nil
 	})
 	if err != nil {
 		logger.Error("Failed to subscribe to source topic", "error", err, "topic", topic)
@@ -88,7 +107,6 @@ func (s *TenantConsumerService) runBridge(ctx context.Context, connectionID, ten
 
 	logger.Info("Bridge active, listening for data")
 
-	// Try to replay cached data; fall back to triggering the source pipeline
 	if config.SourceConnectionID != "" {
 		s.replayOrTrigger(ctx, config.SourceTenantID, config.SourceConnectionID, connectionID, tenantID, dcInfo, logger)
 	} else if len(dcInfo.SharedConnectionIDs) > 0 {
@@ -97,9 +115,8 @@ func (s *TenantConsumerService) runBridge(ctx context.Context, connectionID, ten
 		}
 	}
 
-	// Wait for cancellation
 	<-ctx.Done()
-	_ = sub.Unsubscribe()
+	sub.Stop()
 	logger.Info("Bridge stopped")
 }
 
@@ -144,10 +161,10 @@ func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *na
 		return
 	}
 
-	// Publish to target tenant's pipeline topic
-	targetTopic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", targetTenantID, targetConnectionID)
-	if err := s.nc.Publish(targetTopic, data); err != nil {
-		logger.Error("Failed to publish to target", "error", err, "topic", targetTopic)
+	// Publish to target tenant's pipeline stream (JetStream).
+	if err := s.pub.Publish(ctx, targetTenantID, targetConnectionID, newEnv.ID, data); err != nil {
+		logger.Error("Failed to publish to target tenant via JetStream", "error", err,
+			"target_tenant", targetTenantID, "target_connection", targetConnectionID)
 		return
 	}
 
@@ -157,7 +174,8 @@ func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *na
 	logger.Info("Bridged envelope",
 		"source_envelope_id", env.ID,
 		"new_envelope_id", newEnv.ID,
-		"target_topic", targetTopic,
+		"target_tenant", targetTenantID,
+		"target_connection", targetConnectionID,
 		"payload_size", len(filteredPayload))
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // tunnelState tracks a running cloudflared quick tunnel
@@ -54,6 +55,7 @@ func (ws *WebhookServer) Start() error {
 	mux.HandleFunc("/tunnel/status", ws.handleTunnelStatus)
 	mux.HandleFunc("/tunnel/register", ws.handleTunnelRegister)
 	mux.HandleFunc("/sample-data/", ws.handleSampleData)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	ws.server = &http.Server{
 		Addr:         ":" + ws.port,
@@ -135,6 +137,29 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// HMAC signature verification (Phase 1B / #67). Skipped when the
+	// connection has no signature block configured.
+	if ac.Signature != nil {
+		headerVal := r.Header.Get(ac.Signature.Header)
+		if headerVal == "" {
+			incSignatureFailure(ac.ConnectionID, "missing_header")
+			ws.logger.Warn("Webhook signature header missing",
+				"connection_id", ac.ConnectionID,
+				"header", ac.Signature.Header)
+			http.Error(w, "Missing signature header", http.StatusUnauthorized)
+			return
+		}
+		if err := verifyHMAC(body, headerVal, *ac.Signature); err != nil {
+			incSignatureFailure(ac.ConnectionID, classifySigErr(err))
+			ws.logger.Warn("Webhook signature verification failed",
+				"connection_id", ac.ConnectionID,
+				"header", ac.Signature.Header,
+				"reason", err.Error())
+			http.Error(w, "Invalid signature", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// Create envelope
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
@@ -162,10 +187,12 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Publish to NATS
-	topic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", ac.TenantID, ac.ConnectionID)
-	if err := ws.service.nc.Publish(topic, data); err != nil {
-		ws.logger.Error("Failed to publish to NATS", "error", err, "topic", topic)
+	// Publish to JetStream (at-least-once delivery). The MsgID dedups
+	// retries within JS's 5-minute window — prevents double-delivery if
+	// the client retries after we publish but before responding 202.
+	if err := ws.service.pub.Publish(r.Context(), ac.TenantID, ac.ConnectionID, env.ID, data); err != nil {
+		ws.logger.Error("Failed to publish to JetStream", "error", err,
+			"tenant", ac.TenantID, "connection", ac.ConnectionID)
 		http.Error(w, "Failed to process webhook", http.StatusInternalServerError)
 		return
 	}
@@ -173,7 +200,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ws.logger.Info("Webhook received and published",
 		"connection_id", ac.ConnectionID,
 		"tenant_id", ac.TenantID,
-		"topic", topic,
+		"subject", fmt.Sprintf("vrsky.data.%s.pipeline.%s", ac.TenantID, ac.ConnectionID),
 		"payload_size", len(body),
 		"envelope_id", env.ID)
 

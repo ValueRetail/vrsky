@@ -1,5 +1,38 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Node } from '../../types/pipeline'
+import type { Node, Edge } from '../../types/pipeline'
+import SecretInput from './SecretInput'
+import WebhookSignatureConfig from './WebhookSignatureConfig'
+
+// Walk upstream from a node via edges, returning the first ancestor that's
+// an 'input' (consumer). Returns undefined if none reachable.
+//
+// Precomputes a node lookup and an incoming-edge adjacency map, then walks an
+// index-based queue, keeping the traversal O(V + E) rather than O(V * E).
+function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Node | undefined {
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const sourcesByTarget = new Map<string, string[]>()
+  for (const edge of edges) {
+    const list = sourcesByTarget.get(edge.target)
+    if (list) list.push(edge.source)
+    else sourcesByTarget.set(edge.target, [edge.source])
+  }
+
+  const visited = new Set<string>()
+  const queue = [nodeId]
+  let head = 0
+  while (head < queue.length) {
+    const current = queue[head++]
+    if (visited.has(current)) continue
+    visited.add(current)
+    for (const sourceId of sourcesByTarget.get(current) || []) {
+      const src = nodeById.get(sourceId)
+      if (!src) continue
+      if (src.type === 'input') return src
+      queue.push(src.id)
+    }
+  }
+  return undefined
+}
 import { useAuthStore } from '../../store/authStore'
 import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
@@ -498,11 +531,13 @@ function DatabaseConsumerConfig({
           value={user}
           onChange={(v) => updateDB({ user: v })}
         />
-        <StyledInput
+        <SecretInput
           label="Password"
           placeholder="••••••••"
-          value={password}
-          onChange={(v) => updateDB({ password: v })}
+          field="password"
+          config={dbConfig}
+          defaultSecretName={`pg-pwd-${host || 'db'}`}
+          onChange={(patch) => updateDB(patch)}
         />
       </div>
       <StyledInput
@@ -668,11 +703,13 @@ function DatabaseProducerConfig({
           value={user}
           onChange={(v) => updateDB({ user: v })}
         />
-        <StyledInput
+        <SecretInput
           label="Password"
           placeholder="••••••••"
-          value={password}
-          onChange={(v) => updateDB({ password: v })}
+          field="password"
+          config={dbConfig}
+          defaultSecretName={`pg-pwd-${host || 'db'}`}
+          onChange={(patch) => updateDB(patch)}
         />
       </div>
       <StyledInput
@@ -767,11 +804,15 @@ function FilterConfig({
   config,
   setConfig,
   allNodes,
+  allEdges,
+  currentNodeId,
   deployedConnectionId,
 }: {
   config: Record<string, unknown>
   setConfig: (c: Record<string, unknown>) => void
   allNodes?: Node[]
+  allEdges?: Edge[]
+  currentNodeId?: string
   deployedConnectionId?: string
 }) {
   const rules = (config.rules as Array<{ field: string; operator: string; value: string }>) || []
@@ -835,8 +876,12 @@ function FilterConfig({
 
   // Fetch sample data from upstream consumer
   const fetchSampleData = async () => {
-    const consumer = allNodes?.find(n => n.type === 'input')
-    if (!consumer) { setDataError('No consumer node found'); return }
+    // Walk upstream via edges to find the consumer that *actually* feeds this
+    // filter, not just the first input in the pipeline.
+    const consumer = (currentNodeId && allNodes && allEdges)
+      ? findUpstreamConsumer(currentNodeId, allNodes, allEdges)
+      : allNodes?.find(n => n.type === 'input')
+    if (!consumer) { setDataError('No upstream consumer connected to this node'); return }
 
     const consumerConfig = consumer.data?.config as Record<string, unknown> | undefined
     const consumerType = consumerConfig?.type as string
@@ -883,10 +928,67 @@ function FilterConfig({
         } else {
           setDataError(result.error || 'Failed to fetch')
         }
-      } else if (consumerType === 'http' || consumerType === 'tenant' || consumerType === 'file') {
-        // Fetch last received payload via management API
+      } else if (consumerType === 'tenant') {
+        // Tenant consumers: fetch directly from the source tenant's last_payload
+        // — no need to deploy our own pipeline first.
+        const tenantCfg = consumerConfig?.tenant as { source_tenant_id?: string; source_connection_id?: string } | undefined
+        const srcTenant = tenantCfg?.source_tenant_id
+        const srcConn = tenantCfg?.source_connection_id
+        if (!srcTenant) { setDataError('Tenant consumer has no source configured'); return }
+        const { default: apiClient } = await import('../../services/api')
+        const params = new URLSearchParams({ source_tenant_id: srcTenant })
+        if (srcConn) params.set('source_connection_id', srcConn)
+        const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
+        const result = resp.data
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No sample available from source tenant yet')
+        }
+      } else if (consumerType === 'file') {
+        // File consumers can preview pre-deploy by reading the most recently
+        // modified file in the watch directory directly. Falls back to the
+        // deployed-pipeline endpoint if the file-consumer service is
+        // unreachable (e.g. running outside Docker).
+        const fileCfg = consumerConfig?.file as { path?: string } | undefined
+        const watchPath = fileCfg?.path
+        if (watchPath) {
+          try {
+            const resp = await fetch('http://localhost:9200/sample-data/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: watchPath }),
+            })
+            const result = await resp.json()
+            if (result.ok) {
+              setSampleData(result.data)
+              setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+              return
+            }
+            // Surface "no files yet" but keep the deploy fallback below as
+            // a second chance — if the pipeline ran in the past we may
+            // still have a cached last_payload.
+            setDataError(result.error || 'No files in the watch directory yet')
+          } catch {
+            // Fall through to deploy-based path.
+          }
+        }
         const connId = deployedConnectionId
-        if (!connId) { setDataError('Deploy the pipeline and send data first'); return }
+        if (!connId) { setDataError('Set a watch directory with at least one file, or deploy the pipeline first'); return }
+        const { default: apiClient } = await import('../../services/api')
+        const resp = await apiClient.get(`/api/v1/connections/${connId}/sample-data`)
+        const result = resp.data
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No data yet — send data through the pipeline first')
+        }
+      } else if (consumerType === 'http') {
+        // HTTP webhooks fundamentally need a deployed URL.
+        const connId = deployedConnectionId
+        if (!connId) { setDataError('Deploy the pipeline and send a webhook first'); return }
         const { default: apiClient } = await import('../../services/api')
         const resp = await apiClient.get(`/api/v1/connections/${connId}/sample-data`)
         const result = resp.data
@@ -1284,10 +1386,14 @@ function ConverterConfig({
   config,
   setConfig,
   allNodes,
+  allEdges,
+  currentNodeId,
 }: {
   config: Record<string, unknown>
   setConfig: (config: Record<string, unknown>) => void
   allNodes?: Node[]
+  allEdges?: Edge[]
+  currentNodeId?: string
 }) {
   const outputFormat = (config.output_format as string) || ''
   const csvDelimiter = (config.csv_delimiter as string) || ','
@@ -1302,8 +1408,10 @@ function ConverterConfig({
   const [previewing, setPreviewing] = useState(false)
   const [fetchingSample, setFetchingSample] = useState(false)
 
-  // Get consumer node config for fetching sample data
-  const consumerNode = allNodes?.find(n => n.type === 'input')
+  // Get the consumer that actually feeds this converter (walk edges upstream)
+  const consumerNode = (currentNodeId && allNodes && allEdges)
+    ? findUpstreamConsumer(currentNodeId, allNodes, allEdges)
+    : allNodes?.find(n => n.type === 'input')
   const consumerConfig = consumerNode?.data?.config as Record<string, unknown> | undefined
   const consumerType = consumerConfig?.type as string | undefined
 
@@ -1327,6 +1435,26 @@ function ConverterConfig({
           setPreviewInput(JSON.stringify(data.rows, null, 2))
         } else {
           setPreviewInput('// Error: ' + (data.error || 'No data'))
+        }
+      } else if (consumerType === 'file') {
+        // Pre-deploy file preview reads the most recently modified file in
+        // the watch directory directly. Same endpoint the filter uses.
+        const fc = (consumerConfig.file as Record<string, unknown>) || {}
+        const watchPath = fc.path as string | undefined
+        if (!watchPath) {
+          setPreviewInput('// Set a watch directory on the file consumer first')
+          return
+        }
+        const resp = await fetch('http://localhost:9200/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: watchPath }),
+        })
+        const data = await resp.json()
+        if (data.ok) {
+          setPreviewInput(JSON.stringify(data.data, null, 2))
+        } else {
+          setPreviewInput('// Error: ' + (data.error || 'No files in watch directory'))
         }
       }
     } catch (err) {
@@ -1553,6 +1681,19 @@ function ApiConsumerConfig({
     updateApiConfig({ endpoints: newEndpoints })
   }
 
+  // patchEndpoint accepts a partial object — needed by SecretInput which sets
+  // both the plaintext field (to undefined) and the new <field>_secret_id key.
+  const patchEndpoint = (index: number, patch: Record<string, unknown>) => {
+    const newEndpoints = [...endpoints]
+    const merged: Record<string, unknown> = { ...(newEndpoints[index] as unknown as Record<string, unknown>) }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete merged[k]
+      else merged[k] = v
+    }
+    newEndpoints[index] = merged as unknown as ApiEndpoint
+    updateApiConfig({ endpoints: newEndpoints })
+  }
+
   const removeEndpoint = (index: number) => {
     const newEndpoints = endpoints.filter((_, i) => i !== index)
     updateApiConfig({ endpoints: newEndpoints })
@@ -1747,6 +1888,8 @@ function ApiConsumerConfig({
                     borderRadius: '4px',
                     fontSize: '12px',
                     boxSizing: 'border-box',
+                    color: '#374151',
+                    backgroundColor: '#ffffff',
                   }}
                 />
 
@@ -1763,6 +1906,8 @@ function ApiConsumerConfig({
                     borderRadius: '4px',
                     fontSize: '12px',
                     boxSizing: 'border-box',
+                    color: '#374151',
+                    backgroundColor: '#ffffff',
                   }}
                 />
                 <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
@@ -1777,6 +1922,8 @@ function ApiConsumerConfig({
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
                       fontSize: '12px',
+                      color: '#374151',
+                      backgroundColor: '#ffffff',
                     }}
                   >
                     <option value="none">No Auth</option>
@@ -1785,19 +1932,16 @@ function ApiConsumerConfig({
                   </select>
 
                   {ep.auth_type !== 'none' && (
-                    <input
-                      type="text"
-                      placeholder={ep.auth_type === 'bearer' ? 'Token' : 'API Key'}
-                      value={ep.auth_value}
-                      onChange={(e) => updateEndpoint(idx, 'auth_value', e.target.value)}
-                      style={{
-                        flex: 2,
-                        padding: '8px 10px',
-                        border: '1px solid #d1d5db',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                      }}
-                    />
+                    <div style={{ flex: 2 }}>
+                      <SecretInput
+                        label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
+                        placeholder={ep.auth_type === 'bearer' ? 'Token value' : 'API key value'}
+                        field="auth_value"
+                        config={ep as unknown as Record<string, unknown>}
+                        defaultSecretName={`api-${ep.auth_type}-${idx}`}
+                        onChange={(patch) => patchEndpoint(idx, patch)}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -1836,6 +1980,7 @@ export default function PropertyEditor({
   onDelete,
   deployedConnectionId,
   allNodes,
+  allEdges,
 }: {
   node: Node
   onUpdate: (config: Record<string, unknown>) => void
@@ -1843,6 +1988,7 @@ export default function PropertyEditor({
   onDelete?: () => void
   deployedConnectionId?: string
   allNodes?: Node[]
+  allEdges?: Edge[]
 }) {
   const [config, setConfig] = useState(node.data.config || {})
   const [closeHovered, setCloseHovered] = useState(false)
@@ -2004,6 +2150,11 @@ export default function PropertyEditor({
                     {tunnelLoading ? 'Connecting...' : 'Connect'}
                   </button>
                 )}
+
+                <WebhookSignatureConfig
+                  http={(config.http as Record<string, unknown>) || {}}
+                  onChange={(nextHttp) => setConfig({ ...config, http: nextHttp })}
+                />
               </div>
             )}
 
@@ -2157,12 +2308,12 @@ export default function PropertyEditor({
 
       case 'converter':
         return (
-          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} />
+          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} />
         )
 
       case 'filter':
         return (
-          <FilterConfig config={config} setConfig={setConfig} allNodes={allNodes} deployedConnectionId={deployedConnectionId} />
+          <FilterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} deployedConnectionId={deployedConnectionId} />
         )
 
       default:

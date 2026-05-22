@@ -79,11 +79,26 @@ type TenantSourceConfig struct {
 
 // HTTPSourceConfig represents HTTP source/webhook configuration
 type HTTPSourceConfig struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"` // GET, POST, etc.
-	Headers map[string]string `json:"headers,omitempty"`
-	Auth    *AuthConfig       `json:"auth,omitempty"`
-	Polling *PollingConfig    `json:"polling,omitempty"` // For polling mode
+	URL       string                   `json:"url"`
+	Method    string                   `json:"method"` // GET, POST, etc.
+	Headers   map[string]string        `json:"headers,omitempty"`
+	Auth      *AuthConfig              `json:"auth,omitempty"`
+	Polling   *PollingConfig           `json:"polling,omitempty"`   // For polling mode
+	Signature *WebhookSignatureConfig  `json:"signature,omitempty"` // HMAC signature verification (Phase 1B / #67)
+}
+
+// WebhookSignatureConfig declares how to verify an incoming webhook's HMAC
+// signature. When set on an HTTP consumer node, the webhook-consumer service
+// rejects requests with a missing or invalid signature (401).
+//
+// The shared secret is stored in the `secrets` table (#66) and referenced by
+// SecretID. Leaving SecretID empty disables verification (legacy/anon mode).
+type WebhookSignatureConfig struct {
+	Header    string `json:"header"`              // Request header that carries the signature (e.g. "X-Hub-Signature-256")
+	Algorithm string `json:"algorithm"`           // "hmac-sha1" | "hmac-sha256" | "hmac-sha512"
+	SecretID  string `json:"secret_id"`           // Reference into the secrets table
+	Encoding  string `json:"encoding"`            // "hex" | "base64"
+	Prefix    string `json:"prefix,omitempty"`    // Literal prefix to strip from the header value, e.g. "sha256="
 }
 
 // FileSourceConfig represents file source configuration

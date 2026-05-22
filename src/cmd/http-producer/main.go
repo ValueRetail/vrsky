@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 type Config struct {
@@ -32,6 +33,8 @@ type Config struct {
 
 type HTTPProducerService struct {
 	nc     *nats.Conn
+	js     nats.JetStreamContext
+	sub    *messaging.Subscriber // JetStream subscriber (#70)
 	db     *sql.DB
 	logger *slog.Logger
 	config *Config
@@ -112,8 +115,14 @@ func main() {
 	}
 	defer nc.Close()
 
+	js, jsErr := nc.JetStream()
+	if jsErr != nil {
+		logger.Error("Failed to get JetStream context", "error", jsErr)
+		os.Exit(1)
+	}
 	service := &HTTPProducerService{
 		nc:              nc,
+		js:              js,
 		db:              db,
 		logger:          logger,
 		config:          config,
@@ -150,18 +159,22 @@ func main() {
 }
 
 func (s *HTTPProducerService) Start(ctx context.Context) error {
-	sub, err := s.nc.Subscribe(s.config.SubscriptionTopic, func(msg *nats.Msg) {
-		s.handleMessage(ctx, msg)
+	sub, err := messaging.Subscribe(s.js, messaging.SubscriberOpts{
+		DurableName: "http-producer",
+		AckWait:     45 * time.Second,
+		Logger:      s.logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
+		return s.handleMessage(ctx, msg)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to %s: %w", s.config.SubscriptionTopic, err)
+		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
 	}
-
-	s.logger.Info("Subscribed to NATS topic", "topic", s.config.SubscriptionTopic)
+	s.sub = sub
+	s.logger.Info("Subscribed via JetStream", "durable", "http-producer")
 
 	go func() {
 		<-s.stopCh
-		_ = sub.Unsubscribe()
+		s.sub.Stop()
 		close(s.stoppedCh)
 	}()
 
@@ -181,11 +194,18 @@ func (s *HTTPProducerService) Stop() {
 	<-s.stoppedCh
 }
 
-func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
+// handleMessage processes one envelope. Returning nil acks the message.
+// A non-nil error triggers JS redelivery with backoff; after MaxDeliver
+// the message moves to the DLQ stream.
+//
+// Decoding/config errors are NOT retried — the underlying state cannot
+// improve through a redelivery. Network/HTTP errors ARE retried because
+// the remote endpoint may recover.
+func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) error {
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
-		s.logger.Error("Failed to unmarshal envelope", "error", err)
-		return
+		s.logger.Error("Failed to unmarshal envelope; dropping", "error", err)
+		return nil // unrecoverable
 	}
 
 	connectionID := env.IntegrationID
@@ -196,14 +216,15 @@ func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		}
 	}
 	if connectionID == "" {
-		s.logger.Error("No connection ID", "envelope_id", env.ID)
-		return
+		s.logger.Error("No connection ID; dropping", "envelope_id", env.ID)
+		return nil
 	}
 
 	httpConfigs, err := s.getHTTPConfigs(ctx, connectionID)
 	if err != nil {
+		// Not an http producer for this pipeline — ack and move on.
 		s.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
-		return
+		return nil
 	}
 
 	lastProcessedBy := ""
@@ -213,20 +234,26 @@ func (s *HTTPProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		}
 	}
 
+	var firstErr error
 	for _, httpCfg := range httpConfigs {
-		// Predecessor-based routing
 		if httpCfg.PredIsConsumer && lastProcessedBy != "" {
 			continue
 		}
 		if !httpCfg.PredIsConsumer && httpCfg.PredecessorID != "" && lastProcessedBy != httpCfg.PredecessorID {
 			continue
 		}
-
-		s.sendHTTPRequest(ctx, connectionID, httpCfg, &env)
+		if err := s.sendHTTPRequest(ctx, connectionID, httpCfg, &env); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
+	return firstErr
 }
 
-func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID string, httpCfg *HTTPConfig, env *envelope.Envelope) {
+// sendHTTPRequest returns nil on a successful 2xx response, or a non-nil
+// error on any *retriable* failure (network error, 5xx). 4xx responses are
+// returned as nil so JS doesn't retry them — the request is malformed and
+// will keep failing on every redelivery.
+func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID string, httpCfg *HTTPConfig, env *envelope.Envelope) error {
 	payloadPreview := string(env.Payload)
 	if len(payloadPreview) > 2000 {
 		payloadPreview = payloadPreview[:2000] + "..."
@@ -250,7 +277,7 @@ func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID 
 			Type: "error", Message: "Failed to create request: " + err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
-		return
+		return nil // bad URL — won't improve on retry
 	}
 
 	if env.ContentType != "" {
@@ -271,7 +298,7 @@ func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID 
 			Type: "error", Message: err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
-		return
+		return fmt.Errorf("transport: %w", err) // retriable
 	}
 	defer resp.Body.Close()
 
@@ -285,14 +312,19 @@ func (s *HTTPProducerService) sendHTTPRequest(ctx context.Context, connectionID 
 			StatusCode: resp.StatusCode, Payload: payloadPreview, Response: respPreview,
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
-	} else {
-		s.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID)
-		s.emitEvent(connectionID, HTTPEvent{
-			Type: "error", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
-			StatusCode: resp.StatusCode, Response: respPreview,
-			Time: time.Now().UTC().Format(time.RFC3339),
-		})
+		return nil
 	}
+
+	s.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID)
+	s.emitEvent(connectionID, HTTPEvent{
+		Type: "error", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
+		StatusCode: resp.StatusCode, Response: respPreview,
+		Time: time.Now().UTC().Format(time.RFC3339),
+	})
+	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+		return fmt.Errorf("upstream %d", resp.StatusCode) // retriable
+	}
+	return nil // 4xx — don't retry
 }
 
 func (s *HTTPProducerService) getHTTPConfigs(ctx context.Context, connectionID string) ([]*HTTPConfig, error) {

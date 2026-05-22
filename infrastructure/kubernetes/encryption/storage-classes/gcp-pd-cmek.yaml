@@ -1,0 +1,20 @@
+# Google Cloud Persistent Disk with Customer-Managed Encryption Keys.
+#
+# Prerequisites:
+#  - The pd.csi.storage.gke.io driver (default on GKE).
+#  - A Cloud KMS keyring + key in the same region as your cluster.
+#  - The GKE service account has roles/cloudkms.cryptoKeyEncrypterDecrypter
+#    on that key.
+#
+# Replace KMS_KEY_RESOURCE before applying.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: vrsky-encrypted
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-ssd
+  disk-encryption-kms-key: "projects/REPLACE/locations/europe-north1/keyRings/vrsky/cryptoKeys/storage"
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

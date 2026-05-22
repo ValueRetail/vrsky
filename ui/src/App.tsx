@@ -18,6 +18,9 @@ import NotFound from './pages/NotFound'
 import ConnectionRequestsPage from './pages/ConnectionRequestsPage'
 import TenantConnectionsPage from './pages/TenantConnectionsPage'
 import ApiKeyPage from './pages/ApiKeyPage'
+import AuditPage from './pages/AuditPage'
+import UsersPage from './pages/UsersPage'
+import UsagePage from './pages/UsagePage'
 
 function App() {
   const { confirmDialog, hideConfirmDialog } = useUIStore()
@@ -73,6 +76,9 @@ function App() {
             <Route path="/settings/connection-requests" element={<ProtectedRoute><ConnectionRequestsPage /></ProtectedRoute>} />
             <Route path="/settings/tenant-connections" element={<ProtectedRoute><TenantConnectionsPage /></ProtectedRoute>} />
             <Route path="/settings/api-key" element={<ProtectedRoute><ApiKeyPage /></ProtectedRoute>} />
+            <Route path="/settings/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
+            <Route path="/settings/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
+            <Route path="/settings/usage" element={<ProtectedRoute><UsagePage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

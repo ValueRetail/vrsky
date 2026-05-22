@@ -239,6 +239,11 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Log success
 	h.logAuthEvent(ctx, r, &user.ID, req.Email, "login", "success", nil)
 
+	// Set the session cookie for browser clients. API clients can still
+	// read SessionToken from the response body and send it as a Bearer
+	// header — both paths are accepted by session middleware (#68).
+	setSessionCookie(w, rawToken, session.ExpiresAt)
+
 	// Return response
 	_ = writeJSON(w, http.StatusOK, LoginResponse{
 		Success:      true,
@@ -285,23 +290,30 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) LogoutUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Get session token from header
+	// Accept the session token from either the Authorization header (legacy
+	// API clients) or the vrsky_session cookie (#68 browser sessions).
 	token := extractBearerToken(r)
+	if token == "" {
+		if c, err := r.Cookie(sessionCookieName); err == nil {
+			token = c.Value
+		}
+	}
+
+	// Always clear the cookie so browser logout is idempotent even when
+	// the token is unknown server-side.
+	clearCookie(w, sessionCookieName)
+
 	if token == "" {
 		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "no session token provided", nil)
 		return
 	}
 
-	// Hash the token
 	hashedToken := auth.HashToken(token)
-
-	// Invalidate the session
 	if err := h.repo.InvalidateSession(ctx, hashedToken); err != nil {
-		// Don't fail on logout errors
+		// Don't fail on logout errors.
 		_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out"})
 		return
 	}
-
 	_ = writeJSON(w, http.StatusOK, MessageResponse{Success: true, Message: "logged out successfully"})
 }
 

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/nats-io/nats.go"
 )
 
@@ -16,6 +18,7 @@ import (
 type WebhookConsumerService struct {
 	db     *sql.DB
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream publisher for data-flow messages (#70)
 	logger *slog.Logger
 	config *Config
 	server *WebhookServer
@@ -34,13 +37,31 @@ type ActiveConnection struct {
 	ConnectionID string
 	TenantID     string
 	Cancel       context.CancelFunc
+
+	// Signature, when non-nil, makes the webhook reject any request whose
+	// HMAC signature header does not match cfg.Secret. Populated at start
+	// time from the connection's http.signature config (#67 / Phase 1B).
+	Signature *signatureConfig
 }
 
-// NewWebhookConsumerService creates a new Webhook Consumer service
+// NewWebhookConsumerService creates a new Webhook Consumer service.
+// A JetStream context is derived from nc for data-flow publishes;
+// command-channel subscriptions stay on core NATS.
 func NewWebhookConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *WebhookConsumerService {
+	js, err := nc.JetStream()
+	if err != nil {
+		// JS is mandatory for data-flow delivery; surface fast.
+		logger.Error("Failed to get JetStream context", "error", err)
+		js = nil
+	}
+	var pub *messaging.Publisher
+	if js != nil {
+		pub = messaging.NewPublisher(js)
+	}
 	return &WebhookConsumerService{
 		db:                db,
 		nc:                nc,
+		pub:               pub,
 		logger:            logger,
 		config:            config,
 		activeConnections: make(map[string]*ActiveConnection),
@@ -153,11 +174,17 @@ func (s *WebhookConsumerService) handleStartCommand(msg *nats.Msg) {
 	// Register the webhook handler
 	_, cancel := context.WithCancel(context.Background())
 
+	// Extract optional HMAC signature config. resolveSecretsInNodes has
+	// already turned <field>_secret_id refs into plaintext, so the secret
+	// is sitting in node.config.http.signature.secret.
+	sig := s.extractSignature(conn)
+
 	s.mu.Lock()
 	s.activeConnections[cmd.ConnectionID] = &ActiveConnection{
 		ConnectionID: cmd.ConnectionID,
 		TenantID:     cmd.TenantID,
 		Cancel:       cancel,
+		Signature:    sig,
 	}
 	s.mu.Unlock()
 
@@ -241,7 +268,37 @@ func (s *WebhookConsumerService) getConnection(connectionID, tenantID string) (*
 		return nil, fmt.Errorf("failed to query connection: %w", err)
 	}
 
+	// Resolve any *_secret_id references in node configs to plaintext.
+	resolved, rerr := s.resolveSecretsInNodes(conn.Nodes, tenantID)
+	if rerr != nil {
+		return nil, fmt.Errorf("resolve secrets: %w", rerr)
+	}
+	conn.Nodes = resolved
 	return &conn, nil
+}
+
+// resolveSecretsInNodes parses nodes[], runs the resolver on each config,
+// re-marshals. Returns the original bytes on parse failure (workers will
+// surface a clearer error downstream when they fail to read config).
+func (s *WebhookConsumerService) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
+	if len(nodesJSON) == 0 {
+		return nodesJSON, nil
+	}
+	var nodes []map[string]any
+	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
+		return nodesJSON, err
+	}
+	reader := crypto.NewSQLSecretReader(s.db)
+	for _, n := range nodes {
+		cfg, ok := n["config"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := crypto.ResolveSecrets(context.Background(), reader, tenantID, cfg); err != nil {
+			return nodesJSON, err
+		}
+	}
+	return json.Marshal(nodes)
 }
 
 // Node represents a pipeline node
@@ -249,6 +306,56 @@ type Node struct {
 	ID     string          `json:"id"`
 	Type   string          `json:"type"`
 	Config json.RawMessage `json:"config"`
+}
+
+// extractSignature returns the HMAC verification config for a webhook
+// connection, or nil if the connection has no signature block configured.
+// Reads from nodes[].config.http.signature; the shared secret has already
+// been resolved to plaintext by resolveSecretsInNodes (see #66).
+func (s *WebhookConsumerService) extractSignature(conn *Connection) *signatureConfig {
+	var nodes []Node
+	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
+		return nil
+	}
+	for _, node := range nodes {
+		if node.Type != "consumer" {
+			continue
+		}
+		var cfg struct {
+			Type string `json:"type"`
+			HTTP struct {
+				Signature *struct {
+					Header    string `json:"header"`
+					Algorithm string `json:"algorithm"`
+					Encoding  string `json:"encoding"`
+					Prefix    string `json:"prefix"`
+					Secret    string `json:"secret"` // resolved by ResolveSecrets
+				} `json:"signature"`
+			} `json:"http"`
+		}
+		if err := json.Unmarshal(node.Config, &cfg); err != nil {
+			continue
+		}
+		if cfg.Type != "http" || cfg.HTTP.Signature == nil {
+			continue
+		}
+		sig := cfg.HTTP.Signature
+		if sig.Header == "" || sig.Secret == "" {
+			s.logger.Warn("Webhook signature block present but incomplete; skipping verification",
+				"connection_id", conn.ID,
+				"has_header", sig.Header != "",
+				"has_secret", sig.Secret != "")
+			return nil
+		}
+		return &signatureConfig{
+			Header:    sig.Header,
+			Algorithm: sig.Algorithm,
+			Encoding:  sig.Encoding,
+			Prefix:    sig.Prefix,
+			Secret:    sig.Secret,
+		}
+	}
+	return nil
 }
 
 // hasWebhookConsumer checks if the connection has an HTTP webhook consumer node

@@ -3,12 +3,15 @@ package managementapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
 // Handler implements REST API handlers for connection management
@@ -20,6 +23,8 @@ type Handler struct {
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
 	db                *sql.DB // Direct DB access for raw queries (e.g. sample-data)
+	js                nats.JetStreamContext // JetStream context for DLQ endpoints (#70)
+	quotas            *QuotaTracker // In-process token buckets for per-tenant rate limits (#74)
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
@@ -41,6 +46,7 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 		clientRegistry:    nil, // Will be set via InitializeWebSocketSupport if needed
 		metricsCache:      nil, // Will be set via InitializeWebSocketSupport if needed
 		generatorRegistry: NewTestGeneratorRegistry(),
+		quotas:            NewQuotaTracker(),
 	}
 }
 
@@ -122,6 +128,21 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
+	}
+
+	// Per-tenant quota check (#74): refuse with 429 if adding this
+	// integration would put the tenant over their plan limit. Skipped
+	// silently if quotas can't be loaded — failing closed here would
+	// punish users for a DB hiccup.
+	if q, err := h.repo.GetTenantQuotas(ctx, tenantID); err == nil {
+		if qerr := h.quotas.CheckIntegrationCount(ctx, h.repo, tenantID, q); qerr != nil {
+			w.Header().Set("Retry-After", "0")
+			_ = writeError(w, http.StatusTooManyRequests, "QuotaExceeded",
+				"integration count quota reached", map[string]interface{}{
+					"max_integrations": q.MaxIntegrations,
+				})
+			return
+		}
 	}
 
 	// Limit request body size (10MB)
@@ -571,9 +592,11 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if connection is already stopped
+	// Stop is idempotent: an already-stopped connection succeeds with 200
+	// so the UI's "stop → update → start" redeploy flow doesn't log a
+	// spurious 4xx on every redeploy.
 	if conn.Status == "stopped" {
-		_ = writeError(w, http.StatusBadRequest, "InvalidState", "connection is already stopped", nil)
+		_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: conn})
 		return
 	}
 
@@ -671,6 +694,7 @@ func (h *Handler) GetSampleData(w http.ResponseWriter, r *http.Request) {
 		// Payload isn't valid JSON — check source tenant connections as fallback
 		// (tenant consumer may have corrupted data while source has original JSON)
 		var sourceTenantID string
+		// lint:tenant-ok — resolving source-tenant ID by connection PK; outer handler verified caller tenant.
 		_ = h.db.QueryRowContext(ctx, `
 			SELECT n->'config'->'tenant'->>'source_tenant_id' FROM connections c,
 			jsonb_array_elements(c.nodes) n
@@ -707,23 +731,130 @@ func (h *Handler) GetSampleData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSourceSampleData returns the last_payload of a SOURCE tenant's connection,
+// for previewing tenant-consumer data before deploying the local pipeline. The
+// caller must have an approved data connection with the source tenant.
+//
+//	GET /api/v1/sample-data/source?source_tenant_id=X&source_connection_id=Y
+func (h *Handler) GetSourceSampleData(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+
+	sourceTenantID := r.URL.Query().Get("source_tenant_id")
+	sourceConnID := r.URL.Query().Get("source_connection_id")
+	if sourceTenantID == "" {
+		_ = writeError(w, http.StatusBadRequest, "MissingParam", "source_tenant_id required", nil)
+		return
+	}
+
+	// Verify the caller has an approved data connection with this source tenant.
+	// In tenant_data_connections, the requester is the consumer of the data and
+	// the target is the source tenant whose data is being shared.
+	var approved bool
+	err = h.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM tenant_data_connections
+			WHERE requester_tenant_id = $1 AND target_tenant_id = $2 AND status = 'active'
+		)`, tenantID, sourceTenantID).Scan(&approved)
+	if err != nil {
+		_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to verify data connection", nil)
+		return
+	}
+	if !approved {
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "no active data connection with that source tenant", nil)
+		return
+	}
+
+	// Fetch last_payload from the source. Prefer the specific connection if
+	// provided, otherwise pick the most recent one with payload. A real DB
+	// error is surfaced as 500; a missing row (sql.ErrNoRows) falls back to the
+	// most-recent lookup and ultimately to an "ok=false / no data" response, so
+	// transient outages aren't disguised as "no sample data yet".
+	var lastPayload []byte
+	if sourceConnID != "" {
+		err = h.db.QueryRowContext(ctx,
+			"SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL",
+			sourceConnID, sourceTenantID).Scan(&lastPayload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to load sample data", nil)
+			return
+		}
+	}
+	if len(lastPayload) == 0 {
+		err = h.db.QueryRowContext(ctx, `
+			SELECT last_payload FROM connections
+			WHERE tenant_id = $1 AND last_payload IS NOT NULL
+			ORDER BY updated_at DESC LIMIT 1`,
+			sourceTenantID).Scan(&lastPayload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to load sample data", nil)
+			return
+		}
+	}
+	if len(lastPayload) == 0 {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "No sample data available from source tenant yet.",
+		})
+		return
+	}
+
+	// last_payload is a serialized envelope — extract the payload field
+	var env struct {
+		Payload []byte `json:"payload"`
+	}
+	if err := json.Unmarshal(lastPayload, &env); err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": false, "error": "Failed to parse stored payload",
+		})
+		return
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal(env.Payload, &parsed); err != nil {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok": true, "data": string(env.Payload),
+		})
+		return
+	}
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
+}
+
 // pointerTo is a helper to create a pointer to a value
 func pointerTo[T any](v T) *T {
 	return &v
 }
 
-// RegisterRoutes registers all REST handlers with the mux
+// RegisterRoutes registers all REST handlers with the mux.
+//
+// Role guards (Phase 1D / #69):
+//
+//	create / update / start / stop / secret-write / dlq-retry|discard → editor
+//	delete connection / delete secret                                 → admin
+//	list / get / metrics / sample-data / dlq-list                     → viewer (membership-only)
+//
+// Reads still require tenant membership but no role above viewer.
+// Mutations go through RequireTenantRoleFromHeader which authenticates
+// the caller (session OR API key) and resolves their role in the tenant
+// supplied via the X-Tenant-ID header.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	editor := RequireTenantRoleFromHeader(h.repo, "editor")
+	adminMW := RequireTenantRoleFromHeader(h.repo, "admin")
+
 	// CRUD operations
-	mux.HandleFunc("POST /api/v1/connections", h.CreateConnection)
+	mux.Handle("POST /api/v1/connections", editor(http.HandlerFunc(h.CreateConnection)))
 	mux.HandleFunc("GET /api/v1/connections", h.ListConnections)
 	mux.HandleFunc("GET /api/v1/connections/{id}", h.GetConnection)
-	mux.HandleFunc("PUT /api/v1/connections/{id}", h.UpdateConnection)
-	mux.HandleFunc("DELETE /api/v1/connections/{id}", h.DeleteConnection)
+	mux.Handle("PUT /api/v1/connections/{id}", editor(http.HandlerFunc(h.UpdateConnection)))
+	mux.Handle("DELETE /api/v1/connections/{id}", adminMW(http.HandlerFunc(h.DeleteConnection)))
 
 	// Control operations
-	mux.HandleFunc("POST /api/v1/connections/{id}/start", h.StartConnection)
-	mux.HandleFunc("POST /api/v1/connections/{id}/stop", h.StopConnection)
+	mux.Handle("POST /api/v1/connections/{id}/start", editor(http.HandlerFunc(h.StartConnection)))
+	mux.Handle("POST /api/v1/connections/{id}/stop", editor(http.HandlerFunc(h.StopConnection)))
 
 	// Metrics streaming via Server-Sent Events
 	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/stream", h.HandleMetricsSSE)
@@ -731,18 +862,57 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Sample data for filter preview
 	mux.HandleFunc("GET /api/v1/connections/{id}/sample-data", h.GetSampleData)
+	mux.HandleFunc("GET /api/v1/sample-data/source", h.GetSourceSampleData)
 
-	// Test data generation
-	mux.HandleFunc("POST /api/v1/connections/{id}/test-message", h.SendSingleTestMessage)
-	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/start", h.StartAutoGenerator)
-	mux.HandleFunc("POST /api/v1/connections/{id}/auto-generator/stop", h.StopAutoGenerator)
+	// Test data generation — editor (sends real data through a pipeline)
+	mux.Handle("POST /api/v1/connections/{id}/test-message", editor(http.HandlerFunc(h.SendSingleTestMessage)))
+	mux.Handle("POST /api/v1/connections/{id}/auto-generator/start", editor(http.HandlerFunc(h.StartAutoGenerator)))
+	mux.Handle("POST /api/v1/connections/{id}/auto-generator/stop", editor(http.HandlerFunc(h.StopAutoGenerator)))
 	mux.HandleFunc("GET /api/v1/connections/{id}/auto-generator/status", h.GetAutoGeneratorStatus)
 
 	// API Consumer routes
 	h.RegisterAPIConsumerRoutes(mux)
 
+	// Secrets (Phase 1A — #66). Reads = viewer; writes/rotate = editor;
+	// delete = admin. Branching happens inside SecretsCollection /
+	// SecretsItem; we apply editor here as the minimum so reads still
+	// pass through (editor ≥ viewer). The handler enforces the
+	// admin-for-delete rule inline.
+	mux.Handle("/api/v1/secrets", roleByMethod(h.repo, http.HandlerFunc(h.SecretsCollection), map[string]string{
+		"POST": "editor",
+		"GET":  "viewer",
+	}))
+	mux.Handle("/api/v1/secrets/", roleByMethod(h.repo, http.HandlerFunc(h.SecretsItem), map[string]string{
+		"GET":    "viewer",
+		"PUT":    "editor",
+		"POST":   "editor", // /rotate
+		"DELETE": "admin",
+	}))
+
+	// Dead-letter queue (Phase 1E — #70). Reads = viewer, retry/discard = editor.
+	mux.HandleFunc("GET /api/v1/connections/{id}/dlq", h.DLQRouter)
+	mux.HandleFunc("GET /api/v1/connections/{id}/dlq/{seq}", h.DLQRouter)
+	mux.Handle("POST /api/v1/connections/{id}/dlq/{seq}/retry", editor(http.HandlerFunc(h.DLQRouter)))
+	mux.Handle("POST /api/v1/connections/{id}/dlq/{seq}/discard", editor(http.HandlerFunc(h.DLQRouter)))
+
+	// Audit log (Phase 1G — #72). Read-only — writes happen via middleware.
+	mux.HandleFunc("GET /api/v1/audit", h.ListAudit)
+
 	// Auth routes (these bypass TenantIDMiddleware)
 	h.RegisterAuthRoutes(mux)
+}
+
+// roleByMethod dispatches role requirements based on the HTTP method —
+// useful for endpoints like /api/v1/secrets where the same path serves
+// reads, writes, and deletes that demand different minimum roles.
+func roleByMethod(repo Repository, next http.Handler, perMethod map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		min, ok := perMethod[r.Method]
+		if !ok {
+			min = "admin" // fail-closed default
+		}
+		RequireTenantRoleFromHeader(repo, min)(next).ServeHTTP(w, r)
+	})
 }
 
 // RegisterAuthRoutes registers authentication routes
@@ -754,6 +924,12 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/verify-email", h.VerifyEmail)
 	mux.HandleFunc("POST /api/v1/auth/forgot-password", h.ForgotPassword)
 	mux.HandleFunc("POST /api/v1/auth/reset-password", h.ResetPassword)
+
+	// OIDC / SSO endpoints (Phase 1C — #68). All public — the SSO flow
+	// itself authenticates the user.
+	mux.HandleFunc("GET /api/v1/auth/oidc/{slug}/available", h.HandleOIDCAvailable)
+	mux.HandleFunc("GET /api/v1/auth/oidc/{slug}/login", h.HandleOIDCLogin)
+	mux.HandleFunc("GET /api/v1/auth/oidc/callback", h.HandleOIDCCallback)
 
 	// Protected auth routes (require valid session)
 	sessionMW := SessionAuthMiddleware(h.repo)
@@ -770,6 +946,25 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	tenantMW := TenantMemberMiddleware(h.repo)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}", sessionMW(tenantMW(http.HandlerFunc(h.GetTenantHandler))).ServeHTTP)
 	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}", sessionMW(tenantMW(RequireRole("owner")(http.HandlerFunc(h.DeleteTenantHandler)))).ServeHTTP)
+
+	// OIDC admin CRUD (#68). Owners + admins only — keep SSO config off the
+	// general member's reach.
+	adminMW := RequireRole("admin")
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/oidc", sessionMW(tenantMW(adminMW(http.HandlerFunc(h.HandleOIDCConfigRead)))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/oidc", sessionMW(tenantMW(adminMW(http.HandlerFunc(h.HandleOIDCConfigUpsert)))).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/oidc", sessionMW(tenantMW(adminMW(http.HandlerFunc(h.HandleOIDCConfigDelete)))).ServeHTTP)
+
+	// Tenant members admin (#69). Reading membership: any member.
+	// Mutations (set role / remove): owner only — separation of duties
+	// because admins can manage resources but not redistribute power.
+	ownerMW := RequireRole("owner")
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/members", sessionMW(tenantMW(http.HandlerFunc(h.HandleListMembers))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleSetMemberRole)))).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleRemoveMember)))).ServeHTTP)
+
+	// Tenant quotas (#74). Reads = any member; writes = owner.
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)
 
 	// Tenant provisioning status stream (Phase 2)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/status/stream", sessionMW(tenantMW(http.HandlerFunc(h.HandleTenantStatusSSE))).ServeHTTP)

@@ -1,0 +1,24 @@
+# AWS EBS gp3 encrypted with a customer-managed KMS key.
+#
+# Prerequisites:
+#  - The aws-ebs-csi-driver is installed in the cluster.
+#  - The KMS key ARN below exists and the IAM role used by the EBS CSI
+#    driver has kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:DescribeKey,
+#    and kms:CreateGrant on it.
+#
+# Replace KMS_KEY_ARN before applying.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: vrsky-encrypted
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:eu-north-1:000000000000:key/REPLACE-ME"
+  # gp3 free baseline; tune iops/throughput if needed.
+  iops: "3000"
+  throughput: "125"
+reclaimPolicy: Retain  # Retain protects you from accidental disk wipe.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

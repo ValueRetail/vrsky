@@ -83,6 +83,36 @@ export default function Sidebar() {
           >
             API Key
           </Link>
+          <Link
+            to="/settings/audit"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/audit')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Audit log
+          </Link>
+          <Link
+            to="/settings/users"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/users')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Members
+          </Link>
+          <Link
+            to="/settings/usage"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/usage')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Usage & quotas
+          </Link>
         </div>
 
         {/* Status Cards */}

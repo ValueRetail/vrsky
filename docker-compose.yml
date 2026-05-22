@@ -7,12 +7,19 @@ services:
     container_name: vrsky-nats
     ports:
       # Client port
-      - "4222:4222"
+      - "127.0.0.1:4222:4222"
       # Management port
-      - "8222:8222"
+      - "127.0.0.1:8222:8222"
     command:
       - "-m"   # Enable management port
       - "8222"
+      # JetStream: at-least-once delivery + DLQ for data-flow streams (#70).
+      # Control-plane (vrsky.commands.*) still uses core NATS.
+      - "-js"
+      - "-sd"
+      - "/data"
+    volumes:
+      - nats-jetstream:/data
     networks:
       - vrsky-network
     healthcheck:
@@ -40,7 +47,7 @@ services:
       - "-c"
       - "max_replication_slots=10"
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-source-data:/var/lib/postgresql/data
     networks:
@@ -61,7 +68,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: target_password
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-target-data:/var/lib/postgresql/data
     networks:
@@ -78,7 +85,7 @@ services:
     image: kennethreitz/httpbin:latest
     container_name: vrsky-httpbin
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     networks:
       - vrsky-network
     healthcheck:
@@ -93,7 +100,7 @@ services:
     image: prom/prometheus:latest
     container_name: vrsky-prometheus
     ports:
-      - "9099:9090"
+      - "127.0.0.1:9099:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -142,7 +149,7 @@ services:
       postgres-source:
         condition: service_healthy
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     networks:
       - vrsky-network
     restart: unless-stopped
@@ -181,7 +188,7 @@ services:
       postgres-target:
         condition: service_healthy
     ports:
-      - "9091:9091"
+      - "127.0.0.1:9091:9091"
     networks:
       - vrsky-network
     restart: unless-stopped
@@ -234,7 +241,7 @@ services:
        postgres-consumer:
          condition: service_started
      ports:
-       - "9092:9090"
+       - "127.0.0.1:9092:9090"
      networks:
        - vrsky-network
      restart: unless-stopped
@@ -268,13 +275,20 @@ services:
       # Timeouts - Matches config.go
       MGMT_API_READ_TIMEOUT_SEC: "15"
       MGMT_API_WRITE_TIMEOUT_SEC: "30"
+
+      # Master key for AES-256-GCM secret encryption (#66 / Phase 1A).
+      # DEV-ONLY value baked into compose so a local stack starts without
+      # extra setup. Generate a real key for production:
+      #     openssl rand -hex 32
+      # See docs/SECURITY.md for rotation procedure.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     depends_on:
       nats:
         condition: service_healthy
       postgres-management:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     networks:
       - vrsky-network
     restart: unless-stopped
@@ -288,7 +302,7 @@ services:
        POSTGRES_USER: postgres
        POSTGRES_PASSWORD: management_password
      ports:
-       - "5434:5432"
+       - "127.0.0.1:5434:5432"
      volumes:
        - postgres-management-data:/var/lib/postgresql/data
      networks:
@@ -335,7 +349,7 @@ services:
       FILE_CONSUMER_BASE_DIR: "/data/input"
       HOST_HOME: "${HOME}"
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - ./data/input:/data/input
       - ${HOME}:${HOME}
@@ -359,8 +373,11 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       WEBHOOK_PORT: "9100"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # secrets (e.g. HMAC signing key from #67) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     depends_on:
       nats:
         condition: service_healthy
@@ -383,7 +400,7 @@ services:
       HTTP_PRODUCER_PORT: "9400"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
-      - "9400:9400"
+      - "127.0.0.1:9400:9400"
     depends_on:
       nats:
         condition: service_healthy
@@ -400,18 +417,23 @@ services:
       dockerfile: src/cmd/file-producer/Dockerfile
     container_name: vrsky-file-producer
     environment:
+      FILE_OWNER_UID: "${UID:-1000}"
+      FILE_OWNER_GID: "${GID:-1000}"
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       FILE_OUTPUT_NATS_URL: "nats://nats:4222"
       FILE_OUTPUT_SUBSCRIBE_SUBJECT: "vrsky.data.*.pipeline.*"
       FILE_OUTPUT_DIR: "/data/output"
+      FILE_PRODUCER_HTTP_PORT: "9900"
       HOST_HOME: "${HOME}"
     depends_on:
       nats:
         condition: service_healthy
       postgres-management:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:9900:9900"
     volumes:
       - ${HOME}:${HOME}
       - ./data/output:/data/output
@@ -432,7 +454,7 @@ services:
       CONVERTER_PORT: "9600"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
-      - "9600:9600"
+      - "127.0.0.1:9600:9600"
     depends_on:
       nats:
         condition: service_healthy
@@ -455,7 +477,7 @@ services:
       DB_PRODUCER_PORT: "9500"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
-      - "9500:9500"
+      - "127.0.0.1:9500:9500"
     depends_on:
       nats:
         condition: service_healthy
@@ -477,8 +499,10 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       API_CONSUMER_PORT: "9800"
+      # Required by the secrets resolver (#66).
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
-      - "9800:9800"
+      - "127.0.0.1:9800:9800"
     depends_on:
       nats:
         condition: service_healthy
@@ -500,7 +524,7 @@ services:
       FILTER_PORT: "9700"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
-      - "9700:9700"
+      - "127.0.0.1:9700:9700"
     depends_on:
       nats:
         condition: service_healthy
@@ -521,8 +545,10 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       DB_CONSUMER_PORT: "9300"
+      # Required by the secrets resolver (#66) — DB passwords are stored encrypted.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
-      - "9300:9300"
+      - "127.0.0.1:9300:9300"
     depends_on:
       nats:
         condition: service_healthy
@@ -545,5 +571,7 @@ volumes:
   postgres-management-data:
     driver: local
   prometheus-data:
+    driver: local
+  nats-jetstream:
     driver: local
 

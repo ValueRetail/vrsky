@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/google/uuid"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 )
@@ -18,6 +20,7 @@ import (
 type DBConsumerService struct {
 	db     *sql.DB // management DB
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
 	logger *slog.Logger
 	config *Config
 
@@ -60,9 +63,18 @@ type SourceDBConfig struct {
 }
 
 func NewDBConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *DBConsumerService {
+	js, err := nc.JetStream()
+	if err != nil {
+		logger.Error("Failed to get JetStream context", "error", err)
+	}
+	var pub *messaging.Publisher
+	if js != nil {
+		pub = messaging.NewPublisher(js)
+	}
 	return &DBConsumerService{
 		db:                db,
 		nc:                nc,
+		pub:               pub,
 		logger:            logger,
 		config:            config,
 		activeConnections: make(map[string]*ActiveDBConnection),
@@ -372,9 +384,8 @@ func (s *DBConsumerService) executeAndPublish(ctx context.Context, ac *ActiveDBC
 		return
 	}
 
-	topic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", ac.TenantID, ac.ConnectionID)
-	if err := s.nc.Publish(topic, envData); err != nil {
-		logger.Error("Failed to publish", "error", err)
+	if err := s.pub.Publish(context.Background(), ac.TenantID, ac.ConnectionID, env.ID, envData); err != nil {
+		logger.Error("Failed to publish to JetStream", "error", err)
 		return
 	}
 
@@ -450,7 +461,39 @@ func (s *DBConsumerService) getConnection(connectionID, tenantID string) (*Conne
 	if err != nil {
 		return nil, fmt.Errorf("failed to query connection: %w", err)
 	}
+
+	// Resolve any *_secret_id references in node configs to plaintext so
+	// the downstream extractDBConfig path sees a regular DSN string.
+	resolved, err := s.resolveSecretsInNodes(conn.Nodes, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve secrets: %w", err)
+	}
+	conn.Nodes = resolved
 	return &conn, nil
+}
+
+// resolveSecretsInNodes walks the nodes[] array, decodes each node.config,
+// runs the resolver, and re-marshals. Errors here are fatal — we'd rather
+// fail loud than connect with the wrong password.
+func (s *DBConsumerService) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
+	if len(nodesJSON) == 0 {
+		return nodesJSON, nil
+	}
+	var nodes []map[string]any
+	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
+		return nodesJSON, err
+	}
+	reader := crypto.NewSQLSecretReader(s.db)
+	for _, n := range nodes {
+		cfg, ok := n["config"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := crypto.ResolveSecrets(context.Background(), reader, tenantID, cfg); err != nil {
+			return nodesJSON, err
+		}
+	}
+	return json.Marshal(nodes)
 }
 
 func (s *DBConsumerService) extractDBConfig(conn *Connection) (SourceDBConfig, bool) {

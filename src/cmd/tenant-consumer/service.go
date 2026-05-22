@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/nats-io/nats.go"
 )
 
@@ -16,6 +17,7 @@ import (
 type TenantConsumerService struct {
 	db     *sql.DB
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
 	logger *slog.Logger
 
 	activeBridges map[string]context.CancelFunc
@@ -27,9 +29,18 @@ type TenantConsumerService struct {
 
 // NewTenantConsumerService creates a new service
 func NewTenantConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger) *TenantConsumerService {
+	js, err := nc.JetStream()
+	if err != nil {
+		logger.Error("Failed to get JetStream context", "error", err)
+	}
+	var pub *messaging.Publisher
+	if js != nil {
+		pub = messaging.NewPublisher(js)
+	}
 	return &TenantConsumerService{
 		db:            db,
 		nc:            nc,
+		pub:           pub,
 		logger:        logger,
 		activeBridges: make(map[string]context.CancelFunc),
 	}

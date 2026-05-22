@@ -15,10 +15,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 type Config struct {
@@ -67,6 +69,7 @@ type ConverterPipelineInfo struct {
 
 type ConverterService struct {
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
 	db     *sql.DB
 	logger *slog.Logger
 	config *Config
@@ -143,8 +146,14 @@ func main() {
 	}
 	defer nc.Close()
 
+	jsCtx, jsErr := nc.JetStream()
+	if jsErr != nil {
+		logger.Error("Failed to get JetStream context", "error", jsErr)
+		os.Exit(1)
+	}
 	service := &ConverterService{
 		nc:                nc,
+		pub:               messaging.NewPublisher(jsCtx),
 		db:                db,
 		logger:            logger,
 		config:            config,
@@ -179,17 +188,28 @@ func main() {
 }
 
 func (s *ConverterService) Start(ctx context.Context) error {
-	sub, err := s.nc.Subscribe(s.config.SubscriptionTopic, func(msg *nats.Msg) {
+	js, jsErr := s.nc.JetStream()
+	if jsErr != nil {
+		return fmt.Errorf("JetStream context: %w", jsErr)
+	}
+	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
+		DurableName: "data-converter",
+		Logger:      s.logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
+		// Converter failures are deterministic (bad JSON, bad mapping
+		// config) and don't benefit from retry. Errors are logged via
+		// emitEvent inside handleMessage. Always ack.
 		s.handleMessage(ctx, msg)
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
 	}
-	s.logger.Info("Subscribed to NATS", "topic", s.config.SubscriptionTopic)
+	s.logger.Info("Subscribed via JetStream", "durable", "data-converter")
 
 	go func() {
 		<-s.stopCh
-		_ = sub.Unsubscribe()
+		sub.Stop()
 		close(s.stoppedCh)
 	}()
 	return nil
@@ -314,8 +334,11 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		afterPreview = afterPreview[:2000] + "..."
 	}
 
-	// Build a new envelope copy for this branch
+	// Build a new envelope copy for this branch. Fresh ID so the JetStream
+	// MsgID dedup window doesn't drop this as a duplicate of the upstream
+	// message (5-minute dedup window).
 	env := *origEnv
+	env.ID = uuid.New().String()
 	env.Payload = newPayload
 	if newContentType != "" {
 		env.ContentType = newContentType
@@ -326,6 +349,7 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	}
 	env.Metadata["_last_processed_by"] = entry.NodeID
 	env.Metadata["_converted"] = true
+	env.Metadata["_source_envelope_id"] = origEnv.ID
 	if hasFormat {
 		env.Metadata["_output_format"] = converterCfg.OutputFormat
 	}
@@ -335,7 +359,7 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		return
 	}
 
-	if err := s.nc.Publish(subject, envData); err != nil {
+	if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, envData); err != nil {
 		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
 		return
 	}

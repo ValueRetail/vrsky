@@ -126,6 +126,20 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Per-tenant message-rate quota (#74). One token spent per call. The
+	// token bucket lives in-process — for multi-replica deployments we'd
+	// move this to Redis or a JS KV bucket.
+	if q, err := h.repo.GetTenantQuotas(ctx, tenantID); err == nil {
+		if qerr := h.quotas.CheckMessageRate(tenantID, q); qerr != nil {
+			w.Header().Set("Retry-After", "1")
+			_ = writeError(w, http.StatusTooManyRequests, "RateLimited",
+				"message-rate quota reached, retry shortly", map[string]interface{}{
+					"max_msg_per_sec": q.MaxMsgPerSec,
+				})
+			return
+		}
+	}
+
 	// Extract connection ID
 	connID := r.PathValue("id")
 	if connID == "" {

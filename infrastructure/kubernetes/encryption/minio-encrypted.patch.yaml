@@ -1,0 +1,53 @@
+# MinIO patch — Phase 1F (#71): enable server-side encryption with KES.
+#
+# Apply via kustomize over the base infrastructure/kubernetes/minio/
+# manifests, or copy the env block into the base Deployment when running
+# in compliance mode.
+#
+# Effect:
+#   - MINIO_KMS_AUTO_ENCRYPTION=on forces every PUT to be encrypted.
+#     Existing un-encrypted objects are NOT rewritten — run `mc encrypt
+#     set sse-s3 …` after enabling to re-encrypt the bucket.
+#   - MINIO_KMS_KES_*  points the server at the KES sidecar.
+#   - MINIO_KMS_KES_KEY_NAME selects the key in KES's store.
+#   - Readiness probe is widened slightly because the KES handshake adds
+#     latency on first connect.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: vrsky-storage
+spec:
+  template:
+    spec:
+      containers:
+        - name: minio
+          env:
+            - name: MINIO_KMS_AUTO_ENCRYPTION
+              value: "on"
+            - name: MINIO_KMS_KES_ENDPOINT
+              value: "https://kes.vrsky-storage.svc.cluster.local:7373"
+            - name: MINIO_KMS_KES_CERT_FILE
+              value: "/etc/minio/kes/client.crt"
+            - name: MINIO_KMS_KES_KEY_FILE
+              value: "/etc/minio/kes/client.key"
+            - name: MINIO_KMS_KES_CAPATH
+              value: "/etc/minio/kes/ca.crt"
+            - name: MINIO_KMS_KES_KEY_NAME
+              value: "vrsky-master-key"
+          volumeMounts:
+            - name: kes-client
+              mountPath: /etc/minio/kes
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            # KES handshake on first request can take a few seconds.
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: kes-client
+          secret:
+            secretName: minio-kes-client

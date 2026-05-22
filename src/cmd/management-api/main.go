@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 )
 
@@ -29,6 +30,20 @@ func main() {
 	config := LoadConfig()
 	if err := config.Validate(); err != nil {
 		logger.Fatalf("Invalid configuration: %v", err)
+	}
+
+	// Fail fast if the secrets master key is missing or malformed.
+	// All credential encrypt/decrypt operations require ENCRYPTION_KEY.
+	keyHex, err := crypto.Key()
+	if err != nil {
+		logger.Fatalf("ENCRYPTION_KEY is not configured: %v", err)
+	}
+	// Warn loudly when the dev key is in use — easy to miss in a real
+	// deployment that copied docker-compose.yml as a starting point. The
+	// canonical dev key is the literal repeated nibbles "0123456789abcdef".
+	if keyHex == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		logger.Printf("WARNING: ENCRYPTION_KEY is the documented dev value. " +
+			"Generate a real key for any environment other than local development: openssl rand -hex 32")
 	}
 
 	logger.Printf("Starting %s v%s", config.ServiceName, config.Version)
@@ -185,6 +200,15 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	restHandler.SetPublisher(publisher)
 	restHandler.SetDB(db)
 
+	// JetStream context for DLQ endpoints (#70). Optional — DLQ handlers
+	// return 503 if JS is unconfigured. Stream creation is lazy (workers
+	// call EnsureStreams on first publish/subscribe).
+	if js, err := nc.JetStream(); err != nil {
+		logger.Printf("WARNING: JetStream context unavailable: %v", err)
+	} else {
+		restHandler.SetJetStream(js)
+	}
+
 	// Initialize tenant NATS provisioning (Phase 2)
 	k8sProvisioner := initK8sNATSProvisioner(logger)
 	tenantSSEHub := managementapi.NewTenantSSEHub()
@@ -219,9 +243,12 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// - POST /api/v1/connections/{id}/auto-generator/stop
 	// - GET /api/v1/connections/{id}/auto-generator/status
 
-	// Wrap mux with middleware (applied in reverse order, so innermost is rightmost)
-	// Logging → CORS (handles preflight) → TenantID validation → Routes
+	// Wrap mux with middleware (applied in reverse order — innermost is rightmost).
+	// Audit must sit INSIDE TenantID so it can read the tenant from context,
+	// and OUTSIDE the route mux so it observes every handler.
+	//   Logging → CORS → TenantID → Audit → Routes
 	var handler http.Handler = mux
+	handler = managementapi.AuditMiddleware(repo, logger)(handler)
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
 	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = LoggingMiddleware(logger)(handler)

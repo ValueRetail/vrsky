@@ -202,6 +202,102 @@ type Repository interface {
 	GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error)
 
 	// ============================================
+	// Tenant quotas (Phase 1I — #74)
+	// ============================================
+
+	// GetTenantQuotas returns the quota row, auto-creating a default one
+	// when the tenant has none yet.
+	GetTenantQuotas(ctx context.Context, tenantID string) (*TenantQuotas, error)
+
+	// UpdateTenantQuotas overwrites configurable quota fields. Owner-only.
+	UpdateTenantQuotas(ctx context.Context, q *TenantQuotas) error
+
+	// SetTenantStorageUsage is called by the hourly storage job. Flips
+	// storage_exceeded based on the new usage vs the configured ceiling.
+	SetTenantStorageUsage(ctx context.Context, tenantID string, bytes int64) error
+
+	// CountActiveIntegrations returns how many connections the tenant
+	// has, used by the integration-count quota check on create paths.
+	CountActiveIntegrations(ctx context.Context, tenantID string) (int, error)
+
+	// ============================================
+	// Tenant members (Phase 1D — #69)
+	// ============================================
+
+	// ListTenantMembers returns every (user, role) tuple for one tenant.
+	ListTenantMembers(ctx context.Context, tenantID string) ([]*TenantMember, error)
+
+	// SetTenantMemberRole changes a user's role. Returns ErrLastOwner if
+	// the change would leave the tenant with zero owners.
+	SetTenantMemberRole(ctx context.Context, tenantID, userID, newRole string) error
+
+	// RemoveTenantMember deletes the membership. Returns ErrLastOwner if
+	// removal would leave zero owners.
+	RemoveTenantMember(ctx context.Context, tenantID, userID string) error
+
+	// ============================================
+	// OIDC / SSO (Phase 1C — #68)
+	// ============================================
+
+	// GetOIDCConfigByTenantID returns the OIDC config for a tenant or
+	// ErrOIDCConfigNotFound if SSO is not configured.
+	GetOIDCConfigByTenantID(ctx context.Context, tenantID string) (*OIDCConfig, error)
+
+	// GetOIDCConfigByTenantSlug resolves a tenant slug to its OIDC config.
+	GetOIDCConfigByTenantSlug(ctx context.Context, slug string) (*OIDCConfig, error)
+
+	// UpsertOIDCConfig stores or replaces a tenant's OIDC config.
+	UpsertOIDCConfig(ctx context.Context, c *OIDCConfig) error
+
+	// DeleteOIDCConfig removes a tenant's OIDC config.
+	DeleteOIDCConfig(ctx context.Context, tenantID string) error
+
+	// GetUserByOIDCSubject finds a previously-linked user. Returns
+	// (nil, nil) when not yet linked — callers auto-provision.
+	GetUserByOIDCSubject(ctx context.Context, provider, subject string) (*User, error)
+
+	// LinkUserOIDC sets oidc_provider + oidc_subject on an existing user.
+	LinkUserOIDC(ctx context.Context, userID, provider, subject string) error
+
+	// ============================================
+	// Audit Log Operations (Phase 1G — #72)
+	// ============================================
+
+	// CreateAuditEntry appends an immutable audit record.
+	CreateAuditEntry(ctx context.Context, e *AuditEntry) error
+
+	// ListAuditEntries returns paginated audit entries for one tenant.
+	ListAuditEntries(ctx context.Context, tenantID string, f AuditFilters, limit, offset int) ([]*AuditEntry, int64, error)
+
+	// StreamAuditEntries iterates entries (oldest first) and calls emit
+	// for each — used by the JSONL export so the entire result set never
+	// lives in memory.
+	StreamAuditEntries(ctx context.Context, tenantID string, f AuditFilters, emit func(*AuditEntry) error) error
+
+	// ============================================
+	// Secrets Operations (Phase 1A — #66)
+	// ============================================
+
+	// CreateSecret persists a new ciphertext for a tenant and returns the metadata.
+	CreateSecret(ctx context.Context, tenantID, name, ciphertext string) (*Secret, error)
+
+	// GetSecret returns the metadata for one secret (no ciphertext).
+	GetSecret(ctx context.Context, tenantID, id string) (*Secret, error)
+
+	// GetSecretCiphertext returns the raw ciphertext (used by workers at startup).
+	GetSecretCiphertext(ctx context.Context, tenantID, id string) (string, error)
+
+	// ListSecrets returns metadata for all secrets owned by a tenant.
+	ListSecrets(ctx context.Context, tenantID string, limit, offset int) ([]*Secret, error)
+
+	// UpdateSecret rewrites name and/or ciphertext for one secret.
+	UpdateSecret(ctx context.Context, tenantID, id, name, ciphertext string) (*Secret, error)
+
+	// DeleteSecret removes a secret. Returns referencing connection IDs if any
+	// (and does NOT delete in that case).
+	DeleteSecret(ctx context.Context, tenantID, id string) ([]string, error)
+
+	// ============================================
 	// User Account Deletion
 	// ============================================
 
