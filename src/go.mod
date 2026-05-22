@@ -3,6 +3,7 @@ module github.com/ValueRetail/vrsky
 go 1.22
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/bytecodealliance/wasmtime-go/v13 v13.0.0
 	github.com/coreos/go-oidc/v3 v3.10.0
