@@ -207,6 +207,52 @@ func TestGetSourceSampleData_UnknownConnectionNoFallback(t *testing.T) {
 	}
 }
 
+// A real DB error (not ErrNoRows) on the payload fetch is a server error (500),
+// not a "no data" response - transient outages must not be masked.
+func TestGetSourceSampleData_PayloadQueryError(t *testing.T) {
+	handler, mock, cleanup := setupSourceSampleHandler(t)
+	defer cleanup()
+
+	mock.ExpectQuery(qApproval).
+		WithArgs("tenant-1", "src-tenant").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(qFallback).
+		WithArgs("src-tenant").
+		WillReturnError(sql.ErrConnDone)
+
+	w := callSourceSampleData(handler, "?source_tenant_id=src-tenant")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// A DB error on the specific-connection lookup also surfaces as 500 rather than
+// silently falling back.
+func TestGetSourceSampleData_SpecificQueryError(t *testing.T) {
+	handler, mock, cleanup := setupSourceSampleHandler(t)
+	defer cleanup()
+
+	mock.ExpectQuery(qApproval).
+		WithArgs("tenant-1", "src-tenant").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(qSpecificConn).
+		WithArgs("conn-1", "src-tenant").
+		WillReturnError(sql.ErrConnDone)
+
+	w := callSourceSampleData(handler, "?source_tenant_id=src-tenant&source_connection_id=conn-1")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
 // (5) A stored payload that isn't a valid envelope -> ok=false.
 func TestGetSourceSampleData_MalformedEnvelope(t *testing.T) {
 	handler, mock, cleanup := setupSourceSampleHandler(t)

@@ -81,6 +81,10 @@ export default function PipelineBuilder() {
   const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string } | null>(null)
   const [fileManagerFiles, setFileManagerFiles] = useState<Array<{ name: string; path: string; isDir: boolean; size: number; modTime: string }>>([])
   const [fileManagerLoading, setFileManagerLoading] = useState(false)
+  // Which bottom-panel tab is selected. Empty until the user picks one, in
+  // which case the render falls back to the last available tab. Kept in state
+  // (not derived from the DOM) so re-renders don't reset the user's choice.
+  const [activeBottomTab, setActiveBottomTab] = useState<string>('')
   // Failed Messages count — drives whether the DLQ tab is shown (#74 feedback).
   const [dlqCount, setDlqCount] = useState(0)
   // (effect declared below after we know the active connection id)
@@ -627,6 +631,7 @@ export default function PipelineBuilder() {
         const outputPath = (producerNode?.data?.config?.file as any)?.path || (payloadProducer?.config?.file as any)?.path || '/data/output'
         setFileManagerPanel({ basePath: outputPath, currentPath: outputPath })
         setFileManagerFiles([])
+        setActiveBottomTab('filemanager')
       } else {
         setFileManagerPanel(null)
       }
@@ -708,8 +713,8 @@ export default function PipelineBuilder() {
         showSuccessNotification('Deleted', `Deleted ${name}`)
         if (fileManagerPanel) fetchFileList(fileManagerPanel.currentPath)
       } else {
-        const data = await resp.json()
-        showErrorNotification('Delete failed', data.error || 'Unknown error')
+        const data = await resp.json().catch(() => ({}))
+        showErrorNotification('Delete failed', data.error || `Delete failed (${resp.status})`)
       }
     } catch (err) {
       showErrorNotification('Delete failed', err instanceof Error ? err.message : 'Network error')
@@ -1183,15 +1188,6 @@ export default function PipelineBuilder() {
       </div>
 
       {/* UNIFIED BOTTOM PANEL - Shows tabs for active panels */}
-      {(fileUploadPanel || httpProducerPanel || dbProducerPanel || converterPanel || filterPanel) && (() => {
-        const tabs: Array<{ id: string; label: string; color: string }> = []
-        if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
-        if (converterPanel) tabs.push({ id: 'converter', label: 'Converter', color: '#d946ef' })
-        if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
-        if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
-        // TODO: proper tab state needed here
-        return null
-      })()}
       {(() => {
         const tabs: Array<{ id: string; label: string; color: string }> = []
         if (fileUploadPanel) tabs.push({ id: 'files', label: 'File Watcher', color: '#16a34a' })
@@ -1206,6 +1202,12 @@ export default function PipelineBuilder() {
           tabs.push({ id: 'dlq', label: 'Failed Messages', color: '#dc2626' })
         }
         if (tabs.length === 0) return null
+
+        // Honour the user's selection if that tab still exists, otherwise fall
+        // back to the last available tab (e.g. after a panel closes).
+        const activeId = tabs.some(t => t.id === activeBottomTab)
+          ? activeBottomTab
+          : tabs[tabs.length - 1].id
 
         return (
           <div style={{
@@ -1225,28 +1227,14 @@ export default function PipelineBuilder() {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => {
-                    // Switch to this tab by ensuring only its content shows
-                    // We use a data attribute on the panel container
-                    const panel = document.getElementById('bottom-panel-content')
-                    if (panel) panel.setAttribute('data-active-tab', tab.id)
-                    // Force re-render by toggling a dummy state isn't ideal, so we use DOM
-                    document.querySelectorAll('.bottom-tab-content').forEach(el => {
-                      (el as HTMLElement).style.display = el.getAttribute('data-tab') === tab.id ? 'flex' : 'none'
-                    })
-                    document.querySelectorAll('.bottom-tab-btn').forEach(el => {
-                      const isActive = el.getAttribute('data-tab') === tab.id;
-                      (el as HTMLElement).style.borderBottom = isActive ? `2px solid ${tab.color}` : '2px solid transparent';
-                      (el as HTMLElement).style.color = isActive ? tab.color : '#6b7280'
-                    })
-                  }}
+                  onClick={() => setActiveBottomTab(tab.id)}
                   className="bottom-tab-btn"
                   data-tab={tab.id}
                   style={{
                     padding: '6px 16px', fontSize: '12px', fontWeight: 600,
                     background: 'none', border: 'none',
-                    borderBottom: tab.id === tabs[tabs.length - 1].id ? `2px solid ${tab.color}` : '2px solid transparent',
-                    color: tab.id === tabs[tabs.length - 1].id ? tab.color : '#6b7280',
+                    borderBottom: tab.id === activeId ? `2px solid ${tab.color}` : '2px solid transparent',
+                    color: tab.id === activeId ? tab.color : '#6b7280',
                     cursor: 'pointer',
                   }}
                 >
@@ -1286,7 +1274,7 @@ export default function PipelineBuilder() {
             <div id="bottom-panel-content" style={{ flex: 1, overflow: 'hidden' }}>
               {/* File watcher tab */}
               {fileUploadPanel && (
-                <div className="bottom-tab-content" data-tab="files" style={{ display: tabs[tabs.length - 1].id === 'files' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '10px' }}>
+                <div className="bottom-tab-content" data-tab="files" style={{ display: activeId === 'files' ? 'flex' : 'none', height: '100%', padding: '8px 16px', gap: '10px' }}>
                   <label style={{ width: '180px', flexShrink: 0, border: '2px dashed #d1d5db', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', cursor: fileUploading ? 'not-allowed' : 'pointer', backgroundColor: '#f9fafb', fontSize: '12px', color: '#6b7280', padding: '8px' }}
                     onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#16a34a'; e.currentTarget.style.backgroundColor = '#f0fdf4' }}
                     onDragLeave={(e) => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.backgroundColor = '#f9fafb' }}
@@ -1313,7 +1301,7 @@ export default function PipelineBuilder() {
 
               {/* Converter tab */}
               {converterPanel && (
-                <div className="bottom-tab-content" data-tab="converter" style={{ display: tabs[tabs.length - 1].id === 'converter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                <div className="bottom-tab-content" data-tab="converter" style={{ display: activeId === 'converter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
                   <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
                     {converterEvents.length === 0 ? (
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for converter activity...</p>
@@ -1351,7 +1339,7 @@ export default function PipelineBuilder() {
 
               {/* Filter tab */}
               {filterPanel && (
-                <div className="bottom-tab-content" data-tab="filter" style={{ display: tabs[tabs.length - 1].id === 'filter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                <div className="bottom-tab-content" data-tab="filter" style={{ display: activeId === 'filter' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
                   <div style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace' }}>
                     {filterEvents.length === 0 ? (
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for filter activity...</p>
@@ -1377,7 +1365,7 @@ export default function PipelineBuilder() {
 
               {/* HTTP producer tab */}
               {httpProducerPanel && (
-                <div className="bottom-tab-content" data-tab="http" style={{ display: tabs[tabs.length - 1].id === 'http' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                <div className="bottom-tab-content" data-tab="http" style={{ display: activeId === 'http' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
                   <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>
                     Target: <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: '3px' }}>{httpProducerPanel.url}</code>
                   </div>
@@ -1418,7 +1406,7 @@ export default function PipelineBuilder() {
 
               {/* DB producer tab */}
               {dbProducerPanel && (
-                <div className="bottom-tab-content" data-tab="dbout" style={{ display: tabs[tabs.length - 1].id === 'dbout' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                <div className="bottom-tab-content" data-tab="dbout" style={{ display: activeId === 'dbout' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
                   <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>
                     Target table: <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: '3px' }}>{dbProducerPanel.table || '(auto)'}</code>
                   </div>
@@ -1453,7 +1441,7 @@ export default function PipelineBuilder() {
 
               {/* File manager tab */}
               {fileManagerPanel && (
-                <div className="bottom-tab-content" data-tab="filemanager" style={{ display: tabs[tabs.length - 1].id === 'filemanager' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
+                <div className="bottom-tab-content" data-tab="filemanager" style={{ display: activeId === 'filemanager' ? 'flex' : 'none', flexDirection: 'column', height: '100%', padding: '8px 16px' }}>
                   {/* Breadcrumb + refresh */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontSize: '11px' }}>
                     <span style={{ color: '#6b7280' }}>Path:</span>
@@ -1533,7 +1521,7 @@ export default function PipelineBuilder() {
                 <div
                   className="bottom-tab-content"
                   data-tab="dlq"
-                  style={{ display: tabs[tabs.length - 1].id === 'dlq' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}
+                  style={{ display: activeId === 'dlq' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}
                 >
                   <DLQPanel connectionID={activeCanvas.deployedConnectionId} />
                 </div>

@@ -146,8 +146,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start HTTP server for file management
-	httpPort := getEnv("FILE_PRODUCER_HTTP_PORT", "9500")
+	// Start HTTP server for file management. Default matches the UI
+	// (config.fileProducerUrl) and docker-compose's FILE_PRODUCER_HTTP_PORT.
+	httpPort := getEnv("FILE_PRODUCER_HTTP_PORT", "9900")
 	allowedRoots := []string{config.DefaultOutputDir}
 	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
 		allowedRoots = append(allowedRoots, hostHome)

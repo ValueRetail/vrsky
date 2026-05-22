@@ -5,16 +5,27 @@ import WebhookSignatureConfig from './WebhookSignatureConfig'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
+//
+// Precomputes a node lookup and an incoming-edge adjacency map, then walks an
+// index-based queue, keeping the traversal O(V + E) rather than O(V * E).
 function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Node | undefined {
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const sourcesByTarget = new Map<string, string[]>()
+  for (const edge of edges) {
+    const list = sourcesByTarget.get(edge.target)
+    if (list) list.push(edge.source)
+    else sourcesByTarget.set(edge.target, [edge.source])
+  }
+
   const visited = new Set<string>()
   const queue = [nodeId]
-  while (queue.length > 0) {
-    const current = queue.shift()!
+  let head = 0
+  while (head < queue.length) {
+    const current = queue[head++]
     if (visited.has(current)) continue
     visited.add(current)
-    for (const edge of edges) {
-      if (edge.target !== current) continue
-      const src = nodes.find(n => n.id === edge.source)
+    for (const sourceId of sourcesByTarget.get(current) || []) {
+      const src = nodeById.get(sourceId)
       if (!src) continue
       if (src.type === 'input') return src
       queue.push(src.id)

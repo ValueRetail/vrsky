@@ -3,6 +3,7 @@ package managementapi
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -770,21 +771,32 @@ func (h *Handler) GetSourceSampleData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch last_payload from the source. Prefer the specific connection if
-	// provided, otherwise pick the most recent one with payload.
+	// provided, otherwise pick the most recent one with payload. A real DB
+	// error is surfaced as 500; a missing row (sql.ErrNoRows) falls back to the
+	// most-recent lookup and ultimately to an "ok=false / no data" response, so
+	// transient outages aren't disguised as "no sample data yet".
 	var lastPayload []byte
 	if sourceConnID != "" {
 		err = h.db.QueryRowContext(ctx,
 			"SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL",
 			sourceConnID, sourceTenantID).Scan(&lastPayload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to load sample data", nil)
+			return
+		}
 	}
-	if err != nil || len(lastPayload) == 0 {
+	if len(lastPayload) == 0 {
 		err = h.db.QueryRowContext(ctx, `
 			SELECT last_payload FROM connections
 			WHERE tenant_id = $1 AND last_payload IS NOT NULL
 			ORDER BY updated_at DESC LIMIT 1`,
 			sourceTenantID).Scan(&lastPayload)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to load sample data", nil)
+			return
+		}
 	}
-	if err != nil || len(lastPayload) == 0 {
+	if len(lastPayload) == 0 {
 		_ = writeJSON(w, http.StatusOK, map[string]interface{}{
 			"ok": false, "error": "No sample data available from source tenant yet.",
 		})
