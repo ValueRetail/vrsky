@@ -1888,6 +1888,8 @@ function ApiConsumerConfig({
                     borderRadius: '4px',
                     fontSize: '12px',
                     boxSizing: 'border-box',
+                    color: '#374151',
+                    backgroundColor: '#ffffff',
                   }}
                 />
 
@@ -1904,6 +1906,8 @@ function ApiConsumerConfig({
                     borderRadius: '4px',
                     fontSize: '12px',
                     boxSizing: 'border-box',
+                    color: '#374151',
+                    backgroundColor: '#ffffff',
                   }}
                 />
                 <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
@@ -1918,6 +1922,8 @@ function ApiConsumerConfig({
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
                       fontSize: '12px',
+                      color: '#374151',
+                      backgroundColor: '#ffffff',
                     }}
                   >
                     <option value="none">No Auth</option>
