@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
+import DLQPanel from '../components/Pipeline/DLQPanel'
+import { listDLQ } from '../services/dlqService'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
@@ -73,6 +75,9 @@ export default function PipelineBuilder() {
   const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string } | null>(null)
   const [fileManagerFiles, setFileManagerFiles] = useState<Array<{ name: string; path: string; isDir: boolean; size: number; modTime: string }>>([])
   const [fileManagerLoading, setFileManagerLoading] = useState(false)
+  // Failed Messages count — drives whether the DLQ tab is shown (#74 feedback).
+  const [dlqCount, setDlqCount] = useState(0)
+  // (effect declared below after we know the active connection id)
   const { showErrorNotification, showSuccessNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
 
   // Close user menu when clicking outside
@@ -626,6 +631,9 @@ export default function PipelineBuilder() {
       setDeployAttempted(false)
       
     } catch (error) {
+      // apiClient now rejects with VRSkyAPIError (extends Error), so the
+      // server's `message` field (e.g. "integration count quota reached")
+      // flows through naturally.
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       showErrorNotification('Deployment failed', errorMsg)
       console.error('Deploy error:', error)
@@ -689,6 +697,28 @@ export default function PipelineBuilder() {
       showErrorNotification('Delete failed', err instanceof Error ? err.message : 'Network error')
     }
   }
+
+  // Poll DLQ for the active deployment so the "Failed Messages" tab can
+  // hide itself when there's nothing to show (#74 user feedback).
+  useEffect(() => {
+    const connID = activeCanvas?.deployedConnectionId
+    if (!connID) {
+      setDlqCount(0)
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const entries = await listDLQ(connID, 1, 0)
+        if (!cancelled) setDlqCount(entries.length > 0 ? 1 : 0)
+      } catch {
+        if (!cancelled) setDlqCount(0)
+      }
+    }
+    tick()
+    const id = setInterval(tick, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [activeCanvas?.deployedConnectionId])
 
   // Determine if right sidebar should be open
   const rightSidebarOpen = selectedNode !== null
@@ -1152,6 +1182,11 @@ export default function PipelineBuilder() {
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
         if (fileManagerPanel) tabs.push({ id: 'filemanager', label: 'File Output', color: '#059669' })
+        // Failed Messages tab — only when the deployed pipeline actually has
+        // DLQ entries. Hides cleanly during normal operation (#74 feedback).
+        if (activeCanvas?.deployedConnectionId && dlqCount > 0) {
+          tabs.push({ id: 'dlq', label: 'Failed Messages', color: '#dc2626' })
+        }
         if (tabs.length === 0) return null
 
         return (
@@ -1472,6 +1507,17 @@ export default function PipelineBuilder() {
                       </>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Failed Messages (DLQ) tab — Phase 1E / #70 */}
+              {activeCanvas?.deployedConnectionId && (
+                <div
+                  className="bottom-tab-content"
+                  data-tab="dlq"
+                  style={{ display: tabs[tabs.length - 1].id === 'dlq' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}
+                >
+                  <DLQPanel connectionID={activeCanvas.deployedConnectionId} />
                 </div>
               )}
             </div>

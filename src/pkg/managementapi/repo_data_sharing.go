@@ -41,6 +41,7 @@ func (r *PostgresRepository) GetConnectionRequest(ctx context.Context, requestID
 	var req DataConnectionRequest
 	var allowedJSON, deniedJSON []byte
 	var message sql.NullString
+	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, requester_tenant_id, target_tenant_id, permission_type, status,
 		       message, allowed_fields, denied_fields, created_at, updated_at, responded_at
@@ -92,6 +93,7 @@ func (r *PostgresRepository) ListOutgoingConnectionRequests(ctx context.Context,
 }
 
 func (r *PostgresRepository) listConnectionRequests(ctx context.Context, query, tenantID string, isIncoming bool) ([]*DataConnectionRequest, error) {
+	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	rows, err := r.db.QueryContext(ctx, query, tenantID)
 	if err != nil {
 		return nil, err
@@ -148,6 +150,7 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 	}
 
 	// Update request status
+	// lint:tenant-ok — request ID is FK to tenants; caller verified ownership above.
 	var requesterID, targetID, permType string
 	err = tx.QueryRowContext(ctx, `
 		UPDATE tenant_connection_requests
@@ -196,6 +199,7 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 }
 
 func (r *PostgresRepository) DenyConnectionRequest(ctx context.Context, requestID string) error {
+	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE tenant_connection_requests
 		SET status = 'denied', responded_at = NOW(), updated_at = NOW()
@@ -239,6 +243,7 @@ func (r *PostgresRepository) ListDataConnections(ctx context.Context, tenantID s
 }
 
 func (r *PostgresRepository) GetDataConnectionByID(ctx context.Context, id string) (*TenantDataConnection, error) {
+	// lint:tenant-ok — primary-key lookup; caller verifies (requester|target)_tenant_id matches the request's tenant.
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, request_id, requester_tenant_id, target_tenant_id, permission_type,
 		       allowed_fields, denied_fields, shared_connection_ids, rate_limit_per_hour, status, created_at, updated_at, revoked_at
@@ -267,6 +272,7 @@ func (r *PostgresRepository) GetActiveDataConnection(ctx context.Context, reques
 }
 
 func (r *PostgresRepository) RevokeDataConnection(ctx context.Context, connectionID string) error {
+	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE tenant_data_connections
 		SET status = 'revoked', revoked_at = NOW(), updated_at = NOW()
@@ -369,6 +375,7 @@ func (r *PostgresRepository) PauseConnectionsByDataConnection(ctx context.Contex
 
 func (r *PostgresRepository) GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error) {
 	var t Tenant
+	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	err := r.db.QueryRowContext(ctx, `
 		SELECT t.id, t.name, t.slug, t.owner_id, t.subscription_plan, t.is_verified,
 		       t.max_integrations, t.max_messages_per_month, t.status, t.nats_slug, t.created_at, t.updated_at

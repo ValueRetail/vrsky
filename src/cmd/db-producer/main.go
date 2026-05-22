@@ -19,6 +19,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 type Config struct {
@@ -164,17 +165,29 @@ func main() {
 }
 
 func (s *DBProducerService) Start(ctx context.Context) error {
-	sub, err := s.nc.Subscribe(s.config.SubscriptionTopic, func(msg *nats.Msg) {
+	js, jsErr := s.nc.JetStream()
+	if jsErr != nil {
+		return fmt.Errorf("JetStream context: %w", jsErr)
+	}
+	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
+		DurableName: "db-producer",
+		AckWait:     45 * time.Second,
+		Logger:      s.logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
+		// db-producer's handleMessage doesn't yet thread errors back —
+		// treat all failures as logged-and-acked. Follow-up: surface
+		// transient DB errors as returned errors for DLQ behaviour.
 		s.handleMessage(ctx, msg)
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
 	}
-	s.logger.Info("Subscribed to NATS", "topic", s.config.SubscriptionTopic)
+	s.logger.Info("Subscribed via JetStream", "durable", "db-producer")
 
 	go func() {
 		<-s.stopCh
-		_ = sub.Unsubscribe()
+		sub.Stop()
 		// Close all target connections
 		s.targetCacheMu.Lock()
 		for _, tcs := range s.targetCache {

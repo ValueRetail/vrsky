@@ -15,10 +15,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 type Config struct {
@@ -59,6 +61,7 @@ type PipelineInfo struct {
 
 type FilterService struct {
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
 	db     *sql.DB
 	logger *slog.Logger
 	config *Config
@@ -133,8 +136,14 @@ func main() {
 	}
 	defer nc.Close()
 
+	jsCtx, jsErr := nc.JetStream()
+	if jsErr != nil {
+		logger.Error("Failed to get JetStream context", "error", jsErr)
+		os.Exit(1)
+	}
 	service := &FilterService{
 		nc:                nc,
+		pub:               messaging.NewPublisher(jsCtx),
 		db:                db,
 		logger:            logger,
 		config:            config,
@@ -168,17 +177,27 @@ func main() {
 }
 
 func (s *FilterService) Start(ctx context.Context) error {
-	sub, err := s.nc.Subscribe(s.config.SubscriptionTopic, func(msg *nats.Msg) {
+	js, jsErr := s.nc.JetStream()
+	if jsErr != nil {
+		return fmt.Errorf("JetStream context: %w", jsErr)
+	}
+	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
+		DurableName: "data-filter",
+		Logger:      s.logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
+		// Filter failures are deterministic; ack always (errors emit via
+		// emitEvent and surface in the UI).
 		s.handleMessage(ctx, msg)
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
 	}
-	s.logger.Info("Subscribed to NATS", "topic", s.config.SubscriptionTopic)
+	s.logger.Info("Subscribed via JetStream", "durable", "data-filter")
 
 	go func() {
 		<-s.stopCh
-		_ = sub.Unsubscribe()
+		sub.Stop()
 		close(s.stoppedCh)
 	}()
 	return nil
@@ -306,17 +325,21 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 		return
 	}
 
-	// Build a new envelope copy for this branch
+	// Build a new envelope copy for this branch. Mint a fresh ID so the
+	// re-publish is not treated as a duplicate of the source envelope by
+	// JetStream's MsgID dedup window (5 minutes).
 	env := *origEnv
+	env.ID = uuid.New().String()
 	env.Payload = newPayload
 	env.Metadata = make(map[string]interface{})
 	for k, v := range origEnv.Metadata {
 		env.Metadata[k] = v
 	}
 	env.Metadata["_last_processed_by"] = entry.NodeID
+	env.Metadata["_source_envelope_id"] = origEnv.ID
 
 	envData, _ := json.Marshal(env)
-	if err := s.nc.Publish(subject, envData); err != nil {
+	if err := s.pub.Publish(context.Background(), env.TenantID, connectionID, env.ID, envData); err != nil {
 		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
 		return
 	}

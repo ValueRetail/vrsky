@@ -13,6 +13,13 @@ services:
     command:
       - "-m"   # Enable management port
       - "8222"
+      # JetStream: at-least-once delivery + DLQ for data-flow streams (#70).
+      # Control-plane (vrsky.commands.*) still uses core NATS.
+      - "-js"
+      - "-sd"
+      - "/data"
+    volumes:
+      - nats-jetstream:/data
     networks:
       - vrsky-network
     healthcheck:
@@ -268,6 +275,13 @@ services:
       # Timeouts - Matches config.go
       MGMT_API_READ_TIMEOUT_SEC: "15"
       MGMT_API_WRITE_TIMEOUT_SEC: "30"
+
+      # Master key for AES-256-GCM secret encryption (#66 / Phase 1A).
+      # DEV-ONLY value baked into compose so a local stack starts without
+      # extra setup. Generate a real key for production:
+      #     openssl rand -hex 32
+      # See docs/SECURITY.md for rotation procedure.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     depends_on:
       nats:
         condition: service_healthy
@@ -359,6 +373,9 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       WEBHOOK_PORT: "9100"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # secrets (e.g. HMAC signing key from #67) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
       - "9100:9100"
     depends_on:
@@ -482,6 +499,8 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       API_CONSUMER_PORT: "9800"
+      # Required by the secrets resolver (#66).
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
       - "9800:9800"
     depends_on:
@@ -526,6 +545,8 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       DB_CONSUMER_PORT: "9300"
+      # Required by the secrets resolver (#66) — DB passwords are stored encrypted.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:
       - "9300:9300"
     depends_on:
@@ -550,5 +571,7 @@ volumes:
   postgres-management-data:
     driver: local
   prometheus-data:
+    driver: local
+  nats-jetstream:
     driver: local
 

@@ -1,0 +1,53 @@
+# Self-hosted (bare metal / homelab / single-node k3s) — LUKS-backed
+# local-path provisioner.
+#
+# Rancher's local-path provisioner uses whatever filesystem is under its
+# `nodePath` (default `/opt/local-path-provisioner/`). To get at-rest
+# encryption you mount that path on a LUKS volume on each node — k3s/k8s
+# itself doesn't have a "LUKS storage class".
+#
+# Steps (run as root on each worker node, BEFORE installing VRSky):
+#
+#   # 1. Create a dedicated partition (or LVM logical volume) for VRSky
+#   #    state. Suppose it's /dev/sdb1.
+#   cryptsetup luksFormat /dev/sdb1
+#
+#   # 2. Open it. The passphrase has to be supplied at every boot — see
+#   #    note below about /etc/crypttab for unattended startup.
+#   cryptsetup open /dev/sdb1 vrsky-data
+#
+#   # 3. Make a filesystem and mount where local-path expects it.
+#   mkfs.ext4 /dev/mapper/vrsky-data
+#   mkdir -p /opt/local-path-provisioner
+#   mount /dev/mapper/vrsky-data /opt/local-path-provisioner
+#
+#   # 4. Persist across reboots.
+#   echo "vrsky-data UUID=$(blkid -s UUID -o value /dev/sdb1) none luks" \
+#     >> /etc/crypttab
+#   echo "/dev/mapper/vrsky-data /opt/local-path-provisioner ext4 defaults 0 2" \
+#     >> /etc/fstab
+#
+# For unattended reboots use a TPM-bound key (clevis + tang) or a network
+# key escrow. Storing the passphrase in /etc/crypttab as plaintext
+# defeats the purpose.
+#
+# After the disk is mounted, the existing `storageClassName: local-path`
+# in the base manifests Just Works — no manifest change required.
+#
+# Verify:
+#
+#   lsblk -o NAME,FSTYPE,TYPE,MOUNTPOINT       # vrsky-data should be 'crypt'
+#   dmsetup info /dev/mapper/vrsky-data
+---
+# Placeholder StorageClass so manifests that pin to `vrsky-encrypted`
+# still resolve on a LUKS host. Functionally identical to local-path —
+# encryption happens at the block layer below.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: vrsky-encrypted
+  annotations:
+    vrsky.io/encryption-at-rest: "luks-host"
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

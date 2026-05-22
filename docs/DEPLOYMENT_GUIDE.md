@@ -541,3 +541,118 @@ kubectl exec -it -n vrsky-ui pod/<pod-name> -- /bin/sh
 **Last Updated**: February 24, 2026  
 **PHASE**: 12 - Docker Deployment  
 **Status**: Implementation Complete ✅
+
+---
+
+## Encryption at rest (Phase 1F / issue #71)
+
+VRSky processes credentials, user data, and cross-tenant payloads. Customer
+compliance reviews (SOC 2 CC6.1, ISO 27001 A.10.1, GDPR Art. 32) require
+encryption of every stateful component. The layers below are stacked:
+
+| Layer | What's encrypted | Implementation |
+|-------|------------------|----------------|
+| Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. |
+| Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, KES key store | Encrypted StorageClass (cloud KMS) or LUKS on bare metal. |
+| Object storage | MinIO bucket contents | SSE-S3 via KES sidecar wrapping a KMS data key. |
+| Transit | All HTTP between services | TLS terminated at Traefik, internal mTLS via the cluster mesh (cluster-trust CA). |
+
+### Per-target setup
+
+#### Docker Compose (development only)
+
+**Not for production.** Volumes live on whatever filesystem hosts your Docker
+data root. The application-layer encryption from #66 still applies — secret
+ciphertexts and audit records are protected from a casual `pg_dump` — but
+the disk itself is plaintext. Document this clearly when handing the stack
+to evaluators.
+
+#### K3s / self-hosted (LUKS)
+
+1. Stop k3s.
+2. Format a dedicated partition with LUKS — see
+   `infrastructure/kubernetes/encryption/storage-classes/self-hosted-luks.yaml`
+   for the exact commands.
+3. Mount it on `/opt/local-path-provisioner` (the default `nodePath` for
+   Rancher's `local-path` provisioner).
+4. Use a TPM-bound passphrase (clevis + tang) or a network escrow for
+   unattended reboots. **Never** put a plaintext passphrase in
+   `/etc/crypttab`.
+5. Start k3s. The existing `storageClassName: local-path` on the base
+   manifests now lands on LUKS-backed disk automatically.
+
+Verify: `lsblk -o NAME,FSTYPE,TYPE,MOUNTPOINT` should show the mount as
+type `crypt`.
+
+#### K3s / managed cloud (AWS / GCP / Azure)
+
+1. Pick the appropriate StorageClass template from
+   `infrastructure/kubernetes/encryption/storage-classes/`:
+   - `aws-ebs-kms.yaml` — gp3 + customer-managed KMS key
+   - `gcp-pd-cmek.yaml` — pd-ssd + customer-managed encryption key
+   - `azure-cmk.yaml` — Premium_LRS + disk encryption set
+2. Replace the placeholder key ARN / resource path with your real key.
+3. `kubectl apply -f` the file. The provisioner driver must already be
+   installed in the cluster.
+4. Re-create the PVCs in `vrsky-storage` / `vrsky-platform` /
+   `vrsky-management` so they bind to the new `vrsky-encrypted` class.
+   (PVCs are immutable wrt `storageClassName` — this is destructive in a
+   running cluster, so do it during a maintenance window.)
+5. Verify by inspecting the underlying disk in the cloud console — the
+   "encryption" field should report your customer key.
+
+#### MinIO SSE-S3 (compliance mode)
+
+After the StorageClass is in place:
+
+```bash
+kubectl apply -f infrastructure/kubernetes/encryption/kes-deployment.yaml
+kubectl apply -f infrastructure/kubernetes/encryption/minio-encrypted.patch.yaml
+```
+
+KES is the broker between MinIO and the real KMS. The reference manifest
+uses a file-backed key store on disk for dev convenience — for production
+swap it to HashiCorp Vault, AWS KMS, GCP KMS, or Azure Key Vault. The
+KES config sits in a ConfigMap so you only have to edit + restart.
+
+Verify:
+
+```bash
+# Upload an object and check the metadata for the SSE header.
+mc cp Makefile s3/test/Makefile
+mc cat --metadata s3/test/Makefile | grep -i sse
+# Expected: X-Amz-Server-Side-Encryption: AES256
+```
+
+#### Postgres native encryption
+
+The management Postgres deployment uses `local-path` by default. Once the
+underlying StorageClass is encrypted (any of the steps above), Postgres
+runs unmodified. No `pgcrypto` config or per-column encryption is needed
+at this layer — the secrets table from #66 takes care of column-level
+secrecy for the handful of fields that warrant it.
+
+For managed Postgres (RDS / Cloud SQL / Azure Database), enable the
+provider's native at-rest encryption with a customer-managed key. Point
+`MGMT_API_DB_URL` at the managed endpoint and remove the in-cluster
+`postgres-management` StatefulSet.
+
+### Compliance verification checklist
+
+Before claiming "encryption at rest" to an auditor:
+
+- [ ] `kubectl get sc vrsky-encrypted -o yaml` shows your KMS key.
+- [ ] `kubectl get pvc -A -o wide | grep -v vrsky-encrypted` returns
+      nothing for VRSky namespaces (no plaintext PVCs slipped in).
+- [ ] KES is running and reachable from MinIO; MinIO refuses uploads
+      when KES is intentionally scaled to 0.
+- [ ] Postgres data volume sits on the encrypted class (`kubectl
+      describe pvc` shows the right `StorageClass`).
+- [ ] `ENCRYPTION_KEY` is supplied via a Kubernetes Secret (not a plain
+      env var literal in the manifest).
+- [ ] Off-cluster backups (Postgres dumps, MinIO replication targets)
+      go to buckets / disks with SSE enabled.
+
+See `docs/COMPLIANCE.md` for the full mapping to SOC 2 / ISO 27001
+control families.
+

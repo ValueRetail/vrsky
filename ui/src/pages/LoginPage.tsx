@@ -5,7 +5,9 @@
 
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
+import axios from 'axios'
 import { useAuthStore } from '@/store/authStore'
+import { config } from '@/config/env'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -15,6 +17,40 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+
+  // Single sign-on (Phase 1C / #68).
+  // The user enters their workspace slug; we ask the backend if SSO is
+  // configured for it and, if so, surface a "Sign in with …" button.
+  const [ssoWorkspace, setSsoWorkspace] = useState('')
+  const [ssoAvailable, setSsoAvailable] = useState<{ available: boolean; label?: string } | null>(null)
+  const [ssoChecking, setSsoChecking] = useState(false)
+
+  const checkSSO = async () => {
+    if (!ssoWorkspace.trim()) return
+    setSsoChecking(true)
+    setSsoAvailable(null)
+    try {
+      const resp = await axios.get<{ available: boolean; label?: string }>(
+        `${config.apiUrl}/api/v1/auth/oidc/${encodeURIComponent(ssoWorkspace.trim())}/available`,
+      )
+      setSsoAvailable(resp.data)
+      if (!resp.data.available) {
+        setLocalError('No SSO is configured for that workspace.')
+      }
+    } catch {
+      setLocalError('Could not check SSO for that workspace.')
+    } finally {
+      setSsoChecking(false)
+    }
+  }
+
+  const startSSO = () => {
+    if (!ssoWorkspace.trim()) return
+    // Full page navigation; the backend redirects through the IdP and back
+    // to our /api/v1/auth/oidc/callback, which then lands at "/" with the
+    // vrsky_session cookie set.
+    window.location.href = `${config.apiUrl}/api/v1/auth/oidc/${encodeURIComponent(ssoWorkspace.trim())}/login`
+  }
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -138,6 +174,39 @@ export default function LoginPage() {
             {isLoading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+
+        {/* Single sign-on — Phase 1C (#68) */}
+        <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-700">
+          <div className="text-center text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-3">
+            Or sign in via SSO
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Workspace slug"
+              value={ssoWorkspace}
+              onChange={(e) => setSsoWorkspace(e.target.value)}
+              className="flex-1 px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md text-sm bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+            />
+            <button
+              type="button"
+              onClick={checkSSO}
+              disabled={ssoChecking || !ssoWorkspace.trim()}
+              className="px-4 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 disabled:opacity-50"
+            >
+              {ssoChecking ? 'Checking…' : 'Check'}
+            </button>
+          </div>
+          {ssoAvailable?.available && (
+            <button
+              type="button"
+              onClick={startSSO}
+              className="mt-3 w-full py-2 px-4 rounded-md text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700"
+            >
+              Sign in with {ssoAvailable.label || 'SSO'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

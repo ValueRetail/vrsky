@@ -29,6 +29,10 @@ type User struct {
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 	LastLoginAt     *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
 	DeletedAt       *time.Time `json:"-" db:"deleted_at"`
+	// OIDC identity link (Phase 1C / #68). Empty until the user signs in
+	// via SSO at least once.
+	OIDCProvider string `json:"oidc_provider,omitempty" db:"oidc_provider"`
+	OIDCSubject  string `json:"-" db:"oidc_subject"`
 }
 
 // Session represents a user login session

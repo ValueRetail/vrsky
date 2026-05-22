@@ -11,12 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/nats-io/nats.go"
 )
 
 type FileConsumerService struct {
 	db     *sql.DB
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
 	logger *slog.Logger
 	config *Config
 	server *UploadServer
@@ -51,9 +53,18 @@ type ActiveConnection struct {
 }
 
 func NewFileConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *FileConsumerService {
+	js, err := nc.JetStream()
+	if err != nil {
+		logger.Error("Failed to get JetStream context", "error", err)
+	}
+	var pub *messaging.Publisher
+	if js != nil {
+		pub = messaging.NewPublisher(js)
+	}
 	return &FileConsumerService{
 		db:                db,
 		nc:                nc,
+		pub:               pub,
 		logger:            logger,
 		config:            config,
 		activeConnections: make(map[string]*ActiveConnection),

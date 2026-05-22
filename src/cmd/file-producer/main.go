@@ -21,6 +21,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 // Config holds the file producer configuration
@@ -165,22 +166,28 @@ func main() {
 	logger.Info("File Producer Service stopped")
 }
 
-// Start initializes the service and starts subscribing to NATS
+// Start initializes the service and starts subscribing via JetStream.
 func (s *FileProducerService) Start(ctx context.Context) error {
-	// Subscribe to data topics
-	sub, err := s.nc.Subscribe(s.config.SubscriptionTopic, func(msg *nats.Msg) {
+	js, jsErr := s.nc.JetStream()
+	if jsErr != nil {
+		return fmt.Errorf("JetStream context: %w", jsErr)
+	}
+	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
+		DurableName: "file-producer",
+		AckWait:     45 * time.Second,
+		Logger:      s.logger,
+	}, func(ctx context.Context, msg *nats.Msg) error {
 		s.handleMessage(ctx, msg)
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to %s: %w", s.config.SubscriptionTopic, err)
+		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
 	}
+	s.logger.Info("Subscribed via JetStream", "durable", "file-producer")
 
-	s.logger.Info("Subscribed to NATS topic", "topic", s.config.SubscriptionTopic)
-
-	// Handle stop signal
 	go func() {
 		<-s.stopCh
-		_ = sub.Unsubscribe()
+		sub.Stop()
 		close(s.stoppedCh)
 	}()
 

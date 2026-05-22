@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/nats-io/nats.go"
 )
 
@@ -16,6 +17,7 @@ import (
 type APIConsumerService struct {
 	db     *sql.DB
 	nc     *nats.Conn
+	pub    *messaging.Publisher // JetStream publisher for data-flow (#70)
 	logger *slog.Logger
 	config *Config
 
@@ -30,9 +32,18 @@ type APIConsumerService struct {
 
 // NewAPIConsumerService creates a new API Consumer service
 func NewAPIConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *APIConsumerService {
+	js, err := nc.JetStream()
+	if err != nil {
+		logger.Error("Failed to get JetStream context", "error", err)
+	}
+	var pub *messaging.Publisher
+	if js != nil {
+		pub = messaging.NewPublisher(js)
+	}
 	return &APIConsumerService{
 		db:              db,
 		nc:              nc,
+		pub:             pub,
 		logger:          logger,
 		config:          config,
 		activePipelines: make(map[string]context.CancelFunc),

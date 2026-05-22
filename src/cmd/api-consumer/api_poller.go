@@ -271,16 +271,15 @@ func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payloa
 		return fmt.Errorf("failed to marshal envelope: %w", err)
 	}
 
-	// Publish to NATS topic for this pipeline
-	// Topic format: vrsky.data.{tenantId}.pipeline.{connectionId}
-	topic := fmt.Sprintf("vrsky.data.%s.pipeline.%s", tenantID, connectionID)
-
-	if err := s.nc.Publish(topic, data); err != nil {
-		return fmt.Errorf("failed to publish to NATS: %w", err)
+	// Publish to JetStream (at-least-once). The MsgID dedupes inside the
+	// stream's 5-min window so a retried poll cycle does not duplicate.
+	if err := s.pub.Publish(context.Background(), tenantID, connectionID, env.ID, data); err != nil {
+		return fmt.Errorf("failed to publish to JetStream: %w", err)
 	}
 
-	s.logger.Debug("Published envelope to NATS",
-		"topic", topic,
+	s.logger.Debug("Published envelope to JetStream",
+		"tenant", tenantID,
+		"connection", connectionID,
 		"envelope_id", env.ID,
 		"payload_size", env.PayloadSize)
 

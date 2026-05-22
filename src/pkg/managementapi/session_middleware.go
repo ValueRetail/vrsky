@@ -124,8 +124,17 @@ func RequireAuthenticatedUser(w http.ResponseWriter, r *http.Request) (*User, bo
 	return user, true
 }
 
-// extractBearerTokenFromHeader extracts the bearer token from the Authorization header
+// extractBearerTokenFromHeader extracts the session token from either the
+// Authorization header (Bearer scheme — used by API clients and the legacy
+// localStorage-based UI) OR the vrsky_session cookie set by the OIDC and
+// email/password login paths. The cookie path is preferred when both are
+// present so a browser fetch carries the same identity as a navigation.
 func extractBearerTokenFromHeader(r *http.Request) string {
+	// Cookie first.
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return ""

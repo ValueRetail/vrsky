@@ -106,13 +106,17 @@ run-consumer: build-consumer ## Build and run consumer locally
 	 OUTPUT_TYPE=nats OUTPUT_CONFIG='{"url":"nats://localhost:4222","subject":"test.messages"}' \
 	 ./bin/consumer
 
-lint: ## Run linter (golangci-lint)
+lint: lint-tenant ## Run all linters (golangci-lint + tenant-filter)
 	@echo "$(BLUE)Running linter...$(NC)"
 	@if command -v golangci-lint > /dev/null; then \
 		golangci-lint run ./...; \
 	else \
 		echo "$(RED)golangci-lint not installed. Install with: brew install golangci-lint$(NC)"; \
 	fi
+
+lint-tenant: ## Check that every tenant-scoped query filters by tenant_id (#74)
+	@echo "$(BLUE)Running tenant-filter lint...$(NC)"
+	@$(GO) run ./cmd/lint-tenant-filter
 
 fmt: ## Format code with gofmt
 	@echo "$(BLUE)Formatting code...$(NC)"

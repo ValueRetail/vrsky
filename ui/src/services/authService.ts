@@ -20,10 +20,16 @@ import type {
 // Session token storage key
 const SESSION_TOKEN_KEY = 'vrsky_session_token'
 
-// Create a separate Axios instance for auth (no X-Tenant-ID)
+// Create a separate Axios instance for auth (no X-Tenant-ID).
+// baseURL is empty so requests are issued relative to the current origin
+// and go through Vite's /api proxy — same-origin in the browser, which
+// is what lets the SameSite=Lax `vrsky_session` cookie set on login
+// actually stick. withCredentials=true tells the browser to accept and
+// re-send the cookie on subsequent calls.
 const authClient: AxiosInstance = axios.create({
-  baseURL: config.apiUrl,
+  baseURL: '',
   timeout: 30000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },

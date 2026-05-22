@@ -1,0 +1,152 @@
+# MinIO Key Encryption Service (KES) — Phase 1F (#71).
+#
+# KES is a stateless gateway between MinIO and a real key store. In
+# compliance mode you point MinIO at KES, KES at a KMS, and the MinIO
+# server uses KES to wrap a per-object data-key with the KMS's master key.
+#
+# This manifest is a *reference* deployment; replace the file-backed key
+# store and self-signed certs with HashiCorp Vault / AWS KMS / GCP KMS /
+# Azure Key Vault when promoting to production.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vrsky-storage
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kes-tls
+  namespace: vrsky-storage
+type: kubernetes.io/tls
+# REPLACE THESE before applying.
+# In a real cluster, use cert-manager to issue these from your internal CA.
+data:
+  tls.crt: ""  # base64-encoded PEM
+  tls.key: ""  # base64-encoded PEM
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kes-config
+  namespace: vrsky-storage
+data:
+  kes-server.yaml: |
+    # KES server config. Reference: https://github.com/minio/kes/wiki
+    address: 0.0.0.0:7373
+
+    admin:
+      identity: ${KES_ADMIN_IDENTITY}
+
+    tls:
+      key:  /etc/kes/tls/tls.key
+      cert: /etc/kes/tls/tls.crt
+
+    policy:
+      minio:
+        allow:
+          - /v1/key/create/vrsky-master-key
+          - /v1/key/generate/vrsky-master-key
+          - /v1/key/decrypt/vrsky-master-key
+        identities:
+          - ${KES_MINIO_IDENTITY}
+
+    # File-backed key store — DEV ONLY. Swap for Vault/AWS-KMS in prod.
+    keystore:
+      fs:
+        path: /var/lib/kes/keys
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kes
+  namespace: vrsky-storage
+  labels:
+    app: kes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kes
+  template:
+    metadata:
+      labels:
+        app: kes
+    spec:
+      containers:
+        - name: kes
+          image: minio/kes:2024-09-11T07-22-50Z
+          args: ["server", "--config", "/etc/kes/config/kes-server.yaml"]
+          ports:
+            - containerPort: 7373
+              name: kes
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/kes/tls
+              readOnly: true
+            - name: config
+              mountPath: /etc/kes/config
+              readOnly: true
+            - name: keys
+              mountPath: /var/lib/kes/keys
+          readinessProbe:
+            # The /version endpoint is unauthenticated and returns 200 when
+            # KES has finished bootstrapping its key store.
+            httpGet:
+              path: /version
+              port: 7373
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /version
+              port: 7373
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: kes-tls
+        - name: config
+          configMap:
+            name: kes-config
+        - name: keys
+          persistentVolumeClaim:
+            claimName: kes-keys
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kes
+  namespace: vrsky-storage
+spec:
+  selector:
+    app: kes
+  ports:
+    - name: kes
+      port: 7373
+      targetPort: 7373
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kes-keys
+  namespace: vrsky-storage
+spec:
+  accessModes: [ReadWriteOnce]
+  # IMPORTANT: this volume MUST live on an encrypted StorageClass —
+  # otherwise KES's "encrypted" keys sit on a plaintext disk and the
+  # compliance posture is meaningless. See encryption/storage-classes/.
+  storageClassName: vrsky-encrypted
+  resources:
+    requests:
+      storage: 5Gi
