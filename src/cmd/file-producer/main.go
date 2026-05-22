@@ -47,6 +47,10 @@ type FileProducerService struct {
 	configCacheTTL  time.Duration
 	configCacheTime map[string]time.Time
 
+	// Roots a written file is allowed to live under (default output dir +
+	// mounted host home). Writes outside these are refused — see writeFile.
+	allowedRoots []string
+
 	// Signal channels
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
@@ -60,6 +64,9 @@ type ConnectionConfig struct {
 	FilePattern    string
 	PredecessorID  string
 	PredIsConsumer bool
+	// FolderName is a per-connection subfolder (named after the connection) so
+	// each integration's output is grouped instead of dumped loose.
+	FolderName string
 }
 
 func main() {
@@ -137,6 +144,15 @@ func main() {
 	}
 	logger.Info("Output directory ready", "dir", config.DefaultOutputDir)
 
+	// Roots a written file may live under: the default output dir plus the
+	// mounted host home. Computed before Start so message handling can enforce
+	// it. Anything outside these would land in the container's throwaway FS.
+	allowedRoots := []string{config.DefaultOutputDir}
+	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
+		allowedRoots = append(allowedRoots, hostHome)
+	}
+	service.allowedRoots = allowedRoots
+
 	// Start the service
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,10 +165,6 @@ func main() {
 	// Start HTTP server for file management. Default matches the UI
 	// (config.fileProducerUrl) and docker-compose's FILE_PRODUCER_HTTP_PORT.
 	httpPort := getEnv("FILE_PRODUCER_HTTP_PORT", "9900")
-	allowedRoots := []string{config.DefaultOutputDir}
-	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
-		allowedRoots = append(allowedRoots, hostHome)
-	}
 	startFileHTTPServer(httpPort, allowedRoots, logger)
 
 	// Handle signals
@@ -255,6 +267,10 @@ func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		if outputPath == "" {
 			outputPath = s.config.DefaultOutputDir
 		}
+		// Write into a per-connection subfolder so output is grouped.
+		if config.FolderName != "" {
+			outputPath = filepath.Join(outputPath, config.FolderName)
+		}
 
 		if err := s.writeFile(ctx, &env, outputPath, config.FilePattern); err != nil {
 			s.logger.Error("Failed to write file", "error", err, "envelope_id", env.ID, "path", outputPath)
@@ -281,7 +297,8 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 	s.configCacheMu.RUnlock()
 
 	var nodesJSON, edgesJSON []byte
-	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
+	var connName string
+	err := s.db.QueryRowContext(ctx, `SELECT name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&connName, &nodesJSON, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			configs := []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
@@ -351,12 +368,20 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 			path = s.config.DefaultOutputDir
 		}
 
+		// Group output under a per-connection folder named after the
+		// connection (fall back to its ID if unnamed).
+		folderName := sanitizeForFilename(connName)
+		if folderName == "" {
+			folderName = connectionID
+		}
+
 		configs = append(configs, &ConnectionConfig{
 			ID:             connectionID,
 			OutputPath:     expandHomePath(path),
 			FilePattern:    nodeConfig.File.FilePattern,
 			PredecessorID:  predID,
 			PredIsConsumer: predIsConsumer,
+			FolderName:     folderName,
 		})
 	}
 
@@ -377,6 +402,16 @@ func (s *FileProducerService) cacheConfigs(connectionID string, configs []*Conne
 
 // writeFile writes the envelope payload to a file
 func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envelope, outputPath, filePattern string) error {
+	// Refuse to write outside a mounted root. Otherwise a misconfigured path
+	// (e.g. "/foo" instead of "/Users/you/foo") silently writes into the
+	// container's throwaway filesystem and the file is lost — which looks like
+	// success in the logs. Fail loudly instead.
+	if len(s.allowedRoots) > 0 && !isPathAllowed(outputPath, s.allowedRoots) {
+		return fmt.Errorf("output path %q is not under a mounted directory %v; "+
+			"the file would be lost inside the container — check the output directory in the connection config",
+			outputPath, s.allowedRoots)
+	}
+
 	// Ensure output directory exists. Track which dirs we actually create so
 	// we only chown those — pre-existing parent directories are never touched.
 	if err := mkdirAllAndChown(outputPath); err != nil {
