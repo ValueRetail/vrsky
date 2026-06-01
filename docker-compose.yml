@@ -400,7 +400,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      HTTP_PRODUCER_PORT: "9400"
+      # Aux HTTP port the SDK serves the /events SSE stream on (UI connects here).
+      WORKER_HTTP_PORT: "9400"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
       - "127.0.0.1:9400:9400"
@@ -477,7 +478,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      DB_PRODUCER_PORT: "9500"
+      # Aux HTTP port the SDK serves /events (SSE) + /test-connection on (UI connects here).
+      WORKER_HTTP_PORT: "9500"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
       - "127.0.0.1:9500:9500"

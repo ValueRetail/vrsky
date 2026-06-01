@@ -28,11 +28,12 @@ func main() { sdk.RunProducer(context.Background(), "my-producer", &myProducer{}
 
 ## Status
 
-PR 1/3 of issue #83:
+Issue #83:
 - ✅ `pkg/sdk` — interfaces (`Consumer` is new; `Producer`/`Filter`/`Converter`), `Base*` structs, the `Run*` runner, typed errors.
 - ✅ `pkg/sdk/harness` — embedded JetStream + producer/consumer/filter/converter harnesses (no Docker).
-- ✅ `cmd/file-producer` refactored onto the SDK as the proof (≈870 → ≈640 lines).
-- ⏳ Remaining producers (PR #2), then consumers + a reference connector (PR #3).
+- ✅ **PR 1/3** — `cmd/file-producer` refactored onto the SDK as the proof (≈870 → ≈640 lines).
+- ✅ **PR 2/3** — the remaining fleet-style producers refactored: `cmd/http-producer` (575 → 419) and `cmd/db-producer` (671 → 582, with new error classification + target-pool cleanup). The orchestrator-style `cmd/producer` and `cmd/postgres-producer` stay on `runtime.Config` (see ADR 0001).
+- ⏳ **PR 3/3** — consumers + a <150-LoC reference connector.
 - ⏳ `cmd/lint-connector` analyzer (catch "didn't call sdk.Run", "imports nats.go directly") — deferred.
 
 ## Docs

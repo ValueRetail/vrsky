@@ -233,6 +233,50 @@ func TestRun_ProductionPath(t *testing.T) {
 	}
 }
 
+// stoppableProducer overrides Stop to record that the runner invoked it during
+// graceful shutdown (db-producer relies on this to close its target pools).
+type stoppableProducer struct {
+	sdk.BaseProducer
+	stopped int64
+}
+
+func (p *stoppableProducer) Configure(ctx context.Context, res *sdk.Resources) error { return nil }
+func (p *stoppableProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
+	return nil
+}
+func (p *stoppableProducer) Stop(ctx context.Context) error {
+	atomic.AddInt64(&p.stopped, 1)
+	return nil
+}
+
+// TestRun_CallsConnectorStop verifies the runner calls a connector's Stop on
+// shutdown so it can release resources opened in Configure.
+func TestRun_CallsConnectorStop(t *testing.T) {
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	defer cleanup()
+	if err := messaging.EnsureStreams(js); err != nil {
+		t.Fatalf("ensure streams: %v", err)
+	}
+
+	p := &stoppableProducer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- sdk.RunProducer(ctx, "stoppable", p, sdk.WithNATSConn(nc), sdk.WithoutHealthServer())
+	}()
+
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunProducer did not shut down")
+	}
+	if got := atomic.LoadInt64(&p.stopped); got != 1 {
+		t.Errorf("connector Stop should be called once on shutdown; got %d", got)
+	}
+}
+
 func TestMatchers(t *testing.T) {
 	e := &envelope.Envelope{ID: "x", TenantID: "t"}
 	if !harness.MatchAny()(e) || !harness.MatchID("x")(e) || !harness.MatchTenant("t")(e) {

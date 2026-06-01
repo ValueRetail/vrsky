@@ -243,6 +243,19 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	case <-time.After(shutdownGrace):
 		logger.Warn("shutdown grace exceeded; exiting anyway", "grace", shutdownGrace)
 	}
+
+	// Once the subscription/ingestion loop has stopped, give the connector a
+	// chance to release resources it opened in Configure (e.g. db-producer's
+	// per-target SQL pools). Base* connectors inherit a no-op Stop, so this is
+	// inert unless a connector overrides it.
+	if st, ok := c.(interface{ Stop(context.Context) error }); ok {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := st.Stop(sctx); err != nil {
+			logger.Warn("connector Stop returned an error", "error", err)
+		}
+		scancel()
+	}
+
 	logger.Info("connector stopped", "name", name)
 	return nil
 }

@@ -60,6 +60,30 @@ func main() { sdk.RunProducer(context.Background(), "file-producer", &fileProduc
   `FILE_PRODUCER_HTTP_PORT` (9900). The container healthcheck is file-based, so
   this move is transparent.
 
+## PR 2/3 — http-producer & db-producer
+
+The other two fleet-style producers followed the same shape. Notes specific to
+them:
+
+- **SSE / test-connection endpoints** moved from the worker's hand-rolled
+  `http.Server` (on `HTTP_PRODUCER_PORT` 9400 / `DB_PRODUCER_PORT` 9500) to the
+  SDK auxiliary server via `RegisterHTTPHandler("/events/", …)` (and
+  `"/test-connection/"` for db-producer). Compose now sets `WORKER_HTTP_PORT` to
+  the same 9400/9500 so the UI's `EventSource`/fetch URLs are unchanged. The old
+  `/health` endpoint on those ports is gone — health is on `HEALTH_PORT` (8080),
+  which nothing depended on (neither service had a compose healthcheck).
+- **db-producer now classifies errors.** Previously it acked everything
+  (`handleMessage` returned no error — a noted follow-up). On the SDK it returns
+  `sdk.Retriable` for transient DB failures (table create / open / ping) so they
+  redeliver → DLQ, and `sdk.Permanent` for a non-JSON payload (poison). Per-row
+  insert failures stay best-effort (logged, batch continues), as before.
+- **db-producer opens target DB pools** during delivery. The SDK runner gained a
+  small lifecycle hook — it calls a connector's `Stop(ctx)` after the
+  subscription drains — so db-producer closes those pools cleanly. `Base*`
+  connectors inherit a no-op `Stop`, so this is inert for everyone else.
+  db-producer's target opener is injectable (`openTarget`) purely so the harness
+  can drive a full CREATE/INSERT round-trip against `go-sqlmock` without Docker.
+
 ## Testing it without Docker
 
 ```go
