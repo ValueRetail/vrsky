@@ -240,8 +240,11 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 		}
 		return tenantID, nil
 	})
+	// NB: no `defer Stop()` here — setupServer returns long before the process
+	// exits, so a deferred Stop would kill the refresher immediately (the
+	// tenantProvisioner above has this latent bug). The refresher runs for the
+	// process lifetime; its ticker + worker goroutines are reclaimed on exit.
 	oauthRefresher.Start()
-	defer oauthRefresher.Stop()
 	restHandler.SetOAuthRefresher(oauthRefresher)
 
 	restHandler.RegisterRoutes(mux)
