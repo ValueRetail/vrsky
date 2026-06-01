@@ -155,3 +155,21 @@ docker-compose.override.yml
 # Compiled Go binaries accidentally committed from `go build` without -o
 /src/management-api
 /src/file-producer
+
+# Go binaries dropped at the package dir by `go build` without -o.
+# All cmd/<name> binaries land at src/<name> (or src/cmd/<name>/<name>).
+/src/api-consumer
+/src/converter
+/src/data-converter
+/src/data-filter
+/src/db-consumer
+/src/db-producer
+/src/file-consumer
+/src/filter
+/src/http-producer
+/src/migrate-secrets
+/src/postgres-consumer
+/src/postgres-producer
+/src/tenant-consumer
+/src/webhook-consumer
+/src/cmd/management-api/management-api
