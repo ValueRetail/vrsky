@@ -4,6 +4,7 @@ import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import DLQPanel from '../components/Pipeline/DLQPanel'
 import { listDLQ } from '../services/dlqService'
+import { createSecret } from '../services/secretService'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient from '../services/api'
@@ -18,6 +19,37 @@ import { validatePipelineConnections, type ValidationResult } from '../utils/val
 import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
 import type { Node, Edge } from '../types/pipeline'
+
+// Config keys whose plaintext values are credentials and must be stored as
+// encrypted tenant secrets rather than persisted in the connection JSON.
+const SECRET_FIELDS = new Set(['password', 'secret', 'api_key', 'token'])
+
+/**
+ * Recursively walk a node config; for every plaintext credential field, mint a
+ * tenant secret and replace the plaintext with a `<field>_secret_id` reference.
+ * Already-bound `<field>_secret_id` values and all other config are preserved.
+ * Throws if a secret cannot be created (deploy aborts rather than persisting
+ * plaintext).
+ */
+async function materializeSecrets(value: unknown, hint: string): Promise<unknown> {
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((v, i) => materializeSecrets(v, `${hint}-${i}`)))
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '') {
+        const secret = await createSecret(`${hint}-${k}-${Date.now()}`, v)
+        out[`${k}_secret_id`] = secret.id
+        // plaintext key intentionally dropped
+      } else {
+        out[k] = await materializeSecrets(v, hint)
+      }
+    }
+    return out
+  }
+  return value
+}
 
 // Auth header for the file-producer /files API. Empty unless a token is
 // configured (see config.fileProducerToken), in which case the server requires it.
@@ -443,17 +475,25 @@ export default function PipelineBuilder() {
   /**
    * Build the connection payload with nodes and edges in the new format.
    * This replaces the old source_config/destination_config format.
+   *
+   * Before persisting, plaintext credentials typed into the editor are minted
+   * into encrypted tenant secrets and replaced with `<field>_secret_id`
+   * references (see materializeSecrets) — so nothing plaintext is stored
+   * server-side. The worker resolves the references back at runtime (#66).
    */
-  const buildConnectionPayload = () => {
+  const buildConnectionPayload = async () => {
+    const builtNodes = await Promise.all(
+      nodes.map(async (node) => ({
+        id: node.id,
+        type: node.type === 'input' ? 'consumer' : node.type === 'output' ? 'producer' : node.type,
+        config: (await materializeSecrets(node.data.config || {}, node.id)) as Record<string, unknown>,
+        enabled: true,
+      }))
+    )
     return {
       name: `Pipeline ${new Date().toLocaleTimeString()}`,
       description: 'Created via visual pipeline editor',
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        type: node.type === 'input' ? 'consumer' : node.type === 'output' ? 'producer' : node.type,
-        config: node.data.config || {},
-        enabled: true,
-      })),
+      nodes: builtNodes,
       edges: edges.map((edge, index) => ({
         id: edge.id || `edge-${index}`,
         source: edge.source,
@@ -477,7 +517,16 @@ export default function PipelineBuilder() {
       return
     }
 
-    const payload = buildConnectionPayload()
+    let payload
+    try {
+      payload = await buildConnectionPayload()
+    } catch (err) {
+      showErrorNotification(
+        'Secret storage',
+        err instanceof Error ? err.message : 'Failed to store a credential securely'
+      )
+      return
+    }
     setIsLoading(true)
 
     try {
