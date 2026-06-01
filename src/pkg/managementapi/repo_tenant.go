@@ -184,7 +184,7 @@ func (r *PostgresRepository) CreateProvisioningJob(ctx context.Context, tenantID
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO provisioning_jobs (tenant_id, status, progress, current_step)
 		VALUES ($1, 'queued', 0, 'Queued')
-		RETURNING id, tenant_id, status, progress, current_step, error_message, created_at, completed_at
+		RETURNING id, tenant_id, status, progress, current_step, COALESCE(error_message, ''), created_at, completed_at
 	`, tenantID).Scan(
 		&job.ID, &job.TenantID, &job.Status, &job.Progress,
 		&job.CurrentStep, &job.ErrorMsg, &job.CreatedAt, &job.CompletedAt,
