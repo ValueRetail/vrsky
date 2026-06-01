@@ -926,6 +926,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/oauth/grants", h.ListOAuthGrants)
 	mux.HandleFunc("GET /api/v1/oauth/grants/{id}", h.GetOAuthGrant)
 	mux.Handle("POST /api/v1/oauth/grants/{id}/revoke", editor(http.HandlerFunc(h.RevokeOAuthGrant)))
+	// Service-only token endpoint for workers — authenticated by the shared
+	// X-Service-Token secret inside the handler, not the user-session
+	// middleware (workers have no session). Registered plain for that reason.
+	mux.HandleFunc("GET /api/v1/oauth/grants/{id}/token", h.TokenForGrant)
 
 	// Auth routes (these bypass TenantIDMiddleware)
 	h.RegisterAuthRoutes(mux)

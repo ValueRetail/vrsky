@@ -2,16 +2,23 @@ package managementapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
+
+// oauthServiceTokenEnv names the shared secret workers present (via the
+// X-Service-Token header) to fetch OAuth access tokens from the
+// service-only token endpoint. When unset, that endpoint is disabled.
+const oauthServiceTokenEnv = "OAUTH_TOKEN_SERVICE_SECRET"
 
 // Cookie names used during a single auth-code round-trip. Mirrors the OIDC
 // pattern in auth_oidc.go but with distinct names so an OAuth flow and an
@@ -218,6 +225,81 @@ func (h *Handler) GetOAuthGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = writeJSON(w, http.StatusOK, toOAuthGrantResponse(g))
+}
+
+// TokenForGrant handles GET /api/v1/oauth/grants/{id}/token — a service-only
+// endpoint workers call to obtain a fresh access token for a grant. It is NOT
+// behind the user session / tenant-role middleware (workers have no session);
+// instead it requires a shared service secret in the X-Service-Token header
+// and the tenant in X-Tenant-ID. With ?refresh=1 it forces a refresh (the
+// worker's retry-once-on-401 path); otherwise it returns the current token,
+// refreshing transparently only if near expiry.
+//
+// Not audited: this is a hot path (every worker token fetch) and the grant +
+// revoke lifecycle events are already audited.
+func (h *Handler) TokenForGrant(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	secret := os.Getenv(oauthServiceTokenEnv)
+	if secret == "" {
+		// Fail closed: without a configured secret this endpoint would hand
+		// out access tokens unauthenticated.
+		_ = writeError(w, http.StatusServiceUnavailable, "TokenServiceDisabled",
+			"token service is not configured ("+oauthServiceTokenEnv+" unset)", nil)
+		return
+	}
+	got := r.Header.Get("X-Service-Token")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid service token", nil)
+		return
+	}
+	if h.oauthClient == nil {
+		_ = writeError(w, http.StatusServiceUnavailable, "OAuthUnavailable", "OAuth client is not configured", nil)
+		return
+	}
+
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		_ = writeError(w, http.StatusBadRequest, "MissingTenant", "X-Tenant-ID header required", nil)
+		return
+	}
+	grantID := r.PathValue("id")
+
+	var accessToken string
+	var err error
+	if r.URL.Query().Get("refresh") == "1" {
+		var g *oauth.Grant
+		g, err = h.oauthClient.Refresh(ctx, tenantID, grantID)
+		if err == nil {
+			accessToken = g.AccessToken
+		}
+	} else {
+		accessToken, err = h.oauthClient.Token(ctx, tenantID, grantID)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, oauth.ErrGrantNotFound):
+			_ = writeError(w, http.StatusNotFound, "NotFound", "grant not found", nil)
+		case errors.Is(err, oauth.ErrGrantRevoked):
+			_ = writeError(w, http.StatusForbidden, "GrantRevoked", "grant has been revoked", nil)
+		case errors.Is(err, oauth.ErrRefreshExpired):
+			// The refresh token itself is dead — the user must reconnect.
+			_ = writeError(w, http.StatusConflict, "ReconnectRequired", "refresh token expired; reconnect the grant", nil)
+		default:
+			_ = writeError(w, http.StatusBadGateway, "ProviderError", "failed to obtain access token", nil)
+		}
+		return
+	}
+
+	// expires_at lets the worker cache the token until just before it lapses.
+	var expiresAt *time.Time
+	if meta, mErr := h.repo.GetGrantMeta(ctx, tenantID, grantID); mErr == nil {
+		expiresAt = meta.ExpiresAt
+	}
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{
+		"access_token": accessToken,
+		"expires_at":   expiresAt,
+	})
 }
 
 // RevokeOAuthGrant handles POST /api/v1/oauth/grants/{id}/revoke.

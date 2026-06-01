@@ -96,7 +96,7 @@ func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.
 		logger.Debug("Polling endpoint", "url", url, "endpoint_index", i)
 
 		// Make the API call
-		payload, contentType, err := s.callEndpoint(ctx, client, url, endpoint, logger)
+		payload, contentType, err := s.callEndpoint(ctx, client, url, tenantID, endpoint, logger)
 		if err != nil {
 			logger.Error("Failed to poll endpoint", "url", url, "error", err)
 			// Continue to next endpoint, don't fail the whole polling cycle
@@ -115,25 +115,54 @@ func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.
 	}
 }
 
-// callEndpoint makes an HTTP request to the specified endpoint
-func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Client, url string, endpoint APIEndpoint, logger *slog.Logger) ([]byte, string, error) {
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to create request: %w", err)
+// callEndpoint makes an HTTP request to the specified endpoint. For
+// auth_type=oauth it resolves a fresh access token from management-api; if the
+// endpoint answers 401 it refreshes the token and retries exactly once
+// (transparent refresh — #75 criterion #3).
+func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Client, url, tenantID string, endpoint APIEndpoint, logger *slog.Logger) ([]byte, string, error) {
+	// buildAndSend issues one request. forceRefresh asks the token service to
+	// refresh the grant first (the post-401 retry).
+	buildAndSend := func(forceRefresh bool) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		if endpoint.AuthType == "oauth" {
+			if s.oauthTokens == nil || !s.oauthTokens.Configured() {
+				return nil, fmt.Errorf("endpoint uses OAuth but token resolution is not configured (set MGMT_API_URL + OAUTH_TOKEN_SERVICE_SECRET)")
+			}
+			var tok string
+			if forceRefresh {
+				tok, err = s.oauthTokens.ForceToken(ctx, tenantID, endpoint.OAuthGrantID)
+			} else {
+				tok, err = s.oauthTokens.Token(ctx, tenantID, endpoint.OAuthGrantID)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("resolve oauth token: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+tok)
+		} else {
+			applyAuth(req, endpoint.AuthType, endpoint.AuthValue)
+		}
+		req.Header.Set("User-Agent", "VRSky-API-Consumer/1.0")
+		req.Header.Set("Accept", "*/*")
+		return client.Do(req)
 	}
 
-	// Add auth headers
-	applyAuth(req, endpoint.AuthType, endpoint.AuthValue)
-
-	// Add standard headers
-	req.Header.Set("User-Agent", "VRSky-API-Consumer/1.0")
-	req.Header.Set("Accept", "*/*")
-
-	// Make request
-	resp, err := client.Do(req)
+	resp, err := buildAndSend(false)
 	if err != nil {
 		return nil, "", fmt.Errorf("request failed: %w", err)
+	}
+	// On a 401 for an OAuth endpoint, the token may have been revoked or
+	// rotated server-side; refresh and retry once before giving up.
+	if resp.StatusCode == http.StatusUnauthorized && endpoint.AuthType == "oauth" {
+		_ = resp.Body.Close()
+		logger.Info("OAuth endpoint returned 401; refreshing token and retrying once",
+			"grant_id", endpoint.OAuthGrantID)
+		resp, err = buildAndSend(true)
+		if err != nil {
+			return nil, "", fmt.Errorf("request failed after token refresh: %w", err)
+		}
 	}
 	defer resp.Body.Close()
 

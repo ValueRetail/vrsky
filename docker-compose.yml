@@ -282,6 +282,9 @@ services:
       #     openssl rand -hex 32
       # See docs/SECURITY.md for rotation procedure.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Shared secret workers present (X-Service-Token) to the OAuth token
+      # endpoint (#75). Dev default; set a real value in any real deployment.
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     depends_on:
       nats:
         condition: service_healthy
@@ -501,6 +504,10 @@ services:
       API_CONSUMER_PORT: "9800"
       # Required by the secrets resolver (#66).
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # OAuth token resolution (#75): where to fetch access tokens for
+      # endpoints with auth_type=oauth, and the shared service secret.
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     ports:
       - "127.0.0.1:9800:9800"
     depends_on:

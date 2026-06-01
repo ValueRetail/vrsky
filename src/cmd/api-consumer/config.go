@@ -20,6 +20,11 @@ type Config struct {
 	PollTimeout         time.Duration // HTTP request timeout
 	MaxConcurrentPolls  int           // Max concurrent polling goroutines
 	DefaultPollInterval time.Duration // Default poll interval if not specified
+
+	// OAuth token resolution (#75). When both are set, endpoints with
+	// auth_type=oauth fetch a fresh access token from management-api.
+	MgmtAPIURL        string // e.g. http://management-api:3000
+	OAuthServiceToken string // shared X-Service-Token secret
 }
 
 // LoadConfig loads configuration from environment variables
@@ -54,6 +59,8 @@ func LoadConfig() *Config {
 		PollTimeout:         pollTimeout,
 		MaxConcurrentPolls:  maxConcurrent,
 		DefaultPollInterval: defaultPollInterval,
+		MgmtAPIURL:          os.Getenv("MGMT_API_URL"),
+		OAuthServiceToken:   os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"),
 	}
 }
 

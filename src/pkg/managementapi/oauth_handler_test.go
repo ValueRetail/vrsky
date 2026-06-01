@@ -2,11 +2,13 @@ package managementapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
@@ -337,6 +339,87 @@ func TestLogOAuthGrant_WritesAuditEntry(t *testing.T) {
 	}
 	if e.Details["user_identifier"] != "alice@acme.com" {
 		t.Errorf("details.user_identifier = %v", e.Details["user_identifier"])
+	}
+}
+
+// --- Service token endpoint (workers fetch access tokens) ---
+
+// tokenReq drives TokenForGrant with the given service token + tenant headers.
+func tokenReq(handler *Handler, serviceToken, tenantID, grantID, query string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("GET", "/api/v1/oauth/grants/"+grantID+"/token"+query, nil)
+	if serviceToken != "" {
+		r.Header.Set("X-Service-Token", serviceToken)
+	}
+	if tenantID != "" {
+		r.Header.Set("X-Tenant-ID", tenantID)
+	}
+	r.SetPathValue("id", grantID)
+	w := httptest.NewRecorder()
+	handler.TokenForGrant(w, r)
+	return w
+}
+
+func TestTokenForGrant_DisabledWhenSecretUnset(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_SERVICE_SECRET", "") // explicitly unset
+	handler, _ := setupTestHandler()
+	w := tokenReq(handler, "anything", "tenant-1", "g-1", "")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("want 503 when secret unset, got %d", w.Code)
+	}
+}
+
+func TestTokenForGrant_RejectsWrongServiceToken(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_SERVICE_SECRET", "right-secret")
+	handler, _ := setupTestHandler()
+	w := tokenReq(handler, "wrong-secret", "tenant-1", "g-1", "")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("want 401 for wrong service token, got %d", w.Code)
+	}
+}
+
+func TestTokenForGrant_RequiresTenantHeader(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_SERVICE_SECRET", "s")
+	handler, repo := setupTestHandler()
+	handler.SetOAuthClient(oauth.New(repo, oauth.NewProviderRegistry()))
+	w := tokenReq(handler, "s", "", "g-1", "")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400 without X-Tenant-ID, got %d", w.Code)
+	}
+}
+
+func TestTokenForGrant_NotFoundForOtherTenant(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_SERVICE_SECRET", "s")
+	handler, repo := setupTestHandler()
+	handler.SetOAuthClient(oauth.New(repo, oauth.NewProviderRegistry()))
+	w := tokenReq(handler, "s", "tenant-1", "missing-grant", "")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("want 404 for unknown grant, got %d", w.Code)
+	}
+}
+
+func TestTokenForGrant_ReturnsAccessTokenHappyPath(t *testing.T) {
+	t.Setenv("OAUTH_TOKEN_SERVICE_SECRET", "s")
+	handler, repo := setupTestHandler()
+	handler.SetOAuthClient(oauth.New(repo, oauth.NewProviderRegistry()))
+
+	// Seed a grant with a non-expiring access token so Token() returns it
+	// without attempting a refresh.
+	future := time.Now().Add(time.Hour)
+	g := &oauth.Grant{TenantID: "tenant-1", ProviderID: "p", ProviderName: "p", ProviderType: "fake", ExpiresAt: &future}
+	if err := repo.CreateGrant(context.Background(), g, "access-tok-1", "refresh-tok-1"); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+
+	w := tokenReq(handler, "s", "tenant-1", g.ID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.AccessToken != "access-tok-1" {
+		t.Errorf("got access_token=%q, want access-tok-1", body.AccessToken)
 	}
 }
 
