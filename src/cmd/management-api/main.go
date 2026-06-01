@@ -65,7 +65,7 @@ func main() {
 	defer nc.Close()
 
 	// Setup HTTP server with graceful shutdown
-	server := setupServer(config, db, nc, logger)
+	server, tenantProvisioner := setupServer(config, db, nc, logger)
 
 	// Start server in a goroutine
 	serverErrs := make(chan error, 1)
@@ -93,6 +93,12 @@ func main() {
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Printf("Error during shutdown: %v", err)
 		}
+
+		// Stop the tenant provisioner after the HTTP server has drained, so no
+		// new provisioning jobs are enqueued mid-drain. Stop() blocks until the
+		// worker finishes any in-flight job and empties the queue.
+		tenantProvisioner.Stop()
+
 		logger.Printf("Server stopped")
 	}
 }
@@ -143,8 +149,11 @@ func initNATS(natsURL string, logger *log.Logger) (*nats.Conn, error) {
 	return nc, nil
 }
 
-// setupServer creates and configures the HTTP server
-func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) *http.Server {
+// setupServer creates and configures the HTTP server. It also returns the
+// tenant provisioner so main() can drive its lifecycle (Stop on shutdown);
+// its background worker must outlive this function, so it must not be stopped
+// via defer here.
+func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) (*http.Server, *managementapi.TenantProvisioner) {
 	mux := http.NewServeMux()
 
 	// Health check endpoints
@@ -214,8 +223,13 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	k8sProvisioner := initK8sNATSProvisioner(logger)
 	tenantSSEHub := managementapi.NewTenantSSEHub()
 	tenantProvisioner := managementapi.NewTenantProvisioner(repo, k8sProvisioner, tenantSSEHub, logger)
+	// NB: no `defer Stop()` here — setupServer returns long before the process
+	// exits, so a deferred Stop would kill the provisioner immediately (it
+	// started and stopped in the same instant, leaving provisioning dead on
+	// arrival — same bug class as the OAuth refresher below, fixed in cf534c8).
+	// Instead the provisioner is returned to main(), which calls Stop() on the
+	// graceful-shutdown path so the worker can drain in-flight jobs.
 	tenantProvisioner.Start()
-	defer tenantProvisioner.Stop()
 	restHandler.SetTenantProvisioner(tenantProvisioner)
 	restHandler.SetTenantSSEHub(tenantSSEHub)
 
@@ -284,7 +298,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 		ReadTimeout:  config.ReadTimeout,
 		WriteTimeout: config.WriteTimeout,
 		IdleTimeout:  60 * time.Second,
-	}
+	}, tenantProvisioner
 }
 
 // initK8sNATSProvisioner tries to create a K8s client for tenant NATS provisioning.
