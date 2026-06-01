@@ -33,6 +33,7 @@ function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Nod
   }
   return undefined
 }
+import OAuthGrantSelector from './OAuthGrantSelector'
 import { useAuthStore } from '../../store/authStore'
 import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
@@ -41,8 +42,11 @@ import type { TenantDataConnection, DataConnectionRequest } from '../../types/mo
 interface ApiEndpoint {
   path: string
   params: string
-  auth_type: 'none' | 'bearer' | 'api_key'
+  auth_type: 'none' | 'bearer' | 'api_key' | 'oauth'
   auth_value: string
+  // Set when auth_type === 'oauth': the OAuth grant whose access token the
+  // worker injects as a Bearer header (resolved at request time in PR #3).
+  oauth_grant_id?: string
 }
 
 // Muted color palette matching ComponentPalette
@@ -1929,9 +1933,10 @@ function ApiConsumerConfig({
                     <option value="none">No Auth</option>
                     <option value="bearer">Bearer Token</option>
                     <option value="api_key">API Key</option>
+                    <option value="oauth">OAuth 2.0</option>
                   </select>
 
-                  {ep.auth_type !== 'none' && (
+                  {(ep.auth_type === 'bearer' || ep.auth_type === 'api_key') && (
                     <div style={{ flex: 2 }}>
                       <SecretInput
                         label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
@@ -1940,6 +1945,15 @@ function ApiConsumerConfig({
                         config={ep as unknown as Record<string, unknown>}
                         defaultSecretName={`api-${ep.auth_type}-${idx}`}
                         onChange={(patch) => patchEndpoint(idx, patch)}
+                      />
+                    </div>
+                  )}
+
+                  {ep.auth_type === 'oauth' && (
+                    <div style={{ flex: 2 }}>
+                      <OAuthGrantSelector
+                        value={ep.oauth_grant_id}
+                        onChange={(grantId) => updateEndpoint(idx, 'oauth_grant_id', grantId || '')}
                       />
                     </div>
                   )}

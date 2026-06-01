@@ -109,6 +109,20 @@ func applyProfileDefaults(cfg *oauth.ProviderConfig) {
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = append([]string(nil), prof.Scopes...)
 	}
+	// Salesforce sandbox orgs authenticate against test.salesforce.com. The
+	// admin signals this with extra_params.environment=sandbox; swap the
+	// host on all three URLs unless they were explicitly overridden.
+	if cfg.ProviderType == "salesforce" && cfg.ExtraParams["environment"] == "sandbox" {
+		if cfg.AuthURL == "" || cfg.AuthURL == prof.AuthURL {
+			cfg.AuthURL = oauth.SalesforceSandboxAuthURL
+		}
+		if cfg.TokenURL == "" || cfg.TokenURL == prof.TokenURL {
+			cfg.TokenURL = oauth.SalesforceSandboxTokenURL
+		}
+		if cfg.RevokeURL == "" || cfg.RevokeURL == prof.RevokeURL {
+			cfg.RevokeURL = oauth.SalesforceSandboxRevokeURL
+		}
+	}
 }
 
 // CreateOAuthProvider handles POST /api/v1/oauth/providers.

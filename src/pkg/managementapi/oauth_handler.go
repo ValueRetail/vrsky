@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -17,11 +18,12 @@ import (
 // OIDC login can be in flight in adjacent browser tabs without clobbering
 // each other.
 const (
-	oauthStateCookie      = "vrsky_oauth_state"
-	oauthVerifierCookie   = "vrsky_oauth_verifier"
-	oauthProviderIDCookie = "vrsky_oauth_provider_id"
-	oauthTenantIDCookie   = "vrsky_oauth_tenant_id"
-	oauthConnectionCookie = "vrsky_oauth_connection_id"
+	oauthStateCookie       = "vrsky_oauth_state"
+	oauthVerifierCookie    = "vrsky_oauth_verifier"
+	oauthProviderIDCookie  = "vrsky_oauth_provider_id"
+	oauthTenantIDCookie    = "vrsky_oauth_tenant_id"
+	oauthConnectionCookie  = "vrsky_oauth_connection_id"
+	oauthExtraParamsCookie = "vrsky_oauth_extra" // base64(JSON) of provider-specific extras (e.g. Shopify shop)
 )
 
 // startOAuthRequest is the optional body of POST /providers/{id}/start.
@@ -85,6 +87,15 @@ func (h *Handler) StartOAuth(w http.ResponseWriter, r *http.Request) {
 	} else {
 		clearCookie(w, oauthConnectionCookie)
 	}
+	// Carry provider-specific extras (e.g. Shopify's shop subdomain) to the
+	// callback so the token exchange can template the endpoint URL. Base64 so
+	// the JSON survives cookie value restrictions.
+	if len(req.ExtraParams) > 0 {
+		b, _ := json.Marshal(req.ExtraParams)
+		setShortCookie(w, oauthExtraParamsCookie, base64.RawURLEncoding.EncodeToString(b))
+	} else {
+		clearCookie(w, oauthExtraParamsCookie)
+	}
 	_ = writeJSON(w, http.StatusOK, startOAuthResponse{AuthorizeURL: authURL})
 }
 
@@ -109,11 +120,20 @@ func (h *Handler) HandleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Recover provider-specific extras (e.g. Shopify shop) before clearing.
+	var extraParams map[string]string
+	if extraCk, _ := r.Cookie(oauthExtraParamsCookie); extraCk != nil && extraCk.Value != "" {
+		if b, decErr := base64.RawURLEncoding.DecodeString(extraCk.Value); decErr == nil {
+			_ = json.Unmarshal(b, &extraParams)
+		}
+	}
+
 	clearCookie(w, oauthStateCookie)
 	clearCookie(w, oauthVerifierCookie)
 	clearCookie(w, oauthProviderIDCookie)
 	clearCookie(w, oauthTenantIDCookie)
 	clearCookie(w, oauthConnectionCookie)
+	clearCookie(w, oauthExtraParamsCookie)
 
 	q := r.URL.Query()
 	// If the provider returned an error, surface it.
@@ -136,6 +156,7 @@ func (h *Handler) HandleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	grant, err := h.oauthClient.Complete(ctx, tenantCk.Value, providerCk.Value, code, verifierCk.Value, stateCk.Value, state, oauth.StartOptions{
 		ConnectionID: connectionID,
+		ExtraParams:  extraParams,
 	})
 	if errors.Is(err, oauth.ErrStateMismatch) {
 		http.Error(w, "state mismatch — possible CSRF", http.StatusBadRequest)

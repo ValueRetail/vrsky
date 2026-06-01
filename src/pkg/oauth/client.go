@@ -88,6 +88,10 @@ func (c *Client) StartAuth(ctx context.Context, tenantID, providerID string, opt
 		return "", "", "", err
 	}
 	prof := profileFor(c.registry, cfg)
+	// Fill any {key} placeholders (e.g. Shopify's {shop}) from the per-grant
+	// extras supplied at start time.
+	prof.AuthURL = applyURLTemplate(prof.AuthURL, opts.ExtraParams)
+	prof.TokenURL = applyURLTemplate(prof.TokenURL, opts.ExtraParams)
 
 	state, err = randURLSafe(24)
 	if err != nil {
@@ -124,6 +128,11 @@ func (c *Client) Complete(ctx context.Context, tenantID, providerID, code, codeV
 		return nil, err
 	}
 	prof := profileFor(c.registry, cfg)
+	// Same templating as StartAuth — the shop subdomain must reach the token
+	// endpoint too. opts.ExtraParams is carried from the start request via a
+	// short-lived cookie (see the callback handler).
+	prof.AuthURL = applyURLTemplate(prof.AuthURL, opts.ExtraParams)
+	prof.TokenURL = applyURLTemplate(prof.TokenURL, opts.ExtraParams)
 	clientSecret, err := c.store.ResolveClientSecret(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve client secret: %w", err)

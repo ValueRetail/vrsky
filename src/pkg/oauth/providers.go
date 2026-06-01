@@ -56,13 +56,16 @@ func (r *ProviderRegistry) Get(providerType string) (Provider, bool) {
 	return p, ok
 }
 
-// DefaultRegistry returns a ProviderRegistry seeded with the profiles VRSky
-// ships with. In PR #1 only microsoft365 is fully populated — Salesforce,
-// Google, HubSpot, Shopify are stubs that PR #2 fills in.
+// DefaultRegistry returns a ProviderRegistry seeded with the five provider
+// profiles VRSky ships with. Admins may still create provider_type="custom"
+// rows with their own URLs/scopes.
 func DefaultRegistry() *ProviderRegistry {
 	r := NewProviderRegistry()
 	r.Register(microsoft365)
-	// PR #2 will register salesforce, google, hubspot, shopify.
+	r.Register(salesforce)
+	r.Register(google)
+	r.Register(hubspot)
+	r.Register(shopify)
 	return r
 }
 
@@ -78,6 +81,72 @@ var microsoft365 = Provider{
 	Scopes:          []string{"https://graph.microsoft.com/.default", "offline_access"},
 	ExtraParams:     map[string]string{},
 	SupportsRefresh: true,
+}
+
+// salesforce uses the production login host by default. Sandbox orgs use
+// test.salesforce.com — the admin selects this via extra_params.environment
+// = "sandbox", which the handler's applyProfileDefaults swaps in. Refresh +
+// offline_access scopes are required to receive a refresh token.
+var salesforce = Provider{
+	Type:            "salesforce",
+	AuthURL:         "https://login.salesforce.com/services/oauth2/authorize",
+	TokenURL:        "https://login.salesforce.com/services/oauth2/token",
+	RevokeURL:       "https://login.salesforce.com/services/oauth2/revoke",
+	Scopes:          []string{"api", "refresh_token", "offline_access"},
+	ExtraParams:     map[string]string{},
+	SupportsRefresh: true,
+}
+
+// SalesforceSandboxAuthURL / SalesforceSandboxTokenURL / SalesforceSandboxRevokeURL
+// are the test.salesforce.com equivalents the handler substitutes when an
+// admin marks a provider as a sandbox.
+const (
+	SalesforceSandboxAuthURL   = "https://test.salesforce.com/services/oauth2/authorize"
+	SalesforceSandboxTokenURL  = "https://test.salesforce.com/services/oauth2/token"
+	SalesforceSandboxRevokeURL = "https://test.salesforce.com/services/oauth2/revoke"
+)
+
+// google requires access_type=offline + prompt=consent to be issued a refresh
+// token; without them Google returns only a short-lived access token.
+var google = Provider{
+	Type:      "google",
+	AuthURL:   "https://accounts.google.com/o/oauth2/v2/auth",
+	TokenURL:  "https://oauth2.googleapis.com/token",
+	RevokeURL: "https://oauth2.googleapis.com/revoke",
+	Scopes:    []string{"openid", "email", "https://www.googleapis.com/auth/userinfo.profile"},
+	ExtraParams: map[string]string{
+		"access_type": "offline",
+		"prompt":      "consent",
+	},
+	SupportsRefresh: true,
+}
+
+// hubspot uses a standard auth-code flow. It has no RFC-7009 revoke endpoint
+// that fits our POST helper (revocation is DELETE /oauth/v1/refresh-tokens/{token}),
+// so RevokeURL is empty — revoke marks the grant locally only. Refresh tokens
+// expire 30 days after last use (surfaced as a note in the UI).
+var hubspot = Provider{
+	Type:            "hubspot",
+	AuthURL:         "https://app.hubspot.com/oauth/authorize",
+	TokenURL:        "https://api.hubapi.com/oauth/v1/token",
+	RevokeURL:       "",
+	Scopes:          []string{"crm.objects.contacts.read", "crm.objects.contacts.write"},
+	ExtraParams:     map[string]string{},
+	SupportsRefresh: true,
+}
+
+// shopify scopes its endpoints to a per-store subdomain. The {shop}
+// placeholder is filled at runtime from StartOptions.ExtraParams["shop"]
+// (see applyURLTemplate). Shopify admin API access tokens are long-lived and
+// are NOT refreshed — SupportsRefresh is false, so the refresher skips them.
+var shopify = Provider{
+	Type:            "shopify",
+	AuthURL:         "https://{shop}.myshopify.com/admin/oauth/authorize",
+	TokenURL:        "https://{shop}.myshopify.com/admin/oauth/access_token",
+	RevokeURL:       "",
+	Scopes:          []string{"read_products", "read_orders"},
+	ExtraParams:     map[string]string{},
+	SupportsRefresh: false,
 }
 
 // genericProfile is the fallback used for provider_type="custom" rows. URLs
@@ -118,6 +187,21 @@ func profileFor(r *ProviderRegistry, cfg *ProviderConfig) Provider {
 	}
 	p.ExtraParams = merged
 	return p
+}
+
+// applyURLTemplate substitutes {key} placeholders in a URL with values from
+// params. Used for providers whose endpoints embed a per-grant value — e.g.
+// Shopify's auth_url and token_url contain {shop}, filled from the shop the
+// admin enters on the Connect screen (carried in StartOptions.ExtraParams).
+// A no-op when the URL has no placeholders.
+func applyURLTemplate(raw string, params map[string]string) string {
+	if !strings.Contains(raw, "{") || len(params) == 0 {
+		return raw
+	}
+	for k, v := range params {
+		raw = strings.ReplaceAll(raw, "{"+k+"}", v)
+	}
+	return raw
 }
 
 // buildGenericAuthURL constructs the standard auth-code+PKCE URL. Used when
