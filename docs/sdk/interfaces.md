@@ -36,14 +36,29 @@ runner provides:
 
 ```go
 type Resources struct {
-    Logger *slog.Logger // labelled with the connector name
-    DB     *sql.DB      // non-nil when DATABASE_URL is set
+    Logger *slog.Logger  // labelled with the connector name
+    DB     *sql.DB       // non-nil when DATABASE_URL is set
+    NATS   *nats.Conn    // the live connection (see below)
     Health *healthToggle // SetReady(bool) for the readiness probe
 }
 ```
 
 Connectors read their own environment in `Configure` (the SDK does not impose a
 single config schema — see ADR 0001 for why).
+
+**`Resources.NATS`** is exposed for fleet-style **consumers** that need the
+control plane directly — subscribing to the connection command subjects
+(`vrsky.commands.*.connection.{start,stop}`) or running their own durable
+JetStream subscriptions (e.g. `tenant-consumer`'s cross-tenant bridge).
+Producers/filters/converters get their subscription from the runner and a
+simple consumer just calls the injected `publish` func, so most connectors
+never touch it. Prefer `publish` over `NATS` for emitting data.
+
+## The reference connector
+
+`cmd/example-connector` is the canonical, <150-line Consumer — the cleanest
+thing to clone when starting a new connector. It shows `Configure` (read env),
+`Run` (a ticker loop calling `publish`), and `main` (`sdk.RunConsumer`).
 
 ## Error classification
 

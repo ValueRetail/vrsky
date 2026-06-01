@@ -553,7 +553,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      DB_CONSUMER_PORT: "9300"
+      # Aux HTTP port the SDK serves /events (SSE) + /test-connection + /sample-data on (UI connects here).
+      WORKER_HTTP_PORT: "9300"
       # Required by the secrets resolver (#66) — DB passwords are stored encrypted.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:

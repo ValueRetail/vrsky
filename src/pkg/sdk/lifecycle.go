@@ -205,6 +205,7 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	res := &Resources{
 		Logger: logger,
 		DB:     db,
+		NATS:   nc,
 		Health: &healthToggle{setReady: setReady},
 	}
 

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/nats-io/nats.go"
+
 	"github.com/ValueRetail/vrsky/pkg/component"
 )
 
@@ -16,9 +18,18 @@ import (
 // per-connection config from the management database use it. Health is the
 // running health/metrics server (already started) so a connector can flip
 // readiness if it wants.
+//
+// NATS is the live connection (never nil). Most connectors never touch it —
+// producers/filters/converters get their subscription from the runner, and a
+// simple consumer just calls the injected publish func. It's exposed for
+// fleet-style consumers that need the control plane directly: subscribing to
+// command subjects (vrsky.commands.*.connection.{start,stop}) or running their
+// own durable JetStream subscriptions (e.g. tenant-consumer's cross-tenant
+// bridge). Prefer the injected publish func over NATS for emitting data.
 type Resources struct {
 	Logger *slog.Logger
 	DB     *sql.DB
+	NATS   *nats.Conn
 	Health *healthToggle
 }
 

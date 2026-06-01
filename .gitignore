@@ -163,6 +163,7 @@ docker-compose.override.yml
 /src/data-converter
 /src/data-filter
 /src/db-consumer
+/src/example-connector
 /src/db-producer
 /src/file-consumer
 /src/filter

@@ -22,7 +22,7 @@ type dataConnectionInfo struct {
 }
 
 // runBridge subscribes to the source tenant's NATS topic and republishes to the target tenant's pipeline
-func (s *TenantConsumerService) runBridge(ctx context.Context, connectionID, tenantID string, config *TenantConsumerConfig) {
+func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID string, config *TenantConsumerConfig) {
 	logger := s.logger.With(
 		"connection_id", connectionID,
 		"tenant_id", tenantID,
@@ -121,7 +121,7 @@ func (s *TenantConsumerService) runBridge(ctx context.Context, connectionID, ten
 }
 
 // handleSourceMessage processes a message from the source tenant and republishes it
-func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *nats.Msg, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
+func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
 	// Unmarshal the envelope
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
@@ -155,14 +155,18 @@ func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *na
 		CreatedAt:     time.Now().UTC(),
 	}
 
+	// Marshal once for the last_payload cache below; the SDK publish path
+	// marshals the envelope itself (envelope.Marshal == json.Marshal, so the
+	// bytes are identical).
 	data, err := json.Marshal(newEnv)
 	if err != nil {
 		logger.Error("Failed to marshal new envelope", "error", err)
 		return
 	}
 
-	// Publish to target tenant's pipeline stream (JetStream).
-	if err := s.pub.Publish(ctx, targetTenantID, targetConnectionID, newEnv.ID, data); err != nil {
+	// Publish to the target tenant's pipeline stream via the SDK's injected
+	// publish func (the one data-emit path).
+	if err := s.publish(ctx, newEnv); err != nil {
 		logger.Error("Failed to publish to target tenant via JetStream", "error", err,
 			"target_tenant", targetTenantID, "target_connection", targetConnectionID)
 		return
@@ -181,7 +185,7 @@ func (s *TenantConsumerService) handleSourceMessage(ctx context.Context, msg *na
 
 // replayOrTrigger tries to replay cached data from the source connection.
 // If no cache is available, falls back to triggering the source pipeline.
-func (s *TenantConsumerService) replayOrTrigger(ctx context.Context, sourceTenantID, sourceConnectionID, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
+func (s *tenantConsumer) replayOrTrigger(ctx context.Context, sourceTenantID, sourceConnectionID, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
 	var lastPayload []byte
 
 	// Try exact connection ID first
@@ -207,7 +211,7 @@ func (s *TenantConsumerService) replayOrTrigger(ctx context.Context, sourceTenan
 }
 
 // triggerSourcePipeline sends a start command to re-run a source pipeline
-func (s *TenantConsumerService) triggerSourcePipeline(sourceTenantID, sourceConnectionID string, logger *slog.Logger) {
+func (s *tenantConsumer) triggerSourcePipeline(sourceTenantID, sourceConnectionID string, logger *slog.Logger) {
 	cmd := struct {
 		ConnectionID string `json:"connection_id"`
 		TenantID     string `json:"tenant_id"`
@@ -229,7 +233,7 @@ func (s *TenantConsumerService) triggerSourcePipeline(sourceTenantID, sourceConn
 }
 
 // getDataConnectionInfo looks up an active data connection between two tenants
-func (s *TenantConsumerService) getDataConnectionInfo(requesterTenantID, targetTenantID string) (*dataConnectionInfo, error) {
+func (s *tenantConsumer) getDataConnectionInfo(requesterTenantID, targetTenantID string) (*dataConnectionInfo, error) {
 	var allowedJSON, deniedJSON, sharedJSON []byte
 	err := s.db.QueryRow(`
 		SELECT allowed_fields, denied_fields, shared_connection_ids

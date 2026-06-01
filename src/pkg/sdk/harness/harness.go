@@ -333,6 +333,11 @@ func NewConsumerHarness(t *testing.T, c sdk.Consumer, opts Options) *ConsumerHar
 	return h
 }
 
+// NATS returns the embedded connection so command-driven consumers can be
+// exercised by publishing control-plane messages (e.g. the connection
+// start/stop commands fleet consumers subscribe to).
+func (h *ConsumerHarness) NATS() *nats.Conn { return h.nc }
+
 // ExpectEnvelope waits for a published envelope matching m, or fails.
 func (h *ConsumerHarness) ExpectEnvelope(t *testing.T, m Matcher, timeout time.Duration) *envelope.Envelope {
 	t.Helper()
