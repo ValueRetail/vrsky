@@ -20,6 +20,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
+	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
 
 func main() {
@@ -221,6 +222,27 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	// Phase 3: Data sharing rate limiter
 	rateLimiter := managementapi.NewConnectionRateLimiter()
 	restHandler.SetRateLimiter(rateLimiter)
+
+	// Phase 2A (#75): OAuth 2.0 framework. The repo implements oauth.Store,
+	// so the client can be built directly off it. The refresher gets a small
+	// tenant-lookup function so ticker-scan jobs (which are global) can
+	// resolve a grant's tenant before calling Client.Refresh.
+	oauthClient := oauth.New(repo, oauth.DefaultRegistry())
+	restHandler.SetOAuthClient(oauthClient)
+	oauthRefresher := managementapi.NewOAuthRefresher(oauthClient, repo)
+	oauthRefresher.SetTenantLookup(func(ctx context.Context, grantID string) (string, error) {
+		var tenantID string
+		// lint:tenant-ok — resolving the row's own tenant by grant PK; outer
+		// caller verifies tenant on every subsequent operation.
+		const q = `SELECT tenant_id FROM oauth_grants WHERE id = $1`
+		if err := db.QueryRowContext(ctx, q, grantID).Scan(&tenantID); err != nil {
+			return "", err
+		}
+		return tenantID, nil
+	})
+	oauthRefresher.Start()
+	defer oauthRefresher.Stop()
+	restHandler.SetOAuthRefresher(oauthRefresher)
 
 	restHandler.RegisterRoutes(mux)
 

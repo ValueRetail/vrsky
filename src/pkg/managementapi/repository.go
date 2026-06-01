@@ -3,6 +3,8 @@ package managementapi
 import (
 	"context"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
 
 // Repository defines the interface for connection persistence operations
@@ -303,6 +305,60 @@ type Repository interface {
 
 	// DeleteUser soft-deletes a user and invalidates all their sessions
 	DeleteUser(ctx context.Context, userID string) error
+
+	// ============================================
+	// OAuth 2.0 Framework (Phase 2A — #75)
+	// ============================================
+	//
+	// These methods satisfy the oauth.Store interface (used by pkg/oauth)
+	// plus the admin CRUD endpoints. They live on the Repository so a
+	// Handler with one repo can drive both. See pkg/managementapi/repo_oauth.go.
+
+	// GetProviderConfig loads one provider config by ID. Returns
+	// oauth.ErrProviderNotFound if absent.
+	GetProviderConfig(ctx context.Context, tenantID, providerID string) (*oauth.ProviderConfig, error)
+
+	// ResolveClientSecret returns the plaintext client_secret for a provider.
+	ResolveClientSecret(ctx context.Context, cfg *oauth.ProviderConfig) (string, error)
+
+	// CreateGrant inserts an oauth_grants row + two secrets (access + optional refresh).
+	CreateGrant(ctx context.Context, g *oauth.Grant, accessTok, refreshTok string) error
+
+	// UpdateTokens rewrites the access (and optionally refresh) token for a grant.
+	UpdateTokens(ctx context.Context, grantID, accessTok, refreshTok string, expiresAt *time.Time) error
+
+	// GetGrant loads a grant with tokens populated.
+	GetGrant(ctx context.Context, tenantID, grantID string) (*oauth.Grant, error)
+
+	// GetGrantMeta loads a grant without tokens (for list views).
+	GetGrantMeta(ctx context.Context, tenantID, grantID string) (*oauth.Grant, error)
+
+	// ListGrants returns all grants for a tenant (without tokens).
+	ListGrants(ctx context.Context, tenantID string) ([]*oauth.Grant, error)
+
+	// MarkRevoked sets revoked_at on a grant (tenant-scoped).
+	MarkRevoked(ctx context.Context, tenantID, grantID string) error
+
+	// MarkRefreshFailure records the most recent refresh failure on a grant
+	// (tenant-scoped).
+	MarkRefreshFailure(ctx context.Context, tenantID, grantID, reason string) error
+
+	// ScanExpiring returns IDs of grants whose access tokens expire within
+	// the given window and that still have a refresh token.
+	ScanExpiring(ctx context.Context, within time.Duration, limit int) ([]string, error)
+
+	// CreateOAuthProvider inserts a provider config and stores the client_secret.
+	CreateOAuthProvider(ctx context.Context, cfg *oauth.ProviderConfig, clientSecret string) error
+
+	// UpdateOAuthProvider updates a provider config. Empty newClientSecret leaves
+	// the existing client_secret unchanged.
+	UpdateOAuthProvider(ctx context.Context, cfg *oauth.ProviderConfig, newClientSecret string) error
+
+	// DeleteOAuthProvider removes a provider. Errors if non-revoked grants reference it.
+	DeleteOAuthProvider(ctx context.Context, tenantID, providerID string) error
+
+	// ListOAuthProviders returns all provider configs for a tenant.
+	ListOAuthProviders(ctx context.Context, tenantID string) ([]*oauth.ProviderConfig, error)
 
 	// ============================================
 	// Lifecycle

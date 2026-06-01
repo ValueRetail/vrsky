@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
 
 // Handler implements REST API handlers for connection management
@@ -35,7 +37,20 @@ type Handler struct {
 
 	// Data sharing rate limiter (Phase 3)
 	rateLimiter *ConnectionRateLimiter
+
+	// OAuth 2.0 framework (Phase 2A — #75). Optional: nil disables the
+	// /api/v1/oauth/* routes' state-machine endpoints (start / callback /
+	// revoke); provider CRUD still works since it goes through the repo.
+	oauthClient    *oauth.Client
+	oauthRefresher *OAuthRefresher
 }
+
+// SetOAuthClient wires the generic OAuth 2.0 client (built on h.repo).
+func (h *Handler) SetOAuthClient(c *oauth.Client) { h.oauthClient = c }
+
+// SetOAuthRefresher wires the background refresher so the on-401 retry path
+// (PR #3) can Enqueue refresh jobs.
+func (h *Handler) SetOAuthRefresher(r *OAuthRefresher) { h.oauthRefresher = r }
 
 // NewHandler creates a new handler
 func NewHandler(repo Repository, validator *Validator) *Handler {
@@ -897,6 +912,20 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Audit log (Phase 1G — #72). Read-only — writes happen via middleware.
 	mux.HandleFunc("GET /api/v1/audit", h.ListAudit)
+
+	// OAuth 2.0 framework (Phase 2A — #75). Provider CRUD is admin; viewing
+	// providers / grants is viewer; the auth start is editor; the callback
+	// is public + cookie-gated (it's hit via browser redirect from the IdP).
+	mux.HandleFunc("GET /api/v1/oauth/providers", h.ListOAuthProvidersHandler)
+	mux.Handle("POST /api/v1/oauth/providers", adminMW(http.HandlerFunc(h.CreateOAuthProvider)))
+	mux.HandleFunc("GET /api/v1/oauth/providers/{id}", h.GetOAuthProvider)
+	mux.Handle("PUT /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.UpdateOAuthProvider)))
+	mux.Handle("DELETE /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.DeleteOAuthProvider)))
+	mux.Handle("POST /api/v1/oauth/providers/{id}/start", editor(http.HandlerFunc(h.StartOAuth)))
+	mux.HandleFunc("GET /api/v1/oauth/callback", h.HandleOAuthCallback)
+	mux.HandleFunc("GET /api/v1/oauth/grants", h.ListOAuthGrants)
+	mux.HandleFunc("GET /api/v1/oauth/grants/{id}", h.GetOAuthGrant)
+	mux.Handle("POST /api/v1/oauth/grants/{id}/revoke", editor(http.HandlerFunc(h.RevokeOAuthGrant)))
 
 	// Auth routes (these bypass TenantIDMiddleware)
 	h.RegisterAuthRoutes(mux)
