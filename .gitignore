@@ -151,3 +151,7 @@ docker-compose.override.yml
 *.db
 *.sqlite
 *.sqlite3
+
+# Compiled Go binaries accidentally committed from `go build` without -o
+/src/management-api
+/src/file-producer
