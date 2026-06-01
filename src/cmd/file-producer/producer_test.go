@@ -1,0 +1,66 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
+)
+
+// TestFileProducer_RoundTrip proves the SDK refactor end-to-end with zero
+// Docker: an envelope published into embedded JetStream flows through the SDK
+// runner → fileProducer.Deliver → a file on disk, with per-connection config
+// served from a mocked database.
+func TestFileProducer_RoundTrip(t *testing.T) {
+	outDir := t.TempDir()
+	t.Setenv("FILE_OUTPUT_DIR", outDir) // also seeds allowedRoots
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	const connID = "conn-rt-1"
+	nodes := fmt.Sprintf(`[{"id":"prod1","type":"producer","config":{"type":"file","file":{"path":%q}}}]`, outDir)
+	// The config cache may query more than once across the run; allow repeats.
+	mock.MatchExpectationsInOrder(false)
+	for i := 0; i < 3; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"name", "nodes", "edges"}).
+				AddRow("Round Trip", []byte(nodes), []byte(`[]`)))
+	}
+
+	p := &fileProducer{}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "file-producer", DB: db})
+
+	env := envelope.New()
+	env.ID = "rt-env-1"
+	env.IntegrationID = connID
+	env.TenantID = "tenant-1"
+	env.ContentType = "application/json"
+	env.Payload = []byte(`{"hello":"world"}`)
+	h.Publish(t, env)
+
+	// The folder feature writes under <outDir>/<sanitized connection name>/.
+	wantPath := filepath.Join(outDir, "Round Trip", "rt-env-1.json")
+	harness.Eventually(t, 5*time.Second, "file written to "+wantPath, func() bool {
+		_, err := os.Stat(wantPath)
+		return err == nil
+	})
+
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(data) != `{"hello":"world"}` {
+		t.Errorf("file content = %q", string(data))
+	}
+}

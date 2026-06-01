@@ -5,12 +5,12 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,44 +19,34 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
-	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
-// Config holds the file producer configuration
-type Config struct {
-	NATSUrl           string
-	DatabaseURL       string
-	LogLevel          string
-	DefaultOutputDir  string
-	SubscriptionTopic string
-}
+// fileProducer writes pipeline envelopes to the local filesystem. It is a
+// connector built on the SDK: the runner owns NATS/JetStream, the durable
+// subscription, the health server, signal handling and graceful shutdown;
+// this type implements only Configure (set up output dir + allowed roots +
+// the /files management API) and Deliver (write one envelope).
+type fileProducer struct {
+	sdk.BaseProducer
 
-// FileProducerService handles writing files from NATS messages
-type FileProducerService struct {
-	nc     *nats.Conn
 	db     *sql.DB
 	logger *slog.Logger
-	config *Config
 
-	// Cache for connection configs (multiple producer nodes per connection)
+	defaultOutputDir string
+	allowedRoots     []string
+
+	// Cache of per-connection producer configs (a connection may have several
+	// file-producer nodes).
 	configCache     map[string][]*ConnectionConfig
 	configCacheMu   sync.RWMutex
 	configCacheTTL  time.Duration
 	configCacheTime map[string]time.Time
-
-	// Roots a written file is allowed to live under (default output dir +
-	// mounted host home). Writes outside these are refused — see writeFile.
-	allowedRoots []string
-
-	// Signal channels
-	stopCh    chan struct{}
-	stoppedCh chan struct{}
 }
 
-// ConnectionConfig holds the file output configuration for a connection
+// ConnectionConfig holds the file output configuration for one producer node.
 type ConnectionConfig struct {
 	ID             string
 	TenantID       string
@@ -64,190 +54,75 @@ type ConnectionConfig struct {
 	FilePattern    string
 	PredecessorID  string
 	PredIsConsumer bool
-	// FolderName is a per-connection subfolder (named after the connection) so
-	// each integration's output is grouped instead of dumped loose.
+	// FolderName groups a connection's output under a per-connection subfolder.
 	FolderName string
 }
 
+// errPathNotAllowed marks a write whose target is outside any mounted root —
+// a configuration error that retrying can't fix (treated as Permanent).
+var errPathNotAllowed = errors.New("output path not under a mounted directory")
+
 func main() {
-	// Setup logger
-	logLevel := os.Getenv("LOG_LEVEL")
-	var level slog.Level
-	switch strings.ToLower(logLevel) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn", "warning":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-
-	logger.Info("Starting File Producer Service", "version", "1.0.0")
-
-	// Load configuration
-	config := &Config{
-		NATSUrl:           getEnv("NATS_URL", "nats://localhost:4222"),
-		DatabaseURL:       getEnv("DATABASE_URL", ""),
-		LogLevel:          logLevel,
-		DefaultOutputDir:  expandHomePath(getEnv("FILE_OUTPUT_DIR", "/tmp/file-output")),
-		SubscriptionTopic: getEnv("NATS_SUBSCRIPTION_TOPIC", "vrsky.data.*.pipeline.*"),
-	}
-
-	// Validate config
-	if config.DatabaseURL == "" {
-		logger.Error("DATABASE_URL is required")
+	if err := sdk.RunProducer(context.Background(), "file-producer", &fileProducer{}); err != nil {
+		slog.Error("file-producer exited", "error", err)
 		os.Exit(1)
 	}
-
-	// Initialize database connection
-	db, err := sql.Open("postgres", config.DatabaseURL)
-	if err != nil {
-		logger.Error("Failed to open database connection", "error", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		logger.Error("Failed to ping database", "error", err)
-		os.Exit(1)
-	}
-	logger.Info("Database connected successfully")
-
-	// Initialize NATS connection
-	nc, err := initNATS(config.NATSUrl, logger)
-	if err != nil {
-		logger.Error("Failed to initialize NATS", "error", err)
-		os.Exit(1)
-	}
-	defer nc.Close()
-
-	// Create service
-	service := &FileProducerService{
-		nc:              nc,
-		db:              db,
-		logger:          logger,
-		config:          config,
-		configCache:     make(map[string][]*ConnectionConfig),
-		configCacheTTL:  5 * time.Minute,
-		configCacheTime: make(map[string]time.Time),
-		stopCh:          make(chan struct{}),
-		stoppedCh:       make(chan struct{}),
-	}
-
-	// Create default output directory
-	if err := os.MkdirAll(config.DefaultOutputDir, 0755); err != nil {
-		logger.Error("Failed to create default output directory", "error", err, "dir", config.DefaultOutputDir)
-		os.Exit(1)
-	}
-	logger.Info("Output directory ready", "dir", config.DefaultOutputDir)
-
-	// Roots a written file may live under: the default output dir plus the
-	// mounted host home. Computed before Start so message handling can enforce
-	// it. Anything outside these would land in the container's throwaway FS.
-	allowedRoots := []string{config.DefaultOutputDir}
-	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
-		allowedRoots = append(allowedRoots, hostHome)
-	}
-	service.allowedRoots = allowedRoots
-
-	// Start the service
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := service.Start(ctx); err != nil {
-		logger.Error("Failed to start service", "error", err)
-		os.Exit(1)
-	}
-
-	// Start HTTP server for file management. Default matches the UI
-	// (config.fileProducerUrl) and docker-compose's FILE_PRODUCER_HTTP_PORT.
-	httpPort := getEnv("FILE_PRODUCER_HTTP_PORT", "9900")
-	startFileHTTPServer(httpPort, allowedRoots, logger)
-
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	logger.Info("File Producer Service running. Press Ctrl+C to stop.")
-	<-sigChan
-
-	logger.Info("Shutting down...")
-	cancel()
-	service.Stop()
-	logger.Info("File Producer Service stopped")
 }
 
-// Start initializes the service and starts subscribing via JetStream.
-func (s *FileProducerService) Start(ctx context.Context) error {
-	js, jsErr := s.nc.JetStream()
-	if jsErr != nil {
-		return fmt.Errorf("JetStream context: %w", jsErr)
+// Configure wires the producer's dependencies and output configuration. Called
+// once by the runner before the subscription starts.
+func (p *fileProducer) Configure(ctx context.Context, res *sdk.Resources) error {
+	if res.DB == nil {
+		return errors.New("file-producer requires DATABASE_URL (per-connection config lives in the connections table)")
 	}
-	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
-		DurableName: "file-producer",
-		AckWait:     45 * time.Second,
-		Logger:      s.logger,
-	}, func(ctx context.Context, msg *nats.Msg) error {
-		s.handleMessage(ctx, msg)
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
+	p.db = res.DB
+	p.logger = res.Logger
+	p.configCache = make(map[string][]*ConnectionConfig)
+	p.configCacheTime = make(map[string]time.Time)
+	if p.configCacheTTL == 0 {
+		p.configCacheTTL = 5 * time.Minute
 	}
-	s.logger.Info("Subscribed via JetStream", "durable", "file-producer")
 
-	go func() {
-		<-s.stopCh
-		sub.Stop()
-		close(s.stoppedCh)
-	}()
+	p.defaultOutputDir = expandHomePath(getEnv("FILE_OUTPUT_DIR", "/tmp/file-output"))
+	if err := os.MkdirAll(p.defaultOutputDir, 0o755); err != nil {
+		return fmt.Errorf("create default output directory %q: %w", p.defaultOutputDir, err)
+	}
 
+	// A written file may only live under the default output dir or the mounted
+	// host home — anything else would land in the container's throwaway FS.
+	p.allowedRoots = []string{p.defaultOutputDir}
+	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
+		p.allowedRoots = append(p.allowedRoots, hostHome)
+	}
+
+	// Register the file-management API (/files) on the SDK's auxiliary HTTP
+	// server (served on FILE_PRODUCER_HTTP_PORT). This is the SDK's
+	// custom-handler hook — the management API stays on this binary without
+	// the SDK needing to know about it.
+	allowedOrigin := getEnv("FILE_PRODUCER_ALLOWED_ORIGIN", "http://localhost:5173")
+	authToken := os.Getenv("FILE_PRODUCER_AUTH_TOKEN")
+	p.RegisterHTTPHandler("/files", filesHandler(p.allowedRoots, authToken, allowedOrigin, p.logger))
+
+	p.logger.Info("file-producer configured", "output_dir", p.defaultOutputDir, "allowed_roots", p.allowedRoots)
 	return nil
 }
 
-// Stop gracefully stops the service
-func (s *FileProducerService) Stop() {
-	close(s.stopCh)
-	<-s.stoppedCh
-}
-
-// handleMessage processes an incoming NATS message
-func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) {
-	s.logger.Debug("Received message", "subject", msg.Subject, "size", len(msg.Data))
-
-	// Parse envelope
-	var env envelope.Envelope
-	if err := json.Unmarshal(msg.Data, &env); err != nil {
-		s.logger.Error("Failed to unmarshal envelope", "error", err, "subject", msg.Subject)
-		return
-	}
-
-	// Get connection config (including output path)
+// Deliver writes one envelope to every matching file-producer node configured
+// for its connection. Transient write failures return sdk.Retriable (the SDK
+// NAKs → retries → DLQs); a path-not-allowed config error is logged and
+// dropped (sdk.Permanent semantics — retrying can't help).
+func (p *fileProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connectionID := env.IntegrationID
 	if connectionID == "" {
-		// Try to extract from subject: vrsky.data.tenant-{tenantId}.pipeline.{connectionId}
-		parts := strings.Split(msg.Subject, ".")
-		if len(parts) >= 5 {
-			connectionID = parts[4]
-		}
+		return sdk.Permanent(fmt.Errorf("envelope %s has no integration_id; cannot route to a file config", env.ID))
 	}
 
-	if connectionID == "" {
-		s.logger.Error("No connection ID in envelope or subject", "envelope_id", env.ID, "subject", msg.Subject)
-		return
-	}
-
-	// Get all file producer configs for this connection
-	configs, err := s.getConnectionConfigs(ctx, connectionID)
+	configs, err := p.getConnectionConfigs(ctx, connectionID)
 	if err != nil {
-		s.logger.Error("Failed to get connection config", "error", err, "connection_id", connectionID)
-		return
+		// DB hiccup — retry.
+		return sdk.Retriable(fmt.Errorf("get connection config: %w", err))
 	}
 
-	// Predecessor-based routing: process for each matching producer node
 	lastProcessedBy := ""
 	if env.Metadata != nil {
 		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
@@ -255,6 +130,7 @@ func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 		}
 	}
 
+	var transient error
 	for _, config := range configs {
 		if config.PredIsConsumer && lastProcessedBy != "" {
 			continue
@@ -265,44 +141,51 @@ func (s *FileProducerService) handleMessage(ctx context.Context, msg *nats.Msg) 
 
 		outputPath := config.OutputPath
 		if outputPath == "" {
-			outputPath = s.config.DefaultOutputDir
+			outputPath = p.defaultOutputDir
 		}
-		// Write into a per-connection subfolder so output is grouped.
 		if config.FolderName != "" {
 			outputPath = filepath.Join(outputPath, config.FolderName)
 		}
 
-		if err := s.writeFile(ctx, &env, outputPath, config.FilePattern); err != nil {
-			s.logger.Error("Failed to write file", "error", err, "envelope_id", env.ID, "path", outputPath)
+		if werr := p.writeFile(env, outputPath, config.FilePattern); werr != nil {
+			if errors.Is(werr, errPathNotAllowed) {
+				// Misconfiguration — don't burn the retry budget on it.
+				p.logger.Error("dropping: output path not allowed", "error", werr, "envelope_id", env.ID, "path", outputPath)
+				continue
+			}
+			p.logger.Error("failed to write file", "error", werr, "envelope_id", env.ID, "path", outputPath)
+			transient = werr
 			continue
 		}
-
-		s.logger.Info("File written successfully",
-			"envelope_id", env.ID,
-			"connection_id", connectionID,
-			"path", outputPath,
-			"size", len(env.Payload))
+		p.logger.Info("file written successfully",
+			"envelope_id", env.ID, "connection_id", connectionID, "path", outputPath, "size", len(env.Payload))
 	}
+
+	if transient != nil {
+		return sdk.Retriable(transient)
+	}
+	return nil
 }
 
-// getConnectionConfigs retrieves ALL file producer configs for a connection (with caching)
-func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connectionID string) ([]*ConnectionConfig, error) {
-	s.configCacheMu.RLock()
-	if configs, ok := s.configCache[connectionID]; ok {
-		if time.Since(s.configCacheTime[connectionID]) < s.configCacheTTL {
-			s.configCacheMu.RUnlock()
+// getConnectionConfigs retrieves ALL file producer configs for a connection
+// (with a short cache). // lint:tenant-ok — connection lookup by PK; tenant scoping is enforced upstream when the pipeline is deployed.
+func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID string) ([]*ConnectionConfig, error) {
+	p.configCacheMu.RLock()
+	if configs, ok := p.configCache[connectionID]; ok {
+		if time.Since(p.configCacheTime[connectionID]) < p.configCacheTTL {
+			p.configCacheMu.RUnlock()
 			return configs, nil
 		}
 	}
-	s.configCacheMu.RUnlock()
+	p.configCacheMu.RUnlock()
 
 	var nodesJSON, edgesJSON []byte
 	var connName string
-	err := s.db.QueryRowContext(ctx, `SELECT name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&connName, &nodesJSON, &edgesJSON)
+	err := p.db.QueryRowContext(ctx, `SELECT name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&connName, &nodesJSON, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			configs := []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
-			s.cacheConfigs(connectionID, configs)
+			configs := []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
+			p.cacheConfigs(connectionID, configs)
 			return configs, nil
 		}
 		return nil, fmt.Errorf("query connection config: %w", err)
@@ -314,8 +197,8 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 		Config json.RawMessage `json:"config"`
 	}
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		configs := []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
-		s.cacheConfigs(connectionID, configs)
+		configs := []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
+		p.cacheConfigs(connectionID, configs)
 		return configs, nil
 	}
 
@@ -332,7 +215,6 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 		if node.Type != "producer" {
 			continue
 		}
-
 		var nodeConfig struct {
 			Type string `json:"type"`
 			File struct {
@@ -343,7 +225,6 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
 			continue
 		}
-		// Accept nodes with type "file" or with a file path set
 		if nodeConfig.Type != "file" && nodeConfig.File.Path == "" {
 			continue
 		}
@@ -365,11 +246,8 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 
 		path := nodeConfig.File.Path
 		if path == "" {
-			path = s.config.DefaultOutputDir
+			path = p.defaultOutputDir
 		}
-
-		// Group output under a per-connection folder named after the
-		// connection (fall back to its ID if unnamed).
 		folderName := sanitizeForFilename(connName)
 		if folderName == "" {
 			folderName = connectionID
@@ -386,43 +264,36 @@ func (s *FileProducerService) getConnectionConfigs(ctx context.Context, connecti
 	}
 
 	if len(configs) == 0 {
-		configs = []*ConnectionConfig{{ID: connectionID, OutputPath: s.config.DefaultOutputDir, PredIsConsumer: true}}
+		configs = []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
 	}
 
-	s.cacheConfigs(connectionID, configs)
+	p.cacheConfigs(connectionID, configs)
 	return configs, nil
 }
 
-func (s *FileProducerService) cacheConfigs(connectionID string, configs []*ConnectionConfig) {
-	s.configCacheMu.Lock()
-	defer s.configCacheMu.Unlock()
-	s.configCache[connectionID] = configs
-	s.configCacheTime[connectionID] = time.Now()
+func (p *fileProducer) cacheConfigs(connectionID string, configs []*ConnectionConfig) {
+	p.configCacheMu.Lock()
+	defer p.configCacheMu.Unlock()
+	p.configCache[connectionID] = configs
+	p.configCacheTime[connectionID] = time.Now()
 }
 
-// writeFile writes the envelope payload to a file
-func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envelope, outputPath, filePattern string) error {
-	// Refuse to write outside a mounted root. Otherwise a misconfigured path
-	// (e.g. "/foo" instead of "/Users/you/foo") silently writes into the
-	// container's throwaway filesystem and the file is lost — which looks like
-	// success in the logs. Fail loudly instead.
-	if len(s.allowedRoots) > 0 && !isPathAllowed(outputPath, s.allowedRoots) {
-		return fmt.Errorf("output path %q is not under a mounted directory %v; "+
-			"the file would be lost inside the container — check the output directory in the connection config",
-			outputPath, s.allowedRoots)
+// writeFile writes the envelope payload to a file under outputPath.
+func (p *fileProducer) writeFile(env *envelope.Envelope, outputPath, filePattern string) error {
+	// Refuse to write outside a mounted root (would silently vanish into the
+	// container FS — looks like success in the logs otherwise).
+	if len(p.allowedRoots) > 0 && !isPathAllowed(outputPath, p.allowedRoots) {
+		return fmt.Errorf("%w: %q not under %v — check the output directory in the connection config",
+			errPathNotAllowed, outputPath, p.allowedRoots)
 	}
 
-	// Ensure output directory exists. Track which dirs we actually create so
-	// we only chown those — pre-existing parent directories are never touched.
 	if err := mkdirAllAndChown(outputPath); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
-	// Generate filename
-	filename := s.generateFilename(env, filePattern)
+	filename := p.generateFilename(env, filePattern)
 	fullPath := filepath.Join(outputPath, filename)
 
-	// Sanitize path to prevent directory traversal
 	absPath, err := filepath.Abs(fullPath)
 	if err != nil {
 		return fmt.Errorf("resolve absolute path: %w", err)
@@ -435,27 +306,23 @@ func (s *FileProducerService) writeFile(ctx context.Context, env *envelope.Envel
 		return fmt.Errorf("path traversal detected")
 	}
 
-	// Write file
-	if err := os.WriteFile(absPath, env.Payload, 0644); err != nil {
+	if err := os.WriteFile(absPath, env.Payload, 0o644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 
-	// Chown to host user so files are deletable without sudo
 	chownToHostUser(absPath)
 	chownToHostUser(absOutputPath)
 
-	s.logger.Debug("Wrote file", "path", absPath, "size", len(env.Payload))
+	p.logger.Debug("wrote file", "path", absPath, "size", len(env.Payload))
 	return nil
 }
 
-// generateFilename creates a filename from the envelope and pattern
-func (s *FileProducerService) generateFilename(env *envelope.Envelope, pattern string) string {
+// generateFilename creates a filename from the envelope and pattern.
+func (p *fileProducer) generateFilename(env *envelope.Envelope, pattern string) string {
 	if pattern == "" {
-		ext := s.deriveExtension(env.ContentType)
-		// Prefer original filename from metadata if available
+		ext := deriveExtension(env.ContentType)
 		if env.Metadata != nil {
 			if fn, ok := env.Metadata["filename"].(string); ok && fn != "" {
-				// If the data was converted to a different format, update the extension
 				if _, converted := env.Metadata["_converted"]; converted {
 					baseName := fn
 					if dotIdx := strings.LastIndex(fn, "."); dotIdx >= 0 {
@@ -466,22 +333,19 @@ func (s *FileProducerService) generateFilename(env *envelope.Envelope, pattern s
 				return sanitizeForFilename(fn)
 			}
 		}
-		// Default pattern: {id}.{extension}
 		return fmt.Sprintf("%s.%s", env.ID, ext)
 	}
 
-	// Replace placeholders in pattern
 	filename := pattern
 	filename = strings.ReplaceAll(filename, "{id}", env.ID)
 	filename = strings.ReplaceAll(filename, "{timestamp}", env.CreatedAt.Format("20060102-150405"))
-	filename = strings.ReplaceAll(filename, "{extension}", s.deriveExtension(env.ContentType))
+	filename = strings.ReplaceAll(filename, "{extension}", deriveExtension(env.ContentType))
 	filename = strings.ReplaceAll(filename, "{source}", sanitizeForFilename(env.Source))
-
 	return filename
 }
 
-// deriveExtension maps content type to file extension
-func (s *FileProducerService) deriveExtension(contentType string) string {
+// deriveExtension maps content type to file extension.
+func deriveExtension(contentType string) string {
 	switch {
 	case strings.Contains(contentType, "application/json"):
 		return "json"
@@ -504,7 +368,7 @@ func (s *FileProducerService) deriveExtension(contentType string) string {
 	}
 }
 
-// Helper functions
+// --- package-level helpers (unchanged across the SDK refactor) ---
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
@@ -514,13 +378,11 @@ func getEnv(key, defaultValue string) string {
 }
 
 func expandHomePath(path string) string {
-	// Prefer FILE_OUTPUT_DIR env var over $HOME (important in containers where $HOME=/root)
 	resolveHome := func() string {
 		if dir := os.Getenv("FILE_OUTPUT_DIR"); dir != "" {
 			return dir
 		}
-		home, err := os.UserHomeDir()
-		if err == nil {
+		if home, err := os.UserHomeDir(); err == nil {
 			return home
 		}
 		return ""
@@ -541,59 +403,32 @@ func expandHomePath(path string) string {
 
 func sanitizeForFilename(s string) string {
 	replacer := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
+		"/", "_", "\\", "_", ":", "_", "*", "_", "?", "_",
+		"\"", "_", "<", "_", ">", "_", "|", "_",
 	)
 	return replacer.Replace(s)
 }
 
-// --- File management HTTP server ---
+// --- File management HTTP API (served on the SDK auxiliary HTTP port) ---
 
-func startFileHTTPServer(port string, allowedRoots []string, logger *slog.Logger) {
-	mux := http.NewServeMux()
-
-	// The /files endpoint can list and delete files, so it must not be callable
-	// by arbitrary websites loaded in the user's browser. Two controls guard it:
-	//   - CORS is restricted to the UI origin (not "*"), so a malicious cross-
-	//     origin page can neither read GET responses nor issue the (preflighted)
-	//     DELETE request.
-	//   - When FILE_PRODUCER_AUTH_TOKEN is set, a matching bearer token is
-	//     required, giving defense-in-depth against non-browser clients too.
-	allowedOrigin := getEnv("FILE_PRODUCER_ALLOWED_ORIGIN", "http://localhost:5173")
-	authToken := os.Getenv("FILE_PRODUCER_AUTH_TOKEN")
-
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	mux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
-		// Only echo the allow-origin header back when the request originates from
-		// the configured UI origin. Vary: Origin keeps caches from leaking it.
+// filesHandler returns the /files handler: CORS-restricted to the UI origin
+// and (optionally) bearer-token gated, dispatching GET (list) / DELETE.
+func filesHandler(allowedRoots []string, authToken, allowedOrigin string, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 		if r.Header.Get("Origin") == allowedOrigin {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}
-		// Preflight carries no credentials; answer it before the auth check.
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
 		if !authorizedFileRequest(r, authToken) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
-
 		switch r.Method {
 		case http.MethodGet:
 			handleListFiles(w, r, allowedRoots, logger)
@@ -602,24 +437,12 @@ func startFileHTTPServer(port string, allowedRoots []string, logger *slog.Logger
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-
-	// NOTE: binds to all interfaces because in Docker the published port is what
-	// reaches this server, and Docker forwards to the container's bridge IP, not
-	// its loopback. Network exposure is constrained at the host via the
-	// "127.0.0.1:9900:9900" mapping in docker-compose.yml.
-	server := &http.Server{Addr: ":" + port, Handler: mux}
-	go func() {
-		logger.Info("File management HTTP server started", "port", port, "auth", authToken != "")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("File HTTP server error", "error", err)
-		}
-	}()
+	}
 }
 
 // authorizedFileRequest reports whether a /files request is permitted. When no
-// token is configured the endpoint stays open (default local-dev behaviour);
-// when a token is set, the request must present a matching bearer token.
+// token is configured the endpoint stays open (local-dev default); when set,
+// the request must present a matching bearer token.
 func authorizedFileRequest(r *http.Request, token string) bool {
 	if token == "" {
 		return true
@@ -632,16 +455,13 @@ func authorizedFileRequest(r *http.Request, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) == 1
 }
 
-// isPathAllowed checks that the resolved path is under one of the allowed roots.
 func isPathAllowed(path string, allowedRoots []string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	// Resolve symlinks for safety
 	resolved, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		// Path may not exist yet; fall back to the abs path
 		resolved = absPath
 	}
 	for _, root := range allowedRoots {
@@ -670,12 +490,10 @@ func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []stri
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
 		return
 	}
-
 	if !isPathAllowed(dirPath, allowedRoots) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
 		return
 	}
-
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -685,7 +503,6 @@ func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []stri
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
 	files := make([]fileEntry, 0, len(entries))
 	for _, e := range entries {
 		info, err := e.Info()
@@ -700,7 +517,6 @@ func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []stri
 			ModTime: info.ModTime().Format(time.RFC3339),
 		})
 	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{"files": files, "path": dirPath})
 }
 
@@ -710,13 +526,10 @@ func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []st
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
 		return
 	}
-
 	if !isPathAllowed(targetPath, allowedRoots) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
 		return
 	}
-
-	// Don't allow deleting the root directories themselves
 	absTarget, _ := filepath.Abs(targetPath)
 	for _, root := range allowedRoots {
 		absRoot, _ := filepath.Abs(root)
@@ -725,7 +538,6 @@ func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []st
 			return
 		}
 	}
-
 	info, err := os.Stat(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -735,10 +547,8 @@ func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []st
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
 	var count int
 	if info.IsDir() {
-		// Count files before deleting for feedback
 		_ = filepath.WalkDir(targetPath, func(_ string, d fs.DirEntry, _ error) error {
 			if d != nil && !d.IsDir() {
 				count++
@@ -750,18 +560,13 @@ func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []st
 		count = 1
 		err = os.Remove(targetPath)
 	}
-
 	if err != nil {
 		logger.Error("Failed to delete", "path", targetPath, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
 	logger.Info("Deleted path", "path", targetPath, "files", count)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"deleted": targetPath,
-		"files":   count,
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": targetPath, "files": count})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -770,8 +575,8 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
-// chownToHostUser changes ownership of a path to the host user (FILE_OWNER_UID/GID env vars).
-// Silently does nothing if env vars are not set or chown fails (best-effort).
+// chownToHostUser changes ownership to the host user (FILE_OWNER_UID/GID).
+// Best-effort: silently does nothing if unset or chown fails.
 func chownToHostUser(path string) {
 	uid, gid := getHostOwner()
 	if uid < 0 {
@@ -780,16 +585,13 @@ func chownToHostUser(path string) {
 	_ = os.Chown(path, uid, gid)
 }
 
-// mkdirAllAndChown creates path and all missing parents, chowning *only* the
-// directories it actually creates. Pre-existing directories are never touched,
-// so this can never escape the intended subtree.
+// mkdirAllAndChown creates path + missing parents, chowning only the dirs it
+// actually creates (pre-existing dirs are never touched).
 func mkdirAllAndChown(path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
-	// Walk upward to find which ancestors are missing — those are the ones
-	// MkdirAll will create, and the only ones we'll chown afterwards.
 	var toChown []string
 	p := absPath
 	for {
@@ -803,7 +605,7 @@ func mkdirAllAndChown(path string) error {
 		}
 		p = parent
 	}
-	if err := os.MkdirAll(absPath, 0755); err != nil {
+	if err := os.MkdirAll(absPath, 0o755); err != nil {
 		return err
 	}
 	for _, d := range toChown {
@@ -813,16 +615,12 @@ func mkdirAllAndChown(path string) error {
 }
 
 func getHostOwner() (int, int) {
-	// Prefer explicit env vars when set
 	uidStr := os.Getenv("FILE_OWNER_UID")
 	gidStr := os.Getenv("FILE_OWNER_GID")
 	if uidStr != "" && gidStr != "" {
 		uid, err1 := strconv.Atoi(uidStr)
 		gid, err2 := strconv.Atoi(gidStr)
 		if err1 == nil && err2 == nil {
-			// Sanity-check: does this UID actually own the host home?
-			// If HOST_HOME is mounted and owned by someone else, prefer the
-			// mount's real owner — env vars on this machine were stale.
 			if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
 				if info, err := os.Stat(hostHome); err == nil {
 					if st, ok := info.Sys().(*syscall.Stat_t); ok {
@@ -835,7 +633,6 @@ func getHostOwner() (int, int) {
 			return uid, gid
 		}
 	}
-	// Fall back to stat-ing the mounted HOST_HOME
 	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
 		if info, err := os.Stat(hostHome); err == nil {
 			if st, ok := info.Sys().(*syscall.Stat_t); ok {
@@ -844,26 +641,4 @@ func getHostOwner() (int, int) {
 		}
 	}
 	return -1, -1
-}
-
-func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {
-	opts := []nats.Option{
-		nats.Name("VRSky-File-Producer"),
-		nats.ReconnectWait(2 * time.Second),
-		nats.MaxReconnects(-1),
-		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			logger.Warn("NATS disconnected", "error", err)
-		}),
-		nats.ReconnectHandler(func(nc *nats.Conn) {
-			logger.Info("NATS reconnected", "url", nc.ConnectedUrl())
-		}),
-	}
-
-	nc, err := nats.Connect(natsURL, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
-	}
-
-	logger.Info("NATS connected", "url", nc.ConnectedUrl())
-	return nc, nil
 }
