@@ -175,14 +175,17 @@ func TestHTTPProducer_OAuthRefreshOn401(t *testing.T) {
 	}
 }
 
-// TestHTTPProducer_OAuthEmptyGrantNoCall verifies the empty-grant guard: an
-// auth_type=oauth node whose grant was cleared (e.g. revoked) must fail fast
-// without ever resolving a token or hitting the destination — instead of
-// calling /oauth/grants//token with an empty id and getting an opaque 500.
-func TestHTTPProducer_OAuthEmptyGrantNoCall(t *testing.T) {
+// TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated verifies the empty-grant
+// fallback: an auth_type=oauth node whose grant was cleared (e.g. revoked) must
+// still deliver — sending WITHOUT an Authorization header and without ever
+// resolving a token — rather than blocking or calling /oauth/grants//token with
+// an empty id. (The UI "reconnect required" hint is tracked in #98.)
+func TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated(t *testing.T) {
 	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
+		gotAuth.Store(r.Header.Get("Authorization"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -219,12 +222,13 @@ func TestHTTPProducer_OAuthEmptyGrantNoCall(t *testing.T) {
 	env.Payload = []byte(`{"x":1}`)
 	h.Publish(t, env)
 
-	// Give the runner time to (not) act.
-	time.Sleep(700 * time.Millisecond)
-	if got := atomic.LoadInt32(&hits); got != 0 {
-		t.Errorf("destination was hit %d times; expected 0 (no grant → no send)", got)
+	harness.Eventually(t, 5*time.Second, "destination received the (unauthenticated) POST", func() bool {
+		return atomic.LoadInt32(&hits) >= 1
+	})
+	if a := gotAuth.Load(); a != nil && a.(string) != "" {
+		t.Errorf("Authorization = %q; expected empty (no grant → no bearer)", a)
 	}
 	if got := resolveCalls.Load(); got != 0 {
-		t.Errorf("resolveToken called %d times; expected 0 (guard should short-circuit before token resolution)", got)
+		t.Errorf("resolveToken called %d times; expected 0 (no grant → never resolve a token)", got)
 	}
 }

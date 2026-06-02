@@ -207,13 +207,15 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		for k, v := range httpCfg.Headers {
 			req.Header.Set(k, v)
 		}
-		if httpCfg.AuthType == "oauth" {
-			// No grant selected (e.g. the grant was revoked, which clears the
-			// selection on the node). Fail fast with a clear message instead of
-			// calling /oauth/grants//token with an empty id.
-			if httpCfg.OAuthGrantID == "" {
-				return nil, fmt.Errorf("output uses OAuth but no connection is selected — pick (or reconnect) an OAuth grant for this destination")
-			}
+		if httpCfg.AuthType == "oauth" && httpCfg.OAuthGrantID == "" {
+			// OAuth selected but no grant (e.g. the grant was revoked, which
+			// clears the selection on the node). Rather than blocking the send
+			// — or calling /oauth/grants//token with an empty id and getting an
+			// opaque 500 — fall back to sending unauthenticated and warn. A
+			// proper "reconnect required" hint in the UI is tracked in #98.
+			p.logger.Warn("OAuth output has no grant selected; sending without authentication (reconnect the grant to authenticate)",
+				"connection_id", connectionID, "url", httpCfg.URL)
+		} else if httpCfg.AuthType == "oauth" {
 			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
 			if terr != nil {
 				return nil, fmt.Errorf("resolve oauth token: %w", terr)
@@ -235,7 +237,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 
 	// OAuth: an access token may have expired between resolution and the call —
 	// refresh once and retry (mirrors api-consumer's callEndpoint).
-	if resp.StatusCode == http.StatusUnauthorized && httpCfg.AuthType == "oauth" {
+	if resp.StatusCode == http.StatusUnauthorized && httpCfg.AuthType == "oauth" && httpCfg.OAuthGrantID != "" {
 		_ = resp.Body.Close()
 		p.emitEvent(connectionID, HTTPEvent{Type: "info", Message: "401 — refreshing OAuth token and retrying", Time: now()})
 		resp, err = buildAndSend(true)
