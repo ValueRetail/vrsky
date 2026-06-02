@@ -463,6 +463,154 @@ function TenantConsumerConfig({
   )
 }
 
+// Salesforce producer config (#79 PR 2): write records via REST (insert/upsert),
+// auto Bulk API for batches ≥200. Stores config.salesforce = {instance_url,
+// oauth_grant_id, object, operation, external_id_field, api_version}.
+function SalesforceProducerConfig({
+  config,
+  setConfig,
+  deployedConnectionId,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  deployedConnectionId?: string
+}) {
+  const sf = (config.salesforce as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, salesforce: { ...sf, ...patch } })
+  const operation = (sf.operation as string) || 'insert'
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Instance URL"
+        placeholder="https://your-org.my.salesforce.com"
+        value={(sf.instance_url as string) || ''}
+        onChange={(v) => update({ instance_url: v })}
+      />
+      <div>
+        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <OAuthGrantSelector
+          value={(sf.oauth_grant_id as string) || ''}
+          onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
+          connectionId={deployedConnectionId}
+        />
+      </div>
+      <StyledInput
+        label="Object (sObject)"
+        placeholder="Account"
+        value={(sf.object as string) || ''}
+        onChange={(v) => update({ object: v })}
+      />
+      <StyledSelect
+        label="Operation"
+        value={operation}
+        onChange={(v) => update({ operation: v })}
+        options={[
+          { value: 'insert', label: 'Insert' },
+          { value: 'upsert', label: 'Upsert (by external id)' },
+        ]}
+      />
+      {operation === 'upsert' && (
+        <StyledInput
+          label="External ID field"
+          placeholder="ExternalId__c"
+          value={(sf.external_id_field as string) || ''}
+          onChange={(v) => update({ external_id_field: v })}
+        />
+      )}
+      <StyledInput
+        label="API version"
+        placeholder="v60.0"
+        value={(sf.api_version as string) || ''}
+        onChange={(v) => update({ api_version: v })}
+      />
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Records flowing into this node are written to Salesforce. Batches of 200+ records
+        automatically use the Bulk API 2.0.
+      </div>
+    </div>
+  )
+}
+
+// Salesforce consumer config (#79 PR 1): SOQL poll authenticated by an OAuth
+// grant. Stores config.salesforce = {instance_url, oauth_grant_id, soql,
+// poll_interval_seconds, api_version}.
+function SalesforceConsumerConfig({
+  config,
+  setConfig,
+  deployedConnectionId,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  deployedConnectionId?: string
+}) {
+  const sf = (config.salesforce as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, salesforce: { ...sf, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Instance URL"
+        placeholder="https://your-org.my.salesforce.com"
+        value={(sf.instance_url as string) || ''}
+        onChange={(v) => update({ instance_url: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <OAuthGrantSelector
+          value={(sf.oauth_grant_id as string) || ''}
+          onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
+          connectionId={deployedConnectionId}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>SOQL query</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="SELECT Id, Name FROM Account ORDER BY LastModifiedDate DESC"
+          value={(sf.soql as string) || ''}
+          onChange={(e) => update({ soql: e.target.value })}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Poll interval (s, 0 = once)"
+          placeholder="0"
+          type="number"
+          value={String((sf.poll_interval_seconds as number) ?? 0)}
+          onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+        />
+        <StyledInput
+          label="API version"
+          placeholder="v60.0"
+          value={(sf.api_version as string) || ''}
+          onChange={(v) => update({ api_version: v })}
+        />
+      </div>
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Connect a Salesforce account (OAuth) above, then enter a SOQL query. For a
+        sandbox, register a Salesforce provider with the test.salesforce.com URLs.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -1916,18 +2064,19 @@ function ApiConsumerConfig({
                 />
                 <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <select
                     value={ep.auth_type}
                     onChange={(e) => updateEndpoint(idx, 'auth_type', e.target.value)}
                     style={{
-                      flex: 1,
+                      width: '100%',
                       padding: '8px 10px',
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
                       fontSize: '12px',
                       color: '#374151',
                       backgroundColor: '#ffffff',
+                      boxSizing: 'border-box',
                     }}
                   >
                     <option value="none">No Auth</option>
@@ -1937,25 +2086,21 @@ function ApiConsumerConfig({
                   </select>
 
                   {(ep.auth_type === 'bearer' || ep.auth_type === 'api_key') && (
-                    <div style={{ flex: 2 }}>
-                      <SecretInput
-                        label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
-                        placeholder={ep.auth_type === 'bearer' ? 'Token value' : 'API key value'}
-                        field="auth_value"
-                        config={ep as unknown as Record<string, unknown>}
-                        defaultSecretName={`api-${ep.auth_type}-${idx}`}
-                        onChange={(patch) => patchEndpoint(idx, patch)}
-                      />
-                    </div>
+                    <SecretInput
+                      label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
+                      placeholder={ep.auth_type === 'bearer' ? 'Token value' : 'API key value'}
+                      field="auth_value"
+                      config={ep as unknown as Record<string, unknown>}
+                      defaultSecretName={`api-${ep.auth_type}-${idx}`}
+                      onChange={(patch) => patchEndpoint(idx, patch)}
+                    />
                   )}
 
                   {ep.auth_type === 'oauth' && (
-                    <div style={{ flex: 2 }}>
-                      <OAuthGrantSelector
-                        value={ep.oauth_grant_id}
-                        onChange={(grantId) => updateEndpoint(idx, 'oauth_grant_id', grantId || '')}
-                      />
-                    </div>
+                    <OAuthGrantSelector
+                      value={ep.oauth_grant_id}
+                      onChange={(grantId) => updateEndpoint(idx, 'oauth_grant_id', grantId || '')}
+                    />
                   )}
                 </div>
               </div>
@@ -2066,6 +2211,7 @@ export default function PropertyEditor({
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
                 { value: 'tenant', label: 'Tenant Input' },
+                { value: 'salesforce', label: 'Salesforce' },
               ]}
             />
 
@@ -2220,6 +2366,14 @@ export default function PropertyEditor({
                 setConfig={setConfig}
               />
             )}
+
+            {config.type === 'salesforce' && (
+              <SalesforceConsumerConfig
+                config={config}
+                setConfig={setConfig}
+                deployedConnectionId={deployedConnectionId}
+              />
+            )}
           </div>
         )
 
@@ -2235,6 +2389,7 @@ export default function PropertyEditor({
                 { value: 'http', label: 'Webhook (HTTP)' },
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
+                { value: 'salesforce', label: 'Salesforce' },
               ]}
             />
 
@@ -2294,6 +2449,32 @@ export default function PropertyEditor({
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                   Pipeline data will be POSTed to this URL. Paste a webhook URL from any external service (e.g. webhook.site, Slack, Discord).
                 </p>
+
+                <StyledSelect
+                  label="Authentication"
+                  value={((config.http as any)?.auth_type as string) || 'none'}
+                  onChange={(value) =>
+                    setConfig({ ...config, http: { ...(config.http as any), auth_type: value } })
+                  }
+                  options={[
+                    { value: 'none', label: 'None' },
+                    { value: 'oauth', label: 'OAuth 2.0' },
+                  ]}
+                />
+                {(config.http as any)?.auth_type === 'oauth' && (
+                  <div style={{ marginTop: '4px' }}>
+                    <OAuthGrantSelector
+                      value={(config.http as any)?.oauth_grant_id || ''}
+                      onChange={(grantId) =>
+                        setConfig({
+                          ...config,
+                          http: { ...(config.http as any), oauth_grant_id: grantId || '' },
+                        })
+                      }
+                      connectionId={deployedConnectionId}
+                    />
+                  </div>
+                )}
               </>
             )}
 
@@ -2315,6 +2496,14 @@ export default function PropertyEditor({
               <DatabaseProducerConfig
                 config={config}
                 setConfig={setConfig}
+              />
+            )}
+
+            {config.type === 'salesforce' && (
+              <SalesforceProducerConfig
+                config={config}
+                setConfig={setConfig}
+                deployedConnectionId={deployedConnectionId}
               />
             )}
           </div>

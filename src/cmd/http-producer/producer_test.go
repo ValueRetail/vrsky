@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,5 +106,129 @@ func TestHTTPProducer_4xxIsAcked(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Errorf("expected exactly 1 request (4xx acked, no retry), got %d", got)
+	}
+}
+
+// TestHTTPProducer_OAuthRefreshOn401 verifies the #97 OAuth output path: an
+// auth_type=oauth node attaches a Bearer token; on a 401 the producer refreshes
+// the token (force) and retries once, succeeding without dead-lettering.
+func TestHTTPProducer_OAuthRefreshOn401(t *testing.T) {
+	var calls int32
+	var lastAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		lastAuth.Store(r.Header.Get("Authorization"))
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized) // stale token
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	const connID = "conn-oauth"
+	nodes := fmt.Sprintf(`[{"id":"prod1","type":"producer","config":{"type":"http","http":{"url":%q,"method":"POST","auth_type":"oauth","oauth_grant_id":"g1"}}}]`, srv.URL)
+	mock.MatchExpectationsInOrder(false)
+	for i := 0; i < 3; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).
+				AddRow([]byte(nodes), []byte(`[]`)))
+	}
+
+	var forced atomic.Bool
+	p := &httpProducer{
+		resolveToken: func(_ context.Context, _, grantID string, force bool) (string, error) {
+			if force {
+				forced.Store(true)
+				return "tok-refreshed", nil
+			}
+			return "tok-stale", nil
+		},
+	}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "http-producer", DB: db})
+
+	env := envelope.New()
+	env.ID = "oauth-env-1"
+	env.IntegrationID = connID
+	env.TenantID = "tenant-1"
+	env.Payload = []byte(`{"x":1}`)
+	h.Publish(t, env)
+
+	harness.Eventually(t, 5*time.Second, "endpoint hit twice (401 then 200)", func() bool {
+		return atomic.LoadInt32(&calls) >= 2
+	})
+	time.Sleep(400 * time.Millisecond)
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("expected exactly 2 requests (401 then refreshed 200), got %d", got)
+	}
+	if !forced.Load() {
+		t.Error("expected a forced token refresh on the 401 retry")
+	}
+	if a := lastAuth.Load(); a == nil || a.(string) != "Bearer tok-refreshed" {
+		t.Errorf("retry Authorization = %v, want Bearer tok-refreshed", a)
+	}
+}
+
+// TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated verifies the empty-grant
+// fallback: an auth_type=oauth node whose grant was cleared (e.g. revoked) must
+// still deliver — sending WITHOUT an Authorization header and without ever
+// resolving a token — rather than blocking or calling /oauth/grants//token with
+// an empty id. (The UI "reconnect required" hint is tracked in #98.)
+func TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated(t *testing.T) {
+	var hits int32
+	var gotAuth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		gotAuth.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	const connID = "conn-oauth-empty"
+	// auth_type=oauth but oauth_grant_id is absent (cleared on revoke).
+	nodes := fmt.Sprintf(`[{"id":"prod1","type":"producer","config":{"type":"http","http":{"url":%q,"method":"POST","auth_type":"oauth"}}}]`, srv.URL)
+	mock.MatchExpectationsInOrder(false)
+	for i := 0; i < 5; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).
+				AddRow([]byte(nodes), []byte(`[]`)))
+	}
+
+	var resolveCalls atomic.Int32
+	p := &httpProducer{
+		resolveToken: func(_ context.Context, _, _ string, _ bool) (string, error) {
+			resolveCalls.Add(1)
+			return "should-not-be-used", nil
+		},
+	}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "http-producer", DB: db})
+
+	env := envelope.New()
+	env.ID = "oauth-empty-1"
+	env.IntegrationID = connID
+	env.TenantID = "tenant-1"
+	env.Payload = []byte(`{"x":1}`)
+	h.Publish(t, env)
+
+	harness.Eventually(t, 5*time.Second, "destination received the (unauthenticated) POST", func() bool {
+		return atomic.LoadInt32(&hits) >= 1
+	})
+	if a := gotAuth.Load(); a != nil && a.(string) != "" {
+		t.Errorf("Authorization = %q; expected empty (no grant → no bearer)", a)
+	}
+	if got := resolveCalls.Load(); got != 0 {
+		t.Errorf("resolveToken called %d times; expected 0 (no grant → never resolve a token)", got)
 	}
 }

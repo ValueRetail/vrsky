@@ -404,9 +404,15 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # *_secret_id references (e.g. an encrypted auth-header value) before sending.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # Aux HTTP port the SDK serves the /events SSE stream on (UI connects here).
       WORKER_HTTP_PORT: "9400"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+      # OAuth output (#97): resolve access tokens for nodes with auth_type=oauth.
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     ports:
       - "127.0.0.1:9400:9400"
     depends_on:
@@ -482,6 +488,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # *_secret_id references (e.g. the target-DB password) before connecting.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # Aux HTTP port the SDK serves /events (SSE) + /test-connection on (UI connects here).
       WORKER_HTTP_PORT: "9500"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
@@ -516,6 +525,49 @@ services:
       OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     ports:
       - "127.0.0.1:9800:9800"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Salesforce Consumer - polls Salesforce via SOQL, authed by an OAuth grant (#79)
+  salesforce-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/salesforce-consumer/Dockerfile
+    container_name: vrsky-salesforce-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # OAuth token resolution (#75): fetch access tokens for the configured grant.
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
+  salesforce-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/salesforce-producer/Dockerfile
+    container_name: vrsky-salesforce-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     depends_on:
       nats:
         condition: service_healthy

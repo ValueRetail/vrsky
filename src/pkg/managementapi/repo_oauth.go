@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
@@ -99,15 +100,23 @@ func (r *PostgresRepository) CreateGrant(ctx context.Context, g *oauth.Grant, ac
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Secret names just need to be tenant-unique. Including grant intent in
-	// the name makes operator inspection easier.
-	accessSec, err := createSecretTx(ctx, tx, g.TenantID, "oauth-access:"+g.ProviderName, accessCt)
+	// Generate the grant ID up-front so it can be embedded in the secret
+	// names. Secret names are unique per (tenant_id, name); deriving them from
+	// just the provider name collided whenever a tenant connected the same
+	// provider more than once (re-auth, second grant) → "duplicate key value
+	// violates unique constraint secrets_tenant_id_name_key". The grant ID
+	// makes each name globally unique while still being operator-readable.
+	if g.ID == "" {
+		g.ID = uuid.New().String()
+	}
+
+	accessSec, err := createSecretTx(ctx, tx, g.TenantID, "oauth-access:"+g.ProviderName+":"+g.ID, accessCt)
 	if err != nil {
 		return fmt.Errorf("persist access secret: %w", err)
 	}
 	var refreshSecID sql.NullString
 	if refreshCt != "" {
-		s, err := createSecretTx(ctx, tx, g.TenantID, "oauth-refresh:"+g.ProviderName, refreshCt)
+		s, err := createSecretTx(ctx, tx, g.TenantID, "oauth-refresh:"+g.ProviderName+":"+g.ID, refreshCt)
 		if err != nil {
 			return fmt.Errorf("persist refresh secret: %w", err)
 		}
@@ -117,10 +126,10 @@ func (r *PostgresRepository) CreateGrant(ctx context.Context, g *oauth.Grant, ac
 
 	const q = `
 		INSERT INTO oauth_grants (
-		    tenant_id, provider_id, provider_type, provider_name,
+		    id, tenant_id, provider_id, provider_type, provider_name,
 		    connection_id, user_identifier, scopes_granted,
 		    access_token_secret_id, refresh_token_secret_id, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at`
 	var connID sql.NullString
 	if g.ConnectionID != nil {
@@ -134,7 +143,7 @@ func (r *PostgresRepository) CreateGrant(ctx context.Context, g *oauth.Grant, ac
 	}
 	var createdAt, updatedAt time.Time
 	err = tx.QueryRowContext(ctx, q,
-		g.TenantID, g.ProviderID, g.ProviderType, g.ProviderName,
+		g.ID, g.TenantID, g.ProviderID, g.ProviderType, g.ProviderName,
 		connID, userIdent, pq.Array(g.ScopesGranted),
 		accessSec, refreshSecID, g.ExpiresAt,
 	).Scan(&g.ID, &createdAt, &updatedAt)

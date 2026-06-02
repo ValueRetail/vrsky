@@ -127,7 +127,16 @@ func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Clie
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		if endpoint.AuthType == "oauth" {
+		switch {
+		case endpoint.AuthType == "oauth" && endpoint.OAuthGrantID == "":
+			// OAuth selected but no grant (e.g. the grant was revoked, which
+			// clears the selection on the node). Rather than blocking the poll
+			// — or calling /oauth/grants//token with an empty id and getting an
+			// opaque 500 — fall back to sending unauthenticated and warn. A
+			// proper "reconnect required" hint in the UI is tracked in #98.
+			logger.Warn("OAuth endpoint has no grant selected; polling without authentication (reconnect the grant to authenticate)",
+				"url", url)
+		case endpoint.AuthType == "oauth":
 			if s.oauthTokens == nil || !s.oauthTokens.Configured() {
 				return nil, fmt.Errorf("endpoint uses OAuth but token resolution is not configured (set MGMT_API_URL + OAUTH_TOKEN_SERVICE_SECRET)")
 			}
@@ -141,7 +150,7 @@ func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Clie
 				return nil, fmt.Errorf("resolve oauth token: %w", err)
 			}
 			req.Header.Set("Authorization", "Bearer "+tok)
-		} else {
+		default:
 			applyAuth(req, endpoint.AuthType, endpoint.AuthValue)
 		}
 		req.Header.Set("User-Agent", "VRSky-API-Consumer/1.0")
@@ -155,7 +164,7 @@ func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Clie
 	}
 	// On a 401 for an OAuth endpoint, the token may have been revoked or
 	// rotated server-side; refresh and retry once before giving up.
-	if resp.StatusCode == http.StatusUnauthorized && endpoint.AuthType == "oauth" {
+	if resp.StatusCode == http.StatusUnauthorized && endpoint.AuthType == "oauth" && endpoint.OAuthGrantID != "" {
 		_ = resp.Body.Close()
 		logger.Info("OAuth endpoint returned 401; refreshing token and retrying once",
 			"grant_id", endpoint.OAuthGrantID)
