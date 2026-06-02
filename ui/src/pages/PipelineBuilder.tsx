@@ -1369,13 +1369,13 @@ export default function PipelineBuilder() {
                             {evt.before && (
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>BEFORE</div>
-                                <pre style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.before), null, 2) } catch { return evt.before } })()}</pre>
+                                <pre style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', padding: '6px', fontSize: '11px', color: '#111827', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.before), null, 2) } catch { return evt.before } })()}</pre>
                               </div>
                             )}
                             {evt.after && (
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>AFTER</div>
-                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.after), null, 2) } catch { return evt.after } })()}</pre>
+                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', color: '#111827', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.after), null, 2) } catch { return evt.after } })()}</pre>
                               </div>
                             )}
                           </div>
@@ -1436,13 +1436,13 @@ export default function PipelineBuilder() {
                             {evt.payload && (
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>REQUEST BODY</div>
-                                <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
+                                <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', color: '#111827', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
                               </div>
                             )}
                             {evt.response && (
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>RESPONSE</div>
-                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.response), null, 2) } catch { return evt.response } })()}</pre>
+                                <pre style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '6px', fontSize: '11px', color: '#111827', maxHeight: '100px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.response), null, 2) } catch { return evt.response } })()}</pre>
                               </div>
                             )}
                           </div>
@@ -1478,7 +1478,7 @@ export default function PipelineBuilder() {
                               <div style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', marginBottom: '2px' }}>
                                 DATA{evt.table ? ` → ${evt.table}` : ''}{evt.columns ? ` (${evt.columns.join(', ')})` : ''}
                               </div>
-                              <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', maxHeight: '120px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
+                              <pre style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px', color: '#111827', maxHeight: '120px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>{(() => { try { return JSON.stringify(JSON.parse(evt.payload), null, 2) } catch { return evt.payload } })()}</pre>
                             </div>
                           </div>
                         )}
