@@ -257,6 +257,10 @@ services:
       MGMT_API_LISTEN: ":3000"
       SERVICE_NAME: "VRSky Management API"
       SERVICE_VERSION: "1.0.0"
+      # Local dev is plain http://localhost; Safari won't send Secure cookies
+      # over http, which breaks the cookie-based OAuth/OIDC callback. Disable the
+      # Secure flag for the dev stack. (Leave unset / true behind HTTPS in prod.)
+      COOKIE_SECURE: "false"
       
       # Database configuration - Matches config.go: MGMT_API_DB_URL
       MGMT_API_DB_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"

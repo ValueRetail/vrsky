@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -418,6 +419,13 @@ func pkceChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+// cookieSecure controls the Secure attribute on auth/OAuth cookies. It must be
+// false for local http development — Safari (unlike Chrome) refuses to send
+// Secure cookies over http://localhost, which breaks the cookie-based OAuth/OIDC
+// callback flow. Defaults to true (production over HTTPS); set COOKIE_SECURE=false
+// for an http dev stack.
+var cookieSecure = os.Getenv("COOKIE_SECURE") != "false"
+
 // setShortCookie writes a 10-minute HttpOnly cookie used during the OIDC
 // round-trip (state/PKCE/nonce/slug).
 func setShortCookie(w http.ResponseWriter, name, value string) {
@@ -427,7 +435,7 @@ func setShortCookie(w http.ResponseWriter, name, value string) {
 		Path:     "/",
 		MaxAge:   int(oidcCookieTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -442,7 +450,7 @@ func setSessionCookie(w http.ResponseWriter, rawToken string, expires time.Time)
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -454,7 +462,7 @@ func clearCookie(w http.ResponseWriter, name string) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
