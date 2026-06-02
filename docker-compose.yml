@@ -404,6 +404,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # *_secret_id references (e.g. an encrypted auth-header value) before sending.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # Aux HTTP port the SDK serves the /events SSE stream on (UI connects here).
       WORKER_HTTP_PORT: "9400"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
@@ -485,6 +488,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
+      # *_secret_id references (e.g. the target-DB password) before connecting.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # Aux HTTP port the SDK serves /events (SSE) + /test-connection on (UI connects here).
       WORKER_HTTP_PORT: "9500"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
