@@ -22,6 +22,7 @@ import ApiKeyPage from './pages/ApiKeyPage'
 import AuditPage from './pages/AuditPage'
 import UsersPage from './pages/UsersPage'
 import UsagePage from './pages/UsagePage'
+import OAuthProvidersPage from './pages/OAuthProvidersPage'
 
 function App() {
   const { confirmDialog, hideConfirmDialog } = useUIStore()
@@ -79,6 +80,7 @@ function App() {
             <Route path="/settings/connection-requests" element={<ProtectedRoute><ConnectionRequestsPage /></ProtectedRoute>} />
             <Route path="/settings/tenant-connections" element={<ProtectedRoute><TenantConnectionsPage /></ProtectedRoute>} />
             <Route path="/settings/api-key" element={<ProtectedRoute><ApiKeyPage /></ProtectedRoute>} />
+            <Route path="/settings/oauth" element={<ProtectedRoute><OAuthProvidersPage /></ProtectedRoute>} />
             <Route path="/settings/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
             <Route path="/settings/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
             <Route path="/settings/usage" element={<ProtectedRoute><UsagePage /></ProtectedRoute>} />
