@@ -463,6 +463,81 @@ function TenantConsumerConfig({
   )
 }
 
+// Salesforce consumer config (#79 PR 1): SOQL poll authenticated by an OAuth
+// grant. Stores config.salesforce = {instance_url, oauth_grant_id, soql,
+// poll_interval_seconds, api_version}.
+function SalesforceConsumerConfig({
+  config,
+  setConfig,
+  deployedConnectionId,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  deployedConnectionId?: string
+}) {
+  const sf = (config.salesforce as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, salesforce: { ...sf, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Instance URL"
+        placeholder="https://your-org.my.salesforce.com"
+        value={(sf.instance_url as string) || ''}
+        onChange={(v) => update({ instance_url: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <OAuthGrantSelector
+          value={(sf.oauth_grant_id as string) || ''}
+          onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
+          connectionId={deployedConnectionId}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>SOQL query</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="SELECT Id, Name FROM Account ORDER BY LastModifiedDate DESC"
+          value={(sf.soql as string) || ''}
+          onChange={(e) => update({ soql: e.target.value })}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Poll interval (s, 0 = once)"
+          placeholder="0"
+          type="number"
+          value={String((sf.poll_interval_seconds as number) ?? 0)}
+          onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+        />
+        <StyledInput
+          label="API version"
+          placeholder="v60.0"
+          value={(sf.api_version as string) || ''}
+          onChange={(v) => update({ api_version: v })}
+        />
+      </div>
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Connect a Salesforce account (OAuth) above, then enter a SOQL query. For a
+        sandbox, register a Salesforce provider with the test.salesforce.com URLs.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2066,6 +2141,7 @@ export default function PropertyEditor({
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
                 { value: 'tenant', label: 'Tenant Input' },
+                { value: 'salesforce', label: 'Salesforce' },
               ]}
             />
 
@@ -2218,6 +2294,14 @@ export default function PropertyEditor({
               <TenantConsumerConfig
                 config={config}
                 setConfig={setConfig}
+              />
+            )}
+
+            {config.type === 'salesforce' && (
+              <SalesforceConsumerConfig
+                config={config}
+                setConfig={setConfig}
+                deployedConnectionId={deployedConnectionId}
               />
             )}
           </div>

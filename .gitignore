@@ -171,6 +171,7 @@ docker-compose.override.yml
 /src/migrate-secrets
 /src/postgres-consumer
 /src/postgres-producer
+/src/salesforce-consumer
 /src/tenant-consumer
 /src/webhook-consumer
 /src/cmd/management-api/management-api

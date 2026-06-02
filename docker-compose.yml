@@ -525,6 +525,28 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # Salesforce Consumer - polls Salesforce via SOQL, authed by an OAuth grant (#79)
+  salesforce-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/salesforce-consumer/Dockerfile
+    container_name: vrsky-salesforce-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # OAuth token resolution (#75): fetch access tokens for the configured grant.
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
   data-filter:
     build:
       context: .
