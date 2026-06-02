@@ -63,9 +63,13 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip tenant validation for auth routes, tenant routes, and health checks
-			// Auth and tenant management are session-scoped, not tenant-header-scoped
+			// Auth and tenant management are session-scoped, not tenant-header-scoped.
+			// The OAuth callback is also exempt: it's a top-level browser redirect
+			// from the provider, so it can't carry the X-Tenant-ID header — it
+			// derives the tenant from the signed state cookie set at StartOAuth.
 			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/tenants") ||
+				r.URL.Path == "/api/v1/oauth/callback" ||
 				r.URL.Path == "/health" ||
 				r.URL.Path == "/ready" {
 				next.ServeHTTP(w, r)
