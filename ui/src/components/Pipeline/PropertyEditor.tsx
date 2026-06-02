@@ -463,6 +463,79 @@ function TenantConsumerConfig({
   )
 }
 
+// Salesforce producer config (#79 PR 2): write records via REST (insert/upsert),
+// auto Bulk API for batches ≥200. Stores config.salesforce = {instance_url,
+// oauth_grant_id, object, operation, external_id_field, api_version}.
+function SalesforceProducerConfig({
+  config,
+  setConfig,
+  deployedConnectionId,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  deployedConnectionId?: string
+}) {
+  const sf = (config.salesforce as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, salesforce: { ...sf, ...patch } })
+  const operation = (sf.operation as string) || 'insert'
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Instance URL"
+        placeholder="https://your-org.my.salesforce.com"
+        value={(sf.instance_url as string) || ''}
+        onChange={(v) => update({ instance_url: v })}
+      />
+      <div>
+        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <OAuthGrantSelector
+          value={(sf.oauth_grant_id as string) || ''}
+          onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
+          connectionId={deployedConnectionId}
+        />
+      </div>
+      <StyledInput
+        label="Object (sObject)"
+        placeholder="Account"
+        value={(sf.object as string) || ''}
+        onChange={(v) => update({ object: v })}
+      />
+      <StyledSelect
+        label="Operation"
+        value={operation}
+        onChange={(v) => update({ operation: v })}
+        options={[
+          { value: 'insert', label: 'Insert' },
+          { value: 'upsert', label: 'Upsert (by external id)' },
+        ]}
+      />
+      {operation === 'upsert' && (
+        <StyledInput
+          label="External ID field"
+          placeholder="ExternalId__c"
+          value={(sf.external_id_field as string) || ''}
+          onChange={(v) => update({ external_id_field: v })}
+        />
+      )}
+      <StyledInput
+        label="API version"
+        placeholder="v60.0"
+        value={(sf.api_version as string) || ''}
+        onChange={(v) => update({ api_version: v })}
+      />
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Records flowing into this node are written to Salesforce. Batches of 200+ records
+        automatically use the Bulk API 2.0.
+      </div>
+    </div>
+  )
+}
+
 // Salesforce consumer config (#79 PR 1): SOQL poll authenticated by an OAuth
 // grant. Stores config.salesforce = {instance_url, oauth_grant_id, soql,
 // poll_interval_seconds, api_version}.
@@ -2319,6 +2392,7 @@ export default function PropertyEditor({
                 { value: 'http', label: 'Webhook (HTTP)' },
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
+                { value: 'salesforce', label: 'Salesforce' },
               ]}
             />
 
@@ -2425,6 +2499,14 @@ export default function PropertyEditor({
               <DatabaseProducerConfig
                 config={config}
                 setConfig={setConfig}
+              />
+            )}
+
+            {config.type === 'salesforce' && (
+              <SalesforceProducerConfig
+                config={config}
+                setConfig={setConfig}
+                deployedConnectionId={deployedConnectionId}
               />
             )}
           </div>

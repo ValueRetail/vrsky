@@ -550,6 +550,27 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
+  salesforce-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/salesforce-producer/Dockerfile
+    container_name: vrsky-salesforce-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
   data-filter:
     build:
       context: .

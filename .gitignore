@@ -172,6 +172,7 @@ docker-compose.override.yml
 /src/postgres-consumer
 /src/postgres-producer
 /src/salesforce-consumer
+/src/salesforce-producer
 /src/tenant-consumer
 /src/webhook-consumer
 /src/cmd/management-api/management-api
