@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,18 +12,28 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/google/uuid"
-	"github.com/ValueRetail/vrsky/pkg/messaging"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 )
 
-type DBConsumerService struct {
-	db     *sql.DB // management DB
-	nc     *nats.Conn
-	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
-	logger *slog.Logger
-	config *Config
+// dbConsumer polls external source databases per active connection and publishes
+// the resulting rows into the pipeline. It is an SDK Consumer: the runner
+// provides NATS/DB/health/lifecycle; this type implements Configure (wire deps +
+// register HTTP handlers), Run (subscribe to command subjects, block), and Stop
+// (cancel pollers, close source pools).
+type dbConsumer struct {
+	sdk.BaseConsumer
+
+	db      *sql.DB // management DB
+	nc      *nats.Conn
+	publish sdk.PublishFunc // injected by the runner; the one data-emit path
+	logger  *slog.Logger
+
+	// openSource dials a source database from a DSN. Defaulted to a real
+	// postgres opener in Configure; tests inject a mock to avoid Docker.
+	openSource func(connStr string) (*sql.DB, error)
 
 	activeConnections map[string]*ActiveDBConnection
 	mu                sync.RWMutex
@@ -35,54 +46,33 @@ type DBConsumerService struct {
 	stopSub  *nats.Subscription
 }
 
-type DBEvent struct {
-	Type    string `json:"type"`              // "connected", "query", "rows", "error", "disconnected"
-	Message string `json:"message,omitempty"`
-	Count   int    `json:"count,omitempty"`
-	Time    string `json:"time"`
-}
-
-type ActiveDBConnection struct {
-	ConnectionID string
-	TenantID     string
-	SourceDB     *sql.DB
-	Cancel       context.CancelFunc
-	DBConfig     SourceDBConfig
-}
-
-type SourceDBConfig struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	Database string `json:"database"`
-	SSLMode  string `json:"sslmode"`
-	Query    string `json:"query"`
-	Table    string `json:"table"`
-	Interval int    `json:"poll_interval_seconds"` // 0 = one-shot
-}
-
-func NewDBConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *DBConsumerService {
-	js, err := nc.JetStream()
-	if err != nil {
-		logger.Error("Failed to get JetStream context", "error", err)
+// Configure wires dependencies and registers the HTTP endpoints the UI uses
+// (served on the SDK auxiliary HTTP port). Called once before Run.
+func (s *dbConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
+	if res.DB == nil {
+		return errors.New("db-consumer requires DATABASE_URL")
 	}
-	var pub *messaging.Publisher
-	if js != nil {
-		pub = messaging.NewPublisher(js)
+	s.db = res.DB
+	s.nc = res.NATS
+	s.logger = res.Logger
+	s.activeConnections = make(map[string]*ActiveDBConnection)
+	s.eventSubs = make(map[string][]chan DBEvent)
+	if s.openSource == nil {
+		s.openSource = func(connStr string) (*sql.DB, error) { return sql.Open("postgres", connStr) }
 	}
-	return &DBConsumerService{
-		db:                db,
-		nc:                nc,
-		pub:               pub,
-		logger:            logger,
-		config:            config,
-		activeConnections: make(map[string]*ActiveDBConnection),
-		eventSubs:         make(map[string][]chan DBEvent),
-	}
+
+	s.RegisterHTTPHandler("/events/", s.handleEvents())
+	s.RegisterHTTPHandler("/test-connection/", handleTestConnection())
+	s.RegisterHTTPHandler("/sample-data/", handleSampleData())
+
+	res.Health.SetReady(true)
+	return nil
 }
 
-func (s *DBConsumerService) Start(ctx context.Context) error {
+// Run subscribes to the connection command subjects and blocks until the runner
+// cancels ctx. Per-connection polling is driven from the command handlers.
+func (s *dbConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
+	s.publish = publish
 	s.logger.Info("Starting DB Consumer Service")
 
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
@@ -98,10 +88,13 @@ func (s *DBConsumerService) Start(ctx context.Context) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	<-ctx.Done()
 	return nil
 }
 
-func (s *DBConsumerService) Stop(ctx context.Context) error {
+// Stop cancels all pollers and closes source DB pools. The SDK runner calls
+// this after Run returns.
+func (s *dbConsumer) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping DB Consumer Service")
 
 	if s.startSub != nil {
@@ -130,12 +123,39 @@ func (s *DBConsumerService) Stop(ctx context.Context) error {
 	}
 }
 
+type DBEvent struct {
+	Type    string `json:"type"` // "connected", "query", "rows", "error", "disconnected"
+	Message string `json:"message,omitempty"`
+	Count   int    `json:"count,omitempty"`
+	Time    string `json:"time"`
+}
+
+type ActiveDBConnection struct {
+	ConnectionID string
+	TenantID     string
+	SourceDB     *sql.DB
+	Cancel       context.CancelFunc
+	DBConfig     SourceDBConfig
+}
+
+type SourceDBConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	Database string `json:"database"`
+	SSLMode  string `json:"sslmode"`
+	Query    string `json:"query"`
+	Table    string `json:"table"`
+	Interval int    `json:"poll_interval_seconds"` // 0 = one-shot
+}
+
 type CommandMessage struct {
 	ConnectionID string `json:"connection_id"`
 	TenantID     string `json:"tenant_id"`
 }
 
-func (s *DBConsumerService) handleStartCommand(msg *nats.Msg) {
+func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse start command", "error", err)
@@ -175,7 +195,7 @@ func (s *DBConsumerService) handleStartCommand(msg *nats.Msg) {
 	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		dbConfig.Host, dbConfig.Port, dbConfig.User, dbConfig.Password, dbConfig.Database, dbConfig.SSLMode)
 
-	sourceDB, err := sql.Open("postgres", connStr)
+	sourceDB, err := s.openSource(connStr)
 	if err != nil {
 		s.logger.Error("Failed to open source database", "error", err)
 		s.emitEvent(cmd.ConnectionID, DBEvent{
@@ -223,7 +243,7 @@ func (s *DBConsumerService) handleStartCommand(msg *nats.Msg) {
 	s.logger.Info("DB consumer started", "connection_id", cmd.ConnectionID, "host", dbConfig.Host, "database", dbConfig.Database)
 }
 
-func (s *DBConsumerService) handleStopCommand(msg *nats.Msg) {
+func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse stop command", "error", err)
@@ -255,7 +275,7 @@ func (s *DBConsumerService) handleStopCommand(msg *nats.Msg) {
 	}
 }
 
-func (s *DBConsumerService) runConsumer(ctx context.Context, ac *ActiveDBConnection) {
+func (s *dbConsumer) runConsumer(ctx context.Context, ac *ActiveDBConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID)
 
 	query := ac.DBConfig.Query
@@ -292,7 +312,7 @@ func (s *DBConsumerService) runConsumer(ctx context.Context, ac *ActiveDBConnect
 	}
 }
 
-func (s *DBConsumerService) executeAndPublish(ctx context.Context, ac *ActiveDBConnection, query string, logger *slog.Logger) {
+func (s *dbConsumer) executeAndPublish(ctx context.Context, ac *ActiveDBConnection, query string, logger *slog.Logger) {
 	s.emitEvent(ac.ConnectionID, DBEvent{
 		Type: "query", Message: "Executing query...",
 		Time: time.Now().UTC().Format(time.RFC3339),
@@ -378,13 +398,15 @@ func (s *DBConsumerService) executeAndPublish(ctx context.Context, ac *ActiveDBC
 		Metadata:      map[string]interface{}{"columns": columns, "row_count": len(allRows), "filename": filename},
 	}
 
+	// Marshal once for the last_payload cache; the SDK publish path marshals
+	// the envelope itself (envelope.Marshal == json.Marshal — identical bytes).
 	envData, err := json.Marshal(env)
 	if err != nil {
 		logger.Error("Failed to marshal envelope", "error", err)
 		return
 	}
 
-	if err := s.pub.Publish(context.Background(), ac.TenantID, ac.ConnectionID, env.ID, envData); err != nil {
+	if err := s.publish(context.Background(), env); err != nil {
 		logger.Error("Failed to publish to JetStream", "error", err)
 		return
 	}
@@ -401,7 +423,7 @@ func (s *DBConsumerService) executeAndPublish(ctx context.Context, ac *ActiveDBC
 
 // --- Event broadcasting ---
 
-func (s *DBConsumerService) subscribeEvents(connectionID string) (chan DBEvent, func()) {
+func (s *dbConsumer) subscribeEvents(connectionID string) (chan DBEvent, func()) {
 	ch := make(chan DBEvent, 50)
 	s.eventSubsMu.Lock()
 	s.eventSubs[connectionID] = append(s.eventSubs[connectionID], ch)
@@ -421,7 +443,7 @@ func (s *DBConsumerService) subscribeEvents(connectionID string) (chan DBEvent, 
 	}
 }
 
-func (s *DBConsumerService) emitEvent(connectionID string, event DBEvent) {
+func (s *dbConsumer) emitEvent(connectionID string, event DBEvent) {
 	s.eventSubsMu.RLock()
 	defer s.eventSubsMu.RUnlock()
 	for _, ch := range s.eventSubs[connectionID] {
@@ -448,7 +470,7 @@ type Node struct {
 	Config json.RawMessage `json:"config"`
 }
 
-func (s *DBConsumerService) getConnection(connectionID, tenantID string) (*Connection, error) {
+func (s *dbConsumer) getConnection(connectionID, tenantID string) (*Connection, error) {
 	var conn Connection
 	err := s.db.QueryRow(
 		`SELECT id, tenant_id, name, nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -475,7 +497,7 @@ func (s *DBConsumerService) getConnection(connectionID, tenantID string) (*Conne
 // resolveSecretsInNodes walks the nodes[] array, decodes each node.config,
 // runs the resolver, and re-marshals. Errors here are fatal — we'd rather
 // fail loud than connect with the wrong password.
-func (s *DBConsumerService) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
+func (s *dbConsumer) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
 	if len(nodesJSON) == 0 {
 		return nodesJSON, nil
 	}
@@ -496,7 +518,7 @@ func (s *DBConsumerService) resolveSecretsInNodes(nodesJSON json.RawMessage, ten
 	return json.Marshal(nodes)
 }
 
-func (s *DBConsumerService) extractDBConfig(conn *Connection) (SourceDBConfig, bool) {
+func (s *dbConsumer) extractDBConfig(conn *Connection) (SourceDBConfig, bool) {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
 		return SourceDBConfig{}, false
@@ -506,7 +528,7 @@ func (s *DBConsumerService) extractDBConfig(conn *Connection) (SourceDBConfig, b
 			continue
 		}
 		var config struct {
-			Type     string       `json:"type"`
+			Type     string         `json:"type"`
 			Database SourceDBConfig `json:"database"`
 		}
 		if err := json.Unmarshal(node.Config, &config); err != nil {
@@ -519,7 +541,7 @@ func (s *DBConsumerService) extractDBConfig(conn *Connection) (SourceDBConfig, b
 	return SourceDBConfig{}, false
 }
 
-func (s *DBConsumerService) updateConnectionStatus(connectionID, tenantID, status string) error {
+func (s *dbConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {
 	var query string
 	if status == "running" {
 		query = `UPDATE connections SET status = $1, started_at = NOW(), updated_at = NOW() WHERE id = $2 AND tenant_id = $3`

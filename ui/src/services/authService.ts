@@ -6,7 +6,6 @@
 
 import axios from 'axios'
 import type { AxiosInstance } from 'axios'
-import { config } from '@/config/env'
 import type {
   RegisterRequest,
   LoginRequest,

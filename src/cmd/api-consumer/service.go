@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/oauthtoken"
 	"github.com/nats-io/nats.go"
 )
 
@@ -28,6 +29,11 @@ type APIConsumerService struct {
 	// Subscriptions
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
+
+	// OAuth token resolver (#75). Non-nil + Configured() when MGMT_API_URL +
+	// OAUTH_TOKEN_SERVICE_SECRET are set; resolves access tokens for
+	// endpoints with auth_type=oauth.
+	oauthTokens *oauthtoken.Client
 }
 
 // NewAPIConsumerService creates a new API Consumer service
@@ -40,6 +46,11 @@ func NewAPIConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, confi
 	if js != nil {
 		pub = messaging.NewPublisher(js)
 	}
+	var tokens *oauthtoken.Client
+	if config.MgmtAPIURL != "" && config.OAuthServiceToken != "" {
+		tokens = oauthtoken.New(config.MgmtAPIURL, config.OAuthServiceToken)
+		logger.Info("OAuth token resolution enabled", "mgmt_api", config.MgmtAPIURL)
+	}
 	return &APIConsumerService{
 		db:              db,
 		nc:              nc,
@@ -47,6 +58,7 @@ func NewAPIConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, confi
 		logger:          logger,
 		config:          config,
 		activePipelines: make(map[string]context.CancelFunc),
+		oauthTokens:     tokens,
 	}
 }
 
@@ -242,10 +254,11 @@ type APIConsumerConfig struct {
 
 // APIEndpoint represents a single API endpoint configuration
 type APIEndpoint struct {
-	Path      string `json:"path"`
-	Params    string `json:"params"`     // Query parameters (e.g., "lat=59.9&lon=10.7")
-	AuthType  string `json:"auth_type"`  // "none", "bearer", "api_key"
-	AuthValue string `json:"auth_value"` // Token or API key (may be encrypted)
+	Path         string `json:"path"`
+	Params       string `json:"params"`         // Query parameters (e.g., "lat=59.9&lon=10.7")
+	AuthType     string `json:"auth_type"`      // "none", "bearer", "api_key", "oauth"
+	AuthValue    string `json:"auth_value"`     // Token or API key (may be encrypted)
+	OAuthGrantID string `json:"oauth_grant_id"` // grant whose access token to inject (auth_type=oauth)
 }
 
 // Node represents a pipeline node

@@ -257,6 +257,10 @@ services:
       MGMT_API_LISTEN: ":3000"
       SERVICE_NAME: "VRSky Management API"
       SERVICE_VERSION: "1.0.0"
+      # Local dev is plain http://localhost; Safari won't send Secure cookies
+      # over http, which breaks the cookie-based OAuth/OIDC callback. Disable the
+      # Secure flag for the dev stack. (Leave unset / true behind HTTPS in prod.)
+      COOKIE_SECURE: "false"
       
       # Database configuration - Matches config.go: MGMT_API_DB_URL
       MGMT_API_DB_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
@@ -282,6 +286,9 @@ services:
       #     openssl rand -hex 32
       # See docs/SECURITY.md for rotation procedure.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Shared secret workers present (X-Service-Token) to the OAuth token
+      # endpoint (#75). Dev default; set a real value in any real deployment.
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     depends_on:
       nats:
         condition: service_healthy
@@ -397,7 +404,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      HTTP_PRODUCER_PORT: "9400"
+      # Aux HTTP port the SDK serves the /events SSE stream on (UI connects here).
+      WORKER_HTTP_PORT: "9400"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
       - "127.0.0.1:9400:9400"
@@ -474,7 +482,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      DB_PRODUCER_PORT: "9500"
+      # Aux HTTP port the SDK serves /events (SSE) + /test-connection on (UI connects here).
+      WORKER_HTTP_PORT: "9500"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
     ports:
       - "127.0.0.1:9500:9500"
@@ -501,6 +510,10 @@ services:
       API_CONSUMER_PORT: "9800"
       # Required by the secrets resolver (#66).
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # OAuth token resolution (#75): where to fetch access tokens for
+      # endpoints with auth_type=oauth, and the shared service secret.
+      MGMT_API_URL: "http://management-api:3000"
+      OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
     ports:
       - "127.0.0.1:9800:9800"
     depends_on:
@@ -544,7 +557,8 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      DB_CONSUMER_PORT: "9300"
+      # Aux HTTP port the SDK serves /events (SSE) + /test-connection + /sample-data on (UI connects here).
+      WORKER_HTTP_PORT: "9300"
       # Required by the secrets resolver (#66) — DB passwords are stored encrypted.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ports:

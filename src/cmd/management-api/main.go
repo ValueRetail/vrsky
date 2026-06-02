@@ -20,6 +20,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
+	"github.com/ValueRetail/vrsky/pkg/oauth"
 )
 
 func main() {
@@ -64,7 +65,7 @@ func main() {
 	defer nc.Close()
 
 	// Setup HTTP server with graceful shutdown
-	server := setupServer(config, db, nc, logger)
+	server, tenantProvisioner := setupServer(config, db, nc, logger)
 
 	// Start server in a goroutine
 	serverErrs := make(chan error, 1)
@@ -92,6 +93,12 @@ func main() {
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Printf("Error during shutdown: %v", err)
 		}
+
+		// Stop the tenant provisioner after the HTTP server has drained, so no
+		// new provisioning jobs are enqueued mid-drain. Stop() blocks until the
+		// worker finishes any in-flight job and empties the queue.
+		tenantProvisioner.Stop()
+
 		logger.Printf("Server stopped")
 	}
 }
@@ -142,8 +149,11 @@ func initNATS(natsURL string, logger *log.Logger) (*nats.Conn, error) {
 	return nc, nil
 }
 
-// setupServer creates and configures the HTTP server
-func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) *http.Server {
+// setupServer creates and configures the HTTP server. It also returns the
+// tenant provisioner so main() can drive its lifecycle (Stop on shutdown);
+// its background worker must outlive this function, so it must not be stopped
+// via defer here.
+func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) (*http.Server, *managementapi.TenantProvisioner) {
 	mux := http.NewServeMux()
 
 	// Health check endpoints
@@ -213,14 +223,43 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 	k8sProvisioner := initK8sNATSProvisioner(logger)
 	tenantSSEHub := managementapi.NewTenantSSEHub()
 	tenantProvisioner := managementapi.NewTenantProvisioner(repo, k8sProvisioner, tenantSSEHub, logger)
+	// NB: no `defer Stop()` here — setupServer returns long before the process
+	// exits, so a deferred Stop would kill the provisioner immediately (it
+	// started and stopped in the same instant, leaving provisioning dead on
+	// arrival — same bug class as the OAuth refresher below, fixed in cf534c8).
+	// Instead the provisioner is returned to main(), which calls Stop() on the
+	// graceful-shutdown path so the worker can drain in-flight jobs.
 	tenantProvisioner.Start()
-	defer tenantProvisioner.Stop()
 	restHandler.SetTenantProvisioner(tenantProvisioner)
 	restHandler.SetTenantSSEHub(tenantSSEHub)
 
 	// Phase 3: Data sharing rate limiter
 	rateLimiter := managementapi.NewConnectionRateLimiter()
 	restHandler.SetRateLimiter(rateLimiter)
+
+	// Phase 2A (#75): OAuth 2.0 framework. The repo implements oauth.Store,
+	// so the client can be built directly off it. The refresher gets a small
+	// tenant-lookup function so ticker-scan jobs (which are global) can
+	// resolve a grant's tenant before calling Client.Refresh.
+	oauthClient := oauth.New(repo, oauth.DefaultRegistry())
+	restHandler.SetOAuthClient(oauthClient)
+	oauthRefresher := managementapi.NewOAuthRefresher(oauthClient, repo)
+	oauthRefresher.SetTenantLookup(func(ctx context.Context, grantID string) (string, error) {
+		var tenantID string
+		// lint:tenant-ok — resolving the row's own tenant by grant PK; outer
+		// caller verifies tenant on every subsequent operation.
+		const q = `SELECT tenant_id FROM oauth_grants WHERE id = $1`
+		if err := db.QueryRowContext(ctx, q, grantID).Scan(&tenantID); err != nil {
+			return "", err
+		}
+		return tenantID, nil
+	})
+	// NB: no `defer Stop()` here — setupServer returns long before the process
+	// exits, so a deferred Stop would kill the refresher immediately (the
+	// tenantProvisioner above has this latent bug). The refresher runs for the
+	// process lifetime; its ticker + worker goroutines are reclaimed on exit.
+	oauthRefresher.Start()
+	restHandler.SetOAuthRefresher(oauthRefresher)
 
 	restHandler.RegisterRoutes(mux)
 
@@ -259,7 +298,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 		ReadTimeout:  config.ReadTimeout,
 		WriteTimeout: config.WriteTimeout,
 		IdleTimeout:  60 * time.Second,
-	}
+	}, tenantProvisioner
 }
 
 // initK8sNATSProvisioner tries to create a K8s client for tenant NATS provisioning.

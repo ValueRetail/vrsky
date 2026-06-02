@@ -4,21 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/nats-io/nats.go"
 )
 
-// TenantConsumerService manages tenant-to-tenant data bridges
-type TenantConsumerService struct {
-	db     *sql.DB
-	nc     *nats.Conn
-	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
-	logger *slog.Logger
+// tenantConsumer manages tenant-to-tenant data bridges. It is an SDK Consumer:
+// the runner provides NATS/DB/health/lifecycle; this type implements Configure
+// (wire deps), Run (subscribe to command subjects and block), and Stop (tear
+// down bridges).
+type tenantConsumer struct {
+	sdk.BaseConsumer
+
+	db      *sql.DB
+	nc      *nats.Conn
+	publish sdk.PublishFunc // injected by the runner; the one data-emit path
+	logger  *slog.Logger
 
 	activeBridges map[string]context.CancelFunc
 	mu            sync.RWMutex
@@ -27,33 +33,31 @@ type TenantConsumerService struct {
 	stopSub  *nats.Subscription
 }
 
-// NewTenantConsumerService creates a new service
-func NewTenantConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger) *TenantConsumerService {
-	js, err := nc.JetStream()
-	if err != nil {
-		logger.Error("Failed to get JetStream context", "error", err)
-	}
-	var pub *messaging.Publisher
-	if js != nil {
-		pub = messaging.NewPublisher(js)
-	}
-	return &TenantConsumerService{
-		db:            db,
-		nc:            nc,
-		pub:           pub,
-		logger:        logger,
-		activeBridges: make(map[string]context.CancelFunc),
-	}
-}
-
 // CommandMessage represents a start/stop command from NATS
 type CommandMessage struct {
 	ConnectionID string `json:"connection_id"`
 	TenantID     string `json:"tenant_id"`
 }
 
-// Start subscribes to NATS command topics
-func (s *TenantConsumerService) Start(ctx context.Context) error {
+// Configure wires dependencies. Called once by the runner before Run.
+func (s *tenantConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
+	if res.DB == nil {
+		return errors.New("tenant-consumer requires DATABASE_URL")
+	}
+	s.db = res.DB
+	s.nc = res.NATS
+	s.logger = res.Logger
+	s.activeBridges = make(map[string]context.CancelFunc)
+	res.Health.SetReady(true)
+	return nil
+}
+
+// Run subscribes to the connection command subjects and blocks until the runner
+// cancels ctx (on SIGTERM/SIGINT). Per-bridge JetStream subscriptions and the
+// republish path are driven from the command handlers.
+func (s *tenantConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
+	s.publish = publish
+
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to start commands: %w", err)
@@ -67,11 +71,13 @@ func (s *TenantConsumerService) Start(ctx context.Context) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	<-ctx.Done()
 	return nil
 }
 
-// Stop gracefully shuts down all active bridges
-func (s *TenantConsumerService) Stop(ctx context.Context) {
+// Stop gracefully shuts down all active bridges. The SDK runner calls this
+// after Run returns.
+func (s *tenantConsumer) Stop(ctx context.Context) error {
 	if s.startSub != nil {
 		_ = s.startSub.Unsubscribe()
 	}
@@ -91,10 +97,11 @@ func (s *TenantConsumerService) Stop(ctx context.Context) {
 	case <-ctx.Done():
 	case <-time.After(2 * time.Second):
 	}
+	return nil
 }
 
 // handleStartCommand processes a start command
-func (s *TenantConsumerService) handleStartCommand(msg *nats.Msg) {
+func (s *tenantConsumer) handleStartCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse start command", "error", err)
@@ -142,7 +149,7 @@ func (s *TenantConsumerService) handleStartCommand(msg *nats.Msg) {
 }
 
 // handleStopCommand processes a stop command
-func (s *TenantConsumerService) handleStopCommand(msg *nats.Msg) {
+func (s *tenantConsumer) handleStopCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse stop command", "error", err)
@@ -180,7 +187,7 @@ type PipelineConnection struct {
 	Edges    json.RawMessage
 }
 
-func (s *TenantConsumerService) getConnection(connectionID, tenantID string) (*PipelineConnection, error) {
+func (s *tenantConsumer) getConnection(connectionID, tenantID string) (*PipelineConnection, error) {
 	var conn PipelineConnection
 	err := s.db.QueryRow(`
 		SELECT id, tenant_id, name, nodes, edges
@@ -194,7 +201,7 @@ func (s *TenantConsumerService) getConnection(connectionID, tenantID string) (*P
 }
 
 // extractTenantConsumerConfig finds a tenant consumer node in the connection's nodes
-func (s *TenantConsumerService) extractTenantConsumerConfig(conn *PipelineConnection) (*TenantConsumerConfig, error) {
+func (s *tenantConsumer) extractTenantConsumerConfig(conn *PipelineConnection) (*TenantConsumerConfig, error) {
 	var nodes []struct {
 		ID     string          `json:"id"`
 		Type   string          `json:"type"`
@@ -225,7 +232,7 @@ func (s *TenantConsumerService) extractTenantConsumerConfig(conn *PipelineConnec
 	return nil, fmt.Errorf("no tenant consumer node found")
 }
 
-func (s *TenantConsumerService) updateConnectionStatus(connectionID, tenantID, status string) error {
+func (s *tenantConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {
 	var query string
 	if status == "running" {
 		query = `UPDATE connections SET status = $1, started_at = NOW(), updated_at = NOW() WHERE id = $2 AND tenant_id = $3`

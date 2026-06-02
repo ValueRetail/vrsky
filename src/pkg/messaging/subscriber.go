@@ -80,6 +80,16 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	if len(opts.Backoff) == 0 {
 		opts.Backoff = DefaultBackoff
 	}
+	// JetStream derives a consumer's effective AckWait from Backoff[0] when a
+	// backoff schedule is supplied. If we also request a *different* AckWait,
+	// creating the consumer silently stores Backoff[0] — but every later
+	// re-subscribe to that durable then fails with
+	// "configuration requests ack wait to be X, but consumer's value is Y",
+	// crash-looping the worker on restart (issue #99). Align the requested
+	// AckWait with Backoff[0] so create and re-bind always agree; this also
+	// lets already-drifted consumers (stored at Backoff[0]) re-bind cleanly
+	// with no manual `consumer rm`.
+	opts.AckWait = opts.Backoff[0]
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}

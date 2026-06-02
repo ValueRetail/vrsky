@@ -14,6 +14,7 @@ import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import OAuthConnected from './pages/OAuthConnected'
 import NotFound from './pages/NotFound'
 import ConnectionRequestsPage from './pages/ConnectionRequestsPage'
 import TenantConnectionsPage from './pages/TenantConnectionsPage'
@@ -43,6 +44,8 @@ function App() {
           {/* Public auth routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {/* OAuth popup landing — posts the grant id back to the opener */}
+          <Route path="/oauth/connected" element={<OAuthConnected />} />
           
           {/* Protected routes - PipelineBuilder is the main application */}
           <Route path="/" element={
