@@ -205,7 +205,13 @@ func (p *salesforceProducer) restWrite(ctx context.Context, tenantID string, cfg
 			method = http.MethodPost
 			u = fmt.Sprintf("%s/services/data/%s/sobjects/%s", base, cfg.APIVersion, cfg.Object)
 		}
-		body, _ := json.Marshal(rec)
+		body, err := json.Marshal(rec)
+		if err != nil {
+			// A record that can't be marshalled won't improve on retry — skip
+			// it (poison record) rather than sending an empty/invalid body.
+			p.logger.Error("skipping unmarshalable record", "object", cfg.Object, "error", err)
+			continue
+		}
 		status, respBody, err := p.doRequest(ctx, tenantID, cfg.OAuthGrantID, method, u, "application/json", body)
 		if err != nil {
 			if transient == nil {

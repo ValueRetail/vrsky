@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useUIStore } from '@/store/uiStore'
+import { useAuthStore } from '@/store/authStore'
 import * as oauthService from '@/services/oauthService'
 import type { OAuthProvider } from '@/services/oauthService'
 
@@ -21,6 +22,11 @@ const labelClass = 'block text-xs font-medium text-neutral-600 mb-1'
  */
 export default function OAuthProvidersPage() {
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
+
+  // Provider CRUD endpoints are admin-gated server-side; mirror that in the UI
+  // so non-admins see a read-only view instead of controls that 403.
+  const role = useAuthStore((s) => s.currentTenant?.user_role)
+  const canManage = role === 'owner' || role === 'admin'
 
   const [providers, setProviders] = useState<OAuthProvider[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,7 +75,7 @@ export default function OAuthProvidersPage() {
         name: name.trim(),
         provider_type: type,
         client_id: clientId.trim(),
-        client_secret: secret,
+        client_secret: secret.trim(),
         redirect_url: redirect.trim(),
         ...(type === 'custom' ? { auth_url: authURL.trim(), token_url: tokenURL.trim() } : {}),
       })
@@ -110,7 +116,15 @@ export default function OAuthProvidersPage() {
         pick a provider. Register the redirect URL below with the provider exactly as shown.
       </p>
 
-      {/* Add provider */}
+      {!canManage && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 mb-6 text-sm">
+          Only workspace <strong>owners</strong> and <strong>admins</strong> can register or delete OAuth providers.
+          You can view the configured providers below.
+        </div>
+      )}
+
+      {/* Add provider — owners/admins only */}
+      {canManage && (
       <div className="bg-white border border-neutral-200 rounded-lg p-5 mb-6">
         <h2 className="text-sm font-semibold text-neutral-800 mb-3">Add a provider</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -161,6 +175,7 @@ export default function OAuthProvidersPage() {
           {saving ? 'Saving…' : 'Add provider'}
         </button>
       </div>
+      )}
 
       {/* List */}
       <h2 className="text-sm font-semibold text-neutral-800 mb-2">Configured providers</h2>
@@ -177,12 +192,14 @@ export default function OAuthProvidersPage() {
                 <p className="text-xs text-neutral-500 truncate">client: {p.client_id}</p>
                 <p className="text-xs text-neutral-500 truncate">redirect: {p.redirect_url}</p>
               </div>
-              <button
-                onClick={() => handleDelete(p)}
-                className="ml-4 shrink-0 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100"
-              >
-                Delete
-              </button>
+              {canManage && (
+                <button
+                  onClick={() => handleDelete(p)}
+                  className="ml-4 shrink-0 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100"
+                >
+                  Delete
+                </button>
+              )}
             </div>
           ))}
         </div>

@@ -5,10 +5,15 @@
 
 import { Link, useLocation } from 'react-router-dom'
 import { useConnectionsStore } from '../../store/connectionsStore'
+import { useAuthStore } from '../../store/authStore'
 
 export default function Sidebar() {
   const { pathname } = useLocation()
   const { connections = [] } = useConnectionsStore()
+  // OAuth provider management is owner/admin-only (CRUD is admin-gated
+  // server-side); hide the entry for everyone else.
+  const role = useAuthStore((s) => s.currentTenant?.user_role)
+  const canManageOAuth = role === 'owner' || role === 'admin'
   const runningCount = (connections || []).filter((c) => c.status === 'running').length
   const stoppedCount = (connections || []).filter((c) => c.status === 'stopped').length
   const errorCount = (connections || []).filter((c) => c.status === 'error').length
@@ -83,6 +88,7 @@ export default function Sidebar() {
           >
             API Key
           </Link>
+          {canManageOAuth && (
           <Link
             to="/settings/oauth"
             className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
@@ -93,6 +99,7 @@ export default function Sidebar() {
           >
             OAuth providers
           </Link>
+          )}
           <Link
             to="/settings/audit"
             className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
