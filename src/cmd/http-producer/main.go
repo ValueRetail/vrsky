@@ -208,6 +208,12 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 			req.Header.Set(k, v)
 		}
 		if httpCfg.AuthType == "oauth" {
+			// No grant selected (e.g. the grant was revoked, which clears the
+			// selection on the node). Fail fast with a clear message instead of
+			// calling /oauth/grants//token with an empty id.
+			if httpCfg.OAuthGrantID == "" {
+				return nil, fmt.Errorf("output uses OAuth but no connection is selected — pick (or reconnect) an OAuth grant for this destination")
+			}
 			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
 			if terr != nil {
 				return nil, fmt.Errorf("resolve oauth token: %w", terr)

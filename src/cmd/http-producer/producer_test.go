@@ -174,3 +174,57 @@ func TestHTTPProducer_OAuthRefreshOn401(t *testing.T) {
 		t.Errorf("retry Authorization = %v, want Bearer tok-refreshed", a)
 	}
 }
+
+// TestHTTPProducer_OAuthEmptyGrantNoCall verifies the empty-grant guard: an
+// auth_type=oauth node whose grant was cleared (e.g. revoked) must fail fast
+// without ever resolving a token or hitting the destination — instead of
+// calling /oauth/grants//token with an empty id and getting an opaque 500.
+func TestHTTPProducer_OAuthEmptyGrantNoCall(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	const connID = "conn-oauth-empty"
+	// auth_type=oauth but oauth_grant_id is absent (cleared on revoke).
+	nodes := fmt.Sprintf(`[{"id":"prod1","type":"producer","config":{"type":"http","http":{"url":%q,"method":"POST","auth_type":"oauth"}}}]`, srv.URL)
+	mock.MatchExpectationsInOrder(false)
+	for i := 0; i < 5; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).
+				AddRow([]byte(nodes), []byte(`[]`)))
+	}
+
+	var resolveCalls atomic.Int32
+	p := &httpProducer{
+		resolveToken: func(_ context.Context, _, _ string, _ bool) (string, error) {
+			resolveCalls.Add(1)
+			return "should-not-be-used", nil
+		},
+	}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "http-producer", DB: db})
+
+	env := envelope.New()
+	env.ID = "oauth-empty-1"
+	env.IntegrationID = connID
+	env.TenantID = "tenant-1"
+	env.Payload = []byte(`{"x":1}`)
+	h.Publish(t, env)
+
+	// Give the runner time to (not) act.
+	time.Sleep(700 * time.Millisecond)
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("destination was hit %d times; expected 0 (no grant → no send)", got)
+	}
+	if got := resolveCalls.Load(); got != 0 {
+		t.Errorf("resolveToken called %d times; expected 0 (guard should short-circuit before token resolution)", got)
+	}
+}

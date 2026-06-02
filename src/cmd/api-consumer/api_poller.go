@@ -131,6 +131,13 @@ func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Clie
 			if s.oauthTokens == nil || !s.oauthTokens.Configured() {
 				return nil, fmt.Errorf("endpoint uses OAuth but token resolution is not configured (set MGMT_API_URL + OAUTH_TOKEN_SERVICE_SECRET)")
 			}
+			// No grant selected (e.g. the grant was revoked, which clears the
+			// selection on the node). Fail fast with a clear message instead of
+			// calling /oauth/grants//token with an empty id and getting an
+			// opaque 500/301.
+			if endpoint.OAuthGrantID == "" {
+				return nil, fmt.Errorf("endpoint uses OAuth but no connection is selected — pick (or reconnect) an OAuth grant for this endpoint")
+			}
 			var tok string
 			if forceRefresh {
 				tok, err = s.oauthTokens.ForceToken(ctx, tenantID, endpoint.OAuthGrantID)
