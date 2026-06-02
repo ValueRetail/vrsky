@@ -17,6 +17,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
@@ -106,7 +107,7 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 		return nil
 	}
 
-	httpConfigs, err := p.getHTTPConfigs(ctx, connectionID)
+	httpConfigs, err := p.getHTTPConfigs(ctx, connectionID, env.TenantID)
 	if err != nil {
 		// Not an HTTP producer for this pipeline — ack and move on.
 		p.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
@@ -218,7 +219,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 
 // getHTTPConfigs returns all HTTP-producer node configs for a connection (with
 // a short cache). // lint:tenant-ok — connection lookup by PK; tenant scoping is enforced upstream when the pipeline is deployed.
-func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID string) ([]*HTTPConfig, error) {
+func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantID string) ([]*HTTPConfig, error) {
 	p.configCacheMu.RLock()
 	if cfg, ok := p.configCache[connectionID]; ok {
 		if time.Since(p.configCacheTime[connectionID]) < p.configCacheTTL {
@@ -241,6 +242,17 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID string) 
 	}
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
+	}
+
+	// Decrypt any *_secret_id references (e.g. an encrypted auth-header value)
+	// so the typed config below sees plaintext.
+	reader := crypto.NewSQLSecretReader(p.db)
+	for i := range nodes {
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, nodes[i].Config)
+		if rerr != nil {
+			return nil, fmt.Errorf("resolve secrets for node %s: %w", nodes[i].ID, rerr)
+		}
+		nodes[i].Config = resolved
 	}
 
 	var edges []struct {

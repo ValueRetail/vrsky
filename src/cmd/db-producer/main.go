@@ -16,6 +16,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
@@ -142,7 +143,7 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 		return nil
 	}
 
-	tcs, err := p.getTargetConnections(ctx, connectionID)
+	tcs, err := p.getTargetConnections(ctx, connectionID, env.TenantID)
 	if err != nil {
 		p.logger.Debug("No DB producer config", "connection_id", connectionID, "error", err)
 		return nil
@@ -321,7 +322,7 @@ func quoteIdent(s string) string {
 
 // getTargetConnections returns all DB-producer target connections for a
 // connection (with a short cache). // lint:tenant-ok — connection lookup by PK; tenant scoping is enforced upstream when the pipeline is deployed.
-func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID string) ([]*TargetConnection, error) {
+func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, tenantID string) ([]*TargetConnection, error) {
 	p.targetCacheMu.RLock()
 	if tcs, ok := p.targetCache[connectionID]; ok {
 		if time.Since(p.targetCacheTime[connectionID]) < p.targetCacheTTL {
@@ -344,6 +345,19 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID stri
 	}
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
+	}
+
+	// Decrypt any *_secret_id references in node configs (the UI stores the
+	// target DB password as password_secret_id) so the typed TargetDBConfig
+	// below sees plaintext. Fatal on error — better to fail loud than dial
+	// with an empty password.
+	reader := crypto.NewSQLSecretReader(p.db)
+	for i := range nodes {
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, nodes[i].Config)
+		if rerr != nil {
+			return nil, fmt.Errorf("resolve secrets for node %s: %w", nodes[i].ID, rerr)
+		}
+		nodes[i].Config = resolved
 	}
 
 	var edges []struct {
