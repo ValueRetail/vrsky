@@ -2378,6 +2378,32 @@ export default function PropertyEditor({
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                   Pipeline data will be POSTed to this URL. Paste a webhook URL from any external service (e.g. webhook.site, Slack, Discord).
                 </p>
+
+                <StyledSelect
+                  label="Authentication"
+                  value={((config.http as any)?.auth_type as string) || 'none'}
+                  onChange={(value) =>
+                    setConfig({ ...config, http: { ...(config.http as any), auth_type: value } })
+                  }
+                  options={[
+                    { value: 'none', label: 'None' },
+                    { value: 'oauth', label: 'OAuth 2.0' },
+                  ]}
+                />
+                {(config.http as any)?.auth_type === 'oauth' && (
+                  <div style={{ marginTop: '4px' }}>
+                    <OAuthGrantSelector
+                      value={(config.http as any)?.oauth_grant_id || ''}
+                      onChange={(grantId) =>
+                        setConfig({
+                          ...config,
+                          http: { ...(config.http as any), oauth_grant_id: grantId || '' },
+                        })
+                      }
+                      connectionId={deployedConnectionId}
+                    />
+                  </div>
+                )}
               </>
             )}
 

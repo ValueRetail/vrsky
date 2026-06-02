@@ -19,6 +19,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/oauthtoken"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -44,6 +45,12 @@ type httpProducer struct {
 	eventSubsMu    sync.RWMutex
 	recentEvents   map[string][]HTTPEvent
 	recentEventsMu sync.RWMutex
+
+	// OAuth output (#97): resolve a grant's access token for nodes with
+	// auth_type=oauth. resolveToken is defaulted in Configure to the oauthtoken
+	// client; tests inject a stub.
+	tokens       *oauthtoken.Client
+	resolveToken func(ctx context.Context, tenantID, grantID string, force bool) (string, error)
 }
 
 type HTTPEvent struct {
@@ -59,6 +66,8 @@ type HTTPConfig struct {
 	URL            string            `json:"url"`
 	Method         string            `json:"method"`
 	Headers        map[string]string `json:"headers"`
+	AuthType       string            `json:"auth_type"`      // "", "none", or "oauth"
+	OAuthGrantID   string            `json:"oauth_grant_id"` // grant id when auth_type=oauth
 	PredecessorID  string
 	PredIsConsumer bool
 }
@@ -85,6 +94,20 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	}
 	p.eventSubs = make(map[string][]chan HTTPEvent)
 	p.recentEvents = make(map[string][]HTTPEvent)
+
+	// OAuth output (#97): resolve access tokens for nodes with auth_type=oauth.
+	p.tokens = oauthtoken.New(os.Getenv("MGMT_API_URL"), os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"))
+	if p.resolveToken == nil {
+		p.resolveToken = func(ctx context.Context, tenantID, grantID string, force bool) (string, error) {
+			if !p.tokens.Configured() {
+				return "", errors.New("node uses OAuth but token resolution is not configured (set MGMT_API_URL + OAUTH_TOKEN_SERVICE_SECRET)")
+			}
+			if force {
+				return p.tokens.ForceToken(ctx, tenantID, grantID)
+			}
+			return p.tokens.Token(ctx, tenantID, grantID)
+		}
+	}
 
 	// Serve the live SSE event stream on the SDK auxiliary HTTP port
 	// (WORKER_HTTP_PORT, 9400 in compose) via the custom-handler hook — the UI
@@ -161,34 +184,59 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		method = "POST"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, httpCfg.URL, bytes.NewReader(env.Payload))
-	if err != nil {
+	// Bad URL won't improve on retry — drop early (validated once).
+	if _, err := http.NewRequestWithContext(ctx, method, httpCfg.URL, nil); err != nil {
 		p.emitEvent(connectionID, HTTPEvent{
 			Type: "error", Message: "Failed to create request: " + err.Error(),
 			Time: now(),
 		})
-		return nil // bad URL — won't improve on retry
-	}
-
-	if env.ContentType != "" {
-		req.Header.Set("Content-Type", env.ContentType)
-	} else {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("X-Message-ID", env.ID)
-	for k, v := range httpCfg.Headers {
-		req.Header.Set(k, v)
+		return nil
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	// buildAndSend creates a fresh request (re-readable body) per attempt and,
+	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
+	buildAndSend := func(force bool) (*http.Response, error) {
+		req, _ := http.NewRequestWithContext(ctx, method, httpCfg.URL, bytes.NewReader(env.Payload))
+		if env.ContentType != "" {
+			req.Header.Set("Content-Type", env.ContentType)
+		} else {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("X-Message-ID", env.ID)
+		for k, v := range httpCfg.Headers {
+			req.Header.Set(k, v)
+		}
+		if httpCfg.AuthType == "oauth" {
+			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
+			if terr != nil {
+				return nil, fmt.Errorf("resolve oauth token: %w", terr)
+			}
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		return client.Do(req)
+	}
+
+	resp, err := buildAndSend(false)
 	if err != nil {
 		p.logger.Error("HTTP request failed", "error", err, "connection_id", connectionID)
 		p.emitEvent(connectionID, HTTPEvent{
 			Type: "error", Message: err.Error(),
 			Time: now(),
 		})
-		return fmt.Errorf("transport: %w", err) // retriable
+		return fmt.Errorf("transport: %w", err) // retriable (transport or token-service hiccup)
+	}
+
+	// OAuth: an access token may have expired between resolution and the call —
+	// refresh once and retry (mirrors api-consumer's callEndpoint).
+	if resp.StatusCode == http.StatusUnauthorized && httpCfg.AuthType == "oauth" {
+		_ = resp.Body.Close()
+		p.emitEvent(connectionID, HTTPEvent{Type: "info", Message: "401 — refreshing OAuth token and retrying", Time: now()})
+		resp, err = buildAndSend(true)
+		if err != nil {
+			p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: err.Error(), Time: now()})
+			return fmt.Errorf("after token refresh: %w", err) // retriable
+		}
 	}
 	defer resp.Body.Close()
 
@@ -272,9 +320,11 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		var nodeConfig struct {
 			Type string `json:"type"`
 			HTTP struct {
-				URL     string            `json:"url"`
-				Method  string            `json:"method"`
-				Headers map[string]string `json:"headers"`
+				URL          string            `json:"url"`
+				Method       string            `json:"method"`
+				Headers      map[string]string `json:"headers"`
+				AuthType     string            `json:"auth_type"`
+				OAuthGrantID string            `json:"oauth_grant_id"`
 			} `json:"http"`
 		}
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
@@ -303,6 +353,8 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			URL:            nodeConfig.HTTP.URL,
 			Method:         nodeConfig.HTTP.Method,
 			Headers:        nodeConfig.HTTP.Headers,
+			AuthType:       nodeConfig.HTTP.AuthType,
+			OAuthGrantID:   nodeConfig.HTTP.OAuthGrantID,
 			PredecessorID:  predID,
 			PredIsConsumer: predIsConsumer,
 		})
