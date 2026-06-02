@@ -76,14 +76,17 @@ func validateProviderRequest(req *oauthProviderRequest, requireSecret bool) erro
 	if strings.TrimSpace(req.RedirectURL) == "" {
 		return errors.New("redirect_url is required")
 	}
-	// auth_url + token_url are only required when the profile doesn't seed
-	// them. Generic / custom providers require both.
-	if req.ProviderType == "custom" {
+	// auth_url + token_url come from the built-in profile for known provider
+	// types (applyProfileDefaults). For anything else — "custom" or an
+	// unknown/misspelled type whose profile defaults are a no-op — the caller
+	// must supply both, over https. Without this an unknown type would insert
+	// empty URLs, fail the NOT NULL constraint, and surface as a 500.
+	if _, known := oauth.DefaultRegistry().Get(req.ProviderType); !known {
 		if !strings.HasPrefix(req.AuthURL, "https://") {
-			return errors.New("auth_url must be https for custom providers")
+			return errors.New("auth_url (https) is required for provider_type " + req.ProviderType)
 		}
 		if !strings.HasPrefix(req.TokenURL, "https://") {
-			return errors.New("token_url must be https for custom providers")
+			return errors.New("token_url (https) is required for provider_type " + req.ProviderType)
 		}
 	}
 	return nil

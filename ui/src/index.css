@@ -7,10 +7,12 @@
 @layer base {
   html {
     @apply scroll-smooth;
-    /* The UI is designed light-only (Tailwind darkMode is 'class' and no .dark
-       class is set). Without this, a browser in OS dark mode renders native form
-       controls dark and flips default text/background colors, which clashes with
-       the app's hardcoded light styling and makes inputs and panels unreadable. */
+    /* Default to a light color scheme so browsers in OS dark mode don't render
+       native form controls dark or flip default text/background colors — that
+       clashes with the app's predominantly light styling and makes inputs and
+       panels unreadable. Dark mode is opt-in (main.tsx adds the `.dark` class
+       only when the user explicitly saves a dark theme); this default just
+       governs native-control rendering when `.dark` is absent. */
     color-scheme: light;
     width: 100%;
     height: 100%;

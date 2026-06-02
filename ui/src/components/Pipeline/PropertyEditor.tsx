@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import type { Node, Edge } from '../../types/pipeline'
 import SecretInput from './SecretInput'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
+import OAuthGrantSelector from './OAuthGrantSelector'
+import { useAuthStore } from '../../store/authStore'
+import * as tenantDataService from '../../services/tenantDataService'
+import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
@@ -33,10 +37,6 @@ function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Nod
   }
   return undefined
 }
-import OAuthGrantSelector from './OAuthGrantSelector'
-import { useAuthStore } from '../../store/authStore'
-import * as tenantDataService from '../../services/tenantDataService'
-import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 
 // Type for API Consumer endpoint
 interface ApiEndpoint {

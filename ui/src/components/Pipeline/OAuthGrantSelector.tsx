@@ -24,7 +24,9 @@ const inputStyle: React.CSSProperties = {
 
 // Known provider types whose auth/token URLs + scopes the backend fills in
 // automatically (applyProfileDefaults). "custom" requires explicit URLs.
-const PROVIDER_TYPES = ['google', 'microsoft', 'salesforce', 'hubspot', 'shopify', 'custom']
+// Values must match the backend provider registry keys (pkg/oauth DefaultRegistry)
+// so the known types get their auth/token URLs + scopes filled by applyProfileDefaults.
+const PROVIDER_TYPES = ['google', 'microsoft365', 'salesforce', 'hubspot', 'shopify', 'custom']
 
 const defaultRedirectURL = () =>
   typeof window !== 'undefined' ? `${window.location.origin}/api/v1/oauth/callback` : ''
