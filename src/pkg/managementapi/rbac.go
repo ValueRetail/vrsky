@@ -24,13 +24,6 @@ import (
 // current request.
 type roleContextKey struct{}
 
-// principalRole returns the role the current principal holds in the
-// tenant they're acting against. Empty string when not yet resolved.
-func principalRole(ctx context.Context) string {
-	r, _ := ctx.Value(roleContextKey{}).(string)
-	return r
-}
-
 // withPrincipalRole stamps the role on the request context.
 func withPrincipalRole(ctx context.Context, role string) context.Context {
 	return context.WithValue(ctx, roleContextKey{}, role)

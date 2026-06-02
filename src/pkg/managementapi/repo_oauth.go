@@ -97,7 +97,7 @@ func (r *PostgresRepository) CreateGrant(ctx context.Context, g *oauth.Grant, ac
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Secret names just need to be tenant-unique. Including grant intent in
 	// the name makes operator inspection easier.
@@ -187,7 +187,7 @@ func (r *PostgresRepository) UpdateTokens(ctx context.Context, grantID, accessTo
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := updateSecretCiphertextTx(ctx, tx, tenantID, accessSecID, accessCt); err != nil {
 		return fmt.Errorf("update access secret: %w", err)
@@ -382,7 +382,7 @@ func (r *PostgresRepository) CreateOAuthProvider(ctx context.Context, cfg *oauth
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	secID, err := createSecretTx(ctx, tx, cfg.TenantID, "oauth-clientsecret:"+cfg.Name, ct)
 	if err != nil {
@@ -423,7 +423,7 @@ func (r *PostgresRepository) UpdateOAuthProvider(ctx context.Context, cfg *oauth
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if newClientSecret != "" {
 		key, err := crypto.Key()

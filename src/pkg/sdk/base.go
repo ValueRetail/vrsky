@@ -127,9 +127,3 @@ func (b *baseKit) httpRoutes() []httpRoute {
 	copy(out, b.routes)
 	return out
 }
-
-// httpRegistrar is the internal interface the runner uses to collect any
-// custom HTTP handlers a connector registered during Configure.
-type httpRegistrar interface {
-	httpRoutes() []httpRoute
-}

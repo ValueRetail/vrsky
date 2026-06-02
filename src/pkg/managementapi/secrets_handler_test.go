@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -199,13 +200,13 @@ func TestSecrets_RotateRewrapsCiphertext(t *testing.T) {
 		CreateSecretRequest{Name: "x", Value: "v1"})
 	id := mustDecodeData(t, w.Body.Bytes())["id"].(string)
 
-	before, _ := repo.GetSecretCiphertext(nil, "tenant-A", id)
+	before, _ := repo.GetSecretCiphertext(context.TODO(), "tenant-A", id)
 
 	w = doRequest(t, h.SecretsItem, http.MethodPost, "/api/v1/secrets/"+id+"/rotate", "tenant-A", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("rotate: %d (%s)", w.Code, w.Body.String())
 	}
-	after, _ := repo.GetSecretCiphertext(nil, "tenant-A", id)
+	after, _ := repo.GetSecretCiphertext(context.TODO(), "tenant-A", id)
 	if before == after {
 		t.Fatalf("ciphertext should change after rotate (new nonce)")
 	}

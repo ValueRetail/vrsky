@@ -11,16 +11,16 @@ import (
 
 // DLQEntry is the projection the Management API surfaces to the UI.
 type DLQEntry struct {
-	Sequence     uint64            `json:"sequence"`      // JetStream sequence in the DLQ stream
-	Subject      string            `json:"subject"`       // vrsky.dlq.<tenant>.pipeline.<conn>
+	Sequence     uint64            `json:"sequence"` // JetStream sequence in the DLQ stream
+	Subject      string            `json:"subject"`  // vrsky.dlq.<tenant>.pipeline.<conn>
 	TenantID     string            `json:"tenant_id"`
 	ConnectionID string            `json:"connection_id"`
-	Worker       string            `json:"worker"`        // service name that gave up on it
+	Worker       string            `json:"worker"` // service name that gave up on it
 	LastError    string            `json:"last_error"`
-	Delivered    int               `json:"delivered"`     // delivery attempts before DLQ
+	Delivered    int               `json:"delivered"` // delivery attempts before DLQ
 	ReceivedAt   time.Time         `json:"received_at"`
 	PayloadSize  int               `json:"payload_size"`
-	PayloadJSON  any               `json:"payload,omitempty"`     // parsed envelope, optional
+	PayloadJSON  any               `json:"payload,omitempty"` // parsed envelope, optional
 	Headers      map[string]string `json:"headers,omitempty"`
 }
 
@@ -118,7 +118,7 @@ func toDLQEntry(m *nats.Msg) *DLQEntry {
 		entry.ReceivedAt = meta.Timestamp
 	}
 	if d := m.Header.Get("X-Vrsky-Delivered"); d != "" {
-		fmt.Sscanf(d, "%d", &entry.Delivered)
+		_, _ = fmt.Sscanf(d, "%d", &entry.Delivered)
 	}
 	return entry
 }

@@ -46,7 +46,7 @@ func startServer(t *testing.T) (*nats.Conn, nats.JetStreamContext, func()) {
 		t.Fatalf("jetstream: %v", err)
 	}
 	cleanup := func() {
-		nc.Drain()
+		_ = nc.Drain()
 		srv.Shutdown()
 		_ = os.RemoveAll(dir)
 	}
@@ -210,12 +210,12 @@ func TestDLQSurvivesNATSRestart(t *testing.T) {
 	if err := pub.PublishToDLQ(context.Background(), "tenant-D", "pipeline-survives", "msg-1", []byte("preserved"), hdr); err != nil {
 		t.Fatalf("publish to dlq: %v", err)
 	}
-	nc.Drain()
+	_ = nc.Drain()
 	srv.Shutdown()
 
 	srv2, nc2, js2 := startOne()
 	defer func() {
-		nc2.Drain()
+		_ = nc2.Drain()
 		srv2.Shutdown()
 	}()
 	info, err := js2.StreamInfo(DLQStreamName)
