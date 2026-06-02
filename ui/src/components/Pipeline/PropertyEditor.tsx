@@ -2064,18 +2064,19 @@ function ApiConsumerConfig({
                 />
                 <span style={{ fontSize: '10px', color: '#9ca3af', marginTop: '-6px', marginBottom: '6px', display: 'block' }}>Query params (e.g. lat=59.9&amp;lon=10.7)</span>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <select
                     value={ep.auth_type}
                     onChange={(e) => updateEndpoint(idx, 'auth_type', e.target.value)}
                     style={{
-                      flex: 1,
+                      width: '100%',
                       padding: '8px 10px',
                       border: '1px solid #d1d5db',
                       borderRadius: '4px',
                       fontSize: '12px',
                       color: '#374151',
                       backgroundColor: '#ffffff',
+                      boxSizing: 'border-box',
                     }}
                   >
                     <option value="none">No Auth</option>
@@ -2085,25 +2086,21 @@ function ApiConsumerConfig({
                   </select>
 
                   {(ep.auth_type === 'bearer' || ep.auth_type === 'api_key') && (
-                    <div style={{ flex: 2 }}>
-                      <SecretInput
-                        label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
-                        placeholder={ep.auth_type === 'bearer' ? 'Token value' : 'API key value'}
-                        field="auth_value"
-                        config={ep as unknown as Record<string, unknown>}
-                        defaultSecretName={`api-${ep.auth_type}-${idx}`}
-                        onChange={(patch) => patchEndpoint(idx, patch)}
-                      />
-                    </div>
+                    <SecretInput
+                      label={ep.auth_type === 'bearer' ? 'Bearer token' : 'API key'}
+                      placeholder={ep.auth_type === 'bearer' ? 'Token value' : 'API key value'}
+                      field="auth_value"
+                      config={ep as unknown as Record<string, unknown>}
+                      defaultSecretName={`api-${ep.auth_type}-${idx}`}
+                      onChange={(patch) => patchEndpoint(idx, patch)}
+                    />
                   )}
 
                   {ep.auth_type === 'oauth' && (
-                    <div style={{ flex: 2 }}>
-                      <OAuthGrantSelector
-                        value={ep.oauth_grant_id}
-                        onChange={(grantId) => updateEndpoint(idx, 'oauth_grant_id', grantId || '')}
-                      />
-                    </div>
+                    <OAuthGrantSelector
+                      value={ep.oauth_grant_id}
+                      onChange={(grantId) => updateEndpoint(idx, 'oauth_grant_id', grantId || '')}
+                    />
                   )}
                 </div>
               </div>
