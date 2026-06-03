@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// HTTP handler served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT, 9800 in
+// compose). Registered in Configure via RegisterHTTPHandler. /health is served
+// separately by the SDK on HEALTH_PORT.
 
 type SampleDataRequest struct {
 	BaseURL   string `json:"base_url"`
@@ -18,15 +21,12 @@ type SampleDataRequest struct {
 	AuthValue string `json:"auth_value"`
 }
 
-func startHTTPServer(port string, logger *slog.Logger) {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	mux.HandleFunc("/sample-data/", func(w http.ResponseWriter, r *http.Request) {
+// handleSampleData fetches a small preview from a configured endpoint, used by
+// the UI's filter/converter preview before a pipeline is deployed. The request
+// carries the (typed, not-yet-persisted) auth value directly — nothing here is
+// stored, so no secret resolution is involved.
+func (s *apiConsumer) handleSampleData() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -36,7 +36,7 @@ func startHTTPServer(port string, logger *slog.Logger) {
 		}
 
 		var req SampleDataRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req); err != nil {
 			writeJSON(w, map[string]interface{}{"ok": false, "error": "Invalid request"})
 			return
 		}
@@ -56,7 +56,6 @@ func startHTTPServer(port string, logger *slog.Logger) {
 			}
 		}
 
-		// Fetch
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
@@ -95,15 +94,7 @@ func startHTTPServer(port string, logger *slog.Logger) {
 		} else {
 			writeJSON(w, map[string]interface{}{"ok": true, "data": string(body)})
 		}
-	})
-
-	server := &http.Server{Addr: ":" + port, Handler: mux}
-	go func() {
-		logger.Info("API Consumer HTTP server started", "port", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err)
-		}
-	}()
+	}
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

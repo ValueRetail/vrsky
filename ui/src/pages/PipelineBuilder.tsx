@@ -22,7 +22,7 @@ import type { Node, Edge } from '../types/pipeline'
 
 // Config keys whose plaintext values are credentials and must be stored as
 // encrypted tenant secrets rather than persisted in the connection JSON.
-const SECRET_FIELDS = new Set(['password', 'secret', 'api_key', 'token'])
+const SECRET_FIELDS = new Set(['password', 'secret', 'api_key', 'token', 'auth_value'])
 
 /**
  * Recursively walk a node config; for every plaintext credential field, mint a

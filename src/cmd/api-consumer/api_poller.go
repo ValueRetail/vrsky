@@ -15,7 +15,7 @@ import (
 )
 
 // pollConnection runs the main polling loop for an API consumer
-func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, tenantID string, config *APIConsumerConfig) {
+func (s *apiConsumer) pollConnection(ctx context.Context, connectionID, tenantID string, config *APIConsumerConfig) {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 	logger.Info("Starting API polling",
 		"base_url", config.BaseURL,
@@ -25,7 +25,7 @@ func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, t
 
 	// Create HTTP client with timeout
 	client := &http.Client{
-		Timeout: s.config.PollTimeout,
+		Timeout: s.pollTimeout,
 	}
 
 	// If one-time-only mode, just poll once and return
@@ -47,7 +47,7 @@ func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, t
 	// Calculate poll interval for continuous polling
 	pollInterval := time.Duration(config.PollIntervalSeconds) * time.Second
 	if pollInterval <= 0 {
-		pollInterval = s.config.DefaultPollInterval
+		pollInterval = s.defaultPollInterval
 	}
 
 	ticker := time.NewTicker(pollInterval)
@@ -69,7 +69,7 @@ func (s *APIConsumerService) pollConnection(ctx context.Context, connectionID, t
 }
 
 // pollAllEndpoints polls all configured endpoints
-func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.Client, connectionID, tenantID string, config *APIConsumerConfig, logger *slog.Logger) {
+func (s *apiConsumer) pollAllEndpoints(ctx context.Context, client *http.Client, connectionID, tenantID string, config *APIConsumerConfig, logger *slog.Logger) {
 	for i, endpoint := range config.Endpoints {
 		select {
 		case <-ctx.Done():
@@ -119,7 +119,7 @@ func (s *APIConsumerService) pollAllEndpoints(ctx context.Context, client *http.
 // auth_type=oauth it resolves a fresh access token from management-api; if the
 // endpoint answers 401 it refreshes the token and retries exactly once
 // (transparent refresh — #75 criterion #3).
-func (s *APIConsumerService) callEndpoint(ctx context.Context, client *http.Client, url, tenantID string, endpoint APIEndpoint, logger *slog.Logger) ([]byte, string, error) {
+func (s *apiConsumer) callEndpoint(ctx context.Context, client *http.Client, url, tenantID string, endpoint APIEndpoint, logger *slog.Logger) ([]byte, string, error) {
 	// buildAndSend issues one request. forceRefresh asks the token service to
 	// refresh the grant first (the post-401 retry).
 	buildAndSend := func(forceRefresh bool) (*http.Response, error) {
@@ -288,7 +288,7 @@ func isPrintable(payload []byte) bool {
 }
 
 // publishToNATS wraps the payload in an envelope and publishes to NATS
-func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payload []byte, contentType, source string) error {
+func (s *apiConsumer) publishToNATS(connectionID, tenantID string, payload []byte, contentType, source string) error {
 	// Create envelope
 	env := &envelope.Envelope{
 		ID:            uuid.New().String(),
@@ -303,15 +303,10 @@ func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payloa
 		CreatedAt:     time.Now().UTC(),
 	}
 
-	// Serialize envelope
-	data, err := json.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("failed to marshal envelope: %w", err)
-	}
-
-	// Publish to JetStream (at-least-once). The MsgID dedupes inside the
-	// stream's 5-min window so a retried poll cycle does not duplicate.
-	if err := s.pub.Publish(context.Background(), tenantID, connectionID, env.ID, data); err != nil {
+	// Publish via the SDK-injected closure (at-least-once; the MsgID dedupes
+	// inside the stream's 5-min window so a retried poll cycle does not
+	// duplicate). The closure marshals the envelope itself.
+	if err := s.publish(context.Background(), env); err != nil {
 		return fmt.Errorf("failed to publish to JetStream: %w", err)
 	}
 
@@ -321,8 +316,11 @@ func (s *APIConsumerService) publishToNATS(connectionID, tenantID string, payloa
 		"envelope_id", env.ID,
 		"payload_size", env.PayloadSize)
 
-	// Store last payload in DB for tenant-consumer bridges to read
-	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, connectionID)
+	// Store last payload in DB for tenant-consumer bridges to read. envelope.
+	// Marshal == json.Marshal — identical bytes to what the publish closure sent.
+	if data, err := json.Marshal(env); err == nil {
+		_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, connectionID)
+	}
 
 	return nil
 }

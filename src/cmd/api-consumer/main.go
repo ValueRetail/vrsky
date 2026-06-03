@@ -1,128 +1,22 @@
+// Command api-consumer polls external HTTP APIs on a schedule and publishes the
+// responses into the pipeline. It is an SDK Consumer: the runner owns NATS/DB/
+// health/signals/shutdown; this binary implements Configure + Run + Stop,
+// subscribes to the connection command subjects via the NATS connection the SDK
+// provides, and serves its /sample-data endpoint on the SDK auxiliary HTTP port
+// (WORKER_HTTP_PORT, 9800 in compose).
 package main
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	_ "github.com/jackc/pgx/v4/stdlib"
-	"github.com/nats-io/nats.go"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
 func main() {
-	// Setup logging
-	logLevel := slog.LevelInfo
-	if os.Getenv("LOG_LEVEL") == "debug" {
-		logLevel = slog.LevelDebug
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel,
-	}))
-
-	// Load configuration
-	config := LoadConfig()
-	if err := config.Validate(); err != nil {
-		logger.Error("Invalid configuration", "error", err)
+	if err := sdk.RunConsumer(context.Background(), "api-consumer", &apiConsumer{}); err != nil {
+		slog.Error("api-consumer exited", "error", err)
 		os.Exit(1)
 	}
-
-	logger.Info("Starting API Consumer Service", "version", "1.0.0")
-
-	// Initialize database connection
-	db, err := initDatabase(config.DatabaseURL, logger)
-	if err != nil {
-		logger.Error("Failed to initialize database", "error", err)
-		os.Exit(1)
-	}
-	defer db.Close()
-
-	// Initialize NATS connection
-	nc, err := initNATS(config.NATSUrl, logger)
-	if err != nil {
-		logger.Error("Failed to initialize NATS", "error", err)
-		os.Exit(1)
-	}
-	defer nc.Close()
-
-	// Create API Consumer Service
-	service := NewAPIConsumerService(db, nc, logger, config)
-
-	// Start service
-	ctx := context.Background()
-	if err := service.Start(ctx); err != nil {
-		logger.Error("Failed to start API Consumer Service", "error", err)
-		os.Exit(1)
-	}
-
-	// Start HTTP server for sample-data endpoint
-	startHTTPServer(config.Port, logger)
-
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	logger.Info("API Consumer Service running. Press Ctrl+C to stop.")
-	<-sigChan
-
-	// Graceful shutdown
-	logger.Info("Shutting down API Consumer Service...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := service.Stop(shutdownCtx); err != nil {
-		logger.Error("Error during shutdown", "error", err)
-	}
-
-	logger.Info("API Consumer Service stopped")
-}
-
-// initDatabase initializes PostgreSQL connection pool
-func initDatabase(dbURL string, logger *slog.Logger) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dbURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	// Configure connection pool
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(2)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	logger.Info("Database connected successfully")
-	return db, nil
-}
-
-// initNATS initializes NATS connection
-func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {
-	nc, err := nats.Connect(
-		natsURL,
-		nats.ReconnectWait(100*time.Millisecond),
-		nats.MaxReconnects(-1),
-		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			logger.Warn("NATS disconnected", "error", err)
-		}),
-		nats.ReconnectHandler(func(nc *nats.Conn) {
-			logger.Info("NATS reconnected", "url", nc.ConnectedUrl())
-		}),
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
-	}
-
-	logger.Info("NATS connected", "url", nc.ConnectedUrl())
-	return nc, nil
 }
