@@ -9,6 +9,10 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/fieldfilter"
+	// lint:connector-ok — the cross-tenant bridge owns its own durable
+	// subscription on the *source* tenant's stream, which the SDK's single
+	// command-driven subscription model does not cover. Importing pkg/messaging
+	// directly here is deliberate; see runBridge below.
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
