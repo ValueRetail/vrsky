@@ -381,7 +381,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      WEBHOOK_PORT: "9100"
+      # Aux HTTP port the SDK serves /webhook, /sample-data + /tunnel/* on (UI
+      # connects here; the cloudflared tunnel forwards to it). Health is on 8080.
+      WORKER_HTTP_PORT: "9100"
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
       # secrets (e.g. HMAC signing key from #67) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"

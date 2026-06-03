@@ -4,30 +4,42 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
-	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/nats-io/nats.go"
 )
 
-// WebhookConsumerService manages webhook consumer pipelines
-type WebhookConsumerService struct {
-	db     *sql.DB
-	nc     *nats.Conn
-	pub    *messaging.Publisher // JetStream publisher for data-flow messages (#70)
-	logger *slog.Logger
-	config *Config
-	server *WebhookServer
+// webhookConsumer receives inbound HTTP webhooks per active connection and
+// publishes their bodies into the pipeline. It is an SDK Consumer: the runner
+// provides NATS/DB/health/lifecycle; this type implements Configure (wire deps
+// + register HTTP handlers), Run (subscribe to command subjects, block), and
+// Stop (cancel connections, kill the tunnel).
+type webhookConsumer struct {
+	sdk.BaseConsumer
+
+	db      *sql.DB
+	nc      *nats.Conn
+	publish sdk.PublishFunc // injected by the runner; the one data-emit path
+	logger  *slog.Logger
+
+	// auxPort is the SDK auxiliary HTTP port (WORKER_HTTP_PORT) that /webhook is
+	// served on; the cloudflared tunnel forwards to it.
+	auxPort string
 
 	// Active connections: connectionId → connection info
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
 
-	// Subscriptions
+	// tunnel tracks the on-demand cloudflared quick tunnel.
+	tunnel tunnelState
+
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
 }
@@ -44,63 +56,56 @@ type ActiveConnection struct {
 	Signature *signatureConfig
 }
 
-// NewWebhookConsumerService creates a new Webhook Consumer service.
-// A JetStream context is derived from nc for data-flow publishes;
-// command-channel subscriptions stay on core NATS.
-func NewWebhookConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *WebhookConsumerService {
-	js, err := nc.JetStream()
-	if err != nil {
-		// JS is mandatory for data-flow delivery; surface fast.
-		logger.Error("Failed to get JetStream context", "error", err)
-		js = nil
+// Configure wires dependencies and registers the HTTP endpoints the UI uses
+// (served on the SDK auxiliary HTTP port, WORKER_HTTP_PORT/9100). Called once
+// before Run.
+func (s *webhookConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
+	if res.DB == nil {
+		return errors.New("webhook-consumer requires DATABASE_URL")
 	}
-	var pub *messaging.Publisher
-	if js != nil {
-		pub = messaging.NewPublisher(js)
-	}
-	return &WebhookConsumerService{
-		db:                db,
-		nc:                nc,
-		pub:               pub,
-		logger:            logger,
-		config:            config,
-		activeConnections: make(map[string]*ActiveConnection),
-	}
+	s.db = res.DB
+	s.nc = res.NATS
+	s.logger = res.Logger
+	s.activeConnections = make(map[string]*ActiveConnection)
+	s.auxPort = envOr("WORKER_HTTP_PORT", "9100")
+
+	s.RegisterHTTPHandler("/webhook/", s.handleWebhook())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
+	s.RegisterHTTPHandler("/tunnel/start", s.handleTunnelStart())
+	s.RegisterHTTPHandler("/tunnel/stop", s.handleTunnelStop())
+	s.RegisterHTTPHandler("/tunnel/status", s.handleTunnelStatus())
+	s.RegisterHTTPHandler("/tunnel/register", s.handleTunnelRegister())
+
+	res.Health.SetReady(true)
+	return nil
 }
 
-// Start initializes the HTTP server and subscribes to NATS commands
-func (s *WebhookConsumerService) Start(ctx context.Context) error {
+// Run subscribes to the connection command subjects and blocks until the runner
+// cancels ctx. Webhook delivery is driven by inbound HTTP requests.
+func (s *webhookConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
+	s.publish = publish
 	s.logger.Info("Starting Webhook Consumer Service")
 
-	// Start the shared HTTP server
-	s.server = NewWebhookServer(s.config.WebhookPort, s, s.logger)
-	if err := s.server.Start(); err != nil {
-		return fmt.Errorf("failed to start webhook server: %w", err)
-	}
-
-	// Subscribe to start commands
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to start commands: %w", err)
 	}
 	s.startSub = startSub
 
-	// Subscribe to stop commands
 	stopSub, err := s.nc.Subscribe("vrsky.commands.*.connection.stop", s.handleStopCommand)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to stop commands: %w", err)
 	}
 	s.stopSub = stopSub
 
-	s.logger.Info("Subscribed to NATS command topics",
-		"start_topic", "vrsky.commands.*.connection.start",
-		"stop_topic", "vrsky.commands.*.connection.stop")
-
+	s.logger.Info("Subscribed to NATS command topics")
+	<-ctx.Done()
 	return nil
 }
 
-// Stop gracefully shuts down the service
-func (s *WebhookConsumerService) Stop(ctx context.Context) error {
+// Stop unregisters all webhooks and kills the cloudflared tunnel. The SDK runner
+// calls this after Run returns; it also shuts down the aux HTTP server it owns.
+func (s *webhookConsumer) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping Webhook Consumer Service")
 
 	if s.startSub != nil {
@@ -110,7 +115,6 @@ func (s *WebhookConsumerService) Stop(ctx context.Context) error {
 		_ = s.stopSub.Unsubscribe()
 	}
 
-	// Cancel all active connections
 	s.mu.Lock()
 	for connId, ac := range s.activeConnections {
 		s.logger.Info("Unregistering webhook", "connection_id", connId)
@@ -119,10 +123,7 @@ func (s *WebhookConsumerService) Stop(ctx context.Context) error {
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.mu.Unlock()
 
-	// Stop HTTP server
-	if s.server != nil {
-		s.server.Stop()
-	}
+	s.stopTunnel()
 
 	select {
 	case <-ctx.Done():
@@ -139,7 +140,7 @@ type CommandMessage struct {
 }
 
 // handleStartCommand processes a start command from NATS
-func (s *WebhookConsumerService) handleStartCommand(msg *nats.Msg) {
+func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse start command", "error", err, "data", string(msg.Data))
@@ -148,35 +149,30 @@ func (s *WebhookConsumerService) handleStartCommand(msg *nats.Msg) {
 
 	s.logger.Info("Received start command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
 
-	// Check if already active
 	s.mu.RLock()
 	_, exists := s.activeConnections[cmd.ConnectionID]
 	s.mu.RUnlock()
-
 	if exists {
 		s.logger.Warn("Webhook already registered", "connection_id", cmd.ConnectionID)
 		return
 	}
 
-	// Fetch connection to verify it's a webhook consumer
 	conn, err := s.getConnection(cmd.ConnectionID, cmd.TenantID)
 	if err != nil {
 		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", cmd.ConnectionID)
 		return
 	}
 
-	// Check if this connection has a webhook consumer node
 	if !s.hasWebhookConsumer(conn) {
 		s.logger.Debug("Not a webhook consumer, ignoring", "connection_id", cmd.ConnectionID)
 		return
 	}
 
-	// Register the webhook handler
 	_, cancel := context.WithCancel(context.Background())
 
-	// Extract optional HMAC signature config. resolveSecretsInNodes has
-	// already turned <field>_secret_id refs into plaintext, so the secret
-	// is sitting in node.config.http.signature.secret.
+	// Extract optional HMAC signature config. resolveSecretsInNodes has already
+	// turned <field>_secret_id refs into plaintext, so the secret is sitting in
+	// node.config.http.signature.secret.
 	sig := s.extractSignature(conn)
 
 	s.mu.Lock()
@@ -188,18 +184,17 @@ func (s *WebhookConsumerService) handleStartCommand(msg *nats.Msg) {
 	}
 	s.mu.Unlock()
 
-	// Update connection status
 	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
 	}
 
 	s.logger.Info("Webhook registered",
 		"connection_id", cmd.ConnectionID,
-		"url", fmt.Sprintf("http://localhost:%s/webhook/%s", s.config.WebhookPort, cmd.ConnectionID))
+		"path", fmt.Sprintf("/webhook/%s", cmd.ConnectionID))
 }
 
 // handleStopCommand processes a stop command from NATS
-func (s *WebhookConsumerService) handleStopCommand(msg *nats.Msg) {
+func (s *webhookConsumer) handleStopCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse stop command", "error", err, "data", string(msg.Data))
@@ -229,7 +224,7 @@ func (s *WebhookConsumerService) handleStopCommand(msg *nats.Msg) {
 }
 
 // getActiveConnection returns the active connection info for a given connection ID
-func (s *WebhookConsumerService) getActiveConnection(connectionID string) *ActiveConnection {
+func (s *webhookConsumer) getActiveConnection(connectionID string) *ActiveConnection {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeConnections[connectionID]
@@ -244,22 +239,14 @@ type Connection struct {
 	Edges    json.RawMessage
 }
 
-// getConnection fetches a connection from the database
-func (s *WebhookConsumerService) getConnection(connectionID, tenantID string) (*Connection, error) {
-	query := `
-		SELECT id, tenant_id, name, nodes, edges
-		FROM connections
-		WHERE id = $1 AND tenant_id = $2
-	`
-
+// getConnection fetches a connection and resolves any *_secret_id references in
+// its node configs to plaintext (e.g. the HMAC signing secret).
+func (s *webhookConsumer) getConnection(connectionID, tenantID string) (*Connection, error) {
 	var conn Connection
-	err := s.db.QueryRow(query, connectionID, tenantID).Scan(
-		&conn.ID,
-		&conn.TenantID,
-		&conn.Name,
-		&conn.Nodes,
-		&conn.Edges,
-	)
+	err := s.db.QueryRow(
+		`SELECT id, tenant_id, name, nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
+		connectionID, tenantID,
+	).Scan(&conn.ID, &conn.TenantID, &conn.Name, &conn.Nodes, &conn.Edges)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("connection not found: %s", connectionID)
@@ -268,7 +255,6 @@ func (s *WebhookConsumerService) getConnection(connectionID, tenantID string) (*
 		return nil, fmt.Errorf("failed to query connection: %w", err)
 	}
 
-	// Resolve any *_secret_id references in node configs to plaintext.
 	resolved, rerr := s.resolveSecretsInNodes(conn.Nodes, tenantID)
 	if rerr != nil {
 		return nil, fmt.Errorf("resolve secrets: %w", rerr)
@@ -278,9 +264,8 @@ func (s *WebhookConsumerService) getConnection(connectionID, tenantID string) (*
 }
 
 // resolveSecretsInNodes parses nodes[], runs the resolver on each config,
-// re-marshals. Returns the original bytes on parse failure (workers will
-// surface a clearer error downstream when they fail to read config).
-func (s *WebhookConsumerService) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
+// re-marshals. Returns the original bytes on parse failure.
+func (s *webhookConsumer) resolveSecretsInNodes(nodesJSON json.RawMessage, tenantID string) (json.RawMessage, error) {
 	if len(nodesJSON) == 0 {
 		return nodesJSON, nil
 	}
@@ -310,9 +295,9 @@ type Node struct {
 
 // extractSignature returns the HMAC verification config for a webhook
 // connection, or nil if the connection has no signature block configured.
-// Reads from nodes[].config.http.signature; the shared secret has already
-// been resolved to plaintext by resolveSecretsInNodes (see #66).
-func (s *WebhookConsumerService) extractSignature(conn *Connection) *signatureConfig {
+// Reads from nodes[].config.http.signature; the shared secret has already been
+// resolved to plaintext by resolveSecretsInNodes (see #66).
+func (s *webhookConsumer) extractSignature(conn *Connection) *signatureConfig {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
 		return nil
@@ -359,7 +344,7 @@ func (s *WebhookConsumerService) extractSignature(conn *Connection) *signatureCo
 }
 
 // hasWebhookConsumer checks if the connection has an HTTP webhook consumer node
-func (s *WebhookConsumerService) hasWebhookConsumer(conn *Connection) bool {
+func (s *webhookConsumer) hasWebhookConsumer(conn *Connection) bool {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
 		s.logger.Warn("Failed to parse nodes", "error", err)
@@ -370,13 +355,10 @@ func (s *WebhookConsumerService) hasWebhookConsumer(conn *Connection) bool {
 		if node.Type != "consumer" {
 			continue
 		}
-
-		// Check config.type == "http"
 		var config map[string]json.RawMessage
 		if err := json.Unmarshal(node.Config, &config); err != nil {
 			continue
 		}
-
 		if typeRaw, ok := config["type"]; ok {
 			var configType string
 			if json.Unmarshal(typeRaw, &configType) == nil && configType == "http" {
@@ -384,32 +366,29 @@ func (s *WebhookConsumerService) hasWebhookConsumer(conn *Connection) bool {
 			}
 		}
 	}
-
 	return false
 }
 
 // updateConnectionStatus updates the connection status in the database
-func (s *WebhookConsumerService) updateConnectionStatus(connectionID, tenantID, status string) error {
+func (s *webhookConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {
 	var query string
 	if status == "running" {
-		query = `
-			UPDATE connections
-			SET status = $1, started_at = NOW(), updated_at = NOW()
-			WHERE id = $2 AND tenant_id = $3
-		`
+		query = `UPDATE connections SET status = $1, started_at = NOW(), updated_at = NOW() WHERE id = $2 AND tenant_id = $3`
 	} else {
-		query = `
-			UPDATE connections
-			SET status = $1, stopped_at = NOW(), updated_at = NOW()
-			WHERE id = $2 AND tenant_id = $3
-		`
+		query = `UPDATE connections SET status = $1, stopped_at = NOW(), updated_at = NOW() WHERE id = $2 AND tenant_id = $3`
 	}
-
 	_, err := s.db.Exec(query, status, connectionID, tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to update connection status: %w", err)
 	}
-
 	s.logger.Info("Updated connection status", "connection_id", connectionID, "status", status)
 	return nil
+}
+
+// envOr returns the environment variable value or a default.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
