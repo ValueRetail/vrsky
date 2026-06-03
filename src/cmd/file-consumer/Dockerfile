@@ -32,9 +32,11 @@ COPY --from=builder /build/file-consumer .
 
 RUN chmod +x ./file-consumer
 
-EXPOSE 9200
+# 8080 = SDK health port (HEALTH_PORT); 9200 = aux HTTP port (WORKER_HTTP_PORT,
+# serves /upload, /events, /sample-data).
+EXPOSE 8080 9200
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:9200/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["./file-consumer"]

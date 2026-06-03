@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,17 +12,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/nats-io/nats.go"
 )
 
-type FileConsumerService struct {
-	db     *sql.DB
-	nc     *nats.Conn
-	pub    *messaging.Publisher // JetStream data-flow publisher (#70)
-	logger *slog.Logger
-	config *Config
-	server *UploadServer
+// fileConsumer watches a directory and accepts HTTP uploads per active
+// connection, publishing file contents into the pipeline. It is an SDK
+// Consumer: the runner provides NATS/DB/health/lifecycle; this type implements
+// Configure (wire deps + register HTTP handlers), Run (subscribe to command
+// subjects, block), and Stop (cancel watchers).
+type fileConsumer struct {
+	sdk.BaseConsumer
+
+	db      *sql.DB
+	nc      *nats.Conn
+	publish sdk.PublishFunc // injected by the runner; the one data-emit path
+	logger  *slog.Logger
+
+	baseDir  string // FILE_CONSUMER_BASE_DIR; default watch root when a node has no path
+	hostHome string // HOST_HOME; used to expand a leading ~ in node paths
 
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
@@ -36,7 +45,7 @@ type FileConsumerService struct {
 
 // FileEvent represents an activity event for the UI
 type FileEvent struct {
-	Type     string `json:"type"`     // "detected", "processed", "uploaded", "deleted", "error"
+	Type     string `json:"type"` // "added", "deleted", "uploaded", "error", "connected"
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
 	Time     string `json:"time"`
@@ -44,77 +53,42 @@ type FileEvent struct {
 }
 
 type ActiveConnection struct {
-	ConnectionID   string
-	TenantID       string
-	WatchDir       string
-	Cancel         context.CancelFunc
-	processedFiles map[string]int64 // filename → mtime
-	knownFiles     map[string]bool  // all files seen in last scan
+	ConnectionID string
+	TenantID     string
+	WatchDir     string
+	Cancel       context.CancelFunc
+	knownFiles   map[string]bool // all files seen in last scan
 }
 
-func NewFileConsumerService(db *sql.DB, nc *nats.Conn, logger *slog.Logger, config *Config) *FileConsumerService {
-	js, err := nc.JetStream()
-	if err != nil {
-		logger.Error("Failed to get JetStream context", "error", err)
+// Configure wires dependencies and registers the HTTP endpoints the UI uses
+// (served on the SDK auxiliary HTTP port, WORKER_HTTP_PORT/9200). Called once
+// before Run.
+func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
+	if res.DB == nil {
+		return errors.New("file-consumer requires DATABASE_URL")
 	}
-	var pub *messaging.Publisher
-	if js != nil {
-		pub = messaging.NewPublisher(js)
-	}
-	return &FileConsumerService{
-		db:                db,
-		nc:                nc,
-		pub:               pub,
-		logger:            logger,
-		config:            config,
-		activeConnections: make(map[string]*ActiveConnection),
-		eventSubs:         make(map[string][]chan FileEvent),
-	}
+	s.db = res.DB
+	s.nc = res.NATS
+	s.logger = res.Logger
+	s.activeConnections = make(map[string]*ActiveConnection)
+	s.eventSubs = make(map[string][]chan FileEvent)
+	s.baseDir = getEnv("FILE_CONSUMER_BASE_DIR", "/data/input")
+	s.hostHome = os.Getenv("HOST_HOME")
+
+	s.RegisterHTTPHandler("/upload/", s.handleUpload())
+	s.RegisterHTTPHandler("/events/", s.handleEvents())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
+
+	res.Health.SetReady(true)
+	return nil
 }
 
-// Subscribe to events for a connection, returns a channel and unsubscribe function
-func (s *FileConsumerService) subscribeEvents(connectionID string) (chan FileEvent, func()) {
-	ch := make(chan FileEvent, 50)
-	s.eventSubsMu.Lock()
-	s.eventSubs[connectionID] = append(s.eventSubs[connectionID], ch)
-	s.eventSubsMu.Unlock()
-
-	return ch, func() {
-		s.eventSubsMu.Lock()
-		defer s.eventSubsMu.Unlock()
-		subs := s.eventSubs[connectionID]
-		for i, sub := range subs {
-			if sub == ch {
-				s.eventSubs[connectionID] = append(subs[:i], subs[i+1:]...)
-				close(ch)
-				break
-			}
-		}
-	}
-}
-
-// emitEvent sends an event to all subscribers for a connection
-func (s *FileConsumerService) emitEvent(connectionID string, event FileEvent) {
-	s.eventSubsMu.RLock()
-	defer s.eventSubsMu.RUnlock()
-	for _, ch := range s.eventSubs[connectionID] {
-		select {
-		case ch <- event:
-		default: // drop if channel full
-		}
-	}
-}
-
-func (s *FileConsumerService) Start(ctx context.Context) error {
+// Run subscribes to the connection command subjects and blocks until the runner
+// cancels ctx. Per-connection directory watching is driven from the handlers.
+func (s *fileConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
+	s.publish = publish
 	s.logger.Info("Starting File Consumer Service")
 
-	// Start HTTP upload server
-	s.server = NewUploadServer(s.config.Port, s, s.logger)
-	if err := s.server.Start(); err != nil {
-		return fmt.Errorf("failed to start upload server: %w", err)
-	}
-
-	// Subscribe to NATS commands
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to start commands: %w", err)
@@ -128,10 +102,13 @@ func (s *FileConsumerService) Start(ctx context.Context) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	<-ctx.Done()
 	return nil
 }
 
-func (s *FileConsumerService) Stop(ctx context.Context) error {
+// Stop cancels all directory watchers. The SDK runner calls this after Run
+// returns; it also shuts down the aux HTTP server it owns.
+func (s *fileConsumer) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping File Consumer Service")
 
 	if s.startSub != nil {
@@ -149,10 +126,6 @@ func (s *FileConsumerService) Stop(ctx context.Context) error {
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.mu.Unlock()
 
-	if s.server != nil {
-		s.server.Stop()
-	}
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -166,7 +139,7 @@ type CommandMessage struct {
 	TenantID     string `json:"tenant_id"`
 }
 
-func (s *FileConsumerService) handleStartCommand(msg *nats.Msg) {
+func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse start command", "error", err, "data", string(msg.Data))
@@ -197,12 +170,12 @@ func (s *FileConsumerService) handleStartCommand(msg *nats.Msg) {
 	// Get watch directory from node config, fall back to {baseDir}/{connectionId}
 	watchDir := s.extractWatchDir(conn)
 	if watchDir == "" {
-		watchDir = filepath.Join(s.config.BaseDir, cmd.ConnectionID)
+		watchDir = filepath.Join(s.baseDir, cmd.ConnectionID)
 	}
 
 	// Expand ~ to host home directory
 	if len(watchDir) > 0 && watchDir[0] == '~' {
-		home := s.config.HostHome
+		home := s.hostHome
 		if home == "" {
 			home, _ = os.UserHomeDir()
 		}
@@ -219,12 +192,11 @@ func (s *FileConsumerService) handleStartCommand(msg *nats.Msg) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ac := &ActiveConnection{
-		ConnectionID:   cmd.ConnectionID,
-		TenantID:       cmd.TenantID,
-		WatchDir:       watchDir,
-		Cancel:         cancel,
-		processedFiles: make(map[string]int64),
-		knownFiles:     make(map[string]bool),
+		ConnectionID: cmd.ConnectionID,
+		TenantID:     cmd.TenantID,
+		WatchDir:     watchDir,
+		Cancel:       cancel,
+		knownFiles:   make(map[string]bool),
 	}
 
 	s.mu.Lock()
@@ -240,11 +212,10 @@ func (s *FileConsumerService) handleStartCommand(msg *nats.Msg) {
 
 	s.logger.Info("File watcher started",
 		"connection_id", cmd.ConnectionID,
-		"watch_dir", watchDir,
-		"upload_url", fmt.Sprintf("http://localhost:%s/upload/%s", s.config.Port, cmd.ConnectionID))
+		"watch_dir", watchDir)
 }
 
-func (s *FileConsumerService) handleStopCommand(msg *nats.Msg) {
+func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	var cmd CommandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		s.logger.Error("Failed to parse stop command", "error", err, "data", string(msg.Data))
@@ -275,7 +246,7 @@ func (s *FileConsumerService) handleStopCommand(msg *nats.Msg) {
 
 // watchDirectory polls for file additions and deletions only (no auto-processing).
 // Files are only ingested via explicit upload through the HTTP endpoint.
-func (s *FileConsumerService) watchDirectory(ctx context.Context, ac *ActiveConnection) {
+func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	logger.Info("Starting directory watch", "interval", "5s")
 
@@ -321,7 +292,7 @@ func (s *FileConsumerService) watchDirectory(ctx context.Context, ac *ActiveConn
 }
 
 // listFiles returns a set of non-directory filenames in a directory.
-func (s *FileConsumerService) listFiles(dir string) map[string]bool {
+func (s *fileConsumer) listFiles(dir string) map[string]bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return make(map[string]bool)
@@ -359,7 +330,7 @@ func detectContentType(filename string, data []byte) string {
 	return "application/octet-stream"
 }
 
-func (s *FileConsumerService) getActiveConnection(connectionID string) *ActiveConnection {
+func (s *fileConsumer) getActiveConnection(connectionID string) *ActiveConnection {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeConnections[connectionID]
@@ -380,7 +351,7 @@ type Node struct {
 	Config json.RawMessage `json:"config"`
 }
 
-func (s *FileConsumerService) getConnection(connectionID, tenantID string) (*Connection, error) {
+func (s *fileConsumer) getConnection(connectionID, tenantID string) (*Connection, error) {
 	var conn Connection
 	err := s.db.QueryRow(
 		`SELECT id, tenant_id, name, nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
@@ -397,7 +368,7 @@ func (s *FileConsumerService) getConnection(connectionID, tenantID string) (*Con
 }
 
 // extractWatchDir gets the watch directory from the file consumer node config
-func (s *FileConsumerService) extractWatchDir(conn *Connection) string {
+func (s *fileConsumer) extractWatchDir(conn *Connection) string {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
 		return ""
@@ -422,7 +393,7 @@ func (s *FileConsumerService) extractWatchDir(conn *Connection) string {
 	return ""
 }
 
-func (s *FileConsumerService) hasFileConsumer(conn *Connection) bool {
+func (s *fileConsumer) hasFileConsumer(conn *Connection) bool {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
 		return false
@@ -446,7 +417,7 @@ func (s *FileConsumerService) hasFileConsumer(conn *Connection) bool {
 	return false
 }
 
-func (s *FileConsumerService) updateConnectionStatus(connectionID, tenantID, status string) error {
+func (s *fileConsumer) updateConnectionStatus(connectionID, tenantID, status string) error {
 	var query string
 	if status == "running" {
 		query = `UPDATE connections SET status = $1, started_at = NOW(), updated_at = NOW() WHERE id = $2 AND tenant_id = $3`
@@ -459,4 +430,45 @@ func (s *FileConsumerService) updateConnectionStatus(connectionID, tenantID, sta
 	}
 	s.logger.Info("Updated connection status", "connection_id", connectionID, "status", status)
 	return nil
+}
+
+// --- Event broadcasting (SSE) ---
+
+func (s *fileConsumer) subscribeEvents(connectionID string) (chan FileEvent, func()) {
+	ch := make(chan FileEvent, 50)
+	s.eventSubsMu.Lock()
+	s.eventSubs[connectionID] = append(s.eventSubs[connectionID], ch)
+	s.eventSubsMu.Unlock()
+
+	return ch, func() {
+		s.eventSubsMu.Lock()
+		defer s.eventSubsMu.Unlock()
+		subs := s.eventSubs[connectionID]
+		for i, sub := range subs {
+			if sub == ch {
+				s.eventSubs[connectionID] = append(subs[:i], subs[i+1:]...)
+				close(ch)
+				break
+			}
+		}
+	}
+}
+
+// emitEvent sends an event to all subscribers for a connection
+func (s *fileConsumer) emitEvent(connectionID string, event FileEvent) {
+	s.eventSubsMu.RLock()
+	defer s.eventSubsMu.RUnlock()
+	for _, ch := range s.eventSubs[connectionID] {
+		select {
+		case ch <- event:
+		default: // drop if channel full
+		}
+	}
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

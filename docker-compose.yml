@@ -352,7 +352,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      FILE_CONSUMER_PORT: "9200"
+      # Aux HTTP port the SDK serves /upload, /events (SSE) + /sample-data on
+      # (UI connects here). Health is on 8080 (HEALTH_PORT).
+      WORKER_HTTP_PORT: "9200"
       FILE_CONSUMER_BASE_DIR: "/data/input"
       HOST_HOME: "${HOME}"
     ports:
