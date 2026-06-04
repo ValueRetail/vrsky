@@ -14,6 +14,7 @@ require (
 	github.com/lib/pq v1.10.2
 	github.com/nats-io/nats-server/v2 v2.10.16
 	github.com/nats-io/nats.go v1.35.0
+	github.com/pkg/sftp v1.13.6
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
@@ -56,6 +57,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.8 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect

@@ -561,6 +561,38 @@ services:
         condition: service_healthy
     networks:
       - vrsky-network
+
+  # SFTP Consumer (#76) - watches a remote SFTP dir, fetches + publishes files.
+  sftp-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/sftp-consumer/Dockerfile
+    container_name: vrsky-sftp-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # SFTP password / private key (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # Test SFTP server (atmoz/sftp) for local + CI testing of #76. user: vrsky,
+  # password: vrsky, with an /upload directory writable by the user.
+  sftp-test:
+    image: atmoz/sftp:alpine
+    container_name: vrsky-sftp-test
+    command: "vrsky:vrsky:::upload"
+    ports:
+      - "127.0.0.1:2222:22"
+    networks:
+      - vrsky-network
     restart: unless-stopped
 
   # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)

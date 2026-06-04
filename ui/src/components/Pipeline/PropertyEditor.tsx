@@ -611,6 +611,128 @@ function SalesforceConsumerConfig({
   )
 }
 
+// SFTPConsumerConfig (#76): watch a remote SFTP directory, fetch + publish new
+// files, and apply an after-action. Stores config.sftp = {host, port, username,
+// password, private_key, host_key, remote_dir, file_pattern,
+// poll_interval_seconds, after_action, move_dir}. The password / private key are
+// minted into the secrets vault on deploy (SECRET_FIELDS).
+function SFTPConsumerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const sftp = (config.sftp as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, sftp: { ...sftp, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const afterAction = (sftp.after_action as string) || 'none'
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="sftp.example.com"
+          value={(sftp.host as string) || ''}
+          onChange={(v) => update({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          type="number"
+          placeholder="22"
+          value={String((sftp.port as number) ?? 22)}
+          onChange={(v) => update({ port: parseInt(v) || 22 })}
+        />
+      </div>
+
+      <StyledInput
+        label="Username"
+        placeholder="vrsky"
+        value={(sftp.username as string) || ''}
+        onChange={(v) => update({ username: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Password</label>
+        <SecretInput
+          label="Password"
+          placeholder="SFTP password (or use a private key below)"
+          field="password"
+          config={sftp}
+          defaultSecretName="sftp-password"
+          onChange={(patch) => update(patch)}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          value={(sftp.private_key as string) || ''}
+          onChange={(e) => update({ private_key: e.target.value })}
+        />
+      </div>
+
+      <StyledInput
+        label="Remote directory"
+        placeholder="/upload"
+        value={(sftp.remote_dir as string) || ''}
+        onChange={(v) => update({ remote_dir: v })}
+      />
+      <StyledInput
+        label="File pattern (optional)"
+        placeholder="*.csv"
+        value={(sftp.file_pattern as string) || ''}
+        onChange={(v) => update({ file_pattern: v })}
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Poll interval (s, 0 = once)"
+          type="number"
+          placeholder="60"
+          value={String((sftp.poll_interval_seconds as number) ?? 60)}
+          onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+        />
+        <StyledSelect
+          label="After action"
+          value={afterAction}
+          onChange={(v) => update({ after_action: v })}
+          options={[
+            { value: 'none', label: 'Leave in place' },
+            { value: 'delete', label: 'Delete' },
+            { value: 'move', label: 'Move' },
+          ]}
+        />
+      </div>
+
+      {afterAction === 'move' && (
+        <StyledInput
+          label="Move to directory"
+          placeholder="/upload/processed"
+          value={(sftp.move_dir as string) || ''}
+          onChange={(v) => update({ move_dir: v })}
+        />
+      )}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        The password / private key is stored encrypted in the secrets vault on deploy.
+        The pipeline polls the remote directory and ingests each new file.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2212,6 +2334,7 @@ export default function PropertyEditor({
                 { value: 'database', label: 'Database CDC' },
                 { value: 'tenant', label: 'Tenant Input' },
                 { value: 'salesforce', label: 'Salesforce' },
+                { value: 'sftp', label: 'SFTP' },
               ]}
             />
 
@@ -2373,6 +2496,10 @@ export default function PropertyEditor({
                 setConfig={setConfig}
                 deployedConnectionId={deployedConnectionId}
               />
+            )}
+
+            {config.type === 'sftp' && (
+              <SFTPConsumerConfig config={config} setConfig={setConfig} />
             )}
           </div>
         )
