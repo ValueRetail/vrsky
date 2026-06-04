@@ -611,6 +611,444 @@ function SalesforceConsumerConfig({
   )
 }
 
+// SFTPConsumerConfig (#76): watch a remote SFTP directory, fetch + publish new
+// files, and apply an after-action. Stores config.sftp = {host, port, username,
+// password, private_key, host_key, remote_dir, file_pattern,
+// poll_interval_seconds, after_action, move_dir}. The password / private key are
+// minted into the secrets vault on deploy (SECRET_FIELDS).
+function SFTPConsumerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const sftp = (config.sftp as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, sftp: { ...sftp, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const afterAction = (sftp.after_action as string) || 'none'
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="sftp.example.com"
+          value={(sftp.host as string) || ''}
+          onChange={(v) => update({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          type="number"
+          placeholder="22"
+          value={String((sftp.port as number) ?? 22)}
+          onChange={(v) => update({ port: parseInt(v) || 22 })}
+        />
+      </div>
+
+      <StyledInput
+        label="Username"
+        placeholder="vrsky"
+        value={(sftp.username as string) || ''}
+        onChange={(v) => update({ username: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Password</label>
+        <SecretInput
+          label="Password"
+          placeholder="SFTP password (or use a private key below)"
+          field="password"
+          config={sftp}
+          defaultSecretName="sftp-password"
+          onChange={(patch) => update(patch)}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          value={(sftp.private_key as string) || ''}
+          onChange={(e) => update({ private_key: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '50px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="ssh-ed25519 AAAA…  (a known_hosts / authorized_keys line)"
+          value={(sftp.host_key as string) || ''}
+          onChange={(e) => update({ host_key: e.target.value })}
+        />
+        <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>
+          Leave empty to skip host-key verification (dev only). Pin it in production.
+        </div>
+      </div>
+
+      <StyledInput
+        label="Remote directory"
+        placeholder="/upload"
+        value={(sftp.remote_dir as string) || ''}
+        onChange={(v) => update({ remote_dir: v })}
+      />
+      <StyledInput
+        label="File pattern (optional)"
+        placeholder="*.csv"
+        value={(sftp.file_pattern as string) || ''}
+        onChange={(v) => update({ file_pattern: v })}
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Poll interval (s, 0 = once)"
+          type="number"
+          placeholder="60"
+          value={String((sftp.poll_interval_seconds as number) ?? 60)}
+          onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+        />
+        <StyledSelect
+          label="After action"
+          value={afterAction}
+          onChange={(v) => update({ after_action: v })}
+          options={[
+            { value: 'none', label: 'Leave in place' },
+            { value: 'delete', label: 'Delete' },
+            { value: 'move', label: 'Move' },
+          ]}
+        />
+      </div>
+
+      {afterAction === 'move' && (
+        <StyledInput
+          label="Move to directory"
+          placeholder="/upload/processed"
+          value={(sftp.move_dir as string) || ''}
+          onChange={(v) => update({ move_dir: v })}
+        />
+      )}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        The password / private key is stored encrypted in the secrets vault on deploy.
+        The pipeline polls the remote directory and ingests each new file.
+      </div>
+    </div>
+  )
+}
+
+// SFTPProducerConfig (#76): upload each pipeline message as a file to a remote
+// SFTP directory, named from a template. Stores config.sftp = {host, port,
+// username, password, private_key, host_key, remote_dir, filename_template}.
+// The password / private key is minted into the secrets vault on deploy.
+function SFTPProducerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const sftp = (config.sftp as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, sftp: { ...sftp, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="sftp.example.com"
+          value={(sftp.host as string) || ''}
+          onChange={(v) => update({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          type="number"
+          placeholder="22"
+          value={String((sftp.port as number) ?? 22)}
+          onChange={(v) => update({ port: parseInt(v) || 22 })}
+        />
+      </div>
+
+      <StyledInput
+        label="Username"
+        placeholder="vrsky"
+        value={(sftp.username as string) || ''}
+        onChange={(v) => update({ username: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Password</label>
+        <SecretInput
+          label="Password"
+          placeholder="SFTP password (or use a private key below)"
+          field="password"
+          config={sftp}
+          defaultSecretName="sftp-password"
+          onChange={(patch) => update(patch)}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          value={(sftp.private_key as string) || ''}
+          onChange={(e) => update({ private_key: e.target.value })}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '50px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="ssh-ed25519 AAAA…  (a known_hosts / authorized_keys line)"
+          value={(sftp.host_key as string) || ''}
+          onChange={(e) => update({ host_key: e.target.value })}
+        />
+        <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>
+          Leave empty to skip host-key verification (dev only). Pin it in production.
+        </div>
+      </div>
+
+      <StyledInput
+        label="Remote directory"
+        placeholder="/upload"
+        value={(sftp.remote_dir as string) || ''}
+        onChange={(v) => update({ remote_dir: v })}
+      />
+      <StyledInput
+        label="Filename template"
+        placeholder="order_{{.id}}_{{.timestamp}}.json"
+        value={(sftp.filename_template as string) || ''}
+        onChange={(v) => update({ filename_template: v })}
+      />
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Each message is uploaded as a file. The filename template can reference
+        payload fields (e.g. <code>{'{{.id}}'}</code>) plus <code>{'{{.timestamp}}'}</code> and{' '}
+        <code>{'{{.uuid}}'}</code>. Defaults to <code>{'{{.uuid}}'}.json</code>.
+      </div>
+    </div>
+  )
+}
+
+// KafkaConfigEditor (#77): shared config form for the Kafka consumer + producer.
+// Stores config.kafka = {brokers[], topic, consumer_group?, auth_type, username,
+// password, ca_cert, client_cert, client_key}. password + client_key are minted
+// into the secrets vault on deploy. role switches the consumer-only field
+// (consumer_group) and the producer-only hint (acks=all).
+function KafkaConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const kafka = (config.kafka as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, kafka: { ...kafka, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const authType = (kafka.auth_type as string) || 'none'
+  const isSASL = authType.startsWith('sasl')
+  const isMTLS = authType === 'mtls'
+  const brokers = Array.isArray(kafka.brokers) ? (kafka.brokers as string[]) : []
+
+  const certArea = (label: string, field: string, placeholder: string) => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <textarea
+        style={{
+          width: '100%', minHeight: '60px', padding: '8px 10px',
+          border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+          fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+        }}
+        placeholder={placeholder}
+        value={(kafka[field] as string) || ''}
+        onChange={(e) => update({ [field]: e.target.value })}
+      />
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Brokers (comma-separated)"
+        placeholder="broker1:9092, broker2:9092"
+        value={brokers.join(', ')}
+        onChange={(v) => update({ brokers: v.split(',').map((s) => s.trim()).filter(Boolean) })}
+      />
+      <StyledInput
+        label="Topic"
+        placeholder="orders"
+        value={(kafka.topic as string) || ''}
+        onChange={(v) => update({ topic: v })}
+      />
+      {role === 'consumer' && (
+        <StyledInput
+          label="Consumer group"
+          placeholder="vrsky"
+          value={(kafka.consumer_group as string) || ''}
+          onChange={(v) => update({ consumer_group: v })}
+        />
+      )}
+
+      <StyledSelect
+        label="Authentication"
+        value={authType}
+        onChange={(v) => update({ auth_type: v })}
+        options={[
+          { value: 'none', label: 'None' },
+          { value: 'sasl-plain', label: 'SASL / PLAIN' },
+          { value: 'sasl-scram-256', label: 'SASL / SCRAM-SHA-256' },
+          { value: 'sasl-scram-512', label: 'SASL / SCRAM-SHA-512' },
+          { value: 'mtls', label: 'mTLS' },
+        ]}
+      />
+
+      {isSASL && (
+        <>
+          <StyledInput
+            label="Username"
+            value={(kafka.username as string) || ''}
+            onChange={(v) => update({ username: v })}
+          />
+          <div>
+            <label style={labelStyle}>Password</label>
+            <SecretInput
+              label="Password"
+              placeholder="SASL password"
+              field="password"
+              config={kafka}
+              defaultSecretName="kafka-password"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {(isMTLS || isSASL) && certArea('CA certificate (PEM, optional)', 'ca_cert', '-----BEGIN CERTIFICATE-----')}
+      {isMTLS && certArea('Client certificate (PEM)', 'client_cert', '-----BEGIN CERTIFICATE-----')}
+      {isMTLS && certArea('Client key (PEM)', 'client_key', '-----BEGIN PRIVATE KEY-----')}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'The group offset is committed only after a message is published into the pipeline (at-least-once).'
+          : 'Messages are produced with acks=all (wait for all in-sync replicas).'}{' '}
+        Password and client key are stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
+// RabbitMQConfigEditor (#78): shared config form for the RabbitMQ consumer +
+// producer. Stores config.rabbitmq = {url, username, password, exchange,
+// exchange_type, queue, routing_key}. password is minted into the secrets vault
+// on deploy. role switches help text (manual-ack vs persistent publish).
+function RabbitMQConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const rmq = (config.rabbitmq as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, rabbitmq: { ...rmq, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="AMQP URL"
+        placeholder="amqp://rabbitmq:5672"
+        value={(rmq.url as string) || ''}
+        onChange={(v) => update({ url: v })}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Username (optional)"
+          value={(rmq.username as string) || ''}
+          onChange={(v) => update({ username: v })}
+        />
+        <div>
+          <label style={labelStyle}>Password (optional)</label>
+          <SecretInput
+            label="Password"
+            placeholder="AMQP password"
+            field="password"
+            config={rmq}
+            defaultSecretName="rabbitmq-password"
+            onChange={(patch) => update(patch)}
+          />
+        </div>
+      </div>
+      <StyledInput
+        label="Queue"
+        placeholder="orders"
+        value={(rmq.queue as string) || ''}
+        onChange={(v) => update({ queue: v })}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Exchange (optional)"
+          placeholder="events"
+          value={(rmq.exchange as string) || ''}
+          onChange={(v) => update({ exchange: v })}
+        />
+        <StyledInput
+          label="Routing key (optional)"
+          placeholder="orders.created"
+          value={(rmq.routing_key as string) || ''}
+          onChange={(v) => update({ routing_key: v })}
+        />
+      </div>
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'Messages are manually acked only after a successful publish into the pipeline (at-least-once). Credentials may be embedded in the URL or set above.'
+          : 'Messages are published as persistent (delivery_mode=2) to the exchange (or directly to the queue if no exchange is set).'}{' '}
+        The password is stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2212,6 +2650,9 @@ export default function PropertyEditor({
                 { value: 'database', label: 'Database CDC' },
                 { value: 'tenant', label: 'Tenant Input' },
                 { value: 'salesforce', label: 'Salesforce' },
+                { value: 'sftp', label: 'SFTP' },
+                { value: 'kafka', label: 'Kafka' },
+                { value: 'rabbitmq', label: 'RabbitMQ' },
               ]}
             />
 
@@ -2374,6 +2815,18 @@ export default function PropertyEditor({
                 deployedConnectionId={deployedConnectionId}
               />
             )}
+
+            {config.type === 'sftp' && (
+              <SFTPConsumerConfig config={config} setConfig={setConfig} />
+            )}
+
+            {config.type === 'kafka' && (
+              <KafkaConfigEditor config={config} setConfig={setConfig} role="consumer" />
+            )}
+
+            {config.type === 'rabbitmq' && (
+              <RabbitMQConfigEditor config={config} setConfig={setConfig} role="consumer" />
+            )}
           </div>
         )
 
@@ -2390,6 +2843,9 @@ export default function PropertyEditor({
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
                 { value: 'salesforce', label: 'Salesforce' },
+                { value: 'sftp', label: 'SFTP' },
+                { value: 'kafka', label: 'Kafka' },
+                { value: 'rabbitmq', label: 'RabbitMQ' },
               ]}
             />
 
@@ -2505,6 +2961,18 @@ export default function PropertyEditor({
                 setConfig={setConfig}
                 deployedConnectionId={deployedConnectionId}
               />
+            )}
+
+            {config.type === 'sftp' && (
+              <SFTPProducerConfig config={config} setConfig={setConfig} />
+            )}
+
+            {config.type === 'kafka' && (
+              <KafkaConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+
+            {config.type === 'rabbitmq' && (
+              <RabbitMQConfigEditor config={config} setConfig={setConfig} role="producer" />
             )}
           </div>
         )
