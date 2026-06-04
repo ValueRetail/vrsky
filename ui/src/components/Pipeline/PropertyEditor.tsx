@@ -733,6 +733,98 @@ function SFTPConsumerConfig({
   )
 }
 
+// SFTPProducerConfig (#76): upload each pipeline message as a file to a remote
+// SFTP directory, named from a template. Stores config.sftp = {host, port,
+// username, password, private_key, host_key, remote_dir, filename_template}.
+// The password / private key is minted into the secrets vault on deploy.
+function SFTPProducerConfig({
+  config,
+  setConfig,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+}) {
+  const sftp = (config.sftp as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, sftp: { ...sftp, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Host"
+          placeholder="sftp.example.com"
+          value={(sftp.host as string) || ''}
+          onChange={(v) => update({ host: v })}
+        />
+        <StyledInput
+          label="Port"
+          type="number"
+          placeholder="22"
+          value={String((sftp.port as number) ?? 22)}
+          onChange={(v) => update({ port: parseInt(v) || 22 })}
+        />
+      </div>
+
+      <StyledInput
+        label="Username"
+        placeholder="vrsky"
+        value={(sftp.username as string) || ''}
+        onChange={(v) => update({ username: v })}
+      />
+
+      <div>
+        <label style={labelStyle}>Password</label>
+        <SecretInput
+          label="Password"
+          placeholder="SFTP password (or use a private key below)"
+          field="password"
+          config={sftp}
+          defaultSecretName="sftp-password"
+          onChange={(patch) => update(patch)}
+        />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '70px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+          value={(sftp.private_key as string) || ''}
+          onChange={(e) => update({ private_key: e.target.value })}
+        />
+      </div>
+
+      <StyledInput
+        label="Remote directory"
+        placeholder="/upload"
+        value={(sftp.remote_dir as string) || ''}
+        onChange={(v) => update({ remote_dir: v })}
+      />
+      <StyledInput
+        label="Filename template"
+        placeholder="order_{{.id}}_{{.timestamp}}.json"
+        value={(sftp.filename_template as string) || ''}
+        onChange={(v) => update({ filename_template: v })}
+      />
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        Each message is uploaded as a file. The filename template can reference
+        payload fields (e.g. <code>{'{{.id}}'}</code>) plus <code>{'{{.timestamp}}'}</code> and{' '}
+        <code>{'{{.uuid}}'}</code>. Defaults to <code>{'{{.uuid}}'}.json</code>.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2517,6 +2609,7 @@ export default function PropertyEditor({
                 { value: 'file', label: 'File Output' },
                 { value: 'database', label: 'Database' },
                 { value: 'salesforce', label: 'Salesforce' },
+                { value: 'sftp', label: 'SFTP' },
               ]}
             />
 
@@ -2632,6 +2725,10 @@ export default function PropertyEditor({
                 setConfig={setConfig}
                 deployedConnectionId={deployedConnectionId}
               />
+            )}
+
+            {config.type === 'sftp' && (
+              <SFTPProducerConfig config={config} setConfig={setConfig} />
             )}
           </div>
         )
