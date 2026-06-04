@@ -42,6 +42,13 @@ async function materializeSecrets(value: unknown, hint: string): Promise<unknown
         const secret = await createSecret(`${hint}-${k}-${Date.now()}`, v)
         out[`${k}_secret_id`] = secret.id
         // plaintext key intentionally dropped
+      } else if (v === undefined) {
+        // SecretInput clears a previously-bound `<field>_secret_id` by setting
+        // it to undefined while the user types a replacement. Skip such keys —
+        // otherwise this branch would clobber the `_secret_id` we just minted
+        // above (when iteration reaches the undefined key after the plaintext
+        // field), wiping BOTH the id and the plaintext on serialization.
+        continue
       } else {
         out[k] = await materializeSecrets(v, hint)
       }
