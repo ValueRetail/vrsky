@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// parse folds a source snippet into pkgInfo via analyzeFile.
+// parse folds a source snippet into pkgInfo via analyzeFile. ParseComments so
+// the suppression-comment path is exercised.
 func parse(t *testing.T, src string) pkgInfo {
 	t.Helper()
-	f, err := parser.ParseFile(token.NewFileSet(), "x.go", src, 0)
+	f, err := parser.ParseFile(token.NewFileSet(), "x.go", src, parser.ParseComments)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -52,6 +53,38 @@ var _ = messaging.NewPublisher
 func main() { sdk.RunConsumer(nil, "x", nil) }`)
 	if !info.importsMessaging {
 		t.Error("expected importsMessaging")
+	}
+}
+
+func TestAnalyzeFile_DotImportRun(t *testing.T) {
+	info := parse(t, `package main
+import . "github.com/ValueRetail/vrsky/pkg/sdk"
+func main() { RunConsumer(nil, "x", nil) }`)
+	if !info.importsSDK {
+		t.Error("expected importsSDK for dot import")
+	}
+	if !info.runCalled {
+		t.Error("expected runCalled for dot-imported RunConsumer")
+	}
+}
+
+func TestAnalyzeFile_SuppressOnlyInComment(t *testing.T) {
+	// Token in a real comment → suppressed.
+	inComment := parse(t, `package main
+// lint:connector-ok — deliberate
+import "github.com/ValueRetail/vrsky/pkg/sdk"
+func main() { sdk.RunConsumer(nil, "x", nil) }`)
+	if !inComment.suppressed {
+		t.Error("expected suppressed when token is in a comment")
+	}
+
+	// Token only in a string literal → NOT suppressed.
+	inString := parse(t, `package main
+import "github.com/ValueRetail/vrsky/pkg/sdk"
+var note = "lint:connector-ok"
+func main() { sdk.RunConsumer(nil, "x", nil) }`)
+	if inString.suppressed {
+		t.Error("did not expect suppression from a string literal")
 	}
 }
 

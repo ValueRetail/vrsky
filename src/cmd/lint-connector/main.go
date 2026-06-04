@@ -125,14 +125,9 @@ func analyzeDir(dir string) (pkgInfo, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return pkgInfo{}, err
-		}
-		if strings.Contains(string(src), suppress) {
-			info.suppressed = true
-		}
-		f, err := parser.ParseFile(fset, path, src, 0)
+		// ParseComments so suppression is honoured only in real comments, not
+		// in string literals that happen to contain the token.
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
 			return pkgInfo{}, fmt.Errorf("parse %s: %w", path, err)
 		}
@@ -141,9 +136,19 @@ func analyzeDir(dir string) (pkgInfo, error) {
 	return info, nil
 }
 
-// analyzeFile folds one file's imports + sdk.Run* calls into info.
+// analyzeFile folds one file's imports, sdk.Run* calls, and suppression
+// comments into info.
 func analyzeFile(f *ast.File, info *pkgInfo) {
+	// Suppression marker — only when it appears in an actual comment.
+	for _, cg := range f.Comments {
+		if strings.Contains(cg.Text(), suppress) {
+			info.suppressed = true
+			break
+		}
+	}
+
 	sdkAliases := map[string]bool{}
+	dotImportedSDK := false
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -152,16 +157,19 @@ func analyzeFile(f *ast.File, info *pkgInfo) {
 		switch path {
 		case sdkPkg:
 			info.importsSDK = true
-			alias := "sdk"
-			if imp.Name != nil {
-				alias = imp.Name.Name
+			switch {
+			case imp.Name == nil:
+				sdkAliases["sdk"] = true
+			case imp.Name.Name == ".":
+				dotImportedSDK = true // sdk.RunX → bare RunX(...)
+			default:
+				sdkAliases[imp.Name.Name] = true
 			}
-			sdkAliases[alias] = true
 		case messagingPkg:
 			info.importsMessaging = true
 		}
 	}
-	if len(sdkAliases) == 0 {
+	if len(sdkAliases) == 0 && !dotImportedSDK {
 		return // no sdk import in this file → no Run* call to find here
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -169,16 +177,16 @@ func analyzeFile(f *ast.File, info *pkgInfo) {
 		if !ok {
 			return true
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkgIdent, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		if sdkAliases[pkgIdent.Name] && strings.HasPrefix(sel.Sel.Name, "Run") {
-			info.runCalled = true
+		switch fun := call.Fun.(type) {
+		case *ast.SelectorExpr: // sdk.RunConsumer(...)
+			if pkgIdent, ok := fun.X.(*ast.Ident); ok &&
+				sdkAliases[pkgIdent.Name] && strings.HasPrefix(fun.Sel.Name, "Run") {
+				info.runCalled = true
+			}
+		case *ast.Ident: // dot-imported: RunConsumer(...)
+			if dotImportedSDK && strings.HasPrefix(fun.Name, "Run") {
+				info.runCalled = true
+			}
 		}
 		return true
 	})

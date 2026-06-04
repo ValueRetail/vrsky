@@ -106,7 +106,7 @@ func (s *apiConsumer) pollAllEndpoints(ctx context.Context, client *http.Client,
 		logger.Info("Successfully polled endpoint", "url", url, "payload_size", len(payload), "content_type", contentType)
 
 		// Publish to NATS
-		if err := s.publishToNATS(connectionID, tenantID, payload, contentType, url); err != nil {
+		if err := s.publishToNATS(ctx, connectionID, tenantID, payload, contentType, url); err != nil {
 			logger.Error("Failed to publish to NATS", "error", err)
 			continue
 		}
@@ -287,8 +287,9 @@ func isPrintable(payload []byte) bool {
 	return true
 }
 
-// publishToNATS wraps the payload in an envelope and publishes to NATS
-func (s *apiConsumer) publishToNATS(connectionID, tenantID string, payload []byte, contentType, source string) error {
+// publishToNATS wraps the payload in an envelope and publishes to NATS. ctx is
+// the poll context so an in-flight publish is cancelled on shutdown.
+func (s *apiConsumer) publishToNATS(ctx context.Context, connectionID, tenantID string, payload []byte, contentType, source string) error {
 	// Create envelope
 	env := &envelope.Envelope{
 		ID:            uuid.New().String(),
@@ -305,8 +306,9 @@ func (s *apiConsumer) publishToNATS(connectionID, tenantID string, payload []byt
 
 	// Publish via the SDK-injected closure (at-least-once; the MsgID dedupes
 	// inside the stream's 5-min window so a retried poll cycle does not
-	// duplicate). The closure marshals the envelope itself.
-	if err := s.publish(context.Background(), env); err != nil {
+	// duplicate). The closure marshals the envelope itself. ctx is the poll
+	// context, so a publish in flight is cancelled on shutdown.
+	if err := s.publish(ctx, env); err != nil {
 		return fmt.Errorf("failed to publish to JetStream: %w", err)
 	}
 

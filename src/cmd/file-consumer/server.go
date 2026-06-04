@@ -119,7 +119,13 @@ func (s *fileConsumer) handleUpload() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"accepted","filename":"%s","envelope_id":"%s"}`, filename, env.ID)))
+		// Encode rather than Sprintf — the filename is user-controlled and may
+		// contain quotes/newlines that would otherwise produce invalid JSON.
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":      "accepted",
+			"filename":    filename,
+			"envelope_id": env.ID,
+		})
 	}
 }
 
@@ -160,8 +166,10 @@ func (s *fileConsumer) handleEvents() http.HandlerFunc {
 		ch, unsub := s.subscribeEvents(connectionID)
 		defer unsub()
 
-		// Send initial connected event
-		fmt.Fprintf(w, "data: {\"type\":\"connected\",\"message\":\"Watching %s\"}\n\n", ac.WatchDir)
+		// Send initial connected event. Marshal rather than interpolate — the
+		// watch dir may contain quotes/control chars that would break the JSON.
+		connected, _ := json.Marshal(map[string]string{"type": "connected", "message": "Watching " + ac.WatchDir})
+		fmt.Fprintf(w, "data: %s\n\n", connected)
 		flusher.Flush()
 
 		for {
