@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
@@ -23,9 +23,11 @@ RUN curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/c
 WORKDIR /app
 COPY --from=builder /app/webhook-consumer .
 
-EXPOSE 9100
+# 8080 = SDK health port (HEALTH_PORT); 9100 = aux HTTP port (WORKER_HTTP_PORT,
+# serves /webhook, /sample-data, /tunnel/*).
+EXPOSE 8080 9100
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:9100/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["./webhook-consumer"]

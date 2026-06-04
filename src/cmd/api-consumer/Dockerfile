@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-FROM golang:1.24-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,11 @@ RUN apk --no-cache add ca-certificates curl
 WORKDIR /app
 COPY --from=builder /app/api-consumer .
 
+# 8080 = SDK health port (HEALTH_PORT); 9800 = aux HTTP port (WORKER_HTTP_PORT,
+# serves /sample-data).
+EXPOSE 8080 9800
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD [ "test", "-f", "/app/api-consumer" ]
+    CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["./api-consumer"]

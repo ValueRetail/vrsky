@@ -146,6 +146,14 @@ export default function OAuthGrantSelector({ value, onChange, connectionId }: OA
         </select>
       )}
 
+      {/* No grant selected: the worker falls back to sending unauthenticated
+          (see PR #102). Warn so the user knows to connect/select an account. */}
+      {!value && (
+        <p style={{ fontSize: '11px', color: '#b45309', fontWeight: 600, margin: '0 0 8px' }}>
+          ⚠ No account connected — this OAuth {providerGrants.length > 0 ? 'connection is not selected' : 'endpoint has no account'} and will send <strong>unauthenticated</strong> until you {providerGrants.length > 0 ? 'pick one above' : 'connect below'}.
+        </p>
+      )}
+
       {/* Reconnect / revoke controls for the selected grant */}
       {value && providerGrants.some((g) => g.id === value) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>

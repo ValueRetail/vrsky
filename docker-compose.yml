@@ -352,7 +352,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      FILE_CONSUMER_PORT: "9200"
+      # Aux HTTP port the SDK serves /upload, /events (SSE) + /sample-data on
+      # (UI connects here). Health is on 8080 (HEALTH_PORT).
+      WORKER_HTTP_PORT: "9200"
       FILE_CONSUMER_BASE_DIR: "/data/input"
       HOST_HOME: "${HOME}"
     ports:
@@ -379,7 +381,9 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      WEBHOOK_PORT: "9100"
+      # Aux HTTP port the SDK serves /webhook, /sample-data + /tunnel/* on (UI
+      # connects here; the cloudflared tunnel forwards to it). Health is on 8080.
+      WORKER_HTTP_PORT: "9100"
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
       # secrets (e.g. HMAC signing key from #67) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
@@ -516,8 +520,11 @@ services:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
-      API_CONSUMER_PORT: "9800"
-      # Required by the secrets resolver (#66).
+      # Aux HTTP port the SDK serves /sample-data on (UI connects here).
+      # Health is on 8080 (HEALTH_PORT).
+      WORKER_HTTP_PORT: "9800"
+      # Required by the secrets resolver (#66): decrypts auth_value_secret_id
+      # (endpoint bearer/api-key) before polling.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # OAuth token resolution (#75): where to fetch access tokens for
       # endpoints with auth_type=oauth, and the shared service secret.
