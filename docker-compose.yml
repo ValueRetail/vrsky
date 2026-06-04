@@ -638,6 +638,27 @@ services:
     networks:
       - vrsky-network
 
+  # Kafka Producer (#77) - publishes each pipeline message to a topic (acks=all).
+  kafka-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/kafka-producer/Dockerfile
+    container_name: vrsky-kafka-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # SASL password / TLS client key (*_secret_id) at message-delivery time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # Test Kafka broker (bitnami/kafka, KRaft single-node, PLAINTEXT) for local +
   # CI testing of #77. Reachable in-network at kafka-test:9092.
   kafka-test:

@@ -2728,6 +2728,7 @@ export default function PropertyEditor({
                 { value: 'database', label: 'Database' },
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
+                { value: 'kafka', label: 'Kafka' },
               ]}
             />
 
@@ -2847,6 +2848,10 @@ export default function PropertyEditor({
 
             {config.type === 'sftp' && (
               <SFTPProducerConfig config={config} setConfig={setConfig} />
+            )}
+
+            {config.type === 'kafka' && (
+              <KafkaConfigEditor config={config} setConfig={setConfig} role="producer" />
             )}
           </div>
         )
