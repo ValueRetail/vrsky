@@ -17,6 +17,7 @@ require (
 	github.com/pkg/sftp v1.13.6
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
+	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/stretchr/testify v1.8.4

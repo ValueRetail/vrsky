@@ -677,6 +677,56 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # RabbitMQ Consumer (#78) - consumes a queue (AMQP), publishes to the pipeline,
+  # acking only after a successful publish.
+  rabbitmq-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/rabbitmq-consumer/Dockerfile
+    container_name: vrsky-rabbitmq-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # AMQP password (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # RabbitMQ Producer (#78) - publishes each pipeline message to an exchange/
+  # queue as a persistent message (delivery_mode=2).
+  rabbitmq-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/rabbitmq-producer/Dockerfile
+    container_name: vrsky-rabbitmq-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # Test RabbitMQ broker for local + CI testing of #78. Reachable in-network at
+  # rabbitmq-test:5672 (guest/guest). Management UI on 15672.
+  rabbitmq-test:
+    image: rabbitmq:3-management
+    container_name: vrsky-rabbitmq-test
+    networks:
+      - vrsky-network
+
   # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
   salesforce-producer:
     build:

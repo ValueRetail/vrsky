@@ -938,6 +938,83 @@ function KafkaConfigEditor({
   )
 }
 
+// RabbitMQConfigEditor (#78): shared config form for the RabbitMQ consumer +
+// producer. Stores config.rabbitmq = {url, username, password, exchange,
+// exchange_type, queue, routing_key}. password is minted into the secrets vault
+// on deploy. role switches help text (manual-ack vs persistent publish).
+function RabbitMQConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const rmq = (config.rabbitmq as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, rabbitmq: { ...rmq, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="AMQP URL"
+        placeholder="amqp://rabbitmq:5672"
+        value={(rmq.url as string) || ''}
+        onChange={(v) => update({ url: v })}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Username (optional)"
+          value={(rmq.username as string) || ''}
+          onChange={(v) => update({ username: v })}
+        />
+        <div>
+          <label style={labelStyle}>Password (optional)</label>
+          <SecretInput
+            label="Password"
+            placeholder="AMQP password"
+            field="password"
+            config={rmq}
+            defaultSecretName="rabbitmq-password"
+            onChange={(patch) => update(patch)}
+          />
+        </div>
+      </div>
+      <StyledInput
+        label="Queue"
+        placeholder="orders"
+        value={(rmq.queue as string) || ''}
+        onChange={(v) => update({ queue: v })}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput
+          label="Exchange (optional)"
+          placeholder="events"
+          value={(rmq.exchange as string) || ''}
+          onChange={(v) => update({ exchange: v })}
+        />
+        <StyledInput
+          label="Routing key (optional)"
+          placeholder="orders.created"
+          value={(rmq.routing_key as string) || ''}
+          onChange={(v) => update({ routing_key: v })}
+        />
+      </div>
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'Messages are manually acked only after a successful publish into the pipeline (at-least-once). Credentials may be embedded in the URL or set above.'
+          : 'Messages are published as persistent (delivery_mode=2) to the exchange (or directly to the queue if no exchange is set).'}{' '}
+        The password is stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2541,6 +2618,7 @@ export default function PropertyEditor({
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
+                { value: 'rabbitmq', label: 'RabbitMQ' },
               ]}
             />
 
@@ -2711,6 +2789,10 @@ export default function PropertyEditor({
             {config.type === 'kafka' && (
               <KafkaConfigEditor config={config} setConfig={setConfig} role="consumer" />
             )}
+
+            {config.type === 'rabbitmq' && (
+              <RabbitMQConfigEditor config={config} setConfig={setConfig} role="consumer" />
+            )}
           </div>
         )
 
@@ -2729,6 +2811,7 @@ export default function PropertyEditor({
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
+                { value: 'rabbitmq', label: 'RabbitMQ' },
               ]}
             />
 
@@ -2852,6 +2935,10 @@ export default function PropertyEditor({
 
             {config.type === 'kafka' && (
               <KafkaConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+
+            {config.type === 'rabbitmq' && (
+              <RabbitMQConfigEditor config={config} setConfig={setConfig} role="producer" />
             )}
           </div>
         )
