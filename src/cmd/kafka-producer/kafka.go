@@ -49,7 +49,11 @@ func realWriter(cfg *KafkaConfig) (kafkaWriter, error) {
 		Topic:        cfg.Topic,
 		Balancer:     &kafka.LeastBytes{},
 		RequiredAcks: kafka.RequireAll, // acks=all
-		Transport:    transport,
+		// Create the topic on first write if the broker doesn't have it yet —
+		// without this, writing to a missing topic fails with
+		// "Unknown Topic Or Partition" instead of provisioning it.
+		AllowAutoTopicCreation: true,
+		Transport:              transport,
 	}
 	return &realKafkaWriter{w: w}, nil
 }
