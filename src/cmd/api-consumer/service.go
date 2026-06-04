@@ -159,9 +159,12 @@ func (s *apiConsumer) handleStartCommand(msg *nats.Msg) {
 		return
 	}
 
-	apiConfig, err := s.extractAPIConsumerConfig(conn)
-	if err != nil {
-		s.logger.Error("Failed to extract API Consumer config", "error", err, "connection_id", cmd.ConnectionID)
+	// Fleet worker: every consumer receives every start command. A connection
+	// without an API consumer node simply isn't ours — ignore it quietly
+	// (matches db-consumer/file-consumer), don't log an error.
+	apiConfig, ok := s.extractAPIConsumerConfig(conn)
+	if !ok {
+		s.logger.Debug("Not an API consumer, ignoring", "connection_id", cmd.ConnectionID)
 		return
 	}
 
@@ -300,10 +303,14 @@ type NodeConfig struct {
 
 // extractAPIConsumerConfig extracts API Consumer config from connection nodes.
 // Secrets (auth_value) are already resolved to plaintext by getConnection.
-func (s *apiConsumer) extractAPIConsumerConfig(conn *Connection) (*APIConsumerConfig, error) {
+// Returns ok=false when the connection has no API consumer node — that is not
+// an error for a fleet worker, just a connection that belongs to a different
+// consumer.
+func (s *apiConsumer) extractAPIConsumerConfig(conn *Connection) (*APIConsumerConfig, bool) {
 	var nodes []Node
 	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
-		return nil, fmt.Errorf("failed to parse nodes: %w", err)
+		s.logger.Warn("Failed to parse nodes", "connection_id", conn.ID, "error", err)
+		return nil, false
 	}
 
 	for _, node := range nodes {
@@ -320,7 +327,6 @@ func (s *apiConsumer) extractAPIConsumerConfig(conn *Connection) (*APIConsumerCo
 		// Only pick up nodes explicitly typed as "api" — stale `api` blobs from
 		// other consumer types (e.g. http/webhook) must be ignored.
 		if nodeConfig.Type != "api" || nodeConfig.API == nil {
-			s.logger.Debug("Node is not an API consumer", "node_id", node.ID, "type", nodeConfig.Type)
 			continue
 		}
 
@@ -336,10 +342,10 @@ func (s *apiConsumer) extractAPIConsumerConfig(conn *Connection) (*APIConsumerCo
 			apiConfig.PollIntervalSeconds = int(s.defaultPollInterval.Seconds())
 		}
 
-		return apiConfig, nil
+		return apiConfig, true
 	}
 
-	return nil, fmt.Errorf("no API consumer node found in connection")
+	return nil, false
 }
 
 // updateConnectionStatus updates the connection status in the database
