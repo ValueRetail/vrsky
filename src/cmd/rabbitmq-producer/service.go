@@ -106,7 +106,7 @@ func (p *rabbitProducer) Deliver(ctx context.Context, env *envelope.Envelope) er
 		if !t.predIsConsumer && t.predecessorID != "" && lastProcessedBy != t.predecessorID {
 			continue
 		}
-		if err := p.produce(ctx, &t.cfg, env.Payload); err != nil && transient == nil {
+		if err := p.produce(ctx, &t.cfg, env.Payload, env.ContentType); err != nil && transient == nil {
 			transient = err
 		}
 	}
@@ -116,7 +116,7 @@ func (p *rabbitProducer) Deliver(ctx context.Context, env *envelope.Envelope) er
 	return nil
 }
 
-func (p *rabbitProducer) produce(ctx context.Context, cfg *RabbitMQConfig, body []byte) error {
+func (p *rabbitProducer) produce(ctx context.Context, cfg *RabbitMQConfig, body []byte, contentType string) error {
 	if cfg.URL == "" || (cfg.Exchange == "" && cfg.Queue == "") {
 		p.logger.Error("RabbitMQ producer config incomplete (need url and exchange or queue); skipping")
 		return nil
@@ -126,7 +126,7 @@ func (p *rabbitProducer) produce(ctx context.Context, cfg *RabbitMQConfig, body 
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer pub.Close()
-	if err := pub.Publish(ctx, body); err != nil {
+	if err := pub.Publish(ctx, body, contentType); err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
 	p.logger.Info("RabbitMQ message published", "exchange", cfg.Exchange, "routing_key", cfg.RoutingKey, "queue", cfg.Queue, "size", len(body))

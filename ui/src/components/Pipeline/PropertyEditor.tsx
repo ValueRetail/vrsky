@@ -683,6 +683,23 @@ function SFTPConsumerConfig({
         />
       </div>
 
+      <div>
+        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '50px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="ssh-ed25519 AAAA…  (a known_hosts / authorized_keys line)"
+          value={(sftp.host_key as string) || ''}
+          onChange={(e) => update({ host_key: e.target.value })}
+        />
+        <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>
+          Leave empty to skip host-key verification (dev only). Pin it in production.
+        </div>
+      </div>
+
       <StyledInput
         label="Remote directory"
         placeholder="/upload"
@@ -801,6 +818,23 @@ function SFTPProducerConfig({
           value={(sftp.private_key as string) || ''}
           onChange={(e) => update({ private_key: e.target.value })}
         />
+      </div>
+
+      <div>
+        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <textarea
+          style={{
+            width: '100%', minHeight: '50px', padding: '8px 10px',
+            border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+            fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+          }}
+          placeholder="ssh-ed25519 AAAA…  (a known_hosts / authorized_keys line)"
+          value={(sftp.host_key as string) || ''}
+          onChange={(e) => update({ host_key: e.target.value })}
+        />
+        <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>
+          Leave empty to skip host-key verification (dev only). Pin it in production.
+        </div>
       </div>
 
       <StyledInput

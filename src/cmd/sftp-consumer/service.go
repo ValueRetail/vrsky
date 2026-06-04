@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	defaultPollInterval = 60 * time.Second
-	dialMaxAttempts     = 3
-	dialBaseBackoff     = time.Second
+	dialMaxAttempts = 3
+	dialBaseBackoff = time.Second
 )
 
 // sftpConsumer watches a remote SFTP directory per active connection, fetches
@@ -211,11 +210,17 @@ func (s *sftpConsumer) runPoller(ctx context.Context, connID, tenantID string, c
 
 	s.pollOnce(ctx, connID, tenantID, cfg, processed, logger)
 
-	interval := time.Duration(cfg.PollIntervalSeconds) * time.Second
-	if interval <= 0 {
-		interval = defaultPollInterval
+	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
+	if cfg.PollIntervalSeconds <= 0 {
+		logger.Info("SFTP one-shot poll complete")
+		_ = s.updateConnectionStatus(connID, tenantID, "stopped")
+		s.mu.Lock()
+		delete(s.active, connID)
+		s.mu.Unlock()
+		return
 	}
-	ticker := time.NewTicker(interval)
+
+	ticker := time.NewTicker(time.Duration(cfg.PollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {

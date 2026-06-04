@@ -12,8 +12,8 @@ import (
 // implementation wraps an amqp091 connection/channel; tests inject a fake.
 type amqpPublisher interface {
 	// Publish sends one persistent message to the configured exchange with the
-	// routing key.
-	Publish(ctx context.Context, body []byte) error
+	// routing key, tagged with the given content type.
+	Publish(ctx context.Context, body []byte, contentType string) error
 	Close() error
 }
 
@@ -28,9 +28,12 @@ type realAMQP struct {
 	routingKey string
 }
 
-func (r *realAMQP) Publish(ctx context.Context, body []byte) error {
+func (r *realAMQP) Publish(ctx context.Context, body []byte, contentType string) error {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 	return r.ch.PublishWithContext(ctx, r.exchange, r.routingKey, false, false, amqp.Publishing{
-		ContentType:  "application/json",
+		ContentType:  contentType,
 		DeliveryMode: amqp.Persistent, // delivery_mode=2 (acceptance criterion #2)
 		Body:         body,
 	})

@@ -297,6 +297,10 @@ func (p *sftpProducer) getTargets(ctx context.Context, connID, tenantID string) 
 				break
 			}
 		}
+		if nc.SFTP.HostKey == "" {
+			p.logger.Warn("SFTP host_key not pinned; server identity will not be verified (set host_key in production)",
+				"connection_id", connID)
+		}
 		targets = append(targets, &sftpTarget{cfg: *nc.SFTP, predecessorID: predID, predIsConsumer: predIsConsumer})
 	}
 	if len(targets) == 0 {

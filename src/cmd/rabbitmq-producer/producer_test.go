@@ -18,7 +18,7 @@ type fakePublisher struct {
 	body [][]byte
 }
 
-func (f *fakePublisher) Publish(_ context.Context, body []byte) error {
+func (f *fakePublisher) Publish(_ context.Context, body []byte, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make([]byte, len(body))
