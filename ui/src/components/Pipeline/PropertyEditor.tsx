@@ -825,6 +825,119 @@ function SFTPProducerConfig({
   )
 }
 
+// KafkaConfigEditor (#77): shared config form for the Kafka consumer + producer.
+// Stores config.kafka = {brokers[], topic, consumer_group?, auth_type, username,
+// password, ca_cert, client_cert, client_key}. password + client_key are minted
+// into the secrets vault on deploy. role switches the consumer-only field
+// (consumer_group) and the producer-only hint (acks=all).
+function KafkaConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const kafka = (config.kafka as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, kafka: { ...kafka, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const authType = (kafka.auth_type as string) || 'none'
+  const isSASL = authType.startsWith('sasl')
+  const isMTLS = authType === 'mtls'
+  const brokers = Array.isArray(kafka.brokers) ? (kafka.brokers as string[]) : []
+
+  const certArea = (label: string, field: string, placeholder: string) => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <textarea
+        style={{
+          width: '100%', minHeight: '60px', padding: '8px 10px',
+          border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
+          fontFamily: 'monospace', color: '#111827', boxSizing: 'border-box',
+        }}
+        placeholder={placeholder}
+        value={(kafka[field] as string) || ''}
+        onChange={(e) => update({ [field]: e.target.value })}
+      />
+    </div>
+  )
+
+  return (
+    <div className="space-y-3">
+      <StyledInput
+        label="Brokers (comma-separated)"
+        placeholder="broker1:9092, broker2:9092"
+        value={brokers.join(', ')}
+        onChange={(v) => update({ brokers: v.split(',').map((s) => s.trim()).filter(Boolean) })}
+      />
+      <StyledInput
+        label="Topic"
+        placeholder="orders"
+        value={(kafka.topic as string) || ''}
+        onChange={(v) => update({ topic: v })}
+      />
+      {role === 'consumer' && (
+        <StyledInput
+          label="Consumer group"
+          placeholder="vrsky"
+          value={(kafka.consumer_group as string) || ''}
+          onChange={(v) => update({ consumer_group: v })}
+        />
+      )}
+
+      <StyledSelect
+        label="Authentication"
+        value={authType}
+        onChange={(v) => update({ auth_type: v })}
+        options={[
+          { value: 'none', label: 'None' },
+          { value: 'sasl-plain', label: 'SASL / PLAIN' },
+          { value: 'sasl-scram-256', label: 'SASL / SCRAM-SHA-256' },
+          { value: 'sasl-scram-512', label: 'SASL / SCRAM-SHA-512' },
+          { value: 'mtls', label: 'mTLS' },
+        ]}
+      />
+
+      {isSASL && (
+        <>
+          <StyledInput
+            label="Username"
+            value={(kafka.username as string) || ''}
+            onChange={(v) => update({ username: v })}
+          />
+          <div>
+            <label style={labelStyle}>Password</label>
+            <SecretInput
+              label="Password"
+              placeholder="SASL password"
+              field="password"
+              config={kafka}
+              defaultSecretName="kafka-password"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {(isMTLS || isSASL) && certArea('CA certificate (PEM, optional)', 'ca_cert', '-----BEGIN CERTIFICATE-----')}
+      {isMTLS && certArea('Client certificate (PEM)', 'client_cert', '-----BEGIN CERTIFICATE-----')}
+      {isMTLS && certArea('Client key (PEM)', 'client_key', '-----BEGIN PRIVATE KEY-----')}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'The group offset is committed only after a message is published into the pipeline (at-least-once).'
+          : 'Messages are produced with acks=all (wait for all in-sync replicas).'}{' '}
+        Password and client key are stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2427,6 +2540,7 @@ export default function PropertyEditor({
                 { value: 'tenant', label: 'Tenant Input' },
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
+                { value: 'kafka', label: 'Kafka' },
               ]}
             />
 
@@ -2592,6 +2706,10 @@ export default function PropertyEditor({
 
             {config.type === 'sftp' && (
               <SFTPConsumerConfig config={config} setConfig={setConfig} />
+            )}
+
+            {config.type === 'kafka' && (
+              <KafkaConfigEditor config={config} setConfig={setConfig} role="consumer" />
             )}
           </div>
         )

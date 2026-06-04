@@ -176,6 +176,8 @@ docker-compose.override.yml
 /src/salesforce-producer
 /src/sftp-consumer
 /src/sftp-producer
+/src/kafka-consumer
+/src/kafka-producer
 /src/tenant-consumer
 /src/webhook-consumer
 /src/cmd/management-api/management-api

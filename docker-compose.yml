@@ -615,6 +615,45 @@ services:
       - "127.0.0.1:2222:22"
     networks:
       - vrsky-network
+
+  # Kafka Consumer (#77) - subscribes to a topic (consumer group), publishes to
+  # the pipeline, committing the offset only after a successful publish.
+  kafka-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/kafka-consumer/Dockerfile
+    container_name: vrsky-kafka-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # SASL password / TLS client key (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # Test Kafka broker (bitnami/kafka, KRaft single-node, PLAINTEXT) for local +
+  # CI testing of #77. Reachable in-network at kafka-test:9092.
+  kafka-test:
+    image: bitnami/kafka:3.7
+    container_name: vrsky-kafka-test
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka-test:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-test:9092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    networks:
+      - vrsky-network
     restart: unless-stopped
 
   # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
