@@ -786,6 +786,9 @@ services:
     environment:
       MINIO_ROOT_USER: "minioadmin"
       MINIO_ROOT_PASSWORD: "minioadmin"
+      # Built-in KMS key so SSE-S3 (#80 PR3) actually works on the emulator.
+      # Format: <key-name>:<base64 256-bit key>. Test-only key.
+      MINIO_KMS_SECRET_KEY: "vrsky-test-key:nGwRfGpqzjnb7XC0rIxgv9NMOe+xdgC94SAPBb+Lb1U="
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
