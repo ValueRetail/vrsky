@@ -1049,6 +1049,153 @@ function RabbitMQConfigEditor({
   )
 }
 
+// CloudStorageConfigEditor configures the single cloud-storage connector
+// (Amazon S3 / Azure Blob / GCS) for both consumer and producer roles. The
+// provider picker swaps the credential fields. PR1 ships S3 (and S3-compatible
+// stores such as MinIO via a custom endpoint); Azure/GCS land in PR2.
+function CloudStorageConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const cs = (config.cloud_storage as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, cloud_storage: { ...cs, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const provider = (cs.provider as string) || 's3'
+  const afterAction = (cs.after_action as string) || 'none'
+
+  return (
+    <div className="space-y-3">
+      <StyledSelect
+        label="Provider"
+        value={provider}
+        onChange={(v) => update({ provider: v })}
+        options={[
+          { value: 's3', label: 'Amazon S3 (or S3-compatible)' },
+          { value: 'azure', label: 'Azure Blob Storage' },
+          { value: 'gcs', label: 'Google Cloud Storage' },
+        ]}
+      />
+
+      {provider !== 's3' && (
+        <div style={{ fontSize: '11px', color: '#b45309' }}>
+          {provider === 'azure' ? 'Azure Blob Storage' : 'Google Cloud Storage'} support ships in an
+          upcoming update. Amazon S3 (and S3-compatible stores like MinIO) are available now.
+        </div>
+      )}
+
+      <StyledInput
+        label={provider === 'azure' ? 'Container' : 'Bucket'}
+        placeholder={provider === 'azure' ? 'my-container' : 'my-bucket'}
+        value={(cs.bucket as string) || ''}
+        onChange={(v) => update({ bucket: v })}
+      />
+      <StyledInput
+        label="Prefix (optional)"
+        placeholder={role === 'consumer' ? 'incoming/' : 'outgoing/'}
+        value={(cs.prefix as string) || ''}
+        onChange={(v) => update({ prefix: v })}
+      />
+
+      {provider === 's3' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <StyledInput
+              label="Region"
+              placeholder="us-east-1"
+              value={(cs.region as string) || ''}
+              onChange={(v) => update({ region: v })}
+            />
+            <StyledInput
+              label="Endpoint (optional, for MinIO)"
+              placeholder="http://minio:9000"
+              value={(cs.endpoint as string) || ''}
+              onChange={(v) => update({ endpoint: v })}
+            />
+          </div>
+          <StyledInput
+            label="Access key ID"
+            placeholder="AKIA… (or MinIO user)"
+            value={(cs.access_key_id as string) || ''}
+            onChange={(v) => update({ access_key_id: v })}
+          />
+          <div>
+            <label style={labelStyle}>Secret access key</label>
+            <SecretInput
+              label="Secret access key"
+              placeholder="S3 secret access key"
+              field="secret_access_key"
+              config={cs}
+              defaultSecretName="s3-secret-access-key"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {role === 'consumer' ? (
+        <>
+          <StyledInput
+            label="File pattern (optional)"
+            placeholder="*.csv"
+            value={(cs.file_pattern as string) || ''}
+            onChange={(v) => update({ file_pattern: v })}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <StyledInput
+              label="Poll interval (s, 0 = once)"
+              type="number"
+              placeholder="60"
+              value={String((cs.poll_interval_seconds as number) ?? 60)}
+              onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+            />
+            <StyledSelect
+              label="After action"
+              value={afterAction}
+              onChange={(v) => update({ after_action: v })}
+              options={[
+                { value: 'none', label: 'Leave in place' },
+                { value: 'delete', label: 'Delete' },
+                { value: 'move', label: 'Move' },
+              ]}
+            />
+          </div>
+          {afterAction === 'move' && (
+            <StyledInput
+              label="Move to prefix"
+              placeholder="processed/"
+              value={(cs.move_prefix as string) || ''}
+              onChange={(v) => update({ move_prefix: v })}
+            />
+          )}
+        </>
+      ) : (
+        <StyledInput
+          label="Key template"
+          placeholder="orders/{{.id}}_{{.timestamp}}.json"
+          value={(cs.key_template as string) || ''}
+          onChange={(v) => update({ key_template: v })}
+        />
+      )}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'The bucket is polled under the prefix and each new object is ingested.'
+          : 'Each message is written as an object. The key template can reference payload fields plus the timestamp and uuid built-ins; it defaults to the message id.'}{' '}
+        Credentials are stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2653,6 +2800,7 @@ export default function PropertyEditor({
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
+                { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
               ]}
             />
 
@@ -2827,6 +2975,10 @@ export default function PropertyEditor({
             {config.type === 'rabbitmq' && (
               <RabbitMQConfigEditor config={config} setConfig={setConfig} role="consumer" />
             )}
+
+            {config.type === 'cloud_storage' && (
+              <CloudStorageConfigEditor config={config} setConfig={setConfig} role="consumer" />
+            )}
           </div>
         )
 
@@ -2846,6 +2998,7 @@ export default function PropertyEditor({
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
+                { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
               ]}
             />
 
@@ -2973,6 +3126,10 @@ export default function PropertyEditor({
 
             {config.type === 'rabbitmq' && (
               <RabbitMQConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+
+            {config.type === 'cloud_storage' && (
+              <CloudStorageConfigEditor config={config} setConfig={setConfig} role="producer" />
             )}
           </div>
         )

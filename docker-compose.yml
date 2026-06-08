@@ -731,6 +731,82 @@ services:
     networks:
       - vrsky-network
 
+  # Cloud Storage Consumer (#80) - polls a cloud object-storage bucket (S3 /
+  # Azure Blob / GCS, chosen via config), fetches new objects, publishes them to
+  # the pipeline, and applies an after-action (delete / move / leave).
+  cloud-storage-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/cloud-storage-consumer/Dockerfile
+    container_name: vrsky-cloud-storage-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # cloud credentials (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # Cloud Storage Producer (#80) - writes each pipeline message as an object to a
+  # cloud object store, keyed from a template.
+  cloud-storage-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/cloud-storage-producer/Dockerfile
+    container_name: vrsky-cloud-storage-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # cloud credentials (*_secret_id) at message-delivery time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
+  # Test S3-compatible object store (MinIO) for local + CI testing of #80.
+  # In-network S3 API at http://minio-test:9000 (minioadmin/minioadmin); web
+  # console on 9001. Set the node's endpoint to http://minio-test:9000.
+  minio-test:
+    image: minio/minio:latest
+    container_name: vrsky-minio-test
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    networks:
+      - vrsky-network
+
+  # One-shot: wait for MinIO, then create the test bucket "vrsky-bucket".
+  minio-init:
+    image: minio/mc:latest
+    container_name: vrsky-minio-init
+    depends_on:
+      - minio-test
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio-test:9000 minioadmin minioadmin; do echo 'waiting for minio'; sleep 1; done;
+      mc mb -p local/vrsky-bucket || true;
+      echo 'minio bucket ready';
+      "
+    networks:
+      - vrsky-network
+
   # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
   salesforce-producer:
     build:
