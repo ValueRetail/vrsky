@@ -55,6 +55,7 @@ type cloudConfig struct {
 
 	Mode                string `json:"mode"`                  // "poll" (default) | "event"
 	EventQueueURL       string `json:"event_queue_url"`       // SQS queue URL (S3 event mode)
+	EventEndpoint       string `json:"event_endpoint"`        // optional SQS endpoint override (e.g. LocalStack); NOT the S3 endpoint
 	FilePattern         string `json:"file_pattern"`          // optional glob against the object base name, e.g. *.csv
 	PollIntervalSeconds int    `json:"poll_interval_seconds"` // <= 0 means run once
 	AfterAction         string `json:"after_action"`          // "delete" | "move" | "none" (default none)

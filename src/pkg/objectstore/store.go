@@ -51,8 +51,9 @@ type ObjectStore interface {
 	Put(ctx context.Context, key string, body []byte, contentType string) error
 	// Delete removes an object.
 	Delete(ctx context.Context, key string) error
-	// Copy server-side-copies srcKey to dstKey within the same bucket
-	// (used to implement after_action=move as copy+delete).
+	// Copy copies srcKey to dstKey within the same bucket (used to implement
+	// after_action=move as copy+delete). Backends use a native server-side copy
+	// where available (S3, GCS); the Azure backend falls back to download+upload.
 	Copy(ctx context.Context, srcKey, dstKey string) error
 }
 

@@ -1174,8 +1174,8 @@ function CloudStorageConfigEditor({
       {provider === 'gcs' && (
         <>
           <StyledInput
-            label="Endpoint (optional, for the fake-gcs emulator)"
-            placeholder="http://fake-gcs-test:4443/storage/v1/"
+            label="Endpoint (optional, for a custom/private GCS endpoint)"
+            placeholder="https://storage.googleapis.com/storage/v1/"
             value={(cs.endpoint as string) || ''}
             onChange={(v) => update({ endpoint: v })}
           />
@@ -1190,7 +1190,9 @@ function CloudStorageConfigEditor({
               onChange={(patch) => update(patch)}
             />
             <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
-              Paste the service-account key JSON. Leave empty when using the emulator endpoint above.
+              Paste the service-account key JSON. (For the local fake-gcs emulator, leave this
+              blank and run the worker with <code>STORAGE_EMULATOR_HOST</code> set — an endpoint
+              alone doesn't cover the GCS client's read path.)
             </div>
           </div>
         </>
@@ -1216,10 +1218,17 @@ function CloudStorageConfigEditor({
                 value={(cs.event_queue_url as string) || ''}
                 onChange={(v) => update({ event_queue_url: v })}
               />
+              <StyledInput
+                label="SQS endpoint override (optional, e.g. LocalStack)"
+                placeholder="http://localstack:4566"
+                value={(cs.event_endpoint as string) || ''}
+                onChange={(v) => update({ event_endpoint: v })}
+              />
               <div style={{ fontSize: '11px', color: '#6b7280' }}>
                 Subscribe the bucket's notifications to this SQS queue (S3 only). Each object is
                 ingested as it arrives; the message is acked only after a successful publish.
-                Azure Blob / GCS use poll mode.
+                The endpoint override is for the SQS service (distinct from the object-store
+                endpoint above); leave blank for real AWS SQS. Azure Blob / GCS use poll mode.
               </div>
             </>
           ) : (

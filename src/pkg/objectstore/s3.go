@@ -35,7 +35,10 @@ func newS3Store(ctx context.Context, cfg *Config) (ObjectStore, error) {
 	if cfg.Region != "" {
 		opts = append(opts, awsconfig.WithRegion(cfg.Region))
 	}
-	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+	// Use static credentials only when BOTH are set; a single field would build a
+	// half-configured provider that fails opaquely on the first request. With
+	// neither (or only one), fall back to the AWS default credential chain.
+	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		))

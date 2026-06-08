@@ -64,7 +64,9 @@ func newSQSEventSource(ctx context.Context, cfg *cloudConfig) (eventSource, erro
 	if cfg.Region != "" {
 		opts = append(opts, awsconfig.WithRegion(cfg.Region))
 	}
-	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
+	// Static credentials only when both are set (a single field would build a
+	// half-configured provider). Otherwise the AWS default credential chain.
+	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		))
@@ -74,8 +76,10 @@ func newSQSEventSource(ctx context.Context, cfg *cloudConfig) (eventSource, erro
 		return nil, fmt.Errorf("sqs: load config: %w", err)
 	}
 	client := sqs.NewFromConfig(awsCfg, func(o *sqs.Options) {
-		if cfg.Endpoint != "" {
-			o.BaseEndpoint = aws.String(cfg.Endpoint)
+		// Use the dedicated SQS endpoint override (e.g. LocalStack) — never the
+		// S3/MinIO object-store endpoint, which is a different service.
+		if cfg.EventEndpoint != "" {
+			o.BaseEndpoint = aws.String(cfg.EventEndpoint)
 		}
 	})
 	return &sqsEventSource{client: client, queueURL: cfg.EventQueueURL}, nil
