@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -144,5 +145,55 @@ func TestCloudProducer_DefaultKey(t *testing.T) {
 	defer fake.mu.Unlock()
 	if got := fake.putCT["abc123"]; got != "application/octet-stream" {
 		t.Errorf("content-type = %q, want application/octet-stream", got)
+	}
+}
+
+// TestCloudProducer_EmptyEnvelopeID verifies the default key is non-empty even
+// when the envelope has no ID (e.g. api-consumer) — a generated UUID is used
+// instead of dropping the message.
+func TestCloudProducer_EmptyEnvelopeID(t *testing.T) {
+	const (
+		connID = "cloud-out-3"
+		tenant = "tenant-x"
+	)
+	fake := &fakeStore{}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.MatchExpectationsInOrder(false)
+	nodes := `[{"id":"p1","type":"producer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":"b","prefix":"out"}}}]`
+	for i := 0; i < 3; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte(nodes), []byte(`[]`)))
+	}
+
+	p := &cloudProducer{
+		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+	}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "cloud-storage-producer", DB: db})
+
+	env := envelope.New()
+	// env.ID intentionally left empty (mirrors api-consumer-sourced envelopes).
+	env.IntegrationID = connID
+	env.TenantID = tenant
+	env.Payload = []byte(`{"no":"id-field"}`)
+	h.Publish(t, env)
+
+	harness.Eventually(t, 5*time.Second, "object written under a generated key", func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.put) == 1
+	})
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for k := range fake.put {
+		if !strings.HasPrefix(k, "out/") || k == "out/" {
+			t.Errorf("key = %q, want non-empty under out/", k)
+		}
 	}
 }

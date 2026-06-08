@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
@@ -171,7 +172,13 @@ func (p *cloudProducer) renderKey(tmpl, prefix string, env *envelope.Envelope) (
 		data["timestamp"] = p.now().UTC().Format(timestampLayout)
 	}
 	if _, ok := data["uuid"]; !ok {
-		data["uuid"] = env.ID
+		// Envelope IDs are normally a UUID, but some consumers (e.g. api-consumer)
+		// leave it empty; generate one so the default {{.uuid}} key is never blank.
+		id := env.ID
+		if id == "" {
+			id = uuid.NewString()
+		}
+		data["uuid"] = id
 	}
 
 	if strings.TrimSpace(tmpl) == "" {
