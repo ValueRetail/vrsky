@@ -197,3 +197,54 @@ func TestCloudProducer_EmptyEnvelopeID(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudProducer_TemplateMissingFieldFallback verifies a key template that
+// references a payload field that doesn't exist falls back to a generated key
+// (and writes the object) rather than dropping the message.
+func TestCloudProducer_TemplateMissingFieldFallback(t *testing.T) {
+	const (
+		connID = "cloud-out-4"
+		tenant = "tenant-x"
+	)
+	fake := &fakeStore{}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.MatchExpectationsInOrder(false)
+	// Template references {{.id}} but the payload has no "id" field.
+	nodes := `[{"id":"p1","type":"producer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":"b","prefix":"out","key_template":"orders/{{.id}}.json"}}}]`
+	for i := 0; i < 3; i++ {
+		mock.ExpectQuery("FROM connections WHERE id").
+			WithArgs(connID).
+			WillReturnRows(sqlmock.NewRows([]string{"nodes", "edges"}).AddRow([]byte(nodes), []byte(`[]`)))
+	}
+
+	p := &cloudProducer{
+		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+	}
+	h := harness.NewProducerHarness(t, p, harness.Options{Name: "cloud-storage-producer", DB: db})
+
+	env := envelope.New()
+	env.ID = "env-x"
+	env.IntegrationID = connID
+	env.TenantID = tenant
+	env.Payload = []byte(`{"name":"no-id-here"}`)
+	h.Publish(t, env)
+
+	harness.Eventually(t, 5*time.Second, "object written under fallback key (not dropped)", func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.put) == 1
+	})
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for k := range fake.put {
+		if !strings.HasPrefix(k, "out/") || k == "out/" {
+			t.Errorf("fallback key = %q, want non-empty under out/", k)
+		}
+	}
+}

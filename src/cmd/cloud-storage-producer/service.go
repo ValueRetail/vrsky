@@ -138,9 +138,18 @@ func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envel
 
 	key, err := p.renderKey(cfg.KeyTemplate, cfg.Prefix, env)
 	if err != nil {
-		// A bad template won't improve on retry — log and drop (poison).
-		p.logger.Error("invalid key template; dropping message", "template", cfg.KeyTemplate, "error", err)
-		return nil
+		// A bad/mismatched template (e.g. references a field the payload lacks)
+		// shouldn't lose data — fall back to a generated key and warn instead of
+		// dropping. The warning surfaces the misconfiguration.
+		fallback, ferr := p.renderKey("", cfg.Prefix, env)
+		if ferr != nil {
+			p.logger.Error("key template failed and fallback key failed; dropping message",
+				"template", cfg.KeyTemplate, "error", err)
+			return nil
+		}
+		p.logger.Warn("key template failed; writing under a generated key instead",
+			"template", cfg.KeyTemplate, "key", fallback, "error", err)
+		key = fallback
 	}
 
 	store, err := p.newStore(ctx, &cfg.Config)
