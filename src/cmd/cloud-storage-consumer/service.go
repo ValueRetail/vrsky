@@ -35,6 +35,9 @@ type cloudConsumer struct {
 	// newStore opens an ObjectStore. Defaulted to objectstore.New in Configure;
 	// tests inject a fake so the poller runs without a live bucket.
 	newStore storeFactory
+	// newEvents opens an eventSource (event mode). Defaulted to newEventSource
+	// in Configure; tests inject a fake.
+	newEvents eventSourceFactory
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
@@ -50,6 +53,8 @@ type cloudConsumer struct {
 type cloudConfig struct {
 	objectstore.Config
 
+	Mode                string `json:"mode"`                  // "poll" (default) | "event"
+	EventQueueURL       string `json:"event_queue_url"`       // SQS queue URL (S3 event mode)
 	FilePattern         string `json:"file_pattern"`          // optional glob against the object base name, e.g. *.csv
 	PollIntervalSeconds int    `json:"poll_interval_seconds"` // <= 0 means run once
 	AfterAction         string `json:"after_action"`          // "delete" | "move" | "none" (default none)
@@ -83,6 +88,9 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	s.active = make(map[string]context.CancelFunc)
 	if s.newStore == nil {
 		s.newStore = objectstore.New
+	}
+	if s.newEvents == nil {
+		s.newEvents = newEventSource
 	}
 	res.Health.SetReady(true)
 	return nil
@@ -161,6 +169,10 @@ func (s *cloudConsumer) handleStartCommand(msg *nats.Msg) {
 		logger.Error("after_action=move requires move_prefix")
 		return
 	}
+	if cfg.Mode == "event" && cfg.EventQueueURL == "" {
+		logger.Error("mode=event requires event_queue_url")
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
@@ -168,6 +180,12 @@ func (s *cloudConsumer) handleStartCommand(msg *nats.Msg) {
 	s.mu.Unlock()
 	_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
 
+	if cfg.Mode == "event" {
+		logger.Info("Starting cloud-storage event loop",
+			"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "queue", cfg.EventQueueURL)
+		go s.runEventLoop(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
+		return
+	}
 	logger.Info("Starting cloud-storage poller",
 		"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "prefix", cfg.Prefix, "after_action", cfg.AfterAction)
 	go s.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
@@ -200,10 +218,7 @@ func (s *cloudConsumer) runPoller(ctx context.Context, connID, tenantID string, 
 	store, err := s.newStore(ctx, &cfg.Config)
 	if err != nil {
 		logger.Error("open cloud-storage backend failed", "error", err)
-		_ = s.updateConnectionStatus(connID, tenantID, "error")
-		s.mu.Lock()
-		delete(s.active, connID)
-		s.mu.Unlock()
+		s.finishConn(connID, tenantID, "error")
 		return
 	}
 
@@ -216,10 +231,7 @@ func (s *cloudConsumer) runPoller(ctx context.Context, connID, tenantID string, 
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("cloud-storage one-shot poll complete")
-		_ = s.updateConnectionStatus(connID, tenantID, "stopped")
-		s.mu.Lock()
-		delete(s.active, connID)
-		s.mu.Unlock()
+		s.finishConn(connID, tenantID, "stopped")
 		return
 	}
 
@@ -253,33 +265,105 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 		if processed[o.Key] {
 			continue
 		}
-		base := path.Base(o.Key)
 		if cfg.FilePattern != "" {
-			if match, _ := path.Match(cfg.FilePattern, base); !match {
+			if match, _ := path.Match(cfg.FilePattern, path.Base(o.Key)); !match {
 				continue
 			}
 		}
-
-		data, ct, err := store.Get(ctx, o.Key)
-		if err != nil {
-			logger.Error("cloud-storage get failed", "key", o.Key, "error", err)
-			continue
-		}
-		if ct == "" {
-			ct = detectContentType(base, data)
-		}
-
-		if err := s.publishObject(ctx, connID, tenantID, cfg.Bucket, o.Key, ct, data); err != nil {
-			logger.Error("publish failed", "key", o.Key, "error", err)
-			continue // leave the object in place; retried next cycle
+		if err := s.ingestObject(ctx, connID, tenantID, store, cfg, o.Key, logger); err != nil {
+			logger.Error("ingest failed; will retry next cycle", "key", o.Key, "error", err)
+			continue // leave the object in place
 		}
 		processed[o.Key] = true
-		logger.Info("cloud-storage object ingested", "key", o.Key, "size", len(data))
+	}
+}
 
-		if err := s.afterAction(ctx, store, cfg, o.Key); err != nil {
-			logger.Warn("after-action failed", "key", o.Key, "action", cfg.AfterAction, "error", err)
+// runEventLoop drives event-driven ingestion: long-poll the event source,
+// ingest each referenced object, and ack the message only after a successful
+// publish (at-least-once). Runs until ctx is cancelled (stop command/shutdown).
+func (s *cloudConsumer) runEventLoop(ctx context.Context, connID, tenantID string, cfg *cloudConfig) {
+	logger := s.logger.With("connection_id", connID, "mode", "event")
+
+	store, err := s.newStore(ctx, &cfg.Config)
+	if err != nil {
+		logger.Error("open cloud-storage backend failed", "error", err)
+		s.finishConn(connID, tenantID, "error")
+		return
+	}
+	src, err := s.newEvents(ctx, cfg)
+	if err != nil {
+		logger.Error("open event source failed", "error", err)
+		s.finishConn(connID, tenantID, "error")
+		return
+	}
+
+	logger.Info("cloud-storage event loop started", "queue", cfg.EventQueueURL)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		msgs, err := src.Receive(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			logger.Error("event receive failed; backing off", "error", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		for _, m := range msgs {
+			if ctx.Err() != nil {
+				return
+			}
+			ok := true
+			for _, key := range m.objectKeys {
+				if err := s.ingestObject(ctx, connID, tenantID, store, cfg, key, logger); err != nil {
+					logger.Error("ingest failed; leaving message for redelivery", "key", key, "error", err)
+					ok = false
+				}
+			}
+			// Ack only when every referenced object was published (and an empty
+			// message — e.g. s3:TestEvent — is acked to drain it).
+			if ok {
+				if err := src.Ack(ctx, m.ackHandle); err != nil {
+					logger.Warn("event ack failed", "error", err)
+				}
+			}
 		}
 	}
+}
+
+// ingestObject fetches one object, publishes it into the pipeline, and applies
+// the after-action. Shared by poll and event modes.
+func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) error {
+	data, ct, err := store.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("get: %w", err)
+	}
+	if ct == "" {
+		ct = detectContentType(path.Base(key), data)
+	}
+	if err := s.publishObject(ctx, connID, tenantID, cfg.Bucket, key, ct, data); err != nil {
+		return fmt.Errorf("publish: %w", err)
+	}
+	logger.Info("cloud-storage object ingested", "key", key, "size", len(data))
+	if err := s.afterAction(ctx, store, cfg, key); err != nil {
+		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", err)
+	}
+	return nil
+}
+
+// finishConn marks the connection's terminal status and removes it from the
+// active set.
+func (s *cloudConsumer) finishConn(connID, tenantID, status string) {
+	_ = s.updateConnectionStatus(connID, tenantID, status)
+	s.mu.Lock()
+	delete(s.active, connID)
+	s.mu.Unlock()
 }
 
 // afterAction applies the configured post-ingest action to a fetched object.

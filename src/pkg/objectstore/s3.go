@@ -12,12 +12,14 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 // s3Store is the S3 (and S3-compatible, e.g. MinIO) ObjectStore backend.
 type s3Store struct {
 	client *s3.Client
 	bucket string
+	sse    SSEConfig
 }
 
 // newS3Store builds an S3 client. Static credentials are used when configured
@@ -49,7 +51,7 @@ func newS3Store(ctx context.Context, cfg *Config) (ObjectStore, error) {
 			o.UsePathStyle = true // MinIO / S3-compatible stores need path-style.
 		}
 	})
-	return &s3Store{client: client, bucket: cfg.Bucket}, nil
+	return &s3Store{client: client, bucket: cfg.Bucket, sse: cfg.SSE}, nil
 }
 
 func (s *s3Store) List(ctx context.Context, prefix string) ([]Object, error) {
@@ -104,7 +106,15 @@ func (s *s3Store) Put(ctx context.Context, key string, body []byte, contentType 
 	if contentType != "" {
 		in.ContentType = aws.String(contentType)
 	}
-	// Server-side encryption is applied here in #80 PR3.
+	switch s.sse.Mode {
+	case "sse-s3":
+		in.ServerSideEncryption = s3types.ServerSideEncryptionAes256
+	case "sse-kms":
+		in.ServerSideEncryption = s3types.ServerSideEncryptionAwsKms
+		if s.sse.KMSKeyID != "" {
+			in.SSEKMSKeyId = aws.String(s.sse.KMSKeyID)
+		}
+	}
 	if _, err := s.client.PutObject(ctx, in); err != nil {
 		return fmt.Errorf("s3 put %q: %w", key, err)
 	}

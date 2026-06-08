@@ -1071,6 +1071,7 @@ function CloudStorageConfigEditor({
   }
   const provider = (cs.provider as string) || 's3'
   const afterAction = (cs.after_action as string) || 'none'
+  const mode = (cs.mode as string) || 'poll'
 
   return (
     <div className="space-y-3">
@@ -1197,20 +1198,49 @@ function CloudStorageConfigEditor({
 
       {role === 'consumer' ? (
         <>
-          <StyledInput
-            label="File pattern (optional)"
-            placeholder="*.csv"
-            value={(cs.file_pattern as string) || ''}
-            onChange={(v) => update({ file_pattern: v })}
+          <StyledSelect
+            label="Ingestion mode"
+            value={mode}
+            onChange={(v) => update({ mode: v })}
+            options={[
+              { value: 'poll', label: 'Poll (list the bucket on an interval)' },
+              { value: 'event', label: 'Event-driven (S3 → SQS)' },
+            ]}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+
+          {mode === 'event' ? (
+            <>
+              <StyledInput
+                label="SQS queue URL"
+                placeholder="https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
+                value={(cs.event_queue_url as string) || ''}
+                onChange={(v) => update({ event_queue_url: v })}
+              />
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                Subscribe the bucket's notifications to this SQS queue (S3 only). Each object is
+                ingested as it arrives; the message is acked only after a successful publish.
+                Azure Blob / GCS use poll mode.
+              </div>
+            </>
+          ) : (
             <StyledInput
-              label="Poll interval (s, 0 = once)"
-              type="number"
-              placeholder="60"
-              value={String((cs.poll_interval_seconds as number) ?? 60)}
-              onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+              label="File pattern (optional)"
+              placeholder="*.csv"
+              value={(cs.file_pattern as string) || ''}
+              onChange={(v) => update({ file_pattern: v })}
             />
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            {mode !== 'event' && (
+              <StyledInput
+                label="Poll interval (s, 0 = once)"
+                type="number"
+                placeholder="60"
+                value={String((cs.poll_interval_seconds as number) ?? 60)}
+                onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+              />
+            )}
             <StyledSelect
               label="After action"
               value={afterAction}
@@ -1232,12 +1262,42 @@ function CloudStorageConfigEditor({
           )}
         </>
       ) : (
-        <StyledInput
-          label="Key template"
-          placeholder="orders/{{.id}}_{{.timestamp}}.json"
-          value={(cs.key_template as string) || ''}
-          onChange={(v) => update({ key_template: v })}
-        />
+        <>
+          <StyledInput
+            label="Key template"
+            placeholder="orders/{{.id}}_{{.timestamp}}.json"
+            value={(cs.key_template as string) || ''}
+            onChange={(v) => update({ key_template: v })}
+          />
+          {(() => {
+            const sse = (cs.sse as Record<string, unknown>) || {}
+            const sseMode = (sse.mode as string) || 'none'
+            const updateSSE = (patch: Record<string, unknown>) =>
+              update({ sse: { ...sse, ...patch } })
+            return (
+              <>
+                <StyledSelect
+                  label="Server-side encryption"
+                  value={sseMode}
+                  onChange={(v) => updateSSE({ mode: v })}
+                  options={[
+                    { value: 'none', label: 'Bucket default' },
+                    { value: 'sse-s3', label: 'SSE-S3 (AES-256, S3 only)' },
+                    { value: 'sse-kms', label: 'KMS / CMEK key' },
+                  ]}
+                />
+                {sseMode === 'sse-kms' && (
+                  <StyledInput
+                    label={provider === 's3' ? 'KMS key ID/ARN' : provider === 'azure' ? 'Encryption scope name' : 'Cloud KMS key name'}
+                    placeholder={provider === 's3' ? 'arn:aws:kms:…' : provider === 'azure' ? 'my-encryption-scope' : 'projects/…/cryptoKeys/…'}
+                    value={(sse.kms_key_id as string) || ''}
+                    onChange={(v) => updateSSE({ kms_key_id: v })}
+                  />
+                )}
+              </>
+            )
+          })()}
+        </>
       )}
 
       <div style={{ fontSize: '11px', color: '#6b7280' }}>

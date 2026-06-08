@@ -15,6 +15,7 @@ import (
 type gcsStore struct {
 	client *storage.Client
 	bucket string
+	sse    SSEConfig
 }
 
 // newGCSStore builds a GCS client. Credentials come from a service-account JSON
@@ -40,7 +41,7 @@ func newGCSStore(ctx context.Context, cfg *Config) (ObjectStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gcs: new client: %w", err)
 	}
-	return &gcsStore{client: client, bucket: cfg.Bucket}, nil
+	return &gcsStore{client: client, bucket: cfg.Bucket, sse: cfg.SSE}, nil
 }
 
 func (g *gcsStore) List(ctx context.Context, prefix string) ([]Object, error) {
@@ -80,7 +81,11 @@ func (g *gcsStore) Put(ctx context.Context, key string, body []byte, contentType
 	if contentType != "" {
 		w.ContentType = contentType
 	}
-	// Server-side encryption (CMEK) is applied here in #80 PR3.
+	// GCS objects are always encrypted at rest; a customer-managed key (CMEK,
+	// named in KMSKeyID) is the configurable knob.
+	if g.sse.KMSKeyID != "" {
+		w.KMSKeyName = g.sse.KMSKeyID
+	}
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 		return fmt.Errorf("gcs put %q: %w", key, err)

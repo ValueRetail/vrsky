@@ -15,6 +15,7 @@ import (
 type azureStore struct {
 	client    *azblob.Client
 	container string
+	sse       SSEConfig
 }
 
 // newAzureStore builds an Azure Blob client from either a connection string
@@ -44,7 +45,7 @@ func newAzureStore(_ context.Context, cfg *Config) (ObjectStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azure: new client: %w", err)
 	}
-	return &azureStore{client: client, container: cfg.Bucket}, nil
+	return &azureStore{client: client, container: cfg.Bucket, sse: cfg.SSE}, nil
 }
 
 func (a *azureStore) List(ctx context.Context, prefix string) ([]Object, error) {
@@ -104,7 +105,12 @@ func (a *azureStore) Put(ctx context.Context, key string, body []byte, contentTy
 		ct := contentType
 		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &ct}
 	}
-	// Server-side encryption (encryption scope) is applied here in #80 PR3.
+	// Azure blobs are always encrypted at rest; an encryption scope (named in
+	// KMSKeyID) is the per-blob configurable knob.
+	if a.sse.KMSKeyID != "" {
+		scope := a.sse.KMSKeyID
+		opts.CPKScopeInfo = &blob.CPKScopeInfo{EncryptionScope: &scope}
+	}
 	if _, err := a.client.UploadBuffer(ctx, a.container, key, body, opts); err != nil {
 		return fmt.Errorf("azure put %q: %w", key, err)
 	}
