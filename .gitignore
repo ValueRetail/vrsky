@@ -180,6 +180,8 @@ docker-compose.override.yml
 /src/kafka-producer
 /src/rabbitmq-consumer
 /src/rabbitmq-producer
+/src/cloud-storage-consumer
+/src/cloud-storage-producer
 /src/tenant-consumer
 /src/webhook-consumer
 /src/cmd/management-api/management-api

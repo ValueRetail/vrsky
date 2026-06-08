@@ -1049,6 +1049,276 @@ function RabbitMQConfigEditor({
   )
 }
 
+// CloudStorageConfigEditor configures the single cloud-storage connector
+// (Amazon S3 / Azure Blob / GCS) for both consumer and producer roles. The
+// provider picker swaps the credential fields. PR1 ships S3 (and S3-compatible
+// stores such as MinIO via a custom endpoint); Azure/GCS land in PR2.
+function CloudStorageConfigEditor({
+  config,
+  setConfig,
+  role,
+}: {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  role: 'consumer' | 'producer'
+}) {
+  const cs = (config.cloud_storage as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) =>
+    setConfig({ ...config, cloud_storage: { ...cs, ...patch } })
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
+  }
+  const provider = (cs.provider as string) || 's3'
+  const afterAction = (cs.after_action as string) || 'none'
+  const mode = (cs.mode as string) || 'poll'
+
+  return (
+    <div className="space-y-3">
+      <StyledSelect
+        label="Provider"
+        value={provider}
+        onChange={(v) => update({ provider: v })}
+        options={[
+          { value: 's3', label: 'Amazon S3 (or S3-compatible)' },
+          { value: 'azure', label: 'Azure Blob Storage' },
+          { value: 'gcs', label: 'Google Cloud Storage' },
+        ]}
+      />
+
+      <StyledInput
+        label={provider === 'azure' ? 'Container' : 'Bucket'}
+        placeholder={provider === 'azure' ? 'my-container' : 'my-bucket'}
+        value={(cs.bucket as string) || ''}
+        onChange={(v) => update({ bucket: v })}
+      />
+      <StyledInput
+        label="Prefix (optional)"
+        placeholder={role === 'consumer' ? 'incoming/' : 'outgoing/'}
+        value={(cs.prefix as string) || ''}
+        onChange={(v) => update({ prefix: v })}
+      />
+
+      {provider === 's3' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <StyledInput
+              label="Region"
+              placeholder="us-east-1"
+              value={(cs.region as string) || ''}
+              onChange={(v) => update({ region: v })}
+            />
+            <StyledInput
+              label="Endpoint (optional, for MinIO)"
+              placeholder="http://minio:9000"
+              value={(cs.endpoint as string) || ''}
+              onChange={(v) => update({ endpoint: v })}
+            />
+          </div>
+          <StyledInput
+            label="Access key ID"
+            placeholder="AKIA… (or MinIO user)"
+            value={(cs.access_key_id as string) || ''}
+            onChange={(v) => update({ access_key_id: v })}
+          />
+          <div>
+            <label style={labelStyle}>Secret access key</label>
+            <SecretInput
+              label="Secret access key"
+              placeholder="S3 secret access key"
+              field="secret_access_key"
+              config={cs}
+              defaultSecretName="s3-secret-access-key"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {provider === 'azure' && (
+        <>
+          <div>
+            <label style={labelStyle}>Connection string</label>
+            <SecretInput
+              label="Connection string"
+              placeholder="DefaultEndpointsProtocol=…;AccountName=…;AccountKey=…"
+              field="connection_string"
+              config={cs}
+              defaultSecretName="azure-connection-string"
+              onChange={(patch) => update(patch)}
+            />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+              Easiest option (also works with the Azurite emulator). Or set the account name + key below.
+            </div>
+          </div>
+          <StyledInput
+            label="Account name (optional, instead of connection string)"
+            placeholder="mystorageaccount"
+            value={(cs.account_name as string) || ''}
+            onChange={(v) => update({ account_name: v })}
+          />
+          <div>
+            <label style={labelStyle}>Account key (optional)</label>
+            <SecretInput
+              label="Account key"
+              placeholder="Azure storage account key"
+              field="account_key"
+              config={cs}
+              defaultSecretName="azure-account-key"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {provider === 'gcs' && (
+        <>
+          <StyledInput
+            label="Endpoint (optional, for a custom/private GCS endpoint)"
+            placeholder="https://storage.googleapis.com/storage/v1/"
+            value={(cs.endpoint as string) || ''}
+            onChange={(v) => update({ endpoint: v })}
+          />
+          <div>
+            <label style={labelStyle}>Service account JSON</label>
+            <SecretInput
+              label="Service account JSON"
+              placeholder='{"type":"service_account", …}'
+              field="credentials_json"
+              config={cs}
+              defaultSecretName="gcs-credentials-json"
+              onChange={(patch) => update(patch)}
+            />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+              Paste the service-account key JSON. (For the local fake-gcs emulator, leave this
+              blank and run the worker with <code>STORAGE_EMULATOR_HOST</code> set — an endpoint
+              alone doesn't cover the GCS client's read path.)
+            </div>
+          </div>
+        </>
+      )}
+
+      {role === 'consumer' ? (
+        <>
+          <StyledSelect
+            label="Ingestion mode"
+            value={mode}
+            onChange={(v) => update({ mode: v })}
+            options={[
+              { value: 'poll', label: 'Poll (list the bucket on an interval)' },
+              { value: 'event', label: 'Event-driven (S3 → SQS)' },
+            ]}
+          />
+
+          {mode === 'event' ? (
+            <>
+              <StyledInput
+                label="SQS queue URL"
+                placeholder="https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
+                value={(cs.event_queue_url as string) || ''}
+                onChange={(v) => update({ event_queue_url: v })}
+              />
+              <StyledInput
+                label="SQS endpoint override (optional, e.g. LocalStack)"
+                placeholder="http://localstack:4566"
+                value={(cs.event_endpoint as string) || ''}
+                onChange={(v) => update({ event_endpoint: v })}
+              />
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                Subscribe the bucket's notifications to this SQS queue (S3 only). Each object is
+                ingested as it arrives; the message is acked only after a successful publish.
+                The endpoint override is for the SQS service (distinct from the object-store
+                endpoint above); leave blank for real AWS SQS. Azure Blob / GCS use poll mode.
+              </div>
+            </>
+          ) : (
+            <StyledInput
+              label="File pattern (optional)"
+              placeholder="*.csv"
+              value={(cs.file_pattern as string) || ''}
+              onChange={(v) => update({ file_pattern: v })}
+            />
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            {mode !== 'event' && (
+              <StyledInput
+                label="Poll interval (s, 0 = once)"
+                type="number"
+                placeholder="60"
+                value={String((cs.poll_interval_seconds as number) ?? 60)}
+                onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+              />
+            )}
+            <StyledSelect
+              label="After action"
+              value={afterAction}
+              onChange={(v) => update({ after_action: v })}
+              options={[
+                { value: 'none', label: 'Leave in place' },
+                { value: 'delete', label: 'Delete' },
+                { value: 'move', label: 'Move' },
+              ]}
+            />
+          </div>
+          {afterAction === 'move' && (
+            <StyledInput
+              label="Move to prefix"
+              placeholder="processed/"
+              value={(cs.move_prefix as string) || ''}
+              onChange={(v) => update({ move_prefix: v })}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <StyledInput
+            label="Key template"
+            placeholder="orders/{{.id}}_{{.timestamp}}.json"
+            value={(cs.key_template as string) || ''}
+            onChange={(v) => update({ key_template: v })}
+          />
+          {(() => {
+            const sse = (cs.sse as Record<string, unknown>) || {}
+            const sseMode = (sse.mode as string) || 'none'
+            const updateSSE = (patch: Record<string, unknown>) =>
+              update({ sse: { ...sse, ...patch } })
+            return (
+              <>
+                <StyledSelect
+                  label="Server-side encryption"
+                  value={sseMode}
+                  onChange={(v) => updateSSE({ mode: v })}
+                  options={[
+                    { value: 'none', label: 'Bucket default' },
+                    { value: 'sse-s3', label: 'SSE-S3 (AES-256, S3 only)' },
+                    { value: 'sse-kms', label: 'KMS / CMEK key' },
+                  ]}
+                />
+                {sseMode === 'sse-kms' && (
+                  <StyledInput
+                    label={provider === 's3' ? 'KMS key ID/ARN' : provider === 'azure' ? 'Encryption scope name' : 'Cloud KMS key name'}
+                    placeholder={provider === 's3' ? 'arn:aws:kms:…' : provider === 'azure' ? 'my-encryption-scope' : 'projects/…/cryptoKeys/…'}
+                    value={(sse.kms_key_id as string) || ''}
+                    onChange={(v) => updateSSE({ kms_key_id: v })}
+                  />
+                )}
+              </>
+            )
+          })()}
+        </>
+      )}
+
+      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+        {role === 'consumer'
+          ? 'The bucket is polled under the prefix and each new object is ingested.'
+          : 'Each message is written as an object. The key template can reference payload fields plus the timestamp and uuid built-ins; it defaults to the message id.'}{' '}
+        Credentials are stored encrypted in the secrets vault on deploy.
+      </div>
+    </div>
+  )
+}
+
 // API Consumer configuration component
 // Minimal by default - just Base URL
 // Advanced options (poll interval, endpoints) expandable
@@ -2653,6 +2923,7 @@ export default function PropertyEditor({
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
+                { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
               ]}
             />
 
@@ -2827,6 +3098,10 @@ export default function PropertyEditor({
             {config.type === 'rabbitmq' && (
               <RabbitMQConfigEditor config={config} setConfig={setConfig} role="consumer" />
             )}
+
+            {config.type === 'cloud_storage' && (
+              <CloudStorageConfigEditor config={config} setConfig={setConfig} role="consumer" />
+            )}
           </div>
         )
 
@@ -2846,6 +3121,7 @@ export default function PropertyEditor({
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
+                { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
               ]}
             />
 
@@ -2973,6 +3249,10 @@ export default function PropertyEditor({
 
             {config.type === 'rabbitmq' && (
               <RabbitMQConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+
+            {config.type === 'cloud_storage' && (
+              <CloudStorageConfigEditor config={config} setConfig={setConfig} role="producer" />
             )}
           </div>
         )
