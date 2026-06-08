@@ -93,9 +93,9 @@ func New(ctx context.Context, cfg *Config) (ObjectStore, error) {
 	case ProviderS3, "":
 		return newS3Store(ctx, cfg)
 	case ProviderAzure:
-		return nil, fmt.Errorf("objectstore: provider %q not implemented yet (#80 PR2)", cfg.Provider)
+		return newAzureStore(ctx, cfg)
 	case ProviderGCS:
-		return nil, fmt.Errorf("objectstore: provider %q not implemented yet (#80 PR2)", cfg.Provider)
+		return newGCSStore(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("objectstore: unknown provider %q", cfg.Provider)
 	}

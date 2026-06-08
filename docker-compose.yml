@@ -807,6 +807,30 @@ services:
     networks:
       - vrsky-network
 
+  # Test Azure Blob emulator (Azurite) for local + CI testing of #80. In-network
+  # blob endpoint at http://azurite-test:10000/devstoreaccount1. Use the standard
+  # devstore connection string in the node config (account: devstoreaccount1).
+  azurite-test:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: vrsky-azurite-test
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000"
+    ports:
+      - "127.0.0.1:10000:10000"
+    networks:
+      - vrsky-network
+
+  # Test GCS emulator (fake-gcs-server) for local + CI testing of #80. In-network
+  # API at http://fake-gcs-test:4443. Set the node endpoint to
+  # http://fake-gcs-test:4443/storage/v1/ (no credentials needed).
+  fake-gcs-test:
+    image: fsouza/fake-gcs-server:latest
+    container_name: vrsky-fake-gcs-test
+    command: "-scheme http -host 0.0.0.0 -port 4443 -public-host fake-gcs-test:4443"
+    ports:
+      - "127.0.0.1:4443:4443"
+    networks:
+      - vrsky-network
+
   # Salesforce Producer - writes pipeline records to Salesforce (REST + Bulk API), OAuth-authed (#79)
   salesforce-producer:
     build:

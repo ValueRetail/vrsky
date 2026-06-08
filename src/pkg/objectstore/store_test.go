@@ -13,11 +13,39 @@ func TestNew_UnknownProvider(t *testing.T) {
 	}
 }
 
-func TestNew_NotImplementedProviders(t *testing.T) {
-	for _, p := range []string{ProviderAzure, ProviderGCS} {
-		if _, err := New(context.Background(), &Config{Provider: p, Bucket: "b"}); err == nil {
-			t.Errorf("provider %q: want not-implemented error, got nil", p)
-		}
+func TestNew_AzureRequiresCredentials(t *testing.T) {
+	// Azure with a container but no connection string / account key must error.
+	_, err := New(context.Background(), &Config{Provider: ProviderAzure, Bucket: "c"})
+	if err == nil || !strings.Contains(err.Error(), "connection_string") {
+		t.Fatalf("want azure credential error, got %v", err)
+	}
+}
+
+func TestNew_AzureRequiresContainer(t *testing.T) {
+	if _, err := New(context.Background(), &Config{Provider: ProviderAzure}); err == nil {
+		t.Fatal("want error when azure container is empty")
+	}
+}
+
+func TestNew_GCSRequiresBucket(t *testing.T) {
+	if _, err := New(context.Background(), &Config{Provider: ProviderGCS}); err == nil {
+		t.Fatal("want error when gcs bucket is empty")
+	}
+}
+
+func TestNew_GCSEmulatorConstructs(t *testing.T) {
+	// With an endpoint override (emulator) and no creds, the GCS client
+	// constructs without making a network call.
+	store, err := New(context.Background(), &Config{
+		Provider: ProviderGCS,
+		Bucket:   "b",
+		Endpoint: "http://localhost:4443/storage/v1/",
+	})
+	if err != nil {
+		t.Fatalf("New(gcs emulator): %v", err)
+	}
+	if store == nil {
+		t.Fatal("nil store")
 	}
 }
 

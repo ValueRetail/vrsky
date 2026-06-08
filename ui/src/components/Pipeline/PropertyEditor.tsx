@@ -1085,13 +1085,6 @@ function CloudStorageConfigEditor({
         ]}
       />
 
-      {provider !== 's3' && (
-        <div style={{ fontSize: '11px', color: '#b45309' }}>
-          {provider === 'azure' ? 'Azure Blob Storage' : 'Google Cloud Storage'} support ships in an
-          upcoming update. Amazon S3 (and S3-compatible stores like MinIO) are available now.
-        </div>
-      )}
-
       <StyledInput
         label={provider === 'azure' ? 'Container' : 'Bucket'}
         placeholder={provider === 'azure' ? 'my-container' : 'my-bucket'}
@@ -1137,6 +1130,67 @@ function CloudStorageConfigEditor({
               defaultSecretName="s3-secret-access-key"
               onChange={(patch) => update(patch)}
             />
+          </div>
+        </>
+      )}
+
+      {provider === 'azure' && (
+        <>
+          <div>
+            <label style={labelStyle}>Connection string</label>
+            <SecretInput
+              label="Connection string"
+              placeholder="DefaultEndpointsProtocol=…;AccountName=…;AccountKey=…"
+              field="connection_string"
+              config={cs}
+              defaultSecretName="azure-connection-string"
+              onChange={(patch) => update(patch)}
+            />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+              Easiest option (also works with the Azurite emulator). Or set the account name + key below.
+            </div>
+          </div>
+          <StyledInput
+            label="Account name (optional, instead of connection string)"
+            placeholder="mystorageaccount"
+            value={(cs.account_name as string) || ''}
+            onChange={(v) => update({ account_name: v })}
+          />
+          <div>
+            <label style={labelStyle}>Account key (optional)</label>
+            <SecretInput
+              label="Account key"
+              placeholder="Azure storage account key"
+              field="account_key"
+              config={cs}
+              defaultSecretName="azure-account-key"
+              onChange={(patch) => update(patch)}
+            />
+          </div>
+        </>
+      )}
+
+      {provider === 'gcs' && (
+        <>
+          <StyledInput
+            label="Endpoint (optional, for the fake-gcs emulator)"
+            placeholder="http://fake-gcs-test:4443/storage/v1/"
+            value={(cs.endpoint as string) || ''}
+            onChange={(v) => update({ endpoint: v })}
+          />
+          <div>
+            <label style={labelStyle}>Service account JSON</label>
+            <SecretInput
+              label="Service account JSON"
+              placeholder='{"type":"service_account", …}'
+              field="credentials_json"
+              config={cs}
+              defaultSecretName="gcs-credentials-json"
+              onChange={(patch) => update(patch)}
+            />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+              Paste the service-account key JSON. Leave empty when using the emulator endpoint above.
+            </div>
           </div>
         </>
       )}
