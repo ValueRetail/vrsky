@@ -813,7 +813,9 @@ services:
   azurite-test:
     image: mcr.microsoft.com/azure-storage/azurite:latest
     container_name: vrsky-azurite-test
-    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000"
+    # --skipApiVersionCheck so newer clients (azure-cli, recent SDKs) don't trip
+    # on Azurite's API-version ceiling.
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck"
     ports:
       - "127.0.0.1:10000:10000"
     networks:
