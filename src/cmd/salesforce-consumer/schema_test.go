@@ -18,6 +18,10 @@ func TestObjectFromSOQL(t *testing.T) {
 		"SELECT count() FROM Opportunity LIMIT 10":             "Opportunity",
 		"not a query":                                          "",
 		"":                                                     "",
+		// Child-relationship subquery in SELECT — outer object is Account.
+		"SELECT Name, (SELECT LastName FROM Contacts) FROM Account": "Account",
+		// Semi-join subquery in WHERE — outer object is Account.
+		"SELECT Id FROM Account WHERE Id IN (SELECT AccountId FROM Contact)": "Account",
 	}
 	for soql, want := range cases {
 		if got := objectFromSOQL(soql); got != want {

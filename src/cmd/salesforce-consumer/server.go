@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -15,16 +16,52 @@ import (
 // sample (SOQL) for the visual field-mapping UI (#79 / #81). /health is served
 // separately by the SDK on HEALTH_PORT.
 
-// fromClause extracts the SObject from a SOQL query's FROM clause.
-var fromClause = regexp.MustCompile(`(?i)\bfrom\s+([a-zA-Z0-9_]+)`)
+// limitClause matches a SOQL LIMIT and captures its count.
+var limitClause = regexp.MustCompile(`(?i)\blimit\s+(\d+)`)
 
-// objectFromSOQL returns the SObject named in a SOQL query's FROM clause, or "".
+func isIdentByte(b byte) bool {
+	return b == '_' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// objectFromSOQL returns the SObject named in a SOQL query's top-level FROM
+// clause, or "". It tracks parenthesis depth so subqueries — whether in the
+// SELECT (child relationships) or the WHERE (semi-joins) — don't shadow the
+// queried object.
 func objectFromSOQL(soql string) string {
-	m := fromClause.FindStringSubmatch(soql)
-	if len(m) < 2 {
-		return ""
+	depth := 0
+	for i := 0; i < len(soql); {
+		switch soql[i] {
+		case '(':
+			depth++
+			i++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			i++
+		default:
+			c := soql[i] | 0x20 // ASCII lower
+			if depth == 0 && c == 'f' && i+4 <= len(soql) &&
+				(soql[i+1]|0x20) == 'r' && (soql[i+2]|0x20) == 'o' && (soql[i+3]|0x20) == 'm' &&
+				(i == 0 || !isIdentByte(soql[i-1])) && (i+4 == len(soql) || !isIdentByte(soql[i+4])) {
+				j := i + 4
+				for j < len(soql) && (soql[j] == ' ' || soql[j] == '\t' || soql[j] == '\n' || soql[j] == '\r') {
+					j++
+				}
+				start := j
+				for j < len(soql) && isIdentByte(soql[j]) {
+					j++
+				}
+				if j > start {
+					return soql[start:j]
+				}
+				i = j
+			} else {
+				i++
+			}
+		}
 	}
-	return m[1]
+	return ""
 }
 
 // schemaRequest is the shared request body for /schema/ and /sample-data/.
@@ -146,9 +183,15 @@ func (s *salesforceConsumer) handleSampleData() http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "a SOQL query is required for a sample"})
 			return
 		}
-		soql := req.SOQL
-		if !regexp.MustCompile(`(?i)\blimit\s+\d+`).MatchString(soql) {
-			soql = strings.TrimRight(soql, "; \t\n") + " LIMIT 5"
+		// Always bound a preview to a small page, capping any existing LIMIT.
+		const sampleLimit = 5
+		soql := strings.TrimRight(req.SOQL, "; \t\n")
+		if m := limitClause.FindStringSubmatch(soql); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > sampleLimit {
+				soql = limitClause.ReplaceAllString(soql, fmt.Sprintf("LIMIT %d", sampleLimit))
+			}
+		} else {
+			soql += fmt.Sprintf(" LIMIT %d", sampleLimit)
 		}
 
 		base := strings.TrimRight(req.InstanceURL, "/")
