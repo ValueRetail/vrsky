@@ -6,6 +6,8 @@ import OAuthGrantSelector from './OAuthGrantSelector'
 import { useAuthStore } from '../../store/authStore'
 import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
+import { SchemaTree } from './SchemaTree'
+import { discoverSchema, type SchemaField } from './schemaDiscovery'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
@@ -2248,12 +2250,14 @@ function ConverterConfig({
   allNodes,
   allEdges,
   currentNodeId,
+  deployedConnectionId,
 }: {
   config: Record<string, unknown>
   setConfig: (config: Record<string, unknown>) => void
   allNodes?: Node[]
   allEdges?: Edge[]
   currentNodeId?: string
+  deployedConnectionId?: string
 }) {
   const outputFormat = (config.output_format as string) || ''
   const csvDelimiter = (config.csv_delimiter as string) || ','
@@ -2267,6 +2271,9 @@ function ConverterConfig({
   const [previewOutput, setPreviewOutput] = useState('')
   const [previewing, setPreviewing] = useState(false)
   const [fetchingSample, setFetchingSample] = useState(false)
+  const [schemaFields, setSchemaFields] = useState<SchemaField[]>([])
+  const [discovering, setDiscovering] = useState(false)
+  const [schemaError, setSchemaError] = useState('')
 
   // Get the consumer that actually feeds this converter (walk edges upstream)
   const consumerNode = (currentNodeId && allNodes && allEdges)
@@ -2333,6 +2340,28 @@ function ConverterConfig({
     setConfig({
       ...config,
       mappings: [...mappings, { source: '', target: '', type: 'rename' }],
+    })
+  }
+
+  const runDiscoverSchema = async () => {
+    setDiscovering(true)
+    setSchemaError('')
+    try {
+      const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId })
+      setSchemaFields(fields)
+      if (fields.length === 0) setSchemaError('No fields found in the sample.')
+    } catch (err) {
+      setSchemaFields([])
+      setSchemaError(err instanceof Error ? err.message : 'Schema discovery failed')
+    }
+    setDiscovering(false)
+  }
+
+  // Append a mapping from a picked source field (rename source → its own name).
+  const addMappingFromField = (field: SchemaField) => {
+    setConfig({
+      ...config,
+      mappings: [...mappings, { source: field.path, target: field.name, type: 'rename' }],
     })
   }
 
@@ -2417,6 +2446,29 @@ function ConverterConfig({
           <p className="text-xs text-neutral-500">Use <code className="bg-neutral-100 px-1 rounded">{'{field_name}'}</code> to insert field values. One line per row.</p>
         </>
       )}
+
+      {/* Source schema discovery (#81) — discover the upstream fields + types, click to map */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Source schema</div>
+          <button
+            onClick={runDiscoverSchema}
+            disabled={discovering}
+            style={{ fontSize: '11px', padding: '2px 8px', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: discovering ? 'not-allowed' : 'pointer', color: '#3730a3', fontWeight: 600 }}
+          >
+            {discovering ? 'Discovering…' : 'Discover schema'}
+          </button>
+        </div>
+        {schemaError && <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '4px' }}>{schemaError}</div>}
+        {schemaFields.length > 0 && (
+          <>
+            <SchemaTree fields={schemaFields} onPick={addMappingFromField} />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              Click <strong>+</strong> on a field to add it as a mapping.
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Field Mappings - optional, applied before format conversion */}
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
@@ -3259,7 +3311,7 @@ export default function PropertyEditor({
 
       case 'converter':
         return (
-          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} />
+          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} deployedConnectionId={deployedConnectionId} />
         )
 
       case 'filter':
