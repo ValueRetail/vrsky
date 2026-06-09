@@ -1,4 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
 import type { Node, Edge } from '../../types/pipeline'
 import SecretInput from './SecretInput'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
@@ -2244,6 +2255,41 @@ function FilterConfig({
   )
 }
 
+// --- Drag-and-drop field mapping (#81 PR2) ---
+// A draggable wrapper around a SchemaTree field row. PointerSensor uses an
+// activation distance so the row's expand/pick buttons still receive clicks.
+function DraggableField({ field, children }: { field: SchemaField; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `field:${field.path}`,
+    data: { field },
+  })
+  return (
+    <div ref={setNodeRef} {...attributes} {...listeners} style={{ cursor: 'grab', opacity: isDragging ? 0.4 : 1 }}>
+      {children}
+    </div>
+  )
+}
+
+// A mapping row as a drop target — dropping a field sets that row's source.
+function DroppableMapping({ index, children }: { index: number; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `mapping:${index}` })
+  return (
+    <div ref={setNodeRef} style={{ outline: isOver ? '2px solid #7c3aed' : 'none', outlineOffset: '2px', borderRadius: '6px' }}>
+      {children}
+    </div>
+  )
+}
+
+// Drop zone that appends a new mapping from the dropped field.
+function DropToAddMapping({ children }: { children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: 'mapping-new' })
+  return (
+    <div ref={setNodeRef} style={{ outline: isOver ? '2px dashed #7c3aed' : 'none', outlineOffset: '2px', borderRadius: '6px' }}>
+      {children}
+    </div>
+  )
+}
+
 function ConverterConfig({
   config,
   setConfig,
@@ -2274,6 +2320,9 @@ function ConverterConfig({
   const [schemaFields, setSchemaFields] = useState<SchemaField[]>([])
   const [discovering, setDiscovering] = useState(false)
   const [schemaError, setSchemaError] = useState('')
+  const [activeField, setActiveField] = useState<SchemaField | null>(null)
+  // Activation distance so clicks on the tree's expand/pick buttons still work.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
   // Get the consumer that actually feeds this converter (walk edges upstream)
   const consumerNode = (currentNodeId && allNodes && allEdges)
@@ -2402,6 +2451,25 @@ function ConverterConfig({
     })
   }
 
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveField((e.active.data.current?.field as SchemaField | undefined) || null)
+  }
+
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveField(null)
+    const field = e.active.data.current?.field as SchemaField | undefined
+    const overId = e.over?.id
+    if (!field || !overId) return
+    if (overId === 'mapping-new') {
+      addMappingFromField(field)
+    } else if (typeof overId === 'string' && overId.startsWith('mapping:')) {
+      const idx = parseInt(overId.slice('mapping:'.length), 10)
+      if (!Number.isNaN(idx)) {
+        updateMapping(idx, { source: field.path, target: mappings[idx]?.target || field.name })
+      }
+    }
+  }
+
   const removeMapping = (index: number) => {
     setConfig({
       ...config,
@@ -2433,6 +2501,7 @@ function ConverterConfig({
   }
 
   return (
+    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
     <div className="space-y-3">
       {/* Output Format */}
       <StyledSelect
@@ -2499,9 +2568,13 @@ function ConverterConfig({
         {schemaError && <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '4px' }}>{schemaError}</div>}
         {schemaFields.length > 0 && (
           <>
-            <SchemaTree fields={schemaFields} onPick={addMappingFromField} />
+            <SchemaTree
+              fields={schemaFields}
+              onPick={addMappingFromField}
+              renderField={(field, row) => <DraggableField field={field}>{row}</DraggableField>}
+            />
             <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-              Click <strong>+</strong> on a field to add it as a mapping.
+              <strong>Drag</strong> a field onto a mapping (or the add zone), or click <strong>+</strong> to map it.
             </div>
           </>
         )}
@@ -2514,7 +2587,8 @@ function ConverterConfig({
         </div>
 
         {mappings.map((m, i) => (
-          <div key={i} style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+          <DroppableMapping key={i} index={i}>
+          <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
               <select
                 value={m.type || 'rename'}
@@ -2545,14 +2619,17 @@ function ConverterConfig({
               <StyledInput label="Template" placeholder="e.g. {first_name} {last_name}" value={m.expression || ''} onChange={(v) => updateMapping(i, { expression: v })} />
             )}
           </div>
+          </DroppableMapping>
         ))}
 
-        <button
-          onClick={addMapping}
-          style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
-        >
-          + Add Mapping
-        </button>
+        <DropToAddMapping>
+          <button
+            onClick={addMapping}
+            style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            + Add Mapping
+          </button>
+        </DropToAddMapping>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', marginTop: '8px' }}>
           <input type="checkbox" checked={dropUnmapped} onChange={(e) => setConfig({ ...config, drop_unmapped: e.target.checked })} />
@@ -2592,6 +2669,14 @@ function ConverterConfig({
         )}
       </div>
     </div>
+    <DragOverlay>
+      {activeField ? (
+        <div style={{ fontFamily: 'monospace', fontSize: '12px', background: '#7c3aed', color: '#fff', borderRadius: '4px', padding: '2px 8px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}>
+          {activeField.path}
+        </div>
+      ) : null}
+    </DragOverlay>
+    </DndContext>
   )
 }
 
