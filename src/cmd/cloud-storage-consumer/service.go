@@ -55,7 +55,10 @@ type cloudConfig struct {
 
 	Mode                string `json:"mode"`                  // "poll" (default) | "event"
 	EventQueueURL       string `json:"event_queue_url"`       // SQS queue URL (S3 event mode)
-	EventEndpoint       string `json:"event_endpoint"`        // optional SQS endpoint override (e.g. LocalStack); NOT the S3 endpoint
+	EventQueueName      string `json:"event_queue_name"`      // Azure Storage Queue name (Azure event mode)
+	EventSubscription   string `json:"event_subscription"`    // Pub/Sub subscription, path or bare name (GCS event mode)
+	EventProject        string `json:"event_project"`         // GCP project ID (GCS event mode, when subscription is a bare name)
+	EventEndpoint       string `json:"event_endpoint"`        // optional event-broker endpoint override (LocalStack SQS / Azurite queue / Pub/Sub emulator); NOT the object-store endpoint
 	FilePattern         string `json:"file_pattern"`          // optional glob against the object base name, e.g. *.csv
 	PollIntervalSeconds int    `json:"poll_interval_seconds"` // <= 0 means run once
 	AfterAction         string `json:"after_action"`          // "delete" | "move" | "none" (default none)
@@ -171,9 +174,11 @@ func (s *cloudConsumer) handleStartCommand(msg *nats.Msg) {
 		logger.Error("after_action=move requires move_prefix")
 		return
 	}
-	if cfg.Mode == "event" && cfg.EventQueueURL == "" {
-		logger.Error("mode=event requires event_queue_url")
-		return
+	if cfg.Mode == "event" {
+		if err := cfg.validateEventConfig(); err != nil {
+			logger.Error("invalid event-mode config", "error", err)
+			return
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -184,7 +189,7 @@ func (s *cloudConsumer) handleStartCommand(msg *nats.Msg) {
 
 	if cfg.Mode == "event" {
 		logger.Info("Starting cloud-storage event loop",
-			"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "queue", cfg.EventQueueURL)
+			"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "event_target", cfg.eventTarget())
 		go s.runEventLoop(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
 		return
 	}
@@ -299,7 +304,7 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, connID, tenantID strin
 		return
 	}
 
-	logger.Info("cloud-storage event loop started", "queue", cfg.EventQueueURL)
+	logger.Info("cloud-storage event loop started", "event_target", cfg.eventTarget())
 	for {
 		if ctx.Err() != nil {
 			return
@@ -458,6 +463,38 @@ func (c *cloudConfig) providerOrDefault() string {
 		return objectstore.ProviderS3
 	}
 	return c.Provider
+}
+
+// validateEventConfig checks that the provider-specific event-mode identifier is
+// set (SQS queue URL for S3, queue name for Azure, subscription for GCS).
+func (c *cloudConfig) validateEventConfig() error {
+	switch c.providerOrDefault() {
+	case objectstore.ProviderAzure:
+		if c.EventQueueName == "" {
+			return fmt.Errorf("mode=event (azure) requires event_queue_name")
+		}
+	case objectstore.ProviderGCS:
+		if c.EventSubscription == "" {
+			return fmt.Errorf("mode=event (gcs) requires event_subscription")
+		}
+	default: // s3
+		if c.EventQueueURL == "" {
+			return fmt.Errorf("mode=event (s3) requires event_queue_url")
+		}
+	}
+	return nil
+}
+
+// eventTarget returns the provider-specific event identifier, for logging.
+func (c *cloudConfig) eventTarget() string {
+	switch c.providerOrDefault() {
+	case objectstore.ProviderAzure:
+		return c.EventQueueName
+	case objectstore.ProviderGCS:
+		return c.EventSubscription
+	default:
+		return c.EventQueueURL
+	}
 }
 
 // detectContentType picks a MIME type from the object's base name, falling back

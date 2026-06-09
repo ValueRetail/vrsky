@@ -1225,30 +1225,84 @@ function CloudStorageConfigEditor({
             onChange={(v) => update({ mode: v })}
             options={[
               { value: 'poll', label: 'Poll (list the bucket on an interval)' },
-              { value: 'event', label: 'Event-driven (S3 → SQS)' },
+              { value: 'event', label: 'Event-driven (queue / subscription)' },
             ]}
           />
 
           {mode === 'event' ? (
             <>
-              <StyledInput
-                label="SQS queue URL"
-                placeholder="https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
-                value={(cs.event_queue_url as string) || ''}
-                onChange={(v) => update({ event_queue_url: v })}
-              />
-              <StyledInput
-                label="SQS endpoint override (optional, e.g. LocalStack)"
-                placeholder="http://localstack:4566"
-                value={(cs.event_endpoint as string) || ''}
-                onChange={(v) => update({ event_endpoint: v })}
-              />
-              <div style={{ fontSize: '11px', color: '#6b7280' }}>
-                Subscribe the bucket's notifications to this SQS queue (S3 only). Each object is
-                ingested as it arrives; the message is acked only after a successful publish.
-                The endpoint override is for the SQS service (distinct from the object-store
-                endpoint above); leave blank for real AWS SQS. Azure Blob / GCS use poll mode.
-              </div>
+              {provider === 's3' && (
+                <>
+                  <StyledInput
+                    label="SQS queue URL"
+                    placeholder="https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"
+                    value={(cs.event_queue_url as string) || ''}
+                    onChange={(v) => update({ event_queue_url: v })}
+                  />
+                  <StyledInput
+                    label="SQS endpoint override (optional, e.g. LocalStack)"
+                    placeholder="http://localstack:4566"
+                    value={(cs.event_endpoint as string) || ''}
+                    onChange={(v) => update({ event_endpoint: v })}
+                  />
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Subscribe the bucket's notifications to this SQS queue. Each object is ingested
+                    as it arrives; the message is acked only after a successful publish. The
+                    endpoint override is for the SQS service (distinct from the object-store
+                    endpoint above); leave blank for real AWS SQS.
+                  </div>
+                </>
+              )}
+              {provider === 'azure' && (
+                <>
+                  <StyledInput
+                    label="Storage Queue name"
+                    placeholder="blob-events"
+                    value={(cs.event_queue_name as string) || ''}
+                    onChange={(v) => update({ event_queue_name: v })}
+                  />
+                  <StyledInput
+                    label="Queue endpoint override (optional, e.g. Azurite)"
+                    placeholder="http://azurite:10001/devstoreaccount1"
+                    value={(cs.event_endpoint as string) || ''}
+                    onChange={(v) => update({ event_endpoint: v })}
+                  />
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Route the container's Blob events through Event Grid into this Storage Queue.
+                    The queue is long-polled and each message is deleted only after a successful
+                    publish. It uses the same connection string / account credentials as the
+                    container above; the endpoint override targets the Azurite emulator.
+                  </div>
+                </>
+              )}
+              {provider === 'gcs' && (
+                <>
+                  <StyledInput
+                    label="Pub/Sub subscription"
+                    placeholder="gcs-events-sub (or projects/…/subscriptions/…)"
+                    value={(cs.event_subscription as string) || ''}
+                    onChange={(v) => update({ event_subscription: v })}
+                  />
+                  <StyledInput
+                    label="GCP project ID (required for a bare subscription name)"
+                    placeholder="my-project"
+                    value={(cs.event_project as string) || ''}
+                    onChange={(v) => update({ event_project: v })}
+                  />
+                  <StyledInput
+                    label="Pub/Sub endpoint override (optional, e.g. emulator)"
+                    placeholder="localhost:8085"
+                    value={(cs.event_endpoint as string) || ''}
+                    onChange={(v) => update({ event_endpoint: v })}
+                  />
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Create a bucket notification to a Pub/Sub topic and a pull subscription on it.
+                    Messages are pulled and acked only after a successful publish (OBJECT_FINALIZE
+                    events are ingested). Uses the service-account JSON above; the endpoint
+                    override targets the Pub/Sub emulator.
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <StyledInput
