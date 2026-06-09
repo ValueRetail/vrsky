@@ -45,6 +45,10 @@ func (k *kafkaConsumer) handleTestConnection() http.HandlerFunc {
 			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "at least one broker is required"})
 			return
 		}
+		if cfg.Topic == "" {
+			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "topic is required"})
+			return
+		}
 		n, err := k.ping(r.Context(), &cfg)
 		if err != nil {
 			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})

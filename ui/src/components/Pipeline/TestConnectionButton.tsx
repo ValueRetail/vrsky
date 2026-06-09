@@ -45,13 +45,17 @@ export default function TestConnectionButton({
     if (result.tables?.length) return `Tables: ${result.tables.slice(0, 8).join(', ')}`
     if (result.fields?.length) return `${result.fields.length} fields`
     if (typeof result.partitions === 'number') return `${result.partitions} partitions`
-    if (result.sample?.length) return `${result.sample.length} item(s): ${result.sample.slice(0, 5).map(String).join(', ')}`
+    if (result.sample?.length) {
+      const items = result.sample.slice(0, 5).map((s) => (typeof s === 'string' ? s : JSON.stringify(s)))
+      return `${result.sample.length} item(s): ${items.join(', ')}`
+    }
     return null
   }
 
   return (
     <div>
       <button
+        type="button"
         onClick={run}
         disabled={testing || disabled}
         style={{

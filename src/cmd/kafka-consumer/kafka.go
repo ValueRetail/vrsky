@@ -82,6 +82,11 @@ func realKafkaPing(ctx context.Context, cfg *KafkaConfig) (int, error) {
 	if len(cfg.Brokers) == 0 {
 		return 0, errors.New("at least one broker is required")
 	}
+	if cfg.Topic == "" {
+		// Reading partitions for ALL topics can be huge on real clusters and
+		// blow the connection-test SLA — require a specific topic.
+		return 0, errors.New("topic is required")
+	}
 	dialer, err := buildDialer(cfg)
 	if err != nil {
 		return 0, err
@@ -92,12 +97,7 @@ func realKafkaPing(ctx context.Context, cfg *KafkaConfig) (int, error) {
 	}
 	defer conn.Close()
 
-	var parts []kafka.Partition
-	if cfg.Topic != "" {
-		parts, err = conn.ReadPartitions(cfg.Topic)
-	} else {
-		parts, err = conn.ReadPartitions()
-	}
+	parts, err := conn.ReadPartitions(cfg.Topic)
 	if err != nil {
 		return 0, fmt.Errorf("read partitions: %w", err)
 	}

@@ -73,11 +73,21 @@ func buildTestTarget(typ, role string, raw map[string]json.RawMessage, tenantID 
 		if len(ac.Endpoints) > 0 {
 			ep = ac.Endpoints[0]
 		}
+		// Match the UI's sample-data defaults so "Test" behaves consistently even
+		// when no endpoint is configured yet.
+		path := jsonString(ep["path"])
+		if path == "" {
+			path = "/"
+		}
+		authType := jsonString(ep["auth_type"])
+		if authType == "" {
+			authType = "none"
+		}
 		b, _ := json.Marshal(map[string]interface{}{
 			"base_url":   ac.BaseURL,
-			"path":       jsonString(ep["path"]),
+			"path":       path,
 			"params":     jsonString(ep["params"]),
-			"auth_type":  jsonString(ep["auth_type"]),
+			"auth_type":  authType,
 			"auth_value": jsonString(ep["auth_value"]),
 		})
 		return testWorkerURL("TEST_URL_API", "http://api-consumer:9800") + "/sample-data/", b, true, ""
@@ -130,6 +140,14 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if b, ok := raw["role"]; ok {
 		_ = json.Unmarshal(b, &role)
+	}
+	if typ == "" {
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "config type is required", nil)
+		return
+	}
+	if role != "" && role != "consumer" && role != "producer" {
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "role must be 'consumer' or 'producer'", nil)
+		return
 	}
 	if role == "" {
 		role = "consumer"
