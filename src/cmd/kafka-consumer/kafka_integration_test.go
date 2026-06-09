@@ -33,10 +33,13 @@ func TestKafka_RoundTrip_Integration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	const topic = "vrsky-it-topic"
-	// Unique consumer group per run so a fresh read starts from the beginning
-	// (an existing group's committed offset would skip the produced message).
-	group := fmt.Sprintf("vrsky-it-group-%d", time.Now().UnixNano())
+	// Unique topic + consumer group per run: a fresh topic avoids the
+	// "already exists" case (so a CreateTopics error is actionable), and a fresh
+	// group reads from the beginning (an existing group's committed offset would
+	// skip the produced message).
+	stamp := time.Now().UnixNano()
+	topic := fmt.Sprintf("vrsky-it-topic-%d", stamp)
+	group := fmt.Sprintf("vrsky-it-group-%d", stamp)
 
 	createTopic(t, ctx, broker, topic)
 
@@ -79,8 +82,8 @@ func TestKafka_RoundTrip_Integration(t *testing.T) {
 	}
 }
 
-// createTopic creates the topic via the cluster controller (idempotent — an
-// "already exists" error is ignored).
+// createTopic creates the topic via the cluster controller. The topic is unique
+// per run, so any CreateTopics error is a real failure (not "already exists").
 func createTopic(t *testing.T, ctx context.Context, broker, topic string) {
 	t.Helper()
 	var conn *kafka.Conn
@@ -109,8 +112,7 @@ func createTopic(t *testing.T, ctx context.Context, broker, topic string) {
 	defer ctrlConn.Close()
 
 	if err := ctrlConn.CreateTopics(kafka.TopicConfig{Topic: topic, NumPartitions: 1, ReplicationFactor: 1}); err != nil {
-		// CreateTopics returns an error if the topic already exists; tolerate it.
-		t.Logf("CreateTopics(%q): %v (continuing — may already exist)", topic, err)
+		t.Fatalf("CreateTopics(%q): %v", topic, err)
 	}
 }
 

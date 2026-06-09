@@ -39,6 +39,13 @@ func TestParseAzureNotification(t *testing.T) {
 		t.Errorf("BlobDeleted should yield no keys, got %v", got)
 	}
 
+	// A message with a subject/url but no eventType (e.g. an Event Grid
+	// subscription-validation event) must NOT be ingested.
+	noType := `{"subject":"/blobServices/default/containers/c/blobs/x","data":{"url":"https://acct.blob.core.windows.net/c/x"}}`
+	if got := parseAzureNotification([]byte(noType)); len(got) != 0 {
+		t.Errorf("missing eventType should yield no keys, got %v", got)
+	}
+
 	// Garbage yields no keys (and does not panic).
 	if got := parseAzureNotification([]byte("not json")); len(got) != 0 {
 		t.Errorf("garbage should yield no keys, got %v", got)
@@ -111,8 +118,9 @@ func TestValidateEventConfig(t *testing.T) {
 	ok := []*cloudConfig{
 		{Config: objectstore.Config{Provider: objectstore.ProviderS3}, EventQueueURL: "http://q"},
 		{Config: objectstore.Config{Provider: objectstore.ProviderAzure}, EventQueueName: "q"},
-		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "s"},
-		{Config: objectstore.Config{}, EventQueueURL: "http://q"}, // empty provider defaults to s3
+		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "s", EventProject: "p"},
+		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "projects/p/subscriptions/s"}, // full path needs no project
+		{Config: objectstore.Config{}, EventQueueURL: "http://q"},                                                       // empty provider defaults to s3
 	}
 	for i, c := range ok {
 		if err := c.validateEventConfig(); err != nil {
@@ -123,6 +131,7 @@ func TestValidateEventConfig(t *testing.T) {
 		{Config: objectstore.Config{Provider: objectstore.ProviderS3}},
 		{Config: objectstore.Config{Provider: objectstore.ProviderAzure}},
 		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}},
+		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "s"}, // bare name, no project
 	}
 	for i, c := range bad {
 		if err := c.validateEventConfig(); err == nil {

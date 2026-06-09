@@ -143,8 +143,10 @@ func parseAzureNotification(body []byte) []string {
 
 	var keys []string
 	for _, e := range events {
-		// Only ingest blob-created notifications.
-		if e.EventType != "" && !strings.Contains(e.EventType, "BlobCreated") {
+		// Only ingest blob-created notifications. A missing/other eventType
+		// (e.g. Event Grid subscription-validation or a delete event) is skipped
+		// so it drains without ingesting.
+		if !strings.Contains(e.EventType, "BlobCreated") {
 			continue
 		}
 		if k := azureKeyFromEvent(e); k != "" {

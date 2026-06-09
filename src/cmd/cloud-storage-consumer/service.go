@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -476,6 +477,11 @@ func (c *cloudConfig) validateEventConfig() error {
 	case objectstore.ProviderGCS:
 		if c.EventSubscription == "" {
 			return fmt.Errorf("mode=event (gcs) requires event_subscription")
+		}
+		// A bare subscription name (no path) needs a project to build the full
+		// subscription path; catch it here rather than failing later in newEventSource.
+		if !strings.Contains(c.EventSubscription, "/") && c.EventProject == "" {
+			return fmt.Errorf("mode=event (gcs) requires event_project when event_subscription is a bare name")
 		}
 	default: // s3
 		if c.EventQueueURL == "" {

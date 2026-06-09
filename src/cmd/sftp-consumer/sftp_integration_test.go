@@ -37,7 +37,11 @@ func TestSFTP_RoundTrip_Integration(t *testing.T) {
 	}
 	port := 22
 	if p := os.Getenv("SFTP_TEST_PORT"); p != "" {
-		port, _ = strconv.Atoi(p)
+		parsed, err := strconv.Atoi(p)
+		if err != nil {
+			t.Fatalf("invalid SFTP_TEST_PORT %q: %v", p, err)
+		}
+		port = parsed
 	}
 	user := sftpEnvOr("SFTP_TEST_USER", "vrsky")
 	pass := sftpEnvOr("SFTP_TEST_PASS", "vrsky")
