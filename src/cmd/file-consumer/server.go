@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +16,52 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/google/uuid"
 )
+
+// isDelimited reports whether the file is a delimited table (CSV/TSV) we can
+// derive a column schema from.
+func isDelimited(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".csv" || ext == ".tsv"
+}
+
+func delimiterFor(filename string) rune {
+	if strings.EqualFold(filepath.Ext(filename), ".tsv") {
+		return '\t'
+	}
+	return ','
+}
+
+// parseDelimitedSample reads the header row (column names) and the first data
+// row (values) from CSV/TSV bytes. Returns the headers and a header→value map
+// for the first row (empty-string values when there are no data rows), so the
+// UI renders fields with sensible string previews.
+func parseDelimitedSample(payload []byte, delim rune) ([]string, map[string]string) {
+	rd := csv.NewReader(bytes.NewReader(payload))
+	rd.Comma = delim
+	rd.FieldsPerRecord = -1 // tolerate ragged rows
+	rd.LazyQuotes = true
+
+	header, err := rd.Read()
+	if err != nil || len(header) == 0 {
+		return nil, nil
+	}
+	for i := range header {
+		header[i] = strings.TrimSpace(header[i])
+	}
+
+	row := make(map[string]string, len(header))
+	for _, h := range header {
+		row[h] = ""
+	}
+	if rec, err := rd.Read(); err == nil {
+		for i, h := range header {
+			if i < len(rec) {
+				row[h] = rec[i]
+			}
+		}
+	}
+	return header, row
+}
 
 // HTTP handlers served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT, 9200 in
 // compose). Registered in Configure via RegisterHTTPHandler. /health is served
@@ -244,17 +292,27 @@ func (s *fileConsumer) handleSampleData() http.HandlerFunc {
 		}
 
 		resp := map[string]interface{}{"ok": true, "filename": filename}
-		// Prefer parsed JSON when the content looks like JSON; fall back to a
-		// plain text envelope so CSV/XML/log files still render in the preview.
+		// Prefer parsed JSON when the content looks like JSON; for CSV/TSV parse
+		// the header row into fields (so schema discovery shows columns); fall
+		// back to a plain text envelope for everything else.
 		ct := detectContentType(filename, payload)
-		if ct == "application/json" {
+		switch {
+		case ct == "application/json":
 			var parsed interface{}
 			if err := json.Unmarshal(payload, &parsed); err == nil {
 				resp["data"] = parsed
 			} else {
 				resp["data"] = map[string]string{"text": string(payload)}
 			}
-		} else {
+		case isDelimited(filename):
+			headers, firstRow := parseDelimitedSample(payload, delimiterFor(filename))
+			if len(headers) > 0 {
+				resp["columns"] = headers
+				resp["data"] = firstRow // first data row keyed by header (empty strings if no rows)
+			} else {
+				resp["data"] = map[string]string{"text": string(payload), "content_type": ct}
+			}
+		default:
 			resp["data"] = map[string]string{"text": string(payload), "content_type": ct}
 		}
 		w.Header().Set("Content-Type", "application/json")

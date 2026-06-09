@@ -238,3 +238,95 @@ func handleSampleData() http.HandlerFunc {
 		_, _ = w.Write(resp)
 	}
 }
+
+// schemaField is one column of the source table, for the UI's schema tree.
+type schemaField struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable"`
+}
+
+// handleSchema returns the column schema (name + SQL type + nullability) of a
+// source table via information_schema. Unlike sample-data it works on empty
+// tables and gives authoritative types. Queries the external source DB only.
+// lint:tenant-ok — connects to the user's source DB, not the management DB.
+func handleSchema() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		writeErr := func(msg string) {
+			w.Header().Set("Content-Type", "application/json")
+			resp, _ := json.Marshal(map[string]interface{}{"ok": false, "error": msg})
+			_, _ = w.Write(resp)
+		}
+
+		var req struct {
+			Host     string `json:"host"`
+			Port     int    `json:"port"`
+			User     string `json:"user"`
+			Password string `json:"password"`
+			Database string `json:"database"`
+			SSLMode  string `json:"sslmode"`
+			Table    string `json:"table"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if req.Table == "" {
+			writeErr("No table specified")
+			return
+		}
+		if req.Port == 0 {
+			req.Port = 5432
+		}
+		if req.SSLMode == "" {
+			req.SSLMode = "disable"
+		}
+
+		connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=5",
+			req.Host, req.Port, req.User, req.Password, req.Database, req.SSLMode)
+
+		db, err := sql.Open("postgres", connStr)
+		if err != nil {
+			writeErr(err.Error())
+			return
+		}
+		defer db.Close()
+
+		rows, err := db.Query(`
+			SELECT column_name, data_type, is_nullable
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1
+			ORDER BY ordinal_position`, req.Table)
+		if err != nil {
+			writeErr(err.Error())
+			return
+		}
+		defer rows.Close()
+
+		fields := []schemaField{}
+		for rows.Next() {
+			var name, dataType, isNullable string
+			if err := rows.Scan(&name, &dataType, &isNullable); err != nil {
+				continue
+			}
+			fields = append(fields, schemaField{Name: name, Type: dataType, Nullable: isNullable == "YES"})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		resp, _ := json.Marshal(map[string]interface{}{"ok": true, "fields": fields})
+		_, _ = w.Write(resp)
+	}
+}
