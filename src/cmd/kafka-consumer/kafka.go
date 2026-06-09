@@ -75,6 +75,35 @@ func realReader(cfg *KafkaConfig) (kafkaReader, error) {
 	return &realKafkaReader{r: r}, nil
 }
 
+// realKafkaPing dials the first broker with the configured auth and reads
+// partition metadata (for the topic when set), returning the partition count.
+// Used by the connection-test endpoint (#82).
+func realKafkaPing(ctx context.Context, cfg *KafkaConfig) (int, error) {
+	if len(cfg.Brokers) == 0 {
+		return 0, errors.New("at least one broker is required")
+	}
+	if cfg.Topic == "" {
+		// Reading partitions for ALL topics can be huge on real clusters and
+		// blow the connection-test SLA — require a specific topic.
+		return 0, errors.New("topic is required")
+	}
+	dialer, err := buildDialer(cfg)
+	if err != nil {
+		return 0, err
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.Brokers[0])
+	if err != nil {
+		return 0, fmt.Errorf("dial %s: %w", cfg.Brokers[0], err)
+	}
+	defer conn.Close()
+
+	parts, err := conn.ReadPartitions(cfg.Topic)
+	if err != nil {
+		return 0, fmt.Errorf("read partitions: %w", err)
+	}
+	return len(parts), nil
+}
+
 // buildDialer assembles the SASL mechanism + TLS config from KafkaConfig.
 func buildDialer(cfg *KafkaConfig) (*kafka.Dialer, error) {
 	d := &kafka.Dialer{Timeout: 10 * time.Second, DualStack: true}

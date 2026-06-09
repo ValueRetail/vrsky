@@ -93,6 +93,7 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	if s.newEvents == nil {
 		s.newEvents = newEventSource
 	}
+	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
 	res.Health.SetReady(true)
 	return nil
 }

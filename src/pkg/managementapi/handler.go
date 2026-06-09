@@ -871,6 +871,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/connections/{id}/start", editor(http.HandlerFunc(h.StartConnection)))
 	mux.Handle("POST /api/v1/connections/{id}/stop", editor(http.HandlerFunc(h.StopConnection)))
 
+	// Test a draft connector config without persisting it (#82).
+	mux.Handle("POST /api/v1/connections/test", editor(http.HandlerFunc(h.TestConnection)))
+
 	// Metrics streaming via Server-Sent Events
 	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/stream", h.HandleMetricsSSE)
 	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/ws", h.HandleMetricsWebSocket)

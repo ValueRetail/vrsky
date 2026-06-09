@@ -37,6 +37,9 @@ type kafkaConsumer struct {
 	// newReader opens a consumer-group reader. Defaulted to realReader in
 	// Configure; tests inject a fake so the loop runs without a broker.
 	newReader readerFactory
+	// ping checks broker reachability for the connection-test endpoint.
+	// Defaulted to realKafkaPing in Configure; tests inject a stub.
+	ping func(ctx context.Context, cfg *KafkaConfig) (int, error)
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
@@ -87,6 +90,10 @@ func (k *kafkaConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	if k.newReader == nil {
 		k.newReader = realReader
 	}
+	if k.ping == nil {
+		k.ping = realKafkaPing
+	}
+	k.RegisterHTTPHandler("/test-connection/", k.handleTestConnection())
 	res.Health.SetReady(true)
 	return nil
 }
