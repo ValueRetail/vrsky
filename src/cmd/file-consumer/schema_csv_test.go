@@ -30,3 +30,21 @@ func TestParseDelimitedSample_Empty(t *testing.T) {
 		t.Errorf("empty input should yield nil headers, got %v", h)
 	}
 }
+
+func TestParseDelimitedSample_DupAndBlankHeaders(t *testing.T) {
+	csv := []byte("id,,id,name\n1,x,2,Acme\n")
+	headers, row := parseDelimitedSample(csv, ',')
+	want := []string{"id", "column_2", "id_2", "name"}
+	if len(headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", headers, want)
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Errorf("headers[%d] = %q, want %q", i, headers[i], want[i])
+		}
+	}
+	// Values map onto the de-duplicated keys.
+	if row["id"] != "1" || row["id_2"] != "2" || row["column_2"] != "x" || row["name"] != "Acme" {
+		t.Errorf("row = %v", row)
+	}
+}

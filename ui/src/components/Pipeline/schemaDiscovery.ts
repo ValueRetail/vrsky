@@ -12,6 +12,30 @@ interface DBColumn {
   nullable?: boolean
 }
 
+// postJSON POSTs to a worker aux endpoint and parses JSON, surfacing a readable
+// error for non-2xx / non-JSON responses (e.g. a proxy HTML error page) instead
+// of an opaque SyntaxError.
+async function postJSON(url: string, body: unknown): Promise<Record<string, unknown>> {
+  let resp: Response
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new Error('Could not reach the connector — is the worker running?')
+  }
+  if (!resp.ok) {
+    throw new Error(`Connector responded ${resp.status}`)
+  }
+  try {
+    return await resp.json()
+  } catch {
+    throw new Error('Connector returned a non-JSON response')
+  }
+}
+
 // discoverSchema returns the source field tree for the upstream consumer feeding
 // a converter/filter node. Throws with a user-facing message when the source
 // isn't configured or the worker can't be reached.
@@ -28,16 +52,11 @@ export async function discoverSchema(
     case 'database': {
       const dc = (consumerConfig.database as Record<string, unknown>) || {}
       if (!dc.host || !dc.table) throw new Error('Set the database host and table on the input first')
-      const resp = await fetch('http://localhost:9300/schema/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: dc.host, port: dc.port || 5432, user: dc.user, password: dc.password,
-          database: dc.database, sslmode: dc.sslmode, table: dc.table,
-        }),
+      const data = await postJSON('http://localhost:9300/schema/', {
+        host: dc.host, port: dc.port || 5432, user: dc.user, password: dc.password,
+        database: dc.database, sslmode: dc.sslmode, table: dc.table,
       })
-      const data = await resp.json()
-      if (!data.ok) throw new Error(data.error || 'Schema query failed')
+      if (!data.ok) throw new Error((data.error as string) || 'Schema query failed')
       const cols = (data.fields as DBColumn[] | undefined) || []
       return fieldsFromColumns(cols.map((f) => ({ name: f.name, type: sqlTypeToBadge(f.type || ''), nullable: f.nullable })))
     }
@@ -45,13 +64,8 @@ export async function discoverSchema(
     case 'file': {
       const fc = (consumerConfig.file as Record<string, unknown>) || {}
       if (!fc.path) throw new Error('Set a watch directory on the file input first')
-      const resp = await fetch('http://localhost:9200/sample-data/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: fc.path }),
-      })
-      const data = await resp.json()
-      if (!data.ok) throw new Error(data.error || 'No files in the watch directory')
+      const data = await postJSON('http://localhost:9200/sample-data/', { path: fc.path })
+      if (!data.ok) throw new Error((data.error as string) || 'No files in the watch directory')
       const columns = data.columns as string[] | undefined
       if (Array.isArray(columns) && columns.length > 0) {
         return fieldsFromColumns(columns.map((c) => ({ name: c, type: 'string' as const })))
@@ -63,16 +77,11 @@ export async function discoverSchema(
       const api = (consumerConfig.api as { base_url?: string; endpoints?: Array<Record<string, unknown>> }) || {}
       const ep = api.endpoints?.[0]
       if (!api.base_url || !ep) throw new Error('Set the API base URL and an endpoint first')
-      const resp = await fetch('http://localhost:9800/sample-data/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base_url: api.base_url, path: (ep.path as string) || '/', params: (ep.params as string) || '',
-          auth_type: (ep.auth_type as string) || 'none', auth_value: (ep.auth_value as string) || '',
-        }),
+      const data = await postJSON('http://localhost:9800/sample-data/', {
+        base_url: api.base_url, path: (ep.path as string) || '/', params: (ep.params as string) || '',
+        auth_type: (ep.auth_type as string) || 'none', auth_value: (ep.auth_value as string) || '',
       })
-      const data = await resp.json()
-      if (!data.ok) throw new Error(data.error || 'Sample request failed')
+      if (!data.ok) throw new Error((data.error as string) || 'Sample request failed')
       return inferSchema(data.data)
     }
 

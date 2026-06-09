@@ -2464,7 +2464,7 @@ function ConverterConfig({
       addMappingFromField(field)
     } else if (typeof overId === 'string' && overId.startsWith('mapping:')) {
       const idx = parseInt(overId.slice('mapping:'.length), 10)
-      if (!Number.isNaN(idx)) {
+      if (!Number.isNaN(idx) && idx >= 0 && idx < mappings.length) {
         updateMapping(idx, { source: field.path, target: mappings[idx]?.target || field.name })
       }
     }

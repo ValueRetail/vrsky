@@ -45,8 +45,21 @@ func parseDelimitedSample(payload []byte, delim rune) ([]string, map[string]stri
 	if err != nil || len(header) == 0 {
 		return nil, nil
 	}
+	// Normalise headers to unique, non-empty names so duplicate/blank columns
+	// don't collide into one schema field (or React key) or overwrite row values.
+	seen := make(map[string]int, len(header))
 	for i := range header {
-		header[i] = strings.TrimSpace(header[i])
+		name := strings.TrimSpace(header[i])
+		if name == "" {
+			name = fmt.Sprintf("column_%d", i+1)
+		}
+		if n := seen[name]; n > 0 {
+			seen[name] = n + 1
+			name = fmt.Sprintf("%s_%d", name, n+1)
+		} else {
+			seen[name] = 1
+		}
+		header[i] = name
 	}
 
 	row := make(map[string]string, len(header))

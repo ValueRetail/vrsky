@@ -281,7 +281,10 @@ func handleSchema() http.HandlerFunc {
 			Table    string `json:"table"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			// Return JSON (not plain text) so the UI's resp.json() gets a usable message.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid JSON request body"})
 			return
 		}
 		if req.Table == "" {
@@ -320,9 +323,14 @@ func handleSchema() http.HandlerFunc {
 		for rows.Next() {
 			var name, dataType, isNullable string
 			if err := rows.Scan(&name, &dataType, &isNullable); err != nil {
-				continue
+				writeErr("scan column: " + err.Error())
+				return
 			}
 			fields = append(fields, schemaField{Name: name, Type: dataType, Nullable: isNullable == "YES"})
+		}
+		if err := rows.Err(); err != nil {
+			writeErr("read columns: " + err.Error())
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")

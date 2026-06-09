@@ -3,8 +3,23 @@
 // — it consumes SchemaField[] produced by inferSchema (JSON sources) or the DB
 // information_schema endpoint. PR2 layers drag-and-drop via the renderField slot
 // without touching this component.
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { SchemaField, SchemaFieldType } from './schema'
+
+// seedExpanded returns the set of paths to expand by default (top two levels).
+function seedExpanded(fields: SchemaField[]): Set<string> {
+  const s = new Set<string>()
+  const walk = (fs: SchemaField[], depth: number) => {
+    for (const f of fs) {
+      if (f.children && depth < 1) {
+        s.add(f.path)
+        walk(f.children, depth + 1)
+      }
+    }
+  }
+  walk(fields, 0)
+  return s
+}
 
 const BADGE: Record<SchemaFieldType, { bg: string; fg: string }> = {
   string: { bg: '#e0e7ff', fg: '#3730a3' },
@@ -46,20 +61,12 @@ export function SchemaTree({
   emptyHint?: string
 }) {
   const [search, setSearch] = useState('')
-  // Default-expand the top two levels so the tree is immediately useful.
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const s = new Set<string>()
-    const seed = (fs: SchemaField[], depth: number) => {
-      for (const f of fs) {
-        if (f.children && depth < 1) {
-          s.add(f.path)
-          seed(f.children, depth + 1)
-        }
-      }
-    }
-    seed(fields, 0)
-    return s
-  })
+  // Default-expand the top two levels so the tree is immediately useful, and
+  // re-seed whenever a fresh schema is discovered (the fields prop changes).
+  const [expanded, setExpanded] = useState<Set<string>>(() => seedExpanded(fields))
+  useEffect(() => {
+    setExpanded(seedExpanded(fields))
+  }, [fields])
   const q = search.trim().toLowerCase()
 
   const toggle = (path: string) =>
