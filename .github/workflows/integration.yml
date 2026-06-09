@@ -1,0 +1,91 @@
+name: Integration Tests
+
+# Runs the //go:build integration connector tests against live test brokers
+# brought up from docker-compose: MinIO / Azurite / fake-gcs (cloud-storage,
+# #80), atmoz/sftp (#76), apache/kafka (#77), rabbitmq:3-management (#78).
+#
+# The Go tests run from a container ON vrsky-network so brokers resolve by
+# service name (notably fake-gcs, whose -public-host is fake-gcs-test:4443 — see
+# the header of gcs_integration_test.go). Each test self-skips unless its
+# *_TEST_* env var is set, so the same files are a no-op under a plain `go test`.
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+jobs:
+  integration:
+    name: Connector integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Start test brokers
+        run: |
+          docker compose up -d \
+            minio-test minio-init azurite-test fake-gcs-test \
+            sftp-test kafka-test rabbitmq-test
+
+      - name: Wait for brokers to be ready
+        run: |
+          # Poll each broker's TCP port from inside vrsky-network (busybox nc),
+          # so we wait on actual reachability rather than a fixed sleep.
+          wait_tcp() {
+            local hostport="$1" name="$2" tries=60
+            for i in $(seq 1 "$tries"); do
+              if docker run --rm --network vrsky-network busybox \
+                   sh -c "nc -z -w2 ${hostport/:/ }" >/dev/null 2>&1; then
+                echo "$name ready ($hostport)"; return 0
+              fi
+              echo "waiting for $name ($hostport)… [$i/$tries]"; sleep 2
+            done
+            echo "ERROR: $name ($hostport) never became ready"; return 1
+          }
+          wait_tcp minio-test:9000     minio
+          wait_tcp azurite-test:10000  azurite
+          wait_tcp fake-gcs-test:4443  fake-gcs
+          wait_tcp sftp-test:22        sftp
+          wait_tcp kafka-test:9092     kafka
+          wait_tcp rabbitmq-test:5672  rabbitmq
+
+      - name: Run integration tests (in-network)
+        run: |
+          docker run --rm --network vrsky-network \
+            -v "$PWD/src":/src -w /src \
+            -e S3_TEST_ENDPOINT=http://minio-test:9000 \
+            -e S3_TEST_ACCESS_KEY=minioadmin \
+            -e S3_TEST_SECRET_KEY=minioadmin \
+            -e AZURE_TEST_CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite-test:10000/devstoreaccount1;" \
+            -e GCS_TEST_EMULATOR_HOST=fake-gcs-test:4443 \
+            -e SFTP_TEST_HOST=sftp-test \
+            -e SFTP_TEST_PORT=22 \
+            -e KAFKA_TEST_BROKER=kafka-test:9092 \
+            -e RABBITMQ_TEST_URL=amqp://guest:guest@rabbitmq-test:5672/ \
+            -e GOFLAGS=-buildvcs=false \
+            golang:1.22 \
+            go test -tags=integration -count=1 -v \
+              ./pkg/objectstore/... \
+              ./cmd/sftp-consumer/... \
+              ./cmd/kafka-consumer/... \
+              ./cmd/rabbitmq-consumer/...
+
+      - name: Dump broker logs on failure
+        if: failure()
+        run: |
+          docker compose logs --tail=100 \
+            minio-test azurite-test fake-gcs-test \
+            sftp-test kafka-test rabbitmq-test || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true

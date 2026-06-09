@@ -34,9 +34,8 @@ type eventSource interface {
 // newEventSource in Configure; tests inject a fake.
 type eventSourceFactory func(ctx context.Context, cfg *cloudConfig) (eventSource, error)
 
-// newEventSource builds the event source for the provider. Only S3 (-> SQS) is
-// implemented; Azure Storage Queue / GCS Pub/Sub are tracked follow-ups (poll
-// mode covers those providers today).
+// newEventSource builds the event source for the provider: S3 -> SQS, Azure
+// Blob -> Storage Queue (via Event Grid), GCS -> Pub/Sub pull subscription.
 func newEventSource(ctx context.Context, cfg *cloudConfig) (eventSource, error) {
 	provider := cfg.Provider
 	if provider == "" {
@@ -48,8 +47,12 @@ func newEventSource(ctx context.Context, cfg *cloudConfig) (eventSource, error) 
 			return nil, fmt.Errorf("event mode (s3) requires event_queue_url (an SQS queue URL)")
 		}
 		return newSQSEventSource(ctx, cfg)
+	case objectstore.ProviderAzure:
+		return newAzureQueueEventSource(ctx, cfg)
+	case objectstore.ProviderGCS:
+		return newGCSPubSubEventSource(ctx, cfg)
 	default:
-		return nil, fmt.Errorf("event-driven mode is not implemented for provider %q yet (use poll mode)", provider)
+		return nil, fmt.Errorf("event-driven mode is not implemented for provider %q", provider)
 	}
 }
 
