@@ -100,6 +100,10 @@ func (s *salesforceConsumer) Configure(ctx context.Context, res *sdk.Resources) 
 			return s.tokens.Token(ctx, tenantID, grantID)
 		}
 	}
+	// Aux HTTP endpoints for the UI's schema discovery / field mapping (#79).
+	s.RegisterHTTPHandler("/schema/", s.handleSchema())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
+
 	res.Health.SetReady(true)
 	return nil
 }

@@ -2323,6 +2323,7 @@ function ConverterConfig({
   const [activeField, setActiveField] = useState<SchemaField | null>(null)
   // Activation distance so clicks on the tree's expand/pick buttons still work.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const { currentTenant } = useAuthStore()
 
   // Get the consumer that actually feeds this converter (walk edges upstream)
   const consumerNode = (currentNodeId && allNodes && allEdges)
@@ -2400,6 +2401,22 @@ function ConverterConfig({
         if (t.source_connection_id) params.set('source_connection_id', t.source_connection_id)
         const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
         setPreviewInput(resp.data?.ok ? JSON.stringify(resp.data.data, null, 2) : '// Error: ' + (resp.data?.error || 'No data'))
+      } else if (consumerType === 'salesforce') {
+        const sf = (consumerConfig.salesforce as Record<string, unknown>) || {}
+        if (!sf.instance_url || !sf.oauth_grant_id || !sf.soql) {
+          setPreviewInput('// Set the Salesforce instance URL, account and a SOQL query first')
+          return
+        }
+        const resp = await fetch('http://localhost:9700/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: currentTenant?.id, instance_url: sf.instance_url,
+            oauth_grant_id: sf.oauth_grant_id, api_version: sf.api_version, soql: sf.soql,
+          }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data'))
       } else {
         // http / webhook and others: only a deployed connection has a sample.
         if (!deployedConnectionId) {
@@ -2433,7 +2450,7 @@ function ConverterConfig({
     setDiscovering(true)
     setSchemaError('')
     try {
-      const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId })
+      const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId, tenantId: currentTenant?.id })
       setSchemaFields(fields)
       if (fields.length === 0) setSchemaError('No fields found in the sample.')
     } catch (err) {

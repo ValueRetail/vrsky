@@ -554,6 +554,10 @@ services:
       # OAuth token resolution (#75): fetch access tokens for the configured grant.
       MGMT_API_URL: "http://management-api:3000"
       OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+      # Aux HTTP port serving /schema (describe) + /sample-data for the UI's field mapping (#79).
+      WORKER_HTTP_PORT: "9700"
+    ports:
+      - "127.0.0.1:9700:9700"
     depends_on:
       nats:
         condition: service_healthy
