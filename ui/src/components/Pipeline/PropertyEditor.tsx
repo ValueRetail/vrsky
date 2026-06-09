@@ -2323,6 +2323,43 @@ function ConverterConfig({
         } else {
           setPreviewInput('// Error: ' + (data.error || 'No files in watch directory'))
         }
+      } else if (consumerType === 'api') {
+        const api = (consumerConfig.api as { base_url?: string; endpoints?: Array<Record<string, unknown>> }) || {}
+        const ep = api.endpoints?.[0]
+        if (!api.base_url || !ep) {
+          setPreviewInput('// Set the API base URL and an endpoint on the input first')
+          return
+        }
+        const resp = await fetch('http://localhost:9800/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_url: api.base_url, path: (ep.path as string) || '/', params: (ep.params as string) || '',
+            auth_type: (ep.auth_type as string) || 'none', auth_value: (ep.auth_value as string) || '',
+          }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data'))
+      } else if (consumerType === 'tenant') {
+        const t = (consumerConfig.tenant as { source_tenant_id?: string; source_connection_id?: string }) || {}
+        if (!t.source_tenant_id) {
+          setPreviewInput('// Configure the tenant data source first')
+          return
+        }
+        const { default: apiClient } = await import('../../services/api')
+        const params = new URLSearchParams({ source_tenant_id: t.source_tenant_id })
+        if (t.source_connection_id) params.set('source_connection_id', t.source_connection_id)
+        const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
+        setPreviewInput(resp.data?.ok ? JSON.stringify(resp.data.data, null, 2) : '// Error: ' + (resp.data?.error || 'No data'))
+      } else {
+        // http / webhook and others: only a deployed connection has a sample.
+        if (!deployedConnectionId) {
+          setPreviewInput('// Deploy the pipeline and send data once, then fetch the sample')
+          return
+        }
+        const { default: apiClient } = await import('../../services/api')
+        const resp = await apiClient.get(`/api/v1/connections/${deployedConnectionId}/sample-data`)
+        setPreviewInput(resp.data?.ok ? JSON.stringify(resp.data.data, null, 2) : '// Error: ' + (resp.data?.error || 'No sample yet'))
       }
     } catch (err) {
       setPreviewInput('// Error fetching sample: ' + (err instanceof Error ? err.message : 'unknown'))
@@ -2527,7 +2564,7 @@ function ConverterConfig({
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Preview</div>
-          {consumerType === 'database' && (
+          {consumerNode && (
             <button
               onClick={fetchSampleData}
               disabled={fetchingSample}
@@ -2541,7 +2578,7 @@ function ConverterConfig({
           value={previewInput}
           onChange={(e) => setPreviewInput(e.target.value)}
           style={{ width: '100%', height: '80px', padding: '6px 8px', fontSize: '11px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'vertical', boxSizing: 'border-box' }}
-          placeholder={consumerType === 'database' ? 'Click "Fetch from Input" to load real data, or paste JSON here' : '[{"field": "value"}]'}
+          placeholder={consumerNode ? 'Click "Fetch from Input" to load real data, or paste JSON here' : '[{"field": "value"}]'}
         />
         <button
           onClick={runPreview}
