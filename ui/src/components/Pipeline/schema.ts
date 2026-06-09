@@ -41,6 +41,25 @@ export function jsTypeOf(v: unknown): SchemaFieldType {
   }
 }
 
+// Coarse bucket for a Salesforce describe field type → drives the badge.
+export function sfTypeToBadge(sfType: string): SchemaFieldType {
+  switch (sfType.toLowerCase()) {
+    case 'int':
+    case 'integer':
+    case 'long':
+    case 'double':
+    case 'currency':
+    case 'percent':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    default:
+      // string, textarea, picklist, reference, id, date, datetime, email,
+      // phone, url, address, base64, … all render as string-ish.
+      return 'string'
+  }
+}
+
 // Coarse bucket for a SQL data_type (information_schema) → drives the badge.
 export function sqlTypeToBadge(sqlType: string): SchemaFieldType {
   const t = sqlType.toLowerCase()

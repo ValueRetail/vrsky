@@ -2,7 +2,7 @@
 // DB uses the authoritative information_schema endpoint; the other sources reuse
 // the existing /sample-data/ endpoints and infer types client-side.
 import apiClient from '../../services/api'
-import { inferSchema, fieldsFromColumns, sqlTypeToBadge, type SchemaField } from './schema'
+import { inferSchema, fieldsFromColumns, sqlTypeToBadge, sfTypeToBadge, type SchemaField } from './schema'
 
 export type { SchemaField } from './schema'
 
@@ -42,7 +42,7 @@ async function postJSON(url: string, body: unknown): Promise<Record<string, unkn
 export async function discoverSchema(
   consumerType: string | undefined,
   consumerConfig: Record<string, unknown> | undefined,
-  opts?: { deployedConnectionId?: string },
+  opts?: { deployedConnectionId?: string; tenantId?: string },
 ): Promise<SchemaField[]> {
   if (!consumerType || !consumerConfig) {
     throw new Error('No upstream source is connected to this node')
@@ -93,6 +93,21 @@ export async function discoverSchema(
       const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
       if (!resp.data?.ok) throw new Error(resp.data?.error || 'Sample request failed')
       return inferSchema(resp.data.data)
+    }
+
+    case 'salesforce': {
+      const sf = (consumerConfig.salesforce as Record<string, unknown>) || {}
+      if (!sf.instance_url || !sf.oauth_grant_id) throw new Error('Set the Salesforce instance URL and connect an account first')
+      if (!sf.soql) throw new Error('Enter a SOQL query (its FROM clause names the object to describe)')
+      if (!opts?.tenantId) throw new Error('No active tenant')
+      const data = await postJSON('http://localhost:9700/schema/', {
+        tenant_id: opts.tenantId,
+        instance_url: sf.instance_url, oauth_grant_id: sf.oauth_grant_id,
+        api_version: sf.api_version, soql: sf.soql,
+      })
+      if (!data.ok) throw new Error((data.error as string) || 'Salesforce describe failed')
+      const cols = (data.fields as DBColumn[] | undefined) || []
+      return fieldsFromColumns(cols.map((f) => ({ name: f.name, type: sfTypeToBadge(f.type || ''), nullable: f.nullable })))
     }
 
     default: {
