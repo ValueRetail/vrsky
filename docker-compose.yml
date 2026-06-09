@@ -579,6 +579,10 @@ services:
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
       # SFTP password / private key (*_secret_id) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving /test-connection for the UI's connection-test (#82).
+      WORKER_HTTP_PORT: "9210"
+    ports:
+      - "127.0.0.1:9210:9210"
     depends_on:
       nats:
         condition: service_healthy
@@ -634,6 +638,10 @@ services:
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
       # SASL password / TLS client key (*_secret_id) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving /test-connection for the UI's connection-test (#82).
+      WORKER_HTTP_PORT: "9220"
+    ports:
+      - "127.0.0.1:9220:9220"
     depends_on:
       nats:
         condition: service_healthy
@@ -699,6 +707,10 @@ services:
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
       # AMQP password (*_secret_id) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving /test-connection for the UI's connection-test (#82).
+      WORKER_HTTP_PORT: "9230"
+    ports:
+      - "127.0.0.1:9230:9230"
     depends_on:
       nats:
         condition: service_healthy
@@ -750,6 +762,10 @@ services:
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
       # cloud credentials (*_secret_id) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving /test-connection for the UI's connection-test (#82).
+      WORKER_HTTP_PORT: "9240"
+    ports:
+      - "127.0.0.1:9240:9240"
     depends_on:
       nats:
         condition: service_healthy

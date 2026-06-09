@@ -19,6 +19,7 @@ import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
+import TestConnectionButton from './TestConnectionButton'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
@@ -620,6 +621,7 @@ function SalesforceConsumerConfig({
         Connect a Salesforce account (OAuth) above, then enter a SOQL query. For a
         sandbox, register a Salesforce provider with the test.salesforce.com URLs.
       </div>
+      <TestConnectionButton config={config} role="consumer" />
     </div>
   )
 }
@@ -759,6 +761,7 @@ function SFTPConsumerConfig({
         The password / private key is stored encrypted in the secrets vault on deploy.
         The pipeline polls the remote directory and ingests each new file.
       </div>
+      <TestConnectionButton config={config} role="consumer" />
     </div>
   )
 }
@@ -868,6 +871,7 @@ function SFTPProducerConfig({
         payload fields (e.g. <code>{'{{.id}}'}</code>) plus <code>{'{{.timestamp}}'}</code> and{' '}
         <code>{'{{.uuid}}'}</code>. Defaults to <code>{'{{.uuid}}'}.json</code>.
       </div>
+      <TestConnectionButton config={config} role="producer" />
     </div>
   )
 }
@@ -981,6 +985,7 @@ function KafkaConfigEditor({
           : 'Messages are produced with acks=all (wait for all in-sync replicas).'}{' '}
         Password and client key are stored encrypted in the secrets vault on deploy.
       </div>
+      <TestConnectionButton config={config} role={role} />
     </div>
   )
 }
@@ -1058,6 +1063,7 @@ function RabbitMQConfigEditor({
           : 'Messages are published as persistent (delivery_mode=2) to the exchange (or directly to the queue if no exchange is set).'}{' '}
         The password is stored encrypted in the secrets vault on deploy.
       </div>
+      <TestConnectionButton config={config} role={role} />
     </div>
   )
 }
@@ -1328,6 +1334,7 @@ function CloudStorageConfigEditor({
           : 'Each message is written as an object. The key template can reference payload fields plus the timestamp and uuid built-ins; it defaults to the message id.'}{' '}
         Credentials are stored encrypted in the secrets vault on deploy.
       </div>
+      <TestConnectionButton config={config} role={role} />
     </div>
   )
 }
@@ -3245,6 +3252,7 @@ export default function PropertyEditor({
                     Specify a folder path on your machine. The pipeline will watch it for new files and process them automatically. You can also upload files via the UI after deploying.
                   </p>
                 )}
+                <TestConnectionButton config={config} role="consumer" />
               </div>
             )}
 
@@ -3257,10 +3265,13 @@ export default function PropertyEditor({
             )}
 
             {config.type === 'api' && (
-              <ApiConsumerConfig
-                config={config}
-                setConfig={setConfig}
-              />
+              <>
+                <ApiConsumerConfig
+                  config={config}
+                  setConfig={setConfig}
+                />
+                <TestConnectionButton config={config} role="consumer" />
+              </>
             )}
 
             {config.type === 'tenant' && (

@@ -90,6 +90,7 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	if s.dial == nil {
 		s.dial = realDial
 	}
+	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
 	res.Health.SetReady(true)
 	return nil
 }

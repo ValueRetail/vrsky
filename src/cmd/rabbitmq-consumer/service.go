@@ -83,6 +83,7 @@ func (c *rabbitConsumer) Configure(ctx context.Context, res *sdk.Resources) erro
 	if c.dial == nil {
 		c.dial = realDial
 	}
+	c.RegisterHTTPHandler("/test-connection/", c.handleTestConnection())
 	res.Health.SetReady(true)
 	return nil
 }
