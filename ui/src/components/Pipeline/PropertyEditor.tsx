@@ -1,4 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
 import type { Node, Edge } from '../../types/pipeline'
 import SecretInput from './SecretInput'
 import WebhookSignatureConfig from './WebhookSignatureConfig'
@@ -6,6 +17,8 @@ import OAuthGrantSelector from './OAuthGrantSelector'
 import { useAuthStore } from '../../store/authStore'
 import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
+import { SchemaTree } from './SchemaTree'
+import { discoverSchema, type SchemaField } from './schemaDiscovery'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
@@ -2242,18 +2255,55 @@ function FilterConfig({
   )
 }
 
+// --- Drag-and-drop field mapping (#81 PR2) ---
+// A draggable wrapper around a SchemaTree field row. PointerSensor uses an
+// activation distance so the row's expand/pick buttons still receive clicks.
+function DraggableField({ field, children }: { field: SchemaField; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `field:${field.path}`,
+    data: { field },
+  })
+  return (
+    <div ref={setNodeRef} {...attributes} {...listeners} style={{ cursor: 'grab', opacity: isDragging ? 0.4 : 1 }}>
+      {children}
+    </div>
+  )
+}
+
+// A mapping row as a drop target — dropping a field sets that row's source.
+function DroppableMapping({ index, children }: { index: number; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `mapping:${index}` })
+  return (
+    <div ref={setNodeRef} style={{ outline: isOver ? '2px solid #7c3aed' : 'none', outlineOffset: '2px', borderRadius: '6px' }}>
+      {children}
+    </div>
+  )
+}
+
+// Drop zone that appends a new mapping from the dropped field.
+function DropToAddMapping({ children }: { children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: 'mapping-new' })
+  return (
+    <div ref={setNodeRef} style={{ outline: isOver ? '2px dashed #7c3aed' : 'none', outlineOffset: '2px', borderRadius: '6px' }}>
+      {children}
+    </div>
+  )
+}
+
 function ConverterConfig({
   config,
   setConfig,
   allNodes,
   allEdges,
   currentNodeId,
+  deployedConnectionId,
 }: {
   config: Record<string, unknown>
   setConfig: (config: Record<string, unknown>) => void
   allNodes?: Node[]
   allEdges?: Edge[]
   currentNodeId?: string
+  deployedConnectionId?: string
 }) {
   const outputFormat = (config.output_format as string) || ''
   const csvDelimiter = (config.csv_delimiter as string) || ','
@@ -2267,6 +2317,12 @@ function ConverterConfig({
   const [previewOutput, setPreviewOutput] = useState('')
   const [previewing, setPreviewing] = useState(false)
   const [fetchingSample, setFetchingSample] = useState(false)
+  const [schemaFields, setSchemaFields] = useState<SchemaField[]>([])
+  const [discovering, setDiscovering] = useState(false)
+  const [schemaError, setSchemaError] = useState('')
+  const [activeField, setActiveField] = useState<SchemaField | null>(null)
+  // Activation distance so clicks on the tree's expand/pick buttons still work.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
   // Get the consumer that actually feeds this converter (walk edges upstream)
   const consumerNode = (currentNodeId && allNodes && allEdges)
@@ -2316,6 +2372,43 @@ function ConverterConfig({
         } else {
           setPreviewInput('// Error: ' + (data.error || 'No files in watch directory'))
         }
+      } else if (consumerType === 'api') {
+        const api = (consumerConfig.api as { base_url?: string; endpoints?: Array<Record<string, unknown>> }) || {}
+        const ep = api.endpoints?.[0]
+        if (!api.base_url || !ep) {
+          setPreviewInput('// Set the API base URL and an endpoint on the input first')
+          return
+        }
+        const resp = await fetch('http://localhost:9800/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_url: api.base_url, path: (ep.path as string) || '/', params: (ep.params as string) || '',
+            auth_type: (ep.auth_type as string) || 'none', auth_value: (ep.auth_value as string) || '',
+          }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data'))
+      } else if (consumerType === 'tenant') {
+        const t = (consumerConfig.tenant as { source_tenant_id?: string; source_connection_id?: string }) || {}
+        if (!t.source_tenant_id) {
+          setPreviewInput('// Configure the tenant data source first')
+          return
+        }
+        const { default: apiClient } = await import('../../services/api')
+        const params = new URLSearchParams({ source_tenant_id: t.source_tenant_id })
+        if (t.source_connection_id) params.set('source_connection_id', t.source_connection_id)
+        const resp = await apiClient.get(`/api/v1/sample-data/source?${params.toString()}`)
+        setPreviewInput(resp.data?.ok ? JSON.stringify(resp.data.data, null, 2) : '// Error: ' + (resp.data?.error || 'No data'))
+      } else {
+        // http / webhook and others: only a deployed connection has a sample.
+        if (!deployedConnectionId) {
+          setPreviewInput('// Deploy the pipeline and send data once, then fetch the sample')
+          return
+        }
+        const { default: apiClient } = await import('../../services/api')
+        const resp = await apiClient.get(`/api/v1/connections/${deployedConnectionId}/sample-data`)
+        setPreviewInput(resp.data?.ok ? JSON.stringify(resp.data.data, null, 2) : '// Error: ' + (resp.data?.error || 'No sample yet'))
       }
     } catch (err) {
       setPreviewInput('// Error fetching sample: ' + (err instanceof Error ? err.message : 'unknown'))
@@ -2334,6 +2427,47 @@ function ConverterConfig({
       ...config,
       mappings: [...mappings, { source: '', target: '', type: 'rename' }],
     })
+  }
+
+  const runDiscoverSchema = async () => {
+    setDiscovering(true)
+    setSchemaError('')
+    try {
+      const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId })
+      setSchemaFields(fields)
+      if (fields.length === 0) setSchemaError('No fields found in the sample.')
+    } catch (err) {
+      setSchemaFields([])
+      setSchemaError(err instanceof Error ? err.message : 'Schema discovery failed')
+    }
+    setDiscovering(false)
+  }
+
+  // Append a mapping from a picked source field (rename source → its own name).
+  const addMappingFromField = (field: SchemaField) => {
+    setConfig({
+      ...config,
+      mappings: [...mappings, { source: field.path, target: field.name, type: 'rename' }],
+    })
+  }
+
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveField((e.active.data.current?.field as SchemaField | undefined) || null)
+  }
+
+  const onDragEnd = (e: DragEndEvent) => {
+    setActiveField(null)
+    const field = e.active.data.current?.field as SchemaField | undefined
+    const overId = e.over?.id
+    if (!field || !overId) return
+    if (overId === 'mapping-new') {
+      addMappingFromField(field)
+    } else if (typeof overId === 'string' && overId.startsWith('mapping:')) {
+      const idx = parseInt(overId.slice('mapping:'.length), 10)
+      if (!Number.isNaN(idx) && idx >= 0 && idx < mappings.length) {
+        updateMapping(idx, { source: field.path, target: mappings[idx]?.target || field.name })
+      }
+    }
   }
 
   const removeMapping = (index: number) => {
@@ -2367,6 +2501,7 @@ function ConverterConfig({
   }
 
   return (
+    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
     <div className="space-y-3">
       {/* Output Format */}
       <StyledSelect
@@ -2418,6 +2553,33 @@ function ConverterConfig({
         </>
       )}
 
+      {/* Source schema discovery (#81) — discover the upstream fields + types, click to map */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Source schema</div>
+          <button
+            onClick={runDiscoverSchema}
+            disabled={discovering}
+            style={{ fontSize: '11px', padding: '2px 8px', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '4px', cursor: discovering ? 'not-allowed' : 'pointer', color: '#3730a3', fontWeight: 600 }}
+          >
+            {discovering ? 'Discovering…' : 'Discover schema'}
+          </button>
+        </div>
+        {schemaError && <div style={{ fontSize: '11px', color: '#b45309', marginBottom: '4px' }}>{schemaError}</div>}
+        {schemaFields.length > 0 && (
+          <>
+            <SchemaTree
+              fields={schemaFields}
+              onPick={addMappingFromField}
+              renderField={(field, row) => <DraggableField field={field}>{row}</DraggableField>}
+            />
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              <strong>Drag</strong> a field onto a mapping (or the add zone), or click <strong>+</strong> to map it.
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Field Mappings - optional, applied before format conversion */}
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
         <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
@@ -2425,7 +2587,8 @@ function ConverterConfig({
         </div>
 
         {mappings.map((m, i) => (
-          <div key={i} style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+          <DroppableMapping key={i} index={i}>
+          <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
               <select
                 value={m.type || 'rename'}
@@ -2456,14 +2619,17 @@ function ConverterConfig({
               <StyledInput label="Template" placeholder="e.g. {first_name} {last_name}" value={m.expression || ''} onChange={(v) => updateMapping(i, { expression: v })} />
             )}
           </div>
+          </DroppableMapping>
         ))}
 
-        <button
-          onClick={addMapping}
-          style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
-        >
-          + Add Mapping
-        </button>
+        <DropToAddMapping>
+          <button
+            onClick={addMapping}
+            style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            + Add Mapping
+          </button>
+        </DropToAddMapping>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', marginTop: '8px' }}>
           <input type="checkbox" checked={dropUnmapped} onChange={(e) => setConfig({ ...config, drop_unmapped: e.target.checked })} />
@@ -2475,7 +2641,7 @@ function ConverterConfig({
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Preview</div>
-          {consumerType === 'database' && (
+          {consumerNode && (
             <button
               onClick={fetchSampleData}
               disabled={fetchingSample}
@@ -2489,7 +2655,7 @@ function ConverterConfig({
           value={previewInput}
           onChange={(e) => setPreviewInput(e.target.value)}
           style={{ width: '100%', height: '80px', padding: '6px 8px', fontSize: '11px', fontFamily: 'monospace', border: '1px solid #d1d5db', borderRadius: '4px', resize: 'vertical', boxSizing: 'border-box' }}
-          placeholder={consumerType === 'database' ? 'Click "Fetch from Input" to load real data, or paste JSON here' : '[{"field": "value"}]'}
+          placeholder={consumerNode ? 'Click "Fetch from Input" to load real data, or paste JSON here' : '[{"field": "value"}]'}
         />
         <button
           onClick={runPreview}
@@ -2503,6 +2669,14 @@ function ConverterConfig({
         )}
       </div>
     </div>
+    <DragOverlay>
+      {activeField ? (
+        <div style={{ fontFamily: 'monospace', fontSize: '12px', background: '#7c3aed', color: '#fff', borderRadius: '4px', padding: '2px 8px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}>
+          {activeField.path}
+        </div>
+      ) : null}
+    </DragOverlay>
+    </DndContext>
   )
 }
 
@@ -3259,7 +3433,7 @@ export default function PropertyEditor({
 
       case 'converter':
         return (
-          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} />
+          <ConverterConfig config={config} setConfig={setConfig} allNodes={allNodes} allEdges={allEdges} currentNodeId={node.id} deployedConnectionId={deployedConnectionId} />
         )
 
       case 'filter':

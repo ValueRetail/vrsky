@@ -64,6 +64,7 @@ func (s *dbConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	s.RegisterHTTPHandler("/events/", s.handleEvents())
 	s.RegisterHTTPHandler("/test-connection/", handleTestConnection())
 	s.RegisterHTTPHandler("/sample-data/", handleSampleData())
+	s.RegisterHTTPHandler("/schema/", handleSchema())
 
 	res.Health.SetReady(true)
 	return nil

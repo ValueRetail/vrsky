@@ -14,6 +14,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
     "cytoscape": "^3.33.1",
     "konva": "^10.2.0",
     "react": "^18.3.1",
