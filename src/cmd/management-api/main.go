@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -65,7 +67,8 @@ func main() {
 	defer nc.Close()
 
 	// Setup HTTP server with graceful shutdown
-	server, tenantProvisioner := setupServer(config, db, nc, logger)
+	var shuttingDown atomic.Bool
+	server, tenantProvisioner := setupServer(config, db, nc, logger, &shuttingDown)
 
 	// Start server in a goroutine
 	serverErrs := make(chan error, 1)
@@ -85,6 +88,16 @@ func main() {
 		}
 	case sig := <-sigChan:
 		logger.Printf("Received signal: %v, shutting down...", sig)
+
+		// Flip /readyz to not-ready and wait a short drain window so Kubernetes
+		// removes this pod from Service endpoints before the HTTP server stops
+		// accepting connections (zero dropped in-flight requests on rolling
+		// deploy). Tunable via SHUTDOWN_DRAIN_SECONDS (default 5s).
+		shuttingDown.Store(true)
+		if d := shutdownDrainSeconds(); d > 0 {
+			logger.Printf("draining for %s before shutdown", d)
+			time.Sleep(d)
+		}
 
 		// Graceful shutdown with timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -153,19 +166,20 @@ func initNATS(natsURL string, logger *log.Logger) (*nats.Conn, error) {
 // tenant provisioner so main() can drive its lifecycle (Stop on shutdown);
 // its background worker must outlive this function, so it must not be stopped
 // via defer here.
-func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) (*http.Server, *managementapi.TenantProvisioner) {
+func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, shuttingDown *atomic.Bool) (*http.Server, *managementapi.TenantProvisioner) {
 	mux := http.NewServeMux()
 
-	// Health check endpoints
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// Health check endpoints. /healthz + /readyz are the canonical Kubernetes
+	// probe paths; /health + /ready remain as backward-compatible aliases.
+	liveness := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":    "healthy",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
-	})
+	}
 
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+	readiness := func(w http.ResponseWriter, r *http.Request) {
 		// Check dependencies
 		deps := map[string]string{
 			"database": "ok",
@@ -174,6 +188,14 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 
 		// Determine HTTP status based on dependencies
 		statusCode := http.StatusOK
+		status := "ready"
+
+		// During graceful shutdown, report not-ready so Kubernetes removes this
+		// pod from Service endpoints before the HTTP server drains.
+		if shuttingDown.Load() {
+			statusCode = http.StatusServiceUnavailable
+			status = "shutting down"
+		}
 
 		// Verify database connectivity
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -181,24 +203,31 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger) 
 		if err := db.PingContext(ctx); err != nil {
 			deps["database"] = "error: " + err.Error()
 			statusCode = http.StatusServiceUnavailable
+			status = "not ready"
 		}
 
 		// Verify NATS connectivity
 		if !nc.IsConnected() {
 			deps["nats"] = "error: not connected"
 			statusCode = http.StatusServiceUnavailable
+			status = "not ready"
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":       "ready",
+			"status":       status,
 			"timestamp":    time.Now().UTC().Format(time.RFC3339),
 			"dependencies": deps,
 			"service_name": config.ServiceName,
 			"version":      config.Version,
 		})
-	})
+	}
+
+	mux.HandleFunc("/health", liveness)
+	mux.HandleFunc("/healthz", liveness)
+	mux.HandleFunc("/ready", readiness)
+	mux.HandleFunc("/readyz", readiness)
 
 	// Initialize repository and validator
 	repo := managementapi.NewPostgresRepository(db)
@@ -324,4 +353,16 @@ func initK8sNATSProvisioner(logger *log.Logger) *managementapi.K8sNATSProvisione
 
 	logger.Printf("K8s client initialized for tenant NATS provisioning")
 	return managementapi.NewK8sNATSProvisioner(clientset, logger)
+}
+
+// shutdownDrainSeconds is how long to keep serving (with /readyz reporting
+// not-ready) after a shutdown signal, so Kubernetes de-registers the pod before
+// the HTTP server stops. Tunable via SHUTDOWN_DRAIN_SECONDS (default 5s).
+func shutdownDrainSeconds() time.Duration {
+	if v := os.Getenv("SHUTDOWN_DRAIN_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 5 * time.Second
 }

@@ -36,12 +36,22 @@ type Resources struct {
 // healthToggle is the narrow slice of the health server connectors may touch.
 type healthToggle struct {
 	setReady func(bool)
+	addCheck func(name string, fn func(ctx context.Context) error)
 }
 
 // SetReady marks the worker ready/not-ready for traffic (Kubernetes readiness).
 func (h *healthToggle) SetReady(ready bool) {
 	if h != nil && h.setReady != nil {
 		h.setReady(ready)
+	}
+}
+
+// AddReadinessCheck registers an upstream dependency check run on every
+// readiness probe (/readyz). The runner already registers NATS (and DB when
+// configured); a connector can add its own (e.g. broker reachability).
+func (h *healthToggle) AddReadinessCheck(name string, fn func(ctx context.Context) error) {
+	if h != nil && h.addCheck != nil {
+		h.addCheck(name, fn)
 	}
 }
 

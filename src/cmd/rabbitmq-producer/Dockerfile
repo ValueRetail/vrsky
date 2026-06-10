@@ -20,8 +20,8 @@ RUN apk --no-cache add ca-certificates curl
 WORKDIR /app
 COPY --from=builder /app/rabbitmq-producer .
 
-# The SDK runner serves /health on HEALTH_PORT (default 8080).
+# The SDK runner serves /healthz + /readyz on HEALTH_PORT (default 8080).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["./rabbitmq-producer"]

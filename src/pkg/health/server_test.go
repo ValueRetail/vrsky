@@ -184,6 +184,94 @@ func TestServer_handleReady(t *testing.T) {
 	}
 }
 
+func TestServer_ReadinessChecks(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	t.Run("passing check returns 200 with ok detail", func(t *testing.T) {
+		s := NewServer(Config{Logger: logger})
+		s.AddReadinessCheck("nats", func(context.Context) error { return nil })
+
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.handleReady(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		var st Status
+		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+			t.Fatalf("decode /readyz response: %v", err)
+		}
+		if st.Checks["nats"] != "ok" {
+			t.Errorf("checks[nats] = %q, want ok", st.Checks["nats"])
+		}
+	})
+
+	t.Run("failing check returns 503 and names the dependency", func(t *testing.T) {
+		s := NewServer(Config{Logger: logger})
+		s.AddReadinessCheck("nats", func(context.Context) error { return nil })
+		s.AddReadinessCheck("database", func(context.Context) error { return context.DeadlineExceeded })
+
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.handleReady(w, req)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want 503", resp.StatusCode)
+		}
+		var st Status
+		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+			t.Fatalf("decode /readyz response: %v", err)
+		}
+		if st.Status != "not ready" {
+			t.Errorf("status = %q, want 'not ready'", st.Status)
+		}
+		if st.Checks["nats"] != "ok" {
+			t.Errorf("checks[nats] = %q, want ok", st.Checks["nats"])
+		}
+		if st.Checks["database"] == "ok" || st.Checks["database"] == "" {
+			t.Errorf("checks[database] = %q, want an error", st.Checks["database"])
+		}
+	})
+
+	t.Run("no checks falls back to the static ready gate", func(t *testing.T) {
+		s := NewServer(Config{Logger: logger})
+		s.SetReady(false)
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.handleReady(w, req)
+		resp := w.Result()
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want 503 (static gate)", resp.StatusCode)
+		}
+	})
+}
+
+// TestServer_CanonicalPaths confirms /healthz + /readyz are served alongside
+// the legacy /health + /ready aliases via the real mux.
+func TestServer_CanonicalPaths(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewServer(Config{Logger: logger, Port: 0})
+	srv := httptest.NewServer(s.server.Handler)
+	defer srv.Close()
+
+	for _, path := range []string{"/healthz", "/health", "/readyz", "/ready"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestServer_SettersAndGetters(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := NewServer(Config{Logger: logger})

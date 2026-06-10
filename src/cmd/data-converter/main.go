@@ -35,9 +35,9 @@ type Config struct {
 type FieldMapping struct {
 	Source     string      `json:"source"`               // source field path (e.g. "name")
 	Target     string      `json:"target"`               // target field name (e.g. "full_name")
-	Type       string      `json:"type,omitempty"`        // "rename", "copy", "static", "remove", "template"
-	Value      interface{} `json:"value,omitempty"`       // for static type
-	Expression string      `json:"expression,omitempty"`  // for template type
+	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template"
+	Value      interface{} `json:"value,omitempty"`      // for static type
+	Expression string      `json:"expression,omitempty"` // for template type
 }
 
 // ConverterNodeConfig is what the UI stores in the node config
@@ -89,12 +89,12 @@ type ConverterService struct {
 }
 
 type ConvertEvent struct {
-	Type    string `json:"type"`              // "converted", "error", "info", "connected"
+	Type    string `json:"type"` // "converted", "error", "info", "connected"
 	Message string `json:"message,omitempty"`
 	Time    string `json:"time"`
-	Before  string `json:"before,omitempty"`  // original payload preview
-	After   string `json:"after,omitempty"`   // transformed payload preview
-	Fields  int    `json:"fields,omitempty"`  // number of fields mapped
+	Before  string `json:"before,omitempty"` // original payload preview
+	After   string `json:"after,omitempty"`  // transformed payload preview
+	Fields  int    `json:"fields,omitempty"` // number of fields mapped
 }
 
 func main() {
@@ -160,10 +160,10 @@ func main() {
 		pipelineCache:     make(map[string]*ConverterPipelineInfo),
 		pipelineCacheTime: make(map[string]time.Time),
 		pipelineCacheTTL:  5 * time.Minute,
-		eventSubs:       make(map[string][]chan ConvertEvent),
-		recentEvents:    make(map[string][]ConvertEvent),
-		stopCh:          make(chan struct{}),
-		stoppedCh:       make(chan struct{}),
+		eventSubs:         make(map[string][]chan ConvertEvent),
+		recentEvents:      make(map[string][]ConvertEvent),
+		stopCh:            make(chan struct{}),
+		stoppedCh:         make(chan struct{}),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -824,9 +824,26 @@ func (s *ConverterService) getRecentEvents(connectionID string) []ConvertEvent {
 func startHTTPServer(port string, service *ConverterService, logger *slog.Logger) {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// Liveness: the process is up. /healthz is the canonical Kubernetes path;
+	// /health remains as a backward-compatible alias.
+	liveness := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	}
+	// Readiness: NATS must be connected (the only upstream this worker needs).
+	readiness := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if service.nc == nil || !service.nc.IsConnected() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"not ready","checks":{"nats":"error: not connected"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ready","checks":{"nats":"ok"}}`))
+	}
+	mux.HandleFunc("/health", liveness)
+	mux.HandleFunc("/healthz", liveness)
+	mux.HandleFunc("/ready", readiness)
+	mux.HandleFunc("/readyz", readiness)
 
 	// Preview endpoint: test transformations without deploying
 	mux.HandleFunc("/preview/", func(w http.ResponseWriter, r *http.Request) {

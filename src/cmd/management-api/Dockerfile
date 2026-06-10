@@ -52,7 +52,7 @@ RUN chmod +x ./management-api ./entrypoint.sh
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3000/healthz || exit 1
 
 EXPOSE 3000
 

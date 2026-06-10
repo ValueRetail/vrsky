@@ -30,9 +30,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Pull images (with retry)
+        # Docker Hub aggressively rate-limits / times out anonymous pulls from
+        # shared GitHub Actions IPs, so retry rather than fail the whole run on a
+        # transient "context deadline exceeded". busybox is pulled here too — the
+        # readiness step shells out to it.
+        run: |
+          retry() {
+            local n=0 max=5
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge "$max" ]; then
+                echo "ERROR: '$*' failed after $max attempts"; return 1
+              fi
+              echo "attempt $n/$max failed; retrying in 15s…"; sleep 15
+            done
+          }
+          retry docker compose pull --quiet \
+            minio-test minio-init azurite-test fake-gcs-test \
+            sftp-test kafka-test rabbitmq-test
+          retry docker pull busybox:latest
+
       - name: Start test brokers
         run: |
-          docker compose up -d \
+          docker compose up -d --no-build \
             minio-test minio-init azurite-test fake-gcs-test \
             sftp-test kafka-test rabbitmq-test
 

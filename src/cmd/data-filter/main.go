@@ -81,7 +81,7 @@ type FilterService struct {
 }
 
 type FilterEvent struct {
-	Type    string `json:"type"`              // "passed", "dropped", "error", "info", "connected"
+	Type    string `json:"type"` // "passed", "dropped", "error", "info", "connected"
 	Message string `json:"message,omitempty"`
 	Time    string `json:"time"`
 	Data    string `json:"data,omitempty"` // row that was evaluated
@@ -777,9 +777,26 @@ func (s *FilterService) getRecentEvents(connectionID string) []FilterEvent {
 func startHTTPServer(port string, service *FilterService, logger *slog.Logger) {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	// Liveness: the process is up. /healthz is the canonical Kubernetes path;
+	// /health remains as a backward-compatible alias.
+	liveness := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	}
+	// Readiness: NATS must be connected (the only upstream this worker needs).
+	readiness := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if service.nc == nil || !service.nc.IsConnected() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"not ready","checks":{"nats":"error: not connected"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ready","checks":{"nats":"ok"}}`))
+	}
+	mux.HandleFunc("/health", liveness)
+	mux.HandleFunc("/healthz", liveness)
+	mux.HandleFunc("/ready", readiness)
+	mux.HandleFunc("/readyz", readiness)
 
 	mux.HandleFunc("/events/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
