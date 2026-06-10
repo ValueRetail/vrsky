@@ -16,6 +16,25 @@ func TestRedactURL(t *testing.T) {
 	}
 }
 
+func TestSameDatabase(t *testing.T) {
+	src := "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+	cases := []struct {
+		other string
+		want  bool
+	}{
+		{src, true}, // identical
+		{"postgres://other:pw@postgres-management:5432/management_db", true},                                     // differ only in creds
+		{"postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=require", true}, // differ only in query
+		{"postgres://postgres:pw@dr-target:5432/management_db?sslmode=disable", false},                           // different host
+		{"postgres://postgres:pw@postgres-management:5432/other_db", false},                                      // different db name
+	}
+	for _, c := range cases {
+		if got := sameDatabase(src, c.other); got != c.want {
+			t.Errorf("sameDatabase(src, %q) = %v, want %v", c.other, got, c.want)
+		}
+	}
+}
+
 func TestGzipRoundTrip(t *testing.T) {
 	orig := []byte("the quick brown fox dumps the lazy database")
 	gz, err := gzipBytes(orig)

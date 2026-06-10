@@ -9,7 +9,7 @@ restore path is tested in CI.
 | Objective | Target | How it's met |
 |-----------|--------|--------------|
 | **RPO** (max data loss) | **≤ 24h** | Daily backup CronJob (`infrastructure/kubernetes/backup/cronjob.yaml`, 02:00 UTC) |
-| **RTO** (max time to restore) | **≤ 1h** | Single `vrsky-cli restore` of a small dump; CronJob has a 1h `activeDeadlineSeconds` |
+| **RTO** (max time to restore) | **≤ 1h** | A single `vrsky-cli restore` of the (small) management dump into a fresh DB runs in minutes; the procedure below + the CI restore drill keep it exercised |
 
 > **Scope:** the management DB only. Tenant *data in flight* lives in NATS
 > JetStream (durable, replicated) and large payloads in object storage; those

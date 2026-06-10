@@ -18,7 +18,7 @@ import (
 // object storage under <prefix>management_db-<timestamp>.dump.gz.enc.
 func runBackup(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ExitOnError)
-	stamp := fs.String("stamp", "", "override the timestamp in the key (default: now, RFC3339)")
+	stamp := fs.String("stamp", "", "override the timestamp segment of the object key (default: current UTC time as 20060102T150405Z)")
 	_ = fs.Parse(args)
 
 	cfg, err := backupConfigFromEnv()
@@ -91,7 +91,7 @@ func runList(ctx context.Context, args []string) error {
 
 // pgDump runs pg_dump -Fc against dbURL and returns the dump bytes.
 func pgDump(ctx context.Context, dbURL string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--no-owner", "--no-privileges", dbURL)
+	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--no-owner", "--no-privileges", "--dbname", dbURL)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf

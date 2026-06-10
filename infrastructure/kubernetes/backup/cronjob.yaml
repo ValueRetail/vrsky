@@ -5,9 +5,9 @@
 # Daily schedule gives RPO ≤ 24h. Restore is a deliberate, documented manual
 # step (see docs/DR.md), not automated.
 #
-# Before applying: create the `vrsky-backup-config` Secret with the object-store
-# bucket + credentials and the ENCRYPTION_KEY (see README.md). The management DB
-# URL is taken from the existing management-api config.
+# Before applying: create the `vrsky-backup-config` Secret with the management
+# DB URL (BACKUP_DB_URL), the object-store bucket + credentials, and the
+# ENCRYPTION_KEY (see README.md) — all backup config is sourced from that Secret.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -23,7 +23,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600 # RTO budget: a backup must not run > 1h
+      activeDeadlineSeconds: 3600 # cap a single backup run at 1h (catch a hung pg_dump/upload)
       template:
         metadata:
           labels:

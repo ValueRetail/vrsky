@@ -901,6 +901,12 @@ services:
     profiles: ["backup"]
     environment:
       BACKUP_DB_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      # Dev-only default: the SAME shared key the rest of the local stack uses
+      # (management-api, workers). A local backup MUST use it or it can't decrypt
+      # the local secrets vault on restore. Real deployments do NOT default it —
+      # the k8s CronJob sources ENCRYPTION_KEY from the vrsky-backup-config Secret
+      # (see infrastructure/kubernetes/backup/). Don't point this profile at a
+      # non-local bucket without setting your real ENCRYPTION_KEY.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       BACKUP_PROVIDER: "s3"
       BACKUP_BUCKET: "vrsky-bucket"

@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
+	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
@@ -40,8 +42,10 @@ func runRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Guard against accidentally overwriting the live management DB.
-	if *targetURL == cfg.dbURL && !*allowSource {
+	// Guard against accidentally overwriting the live management DB. Compare by
+	// host:port/dbname so equivalent URLs that differ only in credentials or
+	// query params (e.g. sslmode) still trip the guard.
+	if !*allowSource && sameDatabase(*targetURL, cfg.dbURL) {
 		return fmt.Errorf("refusing to restore over the source database (%s); pass --allow-source-db to override", redactURL(*targetURL))
 	}
 
@@ -81,8 +85,9 @@ func pgRestore(ctx context.Context, targetURL string, dump []byte) error {
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
-		// pg_restore exits non-zero on benign "does not exist, skipping" notices
-		// from --clean against a fresh DB; surface stderr so real failures show.
+		// A non-zero exit is a real restore failure (e.g. a version-incompatible
+		// dump, or DROP errors without --if-exists). Surface pg_restore's stderr
+		// so the operator sees exactly what failed.
 		return fmt.Errorf("pg_restore: %w: %s", err, errBuf.String())
 	}
 	return nil
@@ -95,6 +100,21 @@ func gunzipBytes(b []byte) ([]byte, error) {
 	}
 	defer r.Close()
 	return io.ReadAll(r)
+}
+
+// sameDatabase reports whether two postgres URLs point at the same database —
+// compared by host:port + database name, ignoring credentials and query params
+// (sslmode, etc.) so cosmetically-different URLs don't bypass the source guard.
+// Falls back to exact string match if either URL can't be parsed.
+func sameDatabase(a, b string) bool {
+	pa, errA := url.Parse(a)
+	pb, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return strings.EqualFold(pa.Hostname(), pb.Hostname()) &&
+		pa.Port() == pb.Port() &&
+		strings.TrimPrefix(pa.Path, "/") == strings.TrimPrefix(pb.Path, "/")
 }
 
 // redactURL hides the password in a postgres URL for log output.
