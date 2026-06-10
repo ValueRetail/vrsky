@@ -217,7 +217,7 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 			_ = hsrv.Stop(sctx)
 		}()
 		setReady = hsrv.SetReady
-		addCheck = func(name string, fn func(context.Context) error) { hsrv.AddReadinessCheck(name, fn) }
+		addCheck = func(checkName string, fn func(context.Context) error) { hsrv.AddReadinessCheck(checkName, fn) }
 		drainFn = func() { hsrv.SetReady(false) }
 	}
 

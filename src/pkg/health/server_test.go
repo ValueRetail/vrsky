@@ -201,7 +201,9 @@ func TestServer_ReadinessChecks(t *testing.T) {
 			t.Errorf("status = %d, want 200", resp.StatusCode)
 		}
 		var st Status
-		_ = json.NewDecoder(resp.Body).Decode(&st)
+		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+			t.Fatalf("decode /readyz response: %v", err)
+		}
 		if st.Checks["nats"] != "ok" {
 			t.Errorf("checks[nats] = %q, want ok", st.Checks["nats"])
 		}
@@ -222,7 +224,9 @@ func TestServer_ReadinessChecks(t *testing.T) {
 			t.Errorf("status = %d, want 503", resp.StatusCode)
 		}
 		var st Status
-		_ = json.NewDecoder(resp.Body).Decode(&st)
+		if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+			t.Fatalf("decode /readyz response: %v", err)
+		}
 		if st.Status != "not ready" {
 			t.Errorf("status = %q, want 'not ready'", st.Status)
 		}

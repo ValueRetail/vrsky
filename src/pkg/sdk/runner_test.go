@@ -232,12 +232,14 @@ func TestRun_ProductionPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /readyz: %v", err)
 	}
+	defer rr.Body.Close()
 	var ready struct {
 		Status string            `json:"status"`
 		Checks map[string]string `json:"checks"`
 	}
-	_ = json.NewDecoder(rr.Body).Decode(&ready)
-	_ = rr.Body.Close()
+	if err := json.NewDecoder(rr.Body).Decode(&ready); err != nil {
+		t.Fatalf("decode /readyz response: %v", err)
+	}
 	if rr.StatusCode != http.StatusOK {
 		t.Errorf("/readyz = %d, want 200", rr.StatusCode)
 	}
