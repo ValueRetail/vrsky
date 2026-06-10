@@ -106,7 +106,7 @@ func buildTestTarget(typ, role string, raw map[string]json.RawMessage, tenantID 
 			"api_version":    sf.APIVersion,
 			"soql":           sf.SOQL,
 		})
-		return testWorkerURL("TEST_URL_SALESFORCE", "http://salesforce-consumer:9700") + "/schema/", b, true, ""
+		return testWorkerURL("TEST_URL_SALESFORCE", "http://salesforce-consumer:9250") + "/schema/", b, true, ""
 	case "http":
 		return "", nil, false, "An inbound HTTP webhook can't be tested before deploy — deploy the pipeline and send it a request."
 	default:

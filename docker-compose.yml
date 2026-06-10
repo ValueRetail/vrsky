@@ -611,9 +611,10 @@ services:
       MGMT_API_URL: "http://management-api:3000"
       OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
       # Aux HTTP port serving /schema (describe) + /sample-data for the UI's field mapping (#79).
-      WORKER_HTTP_PORT: "9700"
+      # 9250 (next in the consumer family after cloud-storage 9240); 9700 belongs to data-filter.
+      WORKER_HTTP_PORT: "9250"
     ports:
-      - "127.0.0.1:9700:9700"
+      - "127.0.0.1:9250:9250"
     depends_on:
       nats:
         condition: service_healthy
