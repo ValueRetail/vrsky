@@ -155,6 +155,38 @@ func TestUpdateNotificationTarget_TypeChangeRequiresSecret(t *testing.T) {
 	}
 }
 
+func TestTestNotificationTarget_DisabledRefuses(t *testing.T) {
+	handler, repo := setupTestHandler()
+	created := createTargetForTest(t, handler, "tenant-1", map[string]interface{}{
+		"name": "wh", "type": "webhook", "url": "http://example.invalid/hook",
+	})
+	// Disable it.
+	dis := false
+	if err := repo.UpdateNotificationTarget(contextWithTenant("tenant-1"),
+		&NotificationTarget{ID: created.ID, TenantID: "tenant-1", Name: "wh", Type: "webhook",
+			Config: NotificationTargetConfig{URL: "http://example.invalid/hook"}, Enabled: dis}, ""); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	// Test must refuse (ok:false) without attempting delivery — a real send to
+	// example.invalid would otherwise error differently.
+	r := httptest.NewRequest("POST", "/api/v1/notifications/targets/"+created.ID+"/test", nil).
+		WithContext(contextWithTenant("tenant-1"))
+	r.SetPathValue("id", created.ID)
+	w := httptest.NewRecorder()
+	handler.TestNotificationTarget(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+	var res struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if res.OK || !strings.Contains(res.Error, "disabled") {
+		t.Errorf("disabled test = %+v, want ok:false + 'disabled' message", res)
+	}
+}
+
 func TestAlertsWebhook_AuthAndDispatch(t *testing.T) {
 	t.Setenv("ALERTS_WEBHOOK_TOKEN", "tok-123")
 	handler, _ := setupTestHandler()

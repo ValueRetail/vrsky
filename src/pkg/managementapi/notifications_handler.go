@@ -274,6 +274,12 @@ func (h *Handler) TestNotificationTarget(w http.ResponseWriter, r *http.Request)
 		_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to load target", nil)
 		return
 	}
+	// A disabled target receives no alerts; Test must honour that too, otherwise
+	// "disabled" is misleading (real dispatch already filters on enabled).
+	if !t.Enabled {
+		_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": "target is disabled — enable it to send a test"})
+		return
+	}
 	n, err := h.buildNotifier(ctx, t)
 	if err != nil {
 		_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})
