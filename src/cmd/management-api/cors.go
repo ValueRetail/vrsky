@@ -70,6 +70,8 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/tenants") ||
 				r.URL.Path == "/api/v1/oauth/callback" ||
+				r.URL.Path == "/api/v1/alerts/webhook" ||
+				r.URL.Path == "/metrics" ||
 				r.URL.Path == "/health" ||
 				r.URL.Path == "/healthz" ||
 				r.URL.Path == "/ready" ||

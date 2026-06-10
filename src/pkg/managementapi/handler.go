@@ -934,6 +934,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// middleware (workers have no session). Registered plain for that reason.
 	mux.HandleFunc("GET /api/v1/oauth/grants/{id}/token", h.TokenForGrant)
 
+	// Notification targets (Phase 3A — #84). Writes are admin; listing is
+	// viewer; the test send is admin (it uses the stored secret).
+	mux.HandleFunc("GET /api/v1/notifications/targets", h.ListNotificationTargets)
+	mux.Handle("POST /api/v1/notifications/targets", adminMW(http.HandlerFunc(h.CreateNotificationTarget)))
+	mux.Handle("PUT /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.UpdateNotificationTarget)))
+	mux.Handle("DELETE /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.DeleteNotificationTarget)))
+	mux.Handle("POST /api/v1/notifications/targets/{id}/test", adminMW(http.HandlerFunc(h.TestNotificationTarget)))
+	// Alertmanager's webhook receiver — authenticated by the shared
+	// ALERTS_WEBHOOK_TOKEN bearer inside the handler (Alertmanager has no
+	// session or tenant header). Exempted from TenantIDMiddleware in cors.go.
+	mux.HandleFunc("POST /api/v1/alerts/webhook", h.AlertsWebhook)
+
 	// Auth routes (these bypass TenantIDMiddleware)
 	h.RegisterAuthRoutes(mux)
 }

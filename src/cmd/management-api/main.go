@@ -16,6 +16,7 @@ import (
 
 	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -69,6 +70,10 @@ func main() {
 	// Setup HTTP server with graceful shutdown
 	var shuttingDown atomic.Bool
 	server, tenantProvisioner := setupServer(config, db, nc, logger, &shuttingDown)
+
+	// TLS cert-expiry gauge for the CertExpirySoon alert (#84). No-op unless
+	// TLS_CERT_PATHS is set.
+	watchCertExpiry(logger)
 
 	// Start server in a goroutine
 	serverErrs := make(chan error, 1)
@@ -229,6 +234,11 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	mux.HandleFunc("/ready", readiness)
 	mux.HandleFunc("/readyz", readiness)
 
+	// Prometheus scrape endpoint (#84) — request counters/durations from
+	// MetricsMiddleware + the TLS cert-expiry gauge. Exempt from tenant
+	// middleware in cors.go (Prometheus sends no X-Tenant-ID).
+	mux.Handle("GET /metrics", promhttp.Handler())
+
 	// Initialize repository and validator
 	repo := managementapi.NewPostgresRepository(db)
 	validator := managementapi.NewValidator()
@@ -314,11 +324,12 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// Wrap mux with middleware (applied in reverse order — innermost is rightmost).
 	// Audit must sit INSIDE TenantID so it can read the tenant from context,
 	// and OUTSIDE the route mux so it observes every handler.
-	//   Logging → CORS → TenantID → Audit → Routes
+	//   Logging → Metrics → CORS → TenantID → Audit → Routes
 	var handler http.Handler = mux
 	handler = managementapi.AuditMiddleware(repo, logger)(handler)
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
 	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
+	handler = MetricsMiddleware(handler)
 	handler = LoggingMiddleware(logger)(handler)
 
 	return &http.Server{
