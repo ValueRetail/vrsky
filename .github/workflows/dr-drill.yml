@@ -65,13 +65,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s
           --health-timeout 5s --health-retries 10
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-          MINIO_DEFAULT_BUCKETS: dr-drill
-        ports: ["9000:9000"]
 
     steps:
       - uses: actions/checkout@v5
@@ -87,13 +80,20 @@ jobs:
           sudo apt-get update && sudo apt-get install -y postgresql-client
           cd src && go build -o /usr/local/bin/vrsky-cli ./cmd/vrsky-cli
 
-      - name: Wait for MinIO (+ bucket)
+      - name: Start MinIO + create bucket
+        # The official minio image needs the `server` command, which GitHub
+        # service containers can't supply — so run it as a step. (Bitnami's
+        # auto-starting image dropped its `latest` tag.)
         run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; exit 0; fi
+            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; break; fi
             echo "waiting for minio… [$i/30]"; sleep 2
           done
-          echo "minio never became ready"; exit 1
+          docker run --rm --network host --entrypoint sh minio/mc:latest -c \
+            "until mc alias set local http://localhost:9000 minioadmin minioadmin; do sleep 1; done; mc mb -p local/dr-drill"
 
       - name: Seed the source database
         run: |

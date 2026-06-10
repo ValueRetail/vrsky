@@ -115,10 +115,3 @@ func gzipBytes(b []byte) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
-// pgToolAvailable reports whether a postgres client binary is on PATH (used by
-// tests to skip when the environment lacks pg_dump/pg_restore).
-func pgToolAvailable(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
