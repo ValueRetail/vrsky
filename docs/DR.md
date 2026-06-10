@@ -38,8 +38,10 @@ Deployment + the Secret are documented in
 
 ## Restoring (the recovery procedure)
 
-1. **Stand up a fresh, empty Postgres** (the new management DB), and make sure
-   the **same `ENCRYPTION_KEY`** as the lost instance is available.
+1. **Stand up a fresh, empty Postgres** (the new management DB) of the **same
+   major version as the backed-up server, or newer** — a dump does not restore
+   cleanly into an *older* major (e.g. a PG 18 dump won't fully apply to PG 16) —
+   and make sure the **same `ENCRYPTION_KEY`** as the lost instance is available.
 
 2. **Find the backup to restore:**
    ```sh
