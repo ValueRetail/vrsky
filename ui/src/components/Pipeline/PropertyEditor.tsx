@@ -2468,7 +2468,7 @@ function ConverterConfig({
           setPreviewInput('// Set the Salesforce instance URL, account and a SOQL query first')
           return
         }
-        const resp = await fetch('http://localhost:9700/sample-data/', {
+        const resp = await fetch('http://localhost:9250/sample-data/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

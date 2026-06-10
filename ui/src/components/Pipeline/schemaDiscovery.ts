@@ -100,7 +100,7 @@ export async function discoverSchema(
       if (!sf.instance_url || !sf.oauth_grant_id) throw new Error('Set the Salesforce instance URL and connect an account first')
       if (!sf.soql) throw new Error('Enter a SOQL query (its FROM clause names the object to describe)')
       if (!opts?.tenantId) throw new Error('No active tenant')
-      const data = await postJSON('http://localhost:9700/schema/', {
+      const data = await postJSON('http://localhost:9250/schema/', {
         tenant_id: opts.tenantId,
         instance_url: sf.instance_url, oauth_grant_id: sf.oauth_grant_id,
         api_version: sf.api_version, soql: sf.soql,

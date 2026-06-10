@@ -50,6 +50,7 @@ var tenantScopedTables = []string{
 	"tenant_api_keys",
 	"oauth_providers",
 	"oauth_grants",
+	"notification_targets",
 }
 
 // sqlStmt extracts the backtick-quoted SQL string that follows a

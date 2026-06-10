@@ -5,14 +5,16 @@ global:
   external_labels:
     monitor: 'vrsky-monitor'
 
-# Alertmanager configuration (optional)
+# Alerts route to Alertmanager, which fans them into the management-api's
+# webhook receiver (POST /api/v1/alerts/webhook) for per-tenant dispatch (#84).
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
+        - targets: ['alertmanager:9093']
 
-# Load rules once and periodically evaluate them
-rule_files: []
+# Default VRSky alert ruleset (#84). Unit tests: prometheus-rules-test.yml.
+rule_files:
+  - /etc/prometheus/prometheus-rules.yml
 
 # Scrape configurations
 scrape_configs:
@@ -36,3 +38,46 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
     scrape_timeout: 5s
+
+  # Management API (#84): HTTP request counters/durations (MgmtAPIErrorRate)
+  # + the TLS cert-expiry gauge (CertExpirySoon).
+  - job_name: 'management-api'
+    static_configs:
+      - targets: ['management-api:3000']
+    metrics_path: '/metrics'
+
+  # SDK workers serve Prometheus metrics on HEALTH_PORT 8080 (pkg/health):
+  # messaging throughput (vrsky_messages_published_total → PipelineDown) and
+  # DLQ counters (vrsky_dlq_messages_total → DLQGrowing).
+  - job_name: 'vrsky-workers'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'webhook-consumer:8080'
+          - 'file-consumer:8080'
+          - 'db-consumer:8080'
+          - 'api-consumer:8080'
+          - 'tenant-consumer:8080'
+          - 'salesforce-consumer:8080'
+          - 'sftp-consumer:8080'
+          - 'kafka-consumer:8080'
+          - 'rabbitmq-consumer:8080'
+          - 'cloud-storage-consumer:8080'
+          - 'http-producer:8080'
+          - 'file-producer:8080'
+          - 'db-producer:8080'
+          - 'salesforce-producer:8080'
+          - 'sftp-producer:8080'
+          - 'kafka-producer:8080'
+          - 'rabbitmq-producer:8080'
+          - 'cloud-storage-producer:8080'
+
+  # NATS server metrics via prometheus-nats-exporter (JetStreamLagHigh).
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats-exporter:7777']
+
+  # Host disk/filesystem metrics via node-exporter (DiskUsageHigh).
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']

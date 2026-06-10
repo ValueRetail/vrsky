@@ -361,6 +361,33 @@ type Repository interface {
 	ListOAuthProviders(ctx context.Context, tenantID string) ([]*oauth.ProviderConfig, error)
 
 	// ============================================
+	// Notification Targets (Phase 3A — #84)
+	// ============================================
+
+	// CreateNotificationTarget inserts a target; a non-empty secret is encrypted
+	// into the secrets table and referenced by secret_id.
+	CreateNotificationTarget(ctx context.Context, t *NotificationTarget, secret string) error
+
+	// ListNotificationTargets returns every target owned by a tenant.
+	ListNotificationTargets(ctx context.Context, tenantID string) ([]*NotificationTarget, error)
+
+	// GetNotificationTarget returns one target scoped to a tenant.
+	GetNotificationTarget(ctx context.Context, tenantID, id string) (*NotificationTarget, error)
+
+	// UpdateNotificationTarget rewrites a target; empty secret keeps the old one.
+	UpdateNotificationTarget(ctx context.Context, t *NotificationTarget, secret string) error
+
+	// DeleteNotificationTarget removes one target scoped to a tenant.
+	DeleteNotificationTarget(ctx context.Context, tenantID, id string) error
+
+	// ListNotificationTargetsForDispatch returns enabled targets for an alert:
+	// the tenant's targets when tenantID != "", else all platform-flagged ones.
+	ListNotificationTargetsForDispatch(ctx context.Context, tenantID string) ([]*NotificationTarget, error)
+
+	// ResolveNotificationSecret decrypts a target's secret ("" when none).
+	ResolveNotificationSecret(ctx context.Context, t *NotificationTarget) (string, error)
+
+	// ============================================
 	// Lifecycle
 	// ============================================
 

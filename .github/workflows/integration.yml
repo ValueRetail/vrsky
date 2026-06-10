@@ -25,25 +25,41 @@ jobs:
     name: Connector integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Surface the Docker Hub secrets as env so the login step's `if` can test
+    # them (the `secrets` context isn't available in step-level conditionals).
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      # Authenticated Docker Hub pulls when the secrets are configured — far
+      # higher rate limits + reliability than anonymous pulls from shared
+      # runner IPs. No-op (anonymous fallback) when the secrets are absent.
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
       - name: Pull images (with retry)
-        # Docker Hub aggressively rate-limits / times out anonymous pulls from
-        # shared GitHub Actions IPs, so retry rather than fail the whole run on a
-        # transient "context deadline exceeded". busybox is pulled here too — the
-        # readiness step shells out to it.
+        # Docker Hub rate-limits / times out anonymous pulls from shared GitHub
+        # Actions IPs, so retry rather than fail the whole run on a transient
+        # "context deadline exceeded". busybox is pulled here too — the
+        # readiness step shells out to it. (Authenticated pulls above make this
+        # far less likely to be needed.)
         run: |
           retry() {
-            local n=0 max=5
+            local n=0 max=8
             until "$@"; do
               n=$((n+1))
               if [ "$n" -ge "$max" ]; then
                 echo "ERROR: '$*' failed after $max attempts"; return 1
               fi
-              echo "attempt $n/$max failed; retrying in 15s…"; sleep 15
+              echo "attempt $n/$max failed; retrying in 20s…"; sleep 20
             done
           }
           retry docker compose pull --quiet \
