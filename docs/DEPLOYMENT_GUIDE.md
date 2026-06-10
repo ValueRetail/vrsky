@@ -14,6 +14,7 @@ This guide covers the complete deployment pipeline for VRSky services using Dock
 5. [Kubernetes Deployment](#kubernetes-deployment)
 6. [Versioning Strategy](#versioning-strategy)
 7. [Troubleshooting](#troubleshooting)
+8. [Disaster Recovery](#disaster-recovery)
 
 ---
 
@@ -656,3 +657,15 @@ Before claiming "encryption at rest" to an auditor:
 See `docs/COMPLIANCE.md` for the full mapping to SOC 2 / ISO 27001
 control families.
 
+
+---
+
+## Disaster Recovery
+
+The management Postgres (tenants, connections, secrets, OAuth grants,
+notification targets, audit log) is backed up daily and its restore path is
+tested in CI. See **[`docs/DR.md`](DR.md)** for the full runbook — backup flow,
+the `vrsky-cli backup`/`restore`/`list` commands, RPO ≤ 24h / RTO ≤ 1h, the
+critical `ENCRYPTION_KEY` caveat, and the step-by-step recovery procedure. The
+backup CronJob + its config Secret are documented in
+[`infrastructure/kubernetes/backup/README.md`](../infrastructure/kubernetes/backup/README.md).
