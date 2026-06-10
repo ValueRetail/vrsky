@@ -114,6 +114,30 @@ func TestUpdateNotificationTarget_KeepsSecretWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestCreateNotificationTarget_DuplicateNameConflict(t *testing.T) {
+	handler, _ := setupTestHandler()
+	createTargetForTest(t, handler, "tenant-1", map[string]interface{}{
+		"name": "dupe", "type": "email", "email": "a@b.c",
+	})
+	// A second target with the same name for the same tenant → 409, not 500.
+	body, _ := json.Marshal(map[string]interface{}{"name": "dupe", "type": "email", "email": "x@y.z"})
+	r := httptest.NewRequest("POST", "/api/v1/notifications/targets", bytes.NewReader(body)).
+		WithContext(contextWithTenant("tenant-1"))
+	w := httptest.NewRecorder()
+	handler.CreateNotificationTarget(w, r)
+	if w.Code != http.StatusConflict {
+		t.Errorf("duplicate name: status=%d, want 409 (body=%s)", w.Code, w.Body.String())
+	}
+	// Same name under a different tenant is fine.
+	r2 := httptest.NewRequest("POST", "/api/v1/notifications/targets", bytes.NewReader(body)).
+		WithContext(contextWithTenant("tenant-2"))
+	w2 := httptest.NewRecorder()
+	handler.CreateNotificationTarget(w2, r2)
+	if w2.Code != http.StatusCreated {
+		t.Errorf("same name other tenant: status=%d, want 201", w2.Code)
+	}
+}
+
 func TestUpdateNotificationTarget_TypeChangeRequiresSecret(t *testing.T) {
 	handler, _ := setupTestHandler()
 	created := createTargetForTest(t, handler, "tenant-1", map[string]interface{}{

@@ -157,6 +157,10 @@ func (h *Handler) CreateNotificationTarget(w http.ResponseWriter, r *http.Reques
 	}
 	t := targetFromRequest(tenantID, &req)
 	if err := h.repo.CreateNotificationTarget(ctx, t, req.Secret); err != nil {
+		if errors.Is(err, ErrNotificationTargetNameExists) {
+			_ = writeError(w, http.StatusConflict, "Conflict", "a notification target named "+req.Name+" already exists", nil)
+			return
+		}
 		_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to create target", nil)
 		return
 	}
@@ -216,6 +220,10 @@ func (h *Handler) UpdateNotificationTarget(w http.ResponseWriter, r *http.Reques
 	if err := h.repo.UpdateNotificationTarget(ctx, t, req.Secret); err != nil {
 		if errors.Is(err, ErrNotificationTargetNotFound) {
 			_ = writeError(w, http.StatusNotFound, "NotFound", "target not found", nil)
+			return
+		}
+		if errors.Is(err, ErrNotificationTargetNameExists) {
+			_ = writeError(w, http.StatusConflict, "Conflict", "a notification target named "+req.Name+" already exists", nil)
 			return
 		}
 		_ = writeError(w, http.StatusInternalServerError, "InternalError", "failed to update target", nil)

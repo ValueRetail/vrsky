@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
@@ -18,6 +19,23 @@ import (
 
 // ErrNotificationTargetNotFound is returned for lookups of missing targets.
 var ErrNotificationTargetNotFound = errors.New("notification target not found")
+
+// ErrNotificationTargetNameExists is returned when a target name collides with
+// an existing one for the tenant (UNIQUE (tenant_id, name)). Handlers map it to
+// 409 Conflict with a clear message instead of a generic 500.
+var ErrNotificationTargetNameExists = errors.New("a notification target with this name already exists")
+
+// isDuplicateNameErr reports whether a DB error is the (tenant_id, name) unique
+// violation. String-matched to stay driver-agnostic (pgx stdlib), matching the
+// secrets handler's approach.
+func isDuplicateNameErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "notification_targets_tenant_id_name_key") ||
+		strings.Contains(msg, "duplicate key value")
+}
 
 // NotificationTargetConfig is the non-secret per-target configuration stored
 // as JSONB. Which fields apply depends on Type: email → Email; webhook → URL.
@@ -85,6 +103,9 @@ func (r *PostgresRepository) CreateNotificationTarget(ctx context.Context, t *No
 	if err := tx.QueryRowContext(ctx, q,
 		t.TenantID, t.Name, t.Type, cfgJSON, secretID, t.Enabled,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if isDuplicateNameErr(err) {
+			return ErrNotificationTargetNameExists
+		}
 		return err
 	}
 	return tx.Commit()
@@ -183,6 +204,9 @@ func (r *PostgresRepository) UpdateNotificationTarget(ctx context.Context, t *No
 		WHERE tenant_id = $6 AND id = $7`
 	res, err := tx.ExecContext(ctx, q, t.Name, t.Type, cfgJSON, secretID, t.Enabled, t.TenantID, t.ID)
 	if err != nil {
+		if isDuplicateNameErr(err) {
+			return ErrNotificationTargetNameExists
+		}
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {

@@ -41,6 +41,12 @@ func (m *MockRepository) CreateNotificationTarget(_ context.Context, t *Notifica
 	s := notifStateFor(m)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Enforce UNIQUE (tenant_id, name) like Postgres does.
+	for _, ex := range s.targets {
+		if ex.TenantID == t.TenantID && ex.Name == t.Name {
+			return ErrNotificationTargetNameExists
+		}
+	}
 	s.nextID++
 	t.ID = fmt.Sprintf("nt-%d", s.nextID)
 	t.CreatedAt = time.Now()
