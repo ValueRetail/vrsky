@@ -887,6 +887,31 @@ services:
     networks:
       - vrsky-network
 
+  # Backup CLI (#86, Phase 3C) — DR for the management DB. Not started by
+  # default; run on demand under the "backup" profile, e.g.:
+  #   docker compose run --rm backup            # take an encrypted backup → MinIO
+  #   docker compose run --rm backup list       # list backups
+  # Restores are deliberately manual (see docs/DR.md). Uploads to the local
+  # MinIO bucket "vrsky-bucket"; encrypts with the shared ENCRYPTION_KEY.
+  backup:
+    build:
+      context: .
+      dockerfile: src/cmd/vrsky-cli/Dockerfile
+    container_name: vrsky-backup
+    profiles: ["backup"]
+    environment:
+      BACKUP_DB_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      BACKUP_PROVIDER: "s3"
+      BACKUP_BUCKET: "vrsky-bucket"
+      BACKUP_PREFIX: "mgmt-backups/"
+      BACKUP_ENDPOINT: "http://minio-test:9000"
+      BACKUP_REGION: "us-east-1"
+      BACKUP_ACCESS_KEY_ID: "minioadmin"
+      BACKUP_SECRET_ACCESS_KEY: "minioadmin"
+    networks:
+      - vrsky-network
+
   # Test Azure Blob emulator (Azurite) for local + CI testing of #80. In-network
   # blob endpoint at http://azurite-test:10000/devstoreaccount1. Use the standard
   # devstore connection string in the node config (account: devstoreaccount1).

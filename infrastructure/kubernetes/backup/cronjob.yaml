@@ -1,0 +1,46 @@
+# Phase 3C (#86): daily encrypted backup of the management Postgres.
+#
+# Runs vrsky-cli backup once a day → pg_dump (custom format) → gzip → encrypt
+# (AES-256-GCM with the shared ENCRYPTION_KEY) → upload to object storage.
+# Daily schedule gives RPO ≤ 24h. Restore is a deliberate, documented manual
+# step (see docs/DR.md), not automated.
+#
+# Before applying: create the `vrsky-backup-config` Secret with the object-store
+# bucket + credentials and the ENCRYPTION_KEY (see README.md). The management DB
+# URL is taken from the existing management-api config.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vrsky-mgmt-backup
+  namespace: vrsky-database
+  labels:
+    app: vrsky-mgmt-backup
+spec:
+  schedule: "0 2 * * *" # 02:00 UTC daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600 # RTO budget: a backup must not run > 1h
+      template:
+        metadata:
+          labels:
+            app: vrsky-mgmt-backup
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: ghcr.io/valueretail/vrsky/vrsky-cli:latest
+              args: ["backup"]
+              envFrom:
+                - secretRef:
+                    name: vrsky-backup-config
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"

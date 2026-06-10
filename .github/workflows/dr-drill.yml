@@ -1,0 +1,125 @@
+name: DR Restore Drill
+
+# Phase 3C (#86): proves the backup→restore path end to end. Seeds a source
+# Postgres, runs `vrsky-cli backup` to MinIO, restores into a SEPARATE target
+# Postgres with `vrsky-cli restore`, and asserts the sentinel data survived.
+# This is the "restore drill passes in CI" acceptance criterion.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/cmd/vrsky-cli/**'
+      - 'src/pkg/crypto/**'
+      - 'src/pkg/objectstore/**'
+      - 'infrastructure/migrations/**'
+      - '.github/workflows/dr-drill.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/cmd/vrsky-cli/**'
+      - 'src/pkg/crypto/**'
+      - 'src/pkg/objectstore/**'
+      - 'infrastructure/migrations/**'
+      - '.github/workflows/dr-drill.yml'
+  workflow_dispatch:
+
+jobs:
+  restore-drill:
+    name: Backup + restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      # MinIO (S3) target
+      BACKUP_PROVIDER: s3
+      BACKUP_BUCKET: dr-drill
+      BACKUP_PREFIX: "mgmt-backups/"
+      BACKUP_ENDPOINT: "http://localhost:9000"
+      BACKUP_REGION: us-east-1
+      BACKUP_ACCESS_KEY_ID: minioadmin
+      BACKUP_SECRET_ACCESS_KEY: minioadmin
+      # Source DB to back up; target DB to restore into.
+      SOURCE_DB_URL: "postgres://postgres:postgres@localhost:5432/management_db?sslmode=disable"
+      TARGET_DB_URL: "postgres://postgres:postgres@localhost:5433/management_db?sslmode=disable"
+
+    services:
+      source-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: management_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      target-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: management_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: dr-drill
+        ports: ["9000:9000"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: src/go.sum
+
+      - name: Install postgres client + build vrsky-cli
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          cd src && go build -o /usr/local/bin/vrsky-cli ./cmd/vrsky-cli
+
+      - name: Wait for MinIO (+ bucket)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; exit 0; fi
+            echo "waiting for minio… [$i/30]"; sleep 2
+          done
+          echo "minio never became ready"; exit 1
+
+      - name: Seed the source database
+        run: |
+          export PGPASSWORD=postgres
+          # Minimal schema + sentinel rows (no migrate binary needed — the dump
+          # captures whatever's there; we just need recognisable data).
+          psql "$SOURCE_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE dr_sentinel (id serial PRIMARY KEY, name text NOT NULL);
+          INSERT INTO dr_sentinel (name) VALUES ('acme-tenant'), ('globex-tenant');
+          SQL
+
+      - name: Backup (source → MinIO)
+        run: |
+          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli backup --stamp drill
+          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli list
+
+      - name: Restore (MinIO → target)
+        run: |
+          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli restore \
+            --target-db-url "$TARGET_DB_URL" --confirm \
+            "mgmt-backups/management_db-drill.dump.gz.enc"
+
+      - name: Assert sentinel data restored
+        run: |
+          export PGPASSWORD=postgres
+          count=$(psql "$TARGET_DB_URL" -tAc "SELECT count(*) FROM dr_sentinel WHERE name LIKE '%-tenant'")
+          echo "restored sentinel rows: $count"
+          test "$count" = "2" || { echo "DR DRILL FAILED: expected 2 rows, got $count"; exit 1; }
+          echo "DR drill passed ✅"
