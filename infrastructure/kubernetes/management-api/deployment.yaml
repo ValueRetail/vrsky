@@ -80,7 +80,7 @@ spec:
         # Liveness probe - restart if API becomes unresponsive
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 3000
           initialDelaySeconds: 10
           periodSeconds: 15
@@ -90,7 +90,7 @@ spec:
         # Readiness probe - remove from load balancer if not ready
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /readyz
             port: 3000
           initialDelaySeconds: 5
           periodSeconds: 10

@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync/atomic"
@@ -223,6 +224,25 @@ func TestRun_ProductionPath(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("aux /probe = %d, want 204", resp.StatusCode)
+	}
+
+	// /readyz runs the runner's default upstream checks; NATS is connected so it
+	// must be 200 with the nats check reported ok.
+	rr, err := http.Get("http://127.0.0.1:18195/readyz")
+	if err != nil {
+		t.Fatalf("GET /readyz: %v", err)
+	}
+	var ready struct {
+		Status string            `json:"status"`
+		Checks map[string]string `json:"checks"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&ready)
+	_ = rr.Body.Close()
+	if rr.StatusCode != http.StatusOK {
+		t.Errorf("/readyz = %d, want 200", rr.StatusCode)
+	}
+	if ready.Checks["nats"] != "ok" {
+		t.Errorf("/readyz checks[nats] = %q, want ok", ready.Checks["nats"])
 	}
 
 	cancel()

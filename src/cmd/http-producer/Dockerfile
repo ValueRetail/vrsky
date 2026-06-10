@@ -25,6 +25,6 @@ EXPOSE 9400
 # Health is served by the SDK runner on HEALTH_PORT (default 8080); the SSE
 # stream lives on 9400.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD curl -f http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["./http-producer"]

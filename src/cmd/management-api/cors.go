@@ -71,7 +71,9 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 				strings.HasPrefix(r.URL.Path, "/api/v1/tenants") ||
 				r.URL.Path == "/api/v1/oauth/callback" ||
 				r.URL.Path == "/health" ||
-				r.URL.Path == "/ready" {
+				r.URL.Path == "/healthz" ||
+				r.URL.Path == "/ready" ||
+				r.URL.Path == "/readyz" {
 				next.ServeHTTP(w, r)
 				return
 			}

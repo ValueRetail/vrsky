@@ -23,6 +23,6 @@ COPY --from=builder /app/data-converter .
 EXPOSE 9600
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:9600/health || exit 1
+  CMD curl -f http://localhost:9600/healthz || exit 1
 
 ENTRYPOINT ["./data-converter"]

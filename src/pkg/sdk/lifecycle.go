@@ -183,14 +183,31 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		}
 	}
 
-	// Health/metrics server (skippable in tests).
-	var setReady func(bool)
+	// Health/metrics server (skippable in tests). Registers default upstream
+	// readiness checks (NATS connected, DB reachable) so /readyz reflects real
+	// dependency state; flipped not-ready on shutdown to drain (see below).
+	var (
+		setReady func(bool)
+		addCheck func(string, func(context.Context) error)
+		drainFn  func()
+	)
 	if !o.disableHealth {
 		hsrv := health.NewServer(health.Config{
 			Port:        envInt("HEALTH_PORT", 8080),
 			ComponentID: name,
 			Logger:      logger,
 		})
+		hsrv.AddReadinessCheck("nats", func(context.Context) error {
+			if nc == nil || !nc.IsConnected() {
+				return fmt.Errorf("nats not connected")
+			}
+			return nil
+		})
+		if db != nil {
+			hsrv.AddReadinessCheck("database", func(cctx context.Context) error {
+				return db.PingContext(cctx)
+			})
+		}
 		if err := hsrv.Start(ctx); err != nil {
 			return fmt.Errorf("start health server: %w", err)
 		}
@@ -200,13 +217,15 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 			_ = hsrv.Stop(sctx)
 		}()
 		setReady = hsrv.SetReady
+		addCheck = func(name string, fn func(context.Context) error) { hsrv.AddReadinessCheck(name, fn) }
+		drainFn = func() { hsrv.SetReady(false) }
 	}
 
 	res := &Resources{
 		Logger: logger,
 		DB:     db,
 		NATS:   nc,
-		Health: &healthToggle{setReady: setReady},
+		Health: &healthToggle{setReady: setReady, addCheck: addCheck},
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -229,10 +248,31 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	// Block until signalled (or parent ctx cancelled).
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	fromSignal := false
 	select {
 	case <-runCtx.Done():
 	case <-sigCh:
+		fromSignal = true
 		logger.Info("shutdown signal received")
+	}
+
+	// Drain (signal-initiated shutdown only — i.e. a real SIGTERM from a K8s
+	// rolling deploy; programmatic ctx-cancel is the caller's own lifecycle):
+	// flip readiness to not-ready so Kubernetes removes this pod from Service
+	// endpoints BEFORE we stop consuming — the key to losing zero in-flight
+	// messages. Wait a short pre-stop window for that de-registration to land.
+	if fromSignal && drainFn != nil {
+		drainFn()
+		if d := shutdownDrain(); d > 0 {
+			logger.Info("draining before stop", "drain", d)
+			t := time.NewTimer(d)
+			select {
+			case <-t.C:
+			case <-sigCh: // a second signal skips the drain wait
+				t.Stop()
+				logger.Info("second signal; skipping drain wait")
+			}
+		}
 	}
 
 	// Graceful stop: cancel work, then wait for stop() within the grace window.
@@ -352,6 +392,13 @@ func openDB(dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// shutdownDrain is how long the runner waits after flipping readiness to
+// not-ready (so K8s de-registers the pod) before it stops consuming. Tunable
+// via SHUTDOWN_DRAIN_SECONDS (default 5s; set 0 to disable, e.g. in tests).
+func shutdownDrain() time.Duration {
+	return time.Duration(envInt("SHUTDOWN_DRAIN_SECONDS", 5)) * time.Second
 }
 
 func envInt(key string, def int) int {
