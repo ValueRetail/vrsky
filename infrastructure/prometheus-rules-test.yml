@@ -1,0 +1,126 @@
+# promtool unit tests for the VRSky default alert ruleset (#84).
+# Run: docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool \
+#        prom/prometheus:latest test rules /cfg/prometheus-rules-test.yml
+# All 6 default rules are driven to FIRING — the "staged test" acceptance
+# criterion, deterministic and CI-runnable.
+
+rule_files:
+  - prometheus-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. PipelineDown — tenant publishes for an hour, then goes silent.
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_messages_published_total{tenant_id="t1"}'
+        values: '0+10x60 600x30' # rising 10/min for 60m, then flat (silent)
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: PipelineDown
+        exp_alerts:
+          - exp_labels:
+              alertname: PipelineDown
+              severity: critical
+              tenant_id: t1
+            exp_annotations:
+              summary: "no messages published for tenant t1 in 10+ minutes"
+              description: "The pipeline throughput for tenant t1 dropped to zero after being active in the previous hour."
+      # While still publishing, no alert.
+      - eval_time: 30m
+        alertname: PipelineDown
+        exp_alerts: []
+
+  # 2. DLQGrowing — dead-lettered messages start arriving at minute 10.
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_dlq_messages_total{pipeline_id="p1",worker="db-producer"}'
+        values: '0x10 0+1x20' # flat, then +1/min from minute 10
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: DLQGrowing
+        exp_alerts:
+          - exp_labels:
+              alertname: DLQGrowing
+              severity: warning
+              pipeline_id: p1
+            exp_annotations:
+              summary: "DLQ growing for pipeline p1"
+              description: "Messages moved to the dead-letter queue in the last 10 minutes — a producer is repeatedly failing to deliver."
+      - eval_time: 5m
+        alertname: DLQGrowing
+        exp_alerts: []
+
+  # 3. JetStreamLagHigh — consumer backlog sits above the threshold.
+  - interval: 1m
+    input_series:
+      - series: 'jetstream_consumer_num_pending{stream_name="VRSKY_DATA",consumer_name="db-producer"}'
+        values: '2000x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: JetStreamLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: JetStreamLagHigh
+              severity: warning
+              stream_name: VRSKY_DATA
+              consumer_name: db-producer
+            exp_annotations:
+              summary: "JetStream consumer db-producer lag above 1000"
+              description: "Pending (undelivered) messages for the consumer exceeded 1000 for 10 minutes — the worker is falling behind or down."
+
+  # 4. CertExpirySoon — cert expires ~7 days from t=0 (< 14-day threshold).
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_tls_cert_expiry_timestamp_seconds{path="/certs/tls.crt"}'
+        values: '604800x180' # NotAfter = 7 days (in seconds), constant
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CertExpirySoon
+        exp_alerts:
+          - exp_labels:
+              alertname: CertExpirySoon
+              severity: warning
+              path: /certs/tls.crt
+            exp_annotations:
+              summary: "TLS certificate /certs/tls.crt expires in under 14 days"
+              description: "Renew the certificate at /certs/tls.crt before it expires."
+
+  # 5. MgmtAPIErrorRate — half of all requests are 500s (50% > 5%).
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_mgmtapi_http_requests_total{method="GET",path="/api/v1/connections",status="500"}'
+        values: '0+10x30'
+      - series: 'vrsky_mgmtapi_http_requests_total{method="GET",path="/api/v1/connections",status="200"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MgmtAPIErrorRate
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtAPIErrorRate
+              severity: critical
+            exp_annotations:
+              summary: "management-api 5xx error rate above 5%"
+              description: "More than 5% of management API requests returned a server error over the last 5 minutes."
+
+  # 6. DiskUsageHigh — 90% full filesystem.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+        values: '10x30'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+        values: '100x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DiskUsageHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: DiskUsageHigh
+              severity: warning
+              fstype: ext4
+              mountpoint: /
+              device: /dev/sda1
+            exp_annotations:
+              summary: "disk usage above 80% on /"
+              description: "Filesystem / (/dev/sda1) is over 80% full."

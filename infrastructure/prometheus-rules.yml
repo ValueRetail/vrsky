@@ -1,0 +1,83 @@
+# VRSky default alert ruleset (Phase 3A — #84).
+#
+# Routing: alerts with a tenant_id label are dispatched by the management-api
+# to that tenant's notification targets; the rest are platform alerts and go
+# to targets flagged platform=true. Unit tests: prometheus-rules-test.yml
+# (promtool test rules).
+
+groups:
+  - name: vrsky-pipelines
+    rules:
+      # A tenant that was publishing messages in the previous hour has gone
+      # silent: rate is zero now AND there was activity in the hour before the
+      # current quiet window (so never-active tenants don't alert).
+      - alert: PipelineDown
+        expr: |
+          sum by (tenant_id) (rate(vrsky_messages_published_total[5m])) == 0
+          and
+          sum by (tenant_id) (increase(vrsky_messages_published_total[1h] offset 10m)) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "no messages published for tenant {{ $labels.tenant_id }} in 10+ minutes"
+          description: "The pipeline throughput for tenant {{ $labels.tenant_id }} dropped to zero after being active in the previous hour."
+
+      # Messages are being dead-lettered. pipeline_id is the connection id;
+      # the metric carries no tenant label, so this routes as a platform alert.
+      - alert: DLQGrowing
+        expr: sum by (pipeline_id) (increase(vrsky_dlq_messages_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DLQ growing for pipeline {{ $labels.pipeline_id }}"
+          description: "Messages moved to the dead-letter queue in the last 10 minutes — a producer is repeatedly failing to deliver."
+
+  - name: vrsky-platform
+    rules:
+      # JetStream consumer backlog (prometheus-nats-exporter -jsz).
+      - alert: JetStreamLagHigh
+        expr: jetstream_consumer_num_pending > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JetStream consumer {{ $labels.consumer_name }} lag above 1000"
+          description: "Pending (undelivered) messages for the consumer exceeded 1000 for 10 minutes — the worker is falling behind or down."
+
+      # TLS certificate within 14 days of expiry (management-api gauge from
+      # TLS_CERT_PATHS).
+      - alert: CertExpirySoon
+        expr: (vrsky_tls_cert_expiry_timestamp_seconds - time()) < 14 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate {{ $labels.path }} expires in under 14 days"
+          description: "Renew the certificate at {{ $labels.path }} before it expires."
+
+      # Management API 5xx ratio above 5% over 5 minutes.
+      - alert: MgmtAPIErrorRate
+        expr: |
+          sum(rate(vrsky_mgmtapi_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(vrsky_mgmtapi_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "management-api 5xx error rate above 5%"
+          description: "More than 5% of management API requests returned a server error over the last 5 minutes."
+
+      # Host filesystem above 80% (node-exporter; tmpfs/overlay excluded).
+      - alert: DiskUsageHigh
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+             / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "disk usage above 80% on {{ $labels.mountpoint }}"
+          description: "Filesystem {{ $labels.mountpoint }} ({{ $labels.device }}) is over 80% full."

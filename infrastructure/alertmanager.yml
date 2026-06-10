@@ -1,0 +1,28 @@
+# Alertmanager configuration (Phase 3A — #84).
+#
+# Single-receiver model: every alert is delivered to the management-api's
+# webhook endpoint, which looks up the owning tenant's notification targets
+# (or platform-flagged targets for tenant-less alerts) and fans out to
+# Slack / email / PagerDuty / webhooks. Per-tenant routing therefore lives in
+# the database, not in this file.
+#
+# The bearer token must match the management-api's ALERTS_WEBHOOK_TOKEN env.
+# The value below is the docker-compose dev default — override this file (and
+# the env) in production.
+
+route:
+  receiver: vrsky-management-api
+  group_by: ['alertname', 'tenant_id']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+
+receivers:
+  - name: vrsky-management-api
+    webhook_configs:
+      - url: http://management-api:3000/api/v1/alerts/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: dev-alerts-webhook-token

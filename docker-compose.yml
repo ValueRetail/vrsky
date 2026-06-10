@@ -106,12 +106,59 @@ services:
       - "--storage.tsdb.path=/prometheus"
     volumes:
       - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml:ro
       - prometheus-data:/prometheus
     networks:
       - vrsky-network
     depends_on:
       - postgres-consumer
       - postgres-producer
+    restart: unless-stopped
+
+  # Alertmanager (#84) — routes every alert to the management-api's webhook
+  # receiver, which dispatches to per-tenant notification targets. UI on 9093.
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: vrsky-alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./infrastructure/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # NATS metrics exporter (#84) — exposes JetStream consumer lag for the
+  # JetStreamLagHigh alert. Scraped in-network at nats-exporter:7777.
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter:latest
+    container_name: vrsky-nats-exporter
+    command: "-varz -jsz=all http://nats:8222"
+    networks:
+      - vrsky-network
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Host/filesystem metrics (#84) — powers the DiskUsageHigh alert. Scraped
+  # in-network at node-exporter:9100.
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: vrsky-node-exporter
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Local SMTP catcher (#84) — email notification targets deliver here in dev;
+  # browse received mail at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: vrsky-mailpit
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - vrsky-network
     restart: unless-stopped
 
   # PostgreSQL Consumer (CDC from source to NATS)
@@ -275,10 +322,19 @@ services:
       
       # Logging
       LOG_LEVEL: "info"
-      
+
       # Timeouts - Matches config.go
       MGMT_API_READ_TIMEOUT_SEC: "15"
       MGMT_API_WRITE_TIMEOUT_SEC: "30"
+
+      # Alerting (#84): bearer token Alertmanager presents on
+      # POST /api/v1/alerts/webhook (must match infrastructure/alertmanager.yml;
+      # dev default — override both in prod), and the platform SMTP identity
+      # email notification targets send through (mailpit in dev).
+      ALERTS_WEBHOOK_TOKEN: "${ALERTS_WEBHOOK_TOKEN:-dev-alerts-webhook-token}"
+      SMTP_HOST: "mailpit"
+      SMTP_PORT: "1025"
+      SMTP_FROM: "alerts@vrsky.local"
 
       # Master key for AES-256-GCM secret encryption (#66 / Phase 1A).
       # DEV-ONLY value baked into compose so a local stack starts without
