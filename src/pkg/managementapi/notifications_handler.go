@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,8 +85,8 @@ func validateTargetRequest(req *notificationTargetRequest, create bool) error {
 			return errors.New("pagerduty targets need the Events API routing key (secret)")
 		}
 	case "webhook":
-		if req.URL == "" || !strings.HasPrefix(req.URL, "http") {
-			return errors.New("webhook targets need a destination URL")
+		if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+			return errors.New("webhook targets need an http:// or https:// destination URL")
 		}
 	default:
 		return fmt.Errorf("unknown target type %q (slack | email | pagerduty | webhook)", req.Type)
@@ -193,9 +194,22 @@ func (h *Handler) UpdateNotificationTarget(w http.ResponseWriter, r *http.Reques
 		_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
 		return
 	}
+	// On a type change the stored secret belonged to the old type and no longer
+	// applies: require a fresh one for types that mandate it (slack/pagerduty),
+	// and drop the stale reference otherwise.
+	if existing.Type != req.Type && req.Secret == "" && (req.Type == "slack" || req.Type == "pagerduty") {
+		_ = writeError(w, http.StatusBadRequest, "ValidationError",
+			"switching this target to "+req.Type+" requires its secret", nil)
+		return
+	}
 	t := targetFromRequest(tenantID, &req)
 	t.ID = existing.ID
 	t.SecretID = existing.SecretID // kept unless a new secret re-encrypts below
+	if existing.Type != req.Type {
+		// Old secret is irrelevant to the new type; a provided secret will be
+		// stored fresh by the repo, otherwise the reference is dropped.
+		t.SecretID = ""
+	}
 	if req.Enabled == nil {
 		t.Enabled = existing.Enabled
 	}
@@ -299,10 +313,15 @@ func (h *Handler) AlertsWebhook(w http.ResponseWriter, r *http.Request) {
 		_ = writeError(w, http.StatusServiceUnavailable, "NotConfigured", "ALERTS_WEBHOOK_TOKEN is not set", nil)
 		return
 	}
-	if r.Header.Get("Authorization") != "Bearer "+token {
+	// Constant-time compare to avoid leaking the token via response timing.
+	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid alerts webhook token", nil)
 		return
 	}
+	// Cap the body — this endpoint is reachable by Alertmanager (and possibly
+	// the public internet) with only a bearer token, so bound the read.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload amWebhookPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		_ = writeError(w, http.StatusBadRequest, "InvalidJSON", err.Error(), nil)

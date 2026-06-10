@@ -159,11 +159,18 @@ func (r *PostgresRepository) UpdateNotificationTarget(ctx context.Context, t *No
 		if err != nil {
 			return fmt.Errorf("encrypt notification secret: %w", err)
 		}
-		id, err := createSecretTx(ctx, tx, t.TenantID, notificationSecretName(t.Name), ct)
-		if err != nil {
-			return fmt.Errorf("persist notification secret: %w", err)
+		if t.SecretID != "" {
+			// Rotate in place (same reference) — avoids orphaning secrets rows.
+			if err := updateSecretCiphertextTx(ctx, tx, t.TenantID, t.SecretID, ct); err != nil {
+				return fmt.Errorf("rotate notification secret: %w", err)
+			}
+		} else {
+			id, err := createSecretTx(ctx, tx, t.TenantID, notificationSecretName(t.Name), ct)
+			if err != nil {
+				return fmt.Errorf("persist notification secret: %w", err)
+			}
+			t.SecretID = id
 		}
-		t.SecretID = id
 	}
 
 	var secretID sql.NullString

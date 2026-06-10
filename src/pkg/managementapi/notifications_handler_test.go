@@ -114,6 +114,23 @@ func TestUpdateNotificationTarget_KeepsSecretWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestUpdateNotificationTarget_TypeChangeRequiresSecret(t *testing.T) {
+	handler, _ := setupTestHandler()
+	created := createTargetForTest(t, handler, "tenant-1", map[string]interface{}{
+		"name": "mail", "type": "email", "email": "ops@a.com",
+	})
+	// email → slack with no secret must be rejected (the old type had none).
+	body, _ := json.Marshal(map[string]interface{}{"name": "mail", "type": "slack"})
+	r := httptest.NewRequest("PUT", "/api/v1/notifications/targets/"+created.ID, bytes.NewReader(body)).
+		WithContext(contextWithTenant("tenant-1"))
+	r.SetPathValue("id", created.ID)
+	w := httptest.NewRecorder()
+	handler.UpdateNotificationTarget(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("email→slack without secret: status=%d, want 400 (body=%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestAlertsWebhook_AuthAndDispatch(t *testing.T) {
 	t.Setenv("ALERTS_WEBHOOK_TOKEN", "tok-123")
 	handler, _ := setupTestHandler()
