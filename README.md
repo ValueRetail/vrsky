@@ -16,7 +16,7 @@ VRSky is an integration platform as a service (iPaaS) that revolutionizes how or
 - **Reference-Based Messaging**: Large payloads stored efficiently in object storage, with NATS carrying lightweight references
 - **Multi-Tenant with Collaboration**: Strong isolation with controlled cross-tenant data sharing for B2B scenarios
 - **Marketplace Economy**: Developers can publish and monetize connectors, creating a vibrant ecosystem
-- **Massive Scalability**: Built on Go and NATS to handle millions of messages per day with sub-100ms latency
+- **Measured Throughput**: Go + NATS, **measured at ~15,000 msg/s sustained end-to-end on a single dev host (p99 ≈ 20 ms, zero loss)** — over a billion messages/day with sub-100 ms latency, with headroom to scale out horizontally. See [docs/LOAD.md](docs/LOAD.md) for the numbers and how to reproduce them.
 
 ## Architecture Philosophy
 

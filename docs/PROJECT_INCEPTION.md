@@ -215,7 +215,7 @@ Based on the requirements above, 17 comprehensive research tasks were created an
 
 The VRSky platform will be considered successful when it achieves:
 
-1. **Scalability**: Handle millions of messages per day with sub-100ms p99 latency
+1. **Scalability**: Handle millions of messages per day with sub-100ms p99 latency — _validated_: ~15,000 msg/s sustained end-to-end at p99 ≈ 20 ms on a single dev host (see [LOAD.md](LOAD.md))
 2. **Developer Experience**: New developers can build their first integration in <10 minutes
 3. **Marketplace Adoption**: Thriving ecosystem of third-party connectors
 4. **Multi-Tenancy**: Support 1000+ tenants with strong isolation
