@@ -807,26 +807,45 @@ func (pi *PostgresInput) flushBatch() {
 		pi.batchStartTime = time.Time{} // Reset
 	}
 
+	published := 0
 	for _, env := range pi.pendingBatch {
-		select {
-		case pi.messages <- env:
-			// Published to channel, attempt NATS publish
-			if pi.natsConn != nil {
-				if payload, err := json.Marshal(env); err == nil {
-					if err := pi.natsConn.Publish(pi.natsSubject, payload); err != nil {
-						pi.logger.Error("Failed to publish to NATS", "error", err)
-					}
+		// Stop publishing promptly on shutdown — but break (not return) so the
+		// cleanup below still runs and we don't leave stale buffers/timers/gauge.
+		if pi.ctx.Err() != nil {
+			break
+		}
+
+		// NATS is this worker's durable output path — publish unconditionally.
+		if pi.natsConn != nil {
+			if payload, err := json.Marshal(env); err == nil {
+				if err := pi.natsConn.Publish(pi.natsSubject, payload); err != nil {
+					pi.logger.Error("Failed to publish to NATS", "error", err)
 				}
 			}
-		case <-pi.ctx.Done():
-			return
 		}
+
+		// Best-effort hand-off to the in-process Read() channel. This is a
+		// NON-BLOCKING offer on purpose: nothing drains pi.messages in the
+		// standalone consumer (main.go never calls Read), so a blocking send
+		// here wedged the whole poll goroutine the moment the buffer filled —
+		// the bug that froze CDC capture after the first batch (#116). A reader,
+		// when wired, still receives envelopes; without one we skip the channel
+		// (NATS already has the data) rather than deadlock capture.
+		select {
+		case pi.messages <- env:
+		default:
+		}
+		published++
 	}
 
-	// Record batch published metric
-	pi.metrics.BatchesPublishedTotal.Inc()
+	// Only count a batch as published when we emitted all of it (a shutdown
+	// break leaves a partial batch — don't report that as a full publish).
+	if published == len(pi.pendingBatch) {
+		pi.metrics.BatchesPublishedTotal.Inc()
+	}
 
-	// Update pending batch size gauge
+	// Always clear pending state — even when interrupted by shutdown — so we
+	// don't leak buffered envelopes/timers or leave the gauge reading stale.
 	pi.metrics.PendingBatchSizeGauge.Set(0)
 
 	pi.pendingBatch = nil

@@ -852,6 +852,94 @@ func TestRead_ConsumerClosed(t *testing.T) {
 	}
 }
 
+// TestFlushBatch_DoesNotBlockWithoutReader is the regression test for #116:
+// flushBatch must not wedge when more than cap(pi.messages) envelopes are
+// flushed and nothing is draining the channel (the standalone consumer never
+// calls Read). Before the fix the channel send blocked once the buffer filled,
+// freezing the poll goroutine after the first batch.
+func TestFlushBatch_DoesNotBlockWithoutReader(t *testing.T) {
+	os.Setenv("POSTGRES_INPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_INPUT_DATABASE", "source_db")
+	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
+
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresInput() error = %v", err)
+	}
+	pi.ctx, pi.cancel = context.WithCancel(context.Background())
+	pi.natsConn = nil // no NATS in this unit test; exercise only the channel path
+
+	// Far more envelopes than the channel buffer (cap 100), with NO reader.
+	const n = 250
+	for i := 0; i < n; i++ {
+		e := envelope.New()
+		e.ID = fmt.Sprintf("e-%d", i)
+		pi.pendingBatch = append(pi.pendingBatch, e)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		pi.mu.Lock()
+		pi.flushBatch()
+		pi.mu.Unlock()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// good — returned without blocking
+	case <-time.After(5 * time.Second):
+		t.Fatal("flushBatch blocked with no channel reader (regression #116)")
+	}
+
+	pi.mu.Lock()
+	remaining := len(pi.pendingBatch)
+	pi.mu.Unlock()
+	if remaining != 0 {
+		t.Errorf("pendingBatch not cleared after flush: %d remaining", remaining)
+	}
+}
+
+// TestFlushBatch_ClearsStateOnShutdown verifies that when the context is already
+// cancelled, flushBatch still clears the pending batch and timer instead of
+// returning early and leaking stale state (Copilot review on #117).
+func TestFlushBatch_ClearsStateOnShutdown(t *testing.T) {
+	os.Setenv("POSTGRES_INPUT_PASSWORD", "password")
+	os.Setenv("POSTGRES_INPUT_DATABASE", "source_db")
+	defer os.Unsetenv("POSTGRES_INPUT_PASSWORD")
+	defer os.Unsetenv("POSTGRES_INPUT_DATABASE")
+
+	pi, err := NewPostgresInput(slog.Default(), prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("NewPostgresInput() error = %v", err)
+	}
+	pi.ctx, pi.cancel = context.WithCancel(context.Background())
+	pi.natsConn = nil
+	pi.cancel() // already shutting down
+
+	for i := 0; i < 10; i++ {
+		e := envelope.New()
+		e.ID = fmt.Sprintf("e-%d", i)
+		pi.pendingBatch = append(pi.pendingBatch, e)
+	}
+	// A pending batch timer should also be stopped/cleared by flush.
+	pi.batchTimer = time.AfterFunc(time.Hour, func() {})
+
+	pi.mu.Lock()
+	pi.flushBatch()
+	pendingLeft := len(pi.pendingBatch)
+	timer := pi.batchTimer
+	pi.mu.Unlock()
+
+	if pendingLeft != 0 {
+		t.Errorf("pendingBatch not cleared on shutdown flush: %d remaining", pendingLeft)
+	}
+	if timer != nil {
+		t.Error("batchTimer not cleared on shutdown flush")
+	}
+}
+
 // TestCreateEnvelopeFromWAL_EnvelopeID tests envelope ID generation
 func TestCreateEnvelopeFromWAL_EnvelopeID(t *testing.T) {
 	os.Setenv("POSTGRES_INPUT_PASSWORD", "password")
