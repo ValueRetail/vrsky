@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/health"
+	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
@@ -338,6 +338,9 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 		// Continue the trace from the producer that published this message; the
 		// per-stage span both links the chain and times this worker's handling.
 		ctx = tracing.ExtractNATS(ctx, msg.Header)
+		// Enrich the context so every log emitted while handling this message
+		// carries tenant_id / pipeline_id / connection_id (+ trace_id) (#91).
+		ctx = logging.ContextWith(ctx, env.TenantID, env.IntegrationID)
 		ctx, span := tracing.Tracer("sdk").Start(ctx, "consume "+durable,
 			trace.WithSpanKind(trace.SpanKindConsumer),
 			trace.WithAttributes(
@@ -383,19 +386,10 @@ func republish(ctx context.Context, pub *messaging.Publisher, env *envelope.Enve
 // --- env / wiring helpers ---
 
 func newLogger(name string) *slog.Logger {
-	var level slog.Level
-	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn", "warning":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})).
-		With("service", name)
+	// Structured JSON to stdout with the platform's standard fields (#91); the
+	// context-aware handler stamps trace_id/tenant_id/pipeline_id/connection_id
+	// when the call uses a ctx from logging.ContextWith / carrying a span.
+	return logging.New(name)
 }
 
 func connectNATS(logger *slog.Logger) (*nats.Conn, error) {

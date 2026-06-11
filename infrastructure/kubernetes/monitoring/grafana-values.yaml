@@ -45,6 +45,22 @@ datasources:
         jsonData:
           tracesToMetrics:
             datasourceUid: prometheus
+          tracesToLogsV2:
+            datasourceUid: loki
+      # Centralized logging (#91) — Loki, fed by the Promtail DaemonSet.
+      # See infrastructure/kubernetes/monitoring/loki-promtail.yaml.
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://loki.vrsky-monitoring.svc.cluster.local:3100
+        access: proxy
+        jsonData:
+          derivedFields:
+            - name: trace_id
+              matcherType: label
+              matcherRegex: trace_id
+              datasourceUid: tempo
+              url: "$${__value.raw}"
 
 # Dashboard providers
 dashboardProviders:

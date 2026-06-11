@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,14 +25,20 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
 func main() {
-	// Setup logging
-	logger := log.New(os.Stdout, "[MGMT-API] ", log.LstdFlags|log.Lshortfile)
+	// Structured JSON logging (#91): back the existing *log.Logger threading
+	// with a slog JSON handler so every log.Printf/Fatalf call site emits
+	// JSON tagged service=management-api (and trace_id via the context handler
+	// where a ctx is available), shippable to Loki. The HTTP access log is
+	// fully structured separately in LoggingMiddleware.
+	appLog := logging.New("management-api")
+	logger := slog.NewLogLogger(appLog.Handler(), slog.LevelInfo)
 
 	// Load configuration
 	config := LoadConfig()
@@ -344,7 +351,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
 	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = MetricsMiddleware(handler)
-	handler = LoggingMiddleware(logger)(handler)
+	handler = LoggingMiddleware(logging.New("management-api"))(handler)
 	// Outermost: start/continue the trace for every inbound API request (no-op
 	// when tracing is disabled).
 	handler = otelhttp.NewHandler(handler, "management-api")

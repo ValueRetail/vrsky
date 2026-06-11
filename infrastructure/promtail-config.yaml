@@ -1,0 +1,53 @@
+# Promtail config for the local VRSky stack (Phase 3H, #91): discover compose
+# containers via the Docker socket, parse our JSON log lines, and promote the
+# standard fields to Loki labels so {pipeline_id="abc-123"} works across
+# services. (Promtail is in maintenance mode upstream; Grafana Alloy is the
+# longer-term replacement — see docs/OBSERVABILITY.md.)
+server:
+  http_listen_port: 9080
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: vrsky-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+    relabel_configs:
+      # Keep only our containers (compose names are vrsky-*).
+      - source_labels: [__meta_docker_container_name]
+        regex: "/?(vrsky-.*)"
+        target_label: container
+        replacement: "$1"
+      - source_labels: [__meta_docker_container_name]
+        regex: "/?vrsky-.*"
+        action: keep
+    pipeline_stages:
+      # App logs are JSON (pkg/logging); pull the standard fields out...
+      - json:
+          expressions:
+            service: service
+            level: level
+            tenant_id: tenant_id
+            pipeline_id: pipeline_id
+            connection_id: connection_id
+            trace_id: trace_id
+      # In VRSky the connection IS the pipeline. Workers log connection_id on
+      # every pipeline line; backfill pipeline_id from it when not set explicitly
+      # so {pipeline_id="…"} matches every service touching that pipeline.
+      - template:
+          source: pipeline_id
+          template: '{{ if .pipeline_id }}{{ .pipeline_id }}{{ else }}{{ .connection_id }}{{ end }}'
+      # Promote the low-cardinality fields to labels. trace_id is high-cardinality
+      # so it stays a field (Grafana derivedFields → Tempo), not a label.
+      - labels:
+          service:
+          level:
+          tenant_id:
+          pipeline_id:
+          connection_id:

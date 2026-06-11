@@ -1,0 +1,56 @@
+{
+  "uid": "vrsky-logs",
+  "title": "VRSky — Logs",
+  "tags": ["vrsky", "logs", "loki"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "pipeline_id",
+        "label": "Pipeline",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": { "label": "pipeline_id", "stream": "{service=~\".+\"}", "type": 1 },
+        "refresh": 2,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Logs for pipeline $pipeline_id (all services)",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 0 },
+      "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none" },
+      "targets": [
+        { "refId": "A", "expr": "{pipeline_id=\"$pipeline_id\"}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Errors per tenant per hour",
+      "type": "timeseries",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (tenant_id) (count_over_time({level=\"error\"}[1h]))" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Recent errors (all services)",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "options": { "showTime": true, "wrapLogMessage": true },
+      "targets": [
+        { "refId": "A", "expr": "{level=\"error\"}" }
+      ]
+    }
+  ]
+}
