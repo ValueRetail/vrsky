@@ -10,7 +10,7 @@
 
 VRSky requires a messaging infrastructure that supports:
 
-- High throughput (millions of messages per day)
+- High throughput (measured at ~15,000 msg/s sustained end-to-end on a single dev host — see [LOAD.md](LOAD.md))
 - Multi-tenant isolation
 - Ephemeral message transport (no long-term persistence in core platform)
 - Reference-based messaging for large payloads
