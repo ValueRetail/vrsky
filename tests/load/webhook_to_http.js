@@ -1,6 +1,6 @@
 // Flagship load scenario: webhook ingress → NATS → http-producer → httpbin.
 //
-// k6 drives a constant arrival rate of signed-shaped JSON POSTs at the
+// k6 drives a constant arrival rate of schema-shaped JSON POSTs at the
 // webhook-consumer's /webhook/{connectionId} ingress. Each accepted request
 // (HTTP 202) publishes one message onto NATS, which the http-producer delivers
 // to the sink. k6 measures ingress accept latency (http_req_duration) and the
@@ -16,6 +16,7 @@
 //   MAX_VUS          VU ceiling                     (default 300)
 //   P99_CEILING_MS   if >0, fail the run when p99 exceeds it (CI guard)
 //   MAX_FAILED_RATE  allowed http_req_failed rate   (default 0.01)
+//   MIN_RATE         if >0, fail when sustained req/s drops below it (CI guard)
 import http from 'k6/http';
 import { check } from 'k6';
 
@@ -26,12 +27,22 @@ const PREALLOC = parseInt(__ENV.PREALLOC_VUS || '50', 10);
 const MAX_VUS = parseInt(__ENV.MAX_VUS || '300', 10);
 const P99_CEIL = parseInt(__ENV.P99_CEILING_MS || '0', 10);
 const MAX_FAILED = __ENV.MAX_FAILED_RATE || '0.01';
+const MIN_RATE = parseInt(__ENV.MIN_RATE || '0', 10);
 
 const thresholds = {
   http_req_failed: [`rate<${MAX_FAILED}`],
+  // http_req_failed only catches transport-level errors; a non-202 response
+  // (e.g. the pipeline isn't running) is a 4xx/5xx that passes that check but
+  // fails our explicit 202 check. Fail the run if checks aren't (near) perfect.
+  checks: ['rate>0.99'],
 };
 if (P99_CEIL > 0) {
   thresholds.http_req_duration = [`p(99)<${P99_CEIL}`];
+}
+if (MIN_RATE > 0) {
+  // Catch a severe throughput regression: sustained request rate must hold a
+  // floor (set well below the measured baseline so normal variance doesn't flake).
+  thresholds.http_reqs = [`rate>${MIN_RATE}`];
 }
 
 export const options = {

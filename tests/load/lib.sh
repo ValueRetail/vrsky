@@ -59,21 +59,43 @@ prom_value() {
 # bootstrap_auth — ensure the load-test user exists + is verified, log in,
 # persist the session cookie to COOKIE_JAR, and echo the tenant id on stdout.
 bootstrap_auth() {
-  need curl; need jq; need docker
+  need curl; need jq
   rm -f "$COOKIE_JAR"
   # Register is best-effort: a duplicate email just 4xxs, which is fine on re-run.
   curl -s -X POST "$MGMT_API/api/v1/auth/register" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":\"$LOAD_EMAIL\",\"password\":\"$LOAD_PASSWORD\",\"full_name\":\"$LOAD_FULLNAME\"}" >/dev/null 2>&1 || true
-  # No mail server in the load stack — mark the address verified directly.
-  docker exec "$MGMT_DB_CONTAINER" psql -U "$MGMT_DB_USER" -d "$MGMT_DB_NAME" -q \
-    -c "UPDATE users SET email_verified=true, email_verified_at=now(), status='active' WHERE email='$LOAD_EMAIL';" >/dev/null 2>&1
+
+  # Try logging in first. This is all that's needed when the address is already
+  # verified (re-runs, or a server that doesn't gate login on verification).
   local login
-  login=$(curl -s -c "$COOKIE_JAR" -X POST "$MGMT_API/api/v1/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$LOAD_EMAIL\",\"password\":\"$LOAD_PASSWORD\"}")
+  login=$(_login)
+  if ! echo "$login" | jq -e '.success == true' >/dev/null 2>&1; then
+    # Login failed — most likely the address isn't verified and the load stack
+    # has no mail server. As a best-effort *fallback only*, flip email_verified
+    # directly in the management DB (needs docker access to that container) and
+    # retry. Doing this only on failure keeps the harness usable against a
+    # reachable MGMT_API whose DB container isn't local. (Local/CI dev only.)
+    if command -v docker >/dev/null 2>&1; then
+      docker exec "$MGMT_DB_CONTAINER" psql -U "$MGMT_DB_USER" -d "$MGMT_DB_NAME" -q \
+        -c "UPDATE users SET email_verified=true, email_verified_at=now(), status='active' WHERE email='$LOAD_EMAIL';" >/dev/null 2>&1 || true
+      login=$(_login)
+    fi
+  fi
   echo "$login" | jq -e '.success == true' >/dev/null 2>&1 || { err "login failed: $login"; return 1; }
-  curl -s -b "$COOKIE_JAR" "$MGMT_API/api/v1/tenants" | jq -r '.tenants[0].id'
+
+  local tid
+  tid=$(curl -s -b "$COOKIE_JAR" "$MGMT_API/api/v1/tenants" | jq -r '.tenants[0].id // empty')
+  [ -n "$tid" ] || { err "no tenant found for load-test user $LOAD_EMAIL"; return 1; }
+  echo "$tid"
+}
+
+# _login posts the load-test credentials and echoes the raw login response,
+# persisting the session cookie to COOKIE_JAR.
+_login() {
+  curl -s -c "$COOKIE_JAR" -X POST "$MGMT_API/api/v1/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$LOAD_EMAIL\",\"password\":\"$LOAD_PASSWORD\"}"
 }
 
 # deploy_pipeline <tenant_id> <name> <nodes_json> <edges_json> — create + start a

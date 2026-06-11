@@ -32,6 +32,12 @@ if [ -n "$RATE" ] && [ -n "$DURATION" ]; then
   ROWS=$((RATE * secs))
 fi
 
+# $TABLE is interpolated into SQL below, so it must be a bare identifier — reject
+# anything else (fail fast rather than emit broken/injectable SQL).
+if ! printf '%s' "$TABLE" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
+  err "invalid --table '$TABLE': must be a SQL identifier ([A-Za-z_][A-Za-z0-9_]*)"; exit 1
+fi
+
 psql_src() { docker exec "$SRC_DB_CONTAINER" psql -U "$SRC_DB_USER" -d "$SRC_DB_NAME" -q "$@"; }
 
 need curl; need jq; need docker

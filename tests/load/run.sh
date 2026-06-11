@@ -86,6 +86,8 @@ run_webhook_to_http() {
     -e WEBHOOK_URL="$WEBHOOK_INGRESS_INTERNAL/webhook/$cid" \
     -e RATE="$RATE" -e DURATION="$DURATION" \
     -e P99_CEILING_MS="$P99_CEILING" \
+    -e MIN_RATE="${MIN_RATE:-0}" \
+    -e MAX_FAILED_RATE="${MAX_FAILED_RATE:-0.01}" \
     -v "$outdir:/out" \
     -i "$K6_IMAGE" run - < "$HERE/webhook_to_http.js"
   local k6_rc=$?
