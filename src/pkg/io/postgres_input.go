@@ -807,10 +807,12 @@ func (pi *PostgresInput) flushBatch() {
 		pi.batchStartTime = time.Time{} // Reset
 	}
 
+	published := 0
 	for _, env := range pi.pendingBatch {
-		// Honor shutdown promptly.
+		// Stop publishing promptly on shutdown — but break (not return) so the
+		// cleanup below still runs and we don't leave stale buffers/timers/gauge.
 		if pi.ctx.Err() != nil {
-			return
+			break
 		}
 
 		// NATS is this worker's durable output path — publish unconditionally.
@@ -833,12 +835,17 @@ func (pi *PostgresInput) flushBatch() {
 		case pi.messages <- env:
 		default:
 		}
+		published++
 	}
 
-	// Record batch published metric
-	pi.metrics.BatchesPublishedTotal.Inc()
+	// Only count a batch as published when we emitted all of it (a shutdown
+	// break leaves a partial batch — don't report that as a full publish).
+	if published == len(pi.pendingBatch) {
+		pi.metrics.BatchesPublishedTotal.Inc()
+	}
 
-	// Update pending batch size gauge
+	// Always clear pending state — even when interrupted by shutdown — so we
+	// don't leak buffered envelopes/timers or leave the gauge reading stale.
 	pi.metrics.PendingBatchSizeGauge.Set(0)
 
 	pi.pendingBatch = nil
