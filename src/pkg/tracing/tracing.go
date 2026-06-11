@@ -4,8 +4,9 @@
 // messaging layers use the helpers here so every connector is traced without
 // per-worker boilerplate.
 //
-// Tracing is OFF unless OTEL_EXPORTER_OTLP_ENDPOINT is set (or
-// OTEL_TRACES_ENABLED=true). When off, Init installs no exporter — the global
+// Tracing is OFF unless an OTLP endpoint is configured
+// (OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), or
+// OTEL_TRACES_ENABLED=true. When off, Init installs no exporter — the global
 // provider stays OTel's no-op — so unit tests, the load harness, and bare
 // `go run` pay nothing. The W3C propagator is always installed so trace context
 // is still carried through a partially-enabled fleet.

@@ -54,7 +54,12 @@ func TestInitNoopWhenDisabled(t *testing.T) {
 // a nats.Header via the W3C propagator — the mechanism that links a producer
 // span to the downstream consumer span across the NATS hop.
 func TestInjectExtractRoundTrip(t *testing.T) {
-	// Init (disabled) installs the propagator, which is all this test needs.
+	// Keep the test self-contained: disable export regardless of the shell's
+	// OTEL_* vars. Init (disabled) still installs the propagator, which is all
+	// this test needs.
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+	t.Setenv("OTEL_TRACES_ENABLED", "false")
 	if _, err := Init(context.Background(), "test-svc"); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}

@@ -64,7 +64,8 @@ Context is carried with the standard **W3C Trace Context** (`traceparent` /
 
 | Env var | Purpose | Default |
 |---------|---------|---------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector OTLP/HTTP base URL. **Tracing is off unless this (or `OTEL_TRACES_ENABLED=true`) is set.** | unset (off) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector OTLP/HTTP base URL (signals get `/v1/traces` appended). **Tracing is off unless this, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_TRACES_ENABLED=true` is set.** | unset (off) |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Traces-only OTLP endpoint (full URL); overrides the base endpoint for traces and also enables tracing. | unset |
 | `OTEL_SERVICE_NAME` | `service.name` on spans | the worker name |
 | `OTEL_TRACES_ENABLED` | Force on (`true`) / off (`false`) regardless of endpoint | unset |
 

@@ -24,8 +24,12 @@ func (c natsHeaderCarrier) Keys() []string {
 }
 
 // InjectNATS writes the active span's W3C trace context into h so a downstream
-// consumer can continue the trace. h must be non-nil.
+// consumer can continue the trace. A nil header is a no-op (the propagator would
+// panic writing into a nil map), mirroring ExtractNATS's nil handling.
 func InjectNATS(ctx context.Context, h nats.Header) {
+	if h == nil {
+		return
+	}
 	otel.GetTextMapPropagator().Inject(ctx, natsHeaderCarrier(h))
 }
 
