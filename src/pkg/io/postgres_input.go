@@ -808,18 +808,30 @@ func (pi *PostgresInput) flushBatch() {
 	}
 
 	for _, env := range pi.pendingBatch {
-		select {
-		case pi.messages <- env:
-			// Published to channel, attempt NATS publish
-			if pi.natsConn != nil {
-				if payload, err := json.Marshal(env); err == nil {
-					if err := pi.natsConn.Publish(pi.natsSubject, payload); err != nil {
-						pi.logger.Error("Failed to publish to NATS", "error", err)
-					}
+		// Honor shutdown promptly.
+		if pi.ctx.Err() != nil {
+			return
+		}
+
+		// NATS is this worker's durable output path — publish unconditionally.
+		if pi.natsConn != nil {
+			if payload, err := json.Marshal(env); err == nil {
+				if err := pi.natsConn.Publish(pi.natsSubject, payload); err != nil {
+					pi.logger.Error("Failed to publish to NATS", "error", err)
 				}
 			}
-		case <-pi.ctx.Done():
-			return
+		}
+
+		// Best-effort hand-off to the in-process Read() channel. This is a
+		// NON-BLOCKING offer on purpose: nothing drains pi.messages in the
+		// standalone consumer (main.go never calls Read), so a blocking send
+		// here wedged the whole poll goroutine the moment the buffer filled —
+		// the bug that froze CDC capture after the first batch (#116). A reader,
+		// when wired, still receives envelopes; without one we skip the channel
+		// (NATS already has the data) rather than deadlock capture.
+		select {
+		case pi.messages <- env:
+		default:
 		}
 	}
 
