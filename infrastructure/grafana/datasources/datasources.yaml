@@ -28,8 +28,11 @@ datasources:
       # trace_id is a log field (not a label); surface it as a clickable link
       # into Tempo so logs ↔ traces correlate both ways (#91 + #87).
       derivedFields:
+        # trace_id is a JSON field in the log line (not a Loki label — it's
+        # high-cardinality), so match it with a regex against the line and link
+        # the captured value to Tempo.
         - name: trace_id
-          matcherType: label
-          matcherRegex: trace_id
+          matcherType: regex
+          matcherRegex: '"trace_id":"(\w+)"'
           datasourceUid: tempo
           url: "$${__value.raw}"

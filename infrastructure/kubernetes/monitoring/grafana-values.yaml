@@ -56,9 +56,11 @@ datasources:
         access: proxy
         jsonData:
           derivedFields:
+            # trace_id is a JSON log field (not a Loki label), so match it with
+            # a regex against the line and link the captured value to Tempo.
             - name: trace_id
-              matcherType: label
-              matcherRegex: trace_id
+              matcherType: regex
+              matcherRegex: '"trace_id":"(\w+)"'
               datasourceUid: tempo
               url: "$${__value.raw}"
 

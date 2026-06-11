@@ -199,6 +199,6 @@ spec:
         - name: config
           configMap: { name: promtail-config }
         - name: run
-          hostPath: { path: /run/promtail }
+          hostPath: { path: /run/promtail, type: DirectoryOrCreate }
         - name: pods
           hostPath: { path: /var/log/pods }
