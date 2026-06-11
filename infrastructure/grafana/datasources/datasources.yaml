@@ -1,5 +1,5 @@
-# Grafana datasource provisioning for the local VRSky observability stack
-# (Phase 3D, #87): Tempo for traces + the existing Prometheus for metrics.
+# Grafana datasource provisioning for the local VRSky observability stack:
+# Tempo for traces (#87), Prometheus for metrics (#84), Loki for logs (#91).
 apiVersion: 1
 datasources:
   - name: Tempo
@@ -9,11 +9,30 @@ datasources:
     url: http://tempo:3200
     isDefault: true
     jsonData:
-      # Let trace spans link out to the matching Prometheus metrics.
+      # Let trace spans link out to the matching Prometheus metrics + Loki logs.
       tracesToMetrics:
         datasourceUid: prometheus
+      tracesToLogsV2:
+        datasourceUid: loki
   - name: Prometheus
     type: prometheus
     access: proxy
     uid: prometheus
     url: http://prometheus:9090
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    jsonData:
+      # trace_id is a log field (not a label); surface it as a clickable link
+      # into Tempo so logs ↔ traces correlate both ways (#91 + #87).
+      derivedFields:
+        # trace_id is a JSON field in the log line (not a Loki label — it's
+        # high-cardinality), so match it with a regex against the line and link
+        # the captured value to Tempo.
+        - name: trace_id
+          matcherType: regex
+          matcherRegex: '"trace_id":"(\w+)"'
+          datasourceUid: tempo
+          url: "$${__value.raw}"

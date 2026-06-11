@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -29,8 +29,10 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
-// LoggingMiddleware logs HTTP requests and responses
-func LoggingMiddleware(logger *log.Logger) func(http.Handler) http.Handler {
+// LoggingMiddleware logs HTTP requests as structured records. Using the
+// request context means each access log carries trace_id (from the otelhttp
+// span, #87) automatically; fields are promoted to Loki labels (#91).
+func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -41,15 +43,12 @@ func LoggingMiddleware(logger *log.Logger) func(http.Handler) http.Handler {
 			// Call next handler
 			next.ServeHTTP(rw, r)
 
-			// Log request details
-			duration := time.Since(start)
-			logger.Printf(
-				"%s %s %s %d %v",
-				r.Method,
-				r.RequestURI,
-				r.RemoteAddr,
-				rw.statusCode,
-				duration,
+			logger.InfoContext(r.Context(), "http request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
+				"status", rw.statusCode,
+				"duration_ms", time.Since(start).Milliseconds(),
 			)
 		})
 	}

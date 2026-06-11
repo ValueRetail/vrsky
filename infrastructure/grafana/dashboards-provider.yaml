@@ -1,0 +1,12 @@
+# Grafana dashboard provisioning (#91): load JSON dashboards from disk.
+apiVersion: 1
+providers:
+  - name: vrsky
+    orgId: 1
+    folder: VRSky
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

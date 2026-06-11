@@ -156,11 +156,44 @@ services:
       - "127.0.0.1:3001:3000"
     volumes:
       - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infrastructure/grafana/dashboards-provider.yaml:/etc/grafana/provisioning/dashboards/provider.yaml:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - vrsky-network
     depends_on:
       - tempo
       - prometheus
+      - loki
+    restart: unless-stopped
+
+  # --- Centralized logging (#91) -----------------------------------------
+  # Services log JSON to stdout; Promtail tails the containers, parses the JSON,
+  # promotes service/tenant_id/pipeline_id/connection_id/level to labels, and
+  # ships to Loki (7-day retention). Queryable in Grafana → Explore → Loki.
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: vrsky-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./infrastructure/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: vrsky-promtail
+    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    volumes:
+      - ./infrastructure/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - vrsky-network
+    depends_on:
+      - loki
     restart: unless-stopped
 
   # Alertmanager (#84) — routes every alert to the management-api's webhook
@@ -1091,6 +1124,8 @@ volumes:
   prometheus-data:
     driver: local
   tempo-data:
+    driver: local
+  loki-data:
     driver: local
   nats-jetstream:
     driver: local

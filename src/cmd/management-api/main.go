@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,33 +25,46 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
+// fatal logs a fatal startup error at ERROR level (so {level="error"} queries
+// and panels catch it) and exits. Used instead of log.Fatalf, whose records
+// would otherwise be tagged level=info by the slog-backed adapter.
+func fatal(log *slog.Logger, msg string, err error) {
+	log.Error(msg, "error", err)
+	os.Exit(1)
+}
+
 func main() {
-	// Setup logging
-	logger := log.New(os.Stdout, "[MGMT-API] ", log.LstdFlags|log.Lshortfile)
+	// Structured JSON logging (#91): back the existing *log.Logger threading
+	// with a slog JSON handler so every log.Printf/Fatalf call site emits
+	// JSON tagged service=management-api (and trace_id via the context handler
+	// where a ctx is available), shippable to Loki. The HTTP access log is
+	// fully structured separately in LoggingMiddleware.
+	appLog := logging.New("management-api")
+	logger := slog.NewLogLogger(appLog.Handler(), slog.LevelInfo)
 
 	// Load configuration
 	config := LoadConfig()
 	if err := config.Validate(); err != nil {
-		logger.Fatalf("Invalid configuration: %v", err)
+		fatal(appLog, "invalid configuration", err)
 	}
 
 	// Fail fast if the secrets master key is missing or malformed.
 	// All credential encrypt/decrypt operations require ENCRYPTION_KEY.
 	keyHex, err := crypto.Key()
 	if err != nil {
-		logger.Fatalf("ENCRYPTION_KEY is not configured: %v", err)
+		fatal(appLog, "ENCRYPTION_KEY is not configured", err)
 	}
 	// Warn loudly when the dev key is in use — easy to miss in a real
 	// deployment that copied docker-compose.yml as a starting point. The
 	// canonical dev key is the literal repeated nibbles "0123456789abcdef".
 	if keyHex == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
-		logger.Printf("WARNING: ENCRYPTION_KEY is the documented dev value. " +
-			"Generate a real key for any environment other than local development: openssl rand -hex 32")
+		appLog.Warn("ENCRYPTION_KEY is the documented dev value; generate a real key for any non-local environment (openssl rand -hex 32)")
 	}
 
 	logger.Printf("Starting %s v%s", config.ServiceName, config.Version)
@@ -58,7 +72,7 @@ func main() {
 
 	// Distributed tracing (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set).
 	if shutdownTracing, terr := tracing.Init(context.Background(), config.ServiceName); terr != nil {
-		logger.Printf("WARNING: tracing init failed; continuing without tracing: %v", terr)
+		appLog.Warn("tracing init failed; continuing without tracing", "error", terr)
 	} else {
 		defer func() {
 			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -70,14 +84,14 @@ func main() {
 	// Initialize database connection
 	db, err := initDatabase(config.DatabaseURL, logger)
 	if err != nil {
-		logger.Fatalf("Failed to initialize database: %v", err)
+		fatal(appLog, "failed to initialize database", err)
 	}
 	defer db.Close()
 
 	// Initialize NATS connection
 	nc, err := initNATS(config.NATSUrl, logger)
 	if err != nil {
-		logger.Fatalf("Failed to initialize NATS: %v", err)
+		fatal(appLog, "failed to initialize NATS", err)
 	}
 	defer nc.Close()
 
@@ -103,7 +117,7 @@ func main() {
 	select {
 	case err := <-serverErrs:
 		if err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("Server error: %v", err)
+			fatal(appLog, "server error", err)
 		}
 	case sig := <-sigChan:
 		logger.Printf("Received signal: %v, shutting down...", sig)
@@ -123,7 +137,7 @@ func main() {
 		defer cancel()
 
 		if err := server.Shutdown(ctx); err != nil {
-			logger.Printf("Error during shutdown: %v", err)
+			appLog.Error("error during shutdown", "error", err)
 		}
 
 		// Stop the tenant provisioner after the HTTP server has drained, so no
@@ -344,7 +358,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	handler = TenantIDMiddleware(config.TenantHeader)(handler)
 	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = MetricsMiddleware(handler)
-	handler = LoggingMiddleware(logger)(handler)
+	handler = LoggingMiddleware(logging.New("management-api"))(handler)
 	// Outermost: start/continue the trace for every inbound API request (no-op
 	// when tracing is disabled).
 	handler = otelhttp.NewHandler(handler, "management-api")
