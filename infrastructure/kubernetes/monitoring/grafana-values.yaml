@@ -35,6 +35,16 @@ datasources:
         isDefault: true
         jsonData:
           timeInterval: 30s
+      # Distributed tracing (#87) — Tempo, fed by the otel-collector
+      # (tail-sampling). See infrastructure/kubernetes/monitoring/otel-tracing.yaml.
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://tempo.vrsky-monitoring.svc.cluster.local:3200
+        access: proxy
+        jsonData:
+          tracesToMetrics:
+            datasourceUid: prometheus
 
 # Dashboard providers
 dashboardProviders:

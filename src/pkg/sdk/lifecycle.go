@@ -16,10 +16,15 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/health"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
 // shutdownGrace is how long the runner waits for in-flight work to finish on
@@ -147,6 +152,17 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		opt(&o)
 	}
 	logger := newLogger(name)
+
+	// Distributed tracing (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set).
+	if shutdownTracing, terr := tracing.Init(ctx, name); terr != nil {
+		logger.Warn("tracing init failed; continuing without tracing", "error", terr)
+	} else {
+		defer func() {
+			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer scancel()
+			_ = shutdownTracing(sctx)
+		}()
+	}
 
 	kit, ok := c.(kitAccess)
 	if !ok {
@@ -318,10 +334,28 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 			logger.Error("drop unparseable envelope", "subject", msg.Subject, "error", err)
 			return nil
 		}
+
+		// Continue the trace from the producer that published this message; the
+		// per-stage span both links the chain and times this worker's handling.
+		ctx = tracing.ExtractNATS(ctx, msg.Header)
+		ctx, span := tracing.Tracer("sdk").Start(ctx, "consume "+durable,
+			trace.WithSpanKind(trace.SpanKindConsumer),
+			trace.WithAttributes(
+				attribute.String("vrsky.worker", durable),
+				attribute.String("vrsky.tenant_id", env.TenantID),
+				attribute.String("vrsky.connection_id", env.IntegrationID),
+				attribute.String("vrsky.message_id", env.ID),
+				attribute.String("messaging.source", msg.Subject),
+			),
+		)
+		defer span.End()
+
 		derr := deliver(ctx, env)
 		if derr == nil {
 			return nil
 		}
+		span.RecordError(derr)
+		span.SetStatus(codes.Error, derr.Error())
 		if IsPermanent(derr) {
 			logger.Warn("permanent error; dropping message", "envelope_id", env.ID, "error", derr)
 			return nil // ack — poison message
@@ -426,7 +460,10 @@ func startAuxHTTP(routes []httpRoute, logger *slog.Logger) func() {
 	}
 	mux := http.NewServeMux()
 	for _, r := range routes {
-		mux.Handle(r.pattern, r.handler)
+		// Wrap each route so an inbound request (e.g. the webhook ingress or a
+		// file upload) starts/continues a trace; the SDK publish closure then
+		// hangs the producer span under it. No-op when tracing is disabled.
+		mux.Handle(r.pattern, otelhttp.NewHandler(r.handler, r.pattern))
 	}
 	srv := &http.Server{Addr: ":" + port, Handler: mux}
 	go func() {

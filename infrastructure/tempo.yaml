@@ -1,0 +1,28 @@
+# Minimal single-binary Grafana Tempo config for local tracing (Phase 3D, #87).
+# Receives OTLP from the otel-collector and stores traces on local disk. This is
+# a dev/compose setup — production Tempo uses object storage + a real
+# configuration (tracked with the rest of the monitoring stack in k8s).
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
