@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
@@ -193,7 +194,13 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return nil
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// otelhttp transport makes the outbound call a child span of the pipeline
+	// trace and injects traceparent into the external request. No-op when
+	// tracing is disabled.
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
 	buildAndSend := func(force bool) (*http.Response, error) {

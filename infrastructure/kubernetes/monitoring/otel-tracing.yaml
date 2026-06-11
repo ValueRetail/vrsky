@@ -1,0 +1,162 @@
+# Distributed tracing (#87): OpenTelemetry Collector (tail-sampling) + Tempo.
+# Services set OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.vrsky-monitoring:4318
+# and export every span; the collector keeps 100% of error traces + ~1% success
+# and forwards to Tempo, which Grafana reads (datasource in grafana-values.yaml).
+#
+# NOTE: this Tempo runs single-binary with an emptyDir for simplicity. For
+# production, back it with object storage and run the microservices mode.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: vrsky-monitoring
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      groupbytrace:
+        wait_duration: 10s
+      tail_sampling:
+        decision_wait: 12s
+        num_traces: 50000
+        policies:
+          - name: errors
+            type: status_code
+            status_code:
+              status_codes: [ERROR]
+          - name: success-sample
+            type: probabilistic
+            probabilistic:
+              sampling_percentage: 1
+      batch:
+        timeout: 5s
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.vrsky-monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [groupbytrace, tail_sampling, batch]
+          exporters: [otlp/tempo]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: vrsky-monitoring
+  labels: { app: otel-collector }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: otel-collector }
+  template:
+    metadata:
+      labels: { app: otel-collector }
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.103.1
+          args: ["--config=/etc/otel/otel-collector-config.yaml"]
+          ports:
+            - { containerPort: 4318, name: otlp-http }
+            - { containerPort: 4317, name: otlp-grpc }
+          volumeMounts:
+            - { name: config, mountPath: /etc/otel }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+      volumes:
+        - name: config
+          configMap: { name: otel-collector-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: vrsky-monitoring
+spec:
+  selector: { app: otel-collector }
+  ports:
+    - { name: otlp-http, port: 4318, targetPort: 4318 }
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: vrsky-monitoring
+  labels: { app: tempo }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tempo }
+  template:
+    metadata:
+      labels: { app: tempo }
+    spec:
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.5.0
+          args: ["-config.file=/etc/tempo/tempo.yaml"]
+          ports:
+            - { containerPort: 3200, name: http }
+            - { containerPort: 4317, name: otlp-grpc }
+          volumeMounts:
+            - { name: config, mountPath: /etc/tempo }
+            - { name: data, mountPath: /var/tempo }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+      volumes:
+        - name: config
+          configMap: { name: tempo-config }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: vrsky-monitoring
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+    ingester:
+      max_block_duration: 5m
+    compactor:
+      compaction:
+        block_retention: 24h
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/blocks
+        wal:
+          path: /var/tempo/wal
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: vrsky-monitoring
+spec:
+  selector: { app: tempo }
+  ports:
+    - { name: http, port: 3200, targetPort: 3200 }
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }

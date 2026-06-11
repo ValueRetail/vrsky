@@ -115,6 +115,54 @@ services:
       - postgres-producer
     restart: unless-stopped
 
+  # --- Distributed tracing (#87) -----------------------------------------
+  # Services export ALL spans to the collector (OTLP), which tail-samples
+  # (100% errors + 1% success) and forwards to Tempo; Grafana visualizes them.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.1
+    container_name: vrsky-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infrastructure/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318" # OTLP HTTP (host access for local tools)
+    networks:
+      - vrsky-network
+    depends_on:
+      - tempo
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    container_name: vrsky-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infrastructure/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Grafana for viewing traces (Tempo) + metrics (Prometheus). Anonymous admin
+  # for the local stack only. UI on host 3001 (3000 is the management-api).
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: vrsky-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - vrsky-network
+    depends_on:
+      - tempo
+      - prometheus
+    restart: unless-stopped
+
   # Alertmanager (#84) — routes every alert to the management-api's webhook
   # receiver, which dispatches to per-tenant notification targets. UI on 9093.
   alertmanager:
@@ -315,6 +363,10 @@ services:
       # NATS configuration - Matches config.go: MGMT_API_NATS_URL
       MGMT_API_NATS_URL: "nats://nats:4222"
       MGMT_API_NATS_PREFIX: "vrsky"
+
+      # Distributed tracing (#87): export to the collector for tail-sampling.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
+      OTEL_SERVICE_NAME: "management-api"
       
       # CORS configuration - Matches config.go: MGMT_API_CORS_ORIGINS
       MGMT_API_CORS_ORIGINS: "*"
@@ -443,6 +495,9 @@ services:
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
       # secrets (e.g. HMAC signing key from #67) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Distributed tracing (#87): export to the collector for tail-sampling.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
+      OTEL_SERVICE_NAME: "webhook-consumer"
     ports:
       - "127.0.0.1:9100:9100"
     depends_on:
@@ -473,6 +528,9 @@ services:
       # OAuth output (#97): resolve access tokens for nodes with auth_type=oauth.
       MGMT_API_URL: "http://management-api:3000"
       OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+      # Distributed tracing (#87): export to the collector for tail-sampling.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
+      OTEL_SERVICE_NAME: "http-producer"
     ports:
       - "127.0.0.1:9400:9400"
     depends_on:
@@ -527,6 +585,9 @@ services:
       LOG_LEVEL: "info"
       CONVERTER_PORT: "9600"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+      # Distributed tracing (#87): export to the collector for tail-sampling.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
+      OTEL_SERVICE_NAME: "data-converter"
     ports:
       - "127.0.0.1:9600:9600"
     depends_on:
@@ -976,6 +1037,9 @@ services:
       LOG_LEVEL: "info"
       FILTER_PORT: "9700"
       NATS_SUBSCRIPTION_TOPIC: "vrsky.data.*.pipeline.*"
+      # Distributed tracing (#87): export to the collector for tail-sampling.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
+      OTEL_SERVICE_NAME: "data-filter"
     ports:
       - "127.0.0.1:9700:9700"
     depends_on:
@@ -1025,6 +1089,8 @@ volumes:
   postgres-management-data:
     driver: local
   prometheus-data:
+    driver: local
+  tempo-data:
     driver: local
   nats-jetstream:
     driver: local

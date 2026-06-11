@@ -21,9 +21,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
+	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
 func main() {
@@ -52,6 +55,17 @@ func main() {
 
 	logger.Printf("Starting %s v%s", config.ServiceName, config.Version)
 	logger.Printf("Listening on %s", config.ListenAddr)
+
+	// Distributed tracing (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set).
+	if shutdownTracing, terr := tracing.Init(context.Background(), config.ServiceName); terr != nil {
+		logger.Printf("WARNING: tracing init failed; continuing without tracing: %v", terr)
+	} else {
+		defer func() {
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = shutdownTracing(sctx)
+		}()
+	}
 
 	// Initialize database connection
 	db, err := initDatabase(config.DatabaseURL, logger)
@@ -331,6 +345,9 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	handler = CORSMiddleware(config.CORSOrigins, config.TenantHeader)(handler)
 	handler = MetricsMiddleware(handler)
 	handler = LoggingMiddleware(logger)(handler)
+	// Outermost: start/continue the trace for every inbound API request (no-op
+	// when tracing is disabled).
+	handler = otelhttp.NewHandler(handler, "management-api")
 
 	return &http.Server{
 		Addr:         config.ListenAddr,

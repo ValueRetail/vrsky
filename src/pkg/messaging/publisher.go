@@ -6,6 +6,11 @@ import (
 	"sync"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
 // Publisher is a thin wrapper around nats.JetStreamContext.Publish. The two
@@ -35,11 +40,31 @@ func (p *Publisher) Publish(ctx context.Context, tenantID, connectionID, msgID s
 		return err
 	}
 	subj := DataSubject(tenantID, connectionID)
-	opts := []nats.PubOpt{nats.Context(ctx)}
+
+	// Producer span + W3C trace-context propagation across the NATS hop. The
+	// span is a no-op when tracing is disabled; the header is injected either
+	// way so context flows through a partially-enabled fleet.
+	ctx, span := tracing.Tracer("messaging").Start(ctx, "messaging.publish "+subj,
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "nats"),
+			attribute.String("messaging.destination", subj),
+			attribute.String("vrsky.tenant_id", tenantID),
+			attribute.String("vrsky.connection_id", connectionID),
+			attribute.String("vrsky.message_id", msgID),
+		),
+	)
+	defer span.End()
+
+	msg := &nats.Msg{Subject: subj, Data: body, Header: nats.Header{}}
 	if msgID != "" {
-		opts = append(opts, nats.MsgId(msgID))
+		msg.Header.Set(nats.MsgIdHdr, msgID)
 	}
-	if _, err := p.js.Publish(subj, body, opts...); err != nil {
+	tracing.InjectNATS(ctx, msg.Header)
+
+	if _, err := p.js.PublishMsg(msg, nats.Context(ctx)); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "publish failed")
 		return fmt.Errorf("js.Publish %s: %w", subj, err)
 	}
 	publishCount.WithLabelValues(tenantID).Inc()

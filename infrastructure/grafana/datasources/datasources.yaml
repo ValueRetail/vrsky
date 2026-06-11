@@ -1,0 +1,19 @@
+# Grafana datasource provisioning for the local VRSky observability stack
+# (Phase 3D, #87): Tempo for traces + the existing Prometheus for metrics.
+apiVersion: 1
+datasources:
+  - name: Tempo
+    type: tempo
+    access: proxy
+    uid: tempo
+    url: http://tempo:3200
+    isDefault: true
+    jsonData:
+      # Let trace spans link out to the matching Prometheus metrics.
+      tracesToMetrics:
+        datasourceUid: prometheus
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: prometheus
+    url: http://prometheus:9090

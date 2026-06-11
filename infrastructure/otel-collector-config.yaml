@@ -1,0 +1,56 @@
+# OpenTelemetry Collector config for VRSky tracing (Phase 3D, #87).
+#
+# Services export ALL spans here (head sampling = AlwaysSample); the Collector
+# makes the keep/drop decision with tail_sampling so whole error traces are
+# retained and only ~1% of successful traces are kept. Tail sampling MUST run
+# centrally (it needs every span of a trace before deciding), which is exactly
+# why services don't head-sample.
+#
+# Uses the contrib distribution (otel/opentelemetry-collector-contrib) — the
+# tail_sampling processor is not in the core collector.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # Group a trace's spans together before the sampling decision.
+  groupbytrace:
+    wait_duration: 10s
+  tail_sampling:
+    decision_wait: 12s
+    num_traces: 50000
+    expected_new_traces_per_sec: 200
+    policies:
+      # 1) Keep every trace that contains an error span.
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      # 2) Keep ~1% of everything else (probabilistic — applied to all traces;
+      #    combined with the errors policy above this yields "all errors + 1%").
+      - name: success-sample
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 1
+  batch:
+    timeout: 5s
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [groupbytrace, tail_sampling, batch]
+      exporters: [otlp/tempo]
