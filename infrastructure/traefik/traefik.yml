@@ -1,0 +1,35 @@
+# Traefik v3 static config — VRSky API gateway (Phase 3G, #90).
+# The gateway fronts the management API and enforces per-tenant, per-plan rate
+# limits at the edge (429 + Retry-After from Traefik, before app quotas run).
+entryPoints:
+  web:
+    address: ":80" # API front door (mapped to host :8090 in compose)
+  metrics:
+    address: ":8082" # Prometheus metrics (scraped by prometheus)
+  traefik:
+    address: ":8080" # dashboard / internal API
+
+api:
+  dashboard: true
+  insecure: true # dev only — dashboard on the :8080 entrypoint
+
+providers:
+  file:
+    # base.yml (rate-limit middlewares + management-api service + default router)
+    # and tenants.yml (per-tenant routers, written by the management-API on plan
+    # changes) both live here; watch hot-reloads on change.
+    directory: /etc/traefik/dynamic
+    watch: true
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+
+accessLog:
+  format: json # structured access logs → Loki (#91)
+
+log:
+  level: INFO

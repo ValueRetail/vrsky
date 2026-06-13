@@ -1,0 +1,41 @@
+# API gateway routing (#90): front the management API through Traefik with the
+# free-tier rate limit as the default. Per-tenant plan overrides come from the
+# dynamic config the management-API writes to a shared file-provider volume
+# (mirrors the compose setup) — a plan change hot-reloads in Traefik without a
+# restart, so the new limit applies within seconds.
+#
+# Apply order: middlewares.yaml first, then this IngressRoute.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vrsky-api
+  namespace: vrsky-platform
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`api.vrsky.example.com`) && PathPrefix(`/api/v1`)
+      kind: Rule
+      priority: 1
+      middlewares:
+        - name: rl-free # default; per-tenant routers (dynamic config) override
+      services:
+        - name: vrsky-management-api
+          port: 3000
+  tls:
+    secretName: vrsky-tls-cert
+---
+# File-provider mount for the management-API-generated per-tenant config.
+# The management-API Deployment mounts this PVC at TRAEFIK_DYNAMIC_DIR and writes
+# tenants.yml; the Traefik static config watches the same directory. (Wiring the
+# PVC into both Deployments is environment-specific — documented in docs/SECURITY.md.)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: traefik-dynamic
+  namespace: vrsky-platform
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 64Mi

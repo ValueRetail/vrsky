@@ -1,0 +1,45 @@
+# API gateway rate limiting (#90) — Traefik Middleware CRDs, one per plan.
+# Limits are keyed off the X-Tenant-ID header so each tenant gets an independent
+# token bucket (one tenant being throttled never affects another). average =
+# sustained req/s, burst = momentary allowance. 429 + Retry-After is returned by
+# Traefik at the edge, before app-level quotas (#74) run.
+#
+# Production-leaning values (the compose dev config uses lower numbers so the
+# 429 demo triggers easily). A tenant is routed to its plan's middleware by the
+# per-tenant dynamic config the management-API generates (file provider) — see
+# infrastructure/traefik/dynamic/ and docs/SECURITY.md.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rl-free
+  namespace: vrsky-platform
+spec:
+  rateLimit:
+    average: 100
+    burst: 200
+    sourceCriterion:
+      requestHeaderName: X-Tenant-ID
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rl-pro
+  namespace: vrsky-platform
+spec:
+  rateLimit:
+    average: 1000
+    burst: 2000
+    sourceCriterion:
+      requestHeaderName: X-Tenant-ID
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rl-enterprise
+  namespace: vrsky-platform
+spec:
+  rateLimit:
+    average: 10000
+    burst: 20000
+    sourceCriterion:
+      requestHeaderName: X-Tenant-ID

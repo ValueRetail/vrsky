@@ -1,0 +1,44 @@
+# Traefik dynamic base config (#90): the management-api service, the per-plan
+# rate-limit middlewares, and a catch-all default router. Per-tenant routers are
+# generated alongside this file as tenants.yml by the management-API.
+#
+# Limits are keyed off the X-Tenant-ID header (sourceCriterion), so every tenant
+# gets an independent token bucket — one tenant being throttled never affects
+# another. average = sustained requests/sec, burst = momentary allowance.
+http:
+  services:
+    management-api:
+      loadBalancer:
+        servers:
+          - url: "http://management-api:3000"
+
+  middlewares:
+    rl-free:
+      rateLimit:
+        average: 5
+        burst: 10
+        sourceCriterion:
+          requestHeaderName: X-Tenant-ID
+    rl-pro:
+      rateLimit:
+        average: 50
+        burst: 100
+        sourceCriterion:
+          requestHeaderName: X-Tenant-ID
+    rl-enterprise:
+      rateLimit:
+        average: 500
+        burst: 1000
+        sourceCriterion:
+          requestHeaderName: X-Tenant-ID
+
+  routers:
+    # Catch-all: any API request whose tenant has no specific router (see
+    # tenants.yml) gets the free-tier limit. Lower priority than the per-tenant
+    # routers so a known tenant's plan wins.
+    api-default:
+      rule: "PathPrefix(`/`)"
+      service: management-api
+      priority: 1
+      middlewares:
+        - rl-free

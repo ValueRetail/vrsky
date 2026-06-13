@@ -19,6 +19,7 @@ type MockRepository struct {
 	oidcConfigs  []*OIDCConfig
 	oidcUsers    []mockOIDCUser
 	quotas       map[string]*TenantQuotas
+	tenantPlans  map[string]string
 }
 
 type mockOIDCUser struct {
@@ -529,6 +530,21 @@ func (m *MockRepository) DeleteTenant(ctx context.Context, tenantID string) erro
 
 func (m *MockRepository) UpdateTenantStatus(ctx context.Context, tenantID, status string, natsSlug *string) error {
 	return nil
+}
+
+func (m *MockRepository) UpdateTenantPlan(ctx context.Context, tenantID, plan string) error {
+	if tenantID == "missing" {
+		return ErrTenantNotFound
+	}
+	if m.tenantPlans == nil {
+		m.tenantPlans = make(map[string]string)
+	}
+	m.tenantPlans[tenantID] = plan
+	return nil
+}
+
+func (m *MockRepository) ListTenantPlans(ctx context.Context) (map[string]string, error) {
+	return m.tenantPlans, nil
 }
 
 func (m *MockRepository) CreateProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error) {
