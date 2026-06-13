@@ -43,6 +43,17 @@ const (
 	// is the backstop in case a consumer is offline for a long time.
 	MainRetention = 72 * time.Hour
 
+	// MainMaxBytes / MainMaxMsgs bound the *size* of the main stream. The data
+	// stream is an ephemeral transport (docs/NATS_ARCHITECTURE.md) — messages
+	// should be consumed in seconds. Age alone (72h) doesn't stop a runaway
+	// producer or a stuck/absent consumer from piling up gigabytes within the
+	// window and OOM-killing NATS. With DiscardOld these caps shed the oldest
+	// (already-stale) messages instead, keeping the broker alive — the right
+	// trade-off for a transit stream. ~512 MiB sits well under the ~830 MiB
+	// that OOM-killed the dev broker.
+	MainMaxBytes = 512 * 1024 * 1024 // 512 MiB
+	MainMaxMsgs  = 1_000_000
+
 	// MainStreamName is the singleton data-flow stream.
 	MainStreamName = "VRSKY_DATA"
 
@@ -81,11 +92,16 @@ func DLQSubject(tenantID, connectionID string) string {
 // consumer maintains its own ack state.
 func EnsureStreams(js nats.JetStreamContext) error {
 	if err := ensure(js, &nats.StreamConfig{
-		Name:       MainStreamName,
-		Subjects:   []string{MainSubjectAll},
-		Retention:  nats.LimitsPolicy,
-		Storage:    nats.FileStorage,
-		MaxAge:     MainRetention,
+		Name:      MainStreamName,
+		Subjects:  []string{MainSubjectAll},
+		Retention: nats.LimitsPolicy,
+		Storage:   nats.FileStorage,
+		MaxAge:    MainRetention,
+		// Size caps + DiscardOld: shed the oldest stale messages rather than
+		// grow unbounded and OOM NATS (see MainMaxBytes).
+		MaxBytes:   MainMaxBytes,
+		MaxMsgs:    MainMaxMsgs,
+		Discard:    nats.DiscardOld,
 		Duplicates: 5 * time.Minute,
 	}); err != nil {
 		return fmt.Errorf("ensure %s: %w", MainStreamName, err)

@@ -184,9 +184,10 @@ func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID st
 	err := p.db.QueryRowContext(ctx, `SELECT name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&connName, &nodesJSON, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			configs := []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
-			p.cacheConfigs(connectionID, configs)
-			return configs, nil
+			// Unknown connection — not ours to write. Cache empty so we don't
+			// re-query (and don't write a file) for every message of it.
+			p.cacheConfigs(connectionID, nil)
+			return nil, nil
 		}
 		return nil, fmt.Errorf("query connection config: %w", err)
 	}
@@ -197,9 +198,10 @@ func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID st
 		Config json.RawMessage `json:"config"`
 	}
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		configs := []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
-		p.cacheConfigs(connectionID, configs)
-		return configs, nil
+		// Unparseable nodes — can't identify a file output; skip rather than
+		// dump every message into the default dir.
+		p.cacheConfigs(connectionID, nil)
+		return nil, nil
 	}
 
 	var edges []struct {
@@ -263,10 +265,10 @@ func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID st
 		})
 	}
 
-	if len(configs) == 0 {
-		configs = []*ConnectionConfig{{ID: connectionID, OutputPath: p.defaultOutputDir, PredIsConsumer: true}}
-	}
-
+	// No file-producer node on this connection → nothing for us to write. (This
+	// is the common case for non-file pipelines, e.g. webhook→http; the
+	// file-producer subscribes to ALL pipeline data, so it must no-op here
+	// rather than write a file per message to the default dir.)
 	p.cacheConfigs(connectionID, configs)
 	return configs, nil
 }

@@ -18,6 +18,10 @@ DOCKER_NETWORK="${DOCKER_NETWORK:-vrsky-network}"
 K6_IMAGE="${K6_IMAGE:-grafana/k6:latest}"
 # Container-internal URL k6 uses to reach the webhook ingress.
 WEBHOOK_INGRESS_INTERNAL="${WEBHOOK_INGRESS_INTERNAL:-http://webhook-consumer:9100}"
+# NATS (for the post-run stream purge — see purge_data_stream).
+NATS_INTERNAL="${NATS_INTERNAL:-nats://nats:4222}"
+NATS_BOX_IMAGE="${NATS_BOX_IMAGE:-natsio/nats-box:latest}"
+DATA_STREAM="${DATA_STREAM:-VRSKY_DATA}"
 
 # --- load-test account ---
 # Auto-provisioned on first run. The minimal load stack has no mail server, so
@@ -123,4 +127,18 @@ stop_pipeline() {
 result_row() {
   printf '%s  %-16s p99=%-9s sustained=%-11s delivered=%-8s errors=%s%s\n' \
     "$GRN" "$1" "${2}ms" "${3}/s" "$4" "$5" "$NC"
+}
+
+# purge_data_stream clears the NATS data stream so a load run doesn't leave a
+# durable backlog behind. A high-rate run can publish hundreds of thousands of
+# messages; left un-purged they accumulate (across runs) and have OOM-killed the
+# NATS broker. Best-effort + non-fatal: skips quietly if NATS isn't reachable so
+# it never changes the harness's exit code (which CI gates on).
+purge_data_stream() {
+  if docker run --rm --network "$DOCKER_NETWORK" "$NATS_BOX_IMAGE" \
+       nats --server "$NATS_INTERNAL" stream purge "$DATA_STREAM" -f >/dev/null 2>&1; then
+    log "purged $DATA_STREAM (load-test teardown)"
+  else
+    warn "could not purge $DATA_STREAM (NATS reachable? purge manually if a backlog remains)"
+  fi
 }

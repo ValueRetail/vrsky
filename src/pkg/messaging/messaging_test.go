@@ -71,6 +71,22 @@ func TestEnsureStreams(t *testing.T) {
 		}
 	}
 
+	// The data stream must be size-bounded with DiscardOld so a runaway producer
+	// or stuck consumer sheds stale messages instead of OOM-killing NATS.
+	main, err := js.StreamInfo(MainStreamName)
+	if err != nil {
+		t.Fatalf("StreamInfo %s: %v", MainStreamName, err)
+	}
+	if main.Config.MaxBytes != MainMaxBytes {
+		t.Errorf("MaxBytes = %d, want %d", main.Config.MaxBytes, MainMaxBytes)
+	}
+	if main.Config.MaxMsgs != MainMaxMsgs {
+		t.Errorf("MaxMsgs = %d, want %d", main.Config.MaxMsgs, MainMaxMsgs)
+	}
+	if main.Config.Discard != nats.DiscardOld {
+		t.Errorf("Discard = %v, want DiscardOld", main.Config.Discard)
+	}
+
 	// Idempotent.
 	if err := EnsureStreams(js); err != nil {
 		t.Fatalf("second EnsureStreams: %v", err)
