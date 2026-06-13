@@ -53,6 +53,20 @@ func TestHandlePlanUpdate_InvalidPlan(t *testing.T) {
 	}
 }
 
+func TestHandlePlanUpdate_TenantNotFound(t *testing.T) {
+	h, _ := newPlanTestHandler()
+
+	req := httptest.NewRequest("PUT", "/api/v1/tenants/missing/plan", strings.NewReader(`{"plan":"pro"}`))
+	req.SetPathValue("tenant_id", "missing")
+	rec := httptest.NewRecorder()
+
+	h.HandlePlanUpdate(rec, req)
+
+	if rec.Code != 404 {
+		t.Fatalf("status = %d, want 404 for unknown tenant", rec.Code)
+	}
+}
+
 func TestHandlePlanUpdate_NoHookIsFine(t *testing.T) {
 	h, repo := newPlanTestHandler() // no gateway sync wired (non-gateway deployment)
 

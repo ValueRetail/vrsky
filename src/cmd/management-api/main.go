@@ -341,11 +341,13 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 			}
 			return writeTenantGatewayConfig(dynDir, plans)
 		}
-		if err := gatewaySync(context.Background()); err != nil {
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := gatewaySync(seedCtx); err != nil {
 			logger.Printf("WARNING: gateway rate-limit config seed failed: %v", err)
 		} else {
 			logger.Printf("gateway rate-limit config seeded to %s", dynDir)
 		}
+		seedCancel()
 		restHandler.SetGatewaySync(gatewaySync)
 	}
 

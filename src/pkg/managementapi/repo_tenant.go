@@ -3,7 +3,6 @@ package managementapi
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -189,8 +188,12 @@ func (r *PostgresRepository) UpdateTenantPlan(ctx context.Context, tenantID, pla
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("tenant %s not found", tenantID)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
 	}
 	return nil
 }

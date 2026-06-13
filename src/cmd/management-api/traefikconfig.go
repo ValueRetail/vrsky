@@ -88,7 +88,17 @@ func writeTenantGatewayConfig(dir string, plans map[string]string) error {
 		tmp.Close()
 		return err
 	}
+	// fsync so the rename can't expose an empty/partial file after a crash.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// CreateTemp makes the file 0600; Traefik often runs as a non-root user, so
+	// make it world-readable before publishing it.
+	if err := os.Chmod(tmpName, 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmpName, filepath.Join(dir, "tenants.yml"))

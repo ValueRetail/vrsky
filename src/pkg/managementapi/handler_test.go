@@ -533,6 +533,9 @@ func (m *MockRepository) UpdateTenantStatus(ctx context.Context, tenantID, statu
 }
 
 func (m *MockRepository) UpdateTenantPlan(ctx context.Context, tenantID, plan string) error {
+	if tenantID == "missing" {
+		return ErrTenantNotFound
+	}
 	if m.tenantPlans == nil {
 		m.tenantPlans = make(map[string]string)
 	}

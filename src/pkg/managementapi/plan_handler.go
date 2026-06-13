@@ -44,6 +44,10 @@ func (h *Handler) HandlePlanUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.UpdateTenantPlan(ctx, tenantID, req.Plan); err != nil {
+		if errors.Is(err, ErrTenantNotFound) {
+			_ = writeError(w, http.StatusNotFound, "NotFound", "tenant not found", nil)
+			return
+		}
 		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update plan", nil)
 		return
 	}
