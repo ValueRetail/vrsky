@@ -123,6 +123,11 @@ run_db_cdc()          { "$HERE/generators/cdc_insert.sh"   --rate "$RATE" --dura
 run_file_to_db()      { "$HERE/generators/file_drop.sh"    --rate "$RATE" --duration "$DURATION"; }
 run_tenant_to_tenant(){ "$HERE/generators/tenant_publish.sh" --rate "$RATE" --duration "$DURATION"; }
 
+# Always purge the data stream on the way out so a run never leaves a durable
+# backlog behind (which has OOM-killed NATS). Set after arg parsing so --help
+# doesn't trigger it; best-effort, preserves the scenario's exit code.
+trap purge_data_stream EXIT
+
 case "$SCENARIO" in
   webhook-to-http)  run_webhook_to_http;;
   db-cdc)           run_db_cdc;;
