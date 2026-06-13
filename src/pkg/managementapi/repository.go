@@ -136,6 +136,12 @@ type Repository interface {
 	// UpdateTenantStatus updates the status and optional NATS slug
 	UpdateTenantStatus(ctx context.Context, tenantID, status string, natsSlug *string) error
 
+	// UpdateTenantPlan sets the subscription plan (drives gateway rate limits, #90)
+	UpdateTenantPlan(ctx context.Context, tenantID, plan string) error
+
+	// ListTenantPlans returns plan keyed by tenant ID for every live tenant (#90)
+	ListTenantPlans(ctx context.Context) (map[string]string, error)
+
 	// CreateProvisioningJob creates a new provisioning job record
 	CreateProvisioningJob(ctx context.Context, tenantID string) (*ProvisioningJob, error)
 

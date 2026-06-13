@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -43,7 +44,16 @@ type Handler struct {
 	// revoke); provider CRUD still works since it goes through the repo.
 	oauthClient    *oauth.Client
 	oauthRefresher *OAuthRefresher
+
+	// gatewaySync, when set, regenerates the gateway (Traefik) per-tenant
+	// rate-limit config after a plan change so the new limit takes effect at the
+	// edge (#90). Wired by cmd/management-api when TRAEFIK_DYNAMIC_DIR is set;
+	// nil (the default) makes plan changes a pure DB update.
+	gatewaySync func(context.Context) error
 }
+
+// SetGatewaySync wires the gateway rate-limit config refresher (#90).
+func (h *Handler) SetGatewaySync(fn func(context.Context) error) { h.gatewaySync = fn }
 
 // SetOAuthClient wires the generic OAuth 2.0 client (built on h.repo).
 func (h *Handler) SetOAuthClient(c *oauth.Client) { h.oauthClient = c }
@@ -1013,6 +1023,10 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// Tenant quotas (#74). Reads = any member; writes = owner.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
 	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)
+
+	// Subscription plan (#90). Owner-only; drives the gateway's per-tenant edge
+	// rate limit (free/pro/enterprise).
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/plan", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandlePlanUpdate)))).ServeHTTP)
 
 	// Tenant provisioning status stream (Phase 2)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/status/stream", sessionMW(tenantMW(http.HandlerFunc(h.HandleTenantStatusSSE))).ServeHTTP)

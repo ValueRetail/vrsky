@@ -246,3 +246,54 @@ curl localhost:3000/api/v1/secrets/$ID \
 psql -c "SELECT ciphertext FROM secrets WHERE id = '$ID'"
 # expected: aes256:<base64...>
 ```
+
+## Gateway rate limiting (Phase 3G, #90)
+
+Application quotas (#74) protect downstream resources, but they run *inside* the
+management API — a misbehaving client can still saturate the API before a quota
+check executes. The **gateway** (Traefik) adds edge protection: it rejects
+excess traffic with **429 + `Retry-After` before the request ever reaches the
+app**.
+
+### Model
+- **Per-tenant, per-plan.** Three rate-limit middlewares — `rl-free`, `rl-pro`,
+  `rl-enterprise` — with increasing `average` (sustained req/s) and `burst`.
+- **Keyed off `X-Tenant-ID`** (`sourceCriterion.requestHeaderName`), so every
+  tenant gets an **independent token bucket** — one tenant being throttled never
+  affects another. We key on the tenant id (not the raw API key) because the
+  platform stores only API-key *hashes*; `X-Tenant-ID` is non-secret and the
+  management API already requires it, so per-plan routing needs no secret
+  material. (`X-API-Key` keying remains available for the API-key data path.)
+- **429 + `Retry-After` come from Traefik**, not the app.
+
+### How a plan change propagates (< 30s, no restart)
+`PUT /api/v1/tenants/{id}/plan` (owner-only) updates `subscription_plan`, then
+the management API **regenerates the Traefik dynamic config**
+(`tenants.yml`, one router per tenant matched on `X-Tenant-ID` → the plan's
+middleware) and writes it **atomically** (temp + rename) into the file-provider
+directory it shares with Traefik. Traefik's file watcher hot-reloads in ~1–2s —
+no restart. Seeded from all tenants' plans on management-API startup. Writes are
+**env-gated** on `TRAEFIK_DYNAMIC_DIR`, so deployments without a gateway are
+unaffected.
+
+- Compose: `traefik` fronts the API on host `:8090`; base config in
+  `infrastructure/traefik/`; the shared dir is `infrastructure/traefik/dynamic/`.
+- Kubernetes: `Middleware` CRDs in `infrastructure/kubernetes/traefik/`; the same
+  generated `tenants.yml` is written to a shared file-provider volume.
+
+### Observability
+Traefik exposes Prometheus metrics (scrape job `traefik` →
+`traefik_service_requests_total`, `traefik_service_request_duration_seconds`,
+rate-limit drops), visible in Grafana alongside the app metrics (#84).
+
+### Verify (compose)
+```bash
+docker compose up -d traefik management-api postgres-management nats prometheus
+# Free tier is intentionally low for the demo (avg 5 / burst 10). Burst past it:
+for i in $(seq 1 30); do
+  curl -s -o /dev/null -w "%{http_code} " \
+    -H "X-Tenant-ID: tenant-A" http://localhost:8090/api/v1/health
+done            # expect a run of 200s then 429s
+# A 429 response carries Retry-After and Server: traefik. A different
+# X-Tenant-ID (tenant-B) is unaffected — independent buckets.
+```

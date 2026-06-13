@@ -430,6 +430,11 @@ services:
       # Shared secret workers present (X-Service-Token) to the OAuth token
       # endpoint (#75). Dev default; set a real value in any real deployment.
       OAUTH_TOKEN_SERVICE_SECRET: "${OAUTH_TOKEN_SERVICE_SECRET:-dev-oauth-service-secret-change-me}"
+
+      # API gateway rate limiting (#90): where to write the per-tenant Traefik
+      # dynamic config (shared, read-only, with the traefik service). On a plan
+      # change the API rewrites tenants.yml here and Traefik hot-reloads.
+      TRAEFIK_DYNAMIC_DIR: "/etc/traefik/dynamic"
     depends_on:
       nats:
         condition: service_healthy
@@ -437,8 +442,30 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
+    volumes:
+      - ./infrastructure/traefik/dynamic:/etc/traefik/dynamic
     networks:
       - vrsky-network
+    restart: unless-stopped
+
+  # API gateway (#90): Traefik fronts the management API and enforces per-tenant,
+  # per-plan rate limits at the edge (429 + Retry-After before app quotas run).
+  # Front door on host :8090; dashboard :8081; Prometheus metrics :8082.
+  traefik:
+    image: traefik:v3.1
+    container_name: vrsky-traefik
+    command: ["--configfile=/etc/traefik/traefik.yml"]
+    ports:
+      - "127.0.0.1:8090:80"
+      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - ./infrastructure/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infrastructure/traefik/dynamic:/etc/traefik/dynamic:ro
+    networks:
+      - vrsky-network
+    depends_on:
+      - management-api
     restart: unless-stopped
 
   # PostgreSQL database for management API

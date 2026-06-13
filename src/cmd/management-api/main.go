@@ -330,6 +330,25 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 
 	restHandler.RegisterRoutes(mux)
 
+	// Gateway rate limiting (#90): when TRAEFIK_DYNAMIC_DIR is set, seed the
+	// per-tenant rate-limit config now and refresh it on every plan change so
+	// the edge limit tracks the subscription plan (no Traefik restart).
+	if dynDir := os.Getenv("TRAEFIK_DYNAMIC_DIR"); dynDir != "" {
+		gatewaySync := func(ctx context.Context) error {
+			plans, err := repo.ListTenantPlans(ctx)
+			if err != nil {
+				return err
+			}
+			return writeTenantGatewayConfig(dynDir, plans)
+		}
+		if err := gatewaySync(context.Background()); err != nil {
+			logger.Printf("WARNING: gateway rate-limit config seed failed: %v", err)
+		} else {
+			logger.Printf("gateway rate-limit config seeded to %s", dynDir)
+		}
+		restHandler.SetGatewaySync(gatewaySync)
+	}
+
 	// Initialize WebSocket infrastructure for real-time metrics streaming
 	clientRegistry := managementapi.NewClientRegistry()
 	metricsCache := managementapi.NewMetricsCache(5 * time.Minute)

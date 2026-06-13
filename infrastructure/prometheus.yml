@@ -81,3 +81,8 @@ scrape_configs:
   - job_name: 'node'
     static_configs:
       - targets: ['node-exporter:9100']
+
+  # API gateway (#90): Traefik request/latency metrics + rate-limit drops.
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8082']

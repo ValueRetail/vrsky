@@ -3,6 +3,7 @@ package managementapi
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -176,6 +177,43 @@ func (r *PostgresRepository) UpdateTenantStatus(ctx context.Context, tenantID, s
 		WHERE id = $1
 	`, tenantID, status, natsSlug)
 	return err
+}
+
+// UpdateTenantPlan sets the tenant's subscription plan (free/pro/enterprise).
+// Edge rate limits are keyed off the plan at the gateway (#90).
+func (r *PostgresRepository) UpdateTenantPlan(ctx context.Context, tenantID, plan string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE tenants SET subscription_plan = $2, updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, tenantID, plan)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("tenant %s not found", tenantID)
+	}
+	return nil
+}
+
+// ListTenantPlans returns plan keyed by tenant ID for every live tenant — used
+// to (re)generate the gateway's per-tenant rate-limit config (#90).
+func (r *PostgresRepository) ListTenantPlans(ctx context.Context) (map[string]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, COALESCE(subscription_plan, 'free') FROM tenants WHERE deleted_at IS NULL
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, plan string
+		if err := rows.Scan(&id, &plan); err != nil {
+			return nil, err
+		}
+		out[id] = plan
+	}
+	return out, rows.Err()
 }
 
 // CreateProvisioningJob creates a new provisioning job record
