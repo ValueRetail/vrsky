@@ -50,6 +50,11 @@ func TestGetConnectionConfigs_NoFileNode(t *testing.T) {
 	if len(configs) != 0 {
 		t.Errorf("expected 0 file configs for a non-file pipeline, got %d (%+v)", len(configs), configs)
 	}
+	// Guard the guard: ensure it actually queried the DB (didn't short-circuit
+	// or serve stale cache) — otherwise this test could pass for the wrong reason.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
 }
 
 // TestFileProducer_RoundTrip proves the SDK refactor end-to-end with zero

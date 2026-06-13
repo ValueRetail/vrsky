@@ -132,8 +132,8 @@ result_row() {
 # purge_data_stream clears the NATS data stream so a load run doesn't leave a
 # durable backlog behind. A high-rate run can publish hundreds of thousands of
 # messages; left un-purged they accumulate (across runs) and have OOM-killed the
-# NATS broker. Best-effort + non-fatal: skips quietly if NATS isn't reachable so
-# it never changes the harness's exit code (which CI gates on).
+# NATS broker. Best-effort + non-fatal: logs on success, warns (never errors) on
+# failure, so it can't change the harness's exit code (which CI gates on).
 purge_data_stream() {
   if docker run --rm --network "$DOCKER_NETWORK" "$NATS_BOX_IMAGE" \
        nats --server "$NATS_INTERNAL" stream purge "$DATA_STREAM" -f >/dev/null 2>&1; then
