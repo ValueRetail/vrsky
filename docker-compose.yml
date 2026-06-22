@@ -552,6 +552,14 @@ services:
       # Aux HTTP port the SDK serves /webhook, /sample-data + /tunnel/* on (UI
       # connects here; the cloudflared tunnel forwards to it). Health is on 8080.
       WORKER_HTTP_PORT: "9100"
+      # mTLS listener for high-security connections (#89). A dedicated TLS port
+      # that demands a client certificate; per-connection client-CA verification
+      # happens in the handler. Connections with a tls.client_ca block are
+      # reachable here over https. Server identity defaults to a generated
+      # self-signed cert (dev); set WEBHOOK_TLS_CERT_FILE/_KEY_FILE for a real one.
+      WORKER_MTLS_PORT: "9101"
+      # WEBHOOK_TLS_CERT_FILE: "/certs/server.crt"
+      # WEBHOOK_TLS_KEY_FILE: "/certs/server.key"
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts
       # secrets (e.g. HMAC signing key from #67) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
@@ -560,6 +568,7 @@ services:
       OTEL_SERVICE_NAME: "webhook-consumer"
     ports:
       - "127.0.0.1:9100:9100"
+      - "127.0.0.1:9101:9101"
     depends_on:
       nats:
         condition: service_healthy

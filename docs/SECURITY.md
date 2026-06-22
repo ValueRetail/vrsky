@@ -297,3 +297,72 @@ done            # expect a run of 200s then 429s
 # A 429 response carries Retry-After and Server: traefik. A different
 # X-Tenant-ID (tenant-B) is unaffected — independent buckets.
 ```
+
+## Mutual TLS for HTTP connectors (Phase 3F, #89)
+
+High-security integrations (banking, public sector) require mutual TLS: the
+inbound **webhook consumer** must reject callers that do not present a valid
+client certificate, and the outbound **http producer** must present a client
+certificate to mTLS-required endpoints. mTLS is opt-in per connection, keyed off
+cert material stored as tenant secrets — no new secret plumbing (it reuses the
+`*_secret_id` resolution from #66).
+
+### Config surface
+
+Add a `tls` block to the connector node's `config` (alongside `http`). Each
+field is a reference to a secret holding PEM text; the worker resolves it to
+plaintext at connection-start / send time (the resolver replaces a `*_secret_id`
+key with the de-suffixed key, e.g. `cert_secret_id` → `cert`):
+
+| Field                 | Consumer (webhook)                          | Producer (http)                                   |
+|-----------------------|---------------------------------------------|---------------------------------------------------|
+| `client_ca_secret_id` | **required** — CA that signs accepted client certs | optional — server CA to trust (empty → system roots) |
+| `cert_secret_id`      | n/a (listener cert comes from env)          | **required** — client cert presented to the endpoint |
+| `key_secret_id`       | n/a                                         | **required** — private key for `cert`             |
+
+Example consumer node config (after the CA secret is stored):
+
+```json
+{ "type": "http", "tls": { "client_ca_secret_id": "<secret-uuid>" } }
+```
+
+The `tls` block is settable today via the connections API; UI cert pickers are a
+follow-up. The webhook consumer's own server identity comes from
+`WEBHOOK_TLS_CERT_FILE` / `WEBHOOK_TLS_KEY_FILE`; if unset it generates a
+self-signed cert (dev only) — mTLS security here comes from verifying the
+**client** cert, not from the client trusting the server cert.
+
+### Behaviour
+
+- **Consumer:** when `WORKER_MTLS_PORT` is set (9101 in compose) the worker runs
+  a dedicated TLS listener that demands *a* client cert at the handshake
+  (`RequireAnyClientCert`). For a connection with `tls.client_ca`, the handler
+  then verifies the presented cert chains to that per-connection CA and rejects
+  with **401** if it is missing or untrusted. The same check also runs on the
+  plain aux port (9100), where `r.TLS == nil` counts as "no cert" — so an mTLS
+  connection cannot be reached unauthenticated over plain HTTP.
+- **Producer:** when a node has a `tls` block with a resolved `cert`/`key`, the
+  worker builds a dedicated `http.Client` that presents that client cert (and
+  trusts `client_ca` as the server root if supplied), reused for every send.
+- A connection with no `tls` block behaves exactly as before.
+- Rejections increment `webhook_client_cert_failures_total{connection_id,reason}`
+  (`reason` = `missing_cert` | `untrusted_cert`).
+
+### Verify (compose)
+
+```bash
+# 1. Throwaway CA + server + client certs.
+openssl ecparam -genkey -name prime256v1 -out ca.key
+openssl req -x509 -new -key ca.key -sha256 -days 1 -subj "/CN=test-ca" -out ca.crt
+openssl ecparam -genkey -name prime256v1 -out client.key
+openssl req -new -key client.key -subj "/CN=client" -out client.csr
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out client.crt
+
+# 2. Store ca.crt as a tenant secret and put its id in the consumer node's
+#    tls.client_ca_secret_id, then start a webhook→http connection.
+
+# 3. No client cert → rejected; valid client cert → 202.
+curl -k https://localhost:9101/webhook/<conn-id> -d '{"x":1}'                       # TLS/401
+curl -k --cert client.crt --key client.key https://localhost:9101/webhook/<conn-id> -d '{"x":1}'  # 202
+# A cert signed by a different CA → 401.
+```

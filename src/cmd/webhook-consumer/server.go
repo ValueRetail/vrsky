@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 	"github.com/google/uuid"
 )
 
@@ -58,6 +59,27 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 		if ac == nil {
 			http.Error(w, "Connection not found or not running", http.StatusNotFound)
 			return
+		}
+
+		// mTLS client-cert verification (#89 / Phase 3F). When the connection
+		// configured a client CA, the caller must present a client cert that
+		// chains to it. This also closes the plain-port bypass: a request over
+		// the SDK aux HTTP port (no TLS) to an mTLS connection is rejected.
+		if len(ac.ClientCA) > 0 {
+			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+				incClientCertFailure(ac.ConnectionID, "missing_cert")
+				s.logger.Warn("Webhook requires mTLS but no client certificate presented",
+					"connection_id", ac.ConnectionID)
+				http.Error(w, "Client certificate required", http.StatusUnauthorized)
+				return
+			}
+			if err := tlsconfig.VerifyClientCert(r.TLS.PeerCertificates[0], ac.ClientCA); err != nil {
+				incClientCertFailure(ac.ConnectionID, "untrusted_cert")
+				s.logger.Warn("Webhook client certificate verification failed",
+					"connection_id", ac.ConnectionID, "reason", err.Error())
+				http.Error(w, "Client certificate verification failed", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024)) // 10MB limit

@@ -22,6 +22,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthtoken"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 )
 
 // httpProducer delivers pipeline envelopes to external HTTP endpoints. It is a
@@ -71,6 +72,11 @@ type HTTPConfig struct {
 	OAuthGrantID   string            `json:"oauth_grant_id"` // grant id when auth_type=oauth
 	PredecessorID  string
 	PredIsConsumer bool
+
+	// mTLS (#89): when the node carries a "tls" block with a resolved client
+	// cert/key, client is a pre-built *http.Client presenting that cert to the
+	// endpoint. nil means use the default (non-mTLS) client.
+	client *http.Client
 }
 
 func main() {
@@ -196,10 +202,14 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 
 	// otelhttp transport makes the outbound call a child span of the pipeline
 	// trace and injects traceparent into the external request. No-op when
-	// tracing is disabled.
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	// tracing is disabled. When the node configured mTLS, httpCfg.client is a
+	// pre-built client that presents the client cert; otherwise use the default.
+	client := httpCfg.client
+	if client == nil {
+		client = &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		}
 	}
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
@@ -341,6 +351,10 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 				AuthType     string            `json:"auth_type"`
 				OAuthGrantID string            `json:"oauth_grant_id"`
 			} `json:"http"`
+			// mTLS material (#89). In the stored config these are *_secret_id
+			// refs; crypto.ResolveSecretsInJSON has already replaced them with
+			// plaintext PEM by the time we parse here.
+			TLS tlsconfig.NodeConfig `json:"tls"`
 		}
 		if err := json.Unmarshal(node.Config, &nodeConfig); err != nil {
 			continue
@@ -364,7 +378,7 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			}
 		}
 
-		configs = append(configs, &HTTPConfig{
+		cfg := &HTTPConfig{
 			URL:            nodeConfig.HTTP.URL,
 			Method:         nodeConfig.HTTP.Method,
 			Headers:        nodeConfig.HTTP.Headers,
@@ -372,7 +386,29 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			OAuthGrantID:   nodeConfig.HTTP.OAuthGrantID,
 			PredecessorID:  predID,
 			PredIsConsumer: predIsConsumer,
-		})
+		}
+
+		// mTLS: when the node presents a client cert, pre-build a dedicated
+		// http.Client that presents it (and trusts the configured server CA, if
+		// any). Built once here and reused for every send to this node.
+		if nodeConfig.TLS.Enabled() {
+			tlsCfg, err := tlsconfig.ClientConfig(
+				[]byte(nodeConfig.TLS.Cert),
+				[]byte(nodeConfig.TLS.Key),
+				[]byte(nodeConfig.TLS.ClientCA),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("node %s: build mTLS client: %w", node.ID, err)
+			}
+			cfg.client = &http.Client{
+				Timeout: 30 * time.Second,
+				Transport: otelhttp.NewTransport(&http.Transport{
+					TLSClientConfig: tlsCfg,
+				}),
+			}
+		}
+
+		configs = append(configs, cfg)
 	}
 
 	if len(configs) == 0 {
