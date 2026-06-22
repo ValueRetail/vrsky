@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 	"github.com/nats-io/nats.go"
 )
 
@@ -32,6 +35,13 @@ type webhookConsumer struct {
 	// auxPort is the SDK auxiliary HTTP port (WORKER_HTTP_PORT) that /webhook is
 	// served on; the cloudflared tunnel forwards to it.
 	auxPort string
+
+	// mTLS (#89): a dedicated TLS listener for high-security connections that
+	// require an inbound client certificate. Empty mtlsPort disables it. The
+	// listener demands *a* client cert at the handshake (RequireAnyClientCert);
+	// handleWebhook then verifies the cert chains to the per-connection client CA.
+	mtlsPort   string
+	mtlsServer *http.Server
 
 	// Active connections: connectionId → connection info
 	activeConnections map[string]*ActiveConnection
@@ -54,6 +64,12 @@ type ActiveConnection struct {
 	// HMAC signature header does not match cfg.Secret. Populated at start
 	// time from the connection's http.signature config (#67 / Phase 1B).
 	Signature *signatureConfig
+
+	// ClientCA, when non-empty, makes the webhook require a client certificate
+	// that chains to this CA (PEM). Populated at start time from the
+	// connection's tls.client_ca config (#89 / Phase 3F). Requests that present
+	// no client cert — or one signed by a different CA — are rejected 401.
+	ClientCA []byte
 }
 
 // Configure wires dependencies and registers the HTTP endpoints the UI uses
@@ -68,6 +84,7 @@ func (s *webhookConsumer) Configure(ctx context.Context, res *sdk.Resources) err
 	s.logger = res.Logger
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.auxPort = envOr("WORKER_HTTP_PORT", "9100")
+	s.mtlsPort = os.Getenv("WORKER_MTLS_PORT") // empty → mTLS listener disabled
 
 	s.RegisterHTTPHandler("/webhook/", s.handleWebhook())
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
@@ -85,6 +102,10 @@ func (s *webhookConsumer) Configure(ctx context.Context, res *sdk.Resources) err
 func (s *webhookConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.publish = publish
 	s.logger.Info("Starting Webhook Consumer Service")
+
+	if err := s.startMTLSListener(); err != nil {
+		return fmt.Errorf("failed to start mTLS listener: %w", err)
+	}
 
 	startSub, err := s.nc.Subscribe("vrsky.commands.*.connection.start", s.handleStartCommand)
 	if err != nil {
@@ -125,12 +146,74 @@ func (s *webhookConsumer) Stop(ctx context.Context) error {
 
 	s.stopTunnel()
 
+	if s.mtlsServer != nil {
+		_ = s.mtlsServer.Shutdown(ctx)
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(2 * time.Second):
 		return nil
 	}
+}
+
+// startMTLSListener brings up a dedicated TLS listener on WORKER_MTLS_PORT that
+// serves /webhook and demands a client certificate at the handshake
+// (RequireAnyClientCert). Per-connection client-CA enforcement happens in
+// handleWebhook. No-op when WORKER_MTLS_PORT is unset. The server identity comes
+// from WEBHOOK_TLS_CERT_FILE/_KEY_FILE, or a generated self-signed cert (dev).
+func (s *webhookConsumer) startMTLSListener() error {
+	if s.mtlsPort == "" {
+		return nil
+	}
+
+	certPEM, keyPEM, err := s.loadServerCert()
+	if err != nil {
+		return fmt.Errorf("load mTLS server cert: %w", err)
+	}
+	tlsCfg, err := tlsconfig.ServerConfig(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("build mTLS server config: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhook/", s.handleWebhook())
+	s.mtlsServer = &http.Server{Addr: ":" + s.mtlsPort, Handler: mux, TLSConfig: tlsCfg}
+
+	ln, err := tls.Listen("tcp", s.mtlsServer.Addr, tlsCfg)
+	if err != nil {
+		return fmt.Errorf("listen on mTLS port %s: %w", s.mtlsPort, err)
+	}
+	go func() {
+		s.logger.Info("mTLS webhook listener started", "port", s.mtlsPort)
+		if serr := s.mtlsServer.Serve(ln); serr != nil && serr != http.ErrServerClosed {
+			s.logger.Error("mTLS listener stopped", "error", serr)
+		}
+	}()
+	return nil
+}
+
+// loadServerCert returns the mTLS listener's server cert/key as PEM. It reads
+// WEBHOOK_TLS_CERT_FILE/_KEY_FILE when both are set; otherwise it generates a
+// throwaway self-signed cert (dev fallback). mTLS security comes from verifying
+// the inbound *client* cert, not from the client trusting this server cert.
+func (s *webhookConsumer) loadServerCert() ([]byte, []byte, error) {
+	certFile := os.Getenv("WEBHOOK_TLS_CERT_FILE")
+	keyFile := os.Getenv("WEBHOOK_TLS_KEY_FILE")
+	if certFile != "" && keyFile != "" {
+		cert, err := os.ReadFile(certFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read cert file: %w", err)
+		}
+		key, err := os.ReadFile(keyFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read key file: %w", err)
+		}
+		return cert, key, nil
+	}
+	s.logger.Warn("WEBHOOK_TLS_CERT_FILE/_KEY_FILE not set; generating self-signed mTLS server cert (dev only)")
+	return tlsconfig.SelfSignedServer("webhook-consumer")
 }
 
 // CommandMessage represents a start/stop command from NATS
@@ -175,12 +258,21 @@ func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 	// node.config.http.signature.secret.
 	sig := s.extractSignature(conn)
 
+	// Extract optional per-connection mTLS client CA (#89). When set, the webhook
+	// requires an inbound client cert that chains to it.
+	clientCA := s.extractClientCA(conn)
+	if len(clientCA) > 0 && s.mtlsPort == "" {
+		s.logger.Warn("Connection requires mTLS (tls.client_ca) but WORKER_MTLS_PORT is unset; the connection is unreachable — there is no TLS listener and plain-port requests are rejected as missing a client cert. Set WORKER_MTLS_PORT.",
+			"connection_id", cmd.ConnectionID)
+	}
+
 	s.mu.Lock()
 	s.activeConnections[cmd.ConnectionID] = &ActiveConnection{
 		ConnectionID: cmd.ConnectionID,
 		TenantID:     cmd.TenantID,
 		Cancel:       cancel,
 		Signature:    sig,
+		ClientCA:     clientCA,
 	}
 	s.mu.Unlock()
 
@@ -339,6 +431,37 @@ func (s *webhookConsumer) extractSignature(conn *Connection) *signatureConfig {
 			Prefix:    sig.Prefix,
 			Secret:    sig.Secret,
 		}
+	}
+	return nil
+}
+
+// extractClientCA returns the per-connection mTLS client CA (PEM) for a webhook
+// connection, or nil if the connection has no tls.client_ca configured. The CA
+// has already been resolved to plaintext by resolveSecretsInNodes (#66). When
+// set, handleWebhook requires inbound requests to present a client cert that
+// chains to this CA.
+func (s *webhookConsumer) extractClientCA(conn *Connection) []byte {
+	var nodes []Node
+	if err := json.Unmarshal(conn.Nodes, &nodes); err != nil {
+		return nil
+	}
+	for _, node := range nodes {
+		if node.Type != "consumer" {
+			continue
+		}
+		var cfg struct {
+			Type string `json:"type"`
+			TLS  struct {
+				ClientCA string `json:"client_ca"` // resolved by ResolveSecrets
+			} `json:"tls"`
+		}
+		if err := json.Unmarshal(node.Config, &cfg); err != nil {
+			continue
+		}
+		if cfg.Type != "http" || cfg.TLS.ClientCA == "" {
+			continue
+		}
+		return []byte(cfg.TLS.ClientCA)
 	}
 	return nil
 }
