@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { getQuotas, updateQuotas, type TenantQuotas } from '@/services/quotasService'
+import { getUsage, usageExportURL, type UsageResponse } from '@/services/usageService'
+import apiClient from '@/services/api'
 
 function fmtBytes(n: number): string {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
@@ -62,6 +64,9 @@ export default function UsagePage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Usage metering (#92): current-month consumption from the daily rollup.
+  const [usage, setUsage] = useState<UsageResponse | null>(null)
+
   // Editable copies of the configurable fields.
   const [planName, setPlanName] = useState('')
   const [maxMsg, setMaxMsg] = useState(0)
@@ -78,13 +83,38 @@ export default function UsagePage() {
 
   useEffect(() => {
     if (!currentTenant) return
+    // ignore guards against a slow response from a previous tenant landing after
+    // the user has switched — which would otherwise show cross-tenant data.
+    let ignore = false
     setLoading(true)
     setError(null)
+    setUsage(null) // clear the prior tenant's card before the new request resolves
     getQuotas(currentTenant.id)
-      .then(reset)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load quotas'))
-      .finally(() => setLoading(false))
+      .then((next) => { if (!ignore) reset(next) })
+      .catch((e) => { if (!ignore) setError(e instanceof Error ? e.message : 'Failed to load quotas') })
+      .finally(() => { if (!ignore) setLoading(false) })
+    // Usage is non-critical: a failure here shouldn't blank the quota editor.
+    getUsage(currentTenant.id)
+      .then((u) => { if (!ignore) setUsage(u) })
+      .catch(() => { if (!ignore) setUsage(null) })
+    return () => { ignore = true }
   }, [currentTenant?.id])
+
+  const exportCSV = async () => {
+    if (!currentTenant) return
+    try {
+      // Fetch via apiClient (not window.open) so the X-Tenant-ID header is sent.
+      const resp = await apiClient.get(usageExportURL(currentTenant.id), { responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([resp.data], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `vrsky-usage-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Export failed')
+    }
+  }
 
   const save = async () => {
     if (!currentTenant || !q) return
@@ -122,6 +152,60 @@ export default function UsagePage() {
       {error && (
         <div style={{ padding: '10px', background: '#fef2f2', color: '#991b1b', fontSize: '13px', borderRadius: '6px', marginBottom: '12px' }}>
           {error}
+        </div>
+      )}
+
+      {usage && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <strong style={{ fontSize: '14px' }}>Usage this month</strong>
+            <button
+              onClick={exportCSV}
+              style={{ padding: '6px 12px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+            >
+              Export CSV
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: usage.daily.length ? '14px' : 0 }}>
+            <div>
+              <span style={label}>Messages</span>
+              <div style={{ fontSize: '22px', fontWeight: 600 }}>{usage.month.messages_published.toLocaleString()}</div>
+            </div>
+            <div>
+              <span style={label}>Deploys</span>
+              <div style={{ fontSize: '22px', fontWeight: 600 }}>{usage.month.deploys.toLocaleString()}</div>
+            </div>
+            <div>
+              <span style={label}>Storage</span>
+              <div style={{ fontSize: '22px', fontWeight: 600 }}>{fmtBytes(usage.month.storage_bytes)}</div>
+            </div>
+          </div>
+          {usage.daily.length > 0 ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: '#6b7280' }}>
+                  <th style={{ padding: '4px 0', fontWeight: 600 }}>Day</th>
+                  <th style={{ padding: '4px 0', fontWeight: 600, textAlign: 'right' }}>Messages</th>
+                  <th style={{ padding: '4px 0', fontWeight: 600, textAlign: 'right' }}>Deploys</th>
+                  <th style={{ padding: '4px 0', fontWeight: 600, textAlign: 'right' }}>Storage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.daily.map((d) => (
+                  <tr key={d.day} style={{ borderTop: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '4px 0' }}>{d.day}</td>
+                    <td style={{ padding: '4px 0', textAlign: 'right' }}>{d.messages_published.toLocaleString()}</td>
+                    <td style={{ padding: '4px 0', textAlign: 'right' }}>{d.deploys.toLocaleString()}</td>
+                    <td style={{ padding: '4px 0', textAlign: 'right' }}>{fmtBytes(d.storage_bytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+              No usage recorded yet this month.
+            </p>
+          )}
         </div>
       )}
 

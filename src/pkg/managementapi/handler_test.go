@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 )
@@ -20,6 +21,7 @@ type MockRepository struct {
 	oidcUsers    []mockOIDCUser
 	quotas       map[string]*TenantQuotas
 	tenantPlans  map[string]string
+	usage        map[string]map[string]*UsageDaily // tenantID → day → row
 }
 
 type mockOIDCUser struct {
@@ -683,6 +685,52 @@ func (m *MockRepository) CountActiveIntegrations(ctx context.Context, tenantID s
 		}
 	}
 	return n, nil
+}
+
+// ----- Usage metering (Phase 4A — #92) -----
+
+func (m *MockRepository) UpsertUsageDaily(ctx context.Context, tenantID string, day time.Time, messages, deploys, storageBytes int64) error {
+	if m.usage == nil {
+		m.usage = map[string]map[string]*UsageDaily{}
+	}
+	if m.usage[tenantID] == nil {
+		m.usage[tenantID] = map[string]*UsageDaily{}
+	}
+	d := day.UTC().Format("2006-01-02")
+	m.usage[tenantID][d] = &UsageDaily{Day: d, MessagesPublished: messages, Deploys: deploys, StorageBytes: storageBytes}
+	return nil
+}
+
+func (m *MockRepository) ListUsageDaily(ctx context.Context, tenantID string, from, to time.Time) ([]*UsageDaily, error) {
+	lo, hi := from.UTC().Format("2006-01-02"), to.UTC().Format("2006-01-02")
+	var out []*UsageDaily
+	for d, row := range m.usage[tenantID] {
+		if d >= lo && d <= hi {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Day < out[j].Day })
+	return out, nil
+}
+
+func (m *MockRepository) SumUsage(ctx context.Context, tenantID string, from, to time.Time) (*UsageTotals, error) {
+	rows, _ := m.ListUsageDaily(ctx, tenantID, from, to)
+	t := &UsageTotals{}
+	for _, r := range rows {
+		t.MessagesPublished += r.MessagesPublished
+		t.Deploys += r.Deploys
+		t.StorageBytes = r.StorageBytes // rows are day-ascending → ends on latest
+	}
+	return t, nil
+}
+
+func (m *MockRepository) ListTenantStorage(ctx context.Context) (map[string]int64, error) {
+	out := map[string]int64{}
+	for id, q := range m.quotas {
+		out[id] = q.StorageBytes
+	}
+	return out, nil
 }
 
 // ----- Tenant members (Phase 1D — #69) -----

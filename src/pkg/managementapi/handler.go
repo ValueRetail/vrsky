@@ -564,6 +564,10 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Count the deploy for per-tenant usage metering (#92). The usage rollup
+	// snapshots increase() of this counter from Prometheus into usage_daily.
+	connectionDeploys.WithLabelValues(tenantID).Inc()
+
 	// Create connection started event
 	eventData, _ := json.Marshal(map[string]interface{}{
 		"status":    conn.Status,
@@ -1023,6 +1027,10 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// Tenant quotas (#74). Reads = any member; writes = owner.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
 	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)
+
+	// Per-tenant usage metering (#92). Any member can read usage + export CSV.
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/usage", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetUsage))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/usage/export", sessionMW(tenantMW(http.HandlerFunc(h.HandleExportUsage))).ServeHTTP)
 
 	// Subscription plan (#90). Owner-only; drives the gateway's per-tenant edge
 	// rate limit (free/pro/enterprise).

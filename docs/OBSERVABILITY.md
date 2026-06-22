@@ -65,3 +65,33 @@ secret-access paths follow this.
 - Traces: `infrastructure/kubernetes/monitoring/otel-tracing.yaml`.
 - Logs: `infrastructure/kubernetes/monitoring/loki-promtail.yaml`.
 - All three datasources are provisioned in `grafana-values.yaml`.
+
+## Per-tenant usage metering (#92)
+
+Phase 4A turns the per-tenant metrics into a billable record. Three axes are
+tracked per tenant per UTC day in the `usage_daily` table (migration `000016`):
+
+| Axis                 | Source                                                              |
+|----------------------|---------------------------------------------------------------------|
+| `messages_published` | `increase(vrsky_messages_published_total[24h])` (Prometheus)        |
+| `deploys`            | `increase(vrsky_connection_deploys_total[24h])` (Prometheus)        |
+| `storage_bytes`      | `tenant_quotas.storage_bytes` snapshot                              |
+
+`vrsky_messages_published_total` is incremented by the publisher on every
+successful JetStream publish; `vrsky_connection_deploys_total` is incremented by
+the management-api on every successful connection start. Prometheus scrapes both
+(jobs `vrsky-workers` + `management-api`).
+
+**Rollup.** The management-api runs an hourly `UsageRollup` (`PROMETHEUS_URL`,
+default `http://prometheus:9090`) that queries the two counters by `tenant_id`
+and upserts the current day's row (idempotent `ON CONFLICT`). Running hourly
+keeps the live day's totals fresh and re-derives the current day after a restart;
+prior days persist in `usage_daily` — so the metering survives worker/API
+restarts even though Prometheus counters reset. With `PROMETHEUS_URL` unset the
+rollup records storage only.
+
+**Surfacing.** `GET /api/v1/tenants/{id}/usage[?from=&to=]` returns current-month
+(default) totals + daily rows; `…/usage/export?format=csv` streams the same as
+CSV (`day,messages_published,deploys,storage_bytes`) for handoff to a billing /
+invoice system. Both are shown on the **Usage & quotas** settings page. A live
+Stripe API integration is out of scope — CSV export is the billing handoff.

@@ -435,6 +435,10 @@ services:
       # dynamic config (shared, read-only, with the traefik service). On a plan
       # change the API rewrites tenants.yml here and Traefik hot-reloads.
       TRAEFIK_DYNAMIC_DIR: "/etc/traefik/dynamic"
+      # Usage metering (#92): the hourly rollup queries Prometheus for per-tenant
+      # message + deploy counts and snapshots them (with storage) into
+      # usage_daily. Unset → storage-only rollup.
+      PROMETHEUS_URL: "${PROMETHEUS_URL:-http://prometheus:9090}"
     depends_on:
       nats:
         condition: service_healthy
