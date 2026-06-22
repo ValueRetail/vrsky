@@ -83,16 +83,21 @@ export default function UsagePage() {
 
   useEffect(() => {
     if (!currentTenant) return
+    // ignore guards against a slow response from a previous tenant landing after
+    // the user has switched — which would otherwise show cross-tenant data.
+    let ignore = false
     setLoading(true)
     setError(null)
+    setUsage(null) // clear the prior tenant's card before the new request resolves
     getQuotas(currentTenant.id)
-      .then(reset)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load quotas'))
-      .finally(() => setLoading(false))
+      .then((next) => { if (!ignore) reset(next) })
+      .catch((e) => { if (!ignore) setError(e instanceof Error ? e.message : 'Failed to load quotas') })
+      .finally(() => { if (!ignore) setLoading(false) })
     // Usage is non-critical: a failure here shouldn't blank the quota editor.
     getUsage(currentTenant.id)
-      .then(setUsage)
-      .catch(() => setUsage(null))
+      .then((u) => { if (!ignore) setUsage(u) })
+      .catch(() => { if (!ignore) setUsage(null) })
+    return () => { ignore = true }
   }, [currentTenant?.id])
 
   const exportCSV = async () => {

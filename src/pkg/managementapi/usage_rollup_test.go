@@ -85,6 +85,14 @@ func TestUsageRollup_RunOnce(t *testing.T) {
 	if len(rows2) != 1 || rows2[0].Deploys != 0 {
 		t.Errorf("t-2 row = %+v, want one row with deploys=0", rows2)
 	}
+
+	// The run also finalizes yesterday (closing the midnight gap), so a
+	// yesterday row exists with the day-anchored counter delta.
+	yesterday := today.AddDate(0, 0, -1)
+	yrows, _ := repo.ListUsageDaily(ctx, "t-1", yesterday, yesterday)
+	if len(yrows) != 1 {
+		t.Fatalf("t-1 yesterday rows = %d, want 1 (finalized)", len(yrows))
+	}
 }
 
 func TestUsageRollup_StorageOnlyWhenNoProm(t *testing.T) {

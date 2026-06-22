@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"encoding/csv"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -101,4 +102,10 @@ func (h *Handler) HandleExportUsage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	cw.Flush()
+	// The 200 + headers are already committed once streaming starts, so we can't
+	// signal failure to the client — but log it (e.g. client disconnect mid-stream)
+	// so a truncated export isn't silent.
+	if err := cw.Error(); err != nil {
+		log.Printf("usage: CSV export to tenant=%s failed mid-stream: %v", tenantID, err)
+	}
 }

@@ -69,4 +69,14 @@ func TestQueryByLabel_Errors(t *testing.T) {
 	if _, err := New(down.URL, down.Client()).QueryByLabel(context.Background(), "x", "tenant_id"); err == nil {
 		t.Error("expected error on 500 response")
 	}
+
+	// Non-vector result (e.g. a matrix from a range query) is rejected loudly
+	// rather than silently returning an empty map.
+	matrix := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer matrix.Close()
+	if _, err := New(matrix.URL, matrix.Client()).QueryByLabel(context.Background(), "x", "tenant_id"); err == nil {
+		t.Error("expected error on non-vector (matrix) result")
+	}
 }

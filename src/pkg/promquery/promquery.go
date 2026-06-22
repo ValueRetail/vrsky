@@ -74,6 +74,12 @@ func (c *Client) QueryByLabel(ctx context.Context, query, label string) (map[str
 	if pr.Status != "success" {
 		return nil, fmt.Errorf("prometheus query failed: %s: %s", pr.ErrorType, pr.Error)
 	}
+	// QueryByLabel reads instant-vector samples. A non-vector result (e.g. a
+	// matrix from a range query) would decode fine but yield an empty map,
+	// silently masking a query mistake — fail loudly instead.
+	if pr.Data.ResultType != "" && pr.Data.ResultType != "vector" {
+		return nil, fmt.Errorf("prometheus returned %q result, want vector", pr.Data.ResultType)
+	}
 
 	out := make(map[string]float64, len(pr.Data.Result))
 	for _, series := range pr.Data.Result {

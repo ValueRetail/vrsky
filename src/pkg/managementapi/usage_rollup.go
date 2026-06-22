@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"sync"
@@ -28,12 +29,21 @@ type UsageRollup struct {
 	wg     sync.WaitGroup
 }
 
-// PromQL the rollup evaluates. increase() over 24h gives the day's delta and is
-// resilient to counter resets on worker restart.
+// Counters the rollup snapshots. increase() is reset-aware, so it survives
+// worker/API restarts that zero the counter.
 const (
-	usageMessagesQuery = `sum by (tenant_id) (increase(vrsky_messages_published_total[24h]))`
-	usageDeploysQuery  = `sum by (tenant_id) (increase(vrsky_connection_deploys_total[24h]))`
+	usageMessagesMetric = "vrsky_messages_published_total"
+	usageDeploysMetric  = "vrsky_connection_deploys_total"
 )
+
+// dayDeltaQuery builds a PromQL instant query for a counter's increase over the
+// window (windowSec) ending at endUnix, summed by tenant_id. Anchoring the
+// window to a calendar-day boundary with the @ modifier — rather than a rolling
+// [24h] — keeps each usage_daily row scoped to exactly one UTC day, which is
+// what billing needs.
+func dayDeltaQuery(metric string, windowSec, endUnix int64) string {
+	return fmt.Sprintf("sum by (tenant_id) (increase(%s[%ds] @ %d))", metric, windowSec, endUnix)
+}
 
 // UsageRollupOption tunes the rollup at construction.
 type UsageRollupOption func(*UsageRollup)
@@ -91,10 +101,15 @@ func (u *UsageRollup) Stop() {
 	u.wg.Wait()
 }
 
-// runOnce upserts every tenant's row for the current UTC day. Errors are logged,
-// not fatal — a transient Prometheus or DB blip should not kill the loop.
+// runOnce refreshes today's row (midnight → now) and finalizes yesterday's full
+// calendar day. Running hourly keeps today's totals fresh and converging to the
+// true day total; finalizing yesterday closes the midnight gap so a complete
+// day is never left as a partial rolling window. Errors are logged, not fatal —
+// a transient Prometheus or DB blip should not kill the loop.
 func (u *UsageRollup) runOnce(ctx context.Context) {
-	day := time.Now().UTC()
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	yesterday := today.AddDate(0, 0, -1)
 
 	storage, err := u.repo.ListTenantStorage(ctx)
 	if err != nil {
@@ -102,14 +117,33 @@ func (u *UsageRollup) runOnce(ctx context.Context) {
 		return
 	}
 
+	// Today: window [midnight, now]; storage = current snapshot.
+	todayWindow := int64(now.Sub(today).Seconds())
+	if todayWindow < 1 {
+		todayWindow = 1
+	}
+	u.rollupDay(ctx, today, todayWindow, now.Unix(), storage, true)
+
+	// Yesterday: full day [yesterday-midnight, today-midnight]. Counter deltas
+	// are a fixed past window (stable across re-runs); storage is preserved from
+	// yesterday's own last snapshot rather than overwritten with today's.
+	u.rollupDay(ctx, yesterday, 86400, today.Unix(), storage, false)
+}
+
+// rollupDay upserts one day's row for every tenant. windowSec/endUnix define the
+// counter-delta window. When setStorage is true the current storage snapshot is
+// written; otherwise the day's existing stored storage is preserved (so
+// finalizing a past day doesn't clobber it with today's value).
+func (u *UsageRollup) rollupDay(ctx context.Context, day time.Time, windowSec, endUnix int64, storage map[string]int64, setStorage bool) {
 	var messages, deploys map[string]float64
 	if u.prom != nil {
-		if messages, err = u.prom.QueryByLabel(ctx, usageMessagesQuery, "tenant_id"); err != nil {
-			u.logger.Warn("usage rollup: query messages", "error", err)
+		var err error
+		if messages, err = u.prom.QueryByLabel(ctx, dayDeltaQuery(usageMessagesMetric, windowSec, endUnix), "tenant_id"); err != nil {
+			u.logger.Warn("usage rollup: query messages", "day", day.Format("2006-01-02"), "error", err)
 			messages = map[string]float64{}
 		}
-		if deploys, err = u.prom.QueryByLabel(ctx, usageDeploysQuery, "tenant_id"); err != nil {
-			u.logger.Warn("usage rollup: query deploys", "error", err)
+		if deploys, err = u.prom.QueryByLabel(ctx, dayDeltaQuery(usageDeploysMetric, windowSec, endUnix), "tenant_id"); err != nil {
+			u.logger.Warn("usage rollup: query deploys", "day", day.Format("2006-01-02"), "error", err)
 			deploys = map[string]float64{}
 		}
 	}
@@ -128,15 +162,22 @@ func (u *UsageRollup) runOnce(ctx context.Context) {
 
 	var written, failed int
 	for id := range tenants {
+		storageVal := storage[id]
+		if !setStorage {
+			// Preserve the day's own stored storage if a row already exists.
+			if rows, err := u.repo.ListUsageDaily(ctx, id, day, day); err == nil && len(rows) == 1 {
+				storageVal = rows[0].StorageBytes
+			}
+		}
 		if err := u.repo.UpsertUsageDaily(ctx, id, day,
-			roundCounter(messages[id]), roundCounter(deploys[id]), storage[id]); err != nil {
-			u.logger.Error("usage rollup: upsert", "tenant_id", id, "error", err)
+			roundCounter(messages[id]), roundCounter(deploys[id]), storageVal); err != nil {
+			u.logger.Error("usage rollup: upsert", "tenant_id", id, "day", day.Format("2006-01-02"), "error", err)
 			failed++
 			continue
 		}
 		written++
 	}
-	u.logger.Info("usage rollup complete", "day", day.Format("2006-01-02"),
+	u.logger.Info("usage rollup day complete", "day", day.Format("2006-01-02"),
 		"tenants", written, "failed", failed, "prometheus", u.prom != nil)
 }
 
