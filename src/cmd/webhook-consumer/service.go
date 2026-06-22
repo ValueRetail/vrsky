@@ -262,7 +262,7 @@ func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 	// requires an inbound client cert that chains to it.
 	clientCA := s.extractClientCA(conn)
 	if len(clientCA) > 0 && s.mtlsPort == "" {
-		s.logger.Warn("Connection requires mTLS but WORKER_MTLS_PORT is unset; client-cert checks only apply to TLS-port requests",
+		s.logger.Warn("Connection requires mTLS (tls.client_ca) but WORKER_MTLS_PORT is unset; the connection is unreachable — there is no TLS listener and plain-port requests are rejected as missing a client cert. Set WORKER_MTLS_PORT.",
 			"connection_id", cmd.ConnectionID)
 	}
 

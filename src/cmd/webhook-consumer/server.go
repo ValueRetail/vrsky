@@ -73,7 +73,7 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 				http.Error(w, "Client certificate required", http.StatusUnauthorized)
 				return
 			}
-			if err := tlsconfig.VerifyClientCert(r.TLS.PeerCertificates[0], ac.ClientCA); err != nil {
+			if err := tlsconfig.VerifyClientCert(r.TLS.PeerCertificates, ac.ClientCA); err != nil {
 				incClientCertFailure(ac.ConnectionID, "untrusted_cert")
 				s.logger.Warn("Webhook client certificate verification failed",
 					"connection_id", ac.ConnectionID, "reason", err.Error())

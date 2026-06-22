@@ -400,11 +400,13 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			if err != nil {
 				return nil, fmt.Errorf("node %s: build mTLS client: %w", node.ID, err)
 			}
+			// Clone DefaultTransport so proxy support, dial/idle timeouts and
+			// HTTP/2 settings are preserved; only swap in the mTLS config.
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = tlsCfg
 			cfg.client = &http.Client{
-				Timeout: 30 * time.Second,
-				Transport: otelhttp.NewTransport(&http.Transport{
-					TLSClientConfig: tlsCfg,
-				}),
+				Timeout:   30 * time.Second,
+				Transport: otelhttp.NewTransport(transport),
 			}
 		}
 

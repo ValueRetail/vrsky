@@ -118,14 +118,26 @@ func TestVerifyClientCert(t *testing.T) {
 	leaf := parseLeaf(t, cliCert)
 
 	// Signed by the configured CA → accepted.
-	if err := VerifyClientCert(leaf, caPEM); err != nil {
+	if err := VerifyClientCert([]*x509.Certificate{leaf}, caPEM); err != nil {
 		t.Errorf("VerifyClientCert should accept a cert signed by the configured CA: %v", err)
 	}
 
 	// A different CA → rejected.
 	otherCAPEM, _, _ := genCA(t)
-	if err := VerifyClientCert(leaf, otherCAPEM); err == nil {
+	if err := VerifyClientCert([]*x509.Certificate{leaf}, otherCAPEM); err == nil {
 		t.Error("VerifyClientCert should reject a cert signed by a different CA")
+	}
+
+	// Empty chain → rejected.
+	if err := VerifyClientCert(nil, caPEM); err == nil {
+		t.Error("VerifyClientCert should reject an empty chain")
+	}
+
+	// A server-auth-only leaf signed by the configured CA → rejected (EKU is
+	// restricted to client-auth).
+	srvCert, _ := genLeaf(t, ca, caKey, "server-leaf", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	if err := VerifyClientCert([]*x509.Certificate{parseLeaf(t, srvCert)}, caPEM); err == nil {
+		t.Error("VerifyClientCert should reject a server-auth-only leaf")
 	}
 }
 

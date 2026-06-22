@@ -336,11 +336,12 @@ self-signed cert (dev only) — mTLS security here comes from verifying the
 
 - **Consumer:** when `WORKER_MTLS_PORT` is set (9101 in compose) the worker runs
   a dedicated TLS listener that demands *a* client cert at the handshake
-  (`RequireAnyClientCert`). For a connection with `tls.client_ca`, the handler
-  then verifies the presented cert chains to that per-connection CA and rejects
-  with **401** if it is missing or untrusted. The same check also runs on the
-  plain aux port (9100), where `r.TLS == nil` counts as "no cert" — so an mTLS
-  connection cannot be reached unauthenticated over plain HTTP.
+  (`RequireAnyClientCert`) — a caller that presents none is refused at the TLS
+  layer (no HTTP response). For a connection with `tls.client_ca`, the handler
+  then verifies the presented cert chains to that per-connection CA (client-auth
+  EKU only) and rejects with **401** if it does not. The same check also runs on
+  the plain aux port (9100), where `r.TLS == nil` counts as "no cert" → **401** —
+  so an mTLS connection cannot be reached unauthenticated over plain HTTP.
 - **Producer:** when a node has a `tls` block with a resolved `cert`/`key`, the
   worker builds a dedicated `http.Client` that presents that client cert (and
   trusts `client_ca` as the server root if supplied), reused for every send.
@@ -361,8 +362,11 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 
 # 2. Store ca.crt as a tenant secret and put its id in the consumer node's
 #    tls.client_ca_secret_id, then start a webhook→http connection.
 
-# 3. No client cert → rejected; valid client cert → 202.
-curl -k https://localhost:9101/webhook/<conn-id> -d '{"x":1}'                       # TLS/401
+# 3. No client cert → TLS handshake refused (RequireAnyClientCert, no HTTP
+#    response — curl exits 35/56); valid client cert → 202.
+curl -k https://localhost:9101/webhook/<conn-id> -d '{"x":1}'                       # handshake refused
 curl -k --cert client.crt --key client.key https://localhost:9101/webhook/<conn-id> -d '{"x":1}'  # 202
-# A cert signed by a different CA → 401.
+# A cert signed by a different CA completes the handshake but fails app-layer
+# verification → 401. (macOS system curl uses LibreSSL, which mishandles EC
+# client keys with "bad decrypt"; use an OpenSSL-based curl to test.)
 ```

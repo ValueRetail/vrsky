@@ -54,30 +54,48 @@ func ServerConfig(serverCert, serverKey []byte) (*tls.Config, error) {
 	}, nil
 }
 
-// VerifyClientCert reports whether peer chains to clientCA. Used by the consumer
-// to enforce the per-connection client CA after the handshake captured the cert.
-func VerifyClientCert(peer *x509.Certificate, clientCA []byte) error {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(clientCA) {
+// VerifyClientCert reports whether the presented chain (leaf first, any
+// intermediates following — i.e. tls.ConnectionState.PeerCertificates) chains to
+// clientCA. Used by the consumer to enforce the per-connection client CA after
+// the handshake captured the cert. Intermediates from the chain are added to a
+// pool so a leaf signed by an intermediate under a configured root still
+// verifies. EKU is restricted to client-auth: a server-auth-only leaf signed by
+// the same CA is rejected (a leaf with no EKU still validates, per x509).
+func VerifyClientCert(chain []*x509.Certificate, clientCA []byte) error {
+	if len(chain) == 0 {
+		return fmt.Errorf("no client certificate presented")
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(clientCA) {
 		return fmt.Errorf("client CA: no certificates parsed")
 	}
-	_, err := peer.Verify(x509.VerifyOptions{
-		Roots:     pool,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageAny},
+	intermediates := x509.NewCertPool()
+	for _, c := range chain[1:] {
+		intermediates.AddCert(c)
+	}
+	_, err := chain[0].Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 	return err
 }
 
-// ClientConfig builds a client-side *tls.Config presenting clientCert/Key. When
-// rootCA is non-empty it is the only trusted server CA; empty → system roots.
+// ClientConfig builds a client-side *tls.Config. When clientCert/Key are both
+// supplied it presents that client cert (mTLS); supplying only one is a config
+// error. When rootCA is non-empty it is the only trusted server CA; empty →
+// system roots. A rootCA-only config (no client cert) just pins the server CA.
 func ClientConfig(clientCert, clientKey, rootCA []byte) (*tls.Config, error) {
-	cert, err := tls.X509KeyPair(clientCert, clientKey)
-	if err != nil {
-		return nil, fmt.Errorf("client keypair: %w", err)
-	}
-	cfg := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	switch {
+	case len(clientCert) > 0 && len(clientKey) > 0:
+		cert, err := tls.X509KeyPair(clientCert, clientKey)
+		if err != nil {
+			return nil, fmt.Errorf("client keypair: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	case len(clientCert) > 0 || len(clientKey) > 0:
+		return nil, fmt.Errorf("client cert and key must both be set (got cert=%t key=%t)", len(clientCert) > 0, len(clientKey) > 0)
 	}
 	if len(rootCA) > 0 {
 		pool := x509.NewCertPool()
