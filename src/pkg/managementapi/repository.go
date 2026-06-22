@@ -229,6 +229,24 @@ type Repository interface {
 	CountActiveIntegrations(ctx context.Context, tenantID string) (int, error)
 
 	// ============================================
+	// Usage metering (Phase 4A — #92)
+	// ============================================
+
+	// UpsertUsageDaily writes (or refreshes) a tenant's usage row for one day.
+	UpsertUsageDaily(ctx context.Context, tenantID string, day time.Time, messages, deploys, storageBytes int64) error
+
+	// ListUsageDaily returns a tenant's daily usage rows in [from, to] inclusive.
+	ListUsageDaily(ctx context.Context, tenantID string, from, to time.Time) ([]*UsageDaily, error)
+
+	// SumUsage aggregates a tenant's usage over [from, to] (messages/deploys
+	// summed, storage = latest day in range).
+	SumUsage(ctx context.Context, tenantID string, from, to time.Time) (*UsageTotals, error)
+
+	// ListTenantStorage returns tenant_id → storage_bytes for every tenant with
+	// a quota row; the rollup uses it as the tenant set + storage source.
+	ListTenantStorage(ctx context.Context) (map[string]int64, error)
+
+	// ============================================
 	// Tenant members (Phase 1D — #69)
 	// ============================================
 

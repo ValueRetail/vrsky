@@ -28,6 +28,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
+	"github.com/ValueRetail/vrsky/pkg/promquery"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
@@ -327,6 +328,19 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// process lifetime; its ticker + worker goroutines are reclaimed on exit.
 	oauthRefresher.Start()
 	restHandler.SetOAuthRefresher(oauthRefresher)
+
+	// Phase 4A (#92): per-tenant usage metering. An hourly rollup snapshots
+	// message + deploy counts (from Prometheus) and storage (from tenant_quotas)
+	// into usage_daily, which the /usage API + CSV export read. PROMETHEUS_URL
+	// unset → storage-only rollup (counts stay 0). Like the OAuth refresher, no
+	// deferred Stop — it runs for the process lifetime.
+	var promClient *promquery.Client
+	if promURL := os.Getenv("PROMETHEUS_URL"); promURL != "" {
+		promClient = promquery.New(promURL, nil)
+	} else {
+		slog.Warn("PROMETHEUS_URL unset; usage rollup will record storage only (no message/deploy counts)")
+	}
+	managementapi.NewUsageRollup(repo, promClient).Start()
 
 	restHandler.RegisterRoutes(mux)
 
