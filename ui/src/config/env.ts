@@ -23,6 +23,11 @@ export const config = {
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
   fileProducerUrl: getEnv('VITE_FILE_PRODUCER_URL', 'http://localhost:9900'),
+  // Public base URL of the webhook-consumer ingress. The onboarding wizard (#93)
+  // surfaces `${webhookIngressUrl}/webhook/{id}` and POSTs the sample event to
+  // it. Defaults to the local compose port; override in deployments where
+  // webhooks enter via the gateway/public host.
+  webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', 'http://localhost:9100'),
   // Optional bearer token for the file-producer's /files API. Empty in local
   // dev (the server leaves auth disabled); set in deployments that enable
   // FILE_PRODUCER_AUTH_TOKEN on the file-producer. Read directly because an

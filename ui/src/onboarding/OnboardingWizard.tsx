@@ -11,6 +11,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../services/api'
+import { config } from '../config/env'
 import { useAuthStore } from '../store/authStore'
 import { materializeSecrets } from '../utils/secrets'
 import SecretInput from '../components/Pipeline/SecretInput'
@@ -19,6 +20,9 @@ import { markOnboarded } from './state'
 
 // --- nested config helpers ------------------------------------------------
 
+// getObj resolves (and creates) the nested object at objectPath. It MUTATES
+// root, so only call it on a cloned config inside a setConfigs updater — never
+// during render or on a state object directly.
 function getObj(root: Record<string, unknown>, objectPath: string): Record<string, unknown> {
   if (!objectPath) return root
   let cur = root
@@ -27,6 +31,19 @@ function getObj(root: Record<string, unknown>, objectPath: string): Record<strin
     cur = cur[part] as Record<string, unknown>
   }
   return cur
+}
+
+// readObj is the non-mutating counterpart used during render and in derived
+// state: it never creates intermediate objects (so it can't mutate React
+// state), returning an empty object when the path is absent.
+function readObj(root: Record<string, unknown>, objectPath: string): Record<string, unknown> {
+  if (!objectPath) return root
+  let cur: unknown = root
+  for (const part of objectPath.split('.')) {
+    if (!cur || typeof cur !== 'object') return {}
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur && typeof cur === 'object' ? (cur as Record<string, unknown>) : {}
 }
 
 // --- styles (inline, matching the rest of the app) ------------------------
@@ -89,13 +106,20 @@ export default function OnboardingWizard() {
     })
   }
 
-  // Required non-secret fields must be filled before deploy.
+  // Every template field is required before deploy. A secret field is satisfied
+  // by either freshly-typed plaintext (`key`) or an already-bound secret
+  // (`key_secret_id`); a text field by a non-empty string.
   const missing = useMemo(() => {
     if (!template) return []
     return template.fields.filter((f) => {
-      if (f.secret) return false // secrets optional here; user may reuse env creds
-      const v = getObj(configs[f.nodeId] || {}, f.objectPath)[f.key]
-      return typeof v !== 'string' || v.trim() === ''
+      const obj = readObj(configs[f.nodeId] || {}, f.objectPath)
+      const v = obj[f.key]
+      const filled = typeof v === 'string' && v.trim() !== ''
+      if (f.secret) {
+        const bound = obj[`${f.key}_secret_id`]
+        return !filled && !(typeof bound === 'string' && bound !== '')
+      }
+      return !filled
     })
   }, [template, configs])
 
@@ -127,7 +151,7 @@ export default function OnboardingWizard() {
         /* best-effort auto-start; connection still created */
       }
       setDeployedId(id)
-      if (template.webhookSource) setWebhookUrl(`http://localhost:9100/webhook/${id}`)
+      if (template.webhookSource) setWebhookUrl(`${config.webhookIngressUrl}/webhook/${id}`)
       markOnboarded(currentTenant?.id)
       setStep('done')
     } catch (e) {
@@ -204,7 +228,7 @@ export default function OnboardingWizard() {
           </div>
 
           {template.fields.map((f) => {
-            const obj = getObj(configs[f.nodeId] || {}, f.objectPath)
+            const obj = readObj(configs[f.nodeId] || {}, f.objectPath)
             return (
               <div style={card} key={`${f.nodeId}.${f.objectPath}.${f.key}`}>
                 {f.secret ? (
@@ -231,7 +255,7 @@ export default function OnboardingWizard() {
                   {f.link && (
                     <>
                       {' '}
-                      <a href={f.link.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>
+                      <a href={f.link.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>
                         {f.link.text} ↗
                       </a>
                     </>
