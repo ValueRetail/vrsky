@@ -1,0 +1,45 @@
+name: docs
+
+# Builds the mkdocs site from docs/ on every PR (strict — broken links/nav fail
+# the build) and publishes it to GitHub Pages on push to main (#94).
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+  pull_request:
+    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install mkdocs
+        run: pip install mkdocs-material
+      - name: Build site (strict)
+        run: mkdocs build --strict
+
+  deploy:
+    # Publish to GitHub Pages only from main.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install mkdocs-material
+      - name: Deploy to gh-pages
+        run: mkdocs gh-deploy --force

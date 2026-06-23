@@ -164,3 +164,9 @@ jobs:
           working-directory: src
           args: --timeout=5m
           cache: true
+
+      # #94: fail the build if a management-API route is served without an
+      # OpenAPI registry entry (keeps /openapi.json complete).
+      - name: Lint OpenAPI annotations
+        working-directory: src
+        run: go run ./cmd/lint-openapi

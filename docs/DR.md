@@ -28,7 +28,7 @@ Config is environment-driven (`BACKUP_DB_URL`, `ENCRYPTION_KEY`,
 `BACKUP_PROVIDER`/`BACKUP_BUCKET`/`BACKUP_ENDPOINT`/`BACKUP_REGION`/
 `BACKUP_ACCESS_KEY_ID`/`BACKUP_SECRET_ACCESS_KEY`, or the Azure/GCS equivalents).
 Deployment + the Secret are documented in
-[`infrastructure/kubernetes/backup/README.md`](../infrastructure/kubernetes/backup/README.md).
+[`infrastructure/kubernetes/backup/README.md`](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md).
 
 > ⚠️ **The `ENCRYPTION_KEY` is NOT in the backup** — and it can't be: the dump is
 > encrypted with it, and the dump's `*_secret_id` ciphertext is only decryptable

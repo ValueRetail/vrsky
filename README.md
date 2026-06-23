@@ -6,6 +6,29 @@
 ![License](https://img.shields.io/badge/license-Fair_Source-orange)
 ![Commercial](https://img.shields.io/badge/commercial-license_required-red)
 
+## Documentation
+
+Full documentation lives in [`docs/`](docs/index.md) and builds into a site
+(mkdocs):
+
+- **[Build your first pipeline](docs/tutorials/first-pipeline.md)** — ≤10 min, no code
+- **[Build your first connector](docs/sdk/tutorial/first-connector.md)** — ≤30 min, on the SDK
+- **[Operator guide](docs/operator/install.md)** — install, upgrade, backup, monitoring, troubleshooting
+- **[Connectors](docs/connectors/index.md)** — one page per connector
+- **[Security whitepaper](docs/security/whitepaper.md)**
+- **[API reference](docs/reference/api.md)** — OpenAPI at `/openapi.json`, Swagger UI at `/docs`
+
+## Quick start
+
+```bash
+cp .env.example .env          # set ENCRYPTION_KEY (openssl rand -hex 32) + passwords
+docker compose up -d --build  # start the stack (detached)
+cd ui && npm install && npm run dev   # UI at http://localhost:5173
+```
+
+Then follow the [first-pipeline tutorial](docs/tutorials/first-pipeline.md). See
+the [install guide](docs/operator/install.md) for production (Kubernetes).
+
 ## Vision
 
 VRSky is an integration platform as a service (iPaaS) that revolutionizes how organizations connect their systems. By combining the power of modern message streaming with a thriving connector marketplace, VRSky enables seamless data flow between applications, services, and partners.
