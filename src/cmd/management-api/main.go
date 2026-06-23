@@ -341,6 +341,8 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 		slog.Warn("PROMETHEUS_URL unset; usage rollup will record storage only (no message/deploy counts)")
 	}
 	managementapi.NewUsageRollup(repo, promClient).Start()
+	// Phase 4D (#95): the public status page reads the same Prometheus client.
+	restHandler.SetPrometheus(promClient)
 
 	restHandler.RegisterRoutes(mux)
 

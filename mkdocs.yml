@@ -71,6 +71,7 @@ nav:
       - Monitoring: operator/monitoring.md
       - Troubleshooting: operator/troubleshooting.md
       - Encryption-at-rest checklist: operator/encryption-at-rest.md
+      - Status page & uptime SLA: SLA.md
       - Deployment guide (detailed): DEPLOYMENT_GUIDE.md
       - Disaster recovery: DR.md
   - Connectors:
