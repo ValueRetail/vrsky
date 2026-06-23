@@ -24,6 +24,7 @@ import UsersPage from './pages/UsersPage'
 import UsagePage from './pages/UsagePage'
 import OAuthProvidersPage from './pages/OAuthProvidersPage'
 import NotificationsPage from './pages/NotificationsPage'
+import OnboardingWizard from './onboarding/OnboardingWizard'
 
 function App() {
   const { confirmDialog, hideConfirmDialog } = useUIStore()
@@ -58,6 +59,12 @@ function App() {
           <Route path="/connections/create" element={
             <ProtectedRoute>
               <PipelineBuilderPage />
+            </ProtectedRoute>
+          } />
+          {/* First-login onboarding wizard (#93) */}
+          <Route path="/welcome" element={
+            <ProtectedRoute>
+              <OnboardingWizard />
             </ProtectedRoute>
           } />
           
