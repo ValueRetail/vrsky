@@ -20,12 +20,14 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 const (
-	handlerFile  = "pkg/managementapi/handler.go"
+	pkgDir       = "pkg/managementapi"
 	registryFile = "pkg/managementapi/openapi_registry.go"
 )
 
@@ -37,7 +39,7 @@ var exempt = map[string]bool{
 }
 
 func main() {
-	served, err := muxPatterns(handlerFile)
+	served, err := muxPatterns(pkgDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lint-openapi: %v\n", err)
 		os.Exit(2)
@@ -70,41 +72,53 @@ func main() {
 }
 
 // muxPatterns returns the set of first-string-arg patterns from every
-// mux.Handle / mux.HandleFunc call in the file.
-func muxPatterns(path string) (map[string]bool, error) {
-	f, fset, err := parseFile(path)
+// mux.Handle / mux.HandleFunc call across all non-test .go files in dir. It
+// scans the whole package (not just handler.go) so routes registered in other
+// files — e.g. RegisterAPIConsumerRoutes in api_consumer_handler.go — are also
+// enforced against the OpenAPI registry.
+func muxPatterns(dir string) (map[string]bool, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read dir %s: %w", dir, err)
 	}
 	out := map[string]bool{}
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, _, err := parseFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			recv, ok := sel.X.(*ast.Ident)
+			if !ok || recv.Name != "mux" {
+				return true
+			}
+			if sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc" {
+				return true
+			}
+			if len(call.Args) == 0 {
+				return true
+			}
+			if lit := stringLit(call.Args[0]); lit != "" {
+				out[lit] = true
+			}
 			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		recv, ok := sel.X.(*ast.Ident)
-		if !ok || recv.Name != "mux" {
-			return true
-		}
-		if sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc" {
-			return true
-		}
-		if len(call.Args) == 0 {
-			return true
-		}
-		if lit := stringLit(call.Args[0]); lit != "" {
-			out[lit] = true
-		}
-		return true
-	})
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no mux route registrations found in %s (parser drift?)", path)
+		})
 	}
-	_ = fset
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no mux route registrations found in %s (parser drift?)", dir)
+	}
 	return out, nil
 }
 

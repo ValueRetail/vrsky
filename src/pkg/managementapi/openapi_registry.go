@@ -135,4 +135,11 @@ var apiRoutes = []apiRoute{
 	{"GET /api/v1/tenants/{tenant_id}/data-connections/{connection_id}/shared-connections", "get", "/api/v1/tenants/{tenant_id}/data-connections/{connection_id}/shared-connections", "Data sharing", "List the connections shared over a link", nil, nil},
 	{"GET /api/v1/tenants/{tenant_id}/data-access-log", "get", "/api/v1/tenants/{tenant_id}/data-access-log", "Data sharing", "Data-access audit log (admin)", nil, nil},
 	{"POST /api/v1/tenant/{tenant_id}/data", "post", "/api/v1/tenant/{tenant_id}/data", "Data sharing", "Ingest data into a tenant (API-key auth)", nil, nil},
+
+	// --- API consumers (registered by RegisterAPIConsumerRoutes) ---
+	{"POST /api/v1/api-consumers", "post", "/api/v1/api-consumers", "API consumers", "Create an API consumer (programmatic ingress credential)", nil, nil},
+	{"GET /api/v1/api-consumers", "get", "/api/v1/api-consumers", "API consumers", "List API consumers", nil, nil},
+	{"GET /api/v1/api-consumers/{id}", "get", "/api/v1/api-consumers/{id}", "API consumers", "Get an API consumer", nil, nil},
+	{"PUT /api/v1/api-consumers/{id}", "put", "/api/v1/api-consumers/{id}", "API consumers", "Update an API consumer", nil, nil},
+	{"DELETE /api/v1/api-consumers/{id}", "delete", "/api/v1/api-consumers/{id}", "API consumers", "Delete an API consumer", nil, nil},
 }

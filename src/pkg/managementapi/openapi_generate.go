@@ -38,14 +38,20 @@ func GenerateOpenAPI() ([]byte, error) {
 			}
 		}
 
+		code := successStatus(r)
 		success := map[string]any{"description": "Success"}
-		if r.Response != nil {
-			success["content"] = map[string]any{
-				"application/json": map[string]any{"schema": schemaFor(r.Response, defs)},
+		// 204 carries no body; otherwise document the response schema. Most
+		// handlers wrap the DTO in the standard {"data": …} envelope
+		// (SuccessResponse); list/envelope types are already top-level.
+		if code != "204" && r.Response != nil {
+			schema := schemaFor(r.Response, defs)
+			if !isEnvelopeType(r.Response) {
+				schema = map[string]any{"type": "object", "properties": map[string]any{"data": schema}}
 			}
+			success["content"] = map[string]any{"application/json": map[string]any{"schema": schema}}
 		}
 		op["responses"] = map[string]any{
-			"200": success,
+			code: success,
 			"default": map[string]any{
 				"description": "Error",
 				"content": map[string]any{
@@ -85,6 +91,51 @@ func GenerateOpenAPI() ([]byte, error) {
 		},
 	}
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+// create201 lists the collection-create endpoints that respond 201 Created
+// (keyed by "method path"). Everything else is 200, except DELETE (204) and the
+// async tenant-ingest endpoint (202) handled in successStatus.
+var create201 = map[string]bool{
+	"post /api/v1/connections":           true,
+	"post /api/v1/secrets":               true,
+	"post /api/v1/tenants":               true,
+	"post /api/v1/api-consumers":         true,
+	"post /api/v1/oauth/providers":       true,
+	"post /api/v1/notifications/targets": true,
+}
+
+// successStatus returns the documented success status code for a route.
+func successStatus(r apiRoute) string {
+	key := r.Method + " " + r.Path
+	switch {
+	case r.Method == "delete":
+		return "204"
+	case key == "post /api/v1/tenant/{tenant_id}/data":
+		return "202"
+	case create201[key]:
+		return "201"
+	default:
+		return "200"
+	}
+}
+
+// isEnvelopeType reports whether t is already a top-level response envelope
+// (so the generator must not wrap it again in {"data": …}). SuccessResponse and
+// ListResponse are the platform's response wrappers.
+func isEnvelopeType(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Name() {
+	case "SuccessResponse", "ListResponse", "ErrorResponse":
+		return true
+	default:
+		return false
+	}
 }
 
 var pathParamRe = regexp.MustCompile(`\{([^}]+)\}`)
