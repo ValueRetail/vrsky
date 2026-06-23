@@ -102,6 +102,11 @@ QUICK_*.md
 *INDEX*.md
 FILES_CREATED*.txt
 
+# The ALL-CAPS scratch-note patterns above are for working files, but on
+# case-insensitive filesystems (macOS) they also swallow real docs-site pages
+# like docs/index.md. Never ignore anything under the published docs tree.
+!docs/**
+
 # ============================================================================
 # OS Specific
 # ============================================================================
