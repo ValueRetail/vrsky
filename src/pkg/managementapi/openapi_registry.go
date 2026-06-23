@@ -136,6 +136,9 @@ var apiRoutes = []apiRoute{
 	{"GET /api/v1/tenants/{tenant_id}/data-access-log", "get", "/api/v1/tenants/{tenant_id}/data-access-log", "Data sharing", "Data-access audit log (admin)", nil, nil},
 	{"POST /api/v1/tenant/{tenant_id}/data", "post", "/api/v1/tenant/{tenant_id}/data", "Data sharing", "Ingest data into a tenant (API-key auth)", nil, nil},
 
+	// --- Status (public; #95) ---
+	{"GET /status.json", "get", "/status.json", "Status", "Public platform status + uptime (Prometheus-driven)", nil, tof(StatusResponse{})},
+
 	// --- API consumers (registered by RegisterAPIConsumerRoutes) ---
 	{"POST /api/v1/api-consumers", "post", "/api/v1/api-consumers", "API consumers", "Create an API consumer (programmatic ingress credential)", nil, nil},
 	{"GET /api/v1/api-consumers", "get", "/api/v1/api-consumers", "API consumers", "List API consumers", nil, nil},

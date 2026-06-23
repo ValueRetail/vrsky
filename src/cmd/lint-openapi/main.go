@@ -36,6 +36,7 @@ const (
 var exempt = map[string]bool{
 	"GET /openapi.json": true,
 	"GET /docs":         true,
+	"GET /status":       true, // HTML status page; /status.json is the documented API
 }
 
 func main() {

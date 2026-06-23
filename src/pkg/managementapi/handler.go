@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/oauth"
+	"github.com/ValueRetail/vrsky/pkg/promquery"
 )
 
 // Handler implements REST API handlers for connection management
@@ -50,6 +51,10 @@ type Handler struct {
 	// edge (#90). Wired by cmd/management-api when TRAEFIK_DYNAMIC_DIR is set;
 	// nil (the default) makes plan changes a pure DB update.
 	gatewaySync func(context.Context) error
+
+	// prom, when set, backs the public status page (#95) with Prometheus `up`
+	// probe data. nil (no PROMETHEUS_URL) makes every component report "unknown".
+	prom *promquery.Client
 }
 
 // SetGatewaySync wires the gateway rate-limit config refresher (#90).
@@ -878,6 +883,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// (no tenant header — exempted in TenantIDMiddleware).
 	mux.HandleFunc("GET /openapi.json", h.ServeOpenAPISpec)
 	mux.HandleFunc("GET /docs", h.ServeSwaggerUI)
+
+	// Public status page (#95): HTML + JSON, driven by Prometheus probe data.
+	// Public (exempted in TenantIDMiddleware).
+	mux.HandleFunc("GET /status", h.ServeStatusPage)
+	mux.HandleFunc("GET /status.json", h.ServeStatusJSON)
 
 	// CRUD operations
 	mux.Handle("POST /api/v1/connections", editor(http.HandlerFunc(h.CreateConnection)))
