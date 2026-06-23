@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/promquery"
@@ -22,8 +24,7 @@ import (
 // docs/SLA.md notes that a production status page should be mirrored externally.
 
 // statusComponents maps user-facing platform components to the Prometheus job
-// whose `up` series reflects their health. min() collapses multi-instance jobs
-// (e.g. all workers) to a single worst-case value.
+// whose `up` series reflects their health.
 var statusComponents = []struct {
 	Name string
 	Desc string
@@ -36,13 +37,15 @@ var statusComponents = []struct {
 	{"Monitoring", "Prometheus metrics", "prometheus"},
 }
 
-// ComponentStatus is one row of the status page.
+// ComponentStatus is one row of the status page. Uptime pointers are nil when
+// Prometheus has no sample for the component (distinguishing "unknown" from a
+// genuine 0% uptime).
 type ComponentStatus struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"` // "up" | "down" | "unknown"
-	Uptime24h   float64 `json:"uptime_24h"`
-	Uptime7d    float64 `json:"uptime_7d"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Status      string   `json:"status"` // "up" | "down" | "unknown"
+	Uptime24h   *float64 `json:"uptime_24h,omitempty"`
+	Uptime7d    *float64 `json:"uptime_7d,omitempty"`
 }
 
 // StatusResponse is the GET /status.json payload.
@@ -56,46 +59,90 @@ type StatusResponse struct {
 // PROMETHEUS_URL) makes every component report "unknown".
 func (h *Handler) SetPrometheus(c *promquery.Client) { h.prom = c }
 
-// buildStatus queries Prometheus for each component's current up/down and uptime
-// over 24h / 7d, and rolls up an overall status.
+// Short cache so frequent polling of /status(.json) doesn't fan out to
+// Prometheus on every request. The management API is a singleton process.
+const statusCacheTTL = 15 * time.Second
+
+var (
+	statusMu       sync.Mutex
+	statusCache    *StatusResponse
+	statusCachedAt time.Time
+)
+
+// statusJobsRe is the `job=~"…"` alternation covering every component job.
+var statusJobsRe = func() string {
+	jobs := make([]string, len(statusComponents))
+	for i, c := range statusComponents {
+		jobs[i] = c.Job
+	}
+	return strings.Join(jobs, "|")
+}()
+
+// statusSnapshot returns a cached status if fresh, otherwise recomputes it.
+func (h *Handler) statusSnapshot(ctx context.Context) StatusResponse {
+	statusMu.Lock()
+	defer statusMu.Unlock()
+	if statusCache != nil && time.Since(statusCachedAt) < statusCacheTTL {
+		return *statusCache
+	}
+	s := h.buildStatus(ctx)
+	statusCache = &s
+	statusCachedAt = time.Now()
+	return s
+}
+
+// buildStatus queries Prometheus for all components in three batched queries
+// (current up, 24h uptime, 7d uptime — each grouped by job) and rolls up an
+// overall status. "operational" requires every component to be confirmed up.
 func (h *Handler) buildStatus(ctx context.Context) StatusResponse {
 	resp := StatusResponse{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Components:  make([]ComponentStatus, 0, len(statusComponents)),
 	}
 
-	upCount, downCount := 0, 0
+	var cur, up24, up7 map[string]float64
+	if h.prom != nil {
+		cur, _ = h.prom.QueryByLabel(ctx, fmt.Sprintf(`min by (job) (up{job=~%q})`, statusJobsRe), "job")
+		up24, _ = h.prom.QueryByLabel(ctx, fmt.Sprintf(`min by (job) (avg_over_time(up{job=~%q}[24h]))`, statusJobsRe), "job")
+		up7, _ = h.prom.QueryByLabel(ctx, fmt.Sprintf(`min by (job) (avg_over_time(up{job=~%q}[7d]))`, statusJobsRe), "job")
+	}
+
+	var upN, downN, unknownN int
 	for _, c := range statusComponents {
 		cs := ComponentStatus{Name: c.Name, Description: c.Desc, Status: "unknown"}
-		if h.prom != nil {
-			if v, ok, err := h.prom.QueryScalar(ctx, fmt.Sprintf(`min(up{job=%q})`, c.Job)); err == nil && ok {
-				if v >= 1 {
-					cs.Status = "up"
-					upCount++
-				} else {
-					cs.Status = "down"
-					downCount++
-				}
+		if v, ok := cur[c.Job]; ok {
+			if v >= 1 {
+				cs.Status = "up"
+				upN++
+			} else {
+				cs.Status = "down"
+				downN++
 			}
-			if v, ok, err := h.prom.QueryScalar(ctx, fmt.Sprintf(`min(avg_over_time(up{job=%q}[24h]))`, c.Job)); err == nil && ok {
-				cs.Uptime24h = v
-			}
-			if v, ok, err := h.prom.QueryScalar(ctx, fmt.Sprintf(`min(avg_over_time(up{job=%q}[7d]))`, c.Job)); err == nil && ok {
-				cs.Uptime7d = v
-			}
+		} else {
+			unknownN++
+		}
+		if v, ok := up24[c.Job]; ok {
+			f := v
+			cs.Uptime24h = &f
+		}
+		if v, ok := up7[c.Job]; ok {
+			f := v
+			cs.Uptime7d = &f
 		}
 		resp.Components = append(resp.Components, cs)
 	}
 
 	switch {
-	case h.prom == nil || (upCount == 0 && downCount == 0):
-		resp.Status = "unknown"
-	case downCount == 0:
-		resp.Status = "operational"
-	case upCount == 0:
-		resp.Status = "major_outage"
-	default:
+	case h.prom == nil || unknownN == len(statusComponents):
+		resp.Status = "unknown" // no Prometheus, or no component is visible
+	case upN == 0:
+		resp.Status = "major_outage" // nothing confirmed up
+	case downN > 0:
 		resp.Status = "degraded"
+	case unknownN > 0:
+		resp.Status = "degraded" // partial visibility — not fully operational
+	default:
+		resp.Status = "operational"
 	}
 	return resp
 }
@@ -105,12 +152,12 @@ func (h *Handler) ServeStatusJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(h.buildStatus(r.Context()))
+	_ = json.NewEncoder(w).Encode(h.statusSnapshot(r.Context()))
 }
 
 // ServeStatusPage serves a self-contained HTML status page (no external assets).
 func (h *Handler) ServeStatusPage(w http.ResponseWriter, r *http.Request) {
-	s := h.buildStatus(r.Context())
+	s := h.statusSnapshot(r.Context())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = fmt.Fprint(w, renderStatusHTML(s))
@@ -128,11 +175,11 @@ func renderStatusHTML(s StatusResponse) string {
 		c := map[string]string{"up": "#059669", "down": "#dc2626", "unknown": "#9ca3af"}[status]
 		return fmt.Sprintf(`<span style="display:inline-block;width:10px;height:10px;border-radius:50%%;background:%s"></span>`, c)
 	}
-	pct := func(f float64) string {
-		if f <= 0 {
-			return "—"
+	pct := func(f *float64) string {
+		if f == nil {
+			return "—" // no Prometheus sample
 		}
-		return fmt.Sprintf("%.2f%%", f*100)
+		return fmt.Sprintf("%.2f%%", *f*100)
 	}
 
 	var rows string

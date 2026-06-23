@@ -10,21 +10,33 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/promquery"
 )
 
-// fakeProm answers the status page's `up` queries: every component is up at
-// 99% uptime, except NATS which is currently down.
+// fakeStatusProm answers the status page's batched `min by (job)(...)` queries
+// with one series per component job: everything up at 99% uptime, except NATS
+// which is currently down.
 func fakeStatusProm(t *testing.T) *httptest.Server {
 	t.Helper()
+	jobs := []string{"management-api", "vrsky-workers", "nats", "traefik", "prometheus"}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("query")
-		val := "1"
-		switch {
-		case strings.Contains(q, "avg_over_time"):
-			val = "0.99" // uptime fraction
-		case strings.Contains(q, `job="nats"`):
-			val = "0" // broker currently down
+		uptime := strings.Contains(q, "avg_over_time")
+		var b strings.Builder
+		b.WriteString(`{"status":"success","data":{"resultType":"vector","result":[`)
+		for i, j := range jobs {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			val := "1"
+			switch {
+			case uptime:
+				val = "0.99"
+			case j == "nats":
+				val = "0" // broker currently down
+			}
+			b.WriteString(`{"metric":{"job":"` + j + `"},"value":[1718000000,"` + val + `"]}`)
 		}
+		b.WriteString(`]}}`)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1718000000,"` + val + `"]}]}}`))
+		_, _ = w.Write([]byte(b.String()))
 	}))
 }
 
@@ -48,8 +60,8 @@ func TestBuildStatus_Degraded(t *testing.T) {
 	if byName["Message broker"].Status != "down" {
 		t.Errorf("Message broker = %q, want down", byName["Message broker"].Status)
 	}
-	if got := byName["Management API"].Uptime24h; got < 0.98 || got > 1 {
-		t.Errorf("uptime_24h = %v, want ~0.99", got)
+	if u := byName["Management API"].Uptime24h; u == nil || *u < 0.98 || *u > 1 {
+		t.Errorf("uptime_24h = %v, want ~0.99 (non-nil)", u)
 	}
 	if s.GeneratedAt == "" {
 		t.Error("generated_at not set")
@@ -66,10 +78,14 @@ func TestBuildStatus_UnknownWithoutProm(t *testing.T) {
 		if c.Status != "unknown" {
 			t.Errorf("%s = %q, want unknown", c.Name, c.Status)
 		}
+		if c.Uptime24h != nil || c.Uptime7d != nil {
+			t.Errorf("%s uptime should be nil without Prometheus", c.Name)
+		}
 	}
 }
 
 func TestServeStatusJSON(t *testing.T) {
+	statusCache = nil // ensure no cross-test cache bleed
 	srv := fakeStatusProm(t)
 	defer srv.Close()
 	h := &Handler{}
