@@ -6,6 +6,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useConnectionsStore } from '../../store/connectionsStore'
 import { useAuthStore } from '../../store/authStore'
+import { config } from '../../config/env'
 
 export default function Sidebar() {
   const { pathname } = useLocation()
@@ -173,6 +174,16 @@ export default function Sidebar() {
             )}
           </div>
         )}
+
+        {/* Help & Docs (opens the documentation site in a new tab) */}
+        <a
+          href={config.docsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-4 py-2 rounded-lg font-semibold text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-all duration-fast"
+        >
+          <span>📚 Help &amp; Docs</span>
+        </a>
       </nav>
 
       {/* Footer: Create Button */}

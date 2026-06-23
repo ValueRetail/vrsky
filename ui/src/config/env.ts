@@ -28,6 +28,9 @@ export const config = {
   // it. Defaults to the local compose port; override in deployments where
   // webhooks enter via the gateway/public host.
   webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', 'http://localhost:9100'),
+  // Where the "Help & Docs" sidebar link points (the published mkdocs site).
+  // Override per deployment; defaults to the GitHub Pages build.
+  docsUrl: getEnv('VITE_DOCS_URL', 'https://valueretail.github.io/vrsky/'),
   // Optional bearer token for the file-producer's /files API. Empty in local
   // dev (the server leaves auth disabled); set in deployments that enable
   // FILE_PRODUCER_AUTH_TOKEN on the file-producer. Read directly because an

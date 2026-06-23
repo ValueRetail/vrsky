@@ -1,0 +1,36 @@
+# VRSky
+
+> VRSky is a multi-tenant integration platform (iPaaS). Users build **pipelines**
+> (connections) that move data from a source through optional filters/converters
+> to a destination, deploy them with one click, and monitor them live. This file
+> indexes the documentation for AI assistants; `llms-full.txt` contains the full
+> user guide inlined.
+
+## User guide
+- [Overview](guide/index.md): what VRSky is, key concepts (workspace, pipeline, node, connector, secret).
+- [Getting started](guide/getting-started.md): register, create a workspace, log in (incl. SSO), the first-login wizard.
+- [Workspaces, members & account](guide/workspaces-and-members.md): switch workspaces; roles (viewer/editor/admin/owner); manage members; account actions.
+- [Building a pipeline](guide/building-a-pipeline.md): the canvas, the Input/Filter/Converter/Output palette, connecting nodes, the Property panel, Deploy.
+- [Connectors & node types](guide/connectors-and-nodes.md): the four node kinds; Discover + Test connection.
+- [Credentials, secrets & OAuth](guide/credentials-and-oauth.md): masked secret fields stored encrypted; OAuth providers + grants.
+- [Deploying & monitoring](guide/deploying-and-monitoring.md): connections list, connection detail, live event panels, the DLQ, test data.
+- [Sharing data between workspaces](guide/data-sharing.md): connection requests, data connections, the workspace API key.
+- [Settings](guide/settings.md): usage & quotas (+ CSV export), notification targets, audit log.
+- [Troubleshooting](guide/troubleshooting.md): no data flowing, test-connection failures, role-gating, usage lag.
+
+## Tutorials
+- [Build your first pipeline](tutorials/first-pipeline.md): ≤10-minute clickthrough, no code.
+- [Build your first connector](sdk/tutorial/first-connector.md): build a connector on the SDK.
+
+## Connectors (config reference)
+- [Connectors overview](connectors/index.md): every connector + its `config.type`.
+- [HTTP & webhooks](connectors/http.md), [REST API polling](connectors/api.md), [Databases](connectors/database.md), [Files](connectors/file.md), [SFTP](connectors/sftp.md), [Cloud storage](connectors/cloud-storage.md), [Kafka](connectors/kafka.md), [RabbitMQ](connectors/rabbitmq.md), [Salesforce](connectors/salesforce.md), [Tenant-to-tenant](connectors/tenant.md), [Filters & converters](connectors/filters-converters.md).
+
+## Reference & operations
+- [API reference](reference/api.md): OpenAPI at `/openapi.json`, Swagger UI at `/docs`.
+- [Security whitepaper](security/whitepaper.md): secrets, encryption at rest, audit, mTLS, tenant isolation.
+- [Operator guide](operator/install.md): install, upgrade, backup, monitoring, troubleshooting.
+- [Status page & SLA](SLA.md): uptime measurement and the public status page.
+
+## Optional
+- [SDK overview](sdk/README.md), [Tenant model](TENANT_MODEL.md), [Observability](OBSERVABILITY.md), [NATS architecture](NATS_ARCHITECTURE.md).
