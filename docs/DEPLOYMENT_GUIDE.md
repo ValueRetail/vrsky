@@ -668,4 +668,4 @@ tested in CI. See **[`docs/DR.md`](DR.md)** for the full runbook — backup flow
 the `vrsky-cli backup`/`restore`/`list` commands, RPO ≤ 24h / RTO ≤ 1h, the
 critical `ENCRYPTION_KEY` caveat, and the step-by-step recovery procedure. The
 backup CronJob + its config Secret are documented in
-[`infrastructure/kubernetes/backup/README.md`](../infrastructure/kubernetes/backup/README.md).
+[`infrastructure/kubernetes/backup/README.md`](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md).

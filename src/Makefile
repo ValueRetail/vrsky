@@ -106,7 +106,7 @@ run-consumer: build-consumer ## Build and run consumer locally
 	 OUTPUT_TYPE=nats OUTPUT_CONFIG='{"url":"nats://localhost:4222","subject":"test.messages"}' \
 	 ./bin/consumer
 
-lint: lint-tenant lint-connector ## Run all linters (golangci-lint + tenant-filter + connector)
+lint: lint-tenant lint-connector lint-openapi ## Run all linters (golangci-lint + tenant-filter + connector + openapi)
 	@echo "$(BLUE)Running linter...$(NC)"
 	@if command -v golangci-lint > /dev/null; then \
 		golangci-lint run ./...; \
@@ -121,6 +121,10 @@ lint-tenant: ## Check that every tenant-scoped query filters by tenant_id (#74)
 lint-connector: ## Check that every SDK connector calls sdk.Run* and doesn't bypass the SDK (#98)
 	@echo "$(BLUE)Running connector lint...$(NC)"
 	@$(GO) run ./cmd/lint-connector
+
+lint-openapi: ## Check that every served management-API route is in the OpenAPI registry (#94)
+	@echo "$(BLUE)Running openapi lint...$(NC)"
+	@$(GO) run ./cmd/lint-openapi
 
 fmt: ## Format code with gofmt
 	@echo "$(BLUE)Formatting code...$(NC)"

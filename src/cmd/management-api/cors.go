@@ -72,6 +72,8 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 				r.URL.Path == "/api/v1/oauth/callback" ||
 				r.URL.Path == "/api/v1/alerts/webhook" ||
 				r.URL.Path == "/metrics" ||
+				r.URL.Path == "/openapi.json" ||
+				r.URL.Path == "/docs" ||
 				r.URL.Path == "/health" ||
 				r.URL.Path == "/healthz" ||
 				r.URL.Path == "/ready" ||

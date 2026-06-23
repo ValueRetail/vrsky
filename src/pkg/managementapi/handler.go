@@ -874,6 +874,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	editor := RequireTenantRoleFromHeader(h.repo, "editor")
 	adminMW := RequireTenantRoleFromHeader(h.repo, "admin")
 
+	// API documentation (#94): the generated OpenAPI spec + Swagger UI. Public
+	// (no tenant header — exempted in TenantIDMiddleware).
+	mux.HandleFunc("GET /openapi.json", h.ServeOpenAPISpec)
+	mux.HandleFunc("GET /docs", h.ServeSwaggerUI)
+
 	// CRUD operations
 	mux.Handle("POST /api/v1/connections", editor(http.HandlerFunc(h.CreateConnection)))
 	mux.HandleFunc("GET /api/v1/connections", h.ListConnections)
