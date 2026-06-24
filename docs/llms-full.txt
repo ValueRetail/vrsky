@@ -1,0 +1,779 @@
+# VRSky — full user guide (for AI assistants)
+
+> The complete VRSky end-user guide, inlined. Generated from docs/guide/.
+> See llms.txt for the linked index, and the connectors/ + reference/ docs for config details.
+
+================================================================
+# FILE: guide/index.md
+================================================================
+
+# User Guide
+
+This guide explains how to use the VRSky web app end to end — no coding
+required. If you're new, start with [Getting started](getting-started.md) and
+the [first-pipeline tutorial](../tutorials/first-pipeline.md); then come back
+here for the details of each screen.
+
+## What VRSky does
+
+VRSky moves data between systems. You build a **pipeline** (also called a
+*connection*): a left-to-right flow from a **source** → optional **filter** /
+**converter** → **destination**. You build it visually, deploy it with one
+click, and watch data flow through it live.
+
+## Key ideas
+
+| Term | What it means |
+|------|---------------|
+| **Workspace** | Your isolated area (a "tenant"). Everything — pipelines, secrets, members — belongs to a workspace. You can belong to several and switch between them. |
+| **Pipeline / connection** | A graph of **nodes** (source → filter/converter → destination) that, once deployed, runs continuously. |
+| **Node** | One step in a pipeline. Four kinds: **Input** (source), **Filter**, **Converter**, **Output** (destination). |
+| **Connector** | The integration behind a node — HTTP, database, Salesforce, Kafka, file, etc. |
+| **Secret** | A credential you type once; VRSky stores it encrypted and never shows it again. |
+
+## How to use this guide
+
+| If you want to… | Read |
+|-----------------|------|
+| Sign up and run your first pipeline | [Getting started](getting-started.md) |
+| Manage your workspace, teammates, and account | [Workspaces, members & your account](workspaces-and-members.md) |
+| Build a pipeline on the canvas | [Building a pipeline](building-a-pipeline.md) |
+| Understand the node types | [Connectors & node types](connectors-and-nodes.md) |
+| Enter passwords / connect a SaaS account | [Credentials, secrets & OAuth](credentials-and-oauth.md) |
+| Deploy and watch a pipeline | [Deploying & monitoring](deploying-and-monitoring.md) |
+| Share data with another workspace | [Sharing data between workspaces](data-sharing.md) |
+| Check usage, alerts, and the audit log | [Settings](settings.md) |
+| Fix a problem | [Troubleshooting](troubleshooting.md) |
+
+!!! tip "Roles matter"
+    Some screens and actions are limited by your **role** (viewer, editor,
+    admin, owner). If something is missing or greyed out, see
+    [roles](workspaces-and-members.md#roles).
+
+================================================================
+# FILE: guide/getting-started.md
+================================================================
+
+# Getting started
+
+Welcome to VRSky. This guide takes you from creating an account to seeing your
+first integration move data. No coding required.
+
+## A few concepts first
+
+You'll meet these terms throughout the app:
+
+- **Workspace** — your isolated tenant. Everything you build (pipelines,
+  connections, members) lives inside a workspace and is private to it.
+- **Pipeline / connection** — a flow that moves data from a **source**, through
+  an optional **filter** or **converter**, to a **destination**.
+- **Connector** — the building block for each step (for example, an HTTP source
+  or a database destination).
+
+## Create your account
+
+You sign up on the **Register** screen, which has two steps.
+
+**Step 1 — your details**
+
+1. Enter your **email** and a **password**.
+2. Re-enter the password to **confirm** it.
+3. Enter your **full name**.
+
+!!! note "Password requirements"
+    Your password must be at least **8 characters** and include an **uppercase
+    letter**, a **lowercase letter**, and a **digit**.
+
+**Step 2 — your first workspace**
+
+1. Give your first workspace a **name** (for example, your team or company).
+2. Finish registration.
+
+![Screenshot: the Register screen showing the two-step sign-up form with email, password and workspace name fields](../img/register.png)
+
+When registration is complete, head to the Login screen to sign in.
+
+## Log in
+
+On the **Login** screen, enter your **email** and **password**, then sign in.
+
+![Screenshot: the login screen with email and password fields](../img/login.png)
+
+### Signing in with SSO
+
+If your workspace has single sign-on configured, you can sign in through your
+company's identity provider instead:
+
+1. Type your **workspace slug**.
+2. Choose **Sign in with SSO**.
+3. You're redirected to your identity provider to authenticate.
+
+!!! note
+    The SSO option only works if an administrator has set up SSO for your
+    workspace. If you don't have it, just use email and password.
+
+## Your first pipeline: the Get started wizard
+
+The first time you log in and have no pipelines yet, VRSky drops you on the
+**Get started wizard**. You can also reach it any time at `/welcome`.
+
+The wizard walks you through a working integration in a few clicks:
+
+1. **Pick a template** that matches what you want to do.
+2. **Fill in a couple of fields** (such as a URL or a name).
+3. Choose **Deploy** to launch the pipeline.
+4. Choose **Send a sample event** to push test data through it and confirm it
+   works.
+
+![Screenshot: the Get started wizard showing template choices and the Deploy button](../img/get-started-wizard.png)
+
+!!! note "Want the full walkthrough?"
+    For a step-by-step tour that explains each part of a pipeline in detail,
+    see [Build your first pipeline](../tutorials/first-pipeline.md).
+
+## Where to go next
+
+- Learn how to switch workspaces, invite teammates, and manage your account in
+  [Workspaces, members & your account](workspaces-and-members.md).
+- Explore usage, alerts, and the audit log in
+  [Settings: usage, notifications, audit](settings.md).
+
+================================================================
+# FILE: guide/workspaces-and-members.md
+================================================================
+
+# Workspaces, members & your account
+
+A **workspace** is your isolated space in VRSky. Pipelines and connections
+belong to one workspace and are never shared with another. This guide covers
+switching between workspaces, managing the people in them, and looking after
+your own account.
+
+## Switching and managing workspaces
+
+The **workspace switcher** is the dropdown in the top header.
+
+- **Switch context** — pick another workspace from the dropdown. Your pipelines
+  and connections always reflect the workspace you currently have selected.
+- **Create a workspace** — choose the **+** button. A modal opens; give the new
+  workspace a name and create it.
+- **Delete a workspace** — choose the **trash** button to delete the workspace
+  you're currently in. A confirmation dialog appears before anything is removed.
+
+![Screenshot: the top header workspace switcher dropdown with the plus and trash buttons](../img/workspace-switcher.png)
+
+!!! warning "Deleting a workspace is permanent"
+    Deleting a workspace removes **all of its data**, including every pipeline
+    and connection. The trash button only appears when you belong to more than
+    one workspace, so you can't accidentally delete your only one. Make sure
+    you've selected the right workspace before confirming.
+
+## Members and roles
+
+Open the members list at **Settings → Members** (`/settings/users`). Here you
+can see everyone in the workspace and what they can do.
+
+### Roles
+
+Roles range from least to most privilege. Each role includes everything the one
+before it can do, plus more:
+
+| Role | What they can do |
+|------|------------------|
+| **Viewer** | Read-only access. |
+| **Editor** | Build and edit pipelines, manage connections, and use the API key. |
+| **Admin** | Everything an editor can, plus manage OAuth providers, notifications, and members. |
+| **Owner** | Everything an admin can, plus all settings, rotating the API key, and deleting the workspace. |
+
+![Screenshot: the Members page listing members with their role dropdowns](../img/members.png)
+
+### Managing members (owners)
+
+If you're an **owner**, you can:
+
+- **Change a member's role** using the role dropdown next to their name.
+- **Remove a member** from the workspace.
+
+!!! note "The last owner is protected"
+    A workspace must always keep at least one owner, so the **last owner can't
+    be removed**. Promote someone else to owner first if you need to step down.
+
+## Your account
+
+Open your account from the **user menu** at the top-right (your name or the gear
+icon). From here you can:
+
+- **Log out** of VRSky.
+- **Delete your account** — a destructive action that asks you to confirm first.
+
+![Screenshot: the top-right user menu showing Logout and Delete account options](../img/user-menu.png)
+
+!!! note "Changing your password"
+    There's no password field in the account menu. To change your password, use
+    the **forgot password** reset flow from the Login screen — request a reset
+    and follow the link you receive.
+
+!!! warning "Deleting your account can't be undone"
+    Deleting your account is permanent. If you're the last owner of a workspace,
+    sort out ownership before you delete your account.
+
+## Where to go next
+
+- New here? Start with [Getting started](getting-started.md).
+- Manage usage, alerts, and the audit log in
+  [Settings: usage, notifications, audit](settings.md).
+
+================================================================
+# FILE: guide/building-a-pipeline.md
+================================================================
+
+# Building a pipeline
+
+The pipeline builder is the canvas you land on at **Home** (`/`). You assemble a
+pipeline by dropping nodes onto the canvas, connecting them, configuring each
+one, and clicking **Deploy**.
+
+![Screenshot: the pipeline builder — component palette on the left, canvas in the middle, an Input node connected to an Output node](../img/builder-overview.png)
+
+## 1. Add nodes from the palette
+
+The **component palette** on the left has four kinds of node:
+
+| Kind | Color | Role |
+|------|-------|------|
+| **Input** | blue | the **source** — where data comes from |
+| **Filter** | orange | keep or drop messages by a rule |
+| **Converter** | pink | reshape / map the payload |
+| **Output** | green | the **destination** — where data goes |
+
+Drag a block onto the canvas (or click it). Nodes are auto-named — *Input 1*,
+*Output 1*, and so on. A minimal pipeline is one **Input** connected to one
+**Output**; filters and converters are optional and sit in between.
+
+## 2. Connect the nodes
+
+Drag from a node's output dot to the next node's input dot to draw a
+connection. Data flows along the arrows, left to right. To remove a node or a
+connection, select it and press delete (or use its right-click menu).
+
+## 3. Configure each node
+
+Select a node to open the **Property panel** on the right. What you see depends
+on the node's connector type — pick the connector (e.g. *HTTP*, *Database*,
+*Salesforce*) and fill its fields.
+
+- Credentials are entered as masked fields and stored encrypted — see
+  [Credentials, secrets & OAuth](credentials-and-oauth.md).
+- For sources, two helpers speed you up:
+  - **Discover** reads the source's schema (database tables/columns, Salesforce
+    objects, CSV headers) so you can map fields without guessing.
+  - **Test connection** checks the source/destination is reachable *before* you
+    deploy.
+- Full field-by-field reference for every connector is in the
+  [Connectors](../connectors/index.md) section — open the page for the connector
+  you're using.
+
+![Screenshot: the Property panel for an HTTP output node showing URL, method, and auth fields](../img/property-panel.png)
+
+## 4. (Optional) filter and convert
+
+- A **Filter** node passes messages that match its rule and drops the rest.
+- A **Converter** node maps input fields to output fields (and can transform
+  values), so the destination gets exactly the shape it expects. Use
+  **Discover** on the source first to populate the field list.
+
+## 5. Deploy
+
+Click **Deploy** (top-right). VRSky validates the pipeline (everything connected,
+required fields filled), encrypts any credentials you entered, creates the
+connection, and starts it running. You'll get the connection's details — and for
+a webhook source, its public URL.
+
+!!! note "Multiple canvases"
+    The tabs at the top let you keep several pipelines side by side in a
+    workspace. Double-click a tab to rename it; use **+** to add one. Your
+    in-progress canvas is saved in your browser until you deploy.
+
+Once deployed, head to [Deploying & monitoring](deploying-and-monitoring.md) to
+watch it run, or the [first-pipeline tutorial](../tutorials/first-pipeline.md)
+for a guided end-to-end example.
+
+================================================================
+# FILE: guide/connectors-and-nodes.md
+================================================================
+
+# Connectors & node types
+
+A **pipeline** in VRSky is a graph of **nodes** joined left to right. Data
+enters on the left, flows through the middle, and leaves on the right. You build
+a pipeline by dragging nodes from the component palette onto the canvas and
+connecting them.
+
+## The four node kinds
+
+In the builder's component palette, nodes appear as colored blocks. There are
+four kinds:
+
+| Node kind | What it does |
+|-----------|--------------|
+| **Input** | Where data comes *from* (a source / consumer). |
+| **Filter** | Keeps or drops messages by a rule. |
+| **Converter** | Transforms or reshapes the payload (field mapping). |
+| **Output** | Where data goes *to* (a destination / producer). |
+
+### Input
+
+An Input is the start of your pipeline. It reads data from a source, such as:
+
+- a webhook or HTTP request,
+- a REST API you poll on a schedule,
+- a database,
+- a file or CSV,
+- an SFTP server,
+- cloud storage,
+- Apache Kafka or RabbitMQ,
+- Salesforce,
+- or another workspace.
+
+### Filter
+
+A Filter sits between nodes and decides, message by message, whether to keep it
+or drop it based on a rule you define.
+
+### Converter
+
+A Converter reshapes the payload — for example mapping fields from the source
+format into the shape your destination expects.
+
+### Output
+
+An Output is the end of your pipeline. It writes data to a destination such as
+HTTP, a database, a file, SFTP, cloud storage, Kafka, RabbitMQ, or Salesforce.
+
+!!! note "Filters and converters"
+    For more on building rules and field mappings, see
+    [Filters & converters](../connectors/filters-converters.md).
+
+## Configuring a node
+
+Select a node on the canvas and edit its settings in the **Property panel** on
+the right.
+
+![Screenshot: a selected node with its Property panel open on the right](../img/property-panel.png)
+
+Every connector has its own set of fields. The complete reference for each one —
+every field plus an example — lives in the **Connectors** section. Open the page
+for the connector you're using:
+
+- Start with the [Connectors overview](../connectors/index.md).
+- Then open the page for your specific connector (for example
+  [HTTP & webhooks](../connectors/http.md) or
+  [Salesforce](../connectors/salesforce.md)).
+
+## Two helpers in input editors
+
+When you configure an Input, two buttons help you set it up correctly before you
+deploy:
+
+- **Discover** — reads the source's schema so you don't have to type field names
+  by hand. It pulls database tables and columns, Salesforce objects, or CSV
+  headers, which makes mapping in a downstream Converter much easier.
+- **Test connection** — checks that the source (or destination) is reachable
+  before you deploy the pipeline.
+
+!!! note "Test before you deploy"
+    Running **Test connection** on both ends of your pipeline catches bad hosts
+    or credentials early. See
+    [Troubleshooting](troubleshooting.md) if a test fails.
+
+## Putting it together
+
+A typical pipeline reads from an Input, optionally passes through a Filter and a
+Converter, and writes to an Output:
+
+1. Drag an **Input** onto the canvas and configure its source.
+2. (Optional) Add a **Filter** to drop messages you don't want.
+3. (Optional) Add a **Converter** to map fields.
+4. Drag an **Output** onto the canvas and configure its destination.
+5. Connect the nodes left to right, then deploy.
+
+================================================================
+# FILE: guide/credentials-and-oauth.md
+================================================================
+
+# Credentials, secrets & OAuth
+
+Most connectors need to authenticate to the system they talk to. VRSky handles
+this in two ways: **static credentials** you type in, and **OAuth** where you
+"Connect your account" to a SaaS provider.
+
+## Static credentials
+
+Credential fields — passwords, API keys, tokens, connection strings, and private
+keys — are entered in the node's **Property panel** as masked inputs.
+
+When you deploy the pipeline, VRSky **encrypts each credential** and stores only
+a reference to it. The plaintext is never saved and is never shown again.
+
+![Screenshot: a masked credential field in the Property panel](../img/masked-credential.png)
+
+!!! warning "You can't read a secret back"
+    Because the plaintext is never stored, you cannot view a credential after
+    deploying. To change one, type the new value into the field and deploy
+    again. Keep your own copy of any key you might need elsewhere.
+
+!!! note "How encryption works"
+    For the full details on how secrets are protected, see the
+    [Security whitepaper](../security/whitepaper.md).
+
+## OAuth
+
+Some connectors authenticate to a SaaS by signing you in ("Connect your
+account") instead of using a static key. This applies to connectors such as the
+HTTP output, the REST API input, and Salesforce.
+
+Setting up OAuth is a two-step process.
+
+### Step 1 — An admin registers an OAuth provider
+
+An admin registers the provider once under **Settings → OAuth providers**
+(`/settings/oauth`). They supply:
+
+- the **provider type** — Google, Microsoft 365, Salesforce, HubSpot, Shopify,
+  or **Custom**,
+- the **client id** and **client secret**, and
+- for a **Custom** provider, the **authorization** and **token** URLs.
+
+![Screenshot: the OAuth providers page with a list of registered providers](../img/oauth-providers.png)
+
+!!! note "Registering a provider needs admin rights"
+    The OAuth providers page is role-gated. If you don't see it or the action is
+    greyed out, ask a workspace admin or owner. See
+    [Workspaces, members & your account](workspaces-and-members.md).
+
+### Step 2 — Connect a grant in the node
+
+Once a provider exists, open the node's **Property panel** and:
+
+1. Pick the registered **provider**.
+2. Choose **Connect** to start a **grant**. A pop-up window signs you in at the
+   provider and links the account.
+3. The node now uses that grant to authenticate.
+
+![Screenshot: the Property panel showing a provider picker and a Connect button](../img/oauth-connect-grant.png)
+
+## Connector specifics
+
+Authentication details vary by connector. For the exact fields and OAuth steps,
+open the relevant connector page:
+
+- [Salesforce](../connectors/salesforce.md)
+- [HTTP & webhooks](../connectors/http.md)
+
+For any connector not covered here, see the relevant connector page in the
+[Connectors overview](../connectors/index.md).
+
+================================================================
+# FILE: guide/deploying-and-monitoring.md
+================================================================
+
+# Deploying & monitoring
+
+Once a pipeline is deployed it runs continuously. This page covers how to watch
+it, control it, and test it.
+
+## Live event panels (in the builder)
+
+Right after you deploy, the panels at the bottom of the builder stream what's
+happening — e.g. **HTTP Output** shows each delivery with its status code, file
+panels show files written, the converter/filter panels show transforms and
+pass/drop decisions. This is the fastest way to confirm data is flowing.
+
+![Screenshot: the builder's HTTP Output event panel showing SENT POST ... 200 lines](../img/event-panel.png)
+
+!!! note
+    The **file producer** has no live panel — check its output folder or ask an
+    operator to tail its logs.
+
+## Connections list
+
+**Connections** (sidebar) lists every deployed pipeline in the workspace with
+its status (**running**, **stopped**, **error**). Filter by status and page
+through them. From here you open a connection or start/stop/delete it.
+
+![Screenshot: the Connections list with status badges and start/stop actions](../img/connections-list.png)
+
+## Connection detail
+
+Click a connection to open its dashboard:
+
+- **Metrics** — throughput, latency, and error counts, with a live chart and a
+  visual of the pipeline flow.
+- **Controls** — **Start**, **Stop**, **Delete**.
+- A link to **Test data** (below).
+
+## Testing a running pipeline
+
+From a connection's **Test data** page (`/connections/{id}/test-data`) you can:
+
+- **Send a test message** — paste/craft a JSON payload and inject it.
+- **Auto-generate** — produce a stream of synthetic messages at a chosen rate to
+  watch throughput.
+- **Message log** — a timestamped log of what you sent and what happened.
+
+For a **webhook** source you can also just `POST` to its webhook URL (shown on
+the done step of the wizard and in the builder) and watch the output panel.
+
+## The dead-letter queue (DLQ)
+
+When a message can't be delivered (e.g. the destination rejects it), it isn't
+lost — it goes to the connection's **DLQ**. Open the **DLQ** panel to see each
+failed message with its error and payload, then **Retry** it (after fixing the
+cause) or **Discard** it.
+
+![Screenshot: the DLQ panel listing a failed message with its error and Retry/Discard buttons](../img/dlq.png)
+
+!!! tip "Where to look when nothing happens"
+    1. Is the connection **running**? 2. Did you send/receive anything (event
+    panel)? 3. Anything in the **DLQ**? See
+    [Troubleshooting](troubleshooting.md) for the full checklist.
+
+## Usage
+
+Per-workspace message, deploy, and storage totals are on **Settings → Usage &
+quotas**, with a CSV export — see [Settings](settings.md).
+
+================================================================
+# FILE: guide/data-sharing.md
+================================================================
+
+# Sharing data between workspaces
+
+VRSky lets one workspace share a pipeline's data with another workspace — but
+only with consent on both sides. Nothing is shared until the owning workspace
+approves it, and either side can revoke access at any time.
+
+## The big picture
+
+The flow has four stages:
+
+1. **Request** — one workspace asks another for a data-sharing connection.
+2. **Approve** — the owning workspace approves and chooses what to share.
+3. **Bridge** — data flows across the approved connection.
+4. **Revoke** — either side can cut the link whenever they want.
+
+!!! note "Everything is audit-logged"
+    Every access across a shared connection is recorded in the audit log.
+
+## Three screens
+
+Data sharing is managed across three Settings pages.
+
+### Requests
+
+**Settings → Connection requests** (`/settings/connection-requests`)
+
+- **Outgoing** — request a data-sharing connection to another workspace.
+- **Incoming** — approve or deny requests from other workspaces. When you
+  approve, you choose which connection(s) to share.
+
+![Screenshot: the connection requests page showing incoming and outgoing requests](../img/connection-requests.png)
+
+### Data Connections
+
+**Settings → Data connections** (`/settings/tenant-connections`)
+
+This page lists the active links you've received or granted. **Revoke access**
+here when a share is no longer needed.
+
+![Screenshot: the data connections page listing active shared links with revoke buttons](../img/data-connections.png)
+
+!!! warning "Revoking is immediate"
+    Revoking a data connection stops the data bridge right away. Any pipeline
+    relying on that connection will stop receiving (or sending) shared data.
+
+### API Key
+
+**Settings → API key** (`/settings/api-key`)
+
+Each workspace has an **API key** that external systems use to POST data into
+the workspace. You can **rotate** the key at any time.
+
+![Screenshot: the API key page with the key and a rotate button](../img/api-key.png)
+
+!!! warning "Rotating invalidates the old key"
+    When you rotate, the previous key stops working immediately. Update any
+    external system that uses it. Copy the new key somewhere safe — treat it
+    like a password.
+
+## Building a pipeline on a shared connection
+
+Once a connection is approved, you can read from another workspace in a pipeline
+using the tenant-to-tenant connector. See
+[Tenant-to-tenant](../connectors/tenant.md) for the connector details.
+
+!!! note "Workspaces stay isolated by default"
+    Pipelines and connections belong to a single workspace and are never shared
+    unless you explicitly request and approve a data connection. See
+    [Workspaces, members & your account](workspaces-and-members.md).
+
+================================================================
+# FILE: guide/settings.md
+================================================================
+
+# Settings: usage, notifications, audit
+
+The Settings area has three pages for monitoring and administering your
+workspace: **Usage & quotas**, **Notifications**, and the **Audit log**. Some
+actions are limited by your role — this guide notes where that applies. See
+[Workspaces, members & your account](workspaces-and-members.md) for what each
+role can do.
+
+## Usage & quotas
+
+Open **Usage & quotas** at `/settings/usage`. **Any member can view** this page;
+**owners can edit** the limits.
+
+### Reviewing usage
+
+At the top you'll see **Usage this month** cards for:
+
+- **Messages**
+- **Deploys**
+- **Storage**
+
+Below the cards is a **daily table** breaking the figures down by day. Choose
+**Export CSV** to download the data for your own reporting.
+
+![Screenshot: the Usage & quotas page with the monthly cards, daily table, and Export CSV button](../img/usage.png)
+
+!!! note "Recent activity can lag"
+    Usage counts come from a background rollup, so very recent activity may take
+    a few minutes to appear. If a number looks low right after a busy spell,
+    check back shortly.
+
+### Editing plan limits (owners)
+
+If you're an **owner**, you can edit your plan limits further down the page:
+
+- **Max messages per second**
+- **Max integrations**
+- **Max storage**
+
+## Notifications
+
+Open **Notifications** at `/settings/notifications`. This page is available to
+**admins and owners**.
+
+Notifications are **alert targets** — places VRSky sends an alert when platform
+monitoring detects something worth knowing about.
+
+To set one up:
+
+1. Create a new alert target and choose its **type**: **Slack**, **Email**,
+   **PagerDuty**, or **Webhook**.
+2. Set the **minimum severity** — the alert fires only when an event meets or
+   exceeds this level.
+3. Choose **Send a test** to confirm the target is wired up correctly.
+
+![Screenshot: the Notifications page showing alert target types, the severity selector, and the test button](../img/notifications.png)
+
+!!! note
+    Alerts are generated by platform monitoring. Targets decide where those
+    alerts go and how serious an event must be before you're notified.
+
+## Audit log
+
+Open the **Audit log** at `/settings/audit`. It's a **read-only** record of
+state-changing actions in your workspace.
+
+Each entry shows:
+
+- **Who** performed the action
+- **What** they did
+- **When** it happened
+- The **HTTP status** of the action
+
+You can **filter** the log by **action**, **resource**, and **date**, and
+**export as JSONL** for archiving or analysis.
+
+![Screenshot: the Audit log page with filters and an exportable list of actions](../img/audit-log.png)
+
+!!! note "Why the audit log matters"
+    The audit log gives you an accountable history of changes in your
+    workspace. For how VRSky protects your data more broadly, see the
+    [security whitepaper](../security/whitepaper.md).
+
+## Where to go next
+
+- New to VRSky? Start with [Getting started](getting-started.md).
+- Manage workspaces and members in
+  [Workspaces, members & your account](workspaces-and-members.md).
+
+================================================================
+# FILE: guide/troubleshooting.md
+================================================================
+
+# Troubleshooting
+
+This page covers the most common problems you might hit in the web app and how
+to fix them yourself. For deeper operational issues, see the
+[operator troubleshooting guide](../operator/troubleshooting.md).
+
+## Pipeline deployed but no data arrives
+
+Work through these checks in order:
+
+1. **Confirm it's Running.** Open the pipeline and check its status. If it isn't
+   Running, deploy or start it.
+2. **For a webhook source, send a test event.** POST to the source's webhook URL
+   and watch the producer's **live event panel** to see whether the message
+   arrives.
+3. **Check the DLQ.** Open the connection's **DLQ** (dead-letter queue) to see
+   messages that failed, along with the error for each. You can **retry** or
+   **discard** them from here.
+4. **Check the logs.** If nothing above explains it, ask an operator to check the
+   logs.
+
+![Screenshot: the DLQ panel showing failed messages with errors and retry/discard buttons](../img/dlq-panel.png)
+
+!!! note "The DLQ tells you why"
+    Each DLQ entry includes the error that caused the message to fail — start
+    there before digging into logs.
+
+## "Test connection" fails
+
+- Re-check the **host** and **credentials** you entered.
+- The source or destination must be **reachable from the platform network**. A
+  host that works from your laptop may still be unreachable from VRSky.
+
+If it still fails, see the
+[operator troubleshooting guide](../operator/troubleshooting.md).
+
+## A Settings page is missing or an action is greyed out
+
+Some pages and actions are **role-gated**. Features such as **OAuth providers**,
+**Notifications**, and **Members** require an **admin** or **owner** role.
+
+If you can't see a page or a button is disabled, ask a workspace owner to either
+perform the action or grant you a higher role. See the role table in
+[Workspaces, members & your account](workspaces-and-members.md).
+
+## Usage shows 0 right after a test
+
+The usage rollup runs on a **short delay**, so a recent burst of activity can lag
+behind in the usage display. This is **not** data loss — wait a moment and check
+again.
+
+!!! note
+    If usage still looks wrong after a while, raise it with an operator.
+
+## Forgot your password
+
+Use the **reset link** on the login screen and follow the email instructions.
+
+## Still stuck?
+
+If none of the above helps, the issue may be operational rather than something
+you can fix in the UI. Share what you've already tried with an operator and point
+them at the [operator troubleshooting guide](../operator/troubleshooting.md).

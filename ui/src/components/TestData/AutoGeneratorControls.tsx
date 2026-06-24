@@ -3,7 +3,7 @@
  * Controls for starting/stopping automated test message generation
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { testDataService } from '@/services/testDataService'
 import { useUIStore } from '@/store/uiStore'
 import { isAPIError, getErrorMessage } from '@/utils/errors'
@@ -20,11 +20,23 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
   const [rate, setRate] = useState(1)
   const { addNotification } = useUIStore()
 
+  // Guards against state updates after unmount: the async start/stop/poll calls
+  // can resolve after the component is gone (e.g. a test finishing), and a
+  // setState then throws once React's DOM globals are torn down.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
   // Fetch initial status
   useEffect(() => {
     const fetchStatus = async () => {
       try {
         const result = await testDataService.getGeneratorStatus(connectionId)
+        if (!mounted.current) return
         setStatus(result)
         onStatusChange?.(result)
       } catch (error) {
@@ -43,6 +55,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
     const interval = setInterval(async () => {
       try {
         const result = await testDataService.getGeneratorStatus(connectionId)
+        if (!mounted.current) return
         setStatus(result)
         onStatusChange?.(result)
       } catch (error) {
@@ -66,12 +79,14 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
     try {
       setLoading(true)
       await testDataService.startAutoGenerator(connectionId, rate)
-      
+
       // Refresh status
       const result = await testDataService.getGeneratorStatus(connectionId)
-      setStatus(result)
-      onStatusChange?.(result)
-      
+      if (mounted.current) {
+        setStatus(result)
+        onStatusChange?.(result)
+      }
+
       addNotification({
         type: 'success',
         title: 'Success',
@@ -85,7 +100,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
         message: errorMessage,
       })
     } finally {
-      setLoading(false)
+      if (mounted.current) setLoading(false)
     }
   }
 
@@ -93,12 +108,14 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
     try {
       setLoading(true)
       await testDataService.stopAutoGenerator(connectionId)
-      
+
       // Refresh status
       const result = await testDataService.getGeneratorStatus(connectionId)
-      setStatus(result)
-      onStatusChange?.(result)
-      
+      if (mounted.current) {
+        setStatus(result)
+        onStatusChange?.(result)
+      }
+
       addNotification({
         type: 'success',
         title: 'Success',
@@ -112,7 +129,7 @@ export function AutoGeneratorControls({ connectionId, onStatusChange }: AutoGene
         message: errorMessage,
       })
     } finally {
-      setLoading(false)
+      if (mounted.current) setLoading(false)
     }
   }
 

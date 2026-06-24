@@ -64,6 +64,17 @@ nav:
   - Tutorials:
       - Build your first pipeline: tutorials/first-pipeline.md
       - Build your first connector: sdk/tutorial/first-connector.md
+  - User guide:
+      - Overview: guide/index.md
+      - Getting started: guide/getting-started.md
+      - Workspaces, members & your account: guide/workspaces-and-members.md
+      - Building a pipeline: guide/building-a-pipeline.md
+      - Connectors & node types: guide/connectors-and-nodes.md
+      - Credentials, secrets & OAuth: guide/credentials-and-oauth.md
+      - Deploying & monitoring: guide/deploying-and-monitoring.md
+      - Sharing data between workspaces: guide/data-sharing.md
+      - "Settings: usage, notifications, audit": guide/settings.md
+      - Troubleshooting: guide/troubleshooting.md
   - Operator guide:
       - Install: operator/install.md
       - Upgrade: operator/upgrade.md
