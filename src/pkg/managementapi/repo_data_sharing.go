@@ -144,7 +144,12 @@ func (r *PostgresRepository) ApproveConnectionRequest(ctx context.Context, reque
 	if deniedFields == nil {
 		deniedJSON = nil
 	}
-	var sharedJSON []byte
+	// shared_connection_ids is NOT NULL DEFAULT '[]'. Because the INSERT lists
+	// the column explicitly, passing a nil ([]byte == NULL) violates the
+	// not-null constraint and the approve fails with a 500. Default to an empty
+	// JSON array so "share everything" approvals (no specific connection IDs)
+	// succeed.
+	sharedJSON := []byte("[]")
 	if sharedConnectionIDs != nil {
 		sharedJSON, _ = json.Marshal(sharedConnectionIDs)
 	}
