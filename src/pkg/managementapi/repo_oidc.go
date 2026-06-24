@@ -15,17 +15,17 @@ import (
 // (Google, Microsoft Entra, Okta, Keycloak, …). The client secret is
 // stored encrypted in the `secrets` table and referenced by UUID.
 type OIDCConfig struct {
-	TenantID         string    `json:"tenant_id"`
-	IssuerURL        string    `json:"issuer_url"`
-	ClientID         string    `json:"client_id"`
-	ClientSecretID   string    `json:"client_secret_id"`
-	RedirectURL      string    `json:"redirect_url"`
-	Scopes           []string  `json:"scopes"`
-	AllowedDomains   []string  `json:"allowed_domains,omitempty"`
-	DefaultRole      string    `json:"default_role"`
-	ProviderLabel    string    `json:"provider_label,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	TenantID       string    `json:"tenant_id"`
+	IssuerURL      string    `json:"issuer_url"`
+	ClientID       string    `json:"client_id"`
+	ClientSecretID string    `json:"client_secret_id"`
+	RedirectURL    string    `json:"redirect_url"`
+	Scopes         []string  `json:"scopes"`
+	AllowedDomains []string  `json:"allowed_domains,omitempty"`
+	DefaultRole    string    `json:"default_role"`
+	ProviderLabel  string    `json:"provider_label,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // ErrOIDCConfigNotFound is returned when a tenant has no OIDC config.
@@ -37,9 +37,9 @@ var ErrOIDCConfigNotFound = errors.New("oidc config not found for tenant")
 // ErrOIDCConfigNotFound when the tenant has not configured SSO.
 func (r *PostgresRepository) GetOIDCConfigByTenantID(ctx context.Context, tenantID string) (*OIDCConfig, error) {
 	var (
-		c           OIDCConfig
-		allowed     pq.StringArray
-		label       sql.NullString
+		c       OIDCConfig
+		allowed pq.StringArray
+		label   sql.NullString
 	)
 	err := r.db.QueryRowContext(ctx, `
 		SELECT tenant_id, issuer_url, client_id, client_secret_id, redirect_url,

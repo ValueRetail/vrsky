@@ -12,12 +12,12 @@ import (
 
 func TestObjectFromSOQL(t *testing.T) {
 	cases := map[string]string{
-		"SELECT Id, Name FROM Account":                         "Account",
-		"select id from contact where x=1":                     "contact",
-		"SELECT Id FROM My_Custom__c ORDER BY CreatedDate":     "My_Custom__c",
-		"SELECT count() FROM Opportunity LIMIT 10":             "Opportunity",
-		"not a query":                                          "",
-		"":                                                     "",
+		"SELECT Id, Name FROM Account":                     "Account",
+		"select id from contact where x=1":                 "contact",
+		"SELECT Id FROM My_Custom__c ORDER BY CreatedDate": "My_Custom__c",
+		"SELECT count() FROM Opportunity LIMIT 10":         "Opportunity",
+		"not a query": "",
+		"":            "",
 		// Child-relationship subquery in SELECT — outer object is Account.
 		"SELECT Name, (SELECT LastName FROM Contacts) FROM Account": "Account",
 		// Semi-join subquery in WHERE — outer object is Account.

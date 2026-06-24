@@ -252,7 +252,6 @@ func getStringKey(m map[interface{}]interface{}, keys ...string) string {
 	return ""
 }
 
-
 // getBoolKey safely extracts bool from map
 func getBoolKey(m map[interface{}]interface{}, key string, defaultVal bool) bool {
 	if v, ok := m[key]; ok {

@@ -1,8 +1,11 @@
 package managementapi
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -99,6 +102,25 @@ func (rw *auditResponseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Flush forwards to the underlying ResponseWriter's Flusher. Without it the
+// wrapper hides http.Flusher, so SSE endpoints (metrics/stream, tenant
+// status/stream) failed the w.(http.Flusher) assertion with 500 "streaming
+// not supported" whenever the audit middleware was in the chain.
+func (rw *auditResponseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack forwards to the underlying ResponseWriter's Hijacker so WebSocket
+// upgrade endpoints (metrics/ws) keep working through the audit middleware.
+func (rw *auditResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not support hijacking")
+}
+
 // AuditWriter is the minimal surface AuditMiddleware needs. Implemented by
 // PostgresRepository; tests can pass a stub.
 type AuditWriter interface {
@@ -154,11 +176,11 @@ func TenantIDFromContextOptional(ctx context.Context) (string, bool) {
 
 // shouldAudit decides which requests get an audit entry.
 //
-//	- Always skip non-API paths and the audit endpoints themselves.
-//	- Always audit POST/PUT/PATCH/DELETE on /api/v1/*.
-//	- Additionally audit GET on /api/v1/secrets/* — the acceptance criterion
-//	  for #72 includes "secret access logged", and reads of the secrets
-//	  endpoints are the closest we have to access events.
+//   - Always skip non-API paths and the audit endpoints themselves.
+//   - Always audit POST/PUT/PATCH/DELETE on /api/v1/*.
+//   - Additionally audit GET on /api/v1/secrets/* — the acceptance criterion
+//     for #72 includes "secret access logged", and reads of the secrets
+//     endpoints are the closest we have to access events.
 func shouldAudit(r *http.Request) bool {
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/v1/") {

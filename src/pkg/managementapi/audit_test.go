@@ -183,7 +183,7 @@ func TestAudit_ConcurrentRequests(t *testing.T) {
 
 func TestDeriveAction(t *testing.T) {
 	cases := []struct {
-		method, path     string
+		method, path                 string
 		wantAction, wantType, wantID string
 	}{
 		{http.MethodPost, "/api/v1/connections", "connection.create", "connection", ""},

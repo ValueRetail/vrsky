@@ -19,12 +19,12 @@ var ErrSecretNotFound = errors.New("secret not found")
 // never read from this struct — callers receive only metadata except in the
 // worker decryption path, which uses GetSecretCiphertext.
 type Secret struct {
-	ID         string     `json:"id"`
-	TenantID   string     `json:"-"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	RotatedAt  *time.Time `json:"rotated_at,omitempty"`
+	ID        string     `json:"id"`
+	TenantID  string     `json:"-"`
+	Name      string     `json:"name"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	RotatedAt *time.Time `json:"rotated_at,omitempty"`
 }
 
 // CreateSecret stores a new ciphertext for a tenant. The caller is responsible

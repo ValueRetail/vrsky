@@ -66,11 +66,11 @@ func CalculateBackoff(attempt int, config BackoffConfig) time.Duration {
 	// Use per-package RNG with mutex protection for thread-safe concurrent access
 	jitterFraction := config.JitterPercentage / 100.0
 	maxJitter := baseBackoff * jitterFraction
-	
+
 	rngMu.Lock()
 	jitter := (rng.Float64()*2 - 1) * maxJitter // Random in [-maxJitter, +maxJitter]
 	rngMu.Unlock()
-	
+
 	finalBackoff := baseBackoff + jitter
 
 	// Ensure we don't go negative

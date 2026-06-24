@@ -505,9 +505,15 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 // Helper Functions
 // ============================================
 
-// getAuthenticatedUser extracts and validates the session from the request
+// getAuthenticatedUser extracts and validates the session from the request.
+// It uses the cookie-aware extractor so handlers that re-derive auth (GetMe,
+// ChangePassword, DeleteAccount) honor the vrsky_session cookie set by the
+// email/password and OIDC login paths — matching SessionAuthMiddleware, which
+// already accepts that cookie. Using the header-only extractor here made these
+// endpoints 401 ("no session token provided") for cookie-only sessions even
+// though the shared middleware had already authenticated the request.
 func (h *Handler) getAuthenticatedUser(ctx context.Context, r *http.Request) (*User, *Session, error) {
-	token := extractBearerToken(r)
+	token := extractBearerTokenFromHeader(r)
 	if token == "" {
 		return nil, nil, errors.New("no session token provided")
 	}

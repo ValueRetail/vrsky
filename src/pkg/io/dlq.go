@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/nats-io/nats.go"
 )
 
 // DLQConfig holds Dead Letter Queue configuration
@@ -32,8 +32,8 @@ type DLQMessage struct {
 	Envelope *envelope.Envelope `json:"envelope"`
 
 	// Error information
-	ErrorMessage string `json:"error_message"`
-	ErrorType    string `json:"error_type"` // "parse", "execute", "connection", etc.
+	ErrorMessage string    `json:"error_message"`
+	ErrorType    string    `json:"error_type"` // "parse", "execute", "connection", etc.
 	Timestamp    time.Time `json:"timestamp"`
 
 	// Retry information
@@ -42,7 +42,7 @@ type DLQMessage struct {
 	Source       string `json:"source"` // "consumer" or "producer"
 
 	// Context
-	Table     string `json:"table,omitempty"`      // Table being processed
+	Table     string `json:"table,omitempty"`     // Table being processed
 	Operation string `json:"operation,omitempty"` // INSERT, UPDATE, DELETE
 	LSN       uint64 `json:"lsn,omitempty"`       // PostgreSQL LSN (consumer only)
 }

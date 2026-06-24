@@ -15,28 +15,28 @@ func TestFunctionCache_NewFunctionCache(t *testing.T) {
 	logger := newMockLogger()
 
 	tests := []struct {
-		name        string
-		registry    *FunctionRegistry
-		logger      Logger
-		wantErr     bool
+		name     string
+		registry *FunctionRegistry
+		logger   Logger
+		wantErr  bool
 	}{
 		{
-			name:        "valid registry and logger",
-			registry:    registry,
-			logger:      logger,
-			wantErr:     false,
+			name:     "valid registry and logger",
+			registry: registry,
+			logger:   logger,
+			wantErr:  false,
 		},
 		{
-			name:        "nil registry",
-			registry:    nil,
-			logger:      logger,
-			wantErr:     true,
+			name:     "nil registry",
+			registry: nil,
+			logger:   logger,
+			wantErr:  true,
 		},
 		{
-			name:        "nil logger",
-			registry:    registry,
-			logger:      nil,
-			wantErr:     true,
+			name:     "nil logger",
+			registry: registry,
+			logger:   nil,
+			wantErr:  true,
 		},
 	}
 
@@ -338,7 +338,7 @@ func TestFunctionCache_Call(t *testing.T) {
 	// First call to "sum" function - will hit registry
 	// Note: This assumes "sum" is registered in the function registry
 	// Since it might not be for this test, we'll just verify caching works
-	
+
 	// For pure functions, subsequent calls with same args should use cache
 	cache.Set("sum", int64(6), []int{1, 2, 3})
 
@@ -398,9 +398,9 @@ func TestFunctionCache_GetMetrics(t *testing.T) {
 
 	// Generate various cache operations
 	cache.Set("sum", int64(6), []int{1, 2, 3})
-	cache.Get("sum", []int{1, 2, 3})  // hit
-	cache.Get("sum", []int{1, 2, 3})  // hit
-	cache.Get("sum", []int{1, 2, 4})  // miss
+	cache.Get("sum", []int{1, 2, 3}) // hit
+	cache.Get("sum", []int{1, 2, 3}) // hit
+	cache.Get("sum", []int{1, 2, 4}) // miss
 
 	// Add many entries to trigger eviction
 	for i := 0; i < 15; i++ {
