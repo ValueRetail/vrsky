@@ -2,12 +2,12 @@
 
 The user guide references screenshots by relative path (e.g.
 `![Screenshot: …](../img/builder-overview.png)`). The Markdown alt text on each
-placeholder describes exactly what to capture. Drop the PNGs here using the
-filenames below; until then the placeholders render as broken-image alt text
-(harmless — `mkdocs build` does not fail on a missing image).
+placeholder describes exactly what to capture.
 
 Every `*.png` in this folder is currently a **1×1 placeholder** committed so the
-strict docs build passes. Replace each with a real capture (same filename),
+references resolve and `mkdocs build --strict` passes (a missing image would
+otherwise fail the strict build). They render as tiny blank dots until you
+replace each with a real capture (same filename),
 taken at a normal desktop width with a real, non-sensitive workspace. The exact
 shot for each is described by the alt text on its placeholder in the guide —
 search the guide for the filename to find it.

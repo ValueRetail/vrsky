@@ -21,6 +21,10 @@ export default function Sidebar() {
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/')
 
+  // Only allow http(s) or same-origin relative paths for the docs link, so a
+  // misconfigured VITE_DOCS_URL can't inject an unsafe scheme (e.g. javascript:).
+  const docsHref = /^(https?:\/\/|\/)/i.test(config.docsUrl) ? config.docsUrl : '#'
+
   return (
     <aside className="w-64 bg-white dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 flex flex-col transition-colors duration-base">
       {/* Navigation Menu */}
@@ -177,7 +181,7 @@ export default function Sidebar() {
 
         {/* Help & Docs (opens the documentation site in a new tab) */}
         <a
-          href={config.docsUrl}
+          href={docsHref}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-3 px-4 py-2 rounded-lg font-semibold text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-all duration-fast"
