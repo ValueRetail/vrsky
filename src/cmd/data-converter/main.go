@@ -616,12 +616,42 @@ func convertXML(rows []map[string]interface{}, cfg *ConverterNodeConfig) string 
 			val = strings.ReplaceAll(val, "&", "&amp;")
 			val = strings.ReplaceAll(val, "<", "&lt;")
 			val = strings.ReplaceAll(val, ">", "&gt;")
-			sb.WriteString("    <" + k + ">" + val + "</" + k + ">\n")
+			// Sanitize the element name: a key with a space, '<', or leading
+			// digit would otherwise emit invalid XML that downstream parsers
+			// reject. Previously only the value was escaped.
+			tag := xmlTagName(k)
+			sb.WriteString("    <" + tag + ">" + val + "</" + tag + ">\n")
 		}
 		sb.WriteString("  </" + rowTag + ">\n")
 	}
 	sb.WriteString("</" + rootTag + ">\n")
 	return sb.String()
+}
+
+// xmlTagName turns an arbitrary map key into a valid XML element name: it must
+// start with a letter or underscore and otherwise contain only letters,
+// digits, hyphens, underscores, or periods. Invalid characters become '_', and
+// a leading non-letter/underscore (or empty key) is prefixed with '_'.
+func xmlTagName(k string) string {
+	var b strings.Builder
+	for i, r := range k {
+		switch {
+		case r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			b.WriteRune(r)
+		case i > 0 && (r == '-' || r == '.' || (r >= '0' && r <= '9')):
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	s := b.String()
+	if s == "" {
+		return "_"
+	}
+	if c := s[0]; !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return "_" + s
+	}
+	return s
 }
 
 func convertText(rows []map[string]interface{}, cfg *ConverterNodeConfig) string {

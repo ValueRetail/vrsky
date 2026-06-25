@@ -79,7 +79,17 @@ func (p *salesforceProducer) Configure(ctx context.Context, res *sdk.Resources) 
 	p.db = res.DB
 	p.logger = res.Logger
 	if p.httpClient == nil {
-		p.httpClient = &http.Client{Timeout: 60 * time.Second}
+		p.httpClient = &http.Client{
+			Timeout: 60 * time.Second,
+			// Never follow redirects: requests carry the live Salesforce OAuth
+			// token in the Authorization header, and Go only strips it on a
+			// cross-host redirect. A redirect to a different subdomain of the
+			// same registered domain would forward the token. Surface redirects
+			// instead of silently following them.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	if p.bulkThreshold == 0 {
 		p.bulkThreshold = defaultBulkThreshold

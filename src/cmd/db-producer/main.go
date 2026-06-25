@@ -429,6 +429,18 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 	}
 
 	p.targetCacheMu.Lock()
+	// Close the pools from the previous (now-stale) cache entry before
+	// replacing it — a TTL refresh otherwise leaks the old *sql.DB pools
+	// (sockets + goroutines) for the lifetime of the process. A delivery
+	// in-flight against an old pool will at worst get a transient error and
+	// be redelivered; refreshes are infrequent (default 5m).
+	if old, ok := p.targetCache[connectionID]; ok {
+		for _, tc := range old {
+			if tc.DB != nil {
+				_ = tc.DB.Close()
+			}
+		}
+	}
 	p.targetCache[connectionID] = tcs
 	p.targetCacheTime[connectionID] = time.Now()
 	p.targetCacheMu.Unlock()
