@@ -110,6 +110,11 @@ export default function ConnectionDetail() {
       const clonePayload = {
         name: `Copy of ${connection.name}`,
         description: connection.description,
+        // Carry the graph model: builder-created connections live in
+        // nodes/edges (the legacy *_config fields are empty for them), so
+        // without these the clone would be an empty, undeployable pipeline.
+        nodes: connection.nodes,
+        edges: connection.edges,
         source_config: connection.source_config,
         converter_config: connection.converter_config,
         filter_config: connection.filter_config,
@@ -229,7 +234,9 @@ export default function ConnectionDetail() {
 
             {/* Status Badge */}
             <div className="flex-shrink-0">
-              <div className={getStatusBadgeClass(connection.status)} />
+              <span className={getStatusBadgeClass(connection.status)}>
+                {connection.status.charAt(0).toUpperCase() + connection.status.slice(1)}
+              </span>
             </div>
           </div>
         </div>
