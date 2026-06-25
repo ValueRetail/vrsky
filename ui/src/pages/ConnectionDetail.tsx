@@ -443,47 +443,73 @@ export default function ConnectionDetail() {
         <div className="space-y-6 animate-fade-in">
           <h2 className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">Configuration</h2>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Source Configuration */}
-            <section className="card-elevated">
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Source</h3>
-              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
-                <pre className="text-sm font-mono text-neutral-100">
-                  {JSON.stringify(connection.source_config, null, 2)}
-                </pre>
-              </div>
-            </section>
+          {connection.nodes && connection.nodes.length > 0 ? (
+            /* Graph model: render each node's type + config, plus the edges. */
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {connection.nodes.map((node) => (
+                <section key={node.id} className="card-elevated">
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4 capitalize">
+                    {node.type}
+                    <span className="ml-2 text-sm font-normal text-neutral-500 dark:text-neutral-400">({node.id})</span>
+                  </h3>
+                  <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                    <pre className="text-sm font-mono text-neutral-100">
+                      {JSON.stringify(node.config ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                </section>
+              ))}
+              {connection.edges && connection.edges.length > 0 && (
+                <section className="card-elevated lg:col-span-2">
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Flow</h3>
+                  <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                    <pre className="text-sm font-mono text-neutral-100">
+                      {connection.edges.map((e) => `${e.source}  →  ${e.target}`).join('\n')}
+                    </pre>
+                  </div>
+                </section>
+              )}
+            </div>
+          ) : (
+            /* Legacy linear model fallback. */
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section className="card-elevated">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Source</h3>
+                <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                  <pre className="text-sm font-mono text-neutral-100">
+                    {JSON.stringify(connection.source_config, null, 2)}
+                  </pre>
+                </div>
+              </section>
 
-            {/* Converter Configuration */}
-            <section className="card-elevated">
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Converter</h3>
-              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
-                <pre className="text-sm font-mono text-neutral-100">
-                  {JSON.stringify(connection.converter_config, null, 2)}
-                </pre>
-              </div>
-            </section>
+              <section className="card-elevated">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Converter</h3>
+                <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                  <pre className="text-sm font-mono text-neutral-100">
+                    {JSON.stringify(connection.converter_config, null, 2)}
+                  </pre>
+                </div>
+              </section>
 
-            {/* Filter Configuration */}
-            <section className="card-elevated">
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Filter</h3>
-              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
-                <pre className="text-sm font-mono text-neutral-100">
-                  {JSON.stringify(connection.filter_config, null, 2)}
-                </pre>
-              </div>
-            </section>
+              <section className="card-elevated">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Filter</h3>
+                <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                  <pre className="text-sm font-mono text-neutral-100">
+                    {JSON.stringify(connection.filter_config, null, 2)}
+                  </pre>
+                </div>
+              </section>
 
-            {/* Destination Configuration */}
-            <section className="card-elevated">
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Destination</h3>
-              <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
-                <pre className="text-sm font-mono text-neutral-100">
-                  {JSON.stringify(connection.destination_config, null, 2)}
-                </pre>
-              </div>
-            </section>
-          </div>
+              <section className="card-elevated">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">Destination</h3>
+                <div className="bg-neutral-900 dark:bg-neutral-950 rounded-lg p-4 overflow-x-auto">
+                  <pre className="text-sm font-mono text-neutral-100">
+                    {JSON.stringify(connection.destination_config, null, 2)}
+                  </pre>
+                </div>
+              </section>
+            </div>
+          )}
 
           {/* Metadata */}
           <section className="card-elevated">

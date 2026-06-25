@@ -30,10 +30,16 @@ export async function createConnection(data: unknown): Promise<Connection> {
  * Get a single connection by ID
  */
 export async function getConnection(id: string): Promise<Connection> {
-  const response = await apiClient.get<GetConnectionResponse>(
+  const response = await apiClient.get<GetConnectionResponse | { data: GetConnectionResponse }>(
     `/api/v1/connections/${id}`
   )
-  return response.data as unknown as Connection
+  // GET /connections/:id wraps the connection in a { data: ... } envelope
+  // (unlike the list endpoint). Unwrap it; fall back to the body itself for
+  // any endpoint/version that returns the connection unwrapped. Without this,
+  // the detail page rendered an envelope object whose fields were all
+  // undefined → blank ID/Status and "Invalid Date".
+  const body = response.data as Record<string, unknown>
+  return ((body.data ?? body) as unknown) as Connection
 }
 
 /**

@@ -137,6 +137,22 @@ export interface DatabaseDestinationConfig {
 
 export type DestinationConfig = HttpDestinationConfig | FileDestinationConfig | DatabaseDestinationConfig
 
+// Graph pipeline model (nodes/edges). The current connection format; the
+// legacy *_config fields below are kept for backward compatibility.
+export interface ConnectionNode {
+  id: string
+  type: string
+  config?: Record<string, unknown>
+  enabled?: boolean
+}
+
+export interface ConnectionEdge {
+  id?: string
+  source: string
+  target: string
+  order?: number
+}
+
 // Connection Model
 export interface Connection {
   id: string
@@ -144,6 +160,11 @@ export interface Connection {
   name: string
   description: string
   status: ConnectionStatus
+  // Graph model (preferred). Present on connections created via the builder,
+  // onboarding wizard, or API.
+  nodes?: ConnectionNode[]
+  edges?: ConnectionEdge[]
+  // Legacy linear model — empty on graph-based connections.
   source_config: SourceConfig
   converter_config: ConverterConfig
   filter_config: FilterConfig
