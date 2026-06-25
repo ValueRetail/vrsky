@@ -8,6 +8,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -112,41 +115,52 @@ func (p *NATSPublisher) PublishConnectionDelete(ctx context.Context, connID, ten
 	return p.publishCommand(ctx, tenantID, "delete", cmd)
 }
 
-// PublishTestMessage publishes a test message to the pipeline
-// Subject: vrsky.test.{tenantID}.{connectionID}
+// PublishTestMessage injects a test message into a connection's running
+// pipeline so it flows through exactly like real data — filters, converters,
+// and the producer all process it, and the producer delivers it to the real
+// destination.
+//
+// It wraps the payload in the same envelope the consumer workers emit and
+// publishes onto the pipeline's main JetStream subject
+// (vrsky.data.{tenant}.pipeline.{connection}). Previously it published a bare
+// command to vrsky.test.{tenant}.{connection}, a subject no worker subscribes
+// to — so test messages were silently dropped (the API returned 200 but
+// nothing reached the destination).
 func (p *NATSPublisher) PublishTestMessage(ctx context.Context, connID, tenantID string, payload interface{}) error {
-	msg := TestMessageCommand{
-		ConnectionID: connID,
-		TenantID:     tenantID,
-		Payload:      payload,
-		Timestamp:    time.Now().UTC(),
-	}
-
-	data, err := json.Marshal(msg)
+	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		p.logger.Printf("Failed to marshal test message: %v", err)
-		return fmt.Errorf("failed to marshal test message: %w", err)
+		return fmt.Errorf("failed to marshal test payload: %w", err)
 	}
 
-	subject := fmt.Sprintf("vrsky.test.%s.%s", tenantID, connID)
-
-	// Publish with context timeout
-	done := make(chan error, 1)
-	go func() {
-		done <- p.nc.Publish(subject, data)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("publish context cancelled")
-	case err := <-done:
-		if err != nil {
-			p.logger.Printf("Failed to publish test message to %s: %v", subject, err)
-			return fmt.Errorf("failed to publish test message: %w", err)
-		}
-		p.logger.Printf("Published test message to %s", subject)
-		return nil
+	env := &envelope.Envelope{
+		ID:            uuid.NewString(),
+		TenantID:      tenantID,
+		IntegrationID: connID,
+		Payload:       payloadBytes,
+		PayloadSize:   int64(len(payloadBytes)),
+		ContentType:   "application/json",
+		Source:        "test-message",
+		CurrentStep:   0,
+		StepHistory:   []string{"management-api"},
+		CreatedAt:     time.Now().UTC(),
 	}
+
+	body, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("failed to marshal test envelope: %w", err)
+	}
+
+	js, err := p.nc.JetStream()
+	if err != nil {
+		return fmt.Errorf("jetstream context: %w", err)
+	}
+
+	if err := messaging.NewPublisher(js).Publish(ctx, tenantID, connID, env.ID, body); err != nil {
+		p.logger.Printf("Failed to publish test message for connection %s: %v", connID, err)
+		return fmt.Errorf("failed to publish test message: %w", err)
+	}
+	p.logger.Printf("Published test message to %s (envelope %s)", messaging.DataSubject(tenantID, connID), env.ID)
+	return nil
 }
 
 // publishCommand is a helper to publish connection commands with retry logic
