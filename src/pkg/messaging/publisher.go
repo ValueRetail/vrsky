@@ -67,7 +67,7 @@ func (p *Publisher) Publish(ctx context.Context, tenantID, connectionID, msgID s
 		span.SetStatus(codes.Error, "publish failed")
 		return fmt.Errorf("js.Publish %s: %w", subj, err)
 	}
-	publishCount.WithLabelValues(tenantID).Inc()
+	publishCount.WithLabelValues(tenantID, connectionID).Inc()
 	return nil
 }
 
