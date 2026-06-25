@@ -6,7 +6,7 @@
  * listened on), so the dashboard always showed "No pipeline data available".
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useMetricsStore } from '@/store/metricsStore'
 import { metricsService } from '@/services/metricsService'
 import type { ConnectionMetricsResponse } from '@/types/api'
@@ -28,6 +28,12 @@ interface UseMetricsOptions {
 export function useMetrics(connectionId: string, options: UseMetricsOptions = {}) {
   const { enabled = true, onError, intervalMs = 5000 } = options
   const { updateMetrics, getMetricsByConnectionId } = useMetricsStore()
+
+  // Keep the latest onError in a ref so callers can pass an inline arrow
+  // without it being an effect dependency — otherwise the polling effect tore
+  // down and recreated its interval on every render (timer churn + extra polls).
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
 
   useEffect(() => {
     if (!enabled || !connectionId) {
@@ -72,7 +78,7 @@ export function useMetrics(connectionId: string, options: UseMetricsOptions = {}
         const data = await metricsService.getMetrics(connectionId)
         apply(data)
       } catch (err) {
-        if (!cancelled && onError) onError(err as Error)
+        if (!cancelled && onErrorRef.current) onErrorRef.current(err as Error)
       }
     }
 
@@ -83,7 +89,7 @@ export function useMetrics(connectionId: string, options: UseMetricsOptions = {}
       cancelled = true
       clearInterval(timer)
     }
-  }, [connectionId, enabled, intervalMs, updateMetrics, onError])
+  }, [connectionId, enabled, intervalMs, updateMetrics])
 
   return getMetricsByConnectionId(connectionId)
 }

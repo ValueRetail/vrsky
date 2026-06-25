@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { connectionService } from '../services/connectionService'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import { isAPIError, getErrorMessage } from '../utils/errors'
 import type { Connection, ConnectionStatus } from '../types/models'
 
@@ -29,6 +30,10 @@ const formatDate = (value?: string): string => {
 export default function ConnectionsList() {
   const navigate = useNavigate()
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
+  // The active tenant scopes the X-Tenant-ID header on every request. Track it
+  // so the list refetches when the user switches workspace — without this the
+  // page kept showing the previous tenant's connections until a manual reload.
+  const currentTenantId = useAuthStore((s) => s.currentTenant?.id)
 
   const [connections, setConnections] = useState<Connection[]>([])
   const [total, setTotal] = useState(0)
@@ -55,7 +60,13 @@ export default function ConnectionsList() {
       }
     }
     load()
-  }, [page, addNotification])
+  }, [page, currentTenantId, addNotification])
+
+  // Reset to the first page when the workspace changes so we don't land on a
+  // page number that doesn't exist for the new tenant.
+  useEffect(() => {
+    setPage(1)
+  }, [currentTenantId])
 
   const filtered = connections && connections.length > 0
     ? (statusFilter === 'all'
