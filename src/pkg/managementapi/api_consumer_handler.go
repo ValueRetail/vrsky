@@ -614,9 +614,18 @@ func (h *Handler) ListAPIConsumers(w http.ResponseWriter, r *http.Request) {
 
 // RegisterAPIConsumerRoutes registers API consumer specific routes
 func (h *Handler) RegisterAPIConsumerRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/api-consumers", h.CreateAPIConsumer)
-	mux.HandleFunc("GET /api/v1/api-consumers", h.ListAPIConsumers)
-	mux.HandleFunc("GET /api/v1/api-consumers/{id}", h.GetAPIConsumer)
-	mux.HandleFunc("PUT /api/v1/api-consumers/{id}", h.UpdateAPIConsumer)
-	mux.HandleFunc("DELETE /api/v1/api-consumers/{id}", h.DeleteAPIConsumer)
+	// These operate on the same `connections` table as /api/v1/connections,
+	// so they MUST carry the same RBAC gating. Without it, the global chain
+	// only validates that X-Tenant-ID is non-empty (TenantIDMiddleware), which
+	// would let any unauthenticated caller read/write another tenant's
+	// connections just by setting the header. Mirror the connection routes:
+	// reads = viewer, writes = editor, delete = admin.
+	viewer := RequireTenantRoleFromHeader(h.repo, "viewer")
+	editor := RequireTenantRoleFromHeader(h.repo, "editor")
+	adminMW := RequireTenantRoleFromHeader(h.repo, "admin")
+	mux.Handle("POST /api/v1/api-consumers", editor(http.HandlerFunc(h.CreateAPIConsumer)))
+	mux.Handle("GET /api/v1/api-consumers", viewer(http.HandlerFunc(h.ListAPIConsumers)))
+	mux.Handle("GET /api/v1/api-consumers/{id}", viewer(http.HandlerFunc(h.GetAPIConsumer)))
+	mux.Handle("PUT /api/v1/api-consumers/{id}", editor(http.HandlerFunc(h.UpdateAPIConsumer)))
+	mux.Handle("DELETE /api/v1/api-consumers/{id}", adminMW(http.HandlerFunc(h.DeleteAPIConsumer)))
 }

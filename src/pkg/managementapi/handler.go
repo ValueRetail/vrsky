@@ -952,20 +952,22 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/connections/{id}/dlq/{seq}/discard", editor(http.HandlerFunc(h.DLQRouter)))
 
 	// Audit log (Phase 1G — #72). Read-only — writes happen via middleware.
-	mux.HandleFunc("GET /api/v1/audit", h.ListAudit)
+	// viewer-gated: the handler scopes by the X-Tenant-ID header, which is
+	// untrusted on its own, so the role check enforces tenant isolation.
+	mux.Handle("GET /api/v1/audit", viewer(http.HandlerFunc(h.ListAudit)))
 
 	// OAuth 2.0 framework (Phase 2A — #75). Provider CRUD is admin; viewing
 	// providers / grants is viewer; the auth start is editor; the callback
 	// is public + cookie-gated (it's hit via browser redirect from the IdP).
-	mux.HandleFunc("GET /api/v1/oauth/providers", h.ListOAuthProvidersHandler)
+	mux.Handle("GET /api/v1/oauth/providers", viewer(http.HandlerFunc(h.ListOAuthProvidersHandler)))
 	mux.Handle("POST /api/v1/oauth/providers", adminMW(http.HandlerFunc(h.CreateOAuthProvider)))
-	mux.HandleFunc("GET /api/v1/oauth/providers/{id}", h.GetOAuthProvider)
+	mux.Handle("GET /api/v1/oauth/providers/{id}", viewer(http.HandlerFunc(h.GetOAuthProvider)))
 	mux.Handle("PUT /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.UpdateOAuthProvider)))
 	mux.Handle("DELETE /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.DeleteOAuthProvider)))
 	mux.Handle("POST /api/v1/oauth/providers/{id}/start", editor(http.HandlerFunc(h.StartOAuth)))
 	mux.HandleFunc("GET /api/v1/oauth/callback", h.HandleOAuthCallback)
-	mux.HandleFunc("GET /api/v1/oauth/grants", h.ListOAuthGrants)
-	mux.HandleFunc("GET /api/v1/oauth/grants/{id}", h.GetOAuthGrant)
+	mux.Handle("GET /api/v1/oauth/grants", viewer(http.HandlerFunc(h.ListOAuthGrants)))
+	mux.Handle("GET /api/v1/oauth/grants/{id}", viewer(http.HandlerFunc(h.GetOAuthGrant)))
 	mux.Handle("POST /api/v1/oauth/grants/{id}/revoke", editor(http.HandlerFunc(h.RevokeOAuthGrant)))
 	// Service-only token endpoint for workers — authenticated by the shared
 	// X-Service-Token secret inside the handler, not the user-session
@@ -974,7 +976,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Notification targets (Phase 3A — #84). Writes are admin; listing is
 	// viewer; the test send is admin (it uses the stored secret).
-	mux.HandleFunc("GET /api/v1/notifications/targets", h.ListNotificationTargets)
+	mux.Handle("GET /api/v1/notifications/targets", viewer(http.HandlerFunc(h.ListNotificationTargets)))
 	mux.Handle("POST /api/v1/notifications/targets", adminMW(http.HandlerFunc(h.CreateNotificationTarget)))
 	mux.Handle("PUT /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.UpdateNotificationTarget)))
 	mux.Handle("DELETE /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.DeleteNotificationTarget)))
