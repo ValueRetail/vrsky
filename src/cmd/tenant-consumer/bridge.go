@@ -97,8 +97,10 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 		FilterSubject: topic,
 		Logger:        logger,
 	}, func(ctx context.Context, msg *nats.Msg) error {
-		s.handleSourceMessage(ctx, msg, connectionID, tenantID, dcInfo, logger)
-		return nil
+		// Return the error so the SDK NAKs and redelivers: previously this
+		// always returned nil, so a republish failure (e.g. target stream
+		// briefly unavailable) acked and permanently dropped the message.
+		return s.handleSourceMessage(ctx, msg, connectionID, tenantID, dcInfo, logger)
 	})
 	if err != nil {
 		logger.Error("Failed to subscribe to source topic", "error", err, "topic", topic)
@@ -124,13 +126,16 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 	logger.Info("Bridge stopped")
 }
 
-// handleSourceMessage processes a message from the source tenant and republishes it
-func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
+// handleSourceMessage processes a message from the source tenant and republishes it.
+// Returns nil for non-retryable failures (malformed/unmarshalable data — NAKing
+// would just loop a poison message) and the error for retryable ones (a failed
+// republish), so the caller NAKs and the message is redelivered rather than lost.
+func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) error {
 	// Unmarshal the envelope
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
 		logger.Error("Failed to unmarshal envelope", "error", err)
-		return
+		return nil
 	}
 
 	logger.Debug("Received envelope from source",
@@ -165,7 +170,7 @@ func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg,
 	data, err := json.Marshal(newEnv)
 	if err != nil {
 		logger.Error("Failed to marshal new envelope", "error", err)
-		return
+		return nil
 	}
 
 	// Publish to the target tenant's pipeline stream via the SDK's injected
@@ -173,7 +178,7 @@ func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg,
 	if err := s.publish(ctx, newEnv); err != nil {
 		logger.Error("Failed to publish to target tenant via JetStream", "error", err,
 			"target_tenant", targetTenantID, "target_connection", targetConnectionID)
-		return
+		return err
 	}
 
 	// Store last_payload for the target connection (used by filter data structure preview)
@@ -185,6 +190,7 @@ func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg,
 		"target_tenant", targetTenantID,
 		"target_connection", targetConnectionID,
 		"payload_size", len(filteredPayload))
+	return nil
 }
 
 // replayOrTrigger tries to replay cached data from the source connection.
@@ -192,14 +198,27 @@ func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg,
 func (s *tenantConsumer) replayOrTrigger(ctx context.Context, sourceTenantID, sourceConnectionID, targetConnectionID, targetTenantID string, dcInfo *dataConnectionInfo, logger *slog.Logger) {
 	var lastPayload []byte
 
-	// Try exact connection ID first
+	// Try the exact source connection first, scoped to the source tenant so a
+	// connection id from another tenant can never be read.
 	if sourceConnectionID != "" {
-		_ = s.db.QueryRow("SELECT last_payload FROM connections WHERE id = $1 AND last_payload IS NOT NULL", sourceConnectionID).Scan(&lastPayload)
+		_ = s.db.QueryRow("SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL", sourceConnectionID, sourceTenantID).Scan(&lastPayload)
 	}
 
-	// Fallback: find any connection from the source tenant that has cached data
+	// Fallback: try the OTHER explicitly-shared connections from this data
+	// connection (still in the source tenant). This must stay restricted to
+	// dcInfo.SharedConnectionIDs — previously it grabbed the most-recent
+	// last_payload for the whole source tenant, which could replay an
+	// un-shared connection's data to the requesting tenant.
 	if lastPayload == nil {
-		_ = s.db.QueryRow("SELECT last_payload FROM connections WHERE tenant_id = $1 AND last_payload IS NOT NULL ORDER BY updated_at DESC LIMIT 1", sourceTenantID).Scan(&lastPayload)
+		for _, scID := range dcInfo.SharedConnectionIDs {
+			if scID == "" || scID == sourceConnectionID {
+				continue
+			}
+			_ = s.db.QueryRow("SELECT last_payload FROM connections WHERE id = $1 AND tenant_id = $2 AND last_payload IS NOT NULL", scID, sourceTenantID).Scan(&lastPayload)
+			if lastPayload != nil {
+				break
+			}
+		}
 	}
 
 	if lastPayload != nil {

@@ -155,3 +155,6 @@ func escapeKey(key string) string {
 	}
 	return strings.Join(parts, "/")
 }
+
+// Close is a no-op: the AWS SDK v2 S3 client holds no resources requiring release.
+func (s *s3Store) Close() error { return nil }

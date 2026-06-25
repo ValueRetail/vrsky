@@ -111,3 +111,11 @@ func (g *gcsStore) Copy(ctx context.Context, srcKey, dstKey string) error {
 	}
 	return nil
 }
+
+// Close releases the underlying GCS storage.Client (connection pool + goroutines).
+func (s *gcsStore) Close() error {
+	if s.client == nil {
+		return nil
+	}
+	return s.client.Close()
+}

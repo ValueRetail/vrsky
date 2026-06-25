@@ -258,3 +258,6 @@ func TestCloudConsumer_AfterActionMove(t *testing.T) {
 			len(fake.deleted) == 1 && fake.deleted[0] == "in/data.csv"
 	})
 }
+
+// Close satisfies objectstore.ObjectStore (added when Close was introduced to release backend clients).
+func (f *fakeStore) Close() error { return nil }
