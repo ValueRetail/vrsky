@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../../store/uiStore'
 import { useConnectionsStore } from '../../store/connectionsStore'
 import { useAuthStore } from '../../store/authStore'
@@ -109,30 +109,9 @@ export default function Header() {
                           {user.email}
                         </p>
                       </div>
-                      {/* Menu Items */}
+                      {/* Account actions only — page navigation lives in the
+                          sidebar, so the gear menu stays focused on the account. */}
                       <div className="p-2">
-                        <Link
-                          to="/settings/connection-requests"
-                          onClick={() => setShowUserMenu(false)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-                        >
-                          Connection Requests
-                        </Link>
-                        <Link
-                          to="/settings/tenant-connections"
-                          onClick={() => setShowUserMenu(false)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-                        >
-                          Data Connections
-                        </Link>
-                        <Link
-                          to="/settings/api-key"
-                          onClick={() => setShowUserMenu(false)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-                        >
-                          API Key
-                        </Link>
-                        <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />
                         {/* Delete Account */}
                         <button
                           onClick={() => {
