@@ -74,9 +74,11 @@ export default function ConnectionsList() {
   const handleStop = async (connection: Connection) => {
     try {
       setActionLoading(true)
-      await connectionService.stop(connection.id)
+      const updated = await connectionService.stop(connection.id)
       addNotification({ type: 'success', title: 'Stopped', message: `"${connection.name}" stopped` })
-      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'stopped' as ConnectionStatus } : c))
+      // Reflect the server's actual status (not an optimistic guess) so the
+      // list stays consistent with the detail page.
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'stopped') as ConnectionStatus } : c))
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to stop connection'
       addNotification({ type: 'error', title: 'Error', message })
@@ -88,9 +90,11 @@ export default function ConnectionsList() {
   const handleStart = async (connection: Connection) => {
     try {
       setActionLoading(true)
-      await connectionService.start(connection.id)
+      const updated = await connectionService.start(connection.id)
       addNotification({ type: 'success', title: 'Started', message: `"${connection.name}" started` })
-      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'running' as ConnectionStatus } : c))
+      // Reflect the server's actual status (not an optimistic guess) so the
+      // list stays consistent with the detail page.
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'running') as ConnectionStatus } : c))
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to start connection'
       addNotification({ type: 'error', title: 'Error', message })

@@ -211,7 +211,7 @@ export default function ConnectionDetail() {
             {/* Info */}
             <div className="flex-1">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/connections')}
                 className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium mb-4 transition-colors duration-base"
               >
                 <span>←</span>
