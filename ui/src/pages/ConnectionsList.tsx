@@ -9,6 +9,23 @@ type StatusFilter = 'all' | ConnectionStatus
 
 const PAGE_SIZE = 10
 
+// Legacy source_config/destination_config are empty on graph-based
+// (builder-created) connections, where the pipeline lives in nodes/edges.
+// Prefer the legacy field, then fall back to the matching node, then a dash —
+// reading .type off an absent source_config would throw and crash the list.
+const nodeLabel = (connection: Connection, role: string): string => {
+  const node = connection.nodes?.find(n => n.type === role)
+  const cfgType = node?.config?.type
+  return typeof cfgType === 'string' ? cfgType : (node?.type ?? '—')
+}
+const sourceLabel = (c: Connection): string => c.source_config?.type || nodeLabel(c, 'consumer')
+const destinationLabel = (c: Connection): string => c.destination_config?.type || nodeLabel(c, 'producer')
+const formatDate = (value?: string): string => {
+  if (!value) return '—'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
+}
+
 export default function ConnectionsList() {
   const navigate = useNavigate()
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
@@ -196,9 +213,9 @@ export default function ConnectionsList() {
                       </p>
                     )}
                     <div className="flex flex-wrap gap-4 mt-3 text-sm text-neutral-600 dark:text-neutral-400">
-                      <span>Source: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.source_config.type}</span></span>
-                      <span>Destination: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.destination_config.type}</span></span>
-                      <span>Created: <span className="font-medium text-neutral-900 dark:text-neutral-50">{new Date(connection.created_at).toLocaleDateString()}</span></span>
+                      <span>Source: <span className="font-medium text-neutral-900 dark:text-neutral-50">{sourceLabel(connection)}</span></span>
+                      <span>Destination: <span className="font-medium text-neutral-900 dark:text-neutral-50">{destinationLabel(connection)}</span></span>
+                      <span>Created: <span className="font-medium text-neutral-900 dark:text-neutral-50">{formatDate(connection.created_at)}</span></span>
                     </div>
                   </div>
 
