@@ -223,7 +223,12 @@ func (s *tenantConsumer) replayOrTrigger(ctx context.Context, sourceTenantID, so
 
 	if lastPayload != nil {
 		msg := &nats.Msg{Data: lastPayload}
-		s.handleSourceMessage(ctx, msg, targetConnectionID, targetTenantID, dcInfo, logger)
+		// Best-effort replay of cached data at bridge startup — this isn't on
+		// the JetStream ack path, so log a publish failure rather than NAK.
+		if err := s.handleSourceMessage(ctx, msg, targetConnectionID, targetTenantID, dcInfo, logger); err != nil {
+			logger.Error("Failed to replay cached data from source", "error", err, "source_connection_id", sourceConnectionID)
+			return
+		}
 		logger.Info("Replayed cached data from source", "source_connection_id", sourceConnectionID)
 		return
 	}
