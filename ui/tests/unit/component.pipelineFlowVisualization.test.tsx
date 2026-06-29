@@ -1,364 +1,126 @@
 /**
  * PipelineFlowVisualization Component Tests
+ *
+ * The component is now driven by the connection's real nodes/edges (#129):
+ * it renders only the components the pipeline actually has, in flow order, and
+ * maps each to its live metrics bucket. (It used to always draw a fixed
+ * Consumer→Converter→Filter→Producer chain from metrics alone.)
  */
 
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { PipelineFlowVisualization } from '@/components/MetricsDisplay/PipelineFlowVisualization'
-import type { ConnectionMetrics } from '@/types/models'
+import type { ConnectionMetrics, ConnectionNode, ConnectionEdge } from '@/types/models'
 
-describe('PipelineFlowVisualization Component', () => {
-  const mockMetrics: ConnectionMetrics = {
-    connection_id: 'test-conn',
-    tenant_id: 'test-tenant',
-    status: 'active',
-    components: {
-      consumer: {
-        status: 'active',
-        messages_processed: 1000,
-        errors: 0,
-        last_update: '2024-01-20T10:00:00Z',
-      },
-      converter: {
-        status: 'active',
-        messages_processed: 950,
-        errors: 5,
-        last_update: '2024-01-20T10:00:00Z',
-      },
-      filter: {
-        status: 'active',
-        messages_processed: 900,
-        filtered_out: 50,
-        errors: 0,
-        last_update: '2024-01-20T10:00:00Z',
-      },
-      producer: {
-        status: 'active',
-        messages_sent: 900,
-        messages_processed: 900,
-        errors: 0,
-        last_update: '2024-01-20T10:00:00Z',
-      },
-    },
-    total_messages_in: 1000,
-    total_messages_out: 900,
-    total_errors: 5,
-    errors_per_second: 0.001,
-    throughput_mps: 100,
-    last_updated: '2024-01-20T10:00:00Z',
-  }
+const fullNodes: ConnectionNode[] = [
+  { id: 'n1', type: 'consumer', config: { type: 'http' } },
+  { id: 'n2', type: 'converter', config: {} },
+  { id: 'n3', type: 'filter', config: {} },
+  { id: 'n4', type: 'producer', config: { type: 'file' } },
+]
+const fullEdges: ConnectionEdge[] = [
+  { source: 'n1', target: 'n2' },
+  { source: 'n2', target: 'n3' },
+  { source: 'n3', target: 'n4' },
+]
 
+const mockMetrics: ConnectionMetrics = {
+  connection_id: 'test-conn',
+  tenant_id: 'test-tenant',
+  status: 'active',
+  components: {
+    consumer: { status: 'active', messages_processed: 1000, errors: 0, last_update: '' },
+    converter: { status: 'active', messages_processed: 950, errors: 5, last_update: '' },
+    filter: { status: 'active', messages_processed: 900, filtered_out: 50, errors: 0, last_update: '' },
+    producer: { status: 'active', messages_sent: 900, messages_processed: 900, errors: 0, last_update: '' },
+  },
+  total_messages_in: 1000,
+  total_messages_out: 900,
+  total_errors: 5,
+  errors_per_second: 0.001,
+  throughput_mps: 100,
+  last_updated: '',
+}
+
+describe('PipelineFlowVisualization', () => {
   describe('Empty state', () => {
-    it('should render empty state when metrics is null', () => {
-      render(<PipelineFlowVisualization metrics={null} />)
-
-      expect(screen.getByText('No pipeline data available')).toBeInTheDocument()
+    it('shows "no pipeline defined" when there are no nodes', () => {
+      render(<PipelineFlowVisualization metrics={mockMetrics} nodes={[]} />)
+      expect(screen.getByText(/No pipeline defined/i)).toBeInTheDocument()
     })
 
-    it('should render empty state when metrics is undefined', () => {
-      render(<PipelineFlowVisualization metrics={undefined} />)
-
-      expect(screen.getByText('No pipeline data available')).toBeInTheDocument()
+    it('shows "no pipeline defined" when nodes is omitted', () => {
+      render(<PipelineFlowVisualization metrics={mockMetrics} />)
+      expect(screen.getByText(/No pipeline defined/i)).toBeInTheDocument()
     })
   })
 
-  describe('Component rendering', () => {
-    it('should render pipeline title', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      expect(screen.getByText('Pipeline Flow')).toBeInTheDocument()
+  describe('Data-driven rendering', () => {
+    it('renders a box only for the nodes the pipeline actually has', () => {
+      // consumer → producer only: must NOT invent Converter/Filter boxes.
+      const nodes: ConnectionNode[] = [
+        { id: 'a', type: 'consumer', config: { type: 'http' } },
+        { id: 'b', type: 'producer', config: { type: 'file' } },
+      ]
+      const { container } = render(
+        <PipelineFlowVisualization metrics={mockMetrics} nodes={nodes} edges={[{ source: 'a', target: 'b' }]} />
+      )
+      const boxes = container.querySelectorAll('rect')
+      expect(boxes.length).toBe(2)
+      const svgText = Array.from(document.querySelectorAll('text')).map((t) => t.textContent)
+      expect(svgText).toContain('Consumer')
+      expect(svgText).toContain('Producer')
+      expect(svgText).not.toContain('Converter')
+      expect(svgText).not.toContain('Filter')
     })
 
-    it('should render all component names', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      // Component names appear in SVG
-      const text = document.querySelectorAll('text')
-      const componentNames = Array.from(text).map(el => el.textContent)
-      expect(componentNames).toContain('Consumer')
-      expect(componentNames).toContain('Converter')
-      expect(componentNames).toContain('Filter')
-      expect(componentNames).toContain('Producer')
+    it('renders all four when present, in flow order', () => {
+      const { container } = render(
+        <PipelineFlowVisualization metrics={mockMetrics} nodes={fullNodes} edges={fullEdges} />
+      )
+      expect(container.querySelectorAll('rect').length).toBe(4)
+      const svgText = Array.from(document.querySelectorAll('text')).map((t) => t.textContent)
+      expect(svgText).toContain('Consumer')
+      expect(svgText).toContain('Producer')
     })
 
-    it('should render SVG diagram', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const svg = container.querySelector('svg')
-      expect(svg).toBeInTheDocument()
+    it('maps live metrics onto the matching nodes', () => {
+      render(<PipelineFlowVisualization metrics={mockMetrics} nodes={fullNodes} edges={fullEdges} />)
+      const svgText = Array.from(document.querySelectorAll('text')).map((t) => t.textContent)
+      expect(svgText).toContain('1000 msgs') // consumer
+      expect(svgText.some((t) => t?.includes('5 errors'))).toBe(true) // converter
     })
 
-    it('should render component boxes in SVG', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const rects = container.querySelectorAll('rect')
-      // 4 component boxes (Consumer, Converter, Filter, Producer)
-      expect(rects.length).toBeGreaterThanOrEqual(4)
-    })
-
-    it('should render arrows between components', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const lines = container.querySelectorAll('line')
-      // Should have arrows connecting components
-      expect(lines.length).toBeGreaterThan(0)
-    })
-
-    it('should render status indicators (circles)', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const circles = container.querySelectorAll('circle')
-      // 4 status circles (one per component)
-      expect(circles.length).toBeGreaterThanOrEqual(4)
+    it('shows a dash for nodes without metrics yet', () => {
+      render(<PipelineFlowVisualization metrics={undefined} nodes={fullNodes} edges={fullEdges} />)
+      const svgText = Array.from(document.querySelectorAll('text')).map((t) => t.textContent)
+      expect(svgText).toContain('—')
     })
   })
 
-  describe('Status display', () => {
-    it('should display component status grid', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      // Status grid should display all components
-      const allConsumers = screen.getAllByText('Consumer')
-      const allConverters = screen.getAllByText('Converter')
-      expect(allConsumers.length).toBeGreaterThan(0)
-      expect(allConverters.length).toBeGreaterThan(0)
-    })
-
-    it('should render active status with correct colors', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      // Check for green status indicator for active
-      const statusElements = container.querySelectorAll('[class*="bg-green"]')
-      expect(statusElements.length).toBeGreaterThan(0)
-    })
-
-    it('should handle idle status', () => {
-      const idleMetrics: ConnectionMetrics = {
+  describe('Idle / running state', () => {
+    it('reassures when running with metrics but no traffic', () => {
+      const idle: ConnectionMetrics = {
         ...mockMetrics,
         components: {
-          ...mockMetrics.components,
-          consumer: { ...mockMetrics.components.consumer, status: 'idle' },
+          consumer: { status: 'idle', messages_processed: 0, errors: 0, last_update: '' },
+          converter: { status: 'idle', messages_processed: 0, errors: 0, last_update: '' },
+          filter: { status: 'idle', messages_processed: 0, filtered_out: 0, errors: 0, last_update: '' },
+          producer: { status: 'idle', messages_sent: 0, messages_processed: 0, errors: 0, last_update: '' },
         },
       }
-
-      const { container } = render(<PipelineFlowVisualization metrics={idleMetrics} />)
-
-      const statusElements = container.querySelectorAll('[class*="bg-gray"]')
-      expect(statusElements.length).toBeGreaterThan(0)
+      render(<PipelineFlowVisualization metrics={idle} nodes={fullNodes} edges={fullEdges} status="running" />)
+      expect(screen.getByText(/no traffic yet/i)).toBeInTheDocument()
     })
 
-    it('should handle error status', () => {
-      const errorMetrics: ConnectionMetrics = {
-        ...mockMetrics,
-        components: {
-          ...mockMetrics.components,
-          producer: { ...mockMetrics.components.producer, status: 'error' },
-        },
-      }
-
-      const { container } = render(<PipelineFlowVisualization metrics={errorMetrics} />)
-
-      const statusElements = container.querySelectorAll('[class*="bg-red"]')
-      expect(statusElements.length).toBeGreaterThan(0)
+    it('says it is waiting for metrics when running without any', () => {
+      render(<PipelineFlowVisualization metrics={undefined} nodes={fullNodes} edges={fullEdges} status="running" />)
+      expect(screen.getByText(/waiting for metrics/i)).toBeInTheDocument()
     })
   })
 
-  describe('Metrics display', () => {
-    it('should render message processed counts', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const text = document.querySelectorAll('text')
-      const textContent = Array.from(text).map(el => el.textContent)
-
-      expect(textContent).toContain('1000 msgs') // Consumer
-      expect(textContent).toContain('950 msgs') // Converter
-      expect(textContent).toContain('900 msgs') // Filter
-    })
-
-    it('should display error count when errors exist', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const text = document.querySelectorAll('text')
-      const textContent = Array.from(text).map(el => el.textContent)
-
-      // Converter has 5 errors, filter has 0
-      expect(textContent.some(t => t && t.includes('5 errors'))).toBe(true)
-    })
-
-    it('should not display error count when none', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const text = document.querySelectorAll('text')
-      const textContent = Array.from(text).map(el => el.textContent)
-
-      // Filter and producer have 0 errors
-      expect(textContent.filter(t => t && t.includes('0 errors')).length).toBe(0)
-    })
-  })
-
-  describe('Overall pipeline metrics', () => {
-    it('should display total messages in', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      expect(screen.getByText('Messages In')).toBeInTheDocument()
-      expect(screen.getByText('1000')).toBeInTheDocument()
-    })
-
-    it('should display total messages out', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      expect(screen.getByText('Messages Out')).toBeInTheDocument()
-      // 900 is unique to messages out
-      const allText = document.body.textContent
-      expect(allText).toContain('900')
-    })
-
-    it('should display total errors', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      expect(screen.getByText('Total Errors')).toBeInTheDocument()
-      expect(screen.getByText('5')).toBeInTheDocument()
-    })
-
-    it('should use red styling when errors exist', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const errorCard = container.querySelector('[class*="bg-red-50"]')
-      expect(errorCard).toBeInTheDocument()
-    })
-
-    it('should use gray styling when no errors', () => {
-      const noErrorMetrics: ConnectionMetrics = {
-        ...mockMetrics,
-        total_errors: 0,
-      }
-
-      const { container } = render(<PipelineFlowVisualization metrics={noErrorMetrics} />)
-
-      const errorCard = container.querySelector('[class*="bg-gray-50"]')
-      expect(errorCard).toBeInTheDocument()
-    })
-  })
-
-  describe('Component status text', () => {
-    it('should capitalize status text', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const activeElements = screen.getAllByText('Active')
-      expect(activeElements.length).toBeGreaterThan(0)
-    })
-
-    it('should display all component statuses', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const statusElements = document.querySelectorAll('[class*="text-green-800"]')
-      expect(statusElements.length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('Component grid layout', () => {
-    it('should render grid of 4 components', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      // Check that grid with 4 components exists
-      const mainGrid = container.querySelector('.grid.grid-cols-2')
-      expect(mainGrid).toBeInTheDocument()
-      
-      // Check component names are rendered
-      const allConsumers = screen.getAllByText('Consumer')
-      expect(allConsumers.length).toBeGreaterThan(0)
-    })
-
-    it('should display component name in grid item', () => {
-      render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      // Using getAllByText to handle multiple occurrences of component names
-      expect(screen.getAllByText('Consumer').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Converter').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Filter').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Producer').length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('SVG rendering', () => {
-    it('should include arrows with proper styling', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const lines = container.querySelectorAll('line[stroke="#cbd5e1"]')
-      expect(lines.length).toBeGreaterThan(0)
-    })
-
-    it('should render polygons for arrow heads', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const polygons = container.querySelectorAll('polygon')
-      expect(polygons.length).toBeGreaterThan(0)
-    })
-
-    it('should render boxes with proper dimensions', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const boxes = container.querySelectorAll('rect[width="100"]')
-      expect(boxes.length).toBeGreaterThan(0)
-    })
-
-    it('should render boxes with height 60', () => {
-      const { container } = render(<PipelineFlowVisualization metrics={mockMetrics} />)
-
-      const boxes = container.querySelectorAll('rect[height="60"]')
-      expect(boxes.length).toBeGreaterThan(0)
-    })
-  })
-
-  describe('Edge cases', () => {
-    it('should handle zero metrics', () => {
-      const zeroMetrics: ConnectionMetrics = {
-        ...mockMetrics,
-        total_messages_in: 0,
-        total_messages_out: 0,
-        total_errors: 0,
-        components: {
-          ...mockMetrics.components,
-          consumer: { ...mockMetrics.components.consumer, messages_processed: 0, errors: 0 },
-          converter: { ...mockMetrics.components.converter, messages_processed: 0, errors: 0 },
-          filter: { ...mockMetrics.components.filter, messages_processed: 0, errors: 0 },
-          producer: { ...mockMetrics.components.producer, messages_sent: 0, errors: 0 },
-        },
-      }
-
-      render(<PipelineFlowVisualization metrics={zeroMetrics} />)
-
-      expect(screen.getByText('Pipeline Flow')).toBeInTheDocument()
-    })
-
-    it('should handle large numbers', () => {
-      const largeMetrics: ConnectionMetrics = {
-        ...mockMetrics,
-        total_messages_in: 1000000,
-        total_messages_out: 999999,
-        total_errors: 1000,
-      }
-
-      render(<PipelineFlowVisualization metrics={largeMetrics} />)
-
-      expect(screen.getByText('1000000')).toBeInTheDocument()
-      expect(screen.getByText('1000')).toBeInTheDocument()
-    })
-
-    it('should handle all components with errors', () => {
-      const allErrorMetrics: ConnectionMetrics = {
-        ...mockMetrics,
-        components: {
-          consumer: { ...mockMetrics.components.consumer, errors: 10 },
-          converter: { ...mockMetrics.components.converter, errors: 10 },
-          filter: { ...mockMetrics.components.filter, errors: 10 },
-          producer: { ...mockMetrics.components.producer, errors: 10 },
-        },
-      }
-
-      render(<PipelineFlowVisualization metrics={allErrorMetrics} />)
-
-      expect(screen.getByText('Pipeline Flow')).toBeInTheDocument()
-    })
+  it('always renders the title when a pipeline is present', () => {
+    render(<PipelineFlowVisualization metrics={mockMetrics} nodes={fullNodes} edges={fullEdges} />)
+    expect(screen.getByText('Pipeline Flow')).toBeInTheDocument()
   })
 })
