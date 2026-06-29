@@ -8,6 +8,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,14 +42,57 @@ func CreateDeploymentSpec(node *managementapi.Node, graph *ExecutionGraph, confi
 	// Build labels
 	labels := buildLabels(graph.ConnectionID, node.ID, node.Type, graph.TenantID)
 
-	// Build the deployment
-	deployment := buildDeployment(node, graph, config, labels, envVars)
+	// Resolve autoscaling bounds (node override → orchestrator defaults).
+	scaling := resolveScaling(node, config)
+	deploymentName := buildDeploymentName(graph.ConnectionID, node.ID)
+
+	// Build the deployment (starts at MinReplicas; the HPA scales it).
+	deployment := buildDeployment(node, graph, config, labels, envVars, scaling.MinReplicas)
+	hpa := buildHPA(config, labels, deploymentName, scaling)
 
 	return &DeploymentSpec{
 		NodeID:     node.ID,
 		NodeType:   node.Type,
 		Deployment: deployment,
+		HPA:        hpa,
 	}, nil
+}
+
+// resolveScaling computes the effective autoscaling bounds for a node: the
+// orchestrator defaults, overridden by any "scaling" block in the node config,
+// clamped so 1 <= min <= max.
+func resolveScaling(node *managementapi.Node, config *OrchestratorConfig) NodeScaling {
+	s := NodeScaling{
+		MinReplicas:      config.DefaultMinReplicas,
+		MaxReplicas:      config.DefaultMaxReplicas,
+		TargetCPUPercent: config.TargetCPUPercent,
+	}
+	if len(node.Config) > 0 {
+		var wrap struct {
+			Scaling *NodeScaling `json:"scaling"`
+		}
+		if json.Unmarshal(node.Config, &wrap) == nil && wrap.Scaling != nil {
+			if wrap.Scaling.MinReplicas > 0 {
+				s.MinReplicas = wrap.Scaling.MinReplicas
+			}
+			if wrap.Scaling.MaxReplicas > 0 {
+				s.MaxReplicas = wrap.Scaling.MaxReplicas
+			}
+			if wrap.Scaling.TargetCPUPercent > 0 {
+				s.TargetCPUPercent = wrap.Scaling.TargetCPUPercent
+			}
+		}
+	}
+	if s.MinReplicas < 1 {
+		s.MinReplicas = 1
+	}
+	if s.MaxReplicas < s.MinReplicas {
+		s.MaxReplicas = s.MinReplicas
+	}
+	if s.TargetCPUPercent <= 0 {
+		s.TargetCPUPercent = 75
+	}
+	return s
 }
 
 // buildEnvironmentVariables builds the environment variables for a component.
@@ -106,8 +150,8 @@ func sanitizeLabelValue(s string) string {
 }
 
 // buildDeployment builds the Kubernetes Deployment object.
-func buildDeployment(node *managementapi.Node, graph *ExecutionGraph, config *OrchestratorConfig, labels map[string]string, envVars []corev1.EnvVar) *appsv1.Deployment {
-	replicas := int32(1)
+func buildDeployment(node *managementapi.Node, graph *ExecutionGraph, config *OrchestratorConfig, labels map[string]string, envVars []corev1.EnvVar, minReplicas int32) *appsv1.Deployment {
+	replicas := minReplicas
 	containerImage := GetContainerImage(config, node.Type)
 	deploymentName := buildDeploymentName(graph.ConnectionID, node.ID)
 
@@ -180,6 +224,45 @@ func buildDeployment(node *managementapi.Node, graph *ExecutionGraph, config *Or
 						},
 					},
 					RestartPolicy: corev1.RestartPolicyAlways,
+				},
+			},
+		},
+	}
+}
+
+// buildHPA builds a HorizontalPodAutoscaler that scales the per-connection
+// worker Deployment between MinReplicas and MaxReplicas on average CPU
+// utilization. This is what lets a single hot connection scale out instead of
+// being pinned at one replica (#135). The HPA shares the deployment's name and
+// labels. Resource requests are already set on the container, which the CPU
+// utilization target requires.
+func buildHPA(config *OrchestratorConfig, labels map[string]string, deploymentName string, scaling NodeScaling) *autoscalingv2.HorizontalPodAutoscaler {
+	minReplicas := scaling.MinReplicas
+	targetCPU := scaling.TargetCPUPercent
+	return &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deploymentName,
+			Namespace: config.Namespace,
+			Labels:    labels,
+		},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       deploymentName,
+			},
+			MinReplicas: &minReplicas,
+			MaxReplicas: scaling.MaxReplicas,
+			Metrics: []autoscalingv2.MetricSpec{
+				{
+					Type: autoscalingv2.ResourceMetricSourceType,
+					Resource: &autoscalingv2.ResourceMetricSource{
+						Name: corev1.ResourceCPU,
+						Target: autoscalingv2.MetricTarget{
+							Type:               autoscalingv2.UtilizationMetricType,
+							AverageUtilization: &targetCPU,
+						},
+					},
 				},
 			},
 		},
