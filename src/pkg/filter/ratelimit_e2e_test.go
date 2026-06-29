@@ -41,9 +41,9 @@ func TestE2E_OrderThrottling(t *testing.T) {
 		},
 		RoutingRules: []interface{}{
 			map[interface{}]interface{}{
-				"name":           "route_premium_orders",
-				"priority":       1,
-				"output_topic":   "orders.premium_processing",
+				"name":         "route_premium_orders",
+				"priority":     1,
+				"output_topic": "orders.premium_processing",
 				"condition": map[interface{}]interface{}{
 					"operator": ">=",
 					"field":    "total_amount",
@@ -51,9 +51,9 @@ func TestE2E_OrderThrottling(t *testing.T) {
 				},
 			},
 			map[interface{}]interface{}{
-				"name":           "route_standard_orders",
-				"priority":       2,
-				"output_topic":   "orders.standard_processing",
+				"name":         "route_standard_orders",
+				"priority":     2,
+				"output_topic": "orders.standard_processing",
 				"condition": map[interface{}]interface{}{
 					"operator": "always",
 				},
@@ -75,13 +75,13 @@ func TestE2E_OrderThrottling(t *testing.T) {
 				},
 			},
 			map[interface{}]interface{}{
-				"id":                      "standard_limit",
-				"priority":                2,
-				"strategy":                "token_bucket",
-				"token_bucket_rate":       50,
-				"token_bucket_capacity":   100,
-				"exceed_action":           "queue",
-				"queue_size":              10000,
+				"id":                    "standard_limit",
+				"priority":              2,
+				"strategy":              "token_bucket",
+				"token_bucket_rate":     50,
+				"token_bucket_capacity": 100,
+				"exceed_action":         "queue",
+				"queue_size":            10000,
 				"condition": map[interface{}]interface{}{
 					"operator": "always",
 				},
@@ -225,12 +225,12 @@ func TestE2E_APIRateLimitingWithTiers(t *testing.T) {
 				},
 			},
 			map[interface{}]interface{}{
-				"id":                      "pro_tier_limit",
-				"priority":                2,
-				"strategy":                "token_bucket",
-				"token_bucket_rate":       50,
-				"token_bucket_capacity":   200,
-				"exceed_action":           "reject",
+				"id":                    "pro_tier_limit",
+				"priority":              2,
+				"strategy":              "token_bucket",
+				"token_bucket_rate":     50,
+				"token_bucket_capacity": 200,
+				"exceed_action":         "reject",
 				"condition": map[interface{}]interface{}{
 					"operator": "==",
 					"field":    "user.tier",

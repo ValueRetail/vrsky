@@ -26,9 +26,9 @@ type Handler struct {
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
-	db                *sql.DB // Direct DB access for raw queries (e.g. sample-data)
+	db                *sql.DB               // Direct DB access for raw queries (e.g. sample-data)
 	js                nats.JetStreamContext // JetStream context for DLQ endpoints (#70)
-	quotas            *QuotaTracker // In-process token buckets for per-tenant rate limits (#74)
+	quotas            *QuotaTracker         // In-process token buckets for per-tenant rate limits (#74)
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
@@ -744,7 +744,9 @@ func (h *Handler) GetSampleData(w http.ResponseWriter, r *http.Request) {
 				ORDER BY updated_at DESC LIMIT 1`,
 				sourceTenantID).Scan(&sourcePayload)
 			if sourcePayload != nil {
-				var srcEnv struct{ Payload []byte `json:"payload"` }
+				var srcEnv struct {
+					Payload []byte `json:"payload"`
+				}
 				if json.Unmarshal(sourcePayload, &srcEnv) == nil {
 					if json.Unmarshal(srcEnv.Payload, &parsed) == nil {
 						_ = writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
@@ -878,6 +880,12 @@ func pointerTo[T any](v T) *T {
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	editor := RequireTenantRoleFromHeader(h.repo, "editor")
 	adminMW := RequireTenantRoleFromHeader(h.repo, "admin")
+	// Read routes gate at viewer (the lowest membership role). Without this,
+	// connection GET routes scoped only by the X-Tenant-ID header let any
+	// authenticated user read another tenant's connections, sample data,
+	// metrics, and DLQ payloads simply by changing the header. viewer ≤ editor,
+	// so it does not restrict anyone who could already mutate.
+	viewer := RequireTenantRoleFromHeader(h.repo, "viewer")
 
 	// API documentation (#94): the generated OpenAPI spec + Swagger UI. Public
 	// (no tenant header — exempted in TenantIDMiddleware).
@@ -891,8 +899,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// CRUD operations
 	mux.Handle("POST /api/v1/connections", editor(http.HandlerFunc(h.CreateConnection)))
-	mux.HandleFunc("GET /api/v1/connections", h.ListConnections)
-	mux.HandleFunc("GET /api/v1/connections/{id}", h.GetConnection)
+	mux.Handle("GET /api/v1/connections", viewer(http.HandlerFunc(h.ListConnections)))
+	mux.Handle("GET /api/v1/connections/{id}", viewer(http.HandlerFunc(h.GetConnection)))
 	mux.Handle("PUT /api/v1/connections/{id}", editor(http.HandlerFunc(h.UpdateConnection)))
 	mux.Handle("DELETE /api/v1/connections/{id}", adminMW(http.HandlerFunc(h.DeleteConnection)))
 
@@ -904,18 +912,19 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/connections/test", editor(http.HandlerFunc(h.TestConnection)))
 
 	// Metrics streaming via Server-Sent Events
-	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/stream", h.HandleMetricsSSE)
-	mux.HandleFunc("GET /api/v1/connections/{id}/metrics/ws", h.HandleMetricsWebSocket)
+	mux.Handle("GET /api/v1/connections/{id}/metrics", viewer(http.HandlerFunc(h.HandleConnectionMetrics)))
+	mux.Handle("GET /api/v1/connections/{id}/metrics/stream", viewer(http.HandlerFunc(h.HandleMetricsSSE)))
+	mux.Handle("GET /api/v1/connections/{id}/metrics/ws", viewer(http.HandlerFunc(h.HandleMetricsWebSocket)))
 
 	// Sample data for filter preview
-	mux.HandleFunc("GET /api/v1/connections/{id}/sample-data", h.GetSampleData)
-	mux.HandleFunc("GET /api/v1/sample-data/source", h.GetSourceSampleData)
+	mux.Handle("GET /api/v1/connections/{id}/sample-data", viewer(http.HandlerFunc(h.GetSampleData)))
+	mux.Handle("GET /api/v1/sample-data/source", viewer(http.HandlerFunc(h.GetSourceSampleData)))
 
 	// Test data generation — editor (sends real data through a pipeline)
 	mux.Handle("POST /api/v1/connections/{id}/test-message", editor(http.HandlerFunc(h.SendSingleTestMessage)))
 	mux.Handle("POST /api/v1/connections/{id}/auto-generator/start", editor(http.HandlerFunc(h.StartAutoGenerator)))
 	mux.Handle("POST /api/v1/connections/{id}/auto-generator/stop", editor(http.HandlerFunc(h.StopAutoGenerator)))
-	mux.HandleFunc("GET /api/v1/connections/{id}/auto-generator/status", h.GetAutoGeneratorStatus)
+	mux.Handle("GET /api/v1/connections/{id}/auto-generator/status", viewer(http.HandlerFunc(h.GetAutoGeneratorStatus)))
 
 	// API Consumer routes
 	h.RegisterAPIConsumerRoutes(mux)
@@ -937,26 +946,28 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	}))
 
 	// Dead-letter queue (Phase 1E — #70). Reads = viewer, retry/discard = editor.
-	mux.HandleFunc("GET /api/v1/connections/{id}/dlq", h.DLQRouter)
-	mux.HandleFunc("GET /api/v1/connections/{id}/dlq/{seq}", h.DLQRouter)
+	mux.Handle("GET /api/v1/connections/{id}/dlq", viewer(http.HandlerFunc(h.DLQRouter)))
+	mux.Handle("GET /api/v1/connections/{id}/dlq/{seq}", viewer(http.HandlerFunc(h.DLQRouter)))
 	mux.Handle("POST /api/v1/connections/{id}/dlq/{seq}/retry", editor(http.HandlerFunc(h.DLQRouter)))
 	mux.Handle("POST /api/v1/connections/{id}/dlq/{seq}/discard", editor(http.HandlerFunc(h.DLQRouter)))
 
 	// Audit log (Phase 1G — #72). Read-only — writes happen via middleware.
-	mux.HandleFunc("GET /api/v1/audit", h.ListAudit)
+	// viewer-gated: the handler scopes by the X-Tenant-ID header, which is
+	// untrusted on its own, so the role check enforces tenant isolation.
+	mux.Handle("GET /api/v1/audit", viewer(http.HandlerFunc(h.ListAudit)))
 
 	// OAuth 2.0 framework (Phase 2A — #75). Provider CRUD is admin; viewing
 	// providers / grants is viewer; the auth start is editor; the callback
 	// is public + cookie-gated (it's hit via browser redirect from the IdP).
-	mux.HandleFunc("GET /api/v1/oauth/providers", h.ListOAuthProvidersHandler)
+	mux.Handle("GET /api/v1/oauth/providers", viewer(http.HandlerFunc(h.ListOAuthProvidersHandler)))
 	mux.Handle("POST /api/v1/oauth/providers", adminMW(http.HandlerFunc(h.CreateOAuthProvider)))
-	mux.HandleFunc("GET /api/v1/oauth/providers/{id}", h.GetOAuthProvider)
+	mux.Handle("GET /api/v1/oauth/providers/{id}", viewer(http.HandlerFunc(h.GetOAuthProvider)))
 	mux.Handle("PUT /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.UpdateOAuthProvider)))
 	mux.Handle("DELETE /api/v1/oauth/providers/{id}", adminMW(http.HandlerFunc(h.DeleteOAuthProvider)))
 	mux.Handle("POST /api/v1/oauth/providers/{id}/start", editor(http.HandlerFunc(h.StartOAuth)))
 	mux.HandleFunc("GET /api/v1/oauth/callback", h.HandleOAuthCallback)
-	mux.HandleFunc("GET /api/v1/oauth/grants", h.ListOAuthGrants)
-	mux.HandleFunc("GET /api/v1/oauth/grants/{id}", h.GetOAuthGrant)
+	mux.Handle("GET /api/v1/oauth/grants", viewer(http.HandlerFunc(h.ListOAuthGrants)))
+	mux.Handle("GET /api/v1/oauth/grants/{id}", viewer(http.HandlerFunc(h.GetOAuthGrant)))
 	mux.Handle("POST /api/v1/oauth/grants/{id}/revoke", editor(http.HandlerFunc(h.RevokeOAuthGrant)))
 	// Service-only token endpoint for workers — authenticated by the shared
 	// X-Service-Token secret inside the handler, not the user-session
@@ -965,7 +976,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Notification targets (Phase 3A — #84). Writes are admin; listing is
 	// viewer; the test send is admin (it uses the stored secret).
-	mux.HandleFunc("GET /api/v1/notifications/targets", h.ListNotificationTargets)
+	mux.Handle("GET /api/v1/notifications/targets", viewer(http.HandlerFunc(h.ListNotificationTargets)))
 	mux.Handle("POST /api/v1/notifications/targets", adminMW(http.HandlerFunc(h.CreateNotificationTarget)))
 	mux.Handle("PUT /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.UpdateNotificationTarget)))
 	mux.Handle("DELETE /api/v1/notifications/targets/{id}", adminMW(http.HandlerFunc(h.DeleteNotificationTarget)))

@@ -362,6 +362,18 @@ func (s *dbConsumer) executeAndPublish(ctx context.Context, ac *ActiveDBConnecti
 		allRows = append(allRows, rowMap)
 	}
 
+	// A driver error mid-iteration (e.g. the source connection drops) makes
+	// rows.Next() return false with no panic; without this check the partial
+	// result set would be published downstream and cached as authoritative.
+	if err := rows.Err(); err != nil {
+		logger.Error("Row iteration failed; not publishing partial result", "error", err)
+		s.emitEvent(ac.ConnectionID, DBEvent{
+			Type: "error", Message: "Query failed mid-read: " + err.Error(),
+			Time: time.Now().UTC().Format(time.RFC3339),
+		})
+		return
+	}
+
 	if len(allRows) == 0 {
 		logger.Info("Query returned 0 rows")
 		s.emitEvent(ac.ConnectionID, DBEvent{
@@ -407,7 +419,7 @@ func (s *dbConsumer) executeAndPublish(ctx context.Context, ac *ActiveDBConnecti
 		return
 	}
 
-	if err := s.publish(context.Background(), env); err != nil {
+	if err := s.publish(ctx, env); err != nil {
 		logger.Error("Failed to publish to JetStream", "error", err)
 		return
 	}

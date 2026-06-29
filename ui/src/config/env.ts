@@ -28,6 +28,17 @@ export const config = {
   // it. Defaults to the local compose port; override in deployments where
   // webhooks enter via the gateway/public host.
   webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', 'http://localhost:9100'),
+  // Base URLs for the per-worker live-test event streams (SSE) and the file
+  // upload endpoint surfaced by the builder's test panels. These hit worker
+  // aux ports directly, so they default to the local compose ports; override
+  // per deployment (where workers aren't reachable from the browser the panels
+  // simply won't connect). Centralized here instead of hardcoding
+  // "http://localhost:..." inline so they don't silently break off-localhost.
+  fileConsumerUrl: getEnv('VITE_FILE_CONSUMER_URL', 'http://localhost:9200'),
+  httpProducerUrl: getEnv('VITE_HTTP_PRODUCER_URL', 'http://localhost:9400'),
+  dbProducerUrl: getEnv('VITE_DB_PRODUCER_URL', 'http://localhost:9500'),
+  converterUrl: getEnv('VITE_CONVERTER_URL', 'http://localhost:9600'),
+  filterUrl: getEnv('VITE_FILTER_URL', 'http://localhost:9700'),
   // Where the "Help & Docs" sidebar link points (the published mkdocs site).
   // Override per deployment; defaults to the GitHub Pages build.
   docsUrl: getEnv('VITE_DOCS_URL', 'https://valueretail.github.io/vrsky/'),

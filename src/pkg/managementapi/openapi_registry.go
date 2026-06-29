@@ -38,6 +38,7 @@ var apiRoutes = []apiRoute{
 	{"POST /api/v1/connections/test", "post", "/api/v1/connections/test", "Connections", "Test a connector config without deploying", nil, nil},
 
 	// --- Metrics & sample data ---
+	{"GET /api/v1/connections/{id}/metrics", "get", "/api/v1/connections/{id}/metrics", "Metrics", "Point-in-time pipeline metrics for a connection (from Prometheus)", nil, nil},
 	{"GET /api/v1/connections/{id}/metrics/stream", "get", "/api/v1/connections/{id}/metrics/stream", "Metrics", "Server-sent stream of live pipeline metrics", nil, nil},
 	{"GET /api/v1/connections/{id}/metrics/ws", "get", "/api/v1/connections/{id}/metrics/ws", "Metrics", "WebSocket stream of live pipeline metrics", nil, nil},
 	{"GET /api/v1/connections/{id}/sample-data", "get", "/api/v1/connections/{id}/sample-data", "Metrics", "Last payload seen by a deployed connection", nil, nil},

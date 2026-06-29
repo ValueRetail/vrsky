@@ -184,8 +184,8 @@ type ChangePasswordRequest struct {
 
 // MeResponse is the response body for GET /auth/me
 type MeResponse struct {
-	User             *UserResponse    `json:"user"`
-	SessionExpiresAt time.Time        `json:"session_expires_at"`
+	User             *UserResponse     `json:"user"`
+	SessionExpiresAt time.Time         `json:"session_expires_at"`
 	Tenants          []*TenantResponse `json:"tenants"`
 	CurrentTenant    *TenantResponse   `json:"current_tenant"`
 }

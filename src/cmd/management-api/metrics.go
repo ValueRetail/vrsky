@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -44,6 +47,25 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush and Hijack forward to the underlying ResponseWriter so this metrics
+// wrapper does not hide http.Flusher / http.Hijacker. Without them, SSE
+// endpoints (metrics/stream, tenant status/stream) and the WebSocket upgrade
+// (metrics/ws) failed with 500 "streaming not supported" — the metrics
+// middleware is always in the chain, and on GET requests the audit middleware
+// passes this recorder straight through to the handler.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not support hijacking")
 }
 
 // normalizePath collapses ID-like path segments to ":id" so the path label has

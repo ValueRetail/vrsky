@@ -48,20 +48,45 @@ func runHTTP(t *testing.T, h *Handler, method, path, tenantHeader string, body a
 	return w
 }
 
-func TestIsolation_TenantBCannotReadTenantAConnections(t *testing.T) {
-	h, repo := setupTestHandler()
-	repo.connections["conn-A"] = &Connection{ID: "conn-A", TenantID: tenantA, Name: "A's pipeline"}
+// runHTTPAs is like runHTTP but also presents a session bearer token so the
+// tenant-membership middleware (RequireTenantRoleFromHeader) can resolve the
+// caller's role. Connection read routes are gated at viewer, so reads now
+// require the caller to be a member of the X-Tenant-ID tenant.
+func runHTTPAs(t *testing.T, h *Handler, method, path, tenantHeader, bearer string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
 
-	// GetConnection cross-tenant → 403 (handler verifies tenant ownership).
-	w := runHTTP(t, h, http.MethodGet, "/api/v1/connections/conn-A", tenantB, nil)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("tenant B reading tenant A's connection: want 403, got %d (%s)", w.Code, w.Body.String())
+	var req *http.Request
+	if body != nil {
+		b, _ := json.Marshal(body)
+		req = httptest.NewRequest(method, path, strings.NewReader(string(b)))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
 	}
+	if tenantHeader != "" {
+		req = req.WithContext(ContextWithTenantID(req.Context(), tenantHeader))
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	return w
+}
 
-	// List → 0 results for tenant B even though the mock has tenant A data.
-	w = runHTTP(t, h, http.MethodGet, "/api/v1/connections", tenantB, nil)
+func TestIsolation_TenantBCannotReadTenantAConnections(t *testing.T) {
+	repo := newRBACMock()
+	h := NewHandler(repo, NewValidator())
+	repo.connections["conn-A"] = &Connection{ID: "conn-A", TenantID: tenantA, Name: "A's pipeline"}
+	// A legitimate member of tenant B (viewer is enough to read).
+	repo.addUserSession("tokB", "user-B", tenantB, "viewer")
+
+	// 1. Member of B listing B's own connections → 200, never any tenant-A row.
+	w := runHTTPAs(t, h, http.MethodGet, "/api/v1/connections", tenantB, "tokB", nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("list for tenant B: %d", w.Code)
+		t.Fatalf("list for tenant B member: want 200, got %d (%s)", w.Code, w.Body.String())
 	}
 	var resp struct {
 		Data []map[string]any `json:"data"`
@@ -71,6 +96,27 @@ func TestIsolation_TenantBCannotReadTenantAConnections(t *testing.T) {
 		if c["tenant_id"] == tenantA {
 			t.Fatalf("tenant B's list leaked tenant A row: %+v", c)
 		}
+	}
+
+	// 2. Member of B reading A's connection by ID with their own header →
+	//    403 via the handler's ownership check (conn.TenantID != header).
+	w = runHTTPAs(t, h, http.MethodGet, "/api/v1/connections/conn-A", tenantB, "tokB", nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("B member reading A's connection (header=B): want 403, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// 3. Regression for the cross-tenant read bug: a B member spoofs
+	//    X-Tenant-ID to tenant A — which they are NOT a member of — so the
+	//    header now matches the resource's tenant and the handler ownership
+	//    check alone would pass. The viewer membership middleware must reject
+	//    this before the handler ever loads the data.
+	w = runHTTPAs(t, h, http.MethodGet, "/api/v1/connections/conn-A", tenantA, "tokB", nil)
+	if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+		t.Fatalf("non-member spoofing X-Tenant-ID to victim by id: want 401/403, got %d (%s)", w.Code, w.Body.String())
+	}
+	w = runHTTPAs(t, h, http.MethodGet, "/api/v1/connections", tenantA, "tokB", nil)
+	if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+		t.Fatalf("non-member listing victim tenant: want 401/403, got %d (%s)", w.Code, w.Body.String())
 	}
 }
 

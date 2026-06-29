@@ -156,6 +156,11 @@ func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envel
 	if err != nil {
 		return fmt.Errorf("open backend: %w", err)
 	}
+	// Close the store after this upload — newStore opens a fresh client per
+	// message (the GCS backend builds a real storage.Client with its own
+	// connection pool + goroutines), so without this they leak unboundedly
+	// under sustained throughput.
+	defer func() { _ = store.Close() }()
 
 	contentType := env.ContentType
 	if contentType == "" {

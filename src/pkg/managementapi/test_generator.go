@@ -185,9 +185,11 @@ func (h *Handler) SendSingleTestMessage(w http.ResponseWriter, r *http.Request) 
 		Metadata:  req.Metadata,
 	}
 
-	// Publish test message via NATS if publisher is available
+	// Publish test message via NATS if publisher is available. Send the raw
+	// user payload (not the TestDataPayload wrapper) so the pipeline and the
+	// destination receive exactly what the user entered, like a real message.
 	if h.publisher != nil {
-		if err := h.publisher.PublishTestMessage(ctx, connID, tenantID, testMsg); err != nil {
+		if err := h.publisher.PublishTestMessage(ctx, connID, tenantID, req.Payload); err != nil {
 			_ = writeError(w, http.StatusInternalServerError, "PublishError", "failed to publish test message", nil)
 			return
 		}

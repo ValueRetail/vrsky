@@ -27,19 +27,19 @@ type DataConnectionRequest struct {
 
 // TenantDataConnection represents an active data-sharing connection between tenants
 type TenantDataConnection struct {
-	ID                string     `json:"id"`
-	RequestID         string     `json:"request_id"`
-	RequesterTenantID string     `json:"requester_tenant_id"`
-	TargetTenantID    string     `json:"target_tenant_id"`
-	PermissionType    string     `json:"permission_type"`
-	AllowedFields     []string   `json:"allowed_fields,omitempty"`
-	DeniedFields      []string   `json:"denied_fields,omitempty"`
-	RateLimitPerHour  int        `json:"rate_limit_per_hour"`
-	SharedConnectionIDs []string `json:"shared_connection_ids,omitempty"`
+	ID                  string     `json:"id"`
+	RequestID           string     `json:"request_id"`
+	RequesterTenantID   string     `json:"requester_tenant_id"`
+	TargetTenantID      string     `json:"target_tenant_id"`
+	PermissionType      string     `json:"permission_type"`
+	AllowedFields       []string   `json:"allowed_fields,omitempty"`
+	DeniedFields        []string   `json:"denied_fields,omitempty"`
+	RateLimitPerHour    int        `json:"rate_limit_per_hour"`
+	SharedConnectionIDs []string   `json:"shared_connection_ids,omitempty"`
 	Status              string     `json:"status"` // active|paused|revoked
 	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	RevokedAt         *time.Time `json:"revoked_at,omitempty"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	RevokedAt           *time.Time `json:"revoked_at,omitempty"`
 }
 
 // DataAccessLogEntry records a single data access event for the audit trail

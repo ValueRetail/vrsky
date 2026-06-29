@@ -236,11 +236,11 @@ func TestIntegration_TokenBucketRateLimit(t *testing.T) {
 		},
 		RateLimitRules: []interface{}{
 			map[interface{}]interface{}{
-				"id":                     "tb_limit_2tps",
-				"strategy":               "token_bucket",
-				"token_bucket_rate":      2,
-				"token_bucket_capacity":  5,
-				"exceed_action":          "reject",
+				"id":                    "tb_limit_2tps",
+				"strategy":              "token_bucket",
+				"token_bucket_rate":     2,
+				"token_bucket_capacity": 5,
+				"exceed_action":         "reject",
 				"condition": map[interface{}]interface{}{
 					"operator": "always",
 				},
@@ -312,7 +312,7 @@ func TestIntegration_TokenBucketRateLimit(t *testing.T) {
 	// Verify: some messages passed (initial burst), some rejected
 	totalReceived := len(outputReceived) + len(rejectionReceived)
 	if totalReceived != 10 {
-		t.Errorf("Expected 10 total messages, got %d (passed: %d, rejected: %d)", 
+		t.Errorf("Expected 10 total messages, got %d (passed: %d, rejected: %d)",
 			totalReceived, len(outputReceived), len(rejectionReceived))
 	}
 	// Should have accepted at least the burst capacity

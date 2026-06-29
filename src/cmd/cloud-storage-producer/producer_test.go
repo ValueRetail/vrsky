@@ -248,3 +248,6 @@ func TestCloudProducer_TemplateMissingFieldFallback(t *testing.T) {
 		}
 	}
 }
+
+// Close satisfies objectstore.ObjectStore (added when Close was introduced to release backend clients).
+func (f *fakeStore) Close() error { return nil }

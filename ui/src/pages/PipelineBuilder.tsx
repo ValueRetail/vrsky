@@ -344,7 +344,7 @@ export default function PipelineBuilder() {
   useEffect(() => {
     if (!fileUploadPanel) return
     setFileEvents([])
-    const evtSource = new EventSource(`http://localhost:9200/events/${fileUploadPanel.connectionId}`)
+    const evtSource = new EventSource(`${config.fileConsumerUrl}/events/${fileUploadPanel.connectionId}`)
     evtSource.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
@@ -361,7 +361,7 @@ export default function PipelineBuilder() {
   useEffect(() => {
     if (!httpProducerPanel) return
     setHttpProducerEvents([])
-    const evtSource = new EventSource(`http://localhost:9400/events/${httpProducerPanel.connectionId}`)
+    const evtSource = new EventSource(`${config.httpProducerUrl}/events/${httpProducerPanel.connectionId}`)
     evtSource.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
@@ -375,7 +375,7 @@ export default function PipelineBuilder() {
   useEffect(() => {
     if (!dbProducerPanel) return
     setDbProducerEvents([])
-    const evtSource = new EventSource(`http://localhost:9500/events/${dbProducerPanel.connectionId}`)
+    const evtSource = new EventSource(`${config.dbProducerUrl}/events/${dbProducerPanel.connectionId}`)
     evtSource.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
@@ -389,7 +389,7 @@ export default function PipelineBuilder() {
   useEffect(() => {
     if (!converterPanel) return
     setConverterEvents([])
-    const evtSource = new EventSource(`http://localhost:9600/events/${converterPanel.connectionId}`)
+    const evtSource = new EventSource(`${config.converterUrl}/events/${converterPanel.connectionId}`)
     evtSource.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
@@ -403,7 +403,7 @@ export default function PipelineBuilder() {
   useEffect(() => {
     if (!filterPanel) return
     setFilterEvents([])
-    const evtSource = new EventSource(`http://localhost:9700/events/${filterPanel.connectionId}`)
+    const evtSource = new EventSource(`${config.filterUrl}/events/${filterPanel.connectionId}`)
     evtSource.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
@@ -544,7 +544,7 @@ export default function PipelineBuilder() {
       // Step 4: Show success notification with details
       const consumerNode = nodes.find(n => n.type === 'input')
       const isWebhook = consumerNode?.data?.config?.type === 'http'
-      const webhookUrl = isWebhook ? `http://localhost:9100/webhook/${connectionId}` : ''
+      const webhookUrl = isWebhook ? `${config.webhookIngressUrl}/webhook/${connectionId}` : ''
 
       let message = `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
       if (webhookUrl) {
@@ -561,7 +561,7 @@ export default function PipelineBuilder() {
       let consumerDetail = ''
       let producerDetail = ''
       if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as any)?.path || ''
-      if (consumerType === 'http') consumerDetail = `http://localhost:9100/webhook/${connectionId}`
+      if (consumerType === 'http') consumerDetail = `${config.webhookIngressUrl}/webhook/${connectionId}`
       if (consumerType === 'database') {
         const dc = (consumerNode?.data?.config?.database as any) || {}
         consumerDetail = `${dc.host || ''}:${dc.port || 5432}/${dc.database || ''} → ${dc.table || dc.query || ''}`
@@ -581,7 +581,7 @@ export default function PipelineBuilder() {
 
       if (isFileWatcher) {
         setFileUploadPanel({
-          uploadUrl: `http://localhost:9200/upload/${connectionId}`,
+          uploadUrl: `${config.fileConsumerUrl}/upload/${connectionId}`,
           watchDir: `./data/input/${connectionId}`,
           connectionId,
         })
@@ -829,6 +829,33 @@ export default function PipelineBuilder() {
             {isLoading ? 'Deploying...' : 'Deploy'}
           </button>
 
+          {/* Dashboard Button — single, clear entry point to the full
+              sidebar navigation (connections, settings, usage, etc.). */}
+          {isAuthenticated && (
+            <button
+              onClick={() => navigate('/connections')}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: 'transparent',
+                color: '#374151',
+                fontWeight: 600,
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              title="Go to your dashboard"
+            >
+              <span>📊</span>
+              <span>Dashboard</span>
+            </button>
+          )}
+
           {/* User Menu */}
           <div style={{ position: 'relative' }} ref={userMenuRef}>
             <button
@@ -880,39 +907,9 @@ export default function PipelineBuilder() {
                         {user.email}
                       </p>
                     </div>
-                    {/* Menu Items */}
+                    {/* Account actions only — all navigation lives in the
+                        sidebar, reached via the Dashboard button. */}
                     <div style={{ padding: '8px' }}>
-                      {/* Settings Links */}
-                      {[
-                        { label: 'Connections', path: '/connections' },
-                        { label: 'Connection Requests', path: '/settings/connection-requests' },
-                        { label: 'Data Connections', path: '/settings/tenant-connections' },
-                        { label: 'API Key', path: '/settings/api-key' },
-                      ].map(({ label, path }) => (
-                        <button
-                          key={path}
-                          onClick={() => { setShowUserMenu(false); navigate(path) }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            backgroundColor: 'transparent',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            fontSize: '14px',
-                            color: '#374151',
-                            textAlign: 'left' as const,
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                      <div style={{ borderTop: '1px solid #e5e7eb', margin: '4px 0' }} />
                       {/* Delete Account */}
                       <button
                         onClick={() => {

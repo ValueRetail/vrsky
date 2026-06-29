@@ -12,10 +12,10 @@ type AuditEntry struct {
 	ID           string                 `json:"id"`
 	TenantID     string                 `json:"tenant_id"`
 	UserID       *string                `json:"user_id,omitempty"`
-	ActorKind    string                 `json:"actor_kind"`              // user | api_key | service | system
-	ActorLabel   string                 `json:"actor_label,omitempty"`   // email, key name, …
-	Action       string                 `json:"action"`                  // dotted verb, e.g. "connection.create"
-	ResourceType string                 `json:"resource_type"`           // e.g. "connection"
+	ActorKind    string                 `json:"actor_kind"`            // user | api_key | service | system
+	ActorLabel   string                 `json:"actor_label,omitempty"` // email, key name, …
+	Action       string                 `json:"action"`                // dotted verb, e.g. "connection.create"
+	ResourceType string                 `json:"resource_type"`         // e.g. "connection"
 	ResourceID   string                 `json:"resource_id,omitempty"`
 	Method       string                 `json:"method"`
 	Path         string                 `json:"path"`

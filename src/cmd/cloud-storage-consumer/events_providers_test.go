@@ -120,7 +120,7 @@ func TestValidateEventConfig(t *testing.T) {
 		{Config: objectstore.Config{Provider: objectstore.ProviderAzure}, EventQueueName: "q"},
 		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "s", EventProject: "p"},
 		{Config: objectstore.Config{Provider: objectstore.ProviderGCS}, EventSubscription: "projects/p/subscriptions/s"}, // full path needs no project
-		{Config: objectstore.Config{}, EventQueueURL: "http://q"},                                                       // empty provider defaults to s3
+		{Config: objectstore.Config{}, EventQueueURL: "http://q"},                                                        // empty provider defaults to s3
 	}
 	for i, c := range ok {
 		if err := c.validateEventConfig(); err != nil {

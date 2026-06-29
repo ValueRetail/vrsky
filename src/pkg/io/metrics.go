@@ -12,27 +12,27 @@ import (
 // PostgresConsumerMetrics holds all Prometheus metrics for PostgreSQL Consumer
 type PostgresConsumerMetrics struct {
 	// Counters
-	ChangesCapturedTotal      *prometheus.CounterVec // By operation type
-	BatchesPublishedTotal     prometheus.Counter
-	ConnectionErrorsTotal     prometheus.Counter
-	ParseErrorsTotal          prometheus.Counter
+	ChangesCapturedTotal  *prometheus.CounterVec // By operation type
+	BatchesPublishedTotal prometheus.Counter
+	ConnectionErrorsTotal prometheus.Counter
+	ParseErrorsTotal      prometheus.Counter
 
 	// Histograms
-	BatchSizeHistogram        prometheus.Histogram
-	CaptureLatencyHistogram   prometheus.Histogram
+	BatchSizeHistogram      prometheus.Histogram
+	CaptureLatencyHistogram prometheus.Histogram
 
 	// Gauges
-	LSNOffsetGauge            prometheus.Gauge
-	PendingBatchSizeGauge     prometheus.Gauge
+	LSNOffsetGauge        prometheus.Gauge
+	PendingBatchSizeGauge prometheus.Gauge
 }
 
 // PostgresProducerMetrics holds all Prometheus metrics for PostgreSQL Producer
 type PostgresProducerMetrics struct {
 	// Counters
-	MessagesReceivedTotal     *prometheus.CounterVec // By operation type
-	BatchesWrittenTotal       prometheus.Counter
-	WriteErrorsTotal          prometheus.Counter
-	DLQMessagesTotal          prometheus.Counter
+	MessagesReceivedTotal *prometheus.CounterVec // By operation type
+	BatchesWrittenTotal   prometheus.Counter
+	WriteErrorsTotal      prometheus.Counter
+	DLQMessagesTotal      prometheus.Counter
 
 	// Histograms
 	BatchWriteLatencyHistogram      prometheus.Histogram
@@ -40,7 +40,7 @@ type PostgresProducerMetrics struct {
 	BatchSizeHistogram              prometheus.Histogram
 
 	// Gauges
-	PendingBatchSizeGauge     prometheus.Gauge
+	PendingBatchSizeGauge prometheus.Gauge
 }
 
 // NewPostgresConsumerMetrics creates and registers consumer metrics with the provided registry

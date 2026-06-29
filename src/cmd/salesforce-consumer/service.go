@@ -86,7 +86,18 @@ func (s *salesforceConsumer) Configure(ctx context.Context, res *sdk.Resources) 
 	s.logger = res.Logger
 	s.active = make(map[string]context.CancelFunc)
 	if s.httpClient == nil {
-		s.httpClient = &http.Client{Timeout: 60 * time.Second}
+		s.httpClient = &http.Client{
+			Timeout: 60 * time.Second,
+			// Never follow redirects: requests carry the live Salesforce OAuth
+			// token in the Authorization header, and Go only strips it on a
+			// cross-host redirect. A redirect to a different subdomain of the
+			// same registered domain would forward the token. We only ever call
+			// the configured instance_url / nextRecordsUrl, so a redirect is
+			// unexpected — surface it instead of silently following.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	s.tokens = oauthtoken.New(os.Getenv("MGMT_API_URL"), os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"))
 	if s.resolveToken == nil {

@@ -16,7 +16,10 @@ var (
 			Name: "vrsky_messages_published_total",
 			Help: "Number of messages successfully published to the main JetStream data stream.",
 		},
-		[]string{"tenant_id"},
+		// connection_id enables per-connection throughput in the UI dashboard.
+		// Usage metering still aggregates as sum by (tenant_id), so adding this
+		// label is non-breaking.
+		[]string{"tenant_id", "connection_id"},
 	)
 
 	// redeliveryCount counts every NAK or expired-ack-wait redelivery.

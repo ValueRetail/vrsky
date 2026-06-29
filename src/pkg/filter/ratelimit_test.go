@@ -18,12 +18,12 @@ func TestTimeWindowRateLimit_AllowedWithinLimit(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_test",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 5,
+		ID:                    "time_window_test",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  5,
 		WindowDurationSeconds: 60,
-		ExceedAction:         "reject",
+		ExceedAction:          "reject",
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -52,12 +52,12 @@ func TestTimeWindowRateLimit_RejectedExceedsLimit(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_test",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 3,
+		ID:                    "time_window_test",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  3,
 		WindowDurationSeconds: 60,
-		ExceedAction:         "reject",
+		ExceedAction:          "reject",
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -98,12 +98,12 @@ func TestTimeWindowRateLimit_WindowReset(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_test",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 2,
+		ID:                    "time_window_test",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  2,
 		WindowDurationSeconds: 1, // 1 second window for testing
-		ExceedAction:         "reject",
+		ExceedAction:          "reject",
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -153,12 +153,12 @@ func TestTimeWindowRateLimit_EdgeCaseWindowBoundary(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_test",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 1,
+		ID:                    "time_window_test",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  1,
 		WindowDurationSeconds: 1,
-		ExceedAction:         "reject",
+		ExceedAction:          "reject",
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -194,13 +194,13 @@ func TestTimeWindowRateLimit_QueueAction(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_queue",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 2,
+		ID:                    "time_window_queue",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  2,
 		WindowDurationSeconds: 60,
-		ExceedAction:         "queue",
-		QueueSize:            10,
+		ExceedAction:          "queue",
+		QueueSize:             10,
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -241,12 +241,12 @@ func TestTimeWindowRateLimit_DropAction(t *testing.T) {
 	defer func() { _ = rle.Stop() }()
 
 	rule := &RateLimitRule{
-		ID:                   "time_window_drop",
-		Priority:             1,
-		Strategy:             "time_window",
-		MaxMessagesPerWindow: 1,
+		ID:                    "time_window_drop",
+		Priority:              1,
+		Strategy:              "time_window",
+		MaxMessagesPerWindow:  1,
 		WindowDurationSeconds: 60,
-		ExceedAction:         "drop",
+		ExceedAction:          "drop",
 	}
 
 	if err := rle.AddRule(rule); err != nil {
@@ -659,11 +659,11 @@ func TestValidateRateLimitRule_NoStrategyError(t *testing.T) {
 
 func TestValidateRateLimitRule_InvalidStrategyError(t *testing.T) {
 	rule := &RateLimitRule{
-		ID:                   "invalid",
-		Strategy:             "invalid_strategy",
-		MaxMessagesPerWindow: 10,
+		ID:                    "invalid",
+		Strategy:              "invalid_strategy",
+		MaxMessagesPerWindow:  10,
 		WindowDurationSeconds: 60,
-		ExceedAction:         "reject",
+		ExceedAction:          "reject",
 	}
 
 	if err := validateRateLimitRule(rule); err == nil {

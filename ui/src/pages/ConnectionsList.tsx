@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { connectionService } from '../services/connectionService'
 import { useUIStore } from '../store/uiStore'
+import { useAuthStore } from '../store/authStore'
 import { isAPIError, getErrorMessage } from '../utils/errors'
 import type { Connection, ConnectionStatus } from '../types/models'
 
@@ -9,9 +10,30 @@ type StatusFilter = 'all' | ConnectionStatus
 
 const PAGE_SIZE = 10
 
+// Legacy source_config/destination_config are empty on graph-based
+// (builder-created) connections, where the pipeline lives in nodes/edges.
+// Prefer the legacy field, then fall back to the matching node, then a dash —
+// reading .type off an absent source_config would throw and crash the list.
+const nodeLabel = (connection: Connection, role: string): string => {
+  const node = connection.nodes?.find(n => n.type === role)
+  const cfgType = node?.config?.type
+  return typeof cfgType === 'string' ? cfgType : (node?.type ?? '—')
+}
+const sourceLabel = (c: Connection): string => c.source_config?.type || nodeLabel(c, 'consumer')
+const destinationLabel = (c: Connection): string => c.destination_config?.type || nodeLabel(c, 'producer')
+const formatDate = (value?: string): string => {
+  if (!value) return '—'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
+}
+
 export default function ConnectionsList() {
   const navigate = useNavigate()
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
+  // The active tenant scopes the X-Tenant-ID header on every request. Track it
+  // so the list refetches when the user switches workspace — without this the
+  // page kept showing the previous tenant's connections until a manual reload.
+  const currentTenantId = useAuthStore((s) => s.currentTenant?.id)
 
   const [connections, setConnections] = useState<Connection[]>([])
   const [total, setTotal] = useState(0)
@@ -38,7 +60,13 @@ export default function ConnectionsList() {
       }
     }
     load()
-  }, [page, addNotification])
+  }, [page, currentTenantId, addNotification])
+
+  // Reset to the first page when the workspace changes so we don't land on a
+  // page number that doesn't exist for the new tenant.
+  useEffect(() => {
+    setPage(1)
+  }, [currentTenantId])
 
   const filtered = connections && connections.length > 0
     ? (statusFilter === 'all'
@@ -74,9 +102,11 @@ export default function ConnectionsList() {
   const handleStop = async (connection: Connection) => {
     try {
       setActionLoading(true)
-      await connectionService.stop(connection.id)
+      const updated = await connectionService.stop(connection.id)
       addNotification({ type: 'success', title: 'Stopped', message: `"${connection.name}" stopped` })
-      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'stopped' as ConnectionStatus } : c))
+      // Reflect the server's actual status (not an optimistic guess) so the
+      // list stays consistent with the detail page.
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'stopped') as ConnectionStatus } : c))
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to stop connection'
       addNotification({ type: 'error', title: 'Error', message })
@@ -88,9 +118,11 @@ export default function ConnectionsList() {
   const handleStart = async (connection: Connection) => {
     try {
       setActionLoading(true)
-      await connectionService.start(connection.id)
+      const updated = await connectionService.start(connection.id)
       addNotification({ type: 'success', title: 'Started', message: `"${connection.name}" started` })
-      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: 'running' as ConnectionStatus } : c))
+      // Reflect the server's actual status (not an optimistic guess) so the
+      // list stays consistent with the detail page.
+      setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'running') as ConnectionStatus } : c))
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to start connection'
       addNotification({ type: 'error', title: 'Error', message })
@@ -192,9 +224,9 @@ export default function ConnectionsList() {
                       </p>
                     )}
                     <div className="flex flex-wrap gap-4 mt-3 text-sm text-neutral-600 dark:text-neutral-400">
-                      <span>Source: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.source_config.type}</span></span>
-                      <span>Destination: <span className="font-medium text-neutral-900 dark:text-neutral-50">{connection.destination_config.type}</span></span>
-                      <span>Created: <span className="font-medium text-neutral-900 dark:text-neutral-50">{new Date(connection.created_at).toLocaleDateString()}</span></span>
+                      <span>Source: <span className="font-medium text-neutral-900 dark:text-neutral-50">{sourceLabel(connection)}</span></span>
+                      <span>Destination: <span className="font-medium text-neutral-900 dark:text-neutral-50">{destinationLabel(connection)}</span></span>
+                      <span>Created: <span className="font-medium text-neutral-900 dark:text-neutral-50">{formatDate(connection.created_at)}</span></span>
                     </div>
                   </div>
 

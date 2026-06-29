@@ -135,3 +135,6 @@ func (a *azureStore) Copy(ctx context.Context, srcKey, dstKey string) error {
 	}
 	return a.Put(ctx, dstKey, body, ct)
 }
+
+// Close is a no-op: the azblob client holds no resources requiring release.
+func (s *azureStore) Close() error { return nil }

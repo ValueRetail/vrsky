@@ -24,14 +24,14 @@ import (
 
 // TenantQuotas mirrors one row of the tenant_quotas table.
 type TenantQuotas struct {
-	TenantID         string    `json:"tenant_id"`
-	PlanName         string    `json:"plan_name"`
-	MaxMsgPerSec     int       `json:"max_msg_per_sec"`
-	MaxIntegrations  int       `json:"max_integrations"`
-	MaxStorageBytes  int64     `json:"max_storage_bytes"`
-	StorageBytes     int64     `json:"storage_bytes"`
-	StorageExceeded  bool      `json:"storage_exceeded"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	TenantID        string    `json:"tenant_id"`
+	PlanName        string    `json:"plan_name"`
+	MaxMsgPerSec    int       `json:"max_msg_per_sec"`
+	MaxIntegrations int       `json:"max_integrations"`
+	MaxStorageBytes int64     `json:"max_storage_bytes"`
+	StorageBytes    int64     `json:"storage_bytes"`
+	StorageExceeded bool      `json:"storage_exceeded"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ErrQuotaExceeded is the sentinel returned by every Check* function in

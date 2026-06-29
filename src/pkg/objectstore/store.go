@@ -55,6 +55,11 @@ type ObjectStore interface {
 	// after_action=move as copy+delete). Backends use a native server-side copy
 	// where available (S3, GCS); the Azure backend falls back to download+upload.
 	Copy(ctx context.Context, srcKey, dstKey string) error
+	// Close releases any resources held by the backend's underlying client
+	// (e.g. the GCS storage.Client's connection pool). Callers that open a
+	// store per operation must Close it to avoid leaking connections/goroutines.
+	// S3 and Azure clients hold no closable state, so their Close is a no-op.
+	Close() error
 }
 
 // Config is the resolved per-node configuration (after

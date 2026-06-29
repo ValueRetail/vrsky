@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -86,9 +87,14 @@ func (h *Handler) HandleTenantDataIngestion(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Log access asynchronously
+	// Log access asynchronously. Detach from the request context: once this
+	// handler returns, net/http cancels r.Context(), which would race the
+	// insert and frequently abort it with "context canceled" — silently losing
+	// the cross-tenant data-access audit record. WithoutCancel keeps the
+	// values (e.g. tracing) but drops the cancellation.
+	auditCtx := context.WithoutCancel(r.Context())
 	go func() {
-		_ = h.repo.CreateDataAccessLog(r.Context(), &DataAccessLogEntry{
+		_ = h.repo.CreateDataAccessLog(auditCtx, &DataAccessLogEntry{
 			ConnectionID:      conn.ID,
 			RequesterTenantID: requestingTenant.ID,
 			TargetTenantID:    targetTenantID,

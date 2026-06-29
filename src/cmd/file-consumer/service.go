@@ -184,7 +184,7 @@ func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 		}
 	}
 
-	if err := os.MkdirAll(watchDir, 0777); err != nil {
+	if err := os.MkdirAll(watchDir, 0o755); err != nil {
 		s.logger.Error("Failed to create watch directory", "error", err, "dir", watchDir)
 		return
 	}

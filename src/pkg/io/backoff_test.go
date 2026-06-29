@@ -256,4 +256,3 @@ func TestCalculateBackoff_ConcurrentAccess(t *testing.T) {
 
 	t.Logf("Successfully ran %d concurrent calls to CalculateBackoff", numGoroutines*numCallsPerGoroutine)
 }
-

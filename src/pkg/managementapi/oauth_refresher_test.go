@@ -15,12 +15,12 @@ import (
 // It tracks calls so the test can assert behaviour without a real DB or
 // the full sqlmock setup (those live in pkg/oauth and in verification).
 type trackStore struct {
-	mu              sync.Mutex
-	expiringIDs     []string         // returned by ScanExpiring
-	scanCalls       int64
-	updateCalls     int64
-	markFailureMap  map[string]string // grantID -> recorded reason
-	tenantByGrant   map[string]string
+	mu             sync.Mutex
+	expiringIDs    []string // returned by ScanExpiring
+	scanCalls      int64
+	updateCalls    int64
+	markFailureMap map[string]string // grantID -> recorded reason
+	tenantByGrant  map[string]string
 
 	// What Refresh should do for each grantID. nil = success.
 	refreshErr map[string]error

@@ -153,6 +153,18 @@ func (h *Handler) ApproveConnectionRequest(w http.ResponseWriter, r *http.Reques
 	// Merge auto-denied unsafe patterns into denied fields
 	denied := mergeUnsafeDeniedFields(payload.DeniedFields)
 
+	// The approver may only share its OWN connections. Validate each supplied
+	// id belongs to this tenant before storing it: GetConnection is not
+	// tenant-scoped, and these ids are later resolved (name + payload) for the
+	// requester, so an unchecked id from a third tenant would be disclosed.
+	for _, scID := range payload.SharedConnectionIDs {
+		shared, gerr := h.repo.GetConnection(r.Context(), scID)
+		if gerr != nil || shared == nil || shared.TenantID != tenant.ID {
+			_ = writeError(w, http.StatusBadRequest, "BadRequest", "shared connection ids must belong to your tenant", nil)
+			return
+		}
+	}
+
 	conn, err := h.repo.ApproveConnectionRequest(r.Context(), requestID, payload.AllowedFields, denied, payload.SharedConnectionIDs)
 	if err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "ServerError", "failed to approve connection request", nil)
