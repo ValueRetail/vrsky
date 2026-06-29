@@ -1,3 +1,8 @@
+# DEV / SINGLE-NODE ONLY (#137). This single-replica StatefulSet has no HA:
+# a node or pod failure means a control-plane outage and risks data loss.
+# For production use the CloudNativePG cluster (cnpg-cluster.yaml +
+# cnpg-pooler.yaml) or a managed database — see README.md. Kept for local dev
+# and minimal deployments.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
