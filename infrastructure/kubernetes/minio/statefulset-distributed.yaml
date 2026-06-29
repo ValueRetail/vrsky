@@ -1,0 +1,183 @@
+# =============================================================================
+# MinIO — DISTRIBUTED / HIGH-AVAILABILITY mode (#136)
+# =============================================================================
+# Production-grade, self-hosted object storage. Replaces deployment.yaml (the
+# single-replica dev box). Do NOT apply both — they share the `app: minio`
+# selector and the client-facing Service (service.yaml) would fan out across two
+# different workloads.
+#
+# Topology: 4 MinIO servers, each with one drive, joined into a single
+# erasure-coded pool. With the default EC:2 parity on a 4-drive set, the cluster
+# tolerates the loss of up to 2 drives/nodes with zero data loss and stays
+# READ+WRITE available while >= quorum (write quorum = drives/2 + parity) is up.
+#
+# RECOMMENDED PRODUCTION ALTERNATIVE: a managed object store (AWS S3, GCS,
+# Azure Blob) where the provider owns durability/HA/scaling. VRSky's
+# cloud-storage workers already speak S3/GCS/Azure — see README "High
+# Availability" for when to pick managed vs. self-hosted MinIO.
+#
+# Prerequisites (same as the dev box):
+#   - namespace.yaml          (vrsky-storage)
+#   - secret minio-credentials (keys: accesskey, secretkey)
+#   - configmap minio-config   (key: MINIO_BROWSER)
+#   - StorageClass providing ReadWriteOnce PVs (here: local-path; use a real
+#     block/replicated class such as Longhorn/EBS/PD in production)
+#   - service.yaml             (client-facing ClusterIP, selector app: minio)
+#   - setup-job.yaml           (bucket bootstrap; runs once cluster is Ready)
+#
+# Scaling note: a distributed pool's server count is FIXED for the pool. To grow
+# capacity, add a NEW server pool (expand the `server` arg with another
+# https://...{4...7} range and bump replicas), never by editing an existing
+# pool's size in place. MinIO requires a minimum of 4 drives for erasure coding.
+# =============================================================================
+---
+# Headless service: gives each pod a stable DNS name
+# (minio-<ordinal>.minio-headless.vrsky-storage.svc.cluster.local) so the MinIO
+# servers can discover each other. Client traffic uses the regular `minio`
+# Service in service.yaml, not this one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: vrsky-storage
+  labels:
+    app: minio
+    component: object-storage
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true # peers must resolve each other before Ready
+  selector:
+    app: minio
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: api
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+      name: console
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: vrsky-storage
+  labels:
+    app: minio
+    component: object-storage
+spec:
+  serviceName: minio-headless
+  replicas: 4 # minimum for erasure coding; do not reduce below 4
+  podManagementPolicy: Parallel # all servers must come up together to form the pool
+  selector:
+    matchLabels:
+      app: minio
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: minio
+        component: object-storage
+    spec:
+      # Spread the 4 servers across nodes so a single node failure takes out at
+      # most one drive (stays within EC:2 fault tolerance). "ScheduleAnyway"
+      # keeps it best-effort on small/single-node dev clusters.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: minio
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+          args:
+            - server
+            - http://minio-{0...3}.minio-headless.vrsky-storage.svc.cluster.local/data
+            - --console-address
+            - :9001
+
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+            - name: MINIO_BROWSER
+              valueFrom:
+                configMapKeyRef:
+                  name: minio-config
+                  key: MINIO_BROWSER
+
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+          resources:
+            requests:
+              cpu: 1
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # Cluster-aware readiness: a node reports ready only once the pool has
+          # read quorum, so the client Service won't route to a not-yet-joined
+          # server.
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 100Gi
+---
+# Keep at least 3 of 4 servers up during voluntary disruptions (drains, node
+# upgrades) so the pool never drops below write quorum.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio
+  namespace: vrsky-storage
+  labels:
+    app: minio
+    component: object-storage
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: minio
