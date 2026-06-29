@@ -1932,6 +1932,40 @@ function FilterConfig({
         } else {
           setDataError(result.error || 'No data yet — send data through the pipeline first')
         }
+      } else if (consumerType === 'kafka') {
+        const kc = consumerConfig?.kafka as Record<string, unknown> | undefined
+        if (!kc?.brokers || !kc?.topic) { setDataError('Input has no Kafka brokers/topic'); return }
+        const resp = await fetch('http://localhost:9220/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brokers: kc.brokers, topic: kc.topic, consumer_group: kc.consumer_group,
+            auth_type: kc.auth_type, username: kc.username, password: kc.password,
+            ca_cert: kc.ca_cert, client_cert: kc.client_cert, client_key: kc.client_key,
+          }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No messages on the topic to sample yet')
+        }
+      } else if (consumerType === 'rabbitmq') {
+        const rc = consumerConfig?.rabbitmq as Record<string, unknown> | undefined
+        if (!rc?.url || !rc?.queue) { setDataError('Input has no RabbitMQ URL/queue'); return }
+        const resp = await fetch('http://localhost:9230/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: rc.url, username: rc.username, password: rc.password, queue: rc.queue }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No messages on the queue to sample yet')
+        }
       } else {
         setDataError(`Preview not available for "${consumerType || 'unknown'}" input type`)
       }

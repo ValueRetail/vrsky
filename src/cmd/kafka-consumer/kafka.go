@@ -114,6 +114,41 @@ func realKafkaPing(ctx context.Context, cfg *KafkaConfig) (int, error) {
 	return len(parts), nil
 }
 
+// realKafkaSample reads the earliest available message on the topic (partition
+// 0, no consumer group so nothing is committed) and returns its value. Used by
+// the schema-preview endpoint (#144) so the filter/converter field picker can
+// infer fields from a real message. Returns an error if the topic has no
+// messages within the timeout.
+func realKafkaSample(ctx context.Context, cfg *KafkaConfig) ([]byte, error) {
+	if len(cfg.Brokers) == 0 || cfg.Topic == "" {
+		return nil, errors.New("brokers and topic are required")
+	}
+	dialer, err := buildDialer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:   cfg.Brokers,
+		Topic:     cfg.Topic,
+		Partition: 0,
+		Dialer:    dialer,
+		MaxWait:   time.Second,
+	})
+	defer r.Close()
+	if err := r.SetOffset(kafka.FirstOffset); err != nil {
+		return nil, fmt.Errorf("seek: %w", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	m, err := r.ReadMessage(readCtx)
+	if err != nil {
+		// A reachable-but-empty topic isn't an error worth a stack trace.
+		return nil, errors.New("no messages available on the topic to sample")
+	}
+	return m.Value, nil
+}
+
 // buildDialer assembles the SASL mechanism + TLS config from KafkaConfig.
 func buildDialer(cfg *KafkaConfig) (*kafka.Dialer, error) {
 	d := &kafka.Dialer{Timeout: 10 * time.Second, DualStack: true}

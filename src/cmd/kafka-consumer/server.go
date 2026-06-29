@@ -57,3 +57,35 @@ func (k *kafkaConsumer) handleTestConnection() http.HandlerFunc {
 		writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "partitions": n, "topic": cfg.Topic})
 	}
 }
+
+// handleSampleData peeks the earliest message on the topic and returns it as
+// parsed JSON for the UI schema-preview ("Show Data Structure") flow (#144).
+// Response: {"ok":true,"data":<parsed JSON | {"value":"…"}>} or {"ok":false,"error":"…"}.
+func (k *kafkaConsumer) handleSampleData() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if testGate(w, r) {
+			return
+		}
+		var cfg KafkaConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "invalid JSON request body"})
+			return
+		}
+		if len(cfg.Brokers) == 0 || cfg.Topic == "" {
+			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "brokers and topic are required"})
+			return
+		}
+		raw, err := k.sample(r.Context(), &cfg)
+		if err != nil {
+			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+		// Prefer parsed JSON so the field picker can infer a schema; fall back to
+		// the raw string for non-JSON payloads.
+		var parsed interface{}
+		if json.Unmarshal(raw, &parsed) != nil {
+			parsed = map[string]interface{}{"value": string(raw)}
+		}
+		writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
+	}
+}

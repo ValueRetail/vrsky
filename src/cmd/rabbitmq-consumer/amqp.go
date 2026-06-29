@@ -113,6 +113,38 @@ func realDial(cfg *RabbitMQConfig) (amqpSource, error) {
 	return &realAMQP{conn: conn, ch: ch, recv: recv}, nil
 }
 
+// rabbitSampleFunc peeks one message off the queue for the schema-preview
+// endpoint (#144). Defaulted to realRabbitSample in Configure; tests stub it.
+type rabbitSampleFunc func(cfg *RabbitMQConfig) ([]byte, error)
+
+// realRabbitSample fetches one message from the queue WITHOUT acking it (it is
+// requeued immediately), so the field picker can infer a schema without
+// consuming data. Returns an error when the queue is empty.
+func realRabbitSample(cfg *RabbitMQConfig) ([]byte, error) {
+	if cfg.Queue == "" {
+		return nil, fmt.Errorf("queue is required to sample")
+	}
+	conn, err := amqp.Dial(buildURL(cfg))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = ch.Close() }()
+	msg, ok, err := ch.Get(cfg.Queue, false) // autoAck=false
+	if err != nil {
+		return nil, fmt.Errorf("get: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("no messages available on the queue to sample")
+	}
+	_ = msg.Nack(false, true) // requeue — non-destructive peek
+	return msg.Body, nil
+}
+
 // buildURL injects separate username/password into the AMQP URL when provided
 // (so the password can come from the secrets vault rather than the URL).
 func buildURL(cfg *RabbitMQConfig) string {
