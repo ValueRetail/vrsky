@@ -311,7 +311,9 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// resolve a grant's tenant before calling Client.Refresh.
 	oauthClient := oauth.New(repo, oauth.DefaultRegistry())
 	restHandler.SetOAuthClient(oauthClient)
-	oauthRefresher := managementapi.NewOAuthRefresher(oauthClient, repo)
+	// WithRefresherDB makes refresh cluster-wide-single under N replicas (#138):
+	// a grant is refreshed only by the replica that wins its advisory lock.
+	oauthRefresher := managementapi.NewOAuthRefresher(oauthClient, repo, managementapi.WithRefresherDB(db))
 	oauthRefresher.SetTenantLookup(func(ctx context.Context, grantID string) (string, error) {
 		var tenantID string
 		// lint:tenant-ok — resolving the row's own tenant by grant PK; outer
@@ -340,7 +342,9 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	} else {
 		slog.Warn("PROMETHEUS_URL unset; usage rollup will record storage only (no message/deploy counts)")
 	}
-	managementapi.NewUsageRollup(repo, promClient).Start()
+	// WithRollupDB gates the hourly rollup to one replica per tick under N
+	// replicas (#138); upserts are idempotent, so this is a contention guard.
+	managementapi.NewUsageRollup(repo, promClient, managementapi.WithRollupDB(db)).Start()
 	// Phase 4D (#95): the public status page reads the same Prometheus client.
 	restHandler.SetPrometheus(promClient)
 

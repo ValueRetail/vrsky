@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"sync"
@@ -15,10 +16,15 @@ import (
 // and enqueues them for refresh; refresh work is also enqueueable on demand
 // (PR #3 will call Enqueue from the worker-side on-401 retry path).
 //
-// The refresher is single-instance: dedup between the ticker scan and
-// on-demand calls is handled by the Client's internal singleflight. If/when
-// management-api goes HA we'd swap that for a SELECT FOR UPDATE SKIP
-// LOCKED on the grants row — out of scope for PR #1.
+// Dedup between the ticker scan and on-demand calls within a single process is
+// handled by the Client's internal singleflight. Across replicas (#138), the
+// Client's in-process singleflight is not enough — N replicas would each scan
+// and refresh the same expiring grant, racing on refresh-token rotation. So
+// processJob takes a per-grant Postgres advisory lock before refreshing: only
+// one replica cluster-wide refreshes a given grant at a time; the others skip
+// (the token is being refreshed by whoever holds the lock). The lock is only
+// engaged when a DB handle is wired via WithRefresherDB; without it (unit
+// tests), refresh runs unguarded as before.
 //
 // The lifecycle (Start/Stop with WaitGroup) mirrors MetricsCache and
 // TenantProvisioner in this package so it slots into the standard
@@ -27,6 +33,7 @@ type OAuthRefresher struct {
 	client      *oauth.Client
 	store       oauth.Store
 	logger      *slog.Logger
+	db          *sql.DB // optional: enables cross-replica per-grant locking (#138)
 	tick        time.Duration
 	horizon     time.Duration
 	scanLimit   int
@@ -72,6 +79,15 @@ func WithRefresherWorkers(n int) OAuthRefresherOption {
 // WithRefresherLogger injects a slog logger. Defaults to slog.Default().
 func WithRefresherLogger(l *slog.Logger) OAuthRefresherOption {
 	return func(r *OAuthRefresher) { r.logger = l }
+}
+
+// WithRefresherDB wires the database handle used for cross-replica per-grant
+// advisory locking (#138). When set, processJob refreshes a grant only if it
+// can take that grant's advisory lock, so N replicas never refresh the same
+// grant concurrently. Without it, refresh runs unguarded (single-replica /
+// test behavior).
+func WithRefresherDB(db *sql.DB) OAuthRefresherOption {
+	return func(r *OAuthRefresher) { r.db = db }
 }
 
 // NewOAuthRefresher constructs a refresher around a client + store pair.
@@ -201,21 +217,44 @@ func (r *OAuthRefresher) processJob(ctx context.Context, job refreshJob) {
 		tenantID = meta
 	}
 
-	if _, err := r.client.Refresh(ctx, tenantID, job.grantID); err != nil {
-		reason := err.Error()
-		if errors.Is(err, oauth.ErrRefreshExpired) {
-			reason = "refresh_token_expired"
+	refresh := func(ctx context.Context) error {
+		if _, err := r.client.Refresh(ctx, tenantID, job.grantID); err != nil {
+			reason := err.Error()
+			if errors.Is(err, oauth.ErrRefreshExpired) {
+				reason = "refresh_token_expired"
+			}
+			if mfErr := r.store.MarkRefreshFailure(ctx, tenantID, job.grantID, reason); mfErr != nil {
+				r.logger.Warn("oauth refresh: failed to record failure",
+					"grant_id", job.grantID, "error", mfErr)
+			}
+			r.logger.Warn("oauth refresh failed",
+				"grant_id", job.grantID, "reason", reason, "request_reason", job.reason)
+			return nil // failure already recorded; don't surface to the lock helper
 		}
-		if mfErr := r.store.MarkRefreshFailure(ctx, tenantID, job.grantID, reason); mfErr != nil {
-			r.logger.Warn("oauth refresh: failed to record failure",
-				"grant_id", job.grantID, "error", mfErr)
-		}
-		r.logger.Warn("oauth refresh failed",
-			"grant_id", job.grantID, "reason", reason, "request_reason", job.reason)
+		r.logger.Debug("oauth refresh succeeded",
+			"grant_id", job.grantID, "request_reason", job.reason)
+		return nil
+	}
+
+	// Single-replica / tests: no DB wired, run unguarded.
+	if r.db == nil {
+		_ = refresh(ctx)
 		return
 	}
-	r.logger.Debug("oauth refresh succeeded",
-		"grant_id", job.grantID, "request_reason", job.reason)
+
+	// HA (#138): only refresh if we win the per-grant advisory lock. If another
+	// replica holds it, that replica is already refreshing this grant — skip.
+	acquired, err := withAdvisoryLock(ctx, r.db, advisoryKey("oauth-refresh:"+job.grantID), refresh)
+	if err != nil {
+		r.logger.Warn("oauth refresh: advisory lock error; refreshing unguarded",
+			"grant_id", job.grantID, "error", err)
+		_ = refresh(ctx)
+		return
+	}
+	if !acquired {
+		r.logger.Debug("oauth refresh: grant locked by another replica; skipping",
+			"grant_id", job.grantID, "request_reason", job.reason)
+	}
 }
 
 // lookupTenant resolves a grant ID to its tenant ID. The ticker-scan path

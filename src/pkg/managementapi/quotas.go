@@ -117,11 +117,18 @@ func (r *PostgresRepository) CountActiveIntegrations(ctx context.Context, tenant
 // ===== In-memory token bucket =====
 //
 // One bucket per tenant. Each bucket holds at most max_msg_per_sec
-// tokens and refills fully every second. We deliberately don't share
-// this across replicas — the bucket lives only inside the API process
-// it was created in. A multi-replica deployment would need Redis (or a
-// JetStream KV bucket) keyed by tenant_id; that swap is documented in
-// the issue body and tracked as a Phase 2 follow-up.
+// tokens and refills fully every second. The bucket is per-replica: it
+// lives only inside the API process it was created in.
+//
+// #138 (management-api HA) decision: this is left per-replica on purpose.
+// CheckMessageRate guards only the synthetic test-message generator
+// (test_generator.go) — a control-plane convenience, not the data path
+// (real traffic flows worker→NATS→worker and never touches this bucket).
+// Under N replicas a tenant's *test* burst can reach N×max_msg_per_sec,
+// which is a harmless over-permit on synthetic traffic, not a correctness
+// bug. Making it exact cluster-wide would need a shared counter (NATS-KV
+// keyed by tenant_id); disproportionate for a test-only safety cap. See
+// docs HA section for the upgrade path if it ever guards real traffic.
 
 type tokenBucket struct {
 	mu         sync.Mutex

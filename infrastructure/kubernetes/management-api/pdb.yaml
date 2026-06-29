@@ -1,0 +1,17 @@
+# PodDisruptionBudget for the management-api (#138).
+# Keeps at least one replica serving during voluntary disruptions (node drains,
+# cluster upgrades) so the control plane never goes fully dark. With replicas: 2
+# this allows one pod to be evicted at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vrsky-management-api
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-management-api
+    component: management-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vrsky-management-api

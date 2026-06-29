@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -23,6 +24,7 @@ import (
 type UsageRollup struct {
 	repo   Repository
 	prom   *promquery.Client // nil → storage-only rollup (no Prometheus configured)
+	db     *sql.DB           // optional: gates the rollup to one replica per tick (#138)
 	tick   time.Duration
 	logger *slog.Logger
 	cancel context.CancelFunc
@@ -58,6 +60,16 @@ func WithRollupLogger(l *slog.Logger) UsageRollupOption {
 	return func(u *UsageRollup) { u.logger = l }
 }
 
+// WithRollupDB wires the database handle used to gate the rollup to a single
+// replica per tick via a Postgres advisory lock (#138). When set, a replica
+// that loses the lock skips its tick (another replica is rolling up). The
+// upserts are idempotent, so this is an efficiency/contention guard rather than
+// a correctness fix; without it every replica rolls up (single-replica / test
+// behavior).
+func WithRollupDB(db *sql.DB) UsageRollupOption {
+	return func(u *UsageRollup) { u.db = db }
+}
+
 // NewUsageRollup builds a rollup. prom may be nil (storage-only).
 func NewUsageRollup(repo Repository, prom *promquery.Client, opts ...UsageRollupOption) *UsageRollup {
 	u := &UsageRollup{
@@ -81,16 +93,38 @@ func (u *UsageRollup) Start() {
 		defer u.wg.Done()
 		t := time.NewTicker(u.tick)
 		defer t.Stop()
-		u.runOnce(ctx) // seed immediately so the dashboard isn't empty on boot
+		u.runOnceGated(ctx) // seed immediately so the dashboard isn't empty on boot
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				u.runOnce(ctx)
+				u.runOnceGated(ctx)
 			}
 		}
 	}()
+}
+
+// runOnceGated runs the rollup, but when a DB handle is wired (#138) only the
+// replica that wins the cluster-wide advisory lock does the work; the rest skip
+// this tick. With no DB handle it runs unconditionally (single-replica / tests).
+func (u *UsageRollup) runOnceGated(ctx context.Context) {
+	if u.db == nil {
+		u.runOnce(ctx)
+		return
+	}
+	acquired, err := withAdvisoryLock(ctx, u.db, advisoryKeyUsageRollup, func(ctx context.Context) error {
+		u.runOnce(ctx)
+		return nil
+	})
+	if err != nil {
+		u.logger.Warn("usage rollup: advisory lock error; running unguarded", "error", err)
+		u.runOnce(ctx)
+		return
+	}
+	if !acquired {
+		u.logger.Debug("usage rollup: another replica holds the lock; skipping tick")
+	}
 }
 
 // Stop cancels the loop and waits for the in-flight run to finish.

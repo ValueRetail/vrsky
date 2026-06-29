@@ -82,6 +82,21 @@ In honest per-day terms that headline is **~1.3 billion messages/day** of
 *sustained* single-host capacity — comfortably backing the "handle millions of
 messages per day" claim with three orders of magnitude of headroom.
 
+#### Re-validation after #139 (in-progress heartbeats)
+
+The #139 change adds a per-in-flight-message `InProgress()` heartbeat goroutine
+to the subscriber hot path. Re-running the flagship `webhook-to-http` scenario
+with the rebuilt http-producer confirmed **no delivery regression**: at
+5,000/s the pipeline delivered **124,609 messages end-to-end over 30s with 0
+errors**, the http-producer stayed healthy throughout, and the durable consumer
+**re-bound cleanly** to its existing 1s ack-wait (the reconcile path — no #99
+crash-loop). Absolute throughput/p99 on that run were noisier and lower than
+the table above purely because the host was under concurrent build + workload
+at the time; a clean re-baseline of absolute numbers remains a fixed-cluster
+item (#90), consistent with the rest of this doc. The heartbeat's cost is one
+short-lived goroutine + a ticker per message, stopped the instant the handler
+acks — negligible at the sink-bound rates above.
+
 ### CDC — Postgres logical-replication capture
 
 `generators/cdc_insert.sh` bulk-inserts into the source Postgres and watches the

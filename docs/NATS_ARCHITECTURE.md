@@ -334,6 +334,29 @@ func processMessage(msg *nats.Msg) {
 }
 ```
 
+### AckWait, in-progress heartbeats & redelivery (#139)
+
+The durable consumer's **AckWait** is the crash-recovery window — how long
+JetStream waits for an ack before assuming the worker died and redelivering. It
+is **not** the per-message time budget: while a handler runs, the subscriber
+sends periodic `InProgress()` heartbeats (every `AckWait/2`) that reset the
+server-side timer, so a handler can legitimately run far longer than AckWait
+(slow producer target, large payload, bulk API) **without** triggering a
+duplicate delivery (`pkg/messaging/subscriber.go`).
+
+- JetStream stores `Backoff[0]` as the effective AckWait when a backoff schedule
+  is set, so the two are always kept aligned to avoid the re-bind crash-loop in
+  [#99]. AckWait is tunable per worker via the `WORKER_ACK_WAIT` env (a Go
+  duration, e.g. `2m`); raising it on an existing durable reconciles the
+  consumer in place (`UpdateConsumer`) rather than failing to re-bind.
+- **Idempotency / dedup:** delivery is at-least-once. Producers publish with a
+  stable `Msg-Id` (the envelope ID), and the main stream's **5-minute duplicate
+  window** (`Duplicates: 5*time.Minute`) collapses re-published duplicates. The
+  full redelivery-to-DLQ backoff schedule (≈156s) fits well inside that window,
+  so a message that is NAK'd and retried across the whole schedule is still
+  deduplicated. Downstream sinks should additionally treat writes as idempotent
+  where the target allows it (e.g. upsert by key).
+
 ### Dead Letter Queue
 
 **After 3 failed retries**:
