@@ -8,6 +8,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 )
 
 // ExecutionGraph represents a validated and topologically ordered pipeline.
@@ -56,6 +57,20 @@ type DeploymentSpec struct {
 
 	// Deployment is the K8s Deployment specification
 	Deployment *appsv1.Deployment
+
+	// HPA is the HorizontalPodAutoscaler for this deployment so a single
+	// connection's worker scales out under load instead of being pinned to one
+	// replica (#135). nil only if autoscaling is explicitly disabled.
+	HPA *autoscalingv2.HorizontalPodAutoscaler
+}
+
+// NodeScaling is the optional per-node autoscaling override, read from a
+// top-level "scaling" key in the node config. Zero fields fall back to the
+// orchestrator defaults.
+type NodeScaling struct {
+	MinReplicas      int32 `json:"min_replicas"`
+	MaxReplicas      int32 `json:"max_replicas"`
+	TargetCPUPercent int32 `json:"target_cpu_percent"`
 }
 
 // OrchestratorConfig contains configuration for the orchestrator.
@@ -74,16 +89,25 @@ type OrchestratorConfig struct {
 
 	// NATSAccount is the NATS account for tenant isolation
 	NATSAccount string
+
+	// Default autoscaling bounds for per-connection worker deployments (#135).
+	// A node's config may override these via a "scaling" block.
+	DefaultMinReplicas int32
+	DefaultMaxReplicas int32
+	TargetCPUPercent   int32
 }
 
 // DefaultConfig returns the default orchestrator configuration.
 func DefaultConfig() *OrchestratorConfig {
 	return &OrchestratorConfig{
-		Namespace:     "vrsky",
-		ImageRegistry: "gcr.io/vrsky",
-		ImageVersion:  "latest",
-		NATSURLs:      "nats://nats:4222",
-		NATSAccount:   "",
+		Namespace:          "vrsky",
+		ImageRegistry:      "gcr.io/vrsky",
+		ImageVersion:       "latest",
+		NATSURLs:           "nats://nats:4222",
+		NATSAccount:        "",
+		DefaultMinReplicas: 1,
+		DefaultMaxReplicas: 10,
+		TargetCPUPercent:   75,
 	}
 }
 

@@ -128,7 +128,7 @@ func (o *Orchestrator) deployComponent(ctx context.Context, spec *DeploymentSpec
 		if err != nil {
 			return fmt.Errorf("failed to update deployment %s: %w", spec.Deployment.Name, err)
 		}
-		return nil
+		return o.applyHPA(ctx, spec)
 	}
 
 	// Create new deployment
@@ -137,6 +137,26 @@ func (o *Orchestrator) deployComponent(ctx context.Context, spec *DeploymentSpec
 		return fmt.Errorf("failed to create deployment %s: %w", spec.Deployment.Name, err)
 	}
 
+	return o.applyHPA(ctx, spec)
+}
+
+// applyHPA creates or updates the HorizontalPodAutoscaler for a deployment so
+// the connection's worker scales between min/max replicas under load (#135).
+func (o *Orchestrator) applyHPA(ctx context.Context, spec *DeploymentSpec) error {
+	if spec.HPA == nil {
+		return nil
+	}
+	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
+	if existing, err := hpaClient.Get(ctx, spec.HPA.Name, metav1.GetOptions{}); err == nil && existing != nil {
+		spec.HPA.ResourceVersion = existing.ResourceVersion
+		if _, err = hpaClient.Update(ctx, spec.HPA, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update HPA %s: %w", spec.HPA.Name, err)
+		}
+		return nil
+	}
+	if _, err := hpaClient.Create(ctx, spec.HPA, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create HPA %s: %w", spec.HPA.Name, err)
+	}
 	return nil
 }
 
@@ -175,9 +195,21 @@ func (o *Orchestrator) StopConnection(ctx context.Context) error {
 		}
 	}
 
+	// Delete the connection's HPAs too (#135) — they share the connection
+	// label selector. Best-effort: an HPA delete failure shouldn't mask the
+	// deployment teardown result.
+	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
+	if hpas, listErr := hpaClient.List(ctx, metav1.ListOptions{LabelSelector: labelSelector}); listErr == nil {
+		for _, hpa := range hpas.Items {
+			if err := hpaClient.Delete(ctx, hpa.Name, metav1.DeleteOptions{}); err != nil {
+				deleteErrors = append(deleteErrors, fmt.Sprintf("hpa/%s: %v", hpa.Name, err))
+			}
+		}
+	}
+
 	if len(deleteErrors) > 0 {
 		return NewOrchestratorError(ErrCodeK8sDeleteFailed,
-			fmt.Sprintf("failed to delete some deployments: %v", deleteErrors),
+			fmt.Sprintf("failed to delete some resources: %v", deleteErrors),
 			map[string]string{"connectionID": o.Connection.ID})
 	}
 
