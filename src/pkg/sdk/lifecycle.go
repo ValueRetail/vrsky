@@ -317,6 +317,24 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	return nil
 }
 
+// ackWaitFromEnv reads the optional WORKER_ACK_WAIT override (a Go duration like
+// "2m"). Returns 0 when unset/invalid, letting the messaging layer apply its
+// default. AckWait is the crash-recovery window, not the handler time budget
+// (heartbeats cover long handlers, #139); raise it only to slow the first
+// redelivery after a true worker death.
+func ackWaitFromEnv(logger *slog.Logger) time.Duration {
+	raw := os.Getenv("WORKER_ACK_WAIT")
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		logger.Warn("ignoring invalid WORKER_ACK_WAIT", "value", raw, "error", err)
+		return 0
+	}
+	return d
+}
+
 // subscribeDispatch wires a durable JetStream subscription whose handler
 // unmarshals the envelope and calls deliver, mapping the SDK error classes
 // onto messaging's NAK/DLQ semantics: nil → ack; Permanent → ack+log (poison);
@@ -324,8 +342,13 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Logger, deliver func(context.Context, *envelope.Envelope) error) (func(), error) {
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
-		AckWait:     45 * time.Second,
-		Logger:      logger,
+		// AckWait left at the messaging default: the per-message budget is no
+		// longer bounded by AckWait — the subscriber sends InProgress heartbeats
+		// while the handler runs (#139), so even a slow producer target / bulk
+		// API never triggers a duplicate. Operators can still raise the
+		// crash-recovery window per worker via WORKER_ACK_WAIT (e.g. "2m").
+		AckWait: ackWaitFromEnv(logger),
+		Logger:  logger,
 	}, func(ctx context.Context, msg *nats.Msg) error {
 		env, err := envelope.Unmarshal(msg.Data)
 		if err != nil {

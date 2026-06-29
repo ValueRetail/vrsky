@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -32,12 +33,24 @@ type SubscriberOpts struct {
 	// parallelism per worker; lower = tighter back-pressure.
 	MaxAckPending int
 
-	// AckWait is how long JS waits for an Ack before redelivering. Should
-	// be a comfortable upper bound on the worker's per-message budget.
+	// AckWait is how long JS waits for an Ack before redelivering. It is the
+	// crash-recovery window, NOT the per-message time budget: while a handler
+	// runs, the dispatch loop sends periodic InProgress heartbeats that reset
+	// this timer (#139), so a handler may legitimately run far longer than
+	// AckWait without triggering a duplicate delivery. Leave it small for fast
+	// recovery when a worker actually dies. Raising it is allowed (see the
+	// Backoff[0] alignment note in Subscribe) and reconciles an existing
+	// durable in place.
 	AckWait time.Duration
 
-	// Backoff overrides the default redelivery schedule.
+	// Backoff overrides the default redelivery schedule. Backoff[0] doubles as
+	// the consumer's effective AckWait in JetStream (see Subscribe).
 	Backoff []time.Duration
+
+	// HeartbeatInterval overrides how often an in-flight message is marked
+	// InProgress to reset its AckWait timer (#139). Default: AckWait/2, floored
+	// at 250ms. Must be < AckWait or redelivery can fire between heartbeats.
+	HeartbeatInterval time.Duration
 
 	// Logger receives structured warnings on NAK/redelivery/DLQ events.
 	Logger *slog.Logger
@@ -74,27 +87,48 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	if opts.MaxAckPending <= 0 {
 		opts.MaxAckPending = 32
 	}
-	if opts.AckWait <= 0 {
-		opts.AckWait = 30 * time.Second
-	}
 	if len(opts.Backoff) == 0 {
 		opts.Backoff = DefaultBackoff
 	}
 	// JetStream derives a consumer's effective AckWait from Backoff[0] when a
-	// backoff schedule is supplied. If we also request a *different* AckWait,
-	// creating the consumer silently stores Backoff[0] — but every later
-	// re-subscribe to that durable then fails with
-	// "configuration requests ack wait to be X, but consumer's value is Y",
-	// crash-looping the worker on restart (issue #99). Align the requested
-	// AckWait with Backoff[0] so create and re-bind always agree; this also
-	// lets already-drifted consumers (stored at Backoff[0]) re-bind cleanly
-	// with no manual `consumer rm`.
+	// backoff schedule is supplied. If we request a *different* AckWait, the
+	// consumer is created storing Backoff[0] — but every later re-subscribe
+	// then fails with "configuration requests ack wait to be X, but consumer's
+	// value is Y", crash-looping the worker on restart (#99). So AckWait and
+	// Backoff[0] must always agree.
+	//
+	// #139 keeps them aligned while making AckWait *tunable*: a caller that
+	// explicitly raises AckWait above the first backoff step gets that value
+	// promoted to Backoff[0] (and reconcileAckWait below updates any existing
+	// durable in place, so the raise doesn't reintroduce #99). When AckWait is
+	// left unset, the default schedule's first step wins — identical to the
+	// previous behavior, so existing durables re-bind with no reconcile.
+	opts.Backoff = append([]time.Duration(nil), opts.Backoff...) // copy; never mutate DefaultBackoff
+	if opts.AckWait > opts.Backoff[0] {
+		opts.Backoff[0] = opts.AckWait
+		// Keep the schedule non-decreasing so later (shorter) steps don't
+		// redeliver sooner than the ack window.
+		for i := 1; i < len(opts.Backoff); i++ {
+			if opts.Backoff[i] < opts.Backoff[0] {
+				opts.Backoff[i] = opts.Backoff[0]
+			}
+		}
+	}
 	opts.AckWait = opts.Backoff[0]
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
 	if err := EnsureStreams(js); err != nil {
 		return nil, err
+	}
+	// If a durable already exists with a different ack-wait (e.g. AckWait was
+	// just raised, or a pre-#139 consumer is stored at 1s), update it in place
+	// so the PullSubscribe below binds cleanly instead of erroring on the
+	// mismatch (#99). Best-effort: a missing consumer is created fresh by
+	// PullSubscribe; a transient error here surfaces on the bind attempt.
+	if err := reconcileAckWait(js, opts); err != nil {
+		opts.Logger.Warn("could not reconcile consumer ack wait before bind",
+			"durable", opts.DurableName, "error", err)
 	}
 	pub := NewPublisher(js)
 
@@ -119,6 +153,31 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	}
 	go s.loop()
 	return s, nil
+}
+
+// reconcileAckWait updates an already-existing durable's AckWait/BackOff to the
+// requested values so a re-subscribe binds cleanly. It is a no-op when the
+// consumer doesn't exist yet (PullSubscribe will create it) or already matches.
+func reconcileAckWait(js nats.JetStreamContext, opts SubscriberOpts) error {
+	ci, err := js.ConsumerInfo(MainStreamName, opts.DurableName)
+	if err != nil {
+		// Not found / transient: nothing to reconcile. PullSubscribe creates
+		// the consumer, or surfaces a real error on bind.
+		return nil //nolint:nilerr // intentional: absence is not an error here
+	}
+	if ci.Config.AckWait == opts.AckWait {
+		return nil
+	}
+	cfg := ci.Config
+	cfg.AckWait = opts.AckWait
+	cfg.BackOff = opts.Backoff
+	if _, err := js.UpdateConsumer(MainStreamName, &cfg); err != nil {
+		return err
+	}
+	opts.Logger.Info("reconciled durable ack wait",
+		"durable", opts.DurableName,
+		"old_ack_wait", ci.Config.AckWait, "new_ack_wait", opts.AckWait)
+	return nil
 }
 
 // Stop signals the dispatch loop to exit and waits for it to finish. The
@@ -153,6 +212,53 @@ func (s *Subscriber) loop() {
 	}
 }
 
+// heartbeatInterval returns how often to mark an in-flight message InProgress.
+// Default is AckWait/2 (floored at 250ms) so the redelivery timer is reset with
+// margin even if a tick is slightly late; an explicit HeartbeatInterval wins.
+func (s *Subscriber) heartbeatInterval() time.Duration {
+	if s.opts.HeartbeatInterval > 0 {
+		return s.opts.HeartbeatInterval
+	}
+	hb := s.opts.AckWait / 2
+	if hb < 250*time.Millisecond {
+		hb = 250 * time.Millisecond
+	}
+	return hb
+}
+
+// startHeartbeat launches a goroutine that calls m.InProgress() on a ticker,
+// resetting the message's AckWait timer until the returned stop func is called.
+// The stop func is idempotent (safe to call from both the normal path and a
+// deferred panic-safety net).
+func (s *Subscriber) startHeartbeat(m *nats.Msg) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(s.heartbeatInterval())
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				// Best-effort: if the message is already terminal (acked/nakked)
+				// or the connection is gone, stop heartbeating.
+				if err := m.InProgress(); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
 func (s *Subscriber) dispatch(m *nats.Msg) {
 	startNs := time.Now()
 	defer func() {
@@ -169,8 +275,17 @@ func (s *Subscriber) dispatch(m *nats.Msg) {
 	if meta != nil && meta.NumDelivered > 1 {
 		redeliveryCount.WithLabelValues(s.opts.DurableName).Inc()
 	}
+	// Keep this message in-flight for as long as the handler runs: periodic
+	// InProgress() calls reset the server-side AckWait timer so JetStream never
+	// redelivers a message we're still processing (#139). This decouples the
+	// handler's wall-clock budget from AckWait, so a slow producer target /
+	// large payload / bulk API can take far longer than AckWait without causing
+	// a duplicate downstream delivery.
+	stopHB := s.startHeartbeat(m)
+	defer stopHB() // panic-safety net; idempotent, no-op after the explicit stop
 	ctx := context.Background()
 	err := s.handler(ctx, m)
+	stopHB() // stop before Ack/Nak in the normal path
 	if err == nil {
 		processingSeconds.WithLabelValues(s.opts.DurableName, "ok").
 			Observe(time.Since(startNs).Seconds())

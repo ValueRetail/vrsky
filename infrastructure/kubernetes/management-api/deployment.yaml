@@ -8,10 +8,18 @@ metadata:
     component: management-api
     version: v1
 spec:
-  replicas: 1
+  # >=2 replicas for HA (#138): no single point of failure for the control
+  # plane / UI backend / worker service-token issuance. The API is stateless
+  # (sessions in Postgres; OAuth refresh + usage rollup are gated cluster-wide
+  # by Postgres advisory locks), so replicas scale horizontally. Scale higher
+  # by raising this number.
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
+      # maxUnavailable: 0 + maxSurge: 1 → a new replica becomes Ready before an
+      # old one is removed, and the old one drains in-flight requests (#85), so
+      # a rolling restart drops zero requests.
       maxSurge: 1
       maxUnavailable: 0
   selector:

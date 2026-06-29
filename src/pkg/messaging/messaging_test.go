@@ -320,6 +320,89 @@ func TestMultipleWorkersBothReceive(t *testing.T) {
 	}, 5*time.Second)
 }
 
+// TestSlowHandlerNoRedelivery covers the #139 in-progress heartbeat: a handler
+// that runs far longer than AckWait is still delivered exactly once, because the
+// subscriber keeps the message in-flight with periodic InProgress() calls. With
+// a 1s AckWait and a 3s handler, the pre-#139 behavior would redeliver the
+// message (NumDelivered>1) and re-invoke the handler after the first ack.
+func TestSlowHandlerNoRedelivery(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+
+	pub := NewPublisher(js)
+
+	const ackWait = 1 * time.Second
+	const handlerDur = 3 * time.Second // 3x AckWait
+
+	var invocations int32
+	sub, err := Subscribe(js, SubscriberOpts{
+		DurableName: "test-slow-handler",
+		AckWait:     ackWait,
+		// Tight backoff so a (wrongly) redelivered message would re-invoke fast.
+		Backoff: []time.Duration{ackWait, ackWait, ackWait, ackWait},
+	}, func(ctx context.Context, m *nats.Msg) error {
+		atomic.AddInt32(&invocations, 1)
+		time.Sleep(handlerDur)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer sub.Stop()
+
+	if err := pub.Publish(context.Background(), "tenant-A", "pipeline-1", "slow-1", []byte("payload")); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// Wait past handler completion plus a couple of AckWait windows, during
+	// which a non-heartbeated message would have been redelivered.
+	time.Sleep(handlerDur + 2*ackWait)
+
+	if n := atomic.LoadInt32(&invocations); n != 1 {
+		t.Fatalf("handler invoked %d times; want exactly 1 (heartbeat should prevent redelivery while in-flight)", n)
+	}
+}
+
+// TestRaisedAckWaitRebinds covers #139 acceptance #1: a durable created at one
+// AckWait can be re-subscribed with a higher AckWait without the #99 crash-loop
+// — reconcileAckWait updates the consumer in place so the bind succeeds and the
+// new ack-wait is in effect.
+func TestRaisedAckWaitRebinds(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+
+	const durable = "test-ackwait-rebind"
+
+	// First bind: default schedule → effective AckWait = DefaultBackoff[0] (1s).
+	sub1, err := Subscribe(js, SubscriberOpts{DurableName: durable}, func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("first Subscribe: %v", err)
+	}
+	sub1.Stop()
+	if ci, err := js.ConsumerInfo(MainStreamName, durable); err != nil {
+		t.Fatalf("ConsumerInfo: %v", err)
+	} else if ci.Config.AckWait != DefaultBackoff[0] {
+		t.Fatalf("initial AckWait = %v, want %v", ci.Config.AckWait, DefaultBackoff[0])
+	}
+
+	// Re-bind the SAME durable with a raised AckWait. Pre-#139 this errored with
+	// an ack-wait mismatch; now it reconciles and binds.
+	const raised = 30 * time.Second
+	sub2, err := Subscribe(js, SubscriberOpts{DurableName: durable, AckWait: raised}, func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("re-Subscribe with raised AckWait: %v", err)
+	}
+	defer sub2.Stop()
+
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("ConsumerInfo after raise: %v", err)
+	}
+	if ci.Config.AckWait != raised {
+		t.Fatalf("AckWait after raise = %v, want %v", ci.Config.AckWait, raised)
+	}
+}
+
 func waitFor(t *testing.T, ok func() bool, max time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(max)
