@@ -1,0 +1,31 @@
+# PgBouncer connection pooling in front of the HA cluster (#137).
+#
+# CloudNativePG manages a PgBouncer deployment (2 replicas) and a Service named
+# after this Pooler (vrsky-pg-pooler-rw). The management-api and workers connect
+# here instead of directly to the primary, so backend connections stay bounded
+# under fan-out (many worker pods × per-connection pools).
+#
+# Pooling mode: SESSION is used deliberately. The Go workers use database/sql
+# (lib/pq / pgx) which relies on server-side prepared statements; transaction
+# pooling breaks those unless every driver is switched to the simple query
+# protocol. Session pooling still bounds backend connections (reuses a backend
+# across client sessions) without that risk. Switch to `transaction` only after
+# confirming every DB client tolerates it — see README.md.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: vrsky-pg-pooler-rw
+  namespace: vrsky-database
+  labels:
+    app: vrsky
+    component: database-pooler
+spec:
+  cluster:
+    name: vrsky-pg
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: session
+    parameters:
+      max_client_conn: "1000"
+      default_pool_size: "25"

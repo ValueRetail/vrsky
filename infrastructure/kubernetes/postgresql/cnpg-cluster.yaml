@@ -1,0 +1,78 @@
+# PostgreSQL HA via CloudNativePG (#137).
+#
+# Replaces the single-replica StatefulSet (statefulset.yaml — now dev-only) with
+# a 3-instance cluster: one primary + two streaming replicas, with automated
+# failover and one synchronous standby for zero data loss on promotion.
+#
+# Prerequisites:
+#   1. Install the CloudNativePG operator (once per cluster):
+#        kubectl apply --server-side -f \
+#          https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.0.yaml
+#   2. Create the application role secret (keys MUST be `username`/`password` —
+#      CNPG's convention, distinct from the legacy POSTGRES_* secret):
+#        kubectl -n vrsky-database create secret generic postgres-app-credentials \
+#          --from-literal=username=vrsky --from-literal=password='<strong-password>'
+#   3. Provide the schema as a ConfigMap the cluster applies after bootstrap
+#      (single-sources init-schema.sql — no duplication):
+#        kubectl -n vrsky-database create configmap vrsky-pg-init-schema \
+#          --from-file=init.sql=init-schema.sql
+#
+# CNPG creates these Services automatically:
+#   vrsky-pg-rw  → always the current primary (read/write)   ← the app/pooler uses this
+#   vrsky-pg-ro  → replicas only (read-only)
+#   vrsky-pg-r   → any instance (read, incl. primary)
+#
+# Managed-database alternative: if you run RDS / Cloud SQL / AlloyDB instead,
+# skip this entirely and point MGMT_API_DB_URL at the managed endpoint — the
+# provider handles HA. See README.md.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: vrsky-pg
+  namespace: vrsky-database
+  labels:
+    app: vrsky
+    component: database
+spec:
+  instances: 3
+
+  # Match the engine major version used by the legacy StatefulSet (postgres 18).
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+
+  # Let the operator promote a replica automatically on primary failure.
+  primaryUpdateStrategy: unsupervised
+
+  # One synchronous standby → a committed write is on at least two instances
+  # before it's acknowledged, so an automatic failover loses no data.
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+
+  bootstrap:
+    initdb:
+      database: vrsky
+      owner: vrsky
+      secret:
+        name: postgres-app-credentials
+      # Apply the existing schema once, as the app owner, after the DB is created.
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: vrsky-pg-init-schema
+            key: init.sql
+
+  storage:
+    size: 10Gi
+
+  # Continuous WAL archiving / PITR can be added here later via spec.backup
+  # (object store) — backups are otherwise covered by the vrsky-cli drill (#86).
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"

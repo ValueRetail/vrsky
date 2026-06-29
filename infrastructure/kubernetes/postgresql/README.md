@@ -10,6 +10,63 @@ This directory contains Kubernetes manifests for deploying PostgreSQL 18 as the 
 - **Storage**: 50GB via Longhorn distributed storage
 - **Persistence**: Full durability via Longhorn replication
 
+## High Availability (production) — #137
+
+The single-replica `statefulset.yaml` has **no HA**: a pod/node failure is a
+control-plane outage and risks data loss. It is now **dev/single-node only**.
+For production, choose one of:
+
+### Option A — CloudNativePG (self-hosted HA)
+
+A 3-instance cluster (primary + 2 replicas), automated failover, one
+synchronous standby (zero data loss on promotion), and PgBouncer pooling.
+
+```bash
+# 1. Install the operator (once per cluster)
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.0.yaml
+
+# 2. App role secret — keys MUST be username/password (CNPG convention)
+kubectl -n vrsky-database create secret generic postgres-app-credentials \
+  --from-literal=username=vrsky --from-literal=password='<strong-password>'
+
+# 3. Schema ConfigMap (single-sources init-schema.sql)
+kubectl -n vrsky-database create configmap vrsky-pg-init-schema \
+  --from-file=init.sql=init-schema.sql
+
+# 4. Apply the cluster + pooler
+kubectl apply -f cnpg-cluster.yaml -f cnpg-pooler.yaml
+```
+
+Then point the app at the **pooler** (not the primary directly) by setting the
+`connection_string` key in the `postgres-credentials` secret to:
+
+```
+postgres://vrsky:<password>@vrsky-pg-pooler-rw.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=require
+```
+
+CNPG also exposes `vrsky-pg-rw` (primary), `vrsky-pg-ro` (replicas), `vrsky-pg-r`
+(any). Use `-rw` if you skip the pooler.
+
+**Pooling mode caveat:** the pooler uses **session** mode because the Go workers
+use server-side prepared statements (lib/pq / pgx), which transaction pooling
+breaks unless every client switches to the simple query protocol. Session
+pooling still bounds backend connections. Switch `poolMode` to `transaction` in
+`cnpg-pooler.yaml` only after confirming all DB clients tolerate it.
+
+### Option B — Managed database (recommended for most)
+
+Run **RDS / Cloud SQL / AlloyDB** and let the provider handle HA, failover, and
+backups. Skip the CNPG manifests entirely and set `connection_string` to the
+managed endpoint (`sslmode=require`). Optionally still front it with the pooler.
+
+### Migration note
+
+These manifests provision a **fresh** HA cluster (schema applied via the init
+ConfigMap). To move data off the existing single-node StatefulSet, dump/restore
+with the `vrsky-cli` backup/restore tooling (#86) into the new cluster before
+cutting `connection_string` over.
+
 ## Components
 
 ### Files
