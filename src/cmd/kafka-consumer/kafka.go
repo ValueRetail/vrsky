@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -99,6 +100,15 @@ func realKafkaPing(ctx context.Context, cfg *KafkaConfig) (int, error) {
 
 	parts, err := conn.ReadPartitions(cfg.Topic)
 	if err != nil {
+		// The broker is reachable (the dial above succeeded). A topic that does
+		// not exist yet is NOT a connection failure — it's created when the
+		// pipeline is deployed — so reporting "connected" here lets the user
+		// validate the broker before deploy instead of seeing a spurious
+		// failure that only clears after deploy + reopen (#146).
+		if errors.Is(err, kafka.UnknownTopicOrPartition) ||
+			strings.Contains(strings.ToLower(err.Error()), "unknown topic") {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("read partitions: %w", err)
 	}
 	return len(parts), nil
