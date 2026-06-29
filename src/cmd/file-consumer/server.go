@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -133,21 +134,6 @@ func (s *fileConsumer) handleUpload() http.HandlerFunc {
 		}
 
 		filename := header.Filename
-		contentType := detectContentType(filename, data)
-
-		env := &envelope.Envelope{
-			ID:            uuid.New().String(),
-			TenantID:      ac.TenantID,
-			IntegrationID: ac.ConnectionID,
-			Payload:       data,
-			PayloadSize:   int64(len(data)),
-			ContentType:   contentType,
-			Source:        "upload:" + filename,
-			CurrentStep:   0,
-			StepHistory:   []string{"file-consumer-upload"},
-			CreatedAt:     time.Now().UTC(),
-			Metadata:      map[string]interface{}{"filename": filename},
-		}
 
 		if s.publish == nil {
 			// Run() has not yet injected the publish closure (should not happen
@@ -155,16 +141,11 @@ func (s *fileConsumer) handleUpload() http.HandlerFunc {
 			http.Error(w, "Consumer not ready", http.StatusServiceUnavailable)
 			return
 		}
-		if err := s.publish(r.Context(), env); err != nil {
+		env, err := s.ingestFile(r.Context(), ac, filename, data, "upload:"+filename)
+		if err != nil {
 			s.logger.Error("Failed to publish uploaded file", "error", err)
 			http.Error(w, "Failed to process upload", http.StatusInternalServerError)
 			return
-		}
-
-		// Cache last payload (the SDK publish path marshals the envelope itself;
-		// envelope.Marshal == json.Marshal — identical bytes).
-		if envData, err := json.Marshal(env); err == nil {
-			_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, ac.ConnectionID)
 		}
 
 		s.emitEvent(ac.ConnectionID, FileEvent{
@@ -188,6 +169,38 @@ func (s *fileConsumer) handleUpload() http.HandlerFunc {
 			"envelope_id": env.ID,
 		})
 	}
+}
+
+// ingestFile builds an envelope from file bytes, publishes it into the
+// pipeline, and caches it as last_payload. Shared by the HTTP upload handler
+// and the directory watcher so both ingest paths behave identically (the
+// watcher previously only detected files and never published them — #143).
+func (s *fileConsumer) ingestFile(ctx context.Context, ac *ActiveConnection, filename string, data []byte, source string) (*envelope.Envelope, error) {
+	if s.publish == nil {
+		return nil, fmt.Errorf("consumer not ready: publish func not injected")
+	}
+	env := &envelope.Envelope{
+		ID:            uuid.New().String(),
+		TenantID:      ac.TenantID,
+		IntegrationID: ac.ConnectionID,
+		Payload:       data,
+		PayloadSize:   int64(len(data)),
+		ContentType:   detectContentType(filename, data),
+		Source:        source,
+		CurrentStep:   0,
+		StepHistory:   []string{"file-consumer"},
+		CreatedAt:     time.Now().UTC(),
+		Metadata:      map[string]interface{}{"filename": filename},
+	}
+	if err := s.publish(ctx, env); err != nil {
+		return nil, err
+	}
+	// Cache last payload (the SDK publish path marshals the envelope itself;
+	// envelope.Marshal == json.Marshal — identical bytes).
+	if envData, mErr := json.Marshal(env); mErr == nil {
+		_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, ac.ConnectionID)
+	}
+	return env, nil
 }
 
 // handleEvents is an SSE endpoint that streams file activity events.

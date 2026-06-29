@@ -43,6 +43,10 @@ type fileConsumer struct {
 	stopSub  *nats.Subscription
 }
 
+// maxWatchFileBytes caps the size of a watched file the poller will read into
+// memory before publishing (mirrors the 32 MiB cap on the HTTP upload path).
+const maxWatchFileBytes = 32 << 20
+
 // FileEvent represents an activity event for the UI
 type FileEvent struct {
 	Type     string `json:"type"` // "added", "deleted", "uploaded", "error", "connected"
@@ -264,15 +268,47 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 		case <-ticker.C:
 			currentFiles := s.listFiles(ac.WatchDir)
 
-			// Detect new files
+			// Detect new files and ingest them into the pipeline. Previously
+			// this only emitted a UI "added" event and never published the
+			// file's contents — so the directory-watch source silently did
+			// nothing downstream (#143).
 			for name := range currentFiles {
-				if !ac.knownFiles[name] {
-					logger.Info("File added", "file", name)
+				if ac.knownFiles[name] {
+					continue
+				}
+				logger.Info("File added", "file", name)
+				path := filepath.Join(ac.WatchDir, name)
+				if info, statErr := os.Stat(path); statErr == nil && info.Size() > maxWatchFileBytes {
+					logger.Error("Skipping oversized file", "file", name, "size", info.Size(), "limit", maxWatchFileBytes)
 					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "added", Filename: name,
+						Type: "error", Filename: name, Size: info.Size(),
+						Message: "file exceeds size limit", Time: time.Now().UTC().Format(time.RFC3339),
+					})
+					continue
+				}
+				data, readErr := os.ReadFile(path)
+				if readErr != nil {
+					logger.Error("Failed to read detected file", "file", name, "error", readErr)
+					s.emitEvent(ac.ConnectionID, FileEvent{
+						Type: "error", Filename: name, Message: readErr.Error(),
 						Time: time.Now().UTC().Format(time.RFC3339),
 					})
+					continue
 				}
+				env, pubErr := s.ingestFile(ctx, ac, name, data, "watch:"+name)
+				if pubErr != nil {
+					logger.Error("Failed to publish detected file", "file", name, "error", pubErr)
+					s.emitEvent(ac.ConnectionID, FileEvent{
+						Type: "error", Filename: name, Message: pubErr.Error(),
+						Time: time.Now().UTC().Format(time.RFC3339),
+					})
+					continue
+				}
+				logger.Info("File ingested from watch dir", "file", name, "size", len(data), "envelope_id", env.ID)
+				s.emitEvent(ac.ConnectionID, FileEvent{
+					Type: "added", Filename: name, Size: int64(len(data)),
+					Time: time.Now().UTC().Format(time.RFC3339),
+				})
 			}
 
 			// Detect deleted files
