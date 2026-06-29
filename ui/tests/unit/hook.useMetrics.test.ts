@@ -49,7 +49,9 @@ describe('useMetrics Hook', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUpdateMetrics = vi.fn()
-    mockGetMetricsByConnectionId = vi.fn().mockReturnValue(null)
+    // The real store (metricsMap.get) returns undefined for a missing key,
+    // not null — mirror that so the tests reflect production behavior.
+    mockGetMetricsByConnectionId = vi.fn().mockReturnValue(undefined)
     ;(useMetricsStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       updateMetrics: mockUpdateMetrics,
       getMetricsByConnectionId: mockGetMetricsByConnectionId,
@@ -179,10 +181,10 @@ describe('useMetrics Hook', () => {
       expect(result.current).toEqual(stored)
     })
 
-    it('returns null before any data loads', () => {
-      mockGetMetricsByConnectionId.mockReturnValue(null)
+    it('returns undefined before any data loads', () => {
+      mockGetMetricsByConnectionId.mockReturnValue(undefined)
       const { result } = renderHook(() => useMetrics('test-conn'))
-      expect(result.current).toBeNull()
+      expect(result.current).toBeUndefined()
     })
 
     it('reads the store with the correct connection ID', () => {
