@@ -61,6 +61,12 @@ function App() {
               <PipelineBuilderPage />
             </ProtectedRoute>
           } />
+          {/* Edit an existing connection on the builder canvas (#128) */}
+          <Route path="/connections/:id/edit" element={
+            <ProtectedRoute>
+              <PipelineBuilderPage />
+            </ProtectedRoute>
+          } />
           {/* First-login onboarding wizard (#93) */}
           <Route path="/welcome" element={
             <ProtectedRoute>

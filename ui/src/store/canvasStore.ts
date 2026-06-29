@@ -70,6 +70,7 @@ interface CanvasStore {
   // Actions
   initialize: (tenantId?: string) => void
   createCanvas: (name?: string) => Canvas | null
+  importCanvas: (name: string, nodes: Node[], edges: Edge[], deployedConnectionId?: string) => Canvas | null
   updateCanvas: (id: string, nodes: Node[], edges: Edge[]) => void
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
@@ -142,6 +143,38 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       name: name || generateTenantName(canvases),
       nodes: [],
       edges: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const updatedCanvases = [...canvases, newCanvas]
+    set({
+      canvases: updatedCanvases,
+      currentCanvasId: newCanvas.id,
+    })
+    saveToStorage(updatedCanvases, newCanvas.id, tenantId || undefined)
+
+    return newCanvas
+  },
+
+  // Create a canvas pre-populated with nodes/edges (and optionally linked to an
+  // existing deployed connection) and switch to it. Used by the Edit flow (#128)
+  // to load a saved connection's graph when no local canvas is already linked.
+  importCanvas: (name, nodes, edges, deployedConnectionId) => {
+    const { canvases, tenantId } = get()
+
+    if (canvases.length >= MAX_CANVASES) {
+      console.warn(`Cannot create more than ${MAX_CANVASES} canvases`)
+      return null
+    }
+
+    const now = Date.now()
+    const newCanvas: Canvas = {
+      id: generateId(),
+      name: name || generateTenantName(canvases),
+      nodes,
+      edges,
+      deployedConnectionId: deployedConnectionId || undefined,
       createdAt: now,
       updatedAt: now,
     }
