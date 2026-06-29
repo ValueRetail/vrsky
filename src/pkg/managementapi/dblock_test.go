@@ -11,9 +11,11 @@ import (
 )
 
 func TestAdvisoryKey_StableAndPositive(t *testing.T) {
-	// Deterministic: same input → same key.
-	if advisoryKey("grant-abc") != advisoryKey("grant-abc") {
-		t.Fatal("advisoryKey is not deterministic")
+	// Deterministic: same input → same key. (Bind to vars so staticcheck
+	// doesn't flag identical call expressions across the comparison.)
+	const sameInput = "grant-abc"
+	if got, want := advisoryKey(sameInput), advisoryKey(sameInput); got != want {
+		t.Fatalf("advisoryKey not deterministic: %d != %d", got, want)
 	}
 	// Distinct inputs → (very likely) distinct keys.
 	if advisoryKey("grant-abc") == advisoryKey("grant-xyz") {
