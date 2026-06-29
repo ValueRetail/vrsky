@@ -4,11 +4,15 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 
 ## Architecture
 
-- **Type**: Deployment (1 replica for POC)
+- **Type**: Deployment (1 replica — DEV/POC only) → see **High Availability** below for production
 - **Storage Backend**: S3-compatible object storage
 - **Resources**: 2 CPU, 4GB RAM (requests: 1 CPU, 2GB RAM)
 - **Storage**: 100GB via Longhorn distributed storage
 - **Access**: Internal cluster access only (ClusterIP)
+
+> ⚠️ `deployment.yaml` is a **single replica with a single drive** — a node or PVC
+> loss means data loss and downtime. For production pick a path in
+> [High Availability (production) — #136](#high-availability-production--136).
 
 ## Components
 
@@ -17,9 +21,10 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 1. **namespace.yaml** - Creates `vrsky-storage` namespace
 2. **secret.yaml** - MinIO credentials (⚠️ CHANGE IN PRODUCTION!)
 3. **configmap.yaml** - MinIO configuration
-4. **deployment.yaml** - MinIO Deployment + PVC
-5. **service.yaml** - ClusterIP service (API: 9000, Console: 9001)
-6. **setup-job.yaml** - Job to create buckets and configure lifecycle policies
+4. **deployment.yaml** - MinIO Deployment + PVC (DEV/single-node only)
+5. **statefulset-distributed.yaml** - HA: 4-node erasure-coded StatefulSet + headless service + PodDisruptionBudget (production self-hosted)
+6. **service.yaml** - ClusterIP service (API: 9000, Console: 9001) — fronts either the Deployment or the StatefulSet
+7. **setup-job.yaml** - Job to create buckets and configure lifecycle policies
 
 ### Bucket Structure
 
@@ -352,21 +357,81 @@ kubectl apply -f deployment.yaml
 kubectl rollout restart deployment/minio -n vrsky-storage
 ```
 
-### Distributed Mode (Post-POC)
+## High Availability (production) — #136
 
-For production HA, deploy MinIO in distributed mode (4+ nodes):
+`deployment.yaml` is single-node and not durable. For production choose **one**
+of the two options below. Both are drop-in for VRSky's object-storage workers —
+the cloud-storage consumer/producer already speak the S3 API and select GCS /
+Azure via the `objectstore` backend, so switching is endpoint + credentials, not
+code.
+
+### Option A — Managed object store (recommended)
+
+Use **AWS S3**, **Google Cloud Storage**, or **Azure Blob Storage** and let the
+provider own durability (11 nines), replication, HA, and scaling. There is
+nothing to operate, patch, or capacity-plan, and it removes MinIO from the
+failure domain entirely.
+
+Point the workers at the managed bucket via the existing env/secret wiring
+(no manifest in this directory needed — there is no MinIO to deploy):
+
+```yaml
+env:
+  - name: S3_ENDPOINT
+    value: "https://s3.eu-west-1.amazonaws.com" # or omit for AWS SDK default; GCS/Azure use their own endpoints
+  - name: S3_BUCKET
+    value: "vrsky-objects"
+  - name: S3_USE_SSL
+    value: "true"
+  # S3_ACCESS_KEY / S3_SECRET_KEY from a secret, or use IRSA / Workload Identity
+```
+
+Prefer cloud-native auth (IAM Roles for Service Accounts on EKS, Workload
+Identity on GKE, Managed Identity on AKS) over long-lived static keys. Lifecycle
+rules (the `temp/` 1-day expiry) are set on the managed bucket instead of via
+`setup-job.yaml`.
+
+### Option B — Self-hosted distributed MinIO (`statefulset-distributed.yaml`)
+
+When data must stay in-cluster / on-prem, run MinIO in **distributed mode**: 4
+servers × 1 drive in one erasure-coded pool. With the default `EC:2` parity the
+pool tolerates losing **up to 2 drives or nodes** with no data loss and stays
+read+write available while write quorum holds. The included
+`PodDisruptionBudget` (`minAvailable: 3`) keeps node drains/upgrades from
+dropping below quorum.
 
 ```bash
-# Use MinIO Operator
-kubectl apply -k github.com/minio/operator
+# Prereqs (shared with the dev box): namespace, secret, configmap, service
+kubectl apply -f namespace.yaml
+kubectl apply -f secret.yaml          # ⚠️ change credentials first
+kubectl apply -f configmap.yaml
+kubectl apply -f service.yaml         # client-facing ClusterIP (selector app: minio)
 
-# Create MinIO Tenant (distributed)
-kubectl minio tenant create vrsky-minio \
-  --servers 4 \
-  --volumes 16 \
-  --capacity 400Gi \
-  --storage-class longhorn
+# HA workload — REPLACES deployment.yaml (do NOT apply both: same `app: minio`
+# selector would make the client Service fan out across two workloads)
+kubectl apply -f statefulset-distributed.yaml
+
+# Wait for all 4 servers to join the pool
+kubectl rollout status statefulset/minio -n vrsky-storage
+
+# Bootstrap buckets + lifecycle once the pool is Ready
+kubectl apply -f setup-job.yaml
 ```
+
+**Operational notes**
+
+- A distributed pool's server count is **fixed**. To grow capacity, add a *new*
+  server pool — append another `https://...{4...7}` range to the `server` args
+  and raise `replicas` — never resize an existing pool in place.
+- Use a real block / replicated `StorageClass` (Longhorn, EBS, PD), not
+  `local-path`, so a PVC survives node loss. Minimum 4 drives for erasure coding.
+- Spread servers across nodes (the manifest sets a `topologySpreadConstraint`)
+  so one node failure costs at most one drive.
+
+> The MinIO **Operator** (`kubectl apply -k github.com/minio/operator` + a
+> `Tenant` CR) is an alternative to the raw StatefulSet that adds automated
+> upgrades, TLS, and multi-tenant management. Prefer it if you already run the
+> operator; otherwise the StatefulSet here has no operator dependency.
 
 ## Integration with VRSky
 

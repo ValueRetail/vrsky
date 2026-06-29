@@ -1,3 +1,15 @@
+# =============================================================================
+# MinIO — DEV / SINGLE-NODE ONLY (#136)
+# =============================================================================
+# Single replica, single drive, no erasure coding: a node or PVC loss means
+# data loss and downtime. Fine for local/POC clusters; NOT for production.
+#
+# For production use ONE of:
+#   - statefulset-distributed.yaml  (self-hosted HA: 4-node erasure-coded pool)
+#   - a managed object store (AWS S3 / GCS / Azure Blob)  <-- recommended
+# See README "High Availability (production) — #136". Do not apply this file
+# alongside statefulset-distributed.yaml (they share the `app: minio` selector).
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
