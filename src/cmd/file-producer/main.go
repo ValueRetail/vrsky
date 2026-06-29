@@ -19,6 +19,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -34,6 +35,8 @@ type fileProducer struct {
 
 	db     *sql.DB
 	logger *slog.Logger
+	nc     *nats.Conn
+	cmdSub *nats.Subscription
 
 	defaultOutputDir string
 	allowedRoots     []string
@@ -44,6 +47,38 @@ type fileProducer struct {
 	configCacheMu   sync.RWMutex
 	configCacheTTL  time.Duration
 	configCacheTime map[string]time.Time
+}
+
+// evictConfigCache drops a connection's cached config so the next message
+// re-reads it from the DB. Called when a start/stop command for the connection
+// arrives (i.e. a redeploy), so config edits take effect immediately instead of
+// after the cache TTL (#141).
+func (p *fileProducer) evictConfigCache(connectionID string) {
+	p.configCacheMu.Lock()
+	delete(p.configCache, connectionID)
+	delete(p.configCacheTime, connectionID)
+	p.configCacheMu.Unlock()
+}
+
+// handleConnectionCommand evicts the cache for the connection named in a
+// start/stop command.
+func (p *fileProducer) handleConnectionCommand(msg *nats.Msg) {
+	var cmd struct {
+		ConnectionID string `json:"connection_id"`
+	}
+	if err := json.Unmarshal(msg.Data, &cmd); err != nil || cmd.ConnectionID == "" {
+		return
+	}
+	p.evictConfigCache(cmd.ConnectionID)
+	p.logger.Info("Evicted producer config cache on connection command", "connection_id", cmd.ConnectionID)
+}
+
+// Stop unsubscribes the command listener (the SDK runner closes NATS/DB).
+func (p *fileProducer) Stop(ctx context.Context) error {
+	if p.cmdSub != nil {
+		_ = p.cmdSub.Unsubscribe()
+	}
+	return nil
 }
 
 // ConnectionConfig holds the file output configuration for one producer node.
@@ -102,6 +137,17 @@ func (p *fileProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	allowedOrigin := getEnv("FILE_PRODUCER_ALLOWED_ORIGIN", "http://localhost:5173")
 	authToken := os.Getenv("FILE_PRODUCER_AUTH_TOKEN")
 	p.RegisterHTTPHandler("/files", filesHandler(p.allowedRoots, authToken, allowedOrigin, p.logger))
+
+	// Subscribe to connection start/stop commands so a redeploy evicts this
+	// connection's cached config immediately (#141). nil in some tests/harness.
+	p.nc = res.NATS
+	if p.nc != nil {
+		sub, err := p.nc.Subscribe("vrsky.commands.*.connection.*", p.handleConnectionCommand)
+		if err != nil {
+			return fmt.Errorf("subscribe to connection commands: %w", err)
+		}
+		p.cmdSub = sub
+	}
 
 	p.logger.Info("file-producer configured", "output_dir", p.defaultOutputDir, "allowed_roots", p.allowedRoots)
 	return nil

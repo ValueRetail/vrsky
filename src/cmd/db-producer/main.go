@@ -15,6 +15,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
@@ -32,6 +33,8 @@ type dbProducer struct {
 
 	db     *sql.DB // management DB
 	logger *slog.Logger
+	nc     *nats.Conn
+	cmdSub *nats.Subscription
 
 	// Cache target DB connections per connection ID (multiple producers per connection).
 	targetCache     map[string][]*TargetConnection
@@ -111,13 +114,56 @@ func (p *dbProducer) Configure(ctx context.Context, res *sdk.Resources) error {
 	p.RegisterHTTPHandler("/events/", p.eventsHandler())
 	p.RegisterHTTPHandler("/test-connection/", testConnectionHandler())
 
+	// Evict a connection's cached target pools on redeploy (#141).
+	p.nc = res.NATS
+	if p.nc != nil {
+		sub, err := p.nc.Subscribe("vrsky.commands.*.connection.*", p.handleConnectionCommand)
+		if err != nil {
+			return fmt.Errorf("subscribe to connection commands: %w", err)
+		}
+		p.cmdSub = sub
+	}
+
 	p.logger.Info("db-producer configured")
 	return nil
+}
+
+// evictTargetCache drops (and closes) a connection's cached target pools so the
+// next message re-reads the connection config from the DB. Called on a
+// start/stop command (redeploy) so config edits take effect immediately (#141).
+func (p *dbProducer) evictTargetCache(connectionID string) {
+	p.targetCacheMu.Lock()
+	if tcs, ok := p.targetCache[connectionID]; ok {
+		for _, tc := range tcs {
+			if tc.DB != nil {
+				_ = tc.DB.Close()
+			}
+		}
+		delete(p.targetCache, connectionID)
+		delete(p.targetCacheTime, connectionID)
+	}
+	p.targetCacheMu.Unlock()
+}
+
+// handleConnectionCommand evicts the target cache for the connection in a
+// start/stop command.
+func (p *dbProducer) handleConnectionCommand(msg *nats.Msg) {
+	var cmd struct {
+		ConnectionID string `json:"connection_id"`
+	}
+	if err := json.Unmarshal(msg.Data, &cmd); err != nil || cmd.ConnectionID == "" {
+		return
+	}
+	p.evictTargetCache(cmd.ConnectionID)
+	p.logger.Info("Evicted producer target cache on connection command", "connection_id", cmd.ConnectionID)
 }
 
 // Stop closes every target DB pool opened during message processing. The SDK
 // runner calls this after the subscription has drained.
 func (p *dbProducer) Stop(ctx context.Context) error {
+	if p.cmdSub != nil {
+		_ = p.cmdSub.Unsubscribe()
+	}
 	p.targetCacheMu.Lock()
 	defer p.targetCacheMu.Unlock()
 	for _, tcs := range p.targetCache {

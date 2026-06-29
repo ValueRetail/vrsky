@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
@@ -34,6 +35,8 @@ type cloudProducer struct {
 
 	db     *sql.DB
 	logger *slog.Logger
+	nc     *nats.Conn
+	cmdSub *nats.Subscription
 
 	// newStore opens an ObjectStore. Defaulted to objectstore.New in Configure;
 	// tests inject a fake. now returns the timestamp used in key templates
@@ -86,7 +89,42 @@ func (p *cloudProducer) Configure(ctx context.Context, res *sdk.Resources) error
 	if p.cacheTTL == 0 {
 		p.cacheTTL = 5 * time.Minute
 	}
+	// Evict a connection's cached config on redeploy (#141).
+	p.nc = res.NATS
+	if p.nc != nil {
+		sub, err := p.nc.Subscribe("vrsky.commands.*.connection.*", p.handleConnectionCommand)
+		if err != nil {
+			return fmt.Errorf("subscribe to connection commands: %w", err)
+		}
+		p.cmdSub = sub
+	}
+
 	p.logger.Info("cloud-storage-producer configured")
+	return nil
+}
+
+// handleConnectionCommand evicts the cached config for the connection named in
+// a start/stop command so a redeploy's config edits take effect immediately
+// instead of after the cache TTL (#141).
+func (p *cloudProducer) handleConnectionCommand(msg *nats.Msg) {
+	var cmd struct {
+		ConnectionID string `json:"connection_id"`
+	}
+	if err := json.Unmarshal(msg.Data, &cmd); err != nil || cmd.ConnectionID == "" {
+		return
+	}
+	p.cacheMu.Lock()
+	delete(p.cache, cmd.ConnectionID)
+	delete(p.cacheTime, cmd.ConnectionID)
+	p.cacheMu.Unlock()
+	p.logger.Info("Evicted producer config cache on connection command", "connection_id", cmd.ConnectionID)
+}
+
+// Stop unsubscribes the command listener (the SDK runner closes NATS/DB).
+func (p *cloudProducer) Stop(ctx context.Context) error {
+	if p.cmdSub != nil {
+		_ = p.cmdSub.Unsubscribe()
+	}
 	return nil
 }
 
