@@ -40,6 +40,9 @@ type kafkaConsumer struct {
 	// ping checks broker reachability for the connection-test endpoint.
 	// Defaulted to realKafkaPing in Configure; tests inject a stub.
 	ping func(ctx context.Context, cfg *KafkaConfig) (int, error)
+	// sample peeks the earliest available message on the topic for the
+	// schema-preview endpoint (#144). Defaulted to realKafkaSample; tests stub.
+	sample func(ctx context.Context, cfg *KafkaConfig) ([]byte, error)
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
@@ -93,7 +96,11 @@ func (k *kafkaConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	if k.ping == nil {
 		k.ping = realKafkaPing
 	}
+	if k.sample == nil {
+		k.sample = realKafkaSample
+	}
 	k.RegisterHTTPHandler("/test-connection/", k.handleTestConnection())
+	k.RegisterHTTPHandler("/sample-data/", k.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }

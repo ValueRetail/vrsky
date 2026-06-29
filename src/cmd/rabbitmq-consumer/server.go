@@ -55,3 +55,33 @@ func (c *rabbitConsumer) handleTestConnection() http.HandlerFunc {
 		writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 	}
 }
+
+// handleSampleData peeks one message off the queue (non-destructively) and
+// returns it as parsed JSON for the UI schema-preview flow (#144).
+// Response: {"ok":true,"data":<parsed JSON | {"value":"…"}>} or {"ok":false,"error":"…"}.
+func (c *rabbitConsumer) handleSampleData() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if testGate(w, r) {
+			return
+		}
+		var cfg RabbitMQConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "invalid JSON request body"})
+			return
+		}
+		if cfg.URL == "" || cfg.Queue == "" {
+			writeTestJSON(w, http.StatusBadRequest, map[string]interface{}{"ok": false, "error": "AMQP URL and queue are required"})
+			return
+		}
+		raw, err := c.sample(&cfg)
+		if err != nil {
+			writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": false, "error": err.Error()})
+			return
+		}
+		var parsed interface{}
+		if json.Unmarshal(raw, &parsed) != nil {
+			parsed = map[string]interface{}{"value": string(raw)}
+		}
+		writeTestJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "data": parsed})
+	}
+}

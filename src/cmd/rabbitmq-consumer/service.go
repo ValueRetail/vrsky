@@ -35,6 +35,9 @@ type rabbitConsumer struct {
 	// dial opens an AMQP source. Defaulted to realDial in Configure; tests
 	// inject a fake so the loop runs without a broker.
 	dial dialFunc
+	// sample peeks one message off the queue for the schema-preview endpoint
+	// (#144). Defaulted to realRabbitSample in Configure; tests stub it.
+	sample rabbitSampleFunc
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
@@ -83,7 +86,11 @@ func (c *rabbitConsumer) Configure(ctx context.Context, res *sdk.Resources) erro
 	if c.dial == nil {
 		c.dial = realDial
 	}
+	if c.sample == nil {
+		c.sample = realRabbitSample
+	}
 	c.RegisterHTTPHandler("/test-connection/", c.handleTestConnection())
+	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }

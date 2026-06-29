@@ -110,6 +110,28 @@ export async function discoverSchema(
       return fieldsFromColumns(cols.map((f) => ({ name: f.name, type: sfTypeToBadge(f.type || ''), nullable: f.nullable })))
     }
 
+    case 'kafka': {
+      const kc = (consumerConfig.kafka as Record<string, unknown>) || {}
+      if (!kc.brokers || !kc.topic) throw new Error('Set the Kafka brokers and topic on the input first')
+      const data = await postJSON('http://localhost:9220/sample-data/', {
+        brokers: kc.brokers, topic: kc.topic, consumer_group: kc.consumer_group,
+        auth_type: kc.auth_type, username: kc.username, password: kc.password,
+        ca_cert: kc.ca_cert, client_cert: kc.client_cert, client_key: kc.client_key,
+      })
+      if (!data.ok) throw new Error((data.error as string) || 'No messages on the topic to sample yet')
+      return inferSchema(data.data)
+    }
+
+    case 'rabbitmq': {
+      const rc = (consumerConfig.rabbitmq as Record<string, unknown>) || {}
+      if (!rc.url || !rc.queue) throw new Error('Set the RabbitMQ URL and queue on the input first')
+      const data = await postJSON('http://localhost:9230/sample-data/', {
+        url: rc.url, username: rc.username, password: rc.password, queue: rc.queue,
+      })
+      if (!data.ok) throw new Error((data.error as string) || 'No messages on the queue to sample yet')
+      return inferSchema(data.data)
+    }
+
     default: {
       // http / webhook (and anything else): the only sample is a deployed
       // connection's last payload.
