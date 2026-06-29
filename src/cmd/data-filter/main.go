@@ -18,9 +18,24 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+)
+
+// Per-connection filter throughput counters. Exposed on the worker's /metrics
+// endpoint so drop volume is visible without enabling debug logging (#145).
+var (
+	filterPassedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "vrsky_filter_passed_total",
+		Help: "Messages/rows that passed a filter, by connection.",
+	}, []string{"connection_id"})
+	filterDroppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "vrsky_filter_dropped_total",
+		Help: "Messages/rows dropped by a filter, by connection.",
+	}, []string{"connection_id"})
 )
 
 type Config struct {
@@ -284,6 +299,8 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 				}
 			}
 			if len(result) == 0 {
+				filterDroppedTotal.WithLabelValues(connectionID).Add(float64(dropped))
+				s.logger.Info("Filter dropped all rows", "connection_id", connectionID, "dropped", dropped, "rules", len(entry.Config.Rules))
 				s.emitEvent(connectionID, FilterEvent{
 					Type: "dropped", Message: fmt.Sprintf("All %d rows filtered out", dropped),
 					Time: now(), Rules: len(entry.Config.Rules),
@@ -296,6 +313,8 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 				filtered = d
 				passed = 1
 			} else {
+				filterDroppedTotal.WithLabelValues(connectionID).Inc()
+				s.logger.Info("Filter dropped message", "connection_id", connectionID, "dropped", 1, "rules", len(entry.Config.Rules))
 				s.emitEvent(connectionID, FilterEvent{
 					Type: "dropped", Message: "Message filtered out",
 					Time: now(), Rules: len(entry.Config.Rules),
@@ -359,6 +378,12 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 		msg = "Passed through (no filter rules)"
 	}
 
+	if passed > 0 {
+		filterPassedTotal.WithLabelValues(connectionID).Add(float64(passed))
+	}
+	if dropped > 0 {
+		filterDroppedTotal.WithLabelValues(connectionID).Add(float64(dropped))
+	}
 	s.logger.Info("Filter applied", "connection_id", connectionID, "passed", passed, "dropped", dropped, "extracted", len(entry.Config.ExtractFields))
 	s.emitEvent(connectionID, FilterEvent{
 		Type:    "passed",
