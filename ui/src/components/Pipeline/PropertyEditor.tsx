@@ -3467,17 +3467,37 @@ export default function PropertyEditor({
             )}
 
             {config.type === 'file' && (
-              <StyledInput
-                label="Output Directory"
-                placeholder="/tmp/output"
-                value={(config.file as any)?.path || ''}
-                onChange={(value) =>
-                  setConfig({
-                    ...config,
-                    file: { ...(config.file as any), path: value },
-                  })
-                }
-              />
+              <>
+                <StyledInput
+                  label="Output Directory"
+                  placeholder="/data/output"
+                  value={(config.file as any)?.path || ''}
+                  onChange={(value) =>
+                    setConfig({
+                      ...config,
+                      file: { ...(config.file as any), path: value },
+                    })
+                  }
+                />
+                {/* Warn upfront about a relative path: the worker requires an
+                    absolute directory under a mounted root and otherwise drops
+                    every message at runtime with no UI feedback (#142). */}
+                {(() => {
+                  const p = String((config.file as any)?.path || '').trim()
+                  if (p && !p.startsWith('/')) {
+                    return (
+                      <div style={{ marginTop: '-8px', marginBottom: '16px', fontSize: '12px', color: '#b45309' }}>
+                        ⚠ Use an <strong>absolute directory</strong> under a mounted path (e.g. <code>/data/output</code>). A filename or relative path is rejected and messages are dropped.
+                      </div>
+                    )
+                  }
+                  return (
+                    <div style={{ marginTop: '-8px', marginBottom: '16px', fontSize: '11px', color: '#9ca3af' }}>
+                      Absolute directory the file is written into (the filename is generated), e.g. <code>/data/output</code>.
+                    </div>
+                  )
+                })()}
+              </>
             )}
 
             {config.type === 'database' && (
