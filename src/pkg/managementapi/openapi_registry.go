@@ -113,6 +113,7 @@ var apiRoutes = []apiRoute{
 	{"PUT /api/v1/tenants/{tenant_id}/oidc", "put", "/api/v1/tenants/{tenant_id}/oidc", "Tenants", "Upsert the workspace OIDC config", nil, nil},
 	{"DELETE /api/v1/tenants/{tenant_id}/oidc", "delete", "/api/v1/tenants/{tenant_id}/oidc", "Tenants", "Delete the workspace OIDC config", nil, nil},
 	{"GET /api/v1/tenants/{tenant_id}/members", "get", "/api/v1/tenants/{tenant_id}/members", "Tenants", "List workspace members", nil, tof(TenantMember{})},
+	{"POST /api/v1/tenants/{tenant_id}/members", "post", "/api/v1/tenants/{tenant_id}/members", "Tenants", "Add a registered user to the workspace by email (owner only)", tof(addMemberRequest{}), tof(TenantMember{})},
 	{"PUT /api/v1/tenants/{tenant_id}/members/{user_id}", "put", "/api/v1/tenants/{tenant_id}/members/{user_id}", "Tenants", "Set a member's role (owner only)", nil, nil},
 	{"DELETE /api/v1/tenants/{tenant_id}/members/{user_id}", "delete", "/api/v1/tenants/{tenant_id}/members/{user_id}", "Tenants", "Remove a member (owner only)", nil, nil},
 	{"GET /api/v1/tenants/{tenant_id}/quotas", "get", "/api/v1/tenants/{tenant_id}/quotas", "Tenants", "Get workspace quotas + usage", nil, tof(TenantQuotas{})},

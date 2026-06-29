@@ -1047,6 +1047,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// because admins can manage resources but not redistribute power.
 	ownerMW := RequireRole("owner")
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/members", sessionMW(tenantMW(http.HandlerFunc(h.HandleListMembers))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/members", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleAddMember)))).ServeHTTP)
 	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleSetMemberRole)))).ServeHTTP)
 	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleRemoveMember)))).ServeHTTP)
 

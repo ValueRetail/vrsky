@@ -29,6 +29,18 @@ export async function listMembers(tenantID: string): Promise<TenantMember[]> {
   return resp.data.data ?? []
 }
 
+export async function addMember(
+  tenantID: string,
+  email: string,
+  role: TenantRole,
+): Promise<TenantMember> {
+  const resp = await apiClient.post<Envelope<TenantMember>>(
+    `/api/v1/tenants/${tenantID}/members`,
+    { email, role },
+  )
+  return resp.data.data
+}
+
 export async function setMemberRole(
   tenantID: string,
   userID: string,

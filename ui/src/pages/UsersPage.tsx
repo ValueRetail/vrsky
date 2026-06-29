@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
-import { listMembers, setMemberRole, removeMember, type TenantMember, type TenantRole } from '@/services/membersService'
+import { listMembers, addMember, setMemberRole, removeMember, type TenantMember, type TenantRole } from '@/services/membersService'
 
 const ROLES: TenantRole[] = ['viewer', 'editor', 'admin', 'owner']
 
@@ -28,6 +28,10 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [myRole, setMyRole] = useState<TenantRole | null>(null)
+  const [addEmail, setAddEmail] = useState('')
+  const [addRole, setAddRole] = useState<TenantRole>('viewer')
+  const [adding, setAdding] = useState(false)
+  const [addNotice, setAddNotice] = useState<string | null>(null)
 
   const refresh = async () => {
     if (!currentTenant) {
@@ -55,6 +59,29 @@ export default function UsersPage() {
 
   const ownerCount = members.filter((m) => m.role === 'owner').length
   const canMutate = myRole === 'owner'
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!currentTenant || !addEmail.trim()) return
+    setAdding(true)
+    setError(null)
+    setAddNotice(null)
+    try {
+      const added = await addMember(currentTenant.id, addEmail.trim(), addRole)
+      setAddEmail('')
+      setAddRole('viewer')
+      setAddNotice(`Added ${added.email} as ${added.role}.`)
+      await refresh()
+    } catch (err) {
+      // Surface the server message (e.g. "no registered user with that email").
+      const ax = err as { response?: { data?: { error?: { message?: string }; message?: string } } }
+      const msg = ax.response?.data?.error?.message || ax.response?.data?.message ||
+        (err instanceof Error ? err.message : 'Failed to add member')
+      setError(msg)
+    } finally {
+      setAdding(false)
+    }
+  }
 
   const handleRoleChange = async (member: TenantMember, role: TenantRole) => {
     if (role === member.role) return
@@ -105,6 +132,60 @@ export default function UsersPage() {
         <div style={{ padding: '10px', background: '#fef2f2', color: '#991b1b', fontSize: '13px', borderRadius: '6px', marginBottom: '12px' }}>
           {error}
         </div>
+      )}
+
+      {addNotice && (
+        <div style={{ padding: '10px', background: '#ecfdf5', color: '#065f46', fontSize: '13px', borderRadius: '6px', marginBottom: '12px' }}>
+          {addNotice}
+        </div>
+      )}
+
+      {/* Add member by email (#130). Interim flow: the person must already have
+          a VRSky account — there is no email invite/accept round trip yet. */}
+      {canMutate && (
+        <form
+          onSubmit={handleAdd}
+          style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px', padding: '12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 260px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Add member by email</label>
+            <input
+              type="email"
+              required
+              value={addEmail}
+              onChange={(e) => setAddEmail(e.target.value)}
+              placeholder="teammate@example.com"
+              style={{ padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Role</label>
+            <select
+              value={addRole}
+              onChange={(e) => setAddRole(e.target.value as TenantRole)}
+              style={{ padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={adding || !addEmail.trim()}
+            style={{
+              padding: '7px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '4px',
+              background: '#2563eb', color: '#fff', border: 'none',
+              opacity: adding || !addEmail.trim() ? 0.5 : 1,
+              cursor: adding || !addEmail.trim() ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {adding ? 'Adding…' : 'Add member'}
+          </button>
+          <span style={{ fontSize: '11px', color: '#9ca3af', flexBasis: '100%' }}>
+            The person must already have a VRSky account.
+          </span>
+        </form>
       )}
 
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>

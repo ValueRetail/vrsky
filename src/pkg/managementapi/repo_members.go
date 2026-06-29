@@ -27,6 +27,33 @@ type TenantMember struct {
 // with zero owners — the caller should refuse with 409.
 var ErrLastOwner = errors.New("operation would leave the tenant without an owner")
 
+// ErrAlreadyMember indicates the user is already a member of the tenant — the
+// caller should refuse the add with 409.
+var ErrAlreadyMember = errors.New("user is already a member of this tenant")
+
+// AddTenantMember adds an existing user to a tenant with the given role. The
+// user is joined immediately (invited_at = joined_at = now) since this is a
+// direct add, not an email invite. Returns ErrAlreadyMember if the (user,
+// tenant) membership already exists.
+func (r *PostgresRepository) AddTenantMember(ctx context.Context, tenantID, userID, role string) error {
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO user_tenant_roles (user_id, tenant_id, role, invited_at, joined_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		ON CONFLICT (user_id, tenant_id) DO NOTHING
+	`, userID, tenantID, role)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAlreadyMember
+	}
+	return nil
+}
+
 // ListTenantMembers returns every (user, role) tuple for one tenant.
 func (r *PostgresRepository) ListTenantMembers(ctx context.Context, tenantID string) ([]*TenantMember, error) {
 	rows, err := r.db.QueryContext(ctx, `
