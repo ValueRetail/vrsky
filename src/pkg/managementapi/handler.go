@@ -1061,6 +1061,10 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/invites/{invite_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleRevokeInvite)))).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/invites/accept", sessionMW(http.HandlerFunc(h.HandleAcceptInvite)).ServeHTTP)
 
+	// Tenant NATS service discovery (#21). Any member (and workers) may read the
+	// active instance set for the tenant.
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/nats-instances", sessionMW(tenantMW(http.HandlerFunc(h.HandleListNATSInstances))).ServeHTTP)
+
 	// Tenant quotas (#74). Reads = any member; writes = owner.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
 	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)

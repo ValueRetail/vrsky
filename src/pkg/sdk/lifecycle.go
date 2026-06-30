@@ -24,6 +24,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/health"
 	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/natsdiscovery"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
@@ -419,6 +420,21 @@ func connectNATS(logger *slog.Logger) (*nats.Conn, error) {
 	url := os.Getenv("NATS_URL")
 	if url == "" {
 		url = "nats://localhost:4222"
+	}
+	// Service discovery (#21): if MGMT_API_URL + TENANT_ID are set, resolve the
+	// tenant's NATS instances and dial all of them (comma-separated). nats.Connect
+	// load-balances + fails over across the set and reconnects automatically.
+	// Any discovery hiccup falls back to NATS_URL, so compose/dev is unaffected.
+	if disc := natsdiscovery.New(os.Getenv("MGMT_API_URL"), os.Getenv("TENANT_ID"), os.Getenv("SERVICE_TOKEN")); disc.Enabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		joined, err := disc.ResolveJoined(ctx)
+		cancel()
+		if err != nil {
+			logger.Warn("NATS discovery failed; falling back to NATS_URL", "error", err)
+		} else if joined != "" {
+			logger.Info("NATS discovery resolved tenant instances", "servers", joined)
+			url = joined
+		}
 	}
 	return nats.Connect(url,
 		nats.ReconnectWait(100*time.Millisecond),

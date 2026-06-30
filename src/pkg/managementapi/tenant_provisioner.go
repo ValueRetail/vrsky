@@ -128,6 +128,18 @@ func (p *TenantProvisioner) processJob(job ProvisionJob) {
 	_ = p.repo.UpdateProvisioningJob(ctx, job.JobID, "completed", 100, "NATS instance ready", "")
 	_ = p.repo.UpdateProvisioningJobCompleted(ctx, job.JobID, &now)
 	_ = p.repo.UpdateTenantStatus(ctx, job.TenantID, "active", &natsSlug)
+
+	// Record the instance for service discovery (#21) so workers can resolve it
+	// via the API instead of a hardcoded URL.
+	if store, ok := p.repo.(NATSInstanceStore); ok {
+		dnsName := natsSlug + "." + tenantNATSNamespace + ".svc.cluster.local"
+		if inst, rerr := store.RegisterNATSInstance(ctx, job.TenantID, 1, dnsName); rerr != nil {
+			p.logger.Printf("warn: could not record NATS instance for tenant %s: %v", job.TenantID, rerr)
+		} else if serr := store.SetNATSInstanceStatus(ctx, inst.ID, "active"); serr != nil {
+			p.logger.Printf("warn: could not activate NATS instance %s: %v", inst.ID, serr)
+		}
+	}
+
 	p.broadcastStatus(job.TenantID, "active", 100, "Workspace ready", natsUrl, "")
 	p.logger.Printf("Provisioning complete for tenant %s: %s", job.TenantID, natsUrl)
 }

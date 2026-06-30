@@ -345,6 +345,11 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// WithRollupDB gates the hourly rollup to one replica per tick under N
 	// replicas (#138); upserts are idempotent, so this is a contention guard.
 	managementapi.NewUsageRollup(repo, promClient, managementapi.WithRollupDB(db)).Start()
+
+	// Tenant NATS health monitor (#21): probe each instance's monitoring
+	// endpoint and flip active/unhealthy so the discovery API stops handing out
+	// dead instances. Advisory-lock-gated (db) so only one replica probes.
+	managementapi.NewNATSHealthMonitor(repo, db, slog.Default()).Start()
 	// Phase 4D (#95): the public status page reads the same Prometheus client.
 	restHandler.SetPrometheus(promClient)
 

@@ -121,6 +121,7 @@ var apiRoutes = []apiRoute{
 	{"POST /api/v1/tenants/{tenant_id}/invites/{invite_id}/resend", "post", "/api/v1/tenants/{tenant_id}/invites/{invite_id}/resend", "Tenants", "Resend an invite — new token + expiry (owner only)", nil, tof(TenantInvite{})},
 	{"DELETE /api/v1/tenants/{tenant_id}/invites/{invite_id}", "delete", "/api/v1/tenants/{tenant_id}/invites/{invite_id}", "Tenants", "Revoke a pending invite (owner only)", nil, nil},
 	{"POST /api/v1/invites/accept", "post", "/api/v1/invites/accept", "Tenants", "Accept a workspace invite for the signed-in user", tof(acceptInviteRequest{}), tof(TenantMember{})},
+	{"GET /api/v1/tenants/{tenant_id}/nats-instances", "get", "/api/v1/tenants/{tenant_id}/nats-instances", "Tenants", "List the tenant's active NATS instances + client URLs (service discovery)", nil, tof(natsInstancesResponse{})},
 	{"GET /api/v1/tenants/{tenant_id}/quotas", "get", "/api/v1/tenants/{tenant_id}/quotas", "Tenants", "Get workspace quotas + usage", nil, tof(TenantQuotas{})},
 	{"PUT /api/v1/tenants/{tenant_id}/quotas", "put", "/api/v1/tenants/{tenant_id}/quotas", "Tenants", "Update workspace quotas (owner only)", tof(TenantQuotas{}), tof(TenantQuotas{})},
 	{"GET /api/v1/tenants/{tenant_id}/usage", "get", "/api/v1/tenants/{tenant_id}/usage", "Usage", "Per-tenant usage (month totals + daily)", nil, tof(UsageResponse{})},
