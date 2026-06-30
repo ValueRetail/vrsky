@@ -50,27 +50,25 @@ build_and_import() {
   echo "  ✓ $ref"
 }
 
-run_set() {
-  local -n set=$1
-  for entry in "${set[@]}"; do
-    # shellcheck disable=SC2086
-    build_and_import $entry
-  done
-}
-
 if ! k3d cluster list "$CLUSTER" >/dev/null 2>&1; then
   echo "k3d cluster '$CLUSTER' not found — create it first:" >&2
   echo "  k3d cluster create --config infrastructure/kubernetes/k3d-config.yaml" >&2
   exit 2
 fi
 
-echo "Loading images (scope: $SCOPE) into k3d cluster '$CLUSTER'..."
+# Select the entries for the chosen scope (bash 3.2-compatible — no namerefs).
 case "$SCOPE" in
-  core)    run_set CORE ;;
-  workers) run_set WORKERS ;;
-  all)     run_set CORE; run_set WORKERS ;;
+  core)    SETS=("${CORE[@]}") ;;
+  workers) SETS=("${WORKERS[@]}") ;;
+  all)     SETS=("${CORE[@]}" "${WORKERS[@]}") ;;
   *) echo "unknown scope '$SCOPE' (use core|workers|all)" >&2; exit 2 ;;
 esac
+
+echo "Loading images (scope: $SCOPE) into k3d cluster '$CLUSTER'..."
+for entry in "${SETS[@]}"; do
+  # shellcheck disable=SC2086
+  build_and_import $entry
+done
 
 echo
 echo "Done. Restart any already-deployed pods to pick up the imported images, e.g.:"
