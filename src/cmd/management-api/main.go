@@ -345,6 +345,28 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// WithRollupDB gates the hourly rollup to one replica per tick under N
 	// replicas (#138); upserts are idempotent, so this is a contention guard.
 	managementapi.NewUsageRollup(repo, promClient, managementapi.WithRollupDB(db)).Start()
+
+	// Tenant NATS health monitor (#21): probe each instance's monitoring
+	// endpoint and flip active/unhealthy so the discovery API stops handing out
+	// dead instances. Advisory-lock-gated (db) so only one replica probes.
+	managementapi.NewNATSHealthMonitor(repo, db, slog.Default()).Start()
+
+	// Tenant NATS autoscaler (#19): scrape per-instance load, provision a new
+	// instance past capacity, decommission empty extras. Advisory-lock-gated.
+	// Inert without a K8s provisioner (compose); scale actions only run in a
+	// real cluster. The 80%-capacity signal is exported as a Prometheus gauge
+	// (vrsky_nats_instance_capacity_pct) for Alertmanager (#84).
+	natsAutoscaler := managementapi.NewNATSAutoscaler(repo, k8sProvisioner, db, slog.Default()).
+		WithSlugLookup(func(ctx context.Context, tenantID string) (string, error) {
+			var slug string
+			// lint:tenant-ok — resolving a tenant's own slug by PK for provisioning.
+			const q = `SELECT slug FROM tenants WHERE id = $1`
+			if err := db.QueryRowContext(ctx, q, tenantID).Scan(&slug); err != nil {
+				return "", err
+			}
+			return slug, nil
+		})
+	natsAutoscaler.Start()
 	// Phase 4D (#95): the public status page reads the same Prometheus client.
 	restHandler.SetPrometheus(promClient)
 

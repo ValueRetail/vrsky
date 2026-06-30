@@ -38,30 +38,43 @@ func NewK8sNATSProvisioner(client kubernetes.Interface, logger *log.Logger) *K8s
 	return &K8sNATSProvisioner{client: client, logger: logger}
 }
 
-// NATSUrl returns the in-cluster DNS URL for a tenant's NATS instance.
-func NATSUrl(tenantSlug string) string {
-	return fmt.Sprintf("nats://nats-%s-1.%s.svc.cluster.local:4222", tenantSlug, tenantNATSNamespace)
+// NATSUrl returns the in-cluster DNS URL for a tenant's first NATS instance.
+func NATSUrl(tenantSlug string) string { return NATSUrlN(tenantSlug, 1) }
+
+// NATSUrlN returns the in-cluster DNS URL for instance n of a tenant's NATS.
+func NATSUrlN(tenantSlug string, n int) string {
+	return fmt.Sprintf("nats://%s.%s.svc.cluster.local:4222", natsResourceNameN(tenantSlug, n), tenantNATSNamespace)
 }
 
-// natsResourceName returns the K8s resource name for a tenant's NATS instance.
-func natsResourceName(tenantSlug string) string {
-	return fmt.Sprintf("nats-%s-1", tenantSlug)
+// natsResourceName returns the K8s resource name for a tenant's first instance.
+func natsResourceName(tenantSlug string) string { return natsResourceNameN(tenantSlug, 1) }
+
+// natsResourceNameN returns the K8s resource name for instance n.
+func natsResourceNameN(tenantSlug string, n int) string {
+	return fmt.Sprintf("nats-%s-%d", tenantSlug, n)
 }
 
-// ProvisionNATS creates a Deployment, Service, and NetworkPolicy for a tenant's NATS instance.
-// onProgress is called with (percent, stepDescription) as provisioning progresses.
+// ProvisionNATS provisions a tenant's first NATS instance.
 func (p *K8sNATSProvisioner) ProvisionNATS(ctx context.Context, tenantSlug string, onProgress func(int, string)) (string, error) {
-	name := natsResourceName(tenantSlug)
+	return p.ProvisionNATSInstance(ctx, tenantSlug, 1, onProgress)
+}
+
+// ProvisionNATSInstance creates a Deployment, Service, and NetworkPolicy for
+// instance n of a tenant's NATS (#19 autoscaling provisions n>1). onProgress is
+// called with (percent, stepDescription) as provisioning progresses.
+func (p *K8sNATSProvisioner) ProvisionNATSInstance(ctx context.Context, tenantSlug string, n int, onProgress func(int, string)) (string, error) {
+	name := natsResourceNameN(tenantSlug, n)
+	numStr := fmt.Sprintf("%d", n)
 	labels := map[string]string{
 		"app":          "nats",
 		"component":    "tenant-messaging",
 		"tenant-id":    tenantSlug,
-		"instance-num": "1",
+		"instance-num": numStr,
 	}
 	selectorLabels := map[string]string{
 		"app":          "nats",
 		"tenant-id":    tenantSlug,
-		"instance-num": "1",
+		"instance-num": numStr,
 	}
 
 	// Step 1: Create Deployment
@@ -76,10 +89,14 @@ func (p *K8sNATSProvisioner) ProvisionNATS(ctx context.Context, tenantSlug strin
 		return "", fmt.Errorf("create service: %w", err)
 	}
 
-	// Step 3: Create NetworkPolicy
-	onProgress(50, "Applying network isolation...")
-	if err := p.createNetworkPolicy(ctx, tenantSlug, selectorLabels); err != nil {
-		return "", fmt.Errorf("create network policy: %w", err)
+	// Step 3: Create NetworkPolicy. The policy is per-tenant (its selector
+	// matches every NATS pod for the tenant), so it's created once with the
+	// first instance; additional instances (#19) reuse it.
+	if n == 1 {
+		onProgress(50, "Applying network isolation...")
+		if err := p.createNetworkPolicy(ctx, tenantSlug, selectorLabels); err != nil {
+			return "", fmt.Errorf("create network policy: %w", err)
+		}
 	}
 
 	// Step 4: Wait for deployment to become available
@@ -89,30 +106,33 @@ func (p *K8sNATSProvisioner) ProvisionNATS(ctx context.Context, tenantSlug strin
 	}
 
 	onProgress(100, "NATS instance ready")
-	return NATSUrl(tenantSlug), nil
+	return NATSUrlN(tenantSlug, n), nil
 }
 
-// DeprovisionNATS deletes all K8s resources for a tenant's NATS instance.
+// DeprovisionNATS deletes all K8s resources for a tenant's first NATS instance
+// (including the per-tenant NetworkPolicy).
 func (p *K8sNATSProvisioner) DeprovisionNATS(ctx context.Context, tenantSlug string) error {
-	name := natsResourceName(tenantSlug)
 	npName := fmt.Sprintf("tenant-nats-isolation-%s", tenantSlug)
-
-	// Delete in reverse order: NetworkPolicy, Service, Deployment
-	err := p.client.NetworkingV1().NetworkPolicies(tenantNATSNamespace).Delete(ctx, npName, metav1.DeleteOptions{})
-	if err != nil && !errors.IsNotFound(err) {
+	if err := p.client.NetworkingV1().NetworkPolicies(tenantNATSNamespace).Delete(ctx, npName, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 		p.logger.Printf("Warning: failed to delete NetworkPolicy %s: %v", npName, err)
 	}
+	return p.DeprovisionNATSInstance(ctx, tenantSlug, 1)
+}
 
-	err = p.client.CoreV1().Services(tenantNATSNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !errors.IsNotFound(err) {
+// DeprovisionNATSInstance deletes the Deployment + Service for instance n (#19
+// decommission). The per-tenant NetworkPolicy is left in place for n>1 (other
+// instances still rely on it); it's removed by DeprovisionNATS when the tenant
+// is fully torn down.
+func (p *K8sNATSProvisioner) DeprovisionNATSInstance(ctx context.Context, tenantSlug string, n int) error {
+	name := natsResourceNameN(tenantSlug, n)
+
+	if err := p.client.CoreV1().Services(tenantNATSNamespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 		p.logger.Printf("Warning: failed to delete Service %s: %v", name, err)
 	}
 
-	err = p.client.AppsV1().Deployments(tenantNATSNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !errors.IsNotFound(err) {
+	if err := p.client.AppsV1().Deployments(tenantNATSNamespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete Deployment %s: %w", name, err)
 	}
-
 	return nil
 }
 
