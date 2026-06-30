@@ -253,6 +253,10 @@ type Repository interface {
 	// ListTenantMembers returns every (user, role) tuple for one tenant.
 	ListTenantMembers(ctx context.Context, tenantID string) ([]*TenantMember, error)
 
+	// AddTenantMember adds an existing user to a tenant. Returns
+	// ErrAlreadyMember if the membership already exists.
+	AddTenantMember(ctx context.Context, tenantID, userID, role string) error
+
 	// SetTenantMemberRole changes a user's role. Returns ErrLastOwner if
 	// the change would leave the tenant with zero owners.
 	SetTenantMemberRole(ctx context.Context, tenantID, userID, newRole string) error

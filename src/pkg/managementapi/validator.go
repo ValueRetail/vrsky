@@ -373,8 +373,18 @@ func (v *Validator) validateFileDestination(config *FileDestinationConfig) error
 		return &ConfigError{Component: "destination", Field: "file", Reason: "file destination config is required when type is 'file'"}
 	}
 
-	if strings.TrimSpace(config.Path) == "" {
+	path := strings.TrimSpace(config.Path)
+	if path == "" {
 		return &ConfigError{Component: "destination", Field: "file.path", Reason: "path is required"}
+	}
+
+	// The file producer requires an absolute output directory; a relative path
+	// or filename is rejected at runtime and messages would be dropped (#142).
+	if !strings.HasPrefix(path, "/") {
+		return &ConfigError{Component: "destination", Field: "file.path", Reason: fmt.Sprintf("output path %q must be an absolute directory (e.g. /data/output), not a relative path or filename", path)}
+	}
+	if strings.Contains(path, "..") {
+		return &ConfigError{Component: "destination", Field: "file.path", Reason: fmt.Sprintf("output path %q must not contain '..'", path)}
 	}
 
 	// Validate format
@@ -630,11 +640,57 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 		}).Error())
 	}
 
+	// 7. Per-node config sanity that the structural checks don't cover.
+	// A file producer's output path must be an absolute directory: the worker
+	// rejects relative paths / filenames at runtime and would silently drop
+	// every message, so we catch it here at create/deploy (#142).
+	for _, node := range conn.Nodes {
+		if node == nil || node.Type != "producer" {
+			continue
+		}
+		if msg := validateFileProducerPath(node); msg != "" {
+			errors = append(errors, msg)
+		}
+	}
+
 	if len(errors) > 0 {
 		return &DAGValidationError{Errors: errors}
 	}
 
 	return nil
+}
+
+// validateFileProducerPath returns a non-empty error string if a producer node
+// is a file sink with an invalid output path. An empty path is allowed (the
+// worker falls back to its default mounted output dir); a non-empty path must
+// be absolute and free of ".." traversal, matching the worker's runtime guard
+// (#142). Non-file producers and unparseable config are ignored here.
+func validateFileProducerPath(node *Node) string {
+	var nc struct {
+		Type string `json:"type"`
+		File struct {
+			Path string `json:"path"`
+		} `json:"file"`
+	}
+	if len(node.Config) == 0 || json.Unmarshal(node.Config, &nc) != nil {
+		return ""
+	}
+	// A file producer is identified the same way the worker does: type "file"
+	// or a non-empty file.path.
+	if nc.Type != "file" && nc.File.Path == "" {
+		return ""
+	}
+	path := strings.TrimSpace(nc.File.Path)
+	if path == "" {
+		return "" // worker uses its default output dir
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Sprintf("node %s: file output path %q must be an absolute directory (e.g. /data/output) — a relative path or filename is rejected at runtime and messages would be dropped", node.ID, path)
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Sprintf("node %s: file output path %q must not contain '..'", node.ID, path)
+	}
+	return ""
 }
 
 // validateNodeCounts validates that there is at least 1 consumer and 1 producer.

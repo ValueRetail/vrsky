@@ -23,6 +23,7 @@ interface UseCanvasPersistenceReturn {
   updateCanvas: (nodes: Node[], edges: Edge[]) => void
   forceUpdateCanvas: (nodes: Node[], edges: Edge[]) => void
   createCanvas: (name?: string) => Canvas | null
+  importCanvas: (name: string, nodes: Node[], edges: Edge[], deployedConnectionId?: string) => Canvas | null
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
@@ -36,6 +37,7 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     isInitialized,
     initialize,
     createCanvas,
+    importCanvas,
     updateCanvas: storeUpdateCanvas,
     deleteCanvas,
     switchCanvas,
@@ -106,6 +108,7 @@ export function useCanvasPersistence(): UseCanvasPersistenceReturn {
     updateCanvas,
     forceUpdateCanvas,
     createCanvas,
+    importCanvas,
     deleteCanvas,
     switchCanvas,
     renameCanvas,

@@ -1047,8 +1047,19 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// because admins can manage resources but not redistribute power.
 	ownerMW := RequireRole("owner")
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/members", sessionMW(tenantMW(http.HandlerFunc(h.HandleListMembers))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/members", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleAddMember)))).ServeHTTP)
 	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleSetMemberRole)))).ServeHTTP)
 	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/members/{user_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleRemoveMember)))).ServeHTTP)
+
+	// Pending member invites (#130). Listing/creating/resending/revoking are
+	// owner-only, like member mutations. Accepting is session-authenticated but
+	// NOT tenant-scoped — the token is the capability and the tenant is
+	// recovered from the invite row.
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/invites", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleListInvites)))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/invites", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleCreateInvite)))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/invites/{invite_id}/resend", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleResendInvite)))).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/tenants/{tenant_id}/invites/{invite_id}", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleRevokeInvite)))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/invites/accept", sessionMW(http.HandlerFunc(h.HandleAcceptInvite)).ServeHTTP)
 
 	// Tenant quotas (#74). Reads = any member; writes = owner.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)

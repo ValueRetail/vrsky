@@ -739,6 +739,10 @@ func (m *MockRepository) ListTenantMembers(ctx context.Context, tenantID string)
 	return nil, nil
 }
 
+func (m *MockRepository) AddTenantMember(ctx context.Context, tenantID, userID, role string) error {
+	return nil
+}
+
 func (m *MockRepository) SetTenantMemberRole(ctx context.Context, tenantID, userID, newRole string) error {
 	return nil
 }

@@ -322,8 +322,13 @@ export default function ConnectionDetail() {
             />
           </div>
 
-          {/* Pipeline Flow Visualization */}
-          <PipelineFlowVisualization metrics={metrics} />
+          {/* Pipeline Flow Visualization — driven by the connection's real graph */}
+          <PipelineFlowVisualization
+            metrics={metrics}
+            nodes={connection.nodes}
+            edges={connection.edges}
+            status={connection.status}
+          />
 
           {/* Message Progress Bar */}
           {metrics && <MessageProgressBar

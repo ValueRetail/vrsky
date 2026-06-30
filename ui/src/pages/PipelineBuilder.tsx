@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
+import { connectionService } from '../services/connectionService'
+import { connectionToCanvas } from '../utils/connectionToCanvas'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
 import PropertyEditor from '../components/Pipeline/PropertyEditor'
 import DLQPanel from '../components/Pipeline/DLQPanel'
@@ -41,11 +43,16 @@ export default function PipelineBuilder() {
     updateCanvas,
     forceUpdateCanvas,
     createCanvas,
+    importCanvas,
     deleteCanvas,
     switchCanvas,
     renameCanvas,
     setDeployedConnectionId,
   } = useCanvasPersistence()
+
+  // When routed to /connections/:id/edit, load that connection onto the canvas (#128).
+  const { id: editConnectionId } = useParams<{ id: string }>()
+  const [editLoadDone, setEditLoadDone] = useState(false)
 
   // Local state initialized from active canvas
   const [nodes, setNodes] = useState<Node[]>([])
@@ -193,6 +200,40 @@ export default function PipelineBuilder() {
       updateCanvas(nodes, edges)
     }
   }, [nodes, edges, isInitialized, hasInitializedFromCanvas, updateCanvas])
+
+  // Edit flow (#128): load a saved connection onto the canvas. Prefer an
+  // existing local canvas already linked to this connection (positions intact);
+  // otherwise rebuild the graph from the API with auto-layout. Switching/
+  // importing changes currentCanvasId, which the canvas-switch effect above
+  // picks up to load nodes/edges into local state.
+  useEffect(() => {
+    if (!editConnectionId || editLoadDone || !isInitialized) return
+    let cancelled = false
+
+    const linked = canvases.find((c) => c.deployedConnectionId === editConnectionId)
+    if (linked) {
+      switchCanvas(linked.id)
+      setEditLoadDone(true)
+      return
+    }
+
+    ;(async () => {
+      try {
+        const conn = await connectionService.get(editConnectionId)
+        if (cancelled) return
+        const { nodes: loadedNodes, edges: loadedEdges } = connectionToCanvas(conn)
+        importCanvas(`Edit: ${conn.name || editConnectionId.slice(0, 8)}`, loadedNodes, loadedEdges, editConnectionId)
+      } catch {
+        if (!cancelled) {
+          showErrorNotification('Edit connection', 'Failed to load this connection onto the canvas.')
+        }
+      } finally {
+        if (!cancelled) setEditLoadDone(true)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [editConnectionId, editLoadDone, isInitialized, canvases, switchCanvas, importCanvas, showErrorNotification])
 
   // Use custom hooks
   const { handleNodeDrag } = useNodeDrag(nodes, setNodes)
