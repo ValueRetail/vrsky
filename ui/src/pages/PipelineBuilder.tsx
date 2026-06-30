@@ -219,7 +219,7 @@ export default function PipelineBuilder() {
 
     ;(async () => {
       try {
-        const conn = await connectionService.getConnection(editConnectionId)
+        const conn = await connectionService.get(editConnectionId)
         if (cancelled) return
         const { nodes: loadedNodes, edges: loadedEdges } = connectionToCanvas(conn)
         importCanvas(`Edit: ${conn.name || editConnectionId.slice(0, 8)}`, loadedNodes, loadedEdges, editConnectionId)
