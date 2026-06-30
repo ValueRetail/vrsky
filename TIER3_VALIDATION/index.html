@@ -1981,10 +1981,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#still-to-validate-need-more-setup-a-fuller-cluster" class="md-nav__link">
+  <a href="#blocked-deferred" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Still to validate (need more setup / a fuller cluster)
+        Blocked / deferred
       
     </span>
   </a>
@@ -1993,6 +1993,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-cant-cover-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this can't cover here
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2086,6 +2097,14 @@ kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> <
 <li><strong>#21 discovery API (end-to-end)</strong> — registered a tenant, inserted a
   <code>nats_instances</code> row, and <code>GET /api/v1/tenants/{id}/nats-instances</code> returned the
   instance + <code>nats://…:4222</code> URL (Bearer auth → tenant-scoping → URL formatting).</li>
+<li><strong>#136 object-storage HA failover</strong> — swapped to the 4-node distributed MinIO
+  StatefulSet, wrote an object, <strong>deleted a MinIO pod</strong>, and read the object back
+  through the surviving nodes (EC:2 tolerated the loss).</li>
+<li><strong>#137 PostgreSQL HA failover</strong> — stood up the 3-instance CloudNativePG cluster,
+  wrote a row through the <code>-rw</code> service, <strong>deleted the primary</strong> (<code>vrsky-pg-1</code>),
+  and CNPG <strong>promoted a standby</strong> (<code>vrsky-pg-2</code>) — the row survived (zero data
+  loss). This completes the <strong>no-single-replica-SPOF</strong> DoD item (MinIO + Postgres</li>
+<li>management-api all proven HA).</li>
 </ul>
 <h3 id="fresh-deploy-bugs-fixed-during-this-run-all-on-this-branch">Fresh-deploy bugs fixed during this run (all on this branch)<a class="headerlink" href="#fresh-deploy-bugs-fixed-during-this-run-all-on-this-branch" title="Permanent link">&para;</a></h3>
 <p>These broke <em>any</em> clean deploy — several would hit production identically:</p>
@@ -2101,15 +2120,17 @@ kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> <
 <li><strong><code>nats_instances</code> created by no migration</strong> — only existed in legacy <code>init-schema.sql</code>; a migrate-only (production) DB lacked it and <code>000018</code>'s FK failed → folded the table into <code>000018</code> with a status CHECK covering the values the code writes.</li>
 <li>Loading legacy <code>init-schema.sql</code> <em>and</em> <code>golang-migrate</code> → dirty schema; stopped loading init-schema (migrate is the source of truth). Plus management-api missing <code>ENCRYPTION_KEY</code>, and the legacy filter's <code>NATS_URL</code> env name/value.</li>
 </ol>
-<h3 id="still-to-validate-need-more-setup-a-fuller-cluster">Still to validate (need more setup / a fuller cluster)<a class="headerlink" href="#still-to-validate-need-more-setup-a-fuller-cluster" title="Permanent link">&para;</a></h3>
+<h3 id="blocked-deferred">Blocked / deferred<a class="headerlink" href="#blocked-deferred" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<h1 id="135-worker-hpa-scaling-19-scale-up-under-sustained-load-orchestrator-load-gen">135 worker HPA scaling + #19 scale-up under sustained load (orchestrator + load gen).<a class="headerlink" href="#135-worker-hpa-scaling-19-scale-up-under-sustained-load-orchestrator-load-gen" title="Permanent link">&para;</a></h1>
-</li>
-<li>
-<h1 id="137136-ha-failover-apply-the-cnpg-distributed-minio-manifests-then-pod-kill">137/#136 HA failover (apply the CNPG / distributed-MinIO manifests, then pod-kill).<a class="headerlink" href="#137136-ha-failover-apply-the-cnpg-distributed-minio-manifests-then-pod-kill" title="Permanent link">&para;</a></h1>
-</li>
-<li>Throughput re-measure on the scaled topology → <code>docs/LOAD.md</code>.</li>
+<li><strong>#135 worker autoscaling under load — BLOCKED on #157.</strong> The k8s orchestrator
+  that creates per-connection worker <code>Deployment</code>s + HPAs is never wired into the
+  management-api (<code>SetOrchestratorFactory</code> is never called), so starting a
+  connection in k8s creates no worker pods/HPAs. The #135 HPA code is merged but
+  dormant. Wiring it is tracked as <strong>#157</strong>; once done, the HPA scale-up test
+  becomes runnable.</li>
+<li><strong>Throughput re-measure on the scaled topology</strong> → <code>docs/LOAD.md</code>. Depends on
+  #157 (workers actually running in k8s) + a load generator against the cluster
+  ingress.</li>
 </ul>
 <h2 id="what-this-cant-cover-here">What this can't cover here<a class="headerlink" href="#what-this-cant-cover-here" title="Permanent link">&para;</a></h2>
 <p>This environment is single-host (no K8s), so the run itself must happen on your
