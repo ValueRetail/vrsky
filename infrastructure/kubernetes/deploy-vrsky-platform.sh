@@ -33,6 +33,21 @@ print_error() {
 	echo -e "${RED}✗${NC} $1"
 }
 
+# apply_secret applies secret.yaml from the current dir, falling back to
+# secret.example.yaml (committed dev/placeholder values) when it's absent, so a
+# fresh clone can deploy locally. secret.yaml is git-ignored for real creds.
+apply_secret() {
+	if [ -f secret.yaml ]; then
+		kubectl apply -f secret.yaml
+	elif [ -f secret.example.yaml ]; then
+		print_warning "secret.yaml not found — using secret.example.yaml (DEV credentials; DO NOT use in production)"
+		kubectl apply -f secret.example.yaml
+	else
+		print_error "no secret.yaml or secret.example.yaml in $(pwd)"
+		exit 1
+	fi
+}
+
 check_prerequisites() {
 	print_header "Checking Prerequisites"
 
@@ -109,7 +124,7 @@ deploy_postgresql() {
 	cd "$SCRIPT_DIR/postgresql"
 
 	kubectl apply -f namespace.yaml
-	kubectl apply -f secret.yaml
+	apply_secret
 	kubectl apply -f configmap.yaml
 
 	# Create init script ConfigMap with embedded schema
@@ -140,7 +155,7 @@ deploy_minio() {
 	cd "$SCRIPT_DIR/minio"
 
 	kubectl apply -f namespace.yaml
-	kubectl apply -f secret.yaml
+	apply_secret
 	kubectl apply -f configmap.yaml
 	kubectl apply -f deployment.yaml
 	kubectl apply -f service.yaml

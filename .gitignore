@@ -54,6 +54,9 @@ build/
 **/secret*.yaml
 **/secrets/
 **/*secret*.yaml
+# ...but DO track *.example.yaml templates (placeholder/dev values only, no real creds)
+!**/secret.example.yaml
+!**/*.example.yaml
 
 # AWS, GCP, Azure credentials
 aws_credentials
