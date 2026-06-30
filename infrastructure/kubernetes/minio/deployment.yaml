@@ -68,9 +68,11 @@ spec:
               mountPath: /data
 
           resources:
+            # Modest requests so it schedules on small/k3d nodes; limits stay
+            # generous for real load.
             requests:
-              cpu: 1
-              memory: 2Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 2
               memory: 4Gi

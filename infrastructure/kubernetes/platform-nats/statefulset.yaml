@@ -70,9 +70,12 @@ spec:
               mountPath: /data/jetstream
 
           resources:
+            # Requests are the scheduling floor (not a reservation of headroom);
+            # keep them modest so the platform bin-packs onto small/k3d nodes.
+            # Limits remain generous for burst under real load.
             requests:
-              cpu: 2
-              memory: 4Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 4
               memory: 8Gi

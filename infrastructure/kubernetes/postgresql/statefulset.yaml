@@ -61,9 +61,11 @@ spec:
               readOnly: true
 
           resources:
+            # Modest requests (scheduling floor) so it bin-packs onto small/k3d
+            # nodes; limits stay generous for real load.
             requests:
-              cpu: 2
-              memory: 4Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 4
               memory: 8Gi
