@@ -560,6 +560,10 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Pin the connection to a tenant NATS instance for discovery/placement (#19).
+	// No-op unless the tenant has tracked instances (single-instance / compose).
+	h.placeConnection(ctx, tenantID, connID)
+
 	// Update connection status to Running
 	conn.Status = "running"
 	conn.StartedAt = pointerTo(time.Now().UTC())

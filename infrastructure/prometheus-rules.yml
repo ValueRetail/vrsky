@@ -70,6 +70,18 @@ groups:
           summary: "management-api 5xx error rate above 5%"
           description: "More than 5% of management API requests returned a server error over the last 5 minutes."
 
+      # A tenant NATS instance at/above 80% of its scale-up trigger (#19). The
+      # autoscaler provisions a new instance past 100%; this warns operators
+      # ahead of that. tenant_id label routes it to the tenant's targets.
+      - alert: NATSInstanceApproachingCapacity
+        expr: vrsky_nats_instance_capacity_pct >= 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "tenant NATS instance {{ $labels.tenant_id }}/{{ $labels.instance_number }} at {{ $value | printf \"%.0f\" }}% capacity"
+          description: "NATS instance {{ $labels.instance_number }} for tenant {{ $labels.tenant_id }} is at/above 80% of its scale-up trigger; the autoscaler adds an instance past 100%."
+
       # Host filesystem above 80% (node-exporter; tmpfs/overlay excluded).
       - alert: DiskUsageHigh
         expr: |

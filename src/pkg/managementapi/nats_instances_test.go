@@ -14,13 +14,15 @@ import (
 // monitor without a database.
 type natsInstRepo struct {
 	*MockRepository
-	mu        sync.Mutex
-	instances []*NATSInstance
-	seq       int
+	mu            sync.Mutex
+	instances     []*NATSInstance
+	connCounts    map[string]int // instance id -> connection count
+	metricUpdates map[string]int // instance id -> last integrations recorded
+	seq           int
 }
 
 func newNATSInstRepo() *natsInstRepo {
-	return &natsInstRepo{MockRepository: NewMockRepository()}
+	return &natsInstRepo{MockRepository: NewMockRepository(), connCounts: map[string]int{}}
 }
 
 func (r *natsInstRepo) ListNATSInstances(_ context.Context, tenantID string) ([]*NATSInstance, error) {
@@ -72,8 +74,42 @@ func (r *natsInstRepo) SoftDeleteNATSInstance(_ context.Context, tenantID, id st
 	return nil
 }
 
-func (r *natsInstRepo) UpdateNATSInstanceMetrics(_ context.Context, _ string, _, _, _ int, _ int64) error {
+func (r *natsInstRepo) UpdateNATSInstanceMetrics(_ context.Context, id string, integrations, connections, memoryMB int, msgRate int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.metricUpdates == nil {
+		r.metricUpdates = map[string]int{}
+	}
+	r.metricUpdates[id] = integrations
 	return nil
+}
+
+func (r *natsInstRepo) MaxInstanceNumber(_ context.Context, tenantID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	max := 0
+	for _, n := range r.instances {
+		if n.TenantID == tenantID && n.DeletedAt == nil && n.InstanceNumber > max {
+			max = n.InstanceNumber
+		}
+	}
+	return max, nil
+}
+
+func (r *natsInstRepo) CountConnectionsPerInstance(_ context.Context, _ string) (map[string]int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]int{}
+	for id, c := range r.connCounts {
+		out[id] = c
+	}
+	return out, nil
+}
+
+func (r *natsInstRepo) AssignConnectionInstance(_ context.Context, _, _, _ string) error { return nil }
+
+func (r *natsInstRepo) GetConnectionInstance(_ context.Context, _, _ string) (*NATSInstance, error) {
+	return nil, ErrNATSInstanceNotFound
 }
 
 func TestHandleListNATSInstances(t *testing.T) {

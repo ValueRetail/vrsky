@@ -425,7 +425,7 @@ func connectNATS(logger *slog.Logger) (*nats.Conn, error) {
 	// tenant's NATS instances and dial all of them (comma-separated). nats.Connect
 	// load-balances + fails over across the set and reconnects automatically.
 	// Any discovery hiccup falls back to NATS_URL, so compose/dev is unaffected.
-	if disc := natsdiscovery.New(os.Getenv("MGMT_API_URL"), os.Getenv("TENANT_ID"), os.Getenv("SERVICE_TOKEN")); disc.Enabled() {
+	if disc := natsdiscovery.New(os.Getenv("MGMT_API_URL"), os.Getenv("TENANT_ID"), os.Getenv("CONNECTION_ID"), os.Getenv("SERVICE_TOKEN")); disc.Enabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		joined, err := disc.ResolveJoined(ctx)
 		cancel()

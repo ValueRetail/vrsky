@@ -17,7 +17,7 @@ func TestResolve_ReturnsURLs(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	r := New(srv.URL, "t-1", "")
+	r := New(srv.URL, "t-1", "", "")
 	joined, err := r.ResolveJoined(context.Background())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -28,13 +28,13 @@ func TestResolve_ReturnsURLs(t *testing.T) {
 }
 
 func TestResolve_DisabledWhenUnconfigured(t *testing.T) {
-	if New("", "t-1", "").Enabled() {
+	if New("", "t-1", "", "").Enabled() {
 		t.Error("expected disabled with empty base URL")
 	}
-	if New("http://x", "", "").Enabled() {
+	if New("http://x", "", "", "").Enabled() {
 		t.Error("expected disabled with empty tenant")
 	}
-	urls, err := New("", "", "").Resolve(context.Background())
+	urls, err := New("", "", "", "").Resolve(context.Background())
 	if err != nil || urls != nil {
 		t.Fatalf("disabled resolve should return (nil,nil), got (%v,%v)", urls, err)
 	}
@@ -45,7 +45,7 @@ func TestResolve_ErrorOnNon200(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	if _, err := New(srv.URL, "t-1", "").Resolve(context.Background()); err == nil {
+	if _, err := New(srv.URL, "t-1", "", "").Resolve(context.Background()); err == nil {
 		t.Fatal("expected error on non-200 response")
 	}
 }

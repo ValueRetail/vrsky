@@ -3,6 +3,7 @@ package managementapi
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -47,6 +48,20 @@ type NATSInstanceStore interface {
 	SetNATSInstanceStatus(ctx context.Context, id, status string) error
 	SoftDeleteNATSInstance(ctx context.Context, tenantID, id string) error
 	UpdateNATSInstanceMetrics(ctx context.Context, id string, integrations, connections, memoryMB int, msgRate int64) error
+
+	// --- placement + scaling (#19) ---
+
+	// MaxInstanceNumber returns the highest instance_number for a tenant (0 if
+	// none), so the autoscaler can allocate the next instance.
+	MaxInstanceNumber(ctx context.Context, tenantID string) (int, error)
+	// CountConnectionsPerInstance returns connection counts keyed by
+	// nats_instance_id for a tenant (only rows with an assigned instance).
+	CountConnectionsPerInstance(ctx context.Context, tenantID string) (map[string]int, error)
+	// AssignConnectionInstance pins a connection to an instance (tenant-scoped).
+	AssignConnectionInstance(ctx context.Context, tenantID, connectionID, instanceID string) error
+	// GetConnectionInstance returns the instance a connection is pinned to, or
+	// ErrNATSInstanceNotFound if unassigned/unknown.
+	GetConnectionInstance(ctx context.Context, tenantID, connectionID string) (*NATSInstance, error)
 }
 
 const natsInstanceCols = `id, tenant_id, instance_number, dns_name, status,
@@ -162,6 +177,74 @@ func (r *PostgresRepository) UpdateNATSInstanceMetrics(ctx context.Context, id s
 		       message_rate_avg = $5, updated_at = NOW()
 		 WHERE id = $1 AND deleted_at IS NULL`, id, integrations, connections, memoryMB, msgRate)
 	return err
+}
+
+// MaxInstanceNumber returns the highest instance_number among a tenant's
+// non-deleted instances (0 when the tenant has none).
+func (r *PostgresRepository) MaxInstanceNumber(ctx context.Context, tenantID string) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(instance_number), 0) FROM nats_instances
+		WHERE tenant_id = $1 AND deleted_at IS NULL`, tenantID).Scan(&n)
+	return n, err
+}
+
+// CountConnectionsPerInstance returns per-instance connection counts for a
+// tenant (instance id → count), only for connections with a placement.
+func (r *PostgresRepository) CountConnectionsPerInstance(ctx context.Context, tenantID string) (map[string]int, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT nats_instance_id::text, COUNT(*) FROM connections
+		WHERE tenant_id = $1 AND nats_instance_id IS NOT NULL
+		GROUP BY nats_instance_id`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var c int
+		if err := rows.Scan(&id, &c); err != nil {
+			return nil, err
+		}
+		out[id] = c
+	}
+	return out, rows.Err()
+}
+
+// AssignConnectionInstance pins a connection to a NATS instance.
+func (r *PostgresRepository) AssignConnectionInstance(ctx context.Context, tenantID, connectionID, instanceID string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE connections SET nats_instance_id = $3, updated_at = NOW()
+		WHERE tenant_id = $1 AND id = $2`, tenantID, connectionID, instanceID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return &NotFoundError{ResourceType: "connection", ResourceID: connectionID}
+	}
+	return nil
+}
+
+// GetConnectionInstance returns the instance a connection is pinned to.
+func (r *PostgresRepository) GetConnectionInstance(ctx context.Context, tenantID, connectionID string) (*NATSInstance, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT `+prefixCols("n", natsInstanceCols)+`
+		FROM connections c JOIN nats_instances n ON n.id = c.nats_instance_id
+		WHERE c.tenant_id = $1 AND c.id = $2 AND n.deleted_at IS NULL`, tenantID, connectionID)
+	n, err := scanNATSInstance(row)
+	if err != nil {
+		return nil, ErrNATSInstanceNotFound
+	}
+	return n, nil
+}
+
+// prefixCols qualifies an unaliased column list with a table alias for JOINs.
+func prefixCols(alias, cols string) string {
+	parts := strings.Split(cols, ",")
+	for i, p := range parts {
+		parts[i] = alias + "." + strings.TrimSpace(p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // compile-time guard.

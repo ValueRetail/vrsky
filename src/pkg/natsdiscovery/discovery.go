@@ -16,10 +16,11 @@ import (
 
 // Resolver fetches a tenant's NATS instance URLs from the management-api.
 type Resolver struct {
-	BaseURL    string // management-api base, e.g. http://management-api:3000
-	TenantID   string
-	AuthToken  string // optional service token (Bearer)
-	HTTPClient *http.Client
+	BaseURL      string // management-api base, e.g. http://management-api:3000
+	TenantID     string
+	ConnectionID string // optional: resolve the single instance this connection is placed on (#19)
+	AuthToken    string // optional service token (Bearer)
+	HTTPClient   *http.Client
 }
 
 type discoveryResponse struct {
@@ -30,12 +31,15 @@ type discoveryResponse struct {
 
 // New builds a Resolver. baseURL and tenantID are required for discovery to be
 // attempted; an empty baseURL disables it (caller falls back to NATS_URL).
-func New(baseURL, tenantID, authToken string) *Resolver {
+// connectionID is optional — when set, Resolve targets the single instance the
+// connection is placed on (#19).
+func New(baseURL, tenantID, connectionID, authToken string) *Resolver {
 	return &Resolver{
-		BaseURL:    strings.TrimRight(baseURL, "/"),
-		TenantID:   tenantID,
-		AuthToken:  authToken,
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		BaseURL:      strings.TrimRight(baseURL, "/"),
+		TenantID:     tenantID,
+		ConnectionID: connectionID,
+		AuthToken:    authToken,
+		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -51,6 +55,9 @@ func (r *Resolver) Resolve(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 	url := fmt.Sprintf("%s/api/v1/tenants/%s/nats-instances", r.BaseURL, r.TenantID)
+	if r.ConnectionID != "" {
+		url += "?connection_id=" + r.ConnectionID
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
