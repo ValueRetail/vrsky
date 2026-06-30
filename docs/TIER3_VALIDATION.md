@@ -77,6 +77,14 @@ Validated the control plane live on a local k3d cluster (1 server + 2 agents):
 - **#21 discovery API (end-to-end)** — registered a tenant, inserted a
   `nats_instances` row, and `GET /api/v1/tenants/{id}/nats-instances` returned the
   instance + `nats://…:4222` URL (Bearer auth → tenant-scoping → URL formatting).
+- **#136 object-storage HA failover** — swapped to the 4-node distributed MinIO
+  StatefulSet, wrote an object, **deleted a MinIO pod**, and read the object back
+  through the surviving nodes (EC:2 tolerated the loss).
+- **#137 PostgreSQL HA failover** — stood up the 3-instance CloudNativePG cluster,
+  wrote a row through the `-rw` service, **deleted the primary** (`vrsky-pg-1`),
+  and CNPG **promoted a standby** (`vrsky-pg-2`) — the row survived (zero data
+  loss). This completes the **no-single-replica-SPOF** DoD item (MinIO + Postgres
+  + management-api all proven HA).
 
 ### Fresh-deploy bugs fixed during this run (all on this branch)
 
@@ -93,11 +101,17 @@ These broke *any* clean deploy — several would hit production identically:
 9. **`nats_instances` created by no migration** — only existed in legacy `init-schema.sql`; a migrate-only (production) DB lacked it and `000018`'s FK failed → folded the table into `000018` with a status CHECK covering the values the code writes.
 10. Loading legacy `init-schema.sql` *and* `golang-migrate` → dirty schema; stopped loading init-schema (migrate is the source of truth). Plus management-api missing `ENCRYPTION_KEY`, and the legacy filter's `NATS_URL` env name/value.
 
-### Still to validate (need more setup / a fuller cluster)
+### Blocked / deferred
 
-- #135 worker HPA scaling + #19 scale-up under sustained load (orchestrator + load gen).
-- #137/#136 HA failover (apply the CNPG / distributed-MinIO manifests, then pod-kill).
-- Throughput re-measure on the scaled topology → `docs/LOAD.md`.
+- **#135 worker autoscaling under load — BLOCKED on #157.** The k8s orchestrator
+  that creates per-connection worker `Deployment`s + HPAs is never wired into the
+  management-api (`SetOrchestratorFactory` is never called), so starting a
+  connection in k8s creates no worker pods/HPAs. The #135 HPA code is merged but
+  dormant. Wiring it is tracked as **#157**; once done, the HPA scale-up test
+  becomes runnable.
+- **Throughput re-measure on the scaled topology** → `docs/LOAD.md`. Depends on
+  #157 (workers actually running in k8s) + a load generator against the cluster
+  ingress.
 
 ## What this can't cover here
 
