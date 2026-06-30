@@ -208,8 +208,12 @@ deploy_management_api() {
 
 	cd "$SCRIPT_DIR/management-api"
 
+	# RBAC first: the API needs permission to provision tenant NATS + deploy
+	# per-connection workers/HPAs (#19/#21), else it gets 'forbidden'.
+	kubectl apply -f rbac.yaml
 	kubectl apply -f deployment.yaml
 	kubectl apply -f service.yaml
+	kubectl apply -f pdb.yaml 2>/dev/null || true
 
 	print_success "Management API manifests applied"
 
