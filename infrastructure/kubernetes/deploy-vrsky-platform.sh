@@ -211,6 +211,9 @@ deploy_management_api() {
 	# RBAC first: the API needs permission to provision tenant NATS + deploy
 	# per-connection workers/HPAs (#19/#21), else it gets 'forbidden'.
 	kubectl apply -f rbac.yaml
+	# DB secret in THIS namespace (secrets are namespace-scoped; the postgresql
+	# one lives in vrsky-database).
+	apply_secret
 	kubectl apply -f deployment.yaml
 	kubectl apply -f service.yaml
 	kubectl apply -f pdb.yaml 2>/dev/null || true
