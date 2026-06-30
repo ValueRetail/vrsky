@@ -1,6 +1,7 @@
 package managementapi
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -397,6 +398,48 @@ func TestValidateDAG_ValidConsumerToProducer(t *testing.T) {
 	err := validator.ValidateDAG(conn)
 	if err != nil {
 		t.Errorf("expected no error for valid pipeline, got %v", err)
+	}
+}
+
+// #142: a file producer with a relative path / filename must be rejected at
+// validation time (the worker would otherwise silently drop messages).
+func TestValidateDAG_FileProducerPath(t *testing.T) {
+	validator := NewValidator()
+
+	mk := func(cfg string) *Connection {
+		return &Connection{
+			ID: "c", TenantID: "t", Name: "n",
+			Nodes: []*Node{
+				{ID: "consumer-0", Type: "consumer", Enabled: true},
+				{ID: "producer-0", Type: "producer", Enabled: true, Config: json.RawMessage(cfg)},
+			},
+			Edges: []*Edge{{ID: "e0", Source: "consumer-0", Target: "producer-0", Order: 0}},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		config    string
+		wantError bool
+	}{
+		{"absolute path ok", `{"type":"file","file":{"path":"/data/output"}}`, false},
+		{"empty path ok (worker default)", `{"type":"file","file":{"path":""}}`, false},
+		{"relative filename rejected", `{"type":"file","file":{"path":"customers_out.json"}}`, true},
+		{"relative dir rejected", `{"type":"file","file":{"path":"output/sub"}}`, true},
+		{"traversal rejected", `{"type":"file","file":{"path":"/data/../etc"}}`, true},
+		{"non-file producer ignored", `{"type":"http","http":{"url":"https://x"}}`, false},
+		{"no config ignored", ``, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validator.ValidateDAG(mk(tc.config))
+			if tc.wantError && err == nil {
+				t.Fatalf("expected validation error for config %s", tc.config)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("expected no error for config %s, got %v", tc.config, err)
+			}
+		})
 	}
 }
 
