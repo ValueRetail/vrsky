@@ -36,7 +36,7 @@ spec:
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: default
+      serviceAccountName: vrsky-management-api
 
       containers:
       - name: management-api

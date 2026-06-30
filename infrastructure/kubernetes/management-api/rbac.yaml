@@ -1,0 +1,46 @@
+# RBAC for the management-api (#19/#21 + Phase-2 orchestration).
+# The API provisions per-tenant NATS instances (K8sNATSProvisioner) and, in k8s
+# mode, deploys per-connection worker Deployments + HPAs (orchestrator) and the
+# NATS autoscaler provisions additional instances. Its pods therefore need to
+# manage Deployments/StatefulSets/Services/NetworkPolicies/HPAs across the
+# tenant + platform namespaces. Without this the default ServiceAccount gets
+# "forbidden" on every provision/deploy.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vrsky-management-api
+  namespace: vrsky-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vrsky-management-api
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vrsky-management-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vrsky-management-api
+subjects:
+  - kind: ServiceAccount
+    name: vrsky-management-api
+    namespace: vrsky-platform
