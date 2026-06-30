@@ -9,6 +9,11 @@ metadata:
 spec:
   serviceName: nats-platform
   replicas: 3
+  # Parallel start is required for a clustered JetStream StatefulSet: the default
+  # OrderedReady policy won't start -1/-2 until -0 is Ready, but -0 can't reach a
+  # RAFT meta leader (→ Ready) without its peers. Start all three at once so they
+  # form the cluster together.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: nats-platform
@@ -65,22 +70,40 @@ spec:
               mountPath: /data/jetstream
 
           resources:
+            # Requests are the scheduling floor (not a reservation of headroom);
+            # keep them modest so the platform bin-packs onto small/k3d nodes.
+            # Limits remain generous for burst under real load.
             requests:
-              cpu: 2
-              memory: 4Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 4
               memory: 8Gi
 
+          # Liveness only checks the server is up (js-server-only), NOT that a
+          # JetStream meta leader exists — otherwise a node that's healthy but
+          # still forming the cluster (or during a transient leader election)
+          # gets killed, preventing the cluster from ever bootstrapping.
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /healthz?js-server-only=true
               port: 8222
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
 
+          # Startup probe gives the cluster generous time to elect a meta leader
+          # before liveness begins enforcing.
+          startupProbe:
+            httpGet:
+              path: /healthz?js-server-only=true
+              port: 8222
+            periodSeconds: 5
+            failureThreshold: 30
+
+          # Readiness uses the full health check (requires JetStream to be
+          # ready) so the Service only routes to nodes that can serve.
           readinessProbe:
             httpGet:
               path: /healthz

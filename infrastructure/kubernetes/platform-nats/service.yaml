@@ -8,7 +8,15 @@ metadata:
 spec:
   selector:
     app: nats-platform
-  type: ClusterIP
+  # Headless: this is the StatefulSet's governing service (serviceName:
+  # nats-platform), so it must publish per-pod DNS (nats-platform-0.nats-platform
+  # .<ns>.svc) for the cluster routes in nats.conf to resolve. publishNotReady
+  # is required so peers resolve each other DURING bootstrap — otherwise no pod
+  # becomes Ready (needs peers) and DNS is never published (deadlock). NATS
+  # clients dialing nats://nats-platform:4222 still work (headless returns the
+  # pod IPs).
+  clusterIP: None
+  publishNotReadyAddresses: true
   ports:
     - port: 4222
       targetPort: 4222

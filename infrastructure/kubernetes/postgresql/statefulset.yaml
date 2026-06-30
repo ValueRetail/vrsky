@@ -55,15 +55,18 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
-            - name: init-schema
-              mountPath: /docker-entrypoint-initdb.d/init-schema.sql
-              subPath: init-schema.sql
-              readOnly: true
+            # NOTE: init-schema.sql is intentionally NOT mounted. golang-migrate
+            # (management-api entrypoint) is the single source of truth for the
+            # schema; loading the legacy init-schema.sql here created the tables
+            # first and left migrate dirty at v6 (collision). See
+            # docs/TIER3_VALIDATION.md.
 
           resources:
+            # Modest requests (scheduling floor) so it bin-packs onto small/k3d
+            # nodes; limits stay generous for real load.
             requests:
-              cpu: 2
-              memory: 4Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 4
               memory: 8Gi
@@ -89,13 +92,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
 
-      volumes:
-        - name: init-schema
-          configMap:
-            name: postgres-init-script
-            items:
-              - key: init-schema.sql
-                path: init-schema.sql
+      volumes: []
 
   volumeClaimTemplates:
     - metadata:

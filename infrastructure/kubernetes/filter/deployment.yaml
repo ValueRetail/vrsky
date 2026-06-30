@@ -61,8 +61,11 @@ spec:
         
         # Environment variables
         env:
-        - name: NATS_URLS
-          value: "nats://nats:4222"
+        # The binary reads NATS_URL (singular; main.go), defaulting to localhost.
+        # Point it at the in-cluster platform NATS service (correct name +
+        # namespace) — was NATS_URLS=nats://nats:4222, which the binary ignored.
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
         - name: FILTER_ID
           valueFrom:
             fieldRef:

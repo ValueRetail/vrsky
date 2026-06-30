@@ -36,7 +36,7 @@ spec:
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: default
+      serviceAccountName: vrsky-management-api
 
       containers:
       - name: management-api
@@ -59,6 +59,27 @@ spec:
             secretKeyRef:
               name: postgres-credentials
               key: connection_string
+        # The entrypoint's pg-wait + `migrate up` use these (DB_HOST defaults to
+        # the compose service name 'postgres-management', which doesn't exist in
+        # k8s). DATABASE_URL drives migrate; DB_* drive pg_isready.
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: DB_HOST
+          value: "postgresql.vrsky-database.svc.cluster.local"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_USER
+          value: "vrsky"
+        - name: DB_NAME
+          value: "vrsky"
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
         - name: MGMT_API_NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
         - name: MGMT_API_LISTEN

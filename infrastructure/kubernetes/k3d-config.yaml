@@ -6,6 +6,11 @@ metadata:
 image: rancher/k3s:v1.35.0-k3s1
 servers: 1
 agents: 2
+# Only the ingress ports are published to the host. NATS/Postgres/MinIO are NOT
+# bound to host ports here on purpose: the local docker-compose dev stack already
+# uses 4222/5432/9000/9001, so publishing them from k3d would collide ("port is
+# already allocated"). In-cluster validation (kubectl exec / port-forward) doesn't
+# need host bindings; use `kubectl port-forward` if you need host access.
 ports:
   - port: 80:80
     nodeFilters:
@@ -13,19 +18,9 @@ ports:
   - port: 443:443
     nodeFilters:
       - loadbalancer
-  - port: 4222:4222
-    nodeFilters:
-      - loadbalancer
-  - port: 5432:5432
-    nodeFilters:
-      - loadbalancer
-  - port: 9000:9000
-    nodeFilters:
-      - loadbalancer
-  - port: 9001:9001
-    nodeFilters:
-      - loadbalancer
 options:
   kubeconfig:
+    # Writes/merges the cluster into your default kubeconfig and selects it.
+    # (k3d 5.9 rejects the separate `switchContext` key; updateDefaultKubeconfig
+    # already switches context.)
     updateDefaultKubeconfig: true
-    switchContext: true
