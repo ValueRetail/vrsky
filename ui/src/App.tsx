@@ -21,6 +21,7 @@ import TenantConnectionsPage from './pages/TenantConnectionsPage'
 import ApiKeyPage from './pages/ApiKeyPage'
 import AuditPage from './pages/AuditPage'
 import UsersPage from './pages/UsersPage'
+import InviteAcceptPage from './pages/InviteAcceptPage'
 import UsagePage from './pages/UsagePage'
 import OAuthProvidersPage from './pages/OAuthProvidersPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -71,6 +72,12 @@ function App() {
           <Route path="/welcome" element={
             <ProtectedRoute>
               <OnboardingWizard />
+            </ProtectedRoute>
+          } />
+          {/* Accept a workspace invite (#130) — must be signed in */}
+          <Route path="/invite" element={
+            <ProtectedRoute>
+              <InviteAcceptPage />
             </ProtectedRoute>
           } />
           

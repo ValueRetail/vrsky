@@ -9,7 +9,11 @@
 
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
-import { listMembers, addMember, setMemberRole, removeMember, type TenantMember, type TenantRole } from '@/services/membersService'
+import {
+  listMembers, setMemberRole, removeMember,
+  inviteMember, listInvites, resendInvite, revokeInvite, inviteLink,
+  type TenantMember, type TenantRole, type TenantInvite,
+} from '@/services/membersService'
 
 const ROLES: TenantRole[] = ['viewer', 'editor', 'admin', 'owner']
 
@@ -32,6 +36,8 @@ export default function UsersPage() {
   const [addRole, setAddRole] = useState<TenantRole>('viewer')
   const [adding, setAdding] = useState(false)
   const [addNotice, setAddNotice] = useState<string | null>(null)
+  const [invites, setInvites] = useState<TenantInvite[]>([])
+  const [lastLink, setLastLink] = useState<string | null>(null)
 
   const refresh = async () => {
     if (!currentTenant) {
@@ -45,6 +51,13 @@ export default function UsersPage() {
       setMembers(data)
       const meInList = data.find((m) => m.user_id === me?.id)
       setMyRole(meInList ? meInList.role : null)
+      // Pending invites are owner-only; ignore a 403 for non-owners.
+      try {
+        const inv = await listInvites(currentTenant.id)
+        setInvites(inv.filter((i) => i.status === 'pending'))
+      } catch {
+        setInvites([])
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load members')
     } finally {
@@ -66,20 +79,55 @@ export default function UsersPage() {
     setAdding(true)
     setError(null)
     setAddNotice(null)
+    setLastLink(null)
     try {
-      const added = await addMember(currentTenant.id, addEmail.trim(), addRole)
+      const res = await inviteMember(currentTenant.id, addEmail.trim(), addRole)
+      const email = addEmail.trim()
       setAddEmail('')
       setAddRole('viewer')
-      setAddNotice(`Added ${added.email} as ${added.role}.`)
+      if (res.added) {
+        setAddNotice(`Added ${res.added.email} as ${res.added.role} (they already had an account).`)
+      } else if (res.invite) {
+        setAddNotice(`Invited ${email} as ${res.invite.role}. Share the invite link below — they join after signing up.`)
+        if (res.invite.token) setLastLink(inviteLink(res.invite.token))
+      }
       await refresh()
     } catch (err) {
-      // Surface the server message (e.g. "no registered user with that email").
       const ax = err as { response?: { data?: { error?: { message?: string }; message?: string } } }
       const msg = ax.response?.data?.error?.message || ax.response?.data?.message ||
-        (err instanceof Error ? err.message : 'Failed to add member')
+        (err instanceof Error ? err.message : 'Failed to invite member')
       setError(msg)
     } finally {
       setAdding(false)
+    }
+  }
+
+  const handleResend = async (inv: TenantInvite) => {
+    setBusy(inv.id)
+    setError(null)
+    try {
+      const updated = await resendInvite(inv.tenant_id, inv.id)
+      if (updated.token) setLastLink(inviteLink(updated.token))
+      setAddNotice(`Resent invite to ${inv.email}. A fresh link is below.`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resend failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRevoke = async (inv: TenantInvite) => {
+    if (!window.confirm(`Revoke the invite for ${inv.email}?`)) return
+    setBusy(inv.id)
+    setError(null)
+    try {
+      await revokeInvite(inv.tenant_id, inv.id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Revoke failed')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -140,8 +188,22 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Add member by email (#130). Interim flow: the person must already have
-          a VRSky account — there is no email invite/accept round trip yet. */}
+      {lastLink && (
+        <div style={{ padding: '10px', background: '#eff6ff', color: '#1e3a8a', fontSize: '12px', borderRadius: '6px', marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600 }}>Invite link:</span>
+          <code style={{ flex: '1 1 320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastLink}</code>
+          <button
+            onClick={() => navigator.clipboard?.writeText(lastLink)}
+            style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '4px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer' }}
+          >
+            Copy
+          </button>
+        </div>
+      )}
+
+      {/* Add or invite a member by email (#130). If the email already has a VRSky
+          account they're added immediately; otherwise a pending invite is created
+          and shown below until accepted. */}
       {canMutate && (
         <form
           onSubmit={handleAdd}
@@ -180,10 +242,10 @@ export default function UsersPage() {
               cursor: adding || !addEmail.trim() ? 'not-allowed' : 'pointer',
             }}
           >
-            {adding ? 'Adding…' : 'Add member'}
+            {adding ? 'Sending…' : 'Add / invite'}
           </button>
           <span style={{ fontSize: '11px', color: '#9ca3af', flexBasis: '100%' }}>
-            The person must already have a VRSky account.
+            If they already have a VRSky account they're added immediately; otherwise we create a pending invite.
           </span>
         </form>
       )}
@@ -248,6 +310,52 @@ export default function UsersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Pending invites (#130) — emails invited that haven't signed up + accepted yet. */}
+      {canMutate && invites.length > 0 && (
+        <div style={{ marginTop: '24px' }}>
+          <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
+            Pending invites <span style={{ color: '#9ca3af', fontWeight: 400 }}>({invites.length})</span>
+          </h2>
+          <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={headerCell}>Email</th>
+                  <th style={headerCell}>Role</th>
+                  <th style={headerCell}>Expires</th>
+                  <th style={headerCell}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invites.map((inv) => (
+                  <tr key={inv.id}>
+                    <td style={cell}>{inv.email}</td>
+                    <td style={cell}>{inv.role}</td>
+                    <td style={cell}>{inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : '—'}</td>
+                    <td style={{ ...cell, display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={() => handleResend(inv)}
+                        disabled={busy === inv.id}
+                        style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '4px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer', opacity: busy === inv.id ? 0.5 : 1 }}
+                      >
+                        Resend
+                      </button>
+                      <button
+                        onClick={() => handleRevoke(inv)}
+                        disabled={busy === inv.id}
+                        style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '4px', background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', opacity: busy === inv.id ? 0.5 : 1 }}
+                      >
+                        Revoke
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
