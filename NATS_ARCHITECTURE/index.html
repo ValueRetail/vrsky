@@ -1,0 +1,3423 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+      
+        <link rel="prev" href="../TENANT_MODEL/">
+      
+      
+        <link rel="next" href="../OBSERVABILITY/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>NATS architecture - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vrsky-nats-architecture-decision" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              NATS architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONNECTION_NODE_SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Specifications
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component Specifications">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#platform-nats-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform NATS Cluster
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tenant-scoped-nats-instances" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant-Scoped NATS Instances
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-discovery-worker-connectivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Discovery &amp; Worker Connectivity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Service Discovery &amp; Worker Connectivity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#internal-dns-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal DNS Registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-connection-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Connection Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-flow-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Flow Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Message Flow Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standard-message-flow-small-payloads-256kb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard Message Flow (Small Payloads &lt;256KB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#large-payload-flow-256kb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large Payload Flow (&gt;256KB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retry-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retry &amp; Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Retry &amp; Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retry-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retry Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ackwait-in-progress-heartbeats-redelivery-139" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AckWait, in-progress heartbeats &amp; redelivery (#139)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dead-letter-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dead Letter Queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment &amp; Operations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment &amp; Operations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-scaling-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Scaling Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring &amp; Observability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Monitoring &amp; Observability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cost Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resource-usage-example-100-tenants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource Usage (Example: 100 Tenants)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Enhancements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Future Enhancements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-post-poc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 (Post-POC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-enterprise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 (Enterprise)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision History
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Specifications
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component Specifications">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#platform-nats-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform NATS Cluster
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tenant-scoped-nats-instances" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant-Scoped NATS Instances
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-discovery-worker-connectivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Discovery &amp; Worker Connectivity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Service Discovery &amp; Worker Connectivity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#internal-dns-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internal DNS Registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-connection-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker Connection Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-flow-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Flow Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Message Flow Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standard-message-flow-small-payloads-256kb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard Message Flow (Small Payloads &lt;256KB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#large-payload-flow-256kb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Large Payload Flow (&gt;256KB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retry-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retry &amp; Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Retry &amp; Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retry-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retry Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ackwait-in-progress-heartbeats-redelivery-139" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AckWait, in-progress heartbeats &amp; redelivery (#139)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dead-letter-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dead Letter Queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment &amp; Operations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment &amp; Operations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-scaling-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Scaling Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring &amp; Observability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Monitoring &amp; Observability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#key-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cost Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resource-usage-example-100-tenants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource Usage (Example: 100 Tenants)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Enhancements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Future Enhancements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-post-poc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 (Post-POC)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-enterprise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 (Enterprise)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision History
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vrsky-nats-architecture-decision">VRSky NATS Architecture Decision<a class="headerlink" href="#vrsky-nats-architecture-decision" title="Permanent link">&para;</a></h1>
+<p><strong>Date</strong>: January 27, 2026<br />
+<strong>Status</strong>: Approved<br />
+<strong>Decision Type</strong>: Architecture Design Record (ADR)</p>
+<hr />
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>VRSky requires a messaging infrastructure that supports:</p>
+<ul>
+<li>High throughput (measured at ~15,000 msg/s sustained end-to-end on a single dev host — see <a href="../LOAD/">LOAD.md</a>)</li>
+<li>Multi-tenant isolation</li>
+<li>Ephemeral message transport (no long-term persistence in core platform)</li>
+<li>Reference-based messaging for large payloads</li>
+<li>Elastic scaling based on tenant demand</li>
+</ul>
+<p>This document describes the <strong>hybrid NATS architecture</strong> chosen to meet these requirements.</p>
+<hr />
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p>We will implement a <strong>hybrid dual-NATS architecture</strong>:</p>
+<ol>
+<li><strong>Platform NATS Cluster</strong> (Shared, HA)</li>
+<li>3-5 node HA cluster with JetStream enabled</li>
+<li>Used for state tracking, dead letter queue, retries</li>
+<li>
+<p>Shared across all tenants (platform-wide infrastructure)</p>
+</li>
+<li>
+<p><strong>Tenant-Scoped NATS Instances</strong> (Ephemeral, NATS Core)</p>
+</li>
+<li>Single-node NATS Core per tenant (no JetStream)</li>
+<li>Used for fast, ephemeral message transport</li>
+<li>Horizontal scaling: Add new instances when capacity limits reached</li>
+</ol>
+<hr />
+<h2 id="architecture-diagram">Architecture Diagram<a class="headerlink" href="#architecture-diagram" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────┐
+│              Platform NATS Cluster (HA)                     │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐                     │
+│  │ Node 1  │  │ Node 2  │  │ Node 3  │                     │
+│  └─────────┘  └─────────┘  └─────────┘                     │
+│                                                              │
+│  JetStream + KV Buckets:                                    │
+│  ├─ message_state (TTL: 15min)                              │
+│  ├─ integration_locks (TTL: 5min)                           │
+│  ├─ retry_queue (TTL: 1hr)                                  │
+│  └─ dead_letter_queue (TTL: 7 days)                         │
+└─────────────────────────────────────────────────────────────┘
+                          ▲
+                          │ (State tracking only)
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+        ▼                 ▼                 ▼
+  ┌──────────┐      ┌──────────┐      ┌──────────┐
+  │ Tenant A │      │ Tenant B │      │ Tenant C │
+  ├──────────┤      ├──────────┤      ├──────────┤
+  │ NATS-1   │      │ NATS-1   │      │ NATS-1   │
+  │ (Core)   │      │ (Core)   │      │ (Core)   │
+  │          │      │          │      │ NATS-2   │
+  │ 50 integ │      │ 30 integ │      │ (Core)   │
+  └──────────┘      └──────────┘      │          │
+                                       │ 75 integ │
+                                       └──────────┘
+        ▲                 ▲                 ▲
+        │                 │                 │
+        │                 │                 │
+   Integrations      Integrations      Integrations
+   &amp; Workers         &amp; Workers         &amp; Workers
+</code></pre></div>
+<hr />
+<h2 id="component-specifications">Component Specifications<a class="headerlink" href="#component-specifications" title="Permanent link">&para;</a></h2>
+<h3 id="platform-nats-cluster">Platform NATS Cluster<a class="headerlink" href="#platform-nats-cluster" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose</strong>: Durable state tracking and platform-wide operations</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Deployment</strong></td>
+<td>3-5 node HA cluster (Kubernetes StatefulSet)</td>
+</tr>
+<tr>
+<td><strong>NATS Mode</strong></td>
+<td>JetStream enabled + NATS KV</td>
+</tr>
+<tr>
+<td><strong>Replication</strong></td>
+<td>R3 (3-way replication for durability)</td>
+</tr>
+<tr>
+<td><strong>Resources</strong></td>
+<td>4 CPU, 8GB RAM per node</td>
+</tr>
+<tr>
+<td><strong>Storage</strong></td>
+<td>100GB SSD per node (JetStream streams)</td>
+</tr>
+<tr>
+<td><strong>Uptime SLA</strong></td>
+<td>99.9% (HA with automatic failover)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use Cases</strong>:</p>
+<ul>
+<li>✅ Message state tracking (processing status)</li>
+<li>✅ Dead letter queue (failed messages)</li>
+<li>✅ Retry queue (messages awaiting retry)</li>
+<li>✅ Integration locks (prevent duplicate processing)</li>
+<li>✅ Platform-wide events (tenant provisioning, etc.)</li>
+<li>✅ Cross-tenant integrations (future feature)</li>
+</ul>
+<p><strong>KV Bucket Schema</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">message_state</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15 minutes</span>
+<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10GB</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+
+<span class="nt">integration_locks</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5 minutes</span>
+<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1GB</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+
+<span class="nt">retry_queue</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1 hour</span>
+<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50GB</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+
+<span class="nt">dead_letter_queue</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">ttl</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">7 days</span>
+<span class="w">  </span><span class="nt">max_bytes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100GB</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</code></pre></div>
+<hr />
+<h3 id="tenant-scoped-nats-instances">Tenant-Scoped NATS Instances<a class="headerlink" href="#tenant-scoped-nats-instances" title="Permanent link">&para;</a></h3>
+<p><strong>Purpose</strong>: Fast, ephemeral message transport within tenant boundary</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Deployment</strong></td>
+<td>Single-node NATS Core (Kubernetes Pod)</td>
+</tr>
+<tr>
+<td><strong>NATS Mode</strong></td>
+<td>Core only (no JetStream, no KV)</td>
+</tr>
+<tr>
+<td><strong>Resources</strong></td>
+<td>2 CPU, 4GB RAM per instance</td>
+</tr>
+<tr>
+<td><strong>Storage</strong></td>
+<td>None (ephemeral, in-memory only)</td>
+</tr>
+<tr>
+<td><strong>Uptime SLA</strong></td>
+<td>99% (Kubernetes auto-restart, 30s-2min gap)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Capacity Limits per Instance</strong>:</p>
+<ul>
+<li><strong>Max Integrations</strong>: 50-100 (scale at 50)</li>
+<li><strong>Max Throughput</strong>: 100K-500K msgs/sec</li>
+<li><strong>Max Concurrent Connections</strong>: 500-1000</li>
+</ul>
+<p><strong>Scaling Triggers</strong>:</p>
+<div class="highlight"><pre><span></span><code>if integrations &gt;= 50:
+    provision_new_nats_instance(tenant_id)
+    assign_new_integrations_to_new_instance()
+
+if msg_rate_sustained &gt; 100K msgs/sec for 5 min:
+    provision_new_nats_instance(tenant_id)
+    rebalance_integrations()
+</code></pre></div>
+<p><strong>Naming Convention</strong>:</p>
+<div class="highlight"><pre><span></span><code>nats-{tenant-id}-{instance-number}
+
+Examples:
+- nats-tenant-a-1
+- nats-tenant-a-2
+- nats-tenant-b-1
+</code></pre></div>
+<hr />
+<h2 id="service-discovery-worker-connectivity">Service Discovery &amp; Worker Connectivity<a class="headerlink" href="#service-discovery-worker-connectivity" title="Permanent link">&para;</a></h2>
+<h3 id="internal-dns-registration">Internal DNS Registration<a class="headerlink" href="#internal-dns-registration" title="Permanent link">&para;</a></h3>
+<p>When a new NATS instance is provisioned:</p>
+<ol>
+<li><strong>Kubernetes Service</strong> created:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Service</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-tenant-a-1</span>
+<span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vrsky-tenants</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">    </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
+<span class="w">    </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4222</span>
+<span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">client</span>
+</code></pre></div>
+<ol>
+<li><strong>Internal DNS entry</strong> auto-registered:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>nats-tenant-a-1.vrsky-tenants.svc.cluster.local:4222
+</code></pre></div>
+<ol>
+<li><strong>Control Plane tracking</strong>:
+   <div class="highlight"><pre><span></span><code><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">nats_instances</span><span class="w"> </span><span class="p">(</span><span class="n">tenant_id</span><span class="p">,</span><span class="w"> </span><span class="n">instance_id</span><span class="p">,</span><span class="w"> </span><span class="n">dns_name</span><span class="p">,</span><span class="w"> </span><span class="n">status</span><span class="p">)</span>
+<span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;tenant-a&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;nats-tenant-a-1.vrsky-tenants.svc.cluster.local:4222&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;active&#39;</span><span class="p">);</span>
+</code></pre></div></li>
+</ol>
+<h3 id="worker-connection-strategy">Worker Connection Strategy<a class="headerlink" href="#worker-connection-strategy" title="Permanent link">&para;</a></h3>
+<p><strong>Workers connect to ALL tenant NATS instances</strong> for resilience:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Worker startup: Fetch all NATS instances for this tenant</span>
+<span class="nx">tenantNATS</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">controlPlane</span><span class="p">.</span><span class="nx">GetNATSInstances</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
+<span class="c1">// Returns: [&quot;nats-tenant-a-1:4222&quot;, &quot;nats-tenant-a-2:4222&quot;]</span>
+
+<span class="c1">// Connect to all instances (NATS client handles failover)</span>
+<span class="nx">nc</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">nats</span><span class="p">.</span><span class="nx">Connect</span><span class="p">(</span>
+<span class="w">    </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">tenantNATS</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;,&quot;</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">Name</span><span class="p">(</span><span class="s">&quot;worker-converter-1&quot;</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">ReconnectWait</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">MaxReconnects</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="c1">// Infinite reconnects</span>
+<span class="p">)</span>
+
+<span class="c1">// Workers subscribe to all relevant subjects</span>
+<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">&quot;tenant-a.webhook.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">processWebhook</span><span class="p">)</span>
+<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">&quot;tenant-a.convert.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">processConversion</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Publishing Strategy</strong>: Round-robin (NATS client handles automatically)</p>
+<hr />
+<h2 id="message-flow-architecture">Message Flow Architecture<a class="headerlink" href="#message-flow-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="standard-message-flow-small-payloads-256kb">Standard Message Flow (Small Payloads &lt;256KB)<a class="headerlink" href="#standard-message-flow-small-payloads-256kb" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>1. Integration receives data
+   └─&gt; Publishes to Tenant NATS: &quot;tenant-a.webhook.received&quot;
+
+2. Worker subscribes to Tenant NATS
+   └─&gt; Receives message on &quot;tenant-a.webhook.received&quot;
+
+3. Worker tracks state in Platform NATS KV
+   └─&gt; KV.Put(&quot;msg-12345&quot;, {status: &quot;processing&quot;, timestamp: ...})
+
+4. Worker processes message
+   └─&gt; Convert, filter, route, etc.
+
+5. Worker publishes result to Tenant NATS
+   └─&gt; &quot;tenant-a.producer.send&quot;
+
+6. Producer consumes from Tenant NATS
+   └─&gt; Sends to external system
+
+7. Worker updates state in Platform NATS KV
+   └─&gt; KV.Put(&quot;msg-12345&quot;, {status: &quot;completed&quot;, timestamp: ...})
+   └─&gt; Auto-deleted after TTL (15min)
+</code></pre></div>
+<h3 id="large-payload-flow-256kb">Large Payload Flow (&gt;256KB)<a class="headerlink" href="#large-payload-flow-256kb" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>1. Integration receives large payload (e.g., 5MB file)
+
+2. Integration stores in MinIO/S3
+   └─&gt; PUT /tenant-a/messages/msg-12345.bin
+   └─&gt; Returns: presigned URL (valid 15min)
+
+3. Integration publishes reference to Tenant NATS
+   └─&gt; Payload: {
+         message_id: &quot;msg-12345&quot;,
+         payload_ref: &quot;s3://bucket/tenant-a/messages/msg-12345.bin&quot;,
+         size: 5242880,
+         ttl: 900 // 15min
+       }
+
+4. Worker fetches payload from storage
+   └─&gt; GET presigned URL
+   └─&gt; Process large file
+
+5. Worker publishes result (small reference or direct)
+   └─&gt; Tenant NATS or storage depending on size
+
+6. Cleanup job deletes from storage after TTL
+   └─&gt; DELETE /tenant-a/messages/msg-12345.bin
+</code></pre></div>
+<hr />
+<h2 id="retry-error-handling">Retry &amp; Error Handling<a class="headerlink" href="#retry-error-handling" title="Permanent link">&para;</a></h2>
+<h3 id="state-machine">State Machine<a class="headerlink" href="#state-machine" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>RECEIVED → PROCESSING → COMPLETED
+    ↓           ↓
+    └─→ RETRY ←┘ (max 3 attempts)
+         ↓
+    DEAD_LETTER (after max retries)
+</code></pre></div>
+<h3 id="retry-logic">Retry Logic<a class="headerlink" href="#retry-logic" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="nx">processMessage</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="o">*</span><span class="nx">nats</span><span class="p">.</span><span class="nx">Msg</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">msgID</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="s">&quot;Message-ID&quot;</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// Get current state from Platform NATS KV</span>
+<span class="w">    </span><span class="nx">state</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">msgID</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Move to dead letter queue</span>
+<span class="w">        </span><span class="nx">deadLetterQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;dead_letter&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">})</span>
+<span class="w">        </span><span class="k">return</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Track processing</span>
+<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;processing&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
+
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">doWork</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Schedule retry with exponential backoff</span>
+<span class="w">        </span><span class="nx">retryDelay</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">Pow</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nb">float64</span><span class="p">(</span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">)))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
+<span class="w">        </span><span class="nx">retryQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="nx">nats</span><span class="p">.</span><span class="nx">RetryDelay</span><span class="p">(</span><span class="nx">retryDelay</span><span class="p">))</span>
+<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;retry&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">})</span>
+<span class="w">        </span><span class="k">return</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Success</span>
+<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;completed&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="ackwait-in-progress-heartbeats-redelivery-139">AckWait, in-progress heartbeats &amp; redelivery (#139)<a class="headerlink" href="#ackwait-in-progress-heartbeats-redelivery-139" title="Permanent link">&para;</a></h3>
+<p>The durable consumer's <strong>AckWait</strong> is the crash-recovery window — how long
+JetStream waits for an ack before assuming the worker died and redelivering. It
+is <strong>not</strong> the per-message time budget: while a handler runs, the subscriber
+sends periodic <code>InProgress()</code> heartbeats (every <code>AckWait/2</code>) that reset the
+server-side timer, so a handler can legitimately run far longer than AckWait
+(slow producer target, large payload, bulk API) <strong>without</strong> triggering a
+duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
+<ul>
+<li>JetStream stores <code>Backoff[0]</code> as the effective AckWait when a backoff schedule
+  is set, so the two are always kept aligned to avoid the re-bind crash-loop in
+  [#99]. AckWait is tunable per worker via the <code>WORKER_ACK_WAIT</code> env (a Go
+  duration, e.g. <code>2m</code>); raising it on an existing durable reconciles the
+  consumer in place (<code>UpdateConsumer</code>) rather than failing to re-bind.</li>
+<li><strong>Idempotency / dedup:</strong> delivery is at-least-once. Producers publish with a
+  stable <code>Msg-Id</code> (the envelope ID), and the main stream's <strong>5-minute duplicate
+  window</strong> (<code>Duplicates: 5*time.Minute</code>) collapses re-published duplicates. The
+  full redelivery-to-DLQ backoff schedule (≈156s) fits well inside that window,
+  so a message that is NAK'd and retried across the whole schedule is still
+  deduplicated. Downstream sinks should additionally treat writes as idempotent
+  where the target allows it (e.g. upsert by key).</li>
+</ul>
+<h3 id="dead-letter-queue">Dead Letter Queue<a class="headerlink" href="#dead-letter-queue" title="Permanent link">&para;</a></h3>
+<p><strong>After 3 failed retries</strong>:</p>
+<ol>
+<li>Message moved to <code>dead_letter_queue</code> stream in Platform NATS</li>
+<li>Tenant notified via webhook/email</li>
+<li>Message retained for 7 days</li>
+<li>Admin UI allows manual retry or inspection</li>
+</ol>
+<hr />
+<h2 id="deployment-operations">Deployment &amp; Operations<a class="headerlink" href="#deployment-operations" title="Permanent link">&para;</a></h2>
+<h3 id="kubernetes-manifests">Kubernetes Manifests<a class="headerlink" href="#kubernetes-manifests" title="Permanent link">&para;</a></h3>
+<p><strong>Platform NATS</strong> (StatefulSet):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">StatefulSet</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-platform</span>
+<span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vrsky-platform</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">serviceName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-platform</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-platform</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-platform</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats:2.12-alpine</span>
+<span class="w">          </span><span class="nt">args</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-js&quot;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-c&quot;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;/etc/nats/nats.conf&quot;</span>
+<span class="w">          </span><span class="nt">resources</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">requests</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">              </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4Gi</span>
+<span class="w">            </span><span class="nt">limits</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span>
+<span class="w">              </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8Gi</span>
+<span class="w">          </span><span class="nt">volumeMounts</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">config</span>
+<span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/nats</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jetstream</span>
+<span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/jetstream</span>
+<span class="w">  </span><span class="nt">volumeClaimTemplates</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jetstream</span>
+<span class="w">      </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;ReadWriteOnce&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">        </span><span class="nt">resources</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">requests</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100Gi</span>
+</code></pre></div>
+<p><strong>Tenant NATS</strong> (Deployment, dynamically created):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deployment</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats-tenant-a-1</span>
+<span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vrsky-tenants</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">      </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
+<span class="w">      </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">        </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
+<span class="w">        </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats:2.12-alpine</span>
+<span class="w">          </span><span class="nt">args</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-m&quot;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8222&quot;</span><span class="w"> </span><span class="c1"># Monitoring port</span>
+<span class="w">          </span><span class="nt">resources</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">requests</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">              </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2Gi</span>
+<span class="w">            </span><span class="nt">limits</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">              </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4Gi</span>
+</code></pre></div>
+<h3 id="auto-scaling-logic">Auto-Scaling Logic<a class="headerlink" href="#auto-scaling-logic" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Control Plane monitors tenant NATS instances</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">monitorTenantCapacity</span><span class="p">(</span><span class="nx">tenantID</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">instances</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">getNATSInstances</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">instance</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">instances</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">metrics</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">getMetrics</span><span class="p">(</span><span class="nx">instance</span><span class="p">)</span>
+
+<span class="w">        </span><span class="c1">// Check integration count</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">IntegrationCount</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">50</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">provisionNewNATSInstance</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">&quot;Scaling tenant NATS (integration limit)&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="s">&quot;tenant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
+<span class="w">                </span><span class="s">&quot;count&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">IntegrationCount</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="c1">// Check throughput</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="nx">_000</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">provisionNewNATSInstance</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">&quot;Scaling tenant NATS (throughput limit)&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="s">&quot;tenant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
+<span class="w">                </span><span class="s">&quot;rate&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="monitoring-observability">Monitoring &amp; Observability<a class="headerlink" href="#monitoring-observability" title="Permanent link">&para;</a></h2>
+<h3 id="key-metrics">Key Metrics<a class="headerlink" href="#key-metrics" title="Permanent link">&para;</a></h3>
+<p><strong>Platform NATS</strong>:</p>
+<ul>
+<li>JetStream stream size (GB)</li>
+<li>KV bucket size (GB)</li>
+<li>Message rate (msgs/sec)</li>
+<li>Consumer lag (messages)</li>
+<li>Node health (up/down)</li>
+</ul>
+<p><strong>Tenant NATS</strong>:</p>
+<ul>
+<li>Integration count per instance</li>
+<li>Message rate (msgs/sec)</li>
+<li>Connection count</li>
+<li>Memory usage (MB)</li>
+<li>CPU usage (%)</li>
+</ul>
+<p><strong>Alerting Thresholds</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">alerts</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TenantNATSHighLoad</span>
+<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">msg_rate &gt; 80K msgs/sec for 5min</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Provision new instance</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TenantNATSMemoryHigh</span>
+<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">memory &gt; 3GB</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert + investigate</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PlatformNATSKVFull</span>
+<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kv_size &gt; 80GB</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert + increase retention</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DeadLetterQueueGrowing</span>
+<span class="w">    </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dlq_size &gt; 10K messages</span>
+<span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Alert tenant + investigate</span>
+</code></pre></div>
+<hr />
+<h2 id="security-considerations">Security Considerations<a class="headerlink" href="#security-considerations" title="Permanent link">&para;</a></h2>
+<h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
+<p><strong>Platform NATS</strong>:</p>
+<ul>
+<li>Service account credentials (control plane only)</li>
+<li>TLS encryption (in-cluster)</li>
+<li>No direct tenant access</li>
+</ul>
+<p><strong>Tenant NATS</strong>:</p>
+<ul>
+<li>Generated credentials per tenant</li>
+<li>Workers authenticate via JWT tokens</li>
+<li>Credentials rotated monthly</li>
+</ul>
+<h3 id="isolation">Isolation<a class="headerlink" href="#isolation" title="Permanent link">&para;</a></h3>
+<p><strong>Network Policies</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Tenant NATS can only be accessed by tenant&#39;s workers</span>
+<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">networking.k8s.io/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NetworkPolicy</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-nats-isolation</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">podSelector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
+<span class="w">      </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
+<span class="w">  </span><span class="nt">ingress</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">from</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">podSelector</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
+</code></pre></div>
+<hr />
+<h2 id="cost-analysis">Cost Analysis<a class="headerlink" href="#cost-analysis" title="Permanent link">&para;</a></h2>
+<h3 id="resource-usage-example-100-tenants">Resource Usage (Example: 100 Tenants)<a class="headerlink" href="#resource-usage-example-100-tenants" title="Permanent link">&para;</a></h3>
+<p><strong>Platform NATS</strong> (shared):</p>
+<ul>
+<li>3 nodes × 4 CPU × 8GB = 12 CPU, 24GB RAM</li>
+<li>Storage: 300GB SSD</li>
+<li><strong>Cost</strong>: ~$200-300/month (AWS EKS)</li>
+</ul>
+<p><strong>Tenant NATS</strong> (100 tenants, avg 1.5 instances each):</p>
+<ul>
+<li>150 instances × 2 CPU × 4GB = 300 CPU, 600GB RAM</li>
+<li><strong>Cost</strong>: ~$2000-3000/month (AWS EKS)</li>
+</ul>
+<p><strong>Total</strong>: ~$2500/month for 100 tenants = <strong>$25/tenant/month</strong></p>
+<p><strong>Scaling Economics</strong>:</p>
+<ul>
+<li>Adding 1 tenant = ~$25/month incremental cost</li>
+<li>Shared Platform NATS amortizes across all tenants</li>
+<li>Linear scaling (predictable cost model)</li>
+</ul>
+<hr />
+<h2 id="future-enhancements">Future Enhancements<a class="headerlink" href="#future-enhancements" title="Permanent link">&para;</a></h2>
+<h3 id="phase-2-post-poc">Phase 2 (Post-POC)<a class="headerlink" href="#phase-2-post-poc" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] Multi-region Platform NATS (geo-replication)</li>
+<li>[ ] NATS super-cluster for cross-tenant integrations</li>
+<li>[ ] Auto-scaling based on predictive load</li>
+<li>[ ] NATS KV → PostgreSQL archival pipeline</li>
+</ul>
+<h3 id="phase-3-enterprise">Phase 3 (Enterprise)<a class="headerlink" href="#phase-3-enterprise" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] Dedicated Platform NATS per enterprise tenant</li>
+<li>[ ] Custom retention policies per tenant</li>
+<li>[ ] NATS leafnode support for edge deployments</li>
+</ul>
+<hr />
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://docs.nats.io/">NATS Documentation</a></li>
+<li><a href="https://docs.nats.io/nats-concepts/jetstream">JetStream Design</a></li>
+<li><a href="https://docs.nats.io/nats-concepts/jetstream/key-value-store">NATS KV Store</a></li>
+<li><a href="../PROJECT_INCEPTION/">Project Inception</a></li>
+<li><a href="../ACCELERATED_TIMELINE/">Accelerated Timeline</a></li>
+</ul>
+<hr />
+<h2 id="decision-history">Decision History<a class="headerlink" href="#decision-history" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Version</th>
+<th>Changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-01-27</td>
+<td>1.0</td>
+<td>Initial hybrid NATS architecture approved</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><strong>Status</strong>: ✅ Approved - Ready for implementation</p>
+<p><strong>Next Steps</strong>:</p>
+<ol>
+<li>Create GitHub issues for implementation tasks</li>
+<li>Set up NATS Helm chart repository</li>
+<li>Build control plane NATS provisioning API</li>
+<li>Implement worker discovery service</li>
+<li>Create monitoring dashboards</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

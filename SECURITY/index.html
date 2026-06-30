@@ -1,0 +1,3076 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+      
+        <link rel="prev" href="../security/whitepaper/">
+      
+      
+        <link rel="next" href="../reference/api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Security reference - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vrsky-security" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Security reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-at-rest-issue-66-phase-1a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets at rest (issue #66 — Phase 1A)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets at rest (issue #66 — Phase 1A)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cipher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cipher
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tenant-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-an-encryption_key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating an ENCRYPTION_KEY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotating-the-master-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotating the master key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rotating the master key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#re-wrap-a-single-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-wrap a single secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotate-the-master-key-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotate the master key itself
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rbac-issue-69-phase-1d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC (issue #69 — Phase 1D)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RBAC (issue #69 — Phase 1D)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#permission-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#last-owner-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Last-owner protection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#oidc-sso-issue-68-phase-1c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OIDC / SSO (issue #68 — Phase 1C)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OIDC / SSO (issue #68 — Phase 1C)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tenant-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sign-in-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sign-in flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-development-with-keycloak" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development with Keycloak
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway-rate-limiting-phase-3g-90" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway rate limiting (Phase 3G, #90)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gateway rate limiting (Phase 3G, #90)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-a-plan-change-propagates-30s-no-restart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a plan change propagates (&lt; 30s, no restart)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verify-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (compose)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mutual-tls-for-http-connectors-phase-3f-89" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutual TLS for HTTP connectors (Phase 3F, #89)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mutual TLS for HTTP connectors (Phase 3F, #89)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behaviour
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verify-compose_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (compose)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONNECTION_NODE_SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../NATS_ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-at-rest-issue-66-phase-1a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets at rest (issue #66 — Phase 1A)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets at rest (issue #66 — Phase 1A)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cipher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cipher
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tenant-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-an-encryption_key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating an ENCRYPTION_KEY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotating-the-master-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotating the master key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rotating the master key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#re-wrap-a-single-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-wrap a single secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotate-the-master-key-itself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotate the master key itself
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rbac-issue-69-phase-1d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RBAC (issue #69 — Phase 1D)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RBAC (issue #69 — Phase 1D)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#permission-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#last-owner-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Last-owner protection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#oidc-sso-issue-68-phase-1c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OIDC / SSO (issue #68 — Phase 1C)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OIDC / SSO (issue #68 — Phase 1C)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tenant-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sign-in-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sign-in flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-development-with-keycloak" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development with Keycloak
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway-rate-limiting-phase-3g-90" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gateway rate limiting (Phase 3G, #90)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gateway rate limiting (Phase 3G, #90)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-a-plan-change-propagates-30s-no-restart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a plan change propagates (&lt; 30s, no restart)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verify-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (compose)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mutual-tls-for-http-connectors-phase-3f-89" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutual TLS for HTTP connectors (Phase 3F, #89)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mutual TLS for HTTP connectors (Phase 3F, #89)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behaviour
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verify-compose_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify (compose)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vrsky-security">VRSky Security<a class="headerlink" href="#vrsky-security" title="Permanent link">&para;</a></h1>
+<p>This document covers the platform's security posture for credentials,
+configuration secrets, and the master encryption key that wraps them.</p>
+<h2 id="secrets-at-rest-issue-66-phase-1a">Secrets at rest (issue #66 — Phase 1A)<a class="headerlink" href="#secrets-at-rest-issue-66-phase-1a" title="Permanent link">&para;</a></h2>
+<p>Every credential a connector needs — DB passwords, HTTP bearer tokens,
+basic-auth passwords, API keys, HMAC signing secrets, OAuth refresh tokens —
+is stored encrypted in the <code>secrets</code> table in the management Postgres
+database. Plaintext is never written to disk by the application.</p>
+<h3 id="cipher">Cipher<a class="headerlink" href="#cipher" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Algorithm:</strong> AES-256-GCM with a random 96-bit nonce per ciphertext.</li>
+<li><strong>Wire format:</strong> <code>aes256:</code> + base64( nonce || ciphertext )</li>
+<li><strong>Key:</strong> 32 bytes (256 bits), provided as 64 hex characters via the
+  <code>ENCRYPTION_KEY</code> environment variable. The management-api refuses to start
+  without it.</li>
+<li>Reference implementation lives in <code>src/pkg/crypto/secretbox.go</code>.</li>
+</ul>
+<h3 id="reference-model">Reference model<a class="headerlink" href="#reference-model" title="Permanent link">&para;</a></h3>
+<p>Connector configs hold references — never plaintext:</p>
+<div class="highlight"><pre><span></span><code>{
+  &quot;password_secret_id&quot;: &quot;f0e0a3c2-…&quot;  // resolved at worker startup
+}
+</code></pre></div>
+<p>For database DSNs (a single string containing user, password, host, etc.)
+the password is replaced inline with a placeholder:</p>
+<div class="highlight"><pre><span></span><code>postgres://app:{secret:f0e0a3c2-…}@db.internal:5432/orders
+</code></pre></div>
+<p>Workers call <code>crypto.ResolveSecrets</code> in
+<code>src/pkg/crypto/resolver.go</code> after loading a connection from the management
+DB. The function expands every <code>&lt;key&gt;_secret_id</code> and every <code>{secret:&lt;uuid&gt;}</code>
+placeholder into plaintext in-process; nothing leaves the worker boundary
+in cleartext form.</p>
+<h3 id="tenant-isolation">Tenant isolation<a class="headerlink" href="#tenant-isolation" title="Permanent link">&para;</a></h3>
+<p>The <code>secrets</code> table has a <code>tenant_id</code> column and every read/write filters
+on it. The HTTP handlers in <code>src/pkg/managementapi/secrets_handler.go</code>
+additionally verify ownership at the application layer:</p>
+<ul>
+<li>Tenant A's API key cannot fetch tenant B's secret (returns 404, not 403,
+  to avoid confirming existence).</li>
+<li>Deleting a secret refuses with 409 if any connection in the same tenant
+  references it.</li>
+</ul>
+<h2 id="generating-an-encryption_key">Generating an ENCRYPTION_KEY<a class="headerlink" href="#generating-an-encryption_key" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>openssl rand -hex 32
+</code></pre></div>
+<p>Store the output in your secrets manager (Doppler, AWS SSM, Vault, ...) and
+inject as <code>ENCRYPTION_KEY</code> into the management-api container and every
+worker that needs to decrypt credentials.</p>
+<h2 id="rotating-the-master-key">Rotating the master key<a class="headerlink" href="#rotating-the-master-key" title="Permanent link">&para;</a></h2>
+<p>There are two flavours of rotation:</p>
+<h3 id="re-wrap-a-single-secret">Re-wrap a single secret<a class="headerlink" href="#re-wrap-a-single-secret" title="Permanent link">&para;</a></h3>
+<p>A user-triggered operation that keeps the same plaintext but generates a
+fresh nonce (defence against nonce-reuse attacks if a leak is suspected):</p>
+<div class="highlight"><pre><span></span><code>POST /api/v1/secrets/{id}/rotate
+</code></pre></div>
+<h3 id="rotate-the-master-key-itself">Rotate the master key itself<a class="headerlink" href="#rotate-the-master-key-itself" title="Permanent link">&para;</a></h3>
+<p>Done out-of-band when the master key may have been compromised. The
+high-level procedure:</p>
+<ol>
+<li>Generate a new 64-hex-character key. Call it <code>NEW_KEY</code>.</li>
+<li>Stop the management-api with the old key (graceful — workers can keep
+   running).</li>
+<li>Run the re-wrap helper:
+   <div class="highlight"><pre><span></span><code>ENCRYPTION_KEY_PREVIOUS=$OLD_KEY ENCRYPTION_KEY=$NEW_KEY \
+  go run ./cmd/migrate-secrets --rewrap
+</code></pre></div>
+   <em>(The <code>--rewrap</code> flag is a follow-up addition to migrate-secrets and is
+   not part of #66; track in a future issue.)</em></li>
+<li>Roll out the new <code>ENCRYPTION_KEY</code> to all services. Workers using the old
+   key will fail to decrypt until they restart.</li>
+</ol>
+<p>Audit-trail entries for rotation events will be added when issue #72
+(audit log) lands.</p>
+<h2 id="rbac-issue-69-phase-1d">RBAC (issue #69 — Phase 1D)<a class="headerlink" href="#rbac-issue-69-phase-1d" title="Permanent link">&para;</a></h2>
+<p>Every member of a tenant has one of four roles. Roles are ordered:
+<code>viewer &lt; editor &lt; admin &lt; owner</code>. The server enforces a minimum role on
+each route; the UI hides controls it knows are denied but always
+re-checks server-side.</p>
+<h3 id="permission-matrix">Permission matrix<a class="headerlink" href="#permission-matrix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Min role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List / read connections, secrets metadata, audit log</td>
+<td>viewer</td>
+</tr>
+<tr>
+<td>Create / update / start / stop a pipeline</td>
+<td>editor</td>
+</tr>
+<tr>
+<td>Create / update / rotate a secret</td>
+<td>editor</td>
+</tr>
+<tr>
+<td>Retry / discard a DLQ message</td>
+<td>editor</td>
+</tr>
+<tr>
+<td>Send test data through a pipeline</td>
+<td>editor</td>
+</tr>
+<tr>
+<td>Delete a connection</td>
+<td>admin</td>
+</tr>
+<tr>
+<td>Delete a secret</td>
+<td>admin</td>
+</tr>
+<tr>
+<td>Read / update / delete tenant's OIDC config</td>
+<td>admin</td>
+</tr>
+<tr>
+<td>Change another member's role</td>
+<td>owner</td>
+</tr>
+<tr>
+<td>Remove another member</td>
+<td>owner</td>
+</tr>
+<tr>
+<td>Approve / deny / revoke cross-tenant data connection</td>
+<td>owner</td>
+</tr>
+<tr>
+<td>Rotate the tenant API key</td>
+<td>owner</td>
+</tr>
+<tr>
+<td>Delete the tenant</td>
+<td>owner</td>
+</tr>
+</tbody>
+</table>
+<h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
+<p>Two ways to authenticate against mutating endpoints:</p>
+<ul>
+<li><strong>Session token</strong> (issued by <code>/auth/login</code> or OIDC callback) — present as
+  <code>Authorization: Bearer &lt;token&gt;</code> or via the <code>vrsky_session</code> cookie. The
+  server looks up the user's role in the tenant from <code>X-Tenant-ID</code>.</li>
+<li><strong>Tenant API key</strong> — opaque token bound to one tenant. Treated as
+  effective role <strong>admin</strong>: enough to deploy / manage resources, but
+  cannot transfer ownership or change tenant-wide settings.</li>
+</ul>
+<h3 id="last-owner-protection">Last-owner protection<a class="headerlink" href="#last-owner-protection" title="Permanent link">&para;</a></h3>
+<p>Every tenant must keep at least one <code>owner</code>. The server refuses with 409
+when a role change or member removal would leave zero owners. The UI
+disables the relevant controls when the row is the sole owner.</p>
+<h3 id="audit">Audit<a class="headerlink" href="#audit" title="Permanent link">&para;</a></h3>
+<p>Every role change / member removal emits an audit_log row (#72). The
+middleware auto-captures the request; <code>member.role_change</code> and
+<code>member.remove</code> actions include <code>target_user_id</code> and (for role changes)
+<code>new_role</code> in the details column.</p>
+<h2 id="oidc-sso-issue-68-phase-1c">OIDC / SSO (issue #68 — Phase 1C)<a class="headerlink" href="#oidc-sso-issue-68-phase-1c" title="Permanent link">&para;</a></h2>
+<p>Each tenant can configure one OIDC provider. The client secret is stored
+encrypted in the <code>secrets</code> table (#66); only the UUID reference lives on
+<code>oidc_config</code>. The flow is auth-code with PKCE (S256), nonce, and state.</p>
+<h3 id="tenant-configuration">Tenant configuration<a class="headerlink" href="#tenant-configuration" title="Permanent link">&para;</a></h3>
+<p>Admins of a tenant call <code>PUT /api/v1/tenants/{tenant_id}/oidc</code> with:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;issuer_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://accounts.google.com&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;client_secret&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;redirect_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://app.vrsky.example/api/v1/auth/oidc/callback&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;scopes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;openid&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;email&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;profile&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;allowed_domains&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;acme.com&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;default_role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;viewer&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;provider_label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Acme SSO&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The same <code>redirect_url</code> must be registered with the IdP. <code>allowed_domains</code>
+is enforced server-side: a user whose email domain is not in the list is
+denied at callback time, before any session is minted.</p>
+<h3 id="sign-in-flow">Sign-in flow<a class="headerlink" href="#sign-in-flow" title="Permanent link">&para;</a></h3>
+<ol>
+<li>UI → <code>GET /api/v1/auth/oidc/{slug}/login</code> (slug = tenant slug)</li>
+<li>Management-API → redirect to IdP (state + PKCE + nonce in cookies)</li>
+<li>IdP → <code>GET /api/v1/auth/oidc/callback?code=…&amp;state=…</code></li>
+<li>Management-API validates state / exchanges code / verifies ID-token /
+   matches nonce / checks allowed_domains / finds or auto-provisions the
+   user / mints a session / sets <code>vrsky_session</code> cookie</li>
+<li>Browser is redirected to <code>/</code></li>
+</ol>
+<h3 id="local-development-with-keycloak">Local development with Keycloak<a class="headerlink" href="#local-development-with-keycloak" title="Permanent link">&para;</a></h3>
+<p>The reference dev setup is Keycloak in compose:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">keycloak</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quay.io/keycloak/keycloak:24.0</span>
+<span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">start-dev</span>
+<span class="w">  </span><span class="nt">environment</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">KEYCLOAK_ADMIN</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin</span>
+<span class="w">    </span><span class="nt">KEYCLOAK_ADMIN_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin</span>
+<span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;8081:8080&quot;</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Create a realm <code>vrsky-dev</code>, a confidential client <code>vrsky-app</code> with redirect
+URI <code>http://localhost:3000/api/v1/auth/oidc/callback</code>, then point the
+tenant's OIDC config at <code>http://localhost:8081/realms/vrsky-dev</code>.</p>
+<p>Note: <code>redirect_url</code> must use <code>https://</code> in production. <code>http://localhost*</code>
+is allowed as a special case for local dev.</p>
+<h3 id="audit_1">Audit<a class="headerlink" href="#audit_1" title="Permanent link">&para;</a></h3>
+<p>Every OIDC login attempt — success, failure, denial-by-domain — emits a row
+in <code>auth_audit_log</code> with event type <code>oidc_login</code>. The general audit log
+(#72) records the callback hit as <code>oauth.write</code>.</p>
+<h2 id="threat-model">Threat model<a class="headerlink" href="#threat-model" title="Permanent link">&para;</a></h2>
+<p>In scope:
+- Database dump leak → all credentials remain encrypted, requiring the
+  master key to recover.
+- Casual read access to the DB → no plaintext visible.
+- A misconfigured backup that includes Postgres but not the secret
+  manager → same as above.</p>
+<p>Out of scope (planned for later phases):
+- Compromise of a service host (the master key is in memory).
+- KMS/HSM-managed master key. The env-var design is intentional first
+  step; envelope encryption against a cloud KMS is tracked separately as
+  part of Phase 5.</p>
+<h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h2>
+<p>After deploying:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># 1. Management-api refuses to start without the key.</span>
+<span class="nv">ENCRYPTION_KEY</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>management-api<span class="w">  </span><span class="c1"># expect Fatal</span>
+
+<span class="c1"># 2. Create a secret.</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:3000/api/v1/secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;pg-pwd&quot;,&quot;value&quot;:&quot;hunter2&quot;}&#39;</span>
+
+<span class="c1"># 3. Read it back — value must NOT appear in the response.</span>
+curl<span class="w"> </span>localhost:3000/api/v1/secrets/<span class="nv">$ID</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">&quot;</span>
+
+<span class="c1"># 4. Verify the database holds ciphertext only.</span>
+psql<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;SELECT ciphertext FROM secrets WHERE id = &#39;</span><span class="nv">$ID</span><span class="s2">&#39;&quot;</span>
+<span class="c1"># expected: aes256:&lt;base64...&gt;</span>
+</code></pre></div>
+<h2 id="gateway-rate-limiting-phase-3g-90">Gateway rate limiting (Phase 3G, #90)<a class="headerlink" href="#gateway-rate-limiting-phase-3g-90" title="Permanent link">&para;</a></h2>
+<p>Application quotas (#74) protect downstream resources, but they run <em>inside</em> the
+management API — a misbehaving client can still saturate the API before a quota
+check executes. The <strong>gateway</strong> (Traefik) adds edge protection: it rejects
+excess traffic with <strong>429 + <code>Retry-After</code> before the request ever reaches the
+app</strong>.</p>
+<h3 id="model">Model<a class="headerlink" href="#model" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Per-tenant, per-plan.</strong> Three rate-limit middlewares — <code>rl-free</code>, <code>rl-pro</code>,
+  <code>rl-enterprise</code> — with increasing <code>average</code> (sustained req/s) and <code>burst</code>.</li>
+<li><strong>Keyed off <code>X-Tenant-ID</code></strong> (<code>sourceCriterion.requestHeaderName</code>), so every
+  tenant gets an <strong>independent token bucket</strong> — one tenant being throttled never
+  affects another. We key on the tenant id (not the raw API key) because the
+  platform stores only API-key <em>hashes</em>; <code>X-Tenant-ID</code> is non-secret and the
+  management API already requires it, so per-plan routing needs no secret
+  material. (<code>X-API-Key</code> keying remains available for the API-key data path.)</li>
+<li><strong>429 + <code>Retry-After</code> come from Traefik</strong>, not the app.</li>
+</ul>
+<h3 id="how-a-plan-change-propagates-30s-no-restart">How a plan change propagates (&lt; 30s, no restart)<a class="headerlink" href="#how-a-plan-change-propagates-30s-no-restart" title="Permanent link">&para;</a></h3>
+<p><code>PUT /api/v1/tenants/{id}/plan</code> (owner-only) updates <code>subscription_plan</code>, then
+the management API <strong>regenerates the Traefik dynamic config</strong>
+(<code>tenants.yml</code>, one router per tenant matched on <code>X-Tenant-ID</code> → the plan's
+middleware) and writes it <strong>atomically</strong> (temp + rename) into the file-provider
+directory it shares with Traefik. Traefik's file watcher hot-reloads in ~1–2s —
+no restart. Seeded from all tenants' plans on management-API startup. Writes are
+<strong>env-gated</strong> on <code>TRAEFIK_DYNAMIC_DIR</code>, so deployments without a gateway are
+unaffected.</p>
+<ul>
+<li>Compose: <code>traefik</code> fronts the API on host <code>:8090</code>; base config in
+  <code>infrastructure/traefik/</code>; the shared dir is <code>infrastructure/traefik/dynamic/</code>.</li>
+<li>Kubernetes: <code>Middleware</code> CRDs in <code>infrastructure/kubernetes/traefik/</code>; the same
+  generated <code>tenants.yml</code> is written to a shared file-provider volume.</li>
+</ul>
+<h3 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h3>
+<p>Traefik exposes Prometheus metrics (scrape job <code>traefik</code> →
+<code>traefik_service_requests_total</code>, <code>traefik_service_request_duration_seconds</code>,
+rate-limit drops), visible in Grafana alongside the app metrics (#84).</p>
+<h3 id="verify-compose">Verify (compose)<a class="headerlink" href="#verify-compose" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>traefik<span class="w"> </span>management-api<span class="w"> </span>postgres-management<span class="w"> </span>nats<span class="w"> </span>prometheus
+<span class="c1"># Free tier is intentionally low for the demo (avg 5 / burst 10). Burst past it:</span>
+<span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">30</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code} &quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: tenant-A&quot;</span><span class="w"> </span>http://localhost:8090/api/v1/health
+<span class="k">done</span><span class="w">            </span><span class="c1"># expect a run of 200s then 429s</span>
+<span class="c1"># A 429 response carries Retry-After and Server: traefik. A different</span>
+<span class="c1"># X-Tenant-ID (tenant-B) is unaffected — independent buckets.</span>
+</code></pre></div>
+<h2 id="mutual-tls-for-http-connectors-phase-3f-89">Mutual TLS for HTTP connectors (Phase 3F, #89)<a class="headerlink" href="#mutual-tls-for-http-connectors-phase-3f-89" title="Permanent link">&para;</a></h2>
+<p>High-security integrations (banking, public sector) require mutual TLS: the
+inbound <strong>webhook consumer</strong> must reject callers that do not present a valid
+client certificate, and the outbound <strong>http producer</strong> must present a client
+certificate to mTLS-required endpoints. mTLS is opt-in per connection, keyed off
+cert material stored as tenant secrets — no new secret plumbing (it reuses the
+<code>*_secret_id</code> resolution from #66).</p>
+<h3 id="config-surface">Config surface<a class="headerlink" href="#config-surface" title="Permanent link">&para;</a></h3>
+<p>Add a <code>tls</code> block to the connector node's <code>config</code> (alongside <code>http</code>). Each
+field is a reference to a secret holding PEM text; the worker resolves it to
+plaintext at connection-start / send time (the resolver replaces a <code>*_secret_id</code>
+key with the de-suffixed key, e.g. <code>cert_secret_id</code> → <code>cert</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Consumer (webhook)</th>
+<th>Producer (http)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>client_ca_secret_id</code></td>
+<td><strong>required</strong> — CA that signs accepted client certs</td>
+<td>optional — server CA to trust (empty → system roots)</td>
+</tr>
+<tr>
+<td><code>cert_secret_id</code></td>
+<td>n/a (listener cert comes from env)</td>
+<td><strong>required</strong> — client cert presented to the endpoint</td>
+</tr>
+<tr>
+<td><code>key_secret_id</code></td>
+<td>n/a</td>
+<td><strong>required</strong> — private key for <code>cert</code></td>
+</tr>
+</tbody>
+</table>
+<p>Example consumer node config (after the CA secret is stored):</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tls&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;client_ca_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>The <code>tls</code> block is settable today via the connections API; UI cert pickers are a
+follow-up. The webhook consumer's own server identity comes from
+<code>WEBHOOK_TLS_CERT_FILE</code> / <code>WEBHOOK_TLS_KEY_FILE</code>; if unset it generates a
+self-signed cert (dev only) — mTLS security here comes from verifying the
+<strong>client</strong> cert, not from the client trusting the server cert.</p>
+<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Consumer:</strong> when <code>WORKER_MTLS_PORT</code> is set (9101 in compose) the worker runs
+  a dedicated TLS listener that demands <em>a</em> client cert at the handshake
+  (<code>RequireAnyClientCert</code>) — a caller that presents none is refused at the TLS
+  layer (no HTTP response). For a connection with <code>tls.client_ca</code>, the handler
+  then verifies the presented cert chains to that per-connection CA (client-auth
+  EKU only) and rejects with <strong>401</strong> if it does not. The same check also runs on
+  the plain aux port (9100), where <code>r.TLS == nil</code> counts as "no cert" → <strong>401</strong> —
+  so an mTLS connection cannot be reached unauthenticated over plain HTTP.</li>
+<li><strong>Producer:</strong> when a node has a <code>tls</code> block with a resolved <code>cert</code>/<code>key</code>, the
+  worker builds a dedicated <code>http.Client</code> that presents that client cert (and
+  trusts <code>client_ca</code> as the server root if supplied), reused for every send.</li>
+<li>A connection with no <code>tls</code> block behaves exactly as before.</li>
+<li>Rejections increment <code>webhook_client_cert_failures_total{connection_id,reason}</code>
+  (<code>reason</code> = <code>missing_cert</code> | <code>untrusted_cert</code>).</li>
+</ul>
+<h3 id="verify-compose_1">Verify (compose)<a class="headerlink" href="#verify-compose_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># 1. Throwaway CA + server + client certs.</span>
+openssl<span class="w"> </span>ecparam<span class="w"> </span>-genkey<span class="w"> </span>-name<span class="w"> </span>prime256v1<span class="w"> </span>-out<span class="w"> </span>ca.key
+openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>ca.key<span class="w"> </span>-sha256<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-subj<span class="w"> </span><span class="s2">&quot;/CN=test-ca&quot;</span><span class="w"> </span>-out<span class="w"> </span>ca.crt
+openssl<span class="w"> </span>ecparam<span class="w"> </span>-genkey<span class="w"> </span>-name<span class="w"> </span>prime256v1<span class="w"> </span>-out<span class="w"> </span>client.key
+openssl<span class="w"> </span>req<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>client.key<span class="w"> </span>-subj<span class="w"> </span><span class="s2">&quot;/CN=client&quot;</span><span class="w"> </span>-out<span class="w"> </span>client.csr
+openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>client.csr<span class="w"> </span>-CA<span class="w"> </span>ca.crt<span class="w"> </span>-CAkey<span class="w"> </span>ca.key<span class="w"> </span>-CAcreateserial<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-out<span class="w"> </span>client.crt
+
+<span class="c1"># 2. Store ca.crt as a tenant secret and put its id in the consumer node&#39;s</span>
+<span class="c1">#    tls.client_ca_secret_id, then start a webhook→http connection.</span>
+
+<span class="c1"># 3. No client cert → TLS handshake refused (RequireAnyClientCert, no HTTP</span>
+<span class="c1">#    response — curl exits 35/56); valid client cert → 202.</span>
+curl<span class="w"> </span>-k<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;x&quot;:1}&#39;</span><span class="w">                       </span><span class="c1"># handshake refused</span>
+curl<span class="w"> </span>-k<span class="w"> </span>--cert<span class="w"> </span>client.crt<span class="w"> </span>--key<span class="w"> </span>client.key<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;x&quot;:1}&#39;</span><span class="w">  </span><span class="c1"># 202</span>
+<span class="c1"># A cert signed by a different CA completes the handshake but fails app-layer</span>
+<span class="c1"># verification → 401. (macOS system curl uses LibreSSL, which mishandles EC</span>
+<span class="c1"># client keys with &quot;bad decrypt&quot;; use an OpenSSL-based curl to test.)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

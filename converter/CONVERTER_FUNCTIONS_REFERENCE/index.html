@@ -1,0 +1,3460 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>VRSky Converter Functions Reference - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vrsky-converter-functions-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              VRSky Converter Functions Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#function-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Function Categories
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#string-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        String Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="String Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#upper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        upper()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lower" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lower()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#substringstart-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        substring(start, end)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#concatparts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        concat(...parts)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#splitdelimiter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        split(delimiter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#joindelimiter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        join(delimiter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#containssubstring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        contains(substring)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#startswithprefix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        startswith(prefix)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#endswithsuffix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        endswith(suffix)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trim()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#replacesearch-replacement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        replace(search, replacement)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        length()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-conversion-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type Conversion Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type Conversion Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tostring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        toString()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tonumber" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        toNumber()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toboolean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        toBoolean()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parsejson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parseJSON()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stringifyjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stringifyJSON()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#numeric-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Numeric Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Numeric Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#addvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add(value)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subtractvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        subtract(value)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multiplyfactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        multiply(factor)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dividedivisor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        divide(divisor)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rounddecimals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        round(decimals)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#floor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        floor()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ceil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ceil()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#abs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        abs()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#datetime-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Date/Time Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Date/Time Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#now" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        now()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        today()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timestamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        timestamp()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#id-generation-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ID Generation Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ID Generation Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#uuid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        uuid()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#randommin-max" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        random(min, max)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#envvar_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        env(VAR_NAME)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lookup-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lookup Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lookup_postgresquery-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lookup_postgres(query, parameters)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookup_httpurl-method-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lookup_http(url, method, headers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookup_compositebackends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lookup_composite(backends)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caching-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caching Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Caching Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cache_getkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cache_get(key)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache_setkey-value-ttl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cache_set(key, value, ttl)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm-plugin-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM Plugin Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WASM Plugin Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#deploying-a-wasm-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying a WASM Plugin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasm-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#function-usage-in-transformations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Function Usage in Transformations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Function Usage in Transformations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Conditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chained-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chained Functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Tips
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance Tips">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-cache-expensive-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Cache Expensive Operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-use-conditions-to-skip-unnecessary-lookups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Use Conditions to Skip Unnecessary Lookups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-batch-lookup-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Batch Lookup Requests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-use-connection-pooling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Use Connection Pooling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#built-in-function-reference-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in Function Reference Table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vrsky-converter-functions-reference">VRSky Converter Functions Reference<a class="headerlink" href="#vrsky-converter-functions-reference" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>This guide documents all available functions that can be used in converter transformations. Functions are organized by category and include examples for each.</p>
+<h2 id="function-categories">Function Categories<a class="headerlink" href="#function-categories" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>String Functions</strong> - String manipulation and transformation</li>
+<li><strong>Type Conversion Functions</strong> - Type conversion and parsing</li>
+<li><strong>Numeric Functions</strong> - Numeric operations and calculations</li>
+<li><strong>Date/Time Functions</strong> - Timestamp and date operations</li>
+<li><strong>ID Generation Functions</strong> - Generate unique identifiers</li>
+<li><strong>Lookup Functions</strong> - Query external data sources</li>
+<li><strong>Caching Functions</strong> - Cache and retrieve values</li>
+<li><strong>WASM Plugin Functions</strong> - Custom WebAssembly functions</li>
+</ol>
+<h2 id="string-functions">String Functions<a class="headerlink" href="#string-functions" title="Permanent link">&para;</a></h2>
+<h3 id="upper">upper()<a class="headerlink" href="#upper" title="Permanent link">&para;</a></h3>
+<p>Converts a string to uppercase.</p>
+<p><strong>Signature</strong>: <code>upper(input: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.name</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">upper()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_name_upper</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;john doe&quot;
+Output: &quot;JOHN DOE&quot;
+</code></pre></div></p>
+<h3 id="lower">lower()<a class="headerlink" href="#lower" title="Permanent link">&para;</a></h3>
+<p>Converts a string to lowercase.</p>
+<p><strong>Signature</strong>: <code>lower(input: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.email</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lower()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email_normalized</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;John@EXAMPLE.COM&quot;
+Output: &quot;john@example.com&quot;
+</code></pre></div></p>
+<h3 id="substringstart-end">substring(start, end)<a class="headerlink" href="#substringstart-end" title="Permanent link">&para;</a></h3>
+<p>Extracts a substring from a string.</p>
+<p><strong>Signature</strong>: <code>substring(input: string, start: int, end: int) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.id</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">substring(0, 8)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order_prefix</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;ORD-2026-001-XYZ&quot;
+Output: &quot;ORD-2026&quot;
+</code></pre></div></p>
+<h3 id="concatparts">concat(...parts)<a class="headerlink" href="#concatparts" title="Permanent link">&para;</a></h3>
+<p>Concatenates multiple strings.</p>
+<p><strong>Signature</strong>: <code>concat(part1: string, part2: string, ...) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concat(customer.first_name, &quot; &quot;, customer.last_name)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">full_name</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  first_name=&quot;John&quot;, last_name=&quot;Doe&quot;
+Output: &quot;John Doe&quot;
+</code></pre></div></p>
+<h3 id="splitdelimiter">split(delimiter)<a class="headerlink" href="#splitdelimiter" title="Permanent link">&para;</a></h3>
+<p>Splits a string by delimiter into an array.</p>
+<p><strong>Signature</strong>: <code>split(input: string, delimiter: string) → array[string]</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tags</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">split(&quot;,&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tag_array</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;tag1,tag2,tag3&quot;
+Output: [&quot;tag1&quot;, &quot;tag2&quot;, &quot;tag3&quot;]
+</code></pre></div></p>
+<h3 id="joindelimiter">join(delimiter)<a class="headerlink" href="#joindelimiter" title="Permanent link">&para;</a></h3>
+<p>Joins array elements with a delimiter.</p>
+<p><strong>Signature</strong>: <code>join(input: array[string], delimiter: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.items</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">join(&quot;, &quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">items_string</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  [&quot;apple&quot;, &quot;banana&quot;, &quot;orange&quot;]
+Output: &quot;apple, banana, orange&quot;
+</code></pre></div></p>
+<h3 id="containssubstring">contains(substring)<a class="headerlink" href="#containssubstring" title="Permanent link">&para;</a></h3>
+<p>Checks if a string contains a substring.</p>
+<p><strong>Signature</strong>: <code>contains(input: string, substring: string) → boolean</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contains(&quot;@&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_valid_email</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;john@example.com&quot;
+Output: true
+</code></pre></div></p>
+<h3 id="startswithprefix">startswith(prefix)<a class="headerlink" href="#startswithprefix" title="Permanent link">&para;</a></h3>
+<p>Checks if a string starts with a prefix.</p>
+<p><strong>Signature</strong>: <code>startswith(input: string, prefix: string) → boolean</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.id</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">startswith(&quot;ORD-&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_order</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;ORD-2026-001&quot;
+Output: true
+</code></pre></div></p>
+<h3 id="endswithsuffix">endswith(suffix)<a class="headerlink" href="#endswithsuffix" title="Permanent link">&para;</a></h3>
+<p>Checks if a string ends with a suffix.</p>
+<p><strong>Signature</strong>: <code>endswith(input: string, suffix: string) → boolean</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filename</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">endswith(&quot;.pdf&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_pdf</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;document.pdf&quot;
+Output: true
+</code></pre></div></p>
+<h3 id="trim">trim()<a class="headerlink" href="#trim" title="Permanent link">&para;</a></h3>
+<p>Removes leading and trailing whitespace.</p>
+<p><strong>Signature</strong>: <code>trim(input: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.name</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trim()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">name_trimmed</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;  John Doe  &quot;
+Output: &quot;John Doe&quot;
+</code></pre></div></p>
+<h3 id="replacesearch-replacement">replace(search, replacement)<a class="headerlink" href="#replacesearch-replacement" title="Permanent link">&para;</a></h3>
+<p>Replaces all occurrences of a substring.</p>
+<p><strong>Signature</strong>: <code>replace(input: string, search: string, replacement: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">address</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">replace(&quot;,&quot;, &quot;;&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">address_normalized</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;123 Main St, New York, NY&quot;
+Output: &quot;123 Main St; New York; NY&quot;
+</code></pre></div></p>
+<h3 id="length">length()<a class="headerlink" href="#length" title="Permanent link">&para;</a></h3>
+<p>Returns the length of a string or array.</p>
+<p><strong>Signature</strong>: <code>length(input: string | array) → int</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">product_name</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">length()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">name_length</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;MacBook Pro&quot;
+Output: 11
+</code></pre></div></p>
+<hr />
+<h2 id="type-conversion-functions">Type Conversion Functions<a class="headerlink" href="#type-conversion-functions" title="Permanent link">&para;</a></h2>
+<h3 id="tostring">toString()<a class="headerlink" href="#tostring" title="Permanent link">&para;</a></h3>
+<p>Converts a value to a string.</p>
+<p><strong>Signature</strong>: <code>toString(input: any) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantity</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">toString()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qty_string</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  123
+Output: &quot;123&quot;
+</code></pre></div></p>
+<h3 id="tonumber">toNumber()<a class="headerlink" href="#tonumber" title="Permanent link">&para;</a></h3>
+<p>Converts a value to a number (int or float).</p>
+<p><strong>Signature</strong>: <code>toNumber(input: string | number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">price_text</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">toNumber()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">price</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">float</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;99.99&quot;
+Output: 99.99
+</code></pre></div></p>
+<h3 id="toboolean">toBoolean()<a class="headerlink" href="#toboolean" title="Permanent link">&para;</a></h3>
+<p>Converts a value to a boolean.</p>
+<p><strong>Signature</strong>: <code>toBoolean(input: any) → boolean</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_active</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">toBoolean()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">active</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">boolean</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &quot;true&quot;, 1, true, &quot;yes&quot;
+Output: true
+Input:  &quot;false&quot;, 0, false, &quot;no&quot;
+Output: false
+</code></pre></div></p>
+<h3 id="parsejson">parseJSON()<a class="headerlink" href="#parsejson" title="Permanent link">&para;</a></h3>
+<p>Parses a JSON string into an object.</p>
+<p><strong>Signature</strong>: <code>parseJSON(input: string) → object</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metadata_json</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parseJSON()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metadata</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  &#39;{&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}&#39;
+Output: {&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}
+</code></pre></div></p>
+<h3 id="stringifyjson">stringifyJSON()<a class="headerlink" href="#stringifyjson" title="Permanent link">&para;</a></h3>
+<p>Converts an object to a JSON string.</p>
+<p><strong>Signature</strong>: <code>stringifyJSON(input: object) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metadata_object</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">stringifyJSON()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metadata_json</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  {&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}
+Output: &#39;{&quot;key&quot;:&quot;value&quot;,&quot;count&quot;:42}&#39;
+</code></pre></div></p>
+<hr />
+<h2 id="numeric-functions">Numeric Functions<a class="headerlink" href="#numeric-functions" title="Permanent link">&para;</a></h2>
+<h3 id="addvalue">add(value)<a class="headerlink" href="#addvalue" title="Permanent link">&para;</a></h3>
+<p>Adds a number to another number.</p>
+<p><strong>Signature</strong>: <code>add(input: number, value: number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.total</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">add(tax_amount)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">total_with_tax</span>
+</code></pre></div></p>
+<h3 id="subtractvalue">subtract(value)<a class="headerlink" href="#subtractvalue" title="Permanent link">&para;</a></h3>
+<p>Subtracts a number from another number.</p>
+<p><strong>Signature</strong>: <code>subtract(input: number, value: number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">price</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">subtract(discount)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">final_price</span>
+</code></pre></div></p>
+<h3 id="multiplyfactor">multiply(factor)<a class="headerlink" href="#multiplyfactor" title="Permanent link">&para;</a></h3>
+<p>Multiplies a number by a factor.</p>
+<p><strong>Signature</strong>: <code>multiply(input: number, factor: number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantity</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">multiply(unit_price)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line_total</span>
+</code></pre></div></p>
+<h3 id="dividedivisor">divide(divisor)<a class="headerlink" href="#dividedivisor" title="Permanent link">&para;</a></h3>
+<p>Divides a number by a divisor.</p>
+<p><strong>Signature</strong>: <code>divide(input: number, divisor: number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">total_price</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">divide(quantity)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unit_price</span>
+</code></pre></div></p>
+<h3 id="rounddecimals">round(decimals)<a class="headerlink" href="#rounddecimals" title="Permanent link">&para;</a></h3>
+<p>Rounds a number to a specified number of decimal places.</p>
+<p><strong>Signature</strong>: <code>round(input: number, decimals: int) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">calculated_price</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">round(2)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">final_price</span>
+</code></pre></div></p>
+<p><strong>Input/Output</strong>:
+<div class="highlight"><pre><span></span><code>Input:  99.9876
+Output: 99.99
+</code></pre></div></p>
+<h3 id="floor">floor()<a class="headerlink" href="#floor" title="Permanent link">&para;</a></h3>
+<p>Rounds down to the nearest integer.</p>
+<p><strong>Signature</strong>: <code>floor(input: number) → int</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantity_precise</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">floor()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantity</span>
+</code></pre></div></p>
+<h3 id="ceil">ceil()<a class="headerlink" href="#ceil" title="Permanent link">&para;</a></h3>
+<p>Rounds up to the nearest integer.</p>
+<p><strong>Signature</strong>: <code>ceil(input: number) → int</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">calculated_units</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ceil()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">units_needed</span>
+</code></pre></div></p>
+<h3 id="abs">abs()<a class="headerlink" href="#abs" title="Permanent link">&para;</a></h3>
+<p>Returns the absolute value.</p>
+<p><strong>Signature</strong>: <code>abs(input: number) → number</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">amount_difference</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">abs()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variance</span>
+</code></pre></div></p>
+<hr />
+<h2 id="datetime-functions">Date/Time Functions<a class="headerlink" href="#datetime-functions" title="Permanent link">&para;</a></h2>
+<h3 id="now">now()<a class="headerlink" href="#now" title="Permanent link">&para;</a></h3>
+<p>Returns the current timestamp in RFC3339Nano format.</p>
+<p><strong>Signature</strong>: <code>now() → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">now()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">created_at</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
+</code></pre></div></p>
+<p><strong>Output</strong>:
+<div class="highlight"><pre><span></span><code>&quot;2026-02-23T12:30:45.123456789Z&quot;
+</code></pre></div></p>
+<h3 id="today">today()<a class="headerlink" href="#today" title="Permanent link">&para;</a></h3>
+<p>Returns today's date in YYYY-MM-DD format.</p>
+<p><strong>Signature</strong>: <code>today() → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">today()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">processing_date</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
+</code></pre></div></p>
+<p><strong>Output</strong>:
+<div class="highlight"><pre><span></span><code>&quot;2026-02-23&quot;
+</code></pre></div></p>
+<h3 id="timestamp">timestamp()<a class="headerlink" href="#timestamp" title="Permanent link">&para;</a></h3>
+<p>Returns the current Unix timestamp in seconds.</p>
+<p><strong>Signature</strong>: <code>timestamp() → int</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">timestamp()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unix_timestamp</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">int</span>
+</code></pre></div></p>
+<hr />
+<h2 id="id-generation-functions">ID Generation Functions<a class="headerlink" href="#id-generation-functions" title="Permanent link">&para;</a></h2>
+<h3 id="uuid">uuid()<a class="headerlink" href="#uuid" title="Permanent link">&para;</a></h3>
+<p>Generates a UUID v4 (random unique identifier).</p>
+<p><strong>Signature</strong>: <code>uuid() → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uuid()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">request_id</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
+</code></pre></div></p>
+<p><strong>Output</strong>:
+<div class="highlight"><pre><span></span><code>&quot;550e8400-e29b-41d4-a716-446655440000&quot;
+</code></pre></div></p>
+<h3 id="randommin-max">random(min, max)<a class="headerlink" href="#randommin-max" title="Permanent link">&para;</a></h3>
+<p>Generates a random integer between min and max (inclusive).</p>
+<p><strong>Signature</strong>: <code>random(min: int, max: int) → int</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">random(1, 100)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">random_number</span>
+</code></pre></div></p>
+<h3 id="envvar_name">env(VAR_NAME)<a class="headerlink" href="#envvar_name" title="Permanent link">&para;</a></h3>
+<p>Reads an environment variable.</p>
+<p><strong>Signature</strong>: <code>env(variable_name: string) → string</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env(&quot;TENANT_ID&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant_id</span>
+</code></pre></div></p>
+<hr />
+<h2 id="lookup-functions">Lookup Functions<a class="headerlink" href="#lookup-functions" title="Permanent link">&para;</a></h2>
+<p>Lookup functions query external data sources and can be cached.</p>
+<h3 id="lookup_postgresquery-parameters">lookup_postgres(query, parameters)<a class="headerlink" href="#lookup_postgresquery-parameters" title="Permanent link">&para;</a></h3>
+<p>Executes a PostgreSQL query and returns results.</p>
+<p><strong>Signature</strong>: <code>lookup_postgres(query: string, params: array) → object</code></p>
+<p><strong>Features</strong>:
+- Connection pooling (default 25 connections)
+- Automatic retry on connection failure
+- Result caching with TTL
+- Transaction support</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM customers WHERE id = $1&quot;, [customer.id])</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_data</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
+</code></pre></div></p>
+<p><strong>Configuration</strong>:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">POSTGRES_URL</span><span class="o">=</span>postgres://user:pass@db:5432/dbname
+<span class="nb">export</span><span class="w"> </span><span class="nv">POSTGRES_MAX_CONNECTIONS</span><span class="o">=</span><span class="m">25</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">POSTGRES_CONNECTION_TIMEOUT</span><span class="o">=</span><span class="m">5</span>
+</code></pre></div></p>
+<p><strong>Caching</strong>:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">CACHE_TTL</span><span class="o">=</span><span class="m">300</span><span class="w">  </span><span class="c1"># Cache results for 5 minutes</span>
+</code></pre></div></p>
+<h3 id="lookup_httpurl-method-headers">lookup_http(url, method, headers)<a class="headerlink" href="#lookup_httpurl-method-headers" title="Permanent link">&para;</a></h3>
+<p>Makes an HTTP request to an external API.</p>
+<p><strong>Signature</strong>: <code>lookup_http(url: string, method: string, headers?: object) → object</code></p>
+<p><strong>Features</strong>:
+- HTTP/HTTPS support
+- Custom headers
+- Automatic retry on timeout
+- Result caching
+- Timeout configuration</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http(&quot;https://api.example.com/customer/&quot; + customer.id, &quot;GET&quot;, {&quot;Authorization&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;Bearer</span><span class="nv"> </span><span class="s">token&quot;</span><span class="err">}</span><span class="l l-Scalar l-Scalar-Plain">)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_api_data</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
+</code></pre></div></p>
+<p><strong>Configuration</strong>:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">REQUEST_TIMEOUT</span><span class="o">=</span><span class="m">30</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">CACHE_TTL</span><span class="o">=</span><span class="m">300</span>
+</code></pre></div></p>
+<p><strong>Supported Methods</strong>: GET, POST, PUT, DELETE, PATCH</p>
+<h3 id="lookup_compositebackends">lookup_composite(backends)<a class="headerlink" href="#lookup_compositebackends" title="Permanent link">&para;</a></h3>
+<p>Chains multiple lookup backends with fallback strategy.</p>
+<p><strong>Signature</strong>: <code>lookup_composite(backends: array[{type, config}]) → object</code></p>
+<p><strong>Features</strong>:
+- Fallback to next backend on failure
+- Automatic retry with exponential backoff
+- Error recovery
+- Configurable per-backend timeouts</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_composite([</span>
+<span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">{type</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;postgres&quot;</span><span class="err">,</span><span class="w"> </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">id</span><span class="nv"> </span><span class="s">=</span><span class="nv"> </span><span class="s">$1&quot;</span><span class="err">},</span>
+<span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http&quot;</span><span class="p p-Indicator">,</span><span class="nt"> url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://api.example.com/customer/$1&quot;</span><span class="p p-Indicator">}</span><span class="err">,</span>
+<span class="w">  </span><span class="err">]</span><span class="l l-Scalar l-Scalar-Plain">)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_data</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
+</code></pre></div></p>
+<p><strong>Backends</strong>:
+- <code>postgres</code> - PostgreSQL query
+- <code>http</code> - HTTP API call
+- <code>functions</code> - Mock/test backend</p>
+<hr />
+<h2 id="caching-functions">Caching Functions<a class="headerlink" href="#caching-functions" title="Permanent link">&para;</a></h2>
+<h3 id="cache_getkey">cache_get(key)<a class="headerlink" href="#cache_getkey" title="Permanent link">&para;</a></h3>
+<p>Retrieves a value from the cache.</p>
+<p><strong>Signature</strong>: <code>cache_get(key: string) → any | null</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_get(&quot;customer_&quot; + customer.id)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cached_customer</span>
+<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cached_customer != null</span>
+</code></pre></div></p>
+<h3 id="cache_setkey-value-ttl">cache_set(key, value, ttl)<a class="headerlink" href="#cache_setkey-value-ttl" title="Permanent link">&para;</a></h3>
+<p>Stores a value in the cache with TTL.</p>
+<p><strong>Signature</strong>: <code>cache_set(key: string, value: any, ttl: int) → boolean</code></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_set(&quot;customer_&quot; + customer.id, lookup_result, 300)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_result</span>
+</code></pre></div></p>
+<p><strong>Cache Configuration</strong>:
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">CACHE_TTL</span><span class="o">=</span><span class="m">300</span><span class="w">  </span><span class="c1"># Default 5 minutes</span>
+</code></pre></div></p>
+<hr />
+<h2 id="wasm-plugin-functions">WASM Plugin Functions<a class="headerlink" href="#wasm-plugin-functions" title="Permanent link">&para;</a></h2>
+<p>Custom WebAssembly modules can be deployed as transformation functions.</p>
+<h3 id="deploying-a-wasm-plugin">Deploying a WASM Plugin<a class="headerlink" href="#deploying-a-wasm-plugin" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>Write WASM module</strong> (Rust/C/etc.):
+<div class="highlight"><pre><span></span><code><span class="cp">#[no_mangle]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">transform</span><span class="p">(</span><span class="n">input_ptr</span><span class="p">:</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="p">,</span><span class="w"> </span><span class="n">input_len</span><span class="p">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Custom transformation logic</span>
+<span class="w">    </span><span class="c1">// Return transformed data pointer</span>
+<span class="p">}</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Build to WASM</strong>:
+<div class="highlight"><pre><span></span><code>cargo<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>wasm32-wasi<span class="w"> </span>--release
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Deploy to Kubernetes</strong>:
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>cp<span class="w"> </span>target/wasm32-wasi/release/my_function.wasm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>pod:/app/wasm-modules/my_function.wasm<span class="w"> </span>-n<span class="w"> </span>vrsky-platform
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Use in transformation</strong>:
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">wasm:my_function(customer.id)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">enriched_data</span>
+<span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
+</code></pre></div></p>
+</li>
+</ol>
+<h3 id="wasm-configuration">WASM Configuration<a class="headerlink" href="#wasm-configuration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">WASM_MODULE_DIR</span><span class="o">=</span>/app/wasm-modules
+<span class="nb">export</span><span class="w"> </span><span class="nv">WASM_MEMORY_PAGES</span><span class="o">=</span><span class="m">256</span><span class="w">      </span><span class="c1"># 16MB per module</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">WASM_SANDBOX_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">WASM_TIMEOUT</span><span class="o">=</span><span class="m">10</span><span class="w">             </span><span class="c1"># 10 second timeout</span>
+</code></pre></div>
+<hr />
+<h2 id="function-usage-in-transformations">Function Usage in Transformations<a class="headerlink" href="#function-usage-in-transformations" title="Permanent link">&para;</a></h2>
+<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.name</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">upper()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_name_upper</span>
+</code></pre></div>
+<h3 id="with-conditions">With Conditions<a class="headerlink" href="#with-conditions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.total</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">multiply(1.1)</span><span class="w">  </span><span class="c1"># Add 10% markup</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">final_price</span>
+<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.status == &quot;pending&quot;</span>
+</code></pre></div>
+<h3 id="chained-functions">Chained Functions<a class="headerlink" href="#chained-functions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.email</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lower()</span>
+<span class="w">  </span><span class="nt">function2</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">trim()</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email_normalized</span>
+</code></pre></div>
+<h3 id="with-lookup">With Lookup<a class="headerlink" href="#with-lookup" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM customers WHERE id = $1&quot;, [customer.id])</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_details</span>
+<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.id != null</span>
+</code></pre></div>
+<hr />
+<h2 id="performance-tips">Performance Tips<a class="headerlink" href="#performance-tips" title="Permanent link">&para;</a></h2>
+<h3 id="1-cache-expensive-operations">1. Cache Expensive Operations<a class="headerlink" href="#1-cache-expensive-operations" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http(&quot;https://api.expensive.com/data&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<span class="w">  </span><span class="c1"># Results cached for CACHE_TTL seconds</span>
+</code></pre></div>
+<h3 id="2-use-conditions-to-skip-unnecessary-lookups">2. Use Conditions to Skip Unnecessary Lookups<a class="headerlink" href="#2-use-conditions-to-skip-unnecessary-lookups" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM big_table ...&quot;)</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
+<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always_need_this == true</span><span class="w">  </span><span class="c1"># Only if really needed</span>
+</code></pre></div>
+<h3 id="3-batch-lookup-requests">3. Batch Lookup Requests<a class="headerlink" href="#3-batch-lookup-requests" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Instead of multiple lookups:</span>
+<span class="c1"># Bad:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id1])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id2])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id3])</span>
+
+<span class="c1"># Good:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id IN ($1, $2, $3)&quot;, [id1, id2, id3])</span>
+</code></pre></div>
+<h3 id="4-use-connection-pooling">4. Use Connection Pooling<a class="headerlink" href="#4-use-connection-pooling" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">POSTGRES_MAX_CONNECTIONS</span><span class="o">=</span><span class="m">50</span><span class="w">  </span><span class="c1"># Pre-allocate connections</span>
+</code></pre></div>
+<hr />
+<h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
+<p>Functions can fail and are handled per the error strategy:</p>
+<ul>
+<li><code>ValidationError</code> - Schema validation failed</li>
+<li><code>LookupError</code> - External lookup failed</li>
+<li><code>TypeMismatchError</code> - Type conversion failed</li>
+<li><code>TimeoutError</code> - Function exceeded timeout</li>
+</ul>
+<p>See Configuration Reference for error handling strategies.</p>
+<hr />
+<h2 id="built-in-function-reference-table">Built-in Function Reference Table<a class="headerlink" href="#built-in-function-reference-table" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Category</th>
+<th>Returns</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>upper()</td>
+<td>String</td>
+<td>string</td>
+<td>Convert to uppercase</td>
+</tr>
+<tr>
+<td>lower()</td>
+<td>String</td>
+<td>string</td>
+<td>Convert to lowercase</td>
+</tr>
+<tr>
+<td>substring(start, end)</td>
+<td>String</td>
+<td>string</td>
+<td>Extract substring</td>
+</tr>
+<tr>
+<td>concat(...)</td>
+<td>String</td>
+<td>string</td>
+<td>Join strings</td>
+</tr>
+<tr>
+<td>split(delim)</td>
+<td>String</td>
+<td>array</td>
+<td>Split by delimiter</td>
+</tr>
+<tr>
+<td>join(delim)</td>
+<td>String</td>
+<td>string</td>
+<td>Join array</td>
+</tr>
+<tr>
+<td>contains(str)</td>
+<td>String</td>
+<td>boolean</td>
+<td>Check containment</td>
+</tr>
+<tr>
+<td>startswith(prefix)</td>
+<td>String</td>
+<td>boolean</td>
+<td>Check prefix</td>
+</tr>
+<tr>
+<td>endswith(suffix)</td>
+<td>String</td>
+<td>boolean</td>
+<td>Check suffix</td>
+</tr>
+<tr>
+<td>trim()</td>
+<td>String</td>
+<td>string</td>
+<td>Remove whitespace</td>
+</tr>
+<tr>
+<td>replace(search, repl)</td>
+<td>String</td>
+<td>string</td>
+<td>Replace string</td>
+</tr>
+<tr>
+<td>length()</td>
+<td>String</td>
+<td>int</td>
+<td>Get length</td>
+</tr>
+<tr>
+<td>toString()</td>
+<td>Type Conversion</td>
+<td>string</td>
+<td>Convert to string</td>
+</tr>
+<tr>
+<td>toNumber()</td>
+<td>Type Conversion</td>
+<td>number</td>
+<td>Convert to number</td>
+</tr>
+<tr>
+<td>toBoolean()</td>
+<td>Type Conversion</td>
+<td>boolean</td>
+<td>Convert to boolean</td>
+</tr>
+<tr>
+<td>parseJSON()</td>
+<td>Type Conversion</td>
+<td>object</td>
+<td>Parse JSON string</td>
+</tr>
+<tr>
+<td>stringifyJSON()</td>
+<td>Type Conversion</td>
+<td>string</td>
+<td>Stringify object</td>
+</tr>
+<tr>
+<td>add(n)</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Add numbers</td>
+</tr>
+<tr>
+<td>subtract(n)</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Subtract numbers</td>
+</tr>
+<tr>
+<td>multiply(n)</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Multiply numbers</td>
+</tr>
+<tr>
+<td>divide(n)</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Divide numbers</td>
+</tr>
+<tr>
+<td>round(decimals)</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Round number</td>
+</tr>
+<tr>
+<td>floor()</td>
+<td>Numeric</td>
+<td>int</td>
+<td>Round down</td>
+</tr>
+<tr>
+<td>ceil()</td>
+<td>Numeric</td>
+<td>int</td>
+<td>Round up</td>
+</tr>
+<tr>
+<td>abs()</td>
+<td>Numeric</td>
+<td>number</td>
+<td>Absolute value</td>
+</tr>
+<tr>
+<td>now()</td>
+<td>Date/Time</td>
+<td>string</td>
+<td>Current timestamp</td>
+</tr>
+<tr>
+<td>today()</td>
+<td>Date/Time</td>
+<td>string</td>
+<td>Today's date</td>
+</tr>
+<tr>
+<td>timestamp()</td>
+<td>Date/Time</td>
+<td>int</td>
+<td>Unix timestamp</td>
+</tr>
+<tr>
+<td>uuid()</td>
+<td>ID Generation</td>
+<td>string</td>
+<td>Generate UUID</td>
+</tr>
+<tr>
+<td>random(min, max)</td>
+<td>ID Generation</td>
+<td>int</td>
+<td>Random number</td>
+</tr>
+<tr>
+<td>env(name)</td>
+<td>ID Generation</td>
+<td>string</td>
+<td>Read environment</td>
+</tr>
+<tr>
+<td>lookup_postgres(...)</td>
+<td>Lookup</td>
+<td>object</td>
+<td>Query database</td>
+</tr>
+<tr>
+<td>lookup_http(...)</td>
+<td>Lookup</td>
+<td>object</td>
+<td>HTTP request</td>
+</tr>
+<tr>
+<td>lookup_composite(...)</td>
+<td>Lookup</td>
+<td>object</td>
+<td>Fallback chain</td>
+</tr>
+<tr>
+<td>cache_get(key)</td>
+<td>Caching</td>
+<td>any</td>
+<td>Get cached value</td>
+</tr>
+<tr>
+<td>cache_set(key, val, ttl)</td>
+<td>Caching</td>
+<td>boolean</td>
+<td>Cache value</td>
+</tr>
+<tr>
+<td>wasm:*</td>
+<td>WASM Plugin</td>
+<td>any</td>
+<td>Custom WASM</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Implementation Guide: <code>CONVERTER_IMPLEMENTATION_GUIDE.md</code></li>
+<li>Configuration Reference: <code>CONVERTER_CONFIGURATION_REFERENCE.md</code></li>
+<li>Kubernetes Deployment: <code>../infrastructure/kubernetes/converter/README.md</code></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

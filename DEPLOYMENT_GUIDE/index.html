@@ -1,0 +1,4184 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+      
+        <link rel="prev" href="../SLA/">
+      
+      
+        <link rel="next" href="../DR/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Deployment guide (detailed) - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vrsky-docker-deployment-guide-phase-12" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Deployment guide (detailed)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table of Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#services-and-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Services and Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Registry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Naming Convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Development
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local Development">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building Locally
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building Locally">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-build-ui-only-dev-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Build UI Only (Dev Mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-build-ui-production-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: Build UI Production Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-3-build-all-services-current-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 3: Build All Services (Current Flow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-docker-build-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Docker Build Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#makefile-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Makefile Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-image-building" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Image Building
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Image Building">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-stage-build-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Stage Build Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Stage Build Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backend-services-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend Services (Go)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#frontend-react-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frontend (React + Nginx)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-ignore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Ignore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-actions-cicd-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Actions CI/CD Pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub Actions CI/CD Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workflow-githubworkflowsbuild-pushyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow: .github/workflows/build-push.yml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Tags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-tests-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running Tests in CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Deployment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kubernetes Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#namespace-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Namespace Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-deployment-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Deployment Manifests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UI Deployment Manifests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-namespaceyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. namespace.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-configmapyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. configmap.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-deploymentyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. deployment.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-serviceyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. service.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-ingressyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. ingress.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-hpayaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. hpa.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-pdbyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. pdb.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-to-k3d-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying to k3d (Local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-to-k3s-production-oslo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying to K3s Production (Oslo)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blue-green-deployment-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blue-Green Deployment (Optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioning-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioning Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioning Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#semantic-versioning-semver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Versioning (SemVer)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#git-tag-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Tag Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-version-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Version Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment-by-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment by Version
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-fails-npm-ci-requires-package-lockjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Fails: "npm ci requires package-lock.json"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-build-runs-tests-inside-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Build Runs Tests Inside Container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-pod-stays-in-pending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Pod Stays in "Pending"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#liveness-probe-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Liveness Probe Fails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-pull-errors-in-k8s" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Pull Errors in K8s
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary-phase-12-deliverables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary - PHASE 12 Deliverables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-at-rest-phase-1f-issue-71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption at rest (Phase 1F / issue #71)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption at rest (Phase 1F / issue #71)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-target-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-target setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Per-target setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-compose-development-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose (development only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#k3s-self-hosted-luks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        K3s / self-hosted (LUKS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#k3s-managed-cloud-aws-gcp-azure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        K3s / managed cloud (AWS / GCP / Azure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minio-sse-s3-compliance-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO SSE-S3 (compliance mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#postgres-native-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Postgres native encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compliance-verification-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compliance verification checklist
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disaster-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disaster Recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONNECTION_NODE_SPEC/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../NATS_ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#table-of-contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table of Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#services-and-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Services and Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Registry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Naming Convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Development
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local Development">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building Locally
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building Locally">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-1-build-ui-only-dev-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 1: Build UI Only (Dev Mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-2-build-ui-production-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 2: Build UI Production Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-3-build-all-services-current-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option 3: Build All Services (Current Flow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-docker-build-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Docker Build Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#makefile-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Makefile Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-image-building" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Image Building
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Image Building">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-stage-build-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Stage Build Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Stage Build Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backend-services-go" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend Services (Go)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#frontend-react-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frontend (React + Nginx)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-ignore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Ignore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Process
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-actions-cicd-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Actions CI/CD Pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub Actions CI/CD Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#workflow-githubworkflowsbuild-pushyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow: .github/workflows/build-push.yml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Tags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-tests-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running Tests in CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Deployment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kubernetes Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#namespace-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Namespace Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-deployment-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Deployment Manifests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UI Deployment Manifests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-namespaceyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. namespace.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-configmapyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. configmap.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-deploymentyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. deployment.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-serviceyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. service.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-ingressyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. ingress.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-hpayaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. hpa.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-pdbyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. pdb.yaml
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-to-k3d-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying to k3d (Local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-to-k3s-production-oslo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying to K3s Production (Oslo)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blue-green-deployment-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blue-Green Deployment (Optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioning-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioning Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioning Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#semantic-versioning-semver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Versioning (SemVer)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#git-tag-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Tag Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-version-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Version Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment-by-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment by Version
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-fails-npm-ci-requires-package-lockjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Fails: "npm ci requires package-lock.json"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-build-runs-tests-inside-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Build Runs Tests Inside Container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-pod-stays-in-pending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes Pod Stays in "Pending"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#liveness-probe-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Liveness Probe Fails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image-pull-errors-in-k8s" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Pull Errors in K8s
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debugging-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debugging Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary-phase-12-deliverables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary - PHASE 12 Deliverables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-at-rest-phase-1f-issue-71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption at rest (Phase 1F / issue #71)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption at rest (Phase 1F / issue #71)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-target-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-target setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Per-target setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docker-compose-development-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose (development only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#k3s-self-hosted-luks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        K3s / self-hosted (LUKS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#k3s-managed-cloud-aws-gcp-azure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        K3s / managed cloud (AWS / GCP / Azure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minio-sse-s3-compliance-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO SSE-S3 (compliance mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#postgres-native-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Postgres native encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compliance-verification-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compliance verification checklist
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disaster-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disaster Recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="vrsky-docker-deployment-guide-phase-12">VRSky Docker Deployment Guide - PHASE 12<a class="headerlink" href="#vrsky-docker-deployment-guide-phase-12" title="Permanent link">&para;</a></h1>
+<p>This guide covers the complete deployment pipeline for VRSky services using Docker and Kubernetes, including the React UI frontend and all 9 backend services.</p>
+<p><strong>Target Date</strong>: PHASE 12 (Docker Deployment)<br />
+<strong>Status</strong>: 🔄 Implementation in Progress</p>
+<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#architecture-overview">Architecture Overview</a></li>
+<li><a href="#local-development">Local Development</a></li>
+<li><a href="#docker-image-building">Docker Image Building</a></li>
+<li><a href="#github-actions-cicd-pipeline">GitHub Actions CI/CD Pipeline</a></li>
+<li><a href="#kubernetes-deployment">Kubernetes Deployment</a></li>
+<li><a href="#versioning-strategy">Versioning Strategy</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+<li><a href="#disaster-recovery">Disaster Recovery</a></li>
+</ol>
+<hr />
+<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">&para;</a></h2>
+<h3 id="services-and-components">Services and Components<a class="headerlink" href="#services-and-components" title="Permanent link">&para;</a></h3>
+<p>VRSky consists of:</p>
+<ul>
+<li><strong>1 Frontend</strong>: React SPA (UI)</li>
+<li><strong>9 Backend Services</strong>:</li>
+<li><code>producer</code> - Message production</li>
+<li><code>consumer</code> - Basic message consumption</li>
+<li><code>converter</code> - Data format conversion</li>
+<li><code>filter</code> - Message filtering</li>
+<li><code>management-api</code> - Tenant and integration management</li>
+<li><code>file-consumer</code> - File-based message source</li>
+<li><code>file-producer</code> - File-based message destination</li>
+<li><code>postgres-consumer</code> - PostgreSQL CDC consumer</li>
+<li><code>postgres-producer</code> - PostgreSQL message sink</li>
+</ul>
+<h3 id="container-registry">Container Registry<a class="headerlink" href="#container-registry" title="Permanent link">&para;</a></h3>
+<p>All images are pushed to <strong>GitHub Container Registry (GHCR)</strong>:</p>
+<div class="highlight"><pre><span></span><code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:&lt;tag&gt;
+</code></pre></div>
+<h3 id="image-naming-convention">Image Naming Convention<a class="headerlink" href="#image-naming-convention" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Development</strong>: <code>vrsky/&lt;service&gt;:latest</code> (local builds)</li>
+<li><strong>Production</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:latest</code> (GHCR)</li>
+<li><strong>Versioned</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:v1.2.3</code> (semver tags)</li>
+<li><strong>Commit Hash</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:sha-a1b2c3d4</code> (branch builds)</li>
+</ul>
+<hr />
+<h2 id="local-development">Local Development<a class="headerlink" href="#local-development" title="Permanent link">&para;</a></h2>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Docker 24.0+</li>
+<li>Docker Compose 2.20+</li>
+<li>Node.js 20+</li>
+<li>Go 1.22+</li>
+<li>Git</li>
+</ul>
+<h3 id="building-locally">Building Locally<a class="headerlink" href="#building-locally" title="Permanent link">&para;</a></h3>
+<h4 id="option-1-build-ui-only-dev-mode">Option 1: Build UI Only (Dev Mode)<a class="headerlink" href="#option-1-build-ui-only-dev-mode" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Serves UI on http://localhost:5173 with hot reload</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--profile<span class="w"> </span>dev<span class="w"> </span>ui
+</code></pre></div>
+<h4 id="option-2-build-ui-production-image">Option 2: Build UI Production Image<a class="headerlink" href="#option-2-build-ui-production-image" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Builds optimized production image</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--profile<span class="w"> </span>prod<span class="w"> </span>ui-prod
+
+<span class="c1"># Access on http://localhost:80</span>
+</code></pre></div>
+<h4 id="option-3-build-all-services-current-flow">Option 3: Build All Services (Current Flow)<a class="headerlink" href="#option-3-build-all-services-current-flow" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build full stack from current docker-compose.yml</span>
+docker-compose<span class="w"> </span>build
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<h3 id="manual-docker-build-commands">Manual Docker Build Commands<a class="headerlink" href="#manual-docker-build-commands" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build UI image locally</span>
+<span class="nb">cd</span><span class="w"> </span>vrsky
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>-f<span class="w"> </span>ui/Dockerfile<span class="w"> </span>.
+
+<span class="c1"># Build individual backend service</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/producer:latest<span class="w"> </span>-f<span class="w"> </span>src/cmd/producer/Dockerfile<span class="w"> </span>.
+
+<span class="c1"># Use Makefile for convenience</span>
+<span class="nb">cd</span><span class="w"> </span>src
+make<span class="w"> </span>docker-build-ui
+make<span class="w"> </span>docker-push-ui
+</code></pre></div>
+<h3 id="makefile-commands">Makefile Commands<a class="headerlink" href="#makefile-commands" title="Permanent link">&para;</a></h3>
+<p>The <code>src/Makefile</code> provides convenient targets:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build UI</span>
+make<span class="w"> </span>docker-build-ui
+
+<span class="c1"># Push UI to registry</span>
+make<span class="w"> </span>docker-push-ui
+
+<span class="c1"># Build backend services</span>
+make<span class="w"> </span>docker-build<span class="w">              </span><span class="c1"># Producer (default)</span>
+make<span class="w"> </span>docker-build-consumer
+make<span class="w"> </span>docker-build-filter
+make<span class="w"> </span>docker-build-converter
+
+<span class="c1"># Push backend services</span>
+make<span class="w"> </span>docker-push
+make<span class="w"> </span>docker-push-consumer
+make<span class="w"> </span>docker-push-filter
+make<span class="w"> </span>docker-push-converter
+</code></pre></div>
+<hr />
+<h2 id="docker-image-building">Docker Image Building<a class="headerlink" href="#docker-image-building" title="Permanent link">&para;</a></h2>
+<h3 id="multi-stage-build-strategy">Multi-Stage Build Strategy<a class="headerlink" href="#multi-stage-build-strategy" title="Permanent link">&para;</a></h3>
+<p>All images use multi-stage builds to minimize final size:</p>
+<h4 id="backend-services-go">Backend Services (Go)<a class="headerlink" href="#backend-services-go" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c"># Stage 1: Build</span>
+<span class="k">FROM</span><span class="w"> </span><span class="s">golang:1.21-alpine</span>
+<span class="c"># ... compile binary ...</span>
+
+<span class="c"># Stage 2: Runtime</span>
+<span class="k">FROM</span><span class="w"> </span><span class="s">alpine:3.21</span>
+<span class="c"># Copy binary from stage 1</span>
+<span class="c"># Minimal dependencies</span>
+</code></pre></div>
+<h4 id="frontend-react-nginx">Frontend (React + Nginx)<a class="headerlink" href="#frontend-react-nginx" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c"># Stage 1: Build</span>
+<span class="k">FROM</span><span class="w"> </span><span class="s">node:20-alpine</span>
+<span class="c"># ... npm build ...</span>
+
+<span class="c"># Stage 2: Runtime</span>
+<span class="k">FROM</span><span class="w"> </span><span class="s">nginx:1.27-alpine</span>
+<span class="c"># Copy built artifacts from stage 1</span>
+<span class="c"># Optimized for static serving</span>
+</code></pre></div>
+<h3 id="docker-ignore">Docker Ignore<a class="headerlink" href="#docker-ignore" title="Permanent link">&para;</a></h3>
+<p>Critical for build performance:</p>
+<ul>
+<li><strong>ui/.dockerignore</strong>: Excludes node_modules, coverage, dist (but keeps package-lock.json)</li>
+<li>Prevents large context transfers</li>
+<li>Speeds up builds with Docker BuildKit cache</li>
+</ul>
+<h3 id="build-process">Build Process<a class="headerlink" href="#build-process" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Tests run during image build (Go: <code>go test</code> + backend tests)</li>
+<li>UI tests run in Docker: all 279 tests must pass</li>
+<li>Production artifacts built: Go binaries, Vite bundle</li>
+<li>Minimal runtime image created with only necessary files</li>
+<li>Non-root user enforced (security best practice)</li>
+</ol>
+<hr />
+<h2 id="github-actions-cicd-pipeline">GitHub Actions CI/CD Pipeline<a class="headerlink" href="#github-actions-cicd-pipeline" title="Permanent link">&para;</a></h2>
+<h3 id="workflow-githubworkflowsbuild-pushyml">Workflow: <code>.github/workflows/build-push.yml</code><a class="headerlink" href="#workflow-githubworkflowsbuild-pushyml" title="Permanent link">&para;</a></h3>
+<p><strong>Triggers</strong>:
+- Push to <code>main</code>, <code>develop</code>, <code>feature/**</code> branches
+- Tags matching <code>v*</code> (semantic versioning)
+- Pull requests to <code>main</code>, <code>develop</code></p>
+<h3 id="build-matrix">Build Matrix<a class="headerlink" href="#build-matrix" title="Permanent link">&para;</a></h3>
+<p>The workflow builds <strong>10 services in parallel</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Path</th>
+<th>Image Registry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>producer</td>
+<td>src/cmd/producer</td>
+<td>ghcr.io/ValueRetail/vrsky/producer</td>
+</tr>
+<tr>
+<td>consumer</td>
+<td>src/cmd/consumer</td>
+<td>ghcr.io/ValueRetail/vrsky/consumer</td>
+</tr>
+<tr>
+<td>converter</td>
+<td>src/cmd/converter</td>
+<td>ghcr.io/ValueRetail/vrsky/converter</td>
+</tr>
+<tr>
+<td>filter</td>
+<td>src/cmd/filter</td>
+<td>ghcr.io/ValueRetail/vrsky/filter</td>
+</tr>
+<tr>
+<td>management-api</td>
+<td>src/cmd/management-api</td>
+<td>ghcr.io/ValueRetail/vrsky/management-api</td>
+</tr>
+<tr>
+<td>file-consumer</td>
+<td>src/cmd/file-consumer</td>
+<td>ghcr.io/ValueRetail/vrsky/file-consumer</td>
+</tr>
+<tr>
+<td>file-producer</td>
+<td>src/cmd/file-producer</td>
+<td>ghcr.io/ValueRetail/vrsky/file-producer</td>
+</tr>
+<tr>
+<td>postgres-consumer</td>
+<td>src/cmd/postgres-consumer</td>
+<td>ghcr.io/ValueRetail/vrsky/postgres-consumer</td>
+</tr>
+<tr>
+<td>postgres-producer</td>
+<td>src/cmd/postgres-producer</td>
+<td>ghcr.io/ValueRetail/vrsky/postgres-producer</td>
+</tr>
+<tr>
+<td>ui</td>
+<td>ui</td>
+<td>ghcr.io/ValueRetail/vrsky/ui</td>
+</tr>
+</tbody>
+</table>
+<h3 id="image-tags">Image Tags<a class="headerlink" href="#image-tags" title="Permanent link">&para;</a></h3>
+<p>Each build creates <strong>multiple tags</strong>:</p>
+<div class="highlight"><pre><span></span><code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:latest        # Always latest from main
+ghcr.io/ValueRetail/vrsky/&lt;service&gt;:v1.2.3        # Semantic version (on tags)
+ghcr.io/ValueRetail/vrsky/&lt;service&gt;:sha-a1b2c3d4  # Commit hash (on branches)
+</code></pre></div>
+<h3 id="cache-strategy">Cache Strategy<a class="headerlink" href="#cache-strategy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Uses GitHub Actions Docker Cache (<code>type=gha</code>)</li>
+<li>Caches each layer for faster rebuilds</li>
+<li>Parallelizes builds for all services</li>
+<li>Typical build time: 5-15 minutes for all services</li>
+</ul>
+<h3 id="running-tests-in-ci">Running Tests in CI<a class="headerlink" href="#running-tests-in-ci" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">test</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># UI tests (Node.js)</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm ci</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm run test</span><span class="w">  </span><span class="c1"># All 279 tests</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm run build</span>
+
+<span class="nt">go-tests</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># Go tests with race detector</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">go test -v -race -cover ./...</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">golangci-lint run</span>
+</code></pre></div>
+<hr />
+<h2 id="kubernetes-deployment">Kubernetes Deployment<a class="headerlink" href="#kubernetes-deployment" title="Permanent link">&para;</a></h2>
+<h3 id="namespace-structure">Namespace Structure<a class="headerlink" href="#namespace-structure" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>vrsky-ui                    # UI frontend (NEW in PHASE 12)
+vrsky-platform              # Existing backend services
+vrsky-monitoring            # Prometheus, Grafana
+vrsky-messaging             # NATS platform
+vrsky-tenants               # Per-tenant NATS accounts
+</code></pre></div>
+<h3 id="ui-deployment-manifests">UI Deployment Manifests<a class="headerlink" href="#ui-deployment-manifests" title="Permanent link">&para;</a></h3>
+<p>All UI manifests in <code>infrastructure/kubernetes/ui/</code>:</p>
+<h4 id="1-namespaceyaml">1. <strong>namespace.yaml</strong><a class="headerlink" href="#1-namespaceyaml" title="Permanent link">&para;</a></h4>
+<p>Isolates UI in <code>vrsky-ui</code> namespace with labels.</p>
+<h4 id="2-configmapyaml">2. <strong>configmap.yaml</strong><a class="headerlink" href="#2-configmapyaml" title="Permanent link">&para;</a></h4>
+<p>Configuration for UI environment:
+- <code>VITE_API_BASE_URL</code> - Backend API endpoint
+- Feature flags (metrics, logging, etc.)
+- Performance settings</p>
+<h4 id="3-deploymentyaml">3. <strong>deployment.yaml</strong><a class="headerlink" href="#3-deploymentyaml" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Replicas</strong>: 3 (HA configuration)</li>
+<li><strong>Image</strong>: <code>ghcr.io/ValueRetail/vrsky/ui:latest</code></li>
+<li><strong>Resources</strong>: </li>
+<li>Request: 100m CPU, 128Mi memory</li>
+<li>Limit: 500m CPU, 256Mi memory</li>
+<li><strong>Probes</strong>: Liveness (port 80/health) + Readiness (port 80/index.html)</li>
+<li><strong>Security</strong>: Non-root user (UID 101), read-only root, no privileges</li>
+<li><strong>Volumes</strong>: emptyDir for cache, /tmp, /var/run</li>
+</ul>
+<h4 id="4-serviceyaml">4. <strong>service.yaml</strong><a class="headerlink" href="#4-serviceyaml" title="Permanent link">&para;</a></h4>
+<p>ClusterIP service exposing port 80 internally.</p>
+<h4 id="5-ingressyaml">5. <strong>ingress.yaml</strong><a class="headerlink" href="#5-ingressyaml" title="Permanent link">&para;</a></h4>
+<p>Routes external traffic:
+- Hosts: <code>ui.vrsky.local</code>, <code>ui.valueretalgroup.no</code>
+- TLS termination (cert-manager)
+- NGINX ingress controller</p>
+<h4 id="6-hpayaml">6. <strong>hpa.yaml</strong><a class="headerlink" href="#6-hpayaml" title="Permanent link">&para;</a></h4>
+<p>Horizontal Pod Autoscaling:
+- <strong>Min replicas</strong>: 2
+- <strong>Max replicas</strong>: 5
+- <strong>Triggers</strong>:
+  - CPU &gt; 70%
+  - Memory &gt; 80%
+- <strong>Scaling behavior</strong>: Fast scale-up (30s), gradual scale-down (300s)</p>
+<h4 id="7-pdbyaml">7. <strong>pdb.yaml</strong><a class="headerlink" href="#7-pdbyaml" title="Permanent link">&para;</a></h4>
+<p>Pod Disruption Budget:
+- <strong>Min available</strong>: 1 pod (maintains availability during cluster updates)</p>
+<h3 id="deploying-to-k3d-local">Deploying to k3d (Local)<a class="headerlink" href="#deploying-to-k3d-local" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Create k3d cluster (already exists from PHASE 11)</span>
+k3d<span class="w"> </span>cluster<span class="w"> </span>create<span class="w"> </span>vrsky-k3d<span class="w"> </span>--config<span class="w"> </span>infrastructure/kubernetes/k3d-config.yaml
+
+<span class="c1"># Deploy UI namespace</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/namespace.yaml
+
+<span class="c1"># Deploy UI components</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/
+
+<span class="c1"># Verify deployment</span>
+kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
+kubectl<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui
+
+<span class="c1"># Port-forward for testing</span>
+kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>svc/vrsky-ui<span class="w"> </span><span class="m">8080</span>:80
+<span class="c1"># Access: http://localhost:8080</span>
+</code></pre></div>
+<h3 id="deploying-to-k3s-production-oslo">Deploying to K3s Production (Oslo)<a class="headerlink" href="#deploying-to-k3s-production-oslo" title="Permanent link">&para;</a></h3>
+<p>Same manifests work for production K3s cluster:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set kubeconfig to production</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">KUBECONFIG</span><span class="o">=</span>~/.kube/vrsky-production.yaml
+
+<span class="c1"># Deploy (same commands as k3d)</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/
+
+<span class="c1"># Verify rolling deployment</span>
+kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
+</code></pre></div>
+<h3 id="blue-green-deployment-optional">Blue-Green Deployment (Optional)<a class="headerlink" href="#blue-green-deployment-optional" title="Permanent link">&para;</a></h3>
+<p>For zero-downtime updates:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Update image in deployment</span>
+kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:v1.2.3<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Monitor rollout</span>
+kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Rollback if needed</span>
+kubectl<span class="w"> </span>rollout<span class="w"> </span>undo<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
+</code></pre></div>
+<hr />
+<h2 id="versioning-strategy">Versioning Strategy<a class="headerlink" href="#versioning-strategy" title="Permanent link">&para;</a></h2>
+<h3 id="semantic-versioning-semver">Semantic Versioning (SemVer)<a class="headerlink" href="#semantic-versioning-semver" title="Permanent link">&para;</a></h3>
+<p>VRSky follows semantic versioning: <strong>MAJOR.MINOR.PATCH</strong></p>
+<p>Example: <code>v1.2.3</code></p>
+<h3 id="git-tag-strategy">Git Tag Strategy<a class="headerlink" href="#git-tag-strategy" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Create a release tag</span>
+git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>v1.2.3<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Release v1.2.3: Add UI deployment&quot;</span>
+git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v1.2.3
+
+<span class="c1"># GitHub Actions automatically builds and pushes:</span>
+<span class="c1"># - ghcr.io/ValueRetail/vrsky/ui:latest</span>
+<span class="c1"># - ghcr.io/ValueRetail/vrsky/ui:v1.2.3</span>
+<span class="c1"># - ... (all 10 services)</span>
+</code></pre></div>
+<h3 id="image-version-resolution">Image Version Resolution<a class="headerlink" href="#image-version-resolution" title="Permanent link">&para;</a></h3>
+<p>The workflow uses <code>scripts/get-version.sh</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="ch">#!/bin/bash</span>
+<span class="c1"># Returns git tag (v1.2.3) or commit hash (sha-a1b2c3d4)</span>
+
+<span class="nv">VERSION</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>describe<span class="w"> </span>--exact-match<span class="w"> </span>--tags<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
+<span class="w">          </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;sha-</span><span class="k">$(</span>git<span class="w"> </span>rev-parse<span class="w"> </span>--short<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span>
+</code></pre></div>
+<h3 id="deployment-by-version">Deployment by Version<a class="headerlink" href="#deployment-by-version" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Deploy latest (always works)</span>
+kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:latest<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Deploy specific version</span>
+kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:v1.2.3<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Deploy specific commit</span>
+kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:sha-a1b2c3d4<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
+</code></pre></div>
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="common-issues">Common Issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h3>
+<h4 id="build-fails-npm-ci-requires-package-lockjson">Build Fails: "npm ci requires package-lock.json"<a class="headerlink" href="#build-fails-npm-ci-requires-package-lockjson" title="Permanent link">&para;</a></h4>
+<p><strong>Solution</strong>: Ensure <code>.dockerignore</code> doesn't exclude <code>package-lock.json</code></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check .dockerignore</span>
+grep<span class="w"> </span>-n<span class="w"> </span>package-lock.json<span class="w"> </span>ui/.dockerignore<span class="w">  </span><span class="c1"># Should be empty</span>
+
+<span class="c1"># Remove if present and rebuild</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/
+</code></pre></div>
+<h4 id="image-build-runs-tests-inside-container">Image Build Runs Tests Inside Container<a class="headerlink" href="#image-build-runs-tests-inside-container" title="Permanent link">&para;</a></h4>
+<p><strong>Expected behavior</strong>: Tests run during build (Stage 1).</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># To skip tests, modify Dockerfile temporarily:</span>
+<span class="c1"># Comment out: RUN npm run test</span>
+
+<span class="c1"># To verify tests passed in build:</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;✓.*tests&quot;</span>
+</code></pre></div>
+<h4 id="kubernetes-pod-stays-in-pending">Kubernetes Pod Stays in "Pending"<a class="headerlink" href="#kubernetes-pod-stays-in-pending" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check resource availability</span>
+kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>&lt;pod-name&gt;
+
+<span class="c1"># Check node resources</span>
+kubectl<span class="w"> </span>describe<span class="w"> </span>nodes<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="s2">&quot;Allocated resources&quot;</span>
+
+<span class="c1"># Reduce resource requests in deployment.yaml and reapply</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/deployment.yaml
+</code></pre></div>
+<h4 id="liveness-probe-fails">Liveness Probe Fails<a class="headerlink" href="#liveness-probe-fails" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check endpoint manually</span>
+kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>svc/vrsky-ui<span class="w"> </span><span class="m">8080</span>:80
+curl<span class="w"> </span>-f<span class="w"> </span>http://localhost:8080/health
+
+<span class="c1"># View logs</span>
+kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-f
+</code></pre></div>
+<h4 id="image-pull-errors-in-k8s">Image Pull Errors in K8s<a class="headerlink" href="#image-pull-errors-in-k8s" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Verify GHCR credentials</span>
+kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>docker-registry<span class="w"> </span>ghcr-secret<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--docker-server<span class="o">=</span>ghcr.io<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--docker-username<span class="o">=</span>&lt;github-username&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--docker-password<span class="o">=</span>&lt;github-token&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Update deployment.yaml imagePullSecrets:</span>
+<span class="c1"># - name: ghcr-secret</span>
+</code></pre></div>
+<h3 id="debugging-commands">Debugging Commands<a class="headerlink" href="#debugging-commands" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># View build logs</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-100
+
+<span class="c1"># Inspect running image</span>
+docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>/bin/sh
+
+<span class="c1"># Check K8s events</span>
+kubectl<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>--sort-by<span class="o">=</span><span class="s1">&#39;.lastTimestamp&#39;</span>
+
+<span class="c1"># Describe deployment issues</span>
+kubectl<span class="w"> </span>describe<span class="w"> </span>deployment<span class="w"> </span>vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
+
+<span class="c1"># Stream logs</span>
+kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-f<span class="w"> </span>--all-containers
+
+<span class="c1"># SSH into pod</span>
+kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>pod/&lt;pod-name&gt;<span class="w"> </span>--<span class="w"> </span>/bin/sh
+</code></pre></div>
+<hr />
+<h2 id="summary-phase-12-deliverables">Summary - PHASE 12 Deliverables<a class="headerlink" href="#summary-phase-12-deliverables" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>File</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dockerfile</td>
+<td><code>ui/Dockerfile</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>.dockerignore</td>
+<td><code>ui/.dockerignore</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>Nginx Config</td>
+<td><code>ui/nginx.conf</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>Nginx Default</td>
+<td><code>ui/nginx.default.conf</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>CI/CD Workflow</td>
+<td><code>.github/workflows/build-push.yml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>Version Script</td>
+<td><code>scripts/get-version.sh</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s Namespace</td>
+<td><code>infrastructure/kubernetes/ui/namespace.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s ConfigMap</td>
+<td><code>infrastructure/kubernetes/ui/configmap.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s Deployment</td>
+<td><code>infrastructure/kubernetes/ui/deployment.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s Service</td>
+<td><code>infrastructure/kubernetes/ui/service.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s Ingress</td>
+<td><code>infrastructure/kubernetes/ui/ingress.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s HPA</td>
+<td><code>infrastructure/kubernetes/ui/hpa.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>K8s PDB</td>
+<td><code>infrastructure/kubernetes/ui/pdb.yaml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>Docker Compose UI</td>
+<td><code>docker-compose.ui.yml</code></td>
+<td>✅ Created</td>
+</tr>
+<tr>
+<td>Makefile Updates</td>
+<td><code>src/Makefile</code></td>
+<td>✅ Updated</td>
+</tr>
+<tr>
+<td>Deployment Guide</td>
+<td><code>docs/DEPLOYMENT_GUIDE.md</code></td>
+<td>✅ Created</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ol>
+<li>✅ All 13 deliverables created</li>
+<li>✅ Local Docker build tested (279 tests pass)</li>
+<li>🔄 Push changes to git (5 commits)</li>
+<li>🔄 GitHub Actions workflow validation</li>
+<li>🔄 K8s deployment testing (k3d + K3s)</li>
+<li>✅ PHASE 12 Complete</li>
+</ol>
+<hr />
+<p><strong>Last Updated</strong>: February 24, 2026<br />
+<strong>PHASE</strong>: 12 - Docker Deployment<br />
+<strong>Status</strong>: Implementation Complete ✅</p>
+<hr />
+<h2 id="encryption-at-rest-phase-1f-issue-71">Encryption at rest (Phase 1F / issue #71)<a class="headerlink" href="#encryption-at-rest-phase-1f-issue-71" title="Permanent link">&para;</a></h2>
+<p>VRSky processes credentials, user data, and cross-tenant payloads. Customer
+compliance reviews (SOC 2 CC6.1, ISO 27001 A.10.1, GDPR Art. 32) require
+encryption of every stateful component. The layers below are stacked:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What's encrypted</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Application</td>
+<td>Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys)</td>
+<td>AES-256-GCM via <code>pkg/crypto</code> (#66 secrets table). Master key from <code>ENCRYPTION_KEY</code>.</td>
+</tr>
+<tr>
+<td>Block device</td>
+<td>Postgres <code>$PGDATA</code>, MinIO <code>/data</code>, NATS JetStream <code>/data</code>, KES key store</td>
+<td>Encrypted StorageClass (cloud KMS) or LUKS on bare metal.</td>
+</tr>
+<tr>
+<td>Object storage</td>
+<td>MinIO bucket contents</td>
+<td>SSE-S3 via KES sidecar wrapping a KMS data key.</td>
+</tr>
+<tr>
+<td>Transit</td>
+<td>All HTTP between services</td>
+<td>TLS terminated at Traefik, internal mTLS via the cluster mesh (cluster-trust CA).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="per-target-setup">Per-target setup<a class="headerlink" href="#per-target-setup" title="Permanent link">&para;</a></h3>
+<h4 id="docker-compose-development-only">Docker Compose (development only)<a class="headerlink" href="#docker-compose-development-only" title="Permanent link">&para;</a></h4>
+<p><strong>Not for production.</strong> Volumes live on whatever filesystem hosts your Docker
+data root. The application-layer encryption from #66 still applies — secret
+ciphertexts and audit records are protected from a casual <code>pg_dump</code> — but
+the disk itself is plaintext. Document this clearly when handing the stack
+to evaluators.</p>
+<h4 id="k3s-self-hosted-luks">K3s / self-hosted (LUKS)<a class="headerlink" href="#k3s-self-hosted-luks" title="Permanent link">&para;</a></h4>
+<ol>
+<li>Stop k3s.</li>
+<li>Format a dedicated partition with LUKS — see
+   <code>infrastructure/kubernetes/encryption/storage-classes/self-hosted-luks.yaml</code>
+   for the exact commands.</li>
+<li>Mount it on <code>/opt/local-path-provisioner</code> (the default <code>nodePath</code> for
+   Rancher's <code>local-path</code> provisioner).</li>
+<li>Use a TPM-bound passphrase (clevis + tang) or a network escrow for
+   unattended reboots. <strong>Never</strong> put a plaintext passphrase in
+   <code>/etc/crypttab</code>.</li>
+<li>Start k3s. The existing <code>storageClassName: local-path</code> on the base
+   manifests now lands on LUKS-backed disk automatically.</li>
+</ol>
+<p>Verify: <code>lsblk -o NAME,FSTYPE,TYPE,MOUNTPOINT</code> should show the mount as
+type <code>crypt</code>.</p>
+<h4 id="k3s-managed-cloud-aws-gcp-azure">K3s / managed cloud (AWS / GCP / Azure)<a class="headerlink" href="#k3s-managed-cloud-aws-gcp-azure" title="Permanent link">&para;</a></h4>
+<ol>
+<li>Pick the appropriate StorageClass template from
+   <code>infrastructure/kubernetes/encryption/storage-classes/</code>:</li>
+<li><code>aws-ebs-kms.yaml</code> — gp3 + customer-managed KMS key</li>
+<li><code>gcp-pd-cmek.yaml</code> — pd-ssd + customer-managed encryption key</li>
+<li><code>azure-cmk.yaml</code> — Premium_LRS + disk encryption set</li>
+<li>Replace the placeholder key ARN / resource path with your real key.</li>
+<li><code>kubectl apply -f</code> the file. The provisioner driver must already be
+   installed in the cluster.</li>
+<li>Re-create the PVCs in <code>vrsky-storage</code> / <code>vrsky-platform</code> /
+   <code>vrsky-management</code> so they bind to the new <code>vrsky-encrypted</code> class.
+   (PVCs are immutable wrt <code>storageClassName</code> — this is destructive in a
+   running cluster, so do it during a maintenance window.)</li>
+<li>Verify by inspecting the underlying disk in the cloud console — the
+   "encryption" field should report your customer key.</li>
+</ol>
+<h4 id="minio-sse-s3-compliance-mode">MinIO SSE-S3 (compliance mode)<a class="headerlink" href="#minio-sse-s3-compliance-mode" title="Permanent link">&para;</a></h4>
+<p>After the StorageClass is in place:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/encryption/kes-deployment.yaml
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/encryption/minio-encrypted.patch.yaml
+</code></pre></div>
+<p>KES is the broker between MinIO and the real KMS. The reference manifest
+uses a file-backed key store on disk for dev convenience — for production
+swap it to HashiCorp Vault, AWS KMS, GCP KMS, or Azure Key Vault. The
+KES config sits in a ConfigMap so you only have to edit + restart.</p>
+<p>Verify:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Upload an object and check the metadata for the SSE header.</span>
+mc<span class="w"> </span>cp<span class="w"> </span>Makefile<span class="w"> </span>s3/test/Makefile
+mc<span class="w"> </span>cat<span class="w"> </span>--metadata<span class="w"> </span>s3/test/Makefile<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>sse
+<span class="c1"># Expected: X-Amz-Server-Side-Encryption: AES256</span>
+</code></pre></div>
+<h4 id="postgres-native-encryption">Postgres native encryption<a class="headerlink" href="#postgres-native-encryption" title="Permanent link">&para;</a></h4>
+<p>The management Postgres deployment uses <code>local-path</code> by default. Once the
+underlying StorageClass is encrypted (any of the steps above), Postgres
+runs unmodified. No <code>pgcrypto</code> config or per-column encryption is needed
+at this layer — the secrets table from #66 takes care of column-level
+secrecy for the handful of fields that warrant it.</p>
+<p>For managed Postgres (RDS / Cloud SQL / Azure Database), enable the
+provider's native at-rest encryption with a customer-managed key. Point
+<code>MGMT_API_DB_URL</code> at the managed endpoint and remove the in-cluster
+<code>postgres-management</code> StatefulSet.</p>
+<h3 id="compliance-verification-checklist">Compliance verification checklist<a class="headerlink" href="#compliance-verification-checklist" title="Permanent link">&para;</a></h3>
+<p>Before claiming "encryption at rest" to an auditor:</p>
+<ul>
+<li>[ ] <code>kubectl get sc vrsky-encrypted -o yaml</code> shows your KMS key.</li>
+<li>[ ] <code>kubectl get pvc -A -o wide | grep -v vrsky-encrypted</code> returns
+      nothing for VRSky namespaces (no plaintext PVCs slipped in).</li>
+<li>[ ] KES is running and reachable from MinIO; MinIO refuses uploads
+      when KES is intentionally scaled to 0.</li>
+<li>[ ] Postgres data volume sits on the encrypted class (<code>kubectl
+      describe pvc</code> shows the right <code>StorageClass</code>).</li>
+<li>[ ] <code>ENCRYPTION_KEY</code> is supplied via a Kubernetes Secret (not a plain
+      env var literal in the manifest).</li>
+<li>[ ] Off-cluster backups (Postgres dumps, MinIO replication targets)
+      go to buckets / disks with SSE enabled.</li>
+</ul>
+<p>See <code>docs/COMPLIANCE.md</code> for the full mapping to SOC 2 / ISO 27001
+control families.</p>
+<hr />
+<h2 id="disaster-recovery">Disaster Recovery<a class="headerlink" href="#disaster-recovery" title="Permanent link">&para;</a></h2>
+<p>The management Postgres (tenants, connections, secrets, OAuth grants,
+notification targets, audit log) is backed up daily and its restore path is
+tested in CI. See <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> for the full runbook — backup flow,
+the <code>vrsky-cli backup</code>/<code>restore</code>/<code>list</code> commands, RPO ≤ 24h / RTO ≤ 1h, the
+critical <code>ENCRYPTION_KEY</code> caveat, and the step-by-step recovery procedure. The
+backup CronJob + its config Secret are documented in
+<a href="https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md"><code>infrastructure/kubernetes/backup/README.md</code></a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

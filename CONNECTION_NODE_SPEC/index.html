@@ -1,0 +1,2867 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Operator, integrator, and API documentation for the VRSky integration platform.">
+      
+      
+      
+      
+        <link rel="prev" href="../reference/api/">
+      
+      
+        <link rel="next" href="../TENANT_MODEL/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Connection node spec - VRSky Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#connection-node-rpc-specification" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VRSky Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connection node spec
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    VRSky Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build your first connector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workspaces-and-members/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces, members & your account
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/building-a-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors & node types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credentials, secrets & OAuth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying & monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/data-sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing data between workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings: usage, notifications, audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operator guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operator guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operator/encryption-at-rest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption-at-rest checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SLA/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status page & uptime SLA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEPLOYMENT_GUIDE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment guide (detailed)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DR/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Disaster recovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Connectors
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP & webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API polling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/sftp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/cloud-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/kafka/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apache Kafka
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/rabbitmq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RabbitMQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/salesforce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Salesforce
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/tenant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant-to-tenant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/filters-converters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filters & converters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/whitepaper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Whitepaper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SECURITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection node spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-node-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection Node Interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Entry Point
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rpc-call-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RPC Call Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RPC Call Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#incoming-connection-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incoming Connection Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outgoing-connection-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outgoing Connection Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plugin-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#control-plane-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Control Plane Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-sandboxing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security &amp; Sandboxing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security &amp; Sandboxing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-connection-plugins-can-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Connection Plugins CAN Access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-connection-plugins-cannot-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Connection Plugins CANNOT Access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Best Practices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-functions-available-to-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host Functions Available to Plugins
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resource-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing Your Plugin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-development-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Development Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-http-webhook-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: HTTP Webhook Connector
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TENANT_MODEL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tenant model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../NATS_ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NATS architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../OBSERVABILITY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TRACING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tracing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LOAD/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load & benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oauth-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OAuth framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sdk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-node-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection Node Interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Entry Point
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rpc-call-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RPC Call Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RPC Call Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#incoming-connection-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incoming Connection Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outgoing-connection-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outgoing Connection Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plugin-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#control-plane-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Control Plane Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-sandboxing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security &amp; Sandboxing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security &amp; Sandboxing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-connection-plugins-can-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Connection Plugins CAN Access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-connection-plugins-cannot-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Connection Plugins CANNOT Access
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security Best Practices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-functions-available-to-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host Functions Available to Plugins
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resource-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-your-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing Your Plugin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugin-development-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Development Checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-http-webhook-connector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: HTTP Webhook Connector
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="connection-node-rpc-specification">Connection Node RPC Specification<a class="headerlink" href="#connection-node-rpc-specification" title="Permanent link">&para;</a></h1>
+<p><strong>Document Version</strong>: 1.0<br />
+<strong>Status</strong>: Design Specification<br />
+<strong>Date</strong>: January 28, 2026</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Connection Nodes are RPC-based plugins that handle network protocol communication. They are responsible for:
+- <strong>Incoming Connections</strong>: Receiving data from external systems
+- <strong>Outgoing Connections</strong>: Sending data to external systems</p>
+<p>Connection plugins run as separate subprocesses communicating via gRPC, providing natural process isolation and resource containment.</p>
+<h2 id="connection-node-interface">Connection Node Interface<a class="headerlink" href="#connection-node-interface" title="Permanent link">&para;</a></h2>
+<p>All Connection plugins must implement the following Go interface:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">connector</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;context&quot;</span>
+<span class="w">    </span><span class="s">&quot;time&quot;</span>
+<span class="p">)</span>
+
+<span class="c1">// Message represents a data message flowing through the pipeline</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Message</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ID: Unique message identifier</span>
+<span class="w">    </span><span class="nx">ID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Payload: The actual data (any format: JSON, XML, binary, etc.)</span>
+<span class="w">    </span><span class="nx">Payload</span><span class="w"> </span><span class="p">[]</span><span class="kt">byte</span>
+
+<span class="w">    </span><span class="c1">// ContentType: MIME type of payload (e.g., &quot;application/json&quot;)</span>
+<span class="w">    </span><span class="nx">ContentType</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Metadata: Message metadata</span>
+<span class="w">    </span><span class="nx">Metadata</span><span class="w"> </span><span class="nx">MessageMetadata</span>
+
+<span class="w">    </span><span class="c1">// Headers: Protocol-specific headers</span>
+<span class="w">    </span><span class="nx">Headers</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Timestamp: When message was created</span>
+<span class="w">    </span><span class="nx">Timestamp</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="p">}</span>
+
+<span class="c1">// MessageMetadata: Multi-tenancy and context information</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">MessageMetadata</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// CustomerID: Tenant customer identifier</span>
+<span class="w">    </span><span class="nx">CustomerID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// TenantID: VRSky tenant (shared or dedicated)</span>
+<span class="w">    </span><span class="nx">TenantID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// IntegrationID: Integration this message belongs to</span>
+<span class="w">    </span><span class="nx">IntegrationID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Source: Origin of message (connector name)</span>
+<span class="w">    </span><span class="nx">Source</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Destination: Target of message (connector name)</span>
+<span class="w">    </span><span class="nx">Destination</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// CorrelationID: For tracing messages through the pipeline</span>
+<span class="w">    </span><span class="nx">CorrelationID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// TraceID: Distributed tracing ID</span>
+<span class="w">    </span><span class="nx">TraceID</span><span class="w"> </span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="c1">// ConnectionConfig: Configuration for the connection</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ID: Unique identifier for this connection instance</span>
+<span class="w">    </span><span class="nx">ID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Name: Human-readable name</span>
+<span class="w">    </span><span class="nx">Name</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Type: Connection type (http, mqtt, ftp, salesforce, etc.)</span>
+<span class="w">    </span><span class="nx">Type</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Settings: Connection-specific settings (varies by connector)</span>
+<span class="w">    </span><span class="nx">Settings</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+
+<span class="w">    </span><span class="c1">// Credentials: Sensitive credentials (should use secure secrets manager)</span>
+<span class="w">    </span><span class="nx">Credentials</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Timeout: Default timeout for operations</span>
+<span class="w">    </span><span class="nx">Timeout</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+
+<span class="w">    </span><span class="c1">// RetryPolicy: Retry configuration</span>
+<span class="w">    </span><span class="nx">RetryPolicy</span><span class="w"> </span><span class="nx">RetryPolicy</span>
+<span class="p">}</span>
+
+<span class="c1">// RetryPolicy: Configuration for retries</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">RetryPolicy</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// MaxRetries: Maximum number of retry attempts</span>
+<span class="w">    </span><span class="nx">MaxRetries</span><span class="w"> </span><span class="kt">int</span>
+
+<span class="w">    </span><span class="c1">// BackoffMultiplier: Exponential backoff multiplier (default: 2.0)</span>
+<span class="w">    </span><span class="nx">BackoffMultiplier</span><span class="w"> </span><span class="kt">float64</span>
+
+<span class="w">    </span><span class="c1">// InitialBackoff: Initial backoff duration (default: 1s)</span>
+<span class="w">    </span><span class="nx">InitialBackoff</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+
+<span class="w">    </span><span class="c1">// MaxBackoff: Maximum backoff duration (default: 30s)</span>
+<span class="w">    </span><span class="nx">MaxBackoff</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+<span class="p">}</span>
+
+<span class="c1">// ConnectionNode: Main interface for connection plugins</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">ConnectionNode</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Validate: Validate the configuration and connectivity</span>
+<span class="w">    </span><span class="c1">// Called when plugin is first loaded and when config changes</span>
+<span class="w">    </span><span class="nx">Validate</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// Connect: Establish connection to external system</span>
+<span class="w">    </span><span class="c1">// Called once at startup</span>
+<span class="w">    </span><span class="nx">Connect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// Disconnect: Close connection gracefully</span>
+<span class="w">    </span><span class="c1">// Called on shutdown</span>
+<span class="w">    </span><span class="nx">Disconnect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// Send: Send a message to external system (for Outgoing connections)</span>
+<span class="w">    </span><span class="c1">// Returns message ID or error</span>
+<span class="w">    </span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="w"> </span><span class="nx">Message</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">messageID</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// Receive: Receive messages from external system (for Incoming connections)</span>
+<span class="w">    </span><span class="c1">// Blocks until message available or context cancelled</span>
+<span class="w">    </span><span class="nx">Receive</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">Message</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// Health: Check health status of connection</span>
+<span class="w">    </span><span class="c1">// Returns nil if healthy, error otherwise</span>
+<span class="w">    </span><span class="nx">Health</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// Metadata: Return plugin metadata and capabilities</span>
+<span class="w">    </span><span class="nx">Metadata</span><span class="p">()</span><span class="w"> </span><span class="nx">PluginMetadata</span>
+<span class="p">}</span>
+
+<span class="c1">// PluginMetadata: Information about the plugin</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">PluginMetadata</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ID: Unique plugin identifier</span>
+<span class="w">    </span><span class="nx">ID</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Name: Human-readable name</span>
+<span class="w">    </span><span class="nx">Name</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Version: Semantic version</span>
+<span class="w">    </span><span class="nx">Version</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// ProtocolVersion: VRSky protocol version (for compatibility checks)</span>
+<span class="w">    </span><span class="nx">ProtocolVersion</span><span class="w"> </span><span class="kt">int</span>
+
+<span class="w">    </span><span class="c1">// SupportedTypes: Connection types this plugin supports</span>
+<span class="w">    </span><span class="c1">// e.g., [&quot;http-webhook&quot;, &quot;http-rest&quot;]</span>
+<span class="w">    </span><span class="nx">SupportedTypes</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Description: Plugin description</span>
+<span class="w">    </span><span class="nx">Description</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Author: Plugin author/organization</span>
+<span class="w">    </span><span class="nx">Author</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Documentation: Link to plugin documentation</span>
+<span class="w">    </span><span class="nx">Documentation</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// Capabilities: List of capabilities (see Capabilities section)</span>
+<span class="w">    </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span>
+
+<span class="w">    </span><span class="c1">// ConfigSchema: JSON Schema for configuration</span>
+<span class="w">    </span><span class="nx">ConfigSchema</span><span class="w"> </span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="c1">// Capabilities: What the connection can do</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="kt">string</span>
+
+<span class="kd">const</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="c1">// CapabilityBiDirectional: Connection can both send and receive</span>
+<span class="w">    </span><span class="nx">CapabilityBiDirectional</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;bidirectional&quot;</span>
+
+<span class="w">    </span><span class="c1">// CapabilityRetryable: Connection supports retries</span>
+<span class="w">    </span><span class="nx">CapabilityRetryable</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;retryable&quot;</span>
+
+<span class="w">    </span><span class="c1">// CapabilityBatching: Connection supports batch operations</span>
+<span class="w">    </span><span class="nx">CapabilityBatching</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;batching&quot;</span>
+
+<span class="w">    </span><span class="c1">// CapabilityStreaming: Connection supports streaming</span>
+<span class="w">    </span><span class="nx">CapabilityStreaming</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;streaming&quot;</span>
+
+<span class="w">    </span><span class="c1">// CapabilityTLS: Connection supports TLS</span>
+<span class="w">    </span><span class="nx">CapabilityTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;tls&quot;</span>
+
+<span class="w">    </span><span class="c1">// CapabilityMTLS: Connection supports mutual TLS</span>
+<span class="w">    </span><span class="nx">CapabilityMTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;mtls&quot;</span>
+<span class="p">)</span>
+</code></pre></div>
+<h2 id="plugin-entry-point">Plugin Entry Point<a class="headerlink" href="#plugin-entry-point" title="Permanent link">&para;</a></h2>
+<p>Every Connection plugin must expose a <code>main</code> package with a <code>Serve</code> function:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;github.com/ValueRetail/vrsky/pkg/connector&quot;</span>
+<span class="w">    </span><span class="s">&quot;github.com/hashicorp/go-plugin&quot;</span>
+<span class="p">)</span>
+
+<span class="c1">// MyHTTPConnector: Implementation of ConnectionNode for HTTP</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">MyHTTPConnector</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// ... internal state</span>
+<span class="p">}</span>
+
+<span class="c1">// Serve: Called by VRSky to start the plugin</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">Serve</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">plugin</span><span class="p">.</span><span class="nx">Serve</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">plugin</span><span class="p">.</span><span class="nx">ServeConfig</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">HandshakeConfig</span><span class="p">:</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">Handshake</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Plugins</span><span class="p">:</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">plugin</span><span class="p">.</span><span class="nx">Plugin</span><span class="p">{</span>
+<span class="w">            </span><span class="s">&quot;connection&quot;</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionNodePlugin</span><span class="p">{</span>
+<span class="w">                </span><span class="nx">Impl</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{},</span>
+<span class="w">            </span><span class="p">},</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">    </span><span class="p">})</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Serve</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Build as a plugin:
+<div class="highlight"><pre><span></span><code>go<span class="w"> </span>build<span class="w"> </span>-o<span class="w"> </span>http-connector.so<span class="w"> </span>./cmd/http-connector
+</code></pre></div></p>
+<h2 id="rpc-call-flow">RPC Call Flow<a class="headerlink" href="#rpc-call-flow" title="Permanent link">&para;</a></h2>
+<h3 id="incoming-connection-example">Incoming Connection Example<a class="headerlink" href="#incoming-connection-example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>1. Control Plane discovers HTTP connector plugin
+2. Spawns subprocess: ./http-connector
+3. Establishes gRPC connection to subprocess
+4. Calls ConnectionNode.Validate(config)
+   ✓ Config is valid
+5. Calls ConnectionNode.Connect(config)
+   ✓ HTTP server started on :8080
+6. Integration starts, calls ConnectionNode.Receive(ctx)
+   ✓ Blocks waiting for webhook POST
+7. External system sends POST /webhooks/orders
+   ✓ Plugin receives, creates Message, returns
+8. Message flows through converter → filter → outgoing
+9. Repeat step 6 for each message
+</code></pre></div>
+<h3 id="outgoing-connection-example">Outgoing Connection Example<a class="headerlink" href="#outgoing-connection-example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>1. Control Plane discovers Salesforce connector plugin
+2. Spawns subprocess: ./salesforce-connector
+3. Establishes gRPC connection to subprocess
+4. Calls ConnectionNode.Validate(config)
+   ✓ Config is valid (credentials work)
+5. Calls ConnectionNode.Connect(config)
+   ✓ OAuth token obtained
+6. Integration receives message from filter node
+7. Calls ConnectionNode.Send(msg)
+   ✓ Plugin formats as SOAP, sends to Salesforce API
+   ✓ Returns success or error
+8. If error and retryable, sleep then retry
+9. Repeat for each message
+</code></pre></div>
+<h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
+<h3 id="plugin-errors">Plugin Errors<a class="headerlink" href="#plugin-errors" title="Permanent link">&para;</a></h3>
+<p>Connection plugins should return typed errors:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">connector</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="s">&quot;fmt&quot;</span>
+
+<span class="c1">// PluginError: Base error type</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">PluginError</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Code</span><span class="w">       </span><span class="kt">string</span><span class="w"> </span><span class="c1">// &quot;INVALID_CONFIG&quot;, &quot;CONNECTION_FAILED&quot;, &quot;SEND_FAILED&quot;</span>
+<span class="w">    </span><span class="nx">Message</span><span class="w">    </span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">Recoverable</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="c1">// true = retry, false = dead-letter</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="p">)</span><span class="w"> </span><span class="nx">Error</span><span class="p">()</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">&quot;[%s] %s (recoverable=%v)&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Code</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Message</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Recoverable</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Example errors</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">NewConnectionError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;CONNECTION_FAILED&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="c1">// Can retry connection</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">NewInvalidConfigError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;INVALID_CONFIG&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="c1">// Cannot recover from bad config</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">NewSendError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">recoverable</span><span class="w"> </span><span class="kt">bool</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;SEND_FAILED&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="nx">recoverable</span><span class="p">,</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="control-plane-error-handling">Control Plane Error Handling<a class="headerlink" href="#control-plane-error-handling" title="Permanent link">&para;</a></h3>
+<p>When Connection plugin returns error:</p>
+<div class="highlight"><pre><span></span><code>1. Check error.Recoverable flag
+2. If Recoverable = true:
+   - Apply RetryPolicy (exponential backoff)
+   - Retry up to MaxRetries times
+   - If all retries fail, send to dead-letter queue
+3. If Recoverable = false:
+   - Send to dead-letter queue immediately
+   - Alert platform operator
+   - Stop attempting to process this message
+</code></pre></div>
+<h2 id="security-sandboxing">Security &amp; Sandboxing<a class="headerlink" href="#security-sandboxing" title="Permanent link">&para;</a></h2>
+<h3 id="what-connection-plugins-can-access">What Connection Plugins CAN Access<a class="headerlink" href="#what-connection-plugins-can-access" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Configuration</strong>: Only their own configuration (passed via Connect)</li>
+<li><strong>Customer Context</strong>: CustomerID from message metadata (read-only)</li>
+<li><strong>Logging</strong>: StandardLibrary log package (logs sent to host)</li>
+<li><strong>Host Functions</strong>: Limited set of helper functions (via gRPC)</li>
+</ol>
+<h3 id="what-connection-plugins-cannot-access">What Connection Plugins CANNOT Access<a class="headerlink" href="#what-connection-plugins-cannot-access" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Other Customers' Data</strong>: No cross-tenant data leakage</li>
+<li><strong>Host Filesystem</strong>: No direct file I/O</li>
+<li><strong>Other Processes</strong>: Cannot inspect or modify other plugins</li>
+<li><strong>Arbitrary Network</strong>: Only to configured endpoints</li>
+<li><strong>Host Memory</strong>: Process isolation ensures this</li>
+</ol>
+<h3 id="security-best-practices">Security Best Practices<a class="headerlink" href="#security-best-practices" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// ✅ GOOD: Use credentials passed in config</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Connect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">config</span><span class="p">.</span><span class="nx">Credentials</span><span class="p">[</span><span class="s">&quot;api_key&quot;</span><span class="p">]</span>
+<span class="w">    </span><span class="c1">// Use apiKey to authenticate</span>
+<span class="p">}</span>
+
+<span class="c1">// ❌ BAD: Don&#39;t hardcode credentials</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Connect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="s">&quot;hardcoded-secret-key&quot;</span><span class="w"> </span><span class="c1">// SECURITY ISSUE</span>
+<span class="p">}</span>
+
+<span class="c1">// ✅ GOOD: Log important events without exposing secrets</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="w"> </span><span class="nx">Message</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;Sending message for customer %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Metadata</span><span class="p">.</span><span class="nx">CustomerID</span><span class="p">)</span>
+<span class="w">    </span><span class="c1">// Send message...</span>
+<span class="p">}</span>
+
+<span class="c1">// ❌ BAD: Don&#39;t log sensitive data</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="w"> </span><span class="nx">Message</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;Sending payload: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">string</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">Payload</span><span class="p">))</span><span class="w"> </span><span class="c1">// May contain secrets</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="host-functions-available-to-plugins">Host Functions Available to Plugins<a class="headerlink" href="#host-functions-available-to-plugins" title="Permanent link">&para;</a></h2>
+<p>Plugins can call back to the host for common operations:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// HostFunctions: Interface for host capabilities</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">HostFunctions</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// GetSecret: Retrieve a secret by name from secrets manager</span>
+<span class="w">    </span><span class="nx">GetSecret</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// Log: Send log message to host</span>
+<span class="w">    </span><span class="nx">Log</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">level</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">message</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// RecordMetric: Record a metric (for monitoring)</span>
+<span class="w">    </span><span class="nx">RecordMetric</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">value</span><span class="w"> </span><span class="kt">float64</span><span class="p">,</span><span class="w"> </span><span class="nx">tags</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="w">    </span><span class="c1">// GetConfiguration: Get plugin configuration</span>
+<span class="w">    </span><span class="nx">GetConfiguration</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ConnectionConfig</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="resource-limits">Resource Limits<a class="headerlink" href="#resource-limits" title="Permanent link">&para;</a></h2>
+<p>Connection plugins run with K3s resource limits:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Applied by Control Plane when spawning plugin subprocess</span>
+<span class="nt">resources</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">requests</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;100m&quot;</span>
+<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;64Mi&quot;</span>
+<span class="w">  </span><span class="nt">limits</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;500m&quot;</span>
+<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;256Mi&quot;</span>
+</code></pre></div>
+<p><strong>Plugin responsibilities:</strong>
+- Respect timeout in ConnectionConfig
+- Implement Health() to detect problems
+- Gracefully handle resource exhaustion
+- Log warnings when approaching limits</p>
+<h2 id="testing-your-plugin">Testing Your Plugin<a class="headerlink" href="#testing-your-plugin" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;context&quot;</span>
+<span class="w">    </span><span class="s">&quot;testing&quot;</span>
+
+<span class="w">    </span><span class="s">&quot;github.com/ValueRetail/vrsky/pkg/connector&quot;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">TestMyConnectorValidate</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">c</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{}</span>
+<span class="w">    </span><span class="nx">config</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionConfig</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">&quot;test-http&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http-webhook&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Settings</span><span class="p">:</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}{</span>
+<span class="w">            </span><span class="s">&quot;port&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8080</span><span class="p">,</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Validate</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="nx">config</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">&quot;Validate failed: %v&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">TestMyConnectorConnect</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">c</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{}</span>
+<span class="w">    </span><span class="nx">config</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionConfig</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">&quot;test-http&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http-webhook&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Connect</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="nx">config</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">&quot;Connect failed: %v&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Disconnect</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="plugin-development-checklist">Plugin Development Checklist<a class="headerlink" href="#plugin-development-checklist" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[ ] Implement all ConnectionNode interface methods</li>
+<li>[ ] Handle Customer-ID segregation correctly</li>
+<li>[ ] Use credentials from config, not hardcoded</li>
+<li>[ ] Implement proper error types (Recoverable flag)</li>
+<li>[ ] Add logging for debugging</li>
+<li>[ ] Implement Health() for monitoring</li>
+<li>[ ] Handle context cancellation (timeouts)</li>
+<li>[ ] Test with multiple concurrent messages</li>
+<li>[ ] Document configuration schema</li>
+<li>[ ] Test graceful shutdown (Disconnect)</li>
+<li>[ ] Benchmark performance characteristics</li>
+<li>[ ] Add security review checklist</li>
+</ul>
+<h2 id="example-http-webhook-connector">Example: HTTP Webhook Connector<a class="headerlink" href="#example-http-webhook-connector" title="Permanent link">&para;</a></h2>
+<p>See <code>examples/connectors/http-webhook/</code> in the VRSky repository for a complete working example.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
