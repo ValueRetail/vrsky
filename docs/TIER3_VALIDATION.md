@@ -63,6 +63,42 @@ When all four checks pass:
 3. Close **#140**.
 4. If the throughput numbers supersede the deferral note, update `docs/LOAD.md` and reference #90.
 
+## Validation run — k3d, 2026-06-30
+
+Validated the control plane live on a local k3d cluster (1 server + 2 agents):
+
+- **#138** — management-api ran **2/2 replicas** `1/1` behind the Service; rolling
+  restart kept serving.
+- **DB / migrations** — `golang-migrate` applied **000001 → 000018 cleanly** on a
+  fresh DB (`schema_migrations: 18 | f`).
+- **#21 health monitor** — `nats health monitor started` in the logs.
+- **#19 autoscaler** — `nats autoscaler started ... k8s=true` (live
+  K8sNATSProvisioner, not the inert compose path).
+- **#21 discovery API (end-to-end)** — registered a tenant, inserted a
+  `nats_instances` row, and `GET /api/v1/tenants/{id}/nats-instances` returned the
+  instance + `nats://…:4222` URL (Bearer auth → tenant-scoping → URL formatting).
+
+### Fresh-deploy bugs fixed during this run (all on this branch)
+
+These broke *any* clean deploy — several would hit production identically:
+
+1. `k3d-config.yaml` — rejected `switchContext`; host ports collided with the compose stack.
+2. Platform NATS StatefulSet — clustered JetStream bootstrap **deadlock** (no `podManagementPolicy: Parallel`; liveness used full `/healthz`).
+3. Platform NATS Service — governing service was `ClusterIP`, not headless → peer DNS never resolved.
+4. Missing `secret.yaml` templates (Postgres, MinIO, management-api) — added committed `secret.example.yaml` + deploy fallback.
+5. Resource **requests** oversized (NATS/Postgres/MinIO 1–2 CPU / 2–4 Gi each) → `Insufficient memory` on modest nodes.
+6. Image delivery — manifests referenced unreachable registries; added `k3d-load-images.sh`.
+7. management-api **RBAC** — `default` SA couldn't provision tenant NATS / deploy workers.
+8. management-api missing `DB_HOST`/`DATABASE_URL` env (entrypoint defaulted to the compose host).
+9. **`nats_instances` created by no migration** — only existed in legacy `init-schema.sql`; a migrate-only (production) DB lacked it and `000018`'s FK failed → folded the table into `000018` with a status CHECK covering the values the code writes.
+10. Loading legacy `init-schema.sql` *and* `golang-migrate` → dirty schema; stopped loading init-schema (migrate is the source of truth). Plus management-api missing `ENCRYPTION_KEY`, and the legacy filter's `NATS_URL` env name/value.
+
+### Still to validate (need more setup / a fuller cluster)
+
+- #135 worker HPA scaling + #19 scale-up under sustained load (orchestrator + load gen).
+- #137/#136 HA failover (apply the CNPG / distributed-MinIO manifests, then pod-kill).
+- Throughput re-measure on the scaled topology → `docs/LOAD.md`.
+
 ## What this can't cover here
 
 This environment is single-host (no K8s), so the run itself must happen on your
