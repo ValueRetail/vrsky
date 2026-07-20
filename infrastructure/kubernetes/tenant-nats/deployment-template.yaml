@@ -27,6 +27,10 @@ spec:
         - name: nats
           image: nats:2.12-alpine
 
+          # NOTE: --max_payload / --max_connections are nats-server CONFIG-file
+          # options, NOT CLI flags. Passing them makes nats-server print usage
+          # and exit(0) → CrashLoopBackOff. Keep to real flags (set those limits
+          # via a config file if ever needed). Mirrors K8sNATSProvisioner.
           args:
             - --port
             - "4222"
@@ -34,10 +38,6 @@ spec:
             - "8222"
             - --server_name
             - nats-${TENANT_ID}-${INSTANCE_NUM}
-            - --max_payload
-            - 8MB
-            - --max_connections
-            - "1000"
 
           ports:
             - containerPort: 4222
@@ -52,9 +52,11 @@ spec:
               value: "${INSTANCE_NUM}"
 
           resources:
+            # Modest requests so a tenant instance bin-packs onto small nodes
+            # (the scheduling floor); limits stay generous for burst.
             requests:
-              cpu: 1
-              memory: 2Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 2
               memory: 4Gi

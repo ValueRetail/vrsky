@@ -188,10 +188,11 @@ path does not) drove the full flow:
   right-sized the pod's oversized `1 CPU / 2Gi` requests to `250m / 512Mi` to match
   the platform components.
 
-## What this can't cover here
+## Where these runs happen
 
-This environment is single-host (no K8s), so the run itself must happen on your
-cluster. Everything up to that point — the manifests, migrations, control loops,
-metrics, and this runbook — is in place. `validate-tier3.sh` wraps the deploy +
-checks 1–3 into one command with pass/fail output; check 4 (throughput) is run
-explicitly because it needs a load target.
+The CI/sandbox environment is single-host (no Kubernetes), so a Tier-3 run must
+happen on a real cluster — the validation runs recorded above were done on a
+local **k3d** cluster (1 server + 2 agents). Everything the runbook needs — the
+manifests, migrations, control loops, metrics — is in the repo.
+`validate-tier3.sh` wraps the deploy + checks 1–3 into one command with pass/fail
+output; check 4 (throughput) is run explicitly because it needs a load target.
