@@ -110,18 +110,55 @@ These broke *any* clean deploy — several would hit production identically:
 
 ### Blocked / deferred
 
-- **#135 worker autoscaling under load — orchestrator now wired (#157).** The k8s
-  orchestrator that creates per-connection worker `Deployment`s + HPAs is now wired
-  into the management-api: `main.go` calls `SetOrchestratorFactory` when
-  `ORCHESTRATOR_MODE=k8s` (set in `management-api/deployment.yaml`), sharing the same
-  K8s client as the tenant NATS provisioner. Starting a graph connection deploys a
-  Deployment + HPA per node; stopping it tears them down. The end-to-end scale-up
-  test (check 1 above) is now **runnable** once the generic worker images are imported
-  (`k3d-load-images.sh workers`) — live validation of the scale-up/down is tracked as
-  **#159**.
 - **Throughput re-measure on the scaled topology** → `docs/LOAD.md` (tracked on
-  **#15**). Needs the orchestrator (now wired) plus a load generator against the
-  cluster ingress.
+  **#15**). Needs a load generator against the cluster ingress; the per-connection
+  workers now run and autoscale (below), so this is unblocked.
+
+## Validation run — k3d, 2026-07-20 (#157 orchestrator + #135 autoscaling)
+
+Validated the per-connection orchestrator (#157) and worker autoscaling (#135)
+end-to-end on the local k3d cluster. Imported the generic worker images
+(`k3d-load-images.sh workers` → `vrsky-{consumer,producer,filter,converter}`),
+enabled `ORCHESTRATOR_MODE=k8s`, and drove a `consumer → producer` graph
+connection through its lifecycle:
+
+- **Start → Deployment + HPA per node (#157).** Starting the connection created
+  `vrsky-<conn>-consumer-0` and `vrsky-<conn>-producer-0` Deployments **and** an
+  HPA each (min 1 / max 10 / 75% CPU); both worker pods reached `Running`.
+- **Autoscale under load (#135) — PASS.** Flooding the consumer's `POST /webhook`
+  input drove its CPU to ~620%; the **consumer HPA scaled 1 → 4 → 8 → 10**
+  (maxReplicas), `10/10` available. The **producer HPA stayed at 1** (cpu ~2%) —
+  only the node actually under load scaled, confirming per-node HPAs act
+  independently. Scale-down follows the standard ~5-min HPA stabilization window.
+- **Stop → teardown (#157).** Stopping the connection removed both Deployments and
+  both HPAs (`deploy=0 hpa=0` within ~2s).
+
+### Bugs fixed during this run (all on the #159 branch)
+
+1. **Connection status never persisted.** `StartConnection`/`StopConnection` set
+   `conn.Status` in memory then called the general `UpdateConnection`, whose SQL
+   never writes the `status` column — so connections stayed `stopped` in the DB
+   even while running. The stop path's `status == "stopped"` idempotency guard then
+   skipped orchestrator teardown, **leaking worker Deployments + HPAs on every
+   stop**. Fixed by routing both through `UpdateConnectionStatus`. (Latent before
+   #157 — status was cosmetic; load-bearing once teardown depends on it.)
+2. **Orchestrator worker images used the default pull policy.** With `:latest` that
+   defaults to `Always`, so pods `ErrImagePull`'d against the unreachable
+   `gcr.io/vrsky` even when the image was k3d-imported. Set `imagePullPolicy:
+   IfNotPresent` on the generated Deployments.
+3. **`vrsky-converter` image wouldn't build** (`cmd/converter/Dockerfile`): forced
+   `CGO_ENABLED=1 GOARCH=amd64` (uncompilable on arm64; the converter needs CGO for
+   wasmtime) into an alpine/musl runtime a glibc binary can't load. Now builds for
+   the native arch on a glibc (`debian-slim`) runtime.
+
+### Worker config note
+
+The generic `pkg/runtime` workers the orchestrator deploys take their source/sink
+config from the node `config` JSON: a consumer needs `{"input_type":...,
+"input_config":{...}}` (default `http` → `POST /webhook` on port 8000) and a
+producer needs `{"output_type":"nats|http","output_config":{...}}` (the default
+`file` output type is not supported by that runtime). An empty `{}` config makes a
+worker crash-loop on startup — valid config is required to exercise a pipeline.
 
 ## What this can't cover here
 

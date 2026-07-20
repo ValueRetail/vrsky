@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -560,17 +561,21 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		orch := h.orchestratorFactory(conn)
 		if err := orch.StartPipeline(ctx, conn); err != nil {
 			// Deployment failed - don't update status to running
+			slog.Default().Error("connection start: orchestrator deploy failed", "connection", connID, "error", err)
 			_ = writeError(w, http.StatusInternalServerError, "OrchestratorError",
 				fmt.Sprintf("failed to deploy pipeline: %v", err), nil)
 			return
 		}
 	}
 
-	// Update connection status to Running
+	// Update connection status to Running. Must use UpdateConnectionStatus:
+	// the general UpdateConnection does NOT persist status/started_at, so relying
+	// on it left connections permanently "stopped" in the DB — which made the
+	// stop path's idempotency guard skip orchestrator teardown (leaking workers).
 	conn.Status = "running"
 	conn.StartedAt = pointerTo(time.Now().UTC())
 
-	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
+	if err := h.repo.UpdateConnectionStatus(ctx, connID, "running", nil); err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
 	}
@@ -647,13 +652,21 @@ func (h *Handler) StopConnection(w http.ResponseWriter, r *http.Request) {
 	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
 		orch := h.orchestratorFactory(conn)
 		orchestratorErr = orch.StopPipeline(ctx, conn)
+		if orchestratorErr != nil {
+			slog.Default().Error("connection stop: orchestrator teardown failed", "connection", connID, "error", orchestratorErr)
+		}
 	}
 
-	// Update connection status to Stopped
+	// Update connection status to Stopped (via UpdateConnectionStatus — see the
+	// note in StartConnection; the general UpdateConnection drops status).
 	conn.Status = "stopped"
 	conn.StoppedAt = pointerTo(time.Now().UTC())
 
-	if err := h.repo.UpdateConnection(ctx, conn); err != nil {
+	var stopLastErr *string
+	if orchestratorErr != nil {
+		stopLastErr = pointerTo(orchestratorErr.Error())
+	}
+	if err := h.repo.UpdateConnectionStatus(ctx, connID, "stopped", stopLastErr); err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to update connection status", nil)
 		return
 	}

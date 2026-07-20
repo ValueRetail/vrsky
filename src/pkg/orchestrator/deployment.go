@@ -178,6 +178,11 @@ func buildDeployment(node *managementapi.Node, graph *ExecutionGraph, config *Or
 						{
 							Name:  "component",
 							Image: containerImage,
+							// IfNotPresent so pre-pulled / k3d-imported images run
+							// without a registry round-trip (and unreachable
+							// registries don't ErrImagePull). Matches the platform's
+							// other manifests; redeploys use a new image tag/digest.
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
