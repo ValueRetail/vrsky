@@ -36,8 +36,15 @@ kubectl apply -f infrastructure/kubernetes/management-api/pdb.yaml              
 ## Validation checks → #140 Definition of Done
 
 ### 1. A connection autoscales its workers under load — #135
-- Deploy a connection; drive sustained load (see `docs/LOAD.md` harness).
-- **Pass:** `kubectl get hpa -n vrsky` shows the connection's worker HPA, and replica count rises above `minReplicas` under load and falls after. No manual replica edits.
+- **Prereq (#157):** the management-api runs the per-connection orchestrator only
+  when `ORCHESTRATOR_MODE=k8s` (set in `management-api/deployment.yaml`). Import the
+  generic worker images first: `infrastructure/scripts/k3d-load-images.sh workers`
+  (builds `gcr.io/vrsky/vrsky-{consumer,filter,converter,producer}:latest`).
+- Deploy a graph connection (≥1 node) and start it; drive sustained load (see `docs/LOAD.md` harness).
+- **Pass:** starting the connection creates a `Deployment` + `HorizontalPodAutoscaler`
+  per node (`kubectl get deploy,hpa -n vrsky-platform -l pipeline=<connectionID>`);
+  replica count rises above `minReplicas` under load and falls after (no manual replica
+  edits); stopping the connection removes the Deployments + HPAs.
 
 ### 2. No single-replica SPOF — #136 / #137 / #138
 - **Postgres (#137):** `kubectl get cluster -n vrsky-database vrsky-pg` shows 3 instances, 1 primary. Delete the primary pod → a standby is promoted, the app reconnects via the pooler, no data loss.
@@ -103,15 +110,18 @@ These broke *any* clean deploy — several would hit production identically:
 
 ### Blocked / deferred
 
-- **#135 worker autoscaling under load — BLOCKED on #157.** The k8s orchestrator
-  that creates per-connection worker `Deployment`s + HPAs is never wired into the
-  management-api (`SetOrchestratorFactory` is never called), so starting a
-  connection in k8s creates no worker pods/HPAs. The #135 HPA code is merged but
-  dormant. Wiring it is tracked as **#157**; once done, the HPA scale-up test
-  becomes runnable.
-- **Throughput re-measure on the scaled topology** → `docs/LOAD.md`. Depends on
-  #157 (workers actually running in k8s) + a load generator against the cluster
-  ingress.
+- **#135 worker autoscaling under load — orchestrator now wired (#157).** The k8s
+  orchestrator that creates per-connection worker `Deployment`s + HPAs is now wired
+  into the management-api: `main.go` calls `SetOrchestratorFactory` when
+  `ORCHESTRATOR_MODE=k8s` (set in `management-api/deployment.yaml`), sharing the same
+  K8s client as the tenant NATS provisioner. Starting a graph connection deploys a
+  Deployment + HPA per node; stopping it tears them down. The end-to-end scale-up
+  test (check 1 above) is now **runnable** once the generic worker images are imported
+  (`k3d-load-images.sh workers`) — live validation of the scale-up/down is tracked as
+  **#159**.
+- **Throughput re-measure on the scaled topology** → `docs/LOAD.md` (tracked on
+  **#15**). Needs the orchestrator (now wired) plus a load generator against the
+  cluster ingress.
 
 ## What this can't cover here
 

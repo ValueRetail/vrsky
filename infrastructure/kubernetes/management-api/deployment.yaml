@@ -82,6 +82,16 @@ spec:
               key: encryption_key
         - name: MGMT_API_NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        # #157: run the per-connection orchestrator so starting a graph
+        # connection deploys a Deployment + HPA per node (enables #135
+        # worker autoscaling). Workers land in this namespace and connect to
+        # the platform NATS above (WORKER_NATS_URL unset → MGMT_API_NATS_URL).
+        # Worker images are gcr.io/vrsky/vrsky-{consumer,filter,converter,producer}:latest
+        # (build/import with infrastructure/scripts/k3d-load-images.sh workers).
+        - name: ORCHESTRATOR_MODE
+          value: "k8s"
+        - name: ORCHESTRATOR_NAMESPACE
+          value: "vrsky-platform"
         - name: MGMT_API_LISTEN
           value: ":3000"
         - name: MGMT_API_METRICS_LISTEN

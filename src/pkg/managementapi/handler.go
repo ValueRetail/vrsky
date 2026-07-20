@@ -549,6 +549,12 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pin the connection to a tenant NATS instance for discovery/placement (#19)
+	// BEFORE deploying, so the orchestrator points the workers' NATS_URLS at the
+	// placed instance (the pkg/runtime workers can't self-discover). No-op unless
+	// the tenant has tracked instances (single-instance / compose).
+	h.placeConnection(ctx, tenantID, connID)
+
 	// For graph-based connections (Phase 2): Deploy to Kubernetes via orchestrator
 	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
 		orch := h.orchestratorFactory(conn)
@@ -559,10 +565,6 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	// Pin the connection to a tenant NATS instance for discovery/placement (#19).
-	// No-op unless the tenant has tracked instances (single-instance / compose).
-	h.placeConnection(ctx, tenantID, connID)
 
 	// Update connection status to Running
 	conn.Status = "running"
