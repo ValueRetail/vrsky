@@ -158,12 +158,16 @@ func (p *K8sNATSProvisioner) createDeployment(ctx context.Context, name string, 
 						{
 							Name:  "nats",
 							Image: natsImage,
+							// nats-server CLI accepts only a subset of settings as
+							// flags; --max_payload / --max_connections are config-file
+							// options, NOT flags — passing them makes nats-server print
+							// usage and exit(0), so the pod crash-loops and provisioning
+							// times out. Keep to real flags (defaults are fine for a
+							// tenant instance; tune via a config file if ever needed).
 							Args: []string{
 								"--port", "4222",
 								"--http_port", "8222",
 								"--server_name", name,
-								"--max_payload", "8MB",
-								"--max_connections", "1000",
 							},
 							Ports: []corev1.ContainerPort{
 								{Name: "client", ContainerPort: 4222},
@@ -173,10 +177,14 @@ func (p *K8sNATSProvisioner) createDeployment(ctx context.Context, name string, 
 								{Name: "TENANT_ID", Value: tenantSlug},
 								{Name: "INSTANCE_NUM", Value: "1"},
 							},
+							// Requests are the scheduling floor — keep them modest so a
+							// tenant instance bin-packs onto small/k3d nodes (the same
+							// right-sizing applied to the platform components). Limits
+							// stay generous for burst.
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("1"),
-									corev1.ResourceMemory: resource.MustParse("2Gi"),
+									corev1.ResourceCPU:    resource.MustParse("250m"),
+									corev1.ResourceMemory: resource.MustParse("512Mi"),
 								},
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("2"),

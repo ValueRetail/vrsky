@@ -160,10 +160,39 @@ producer needs `{"output_type":"nats|http","output_config":{...}}` (the default
 `file` output type is not supported by that runtime). An empty `{}` config makes a
 worker crash-loop on startup — valid config is required to exercise a pipeline.
 
-## What this can't cover here
+## Validation run — k3d, 2026-07-20 (#160 tenant provisioning → discovery)
 
-This environment is single-host (no K8s), so the run itself must happen on your
-cluster. Everything up to that point — the manifests, migrations, control loops,
-metrics, and this runbook — is in place. `validate-tier3.sh` wraps the deploy +
-checks 1–3 into one command with pass/fail output; check 4 (throughput) is run
-explicitly because it needs a load target.
+Validated the tenant NATS provisioning → service-discovery chain (#21) end-to-end.
+`POST /api/v1/tenants` (the path that enqueues a provisioning job — the *register*
+path does not) drove the full flow:
+
+- **Provisioner creates the instance.** The `K8sNATSProvisioner` created a
+  `nats-<slug>-1` **Deployment + Service (4222/8222) + NetworkPolicy** (tenant-id
+  isolation) in `vrsky-tenants`; the pod reached `1/1 Running` and the provisioning
+  job completed (`status=completed`, `progress=100`, "NATS instance ready").
+- **Discovery returns it (#21).** `GET /api/v1/tenants/{id}/nats-instances` returned
+  the instance with `status: active` and its
+  `nats://nats-<slug>-1.vrsky-tenants.svc.cluster.local:4222` URL.
+- **DB.** A `nats_instances` row (instance 1, `active`) was written by the
+  provisioner (not manually) — closing the gap left by the 2026-06-30 run, which
+  had inserted that row by hand.
+
+### Bug fixed during this run
+
+- **Tenant NATS pod crash-looped → provisioning always failed.** The provisioner
+  passed `--max_payload 8MB` and `--max_connections 1000` as nats-server **CLI
+  flags**, but those are config-file-only options — nats-server prints usage and
+  `exit(0)`, so the pod `CrashLoopBackOff`'d and `waitForDeployment` timed out
+  (`provisioning_jobs.status = failed`). This broke tenant provisioning on *any*
+  cluster. Fixed by dropping the invalid flags (defaults are fine); also
+  right-sized the pod's oversized `1 CPU / 2Gi` requests to `250m / 512Mi` to match
+  the platform components.
+
+## Where these runs happen
+
+The CI/sandbox environment is single-host (no Kubernetes), so a Tier-3 run must
+happen on a real cluster — the validation runs recorded above were done on a
+local **k3d** cluster (1 server + 2 agents). Everything the runbook needs — the
+manifests, migrations, control loops, metrics — is in the repo.
+`validate-tier3.sh` wraps the deploy + checks 1–3 into one command with pass/fail
+output; check 4 (throughput) is run explicitly because it needs a load target.
