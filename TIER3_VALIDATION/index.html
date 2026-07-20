@@ -1997,6 +1997,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#validation-run-k3d-2026-07-20-157-orchestrator-135-autoscaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation run — k3d, 2026-07-20 (#157 orchestrator + #135 autoscaling)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation run — k3d, 2026-07-20 (#157 orchestrator + #135 autoscaling)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bugs-fixed-during-this-run-all-on-the-159-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bugs fixed during this run (all on the #159 branch)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-config-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker config note
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-this-cant-cover-here" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2129,19 +2168,53 @@ kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> <
 </ol>
 <h3 id="blocked-deferred">Blocked / deferred<a class="headerlink" href="#blocked-deferred" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>#135 worker autoscaling under load — orchestrator now wired (#157).</strong> The k8s
-  orchestrator that creates per-connection worker <code>Deployment</code>s + HPAs is now wired
-  into the management-api: <code>main.go</code> calls <code>SetOrchestratorFactory</code> when
-  <code>ORCHESTRATOR_MODE=k8s</code> (set in <code>management-api/deployment.yaml</code>), sharing the same
-  K8s client as the tenant NATS provisioner. Starting a graph connection deploys a
-  Deployment + HPA per node; stopping it tears them down. The end-to-end scale-up
-  test (check 1 above) is now <strong>runnable</strong> once the generic worker images are imported
-  (<code>k3d-load-images.sh workers</code>) — live validation of the scale-up/down is tracked as
-  <strong>#159</strong>.</li>
 <li><strong>Throughput re-measure on the scaled topology</strong> → <code>docs/LOAD.md</code> (tracked on
-  <strong>#15</strong>). Needs the orchestrator (now wired) plus a load generator against the
-  cluster ingress.</li>
+  <strong>#15</strong>). Needs a load generator against the cluster ingress; the per-connection
+  workers now run and autoscale (below), so this is unblocked.</li>
 </ul>
+<h2 id="validation-run-k3d-2026-07-20-157-orchestrator-135-autoscaling">Validation run — k3d, 2026-07-20 (#157 orchestrator + #135 autoscaling)<a class="headerlink" href="#validation-run-k3d-2026-07-20-157-orchestrator-135-autoscaling" title="Permanent link">&para;</a></h2>
+<p>Validated the per-connection orchestrator (#157) and worker autoscaling (#135)
+end-to-end on the local k3d cluster. Imported the generic worker images
+(<code>k3d-load-images.sh workers</code> → <code>vrsky-{consumer,producer,filter,converter}</code>),
+enabled <code>ORCHESTRATOR_MODE=k8s</code>, and drove a <code>consumer → producer</code> graph
+connection through its lifecycle:</p>
+<ul>
+<li><strong>Start → Deployment + HPA per node (#157).</strong> Starting the connection created
+  <code>vrsky-&lt;conn&gt;-consumer-0</code> and <code>vrsky-&lt;conn&gt;-producer-0</code> Deployments <strong>and</strong> an
+  HPA each (min 1 / max 10 / 75% CPU); both worker pods reached <code>Running</code>.</li>
+<li><strong>Autoscale under load (#135) — PASS.</strong> Flooding the consumer's <code>POST /webhook</code>
+  input drove its CPU to ~620%; the <strong>consumer HPA scaled 1 → 4 → 8 → 10</strong>
+  (maxReplicas), <code>10/10</code> available. The <strong>producer HPA stayed at 1</strong> (cpu ~2%) —
+  only the node actually under load scaled, confirming per-node HPAs act
+  independently. Scale-down follows the standard ~5-min HPA stabilization window.</li>
+<li><strong>Stop → teardown (#157).</strong> Stopping the connection removed both Deployments and
+  both HPAs (<code>deploy=0 hpa=0</code> within ~2s).</li>
+</ul>
+<h3 id="bugs-fixed-during-this-run-all-on-the-159-branch">Bugs fixed during this run (all on the #159 branch)<a class="headerlink" href="#bugs-fixed-during-this-run-all-on-the-159-branch" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Connection status never persisted.</strong> <code>StartConnection</code>/<code>StopConnection</code> set
+   <code>conn.Status</code> in memory then called the general <code>UpdateConnection</code>, whose SQL
+   never writes the <code>status</code> column — so connections stayed <code>stopped</code> in the DB
+   even while running. The stop path's <code>status == "stopped"</code> idempotency guard then
+   skipped orchestrator teardown, <strong>leaking worker Deployments + HPAs on every
+   stop</strong>. Fixed by routing both through <code>UpdateConnectionStatus</code>. (Latent before
+   #157 — status was cosmetic; load-bearing once teardown depends on it.)</li>
+<li><strong>Orchestrator worker images used the default pull policy.</strong> With <code>:latest</code> that
+   defaults to <code>Always</code>, so pods <code>ErrImagePull</code>'d against the unreachable
+   <code>gcr.io/vrsky</code> even when the image was k3d-imported. Set <code>imagePullPolicy:
+   IfNotPresent</code> on the generated Deployments.</li>
+<li><strong><code>vrsky-converter</code> image wouldn't build</strong> (<code>cmd/converter/Dockerfile</code>): forced
+   <code>CGO_ENABLED=1 GOARCH=amd64</code> (uncompilable on arm64; the converter needs CGO for
+   wasmtime) into an alpine/musl runtime a glibc binary can't load. Now builds for
+   the native arch on a glibc (<code>debian-slim</code>) runtime.</li>
+</ol>
+<h3 id="worker-config-note">Worker config note<a class="headerlink" href="#worker-config-note" title="Permanent link">&para;</a></h3>
+<p>The generic <code>pkg/runtime</code> workers the orchestrator deploys take their source/sink
+config from the node <code>config</code> JSON: a consumer needs <code>{"input_type":...,
+"input_config":{...}}</code> (default <code>http</code> → <code>POST /webhook</code> on port 8000) and a
+producer needs <code>{"output_type":"nats|http","output_config":{...}}</code> (the default
+<code>file</code> output type is not supported by that runtime). An empty <code>{}</code> config makes a
+worker crash-loop on startup — valid config is required to exercise a pipeline.</p>
 <h2 id="what-this-cant-cover-here">What this can't cover here<a class="headerlink" href="#what-this-cant-cover-here" title="Permanent link">&para;</a></h2>
 <p>This environment is single-host (no K8s), so the run itself must happen on your
 cluster. Everything up to that point — the manifests, migrations, control loops,
