@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -94,6 +95,9 @@ func (o *Orchestrator) StartConnection(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	slog.Default().Info("orchestrator deploying connection components",
+		"connection", o.Graph.ConnectionID, "components", len(specs), "namespace", o.Config.Namespace)
 
 	// Track successfully deployed nodes for error reporting
 	var deployedNodes []string

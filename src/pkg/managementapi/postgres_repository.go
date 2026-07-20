@@ -324,6 +324,10 @@ func (r *PostgresRepository) DeleteConnection(ctx context.Context, id string) er
 
 // UpdateConnectionStatus updates the status of a connection
 func (r *PostgresRepository) UpdateConnectionStatus(ctx context.Context, id string, status string, lastError *string) error {
+	// NOTE: Start/Stop must persist status through THIS method — the general
+	// UpdateConnection does not touch the status column, so relying on it left
+	// connections permanently "stopped" in the DB, which made the stop path skip
+	// orchestrator teardown (leaking worker Deployments/HPAs). See StartConnection.
 	query := `
 		UPDATE connections
 		SET
