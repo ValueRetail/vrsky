@@ -319,7 +319,19 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 			logger.Printf("WARNING: ORCHESTRATOR_MODE=k8s but no K8s client is available; per-connection orchestrator disabled")
 		} else {
 			orchConfig := orchestratorConfigFromEnv(config)
-			restHandler.SetOrchestratorFactory(orchestrator.NewOrchestratorFactory(k8sClient, orchConfig, validator))
+			// Point per-connection workers at the connection's placed NATS
+			// instance (#19) when one exists; otherwise the static config NATS
+			// URL above. The pkg/runtime workers the orchestrator deploys can't
+			// self-discover, so this resolution happens at deploy time.
+			natsResolver := func(ctx context.Context, tenantID, connID string) (string, bool) {
+				inst, err := repo.GetConnectionInstance(ctx, tenantID, connID)
+				if err != nil || inst == nil {
+					return "", false
+				}
+				return inst.NATSURL(), true
+			}
+			restHandler.SetOrchestratorFactory(orchestrator.NewOrchestratorFactory(
+				k8sClient, orchConfig, validator, orchestrator.WithNATSURLResolver(natsResolver)))
 			logger.Printf("per-connection K8s orchestrator enabled (namespace=%s registry=%s version=%s nats=%s)",
 				orchConfig.Namespace, orchConfig.ImageRegistry, orchConfig.ImageVersion, orchConfig.NATSURLs)
 		}
