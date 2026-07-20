@@ -17,7 +17,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -25,7 +25,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2056,8 +2056,15 @@ kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> <
 <h2 id="validation-checks-140-definition-of-done">Validation checks → #140 Definition of Done<a class="headerlink" href="#validation-checks-140-definition-of-done" title="Permanent link">&para;</a></h2>
 <h3 id="1-a-connection-autoscales-its-workers-under-load-135">1. A connection autoscales its workers under load — #135<a class="headerlink" href="#1-a-connection-autoscales-its-workers-under-load-135" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Deploy a connection; drive sustained load (see <code>docs/LOAD.md</code> harness).</li>
-<li><strong>Pass:</strong> <code>kubectl get hpa -n vrsky</code> shows the connection's worker HPA, and replica count rises above <code>minReplicas</code> under load and falls after. No manual replica edits.</li>
+<li><strong>Prereq (#157):</strong> the management-api runs the per-connection orchestrator only
+  when <code>ORCHESTRATOR_MODE=k8s</code> (set in <code>management-api/deployment.yaml</code>). Import the
+  generic worker images first: <code>infrastructure/scripts/k3d-load-images.sh workers</code>
+  (builds <code>gcr.io/vrsky/vrsky-{consumer,filter,converter,producer}:latest</code>).</li>
+<li>Deploy a graph connection (≥1 node) and start it; drive sustained load (see <code>docs/LOAD.md</code> harness).</li>
+<li><strong>Pass:</strong> starting the connection creates a <code>Deployment</code> + <code>HorizontalPodAutoscaler</code>
+  per node (<code>kubectl get deploy,hpa -n vrsky-platform -l pipeline=&lt;connectionID&gt;</code>);
+  replica count rises above <code>minReplicas</code> under load and falls after (no manual replica
+  edits); stopping the connection removes the Deployments + HPAs.</li>
 </ul>
 <h3 id="2-no-single-replica-spof-136-137-138">2. No single-replica SPOF — #136 / #137 / #138<a class="headerlink" href="#2-no-single-replica-spof-136-137-138" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2122,15 +2129,18 @@ kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> <
 </ol>
 <h3 id="blocked-deferred">Blocked / deferred<a class="headerlink" href="#blocked-deferred" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>#135 worker autoscaling under load — BLOCKED on #157.</strong> The k8s orchestrator
-  that creates per-connection worker <code>Deployment</code>s + HPAs is never wired into the
-  management-api (<code>SetOrchestratorFactory</code> is never called), so starting a
-  connection in k8s creates no worker pods/HPAs. The #135 HPA code is merged but
-  dormant. Wiring it is tracked as <strong>#157</strong>; once done, the HPA scale-up test
-  becomes runnable.</li>
-<li><strong>Throughput re-measure on the scaled topology</strong> → <code>docs/LOAD.md</code>. Depends on
-  #157 (workers actually running in k8s) + a load generator against the cluster
-  ingress.</li>
+<li><strong>#135 worker autoscaling under load — orchestrator now wired (#157).</strong> The k8s
+  orchestrator that creates per-connection worker <code>Deployment</code>s + HPAs is now wired
+  into the management-api: <code>main.go</code> calls <code>SetOrchestratorFactory</code> when
+  <code>ORCHESTRATOR_MODE=k8s</code> (set in <code>management-api/deployment.yaml</code>), sharing the same
+  K8s client as the tenant NATS provisioner. Starting a graph connection deploys a
+  Deployment + HPA per node; stopping it tears them down. The end-to-end scale-up
+  test (check 1 above) is now <strong>runnable</strong> once the generic worker images are imported
+  (<code>k3d-load-images.sh workers</code>) — live validation of the scale-up/down is tracked as
+  <strong>#159</strong>.</li>
+<li><strong>Throughput re-measure on the scaled topology</strong> → <code>docs/LOAD.md</code> (tracked on
+  <strong>#15</strong>). Needs the orchestrator (now wired) plus a load generator against the
+  cluster ingress.</li>
 </ul>
 <h2 id="what-this-cant-cover-here">What this can't cover here<a class="headerlink" href="#what-this-cant-cover-here" title="Permanent link">&para;</a></h2>
 <p>This environment is single-host (no K8s), so the run itself must happen on your
@@ -2196,7 +2206,7 @@ explicitly because it needs a load target.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
