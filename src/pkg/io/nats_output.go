@@ -112,10 +112,6 @@ func (n *NATSOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 		"message_id", env.ID,
 		"size", len(envJSON))
 
-	// Publish to NATS with timeout
-	_, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	// Create NATS message with headers
 	msg := &nats.Msg{
 		Subject: n.config.Subject,
@@ -133,16 +129,18 @@ func (n *NATSOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 		return fmt.Errorf("failed to publish to NATS subject %s: %w", n.config.Subject, err)
 	}
 
-	slog.Info("Message published to NATS",
+	// Per-message logging stays at Debug: this is a data-plane hot path, and an
+	// Info line per message dominates CPU at real rates.
+	slog.Debug("Message published to NATS",
 		"subject", n.config.Subject,
 		"message_id", env.ID)
 
-	// Ensure message is flushed (optional, for reliability)
-	if err := conn.Flush(); err != nil {
-		slog.Warn("Failed to flush NATS connection", "error", err)
-		// Don't fail the write if flush fails - message was published
-	}
-
+	// NB: deliberately no per-message conn.Flush(). Flush is a full round-trip
+	// to the server, so flushing per publish serialises the hot path on network
+	// latency (measured: it capped end-to-end delivery at a few hundred msg/s
+	// while the ingress accepted thousands). The NATS client buffers and flushes
+	// asynchronously, and Close() flushes on the way out; core NATS gives no
+	// delivery ack either way, so the per-message flush bought no guarantee.
 	return nil
 }
 
