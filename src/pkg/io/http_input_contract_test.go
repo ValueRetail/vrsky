@@ -78,11 +78,14 @@ func TestHTTPInput_DeliversAfterStartReturns(t *testing.T) {
 	}
 
 	url := "http://127.0.0.1:" + port + "/webhook"
+	// Bounded client so a stuck server fails fast instead of hanging until the
+	// package test timeout.
+	client := &http.Client{Timeout: 2 * time.Second}
 	var resp *http.Response
 	// The listener is bound before Start returns, but give the serve goroutine
 	// a moment to begin accepting.
 	for i := 0; i < 20; i++ {
-		resp, err = http.Post(url, "application/json", bytes.NewReader([]byte(`{"hello":"world"}`)))
+		resp, err = client.Post(url, "application/json", bytes.NewReader([]byte(`{"hello":"world"}`)))
 		if err == nil {
 			break
 		}

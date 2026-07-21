@@ -60,9 +60,11 @@ func (h *HTTPInput) Start(ctx context.Context) error {
 		return fmt.Errorf("http input listen on %s: %w", h.server.Addr, err)
 	}
 
+	// On cancel, go through Close() so shutdown is idempotent (the caller also
+	// calls Close() on stop) and graceful (Server.Shutdown, not an abrupt Close).
 	go func() {
 		<-ctx.Done()
-		_ = h.server.Close()
+		_ = h.Close()
 	}()
 
 	// Serve in the background — Start MUST return. The component.Input contract

@@ -139,8 +139,9 @@ func (n *NATSOutput) Write(ctx context.Context, env *envelope.Envelope) error {
 	// to the server, so flushing per publish serialises the hot path on network
 	// latency (measured: it capped end-to-end delivery at a few hundred msg/s
 	// while the ingress accepted thousands). The NATS client buffers and flushes
-	// asynchronously, and Close() flushes on the way out; core NATS gives no
-	// delivery ack either way, so the per-message flush bought no guarantee.
+	// asynchronously, and Close() drains the buffer (FlushTimeout) on the way
+	// out; core NATS gives no delivery ack either way, so the per-message flush
+	// bought no guarantee.
 	return nil
 }
 
@@ -150,6 +151,13 @@ func (n *NATSOutput) Close() error {
 	defer n.mu.Unlock()
 
 	if n.conn != nil {
+		// Flush the async write buffer before closing. With the per-message
+		// Flush removed from Write (hot-path), shutdown is the point that must
+		// drain in-flight publishes — conn.Close() alone does NOT flush, so
+		// skipping this would drop buffered messages on stop.
+		if err := n.conn.FlushTimeout(5 * time.Second); err != nil {
+			slog.Warn("NATS output flush on close failed", "error", err)
+		}
 		n.conn.Close()
 	}
 

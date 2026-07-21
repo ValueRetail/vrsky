@@ -19,6 +19,9 @@ import http from 'k6/http';
 import { check } from 'k6';
 
 const TARGET_URL = __ENV.TARGET_URL;
+if (!TARGET_URL) {
+  throw new Error('TARGET_URL is required (e.g. http://consumer-lb.vrsky-platform:8000/webhook)');
+}
 const RATE = parseInt(__ENV.RATE || '2000', 10);
 const DURATION = __ENV.DURATION || '30s';
 const PREALLOC = parseInt(__ENV.PREALLOC_VUS || '100', 10);
@@ -27,6 +30,15 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS || '800', 10);
 export const options = {
   discardResponseBodies: true,
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
+  // Guard rails so a misconfigured run (wrong URL, non-202 responses) exits
+  // non-zero instead of printing a misleading "success" summary. The consumer
+  // answers 202 on accept (fire-and-forget), so the 202 check reflects ingress
+  // health; downstream backpressure drops are expected and measured via the
+  // sink, not here.
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+    checks: ['rate>0.99'],
+  },
   scenarios: {
     webhook: {
       executor: 'constant-arrival-rate',
