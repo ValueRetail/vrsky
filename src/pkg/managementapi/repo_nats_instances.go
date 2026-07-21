@@ -8,7 +8,7 @@ import (
 )
 
 // Tenant NATS instance tracking + service discovery (#21). The nats_instances
-// table (init-schema.sql) records every per-tenant NATS instance the control
+// table (migration 000018) records every per-tenant NATS instance the control
 // plane provisions; workers discover their tenant's instances through the
 // /api/v1/tenants/{id}/nats-instances API rather than a hardcoded URL, and the
 // autoscaler (#19) updates capacity metrics here.

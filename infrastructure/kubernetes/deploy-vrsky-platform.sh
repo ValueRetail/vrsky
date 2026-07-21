@@ -237,33 +237,6 @@ deploy_management_api() {
 	print_success "Management API deployment complete"
 }
 
-deploy_data_plane() {
-	print_header "Deploying Data Plane (Message Processing Runtime)"
-
-	cd "$SCRIPT_DIR/data-plane"
-
-	# Check if deployment.yaml exists
-	if [ ! -f deployment.yaml ]; then
-		print_warning "Data Plane deployment.yaml not found - skipping deployment"
-		print_warning "Data Plane is the message processing runtime that will be implemented in Phase 2"
-		return
-	fi
-
-	kubectl apply -f deployment.yaml
-
-	print_success "Data Plane manifests applied"
-
-	echo "Waiting for Data Plane pods to be ready..."
-	kubectl wait --for=condition=ready pod -l app=vrsky-data-plane -n vrsky-platform --timeout=300s || {
-		print_error "Data Plane pods did not become ready in time"
-		kubectl get pods -n vrsky-platform -l app=vrsky-data-plane
-		exit 1
-	}
-
-	print_success "Data Plane is ready"
-	print_success "Data Plane deployment complete"
-}
-
 deploy_monitoring() {
 	print_header "Deploying Monitoring Stack (Prometheus + Grafana)"
 
@@ -443,8 +416,6 @@ main() {
 	deploy_filter
 
 	deploy_management_api
-
-	deploy_data_plane
 
 	deploy_monitoring
 

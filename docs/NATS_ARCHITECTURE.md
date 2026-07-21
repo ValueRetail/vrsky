@@ -618,8 +618,6 @@ spec:
 - [NATS Documentation](https://docs.nats.io/)
 - [JetStream Design](https://docs.nats.io/nats-concepts/jetstream)
 - [NATS KV Store](https://docs.nats.io/nats-concepts/jetstream/key-value-store)
-- [Project Inception](./PROJECT_INCEPTION.md)
-- [Accelerated Timeline](./ACCELERATED_TIMELINE.md)
 
 ---
 

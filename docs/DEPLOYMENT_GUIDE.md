@@ -654,7 +654,7 @@ Before claiming "encryption at rest" to an auditor:
 - [ ] Off-cluster backups (Postgres dumps, MinIO replication targets)
       go to buckets / disks with SSE enabled.
 
-See `docs/COMPLIANCE.md` for the full mapping to SOC 2 / ISO 27001
+Encryption-at-rest and audit logging map to the common SOC 2 / ISO 27001
 control families.
 
 

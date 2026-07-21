@@ -2,29 +2,6 @@ site_name: VRSky Documentation
 site_description: Operator, integrator, and API documentation for the VRSky integration platform.
 docs_dir: docs
 
-# Legacy / planning docs predating the published site. They remain in the repo
-# but are not part of the docs site (they carry stale internal cross-links).
-exclude_docs: |
-  ACCELERATED_TIMELINE.md
-  COMPLIANCE.md
-  DATABASE_COMPONENTS_ARCHITECTURE.md
-  DOCKER_FILE_COMPONENTS.md
-  FILE_COMPONENTS_ARCHITECTURE.md
-  FILE_CONSUMER_PRODUCER_CONFIG.md
-  FILTER_ARCHITECTURE.md
-  ISSUE_CONSOLIDATION_PLAN.md
-  ISSUE_EXECUTION_ORDER.md
-  LOGIC_NODE_SPEC.md
-  PLUGIN_ARCHITECTURE.md
-  PLUGIN_SECURITY_MODEL.md
-  POC_SCOPE.md
-  PROJECT_INCEPTION.md
-  SERVICE_NODE_PIPELINE.md
-  ARCHIVE/
-  PHASE_TEMPLATES/
-  PLANNING/
-  tasks/
-
 # Keep link checking strict for the curated site, but don't fail on the
 # legacy/non-nav pages that are intentionally not linked.
 validation:
