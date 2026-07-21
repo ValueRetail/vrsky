@@ -97,6 +97,52 @@ item (#90), consistent with the rest of this doc. The heartbeat's cost is one
 short-lived goroutine + a ticker per message, stopped the instant the handler
 acks — negligible at the sink-bound rates above.
 
+### Scaled topology — k8s orchestrator path (#15, k3d)
+
+The numbers above run the **compose** stack (SDK connectors, one host). The
+**k8s orchestrator path** — where the management-api's orchestrator (#157)
+deploys per-node `pkg/runtime` workers with per-connection HPAs (#135) — was
+load-validated separately on the local k3d cluster used for the #157/#159/#160
+validations. k6 ran **as an in-cluster Job** driving a constant arrival rate at
+a ClusterIP Service in front of the connection's autoscaled consumer replicas:
+`k6 → Service → consumer(HTTP input) → NATS → producer → sink`.
+
+- **Ingress:** sustained the full **3,000 req/s** target at **p99 < 1 ms, 0%
+  HTTP failures** — the webhook input accepts at the same sub-millisecond
+  latencies as the compose path.
+- **Autoscaling under load (#135):** the consumer HPA scaled from 1 toward
+  `maxReplicas` (consumer CPU > 360% of request; producer > 220%), i.e. the
+  per-node HPAs the orchestrator creates react to real traffic — consistent with
+  the dedicated #159 run (consumer 1→10 under load).
+- **End-to-end delivery:** confirmed working through the orchestrator pipeline
+  (messages arrive on the sink subject; the producer saturates). A **precise
+  sustained delivered-msg/s ceiling is not claimed on k3d**: it shares one
+  laptop's cores with everything else, a 30 s window doesn't outlast HPA
+  scale-up lag, and the delivered count here is read by grepping a `nats sub`
+  pod's log (a floor, not a ceiling). A clean scaled delivered-throughput
+  baseline stays a real-multi-node-cluster item (with in-cluster Prometheus),
+  consistent with the deferral at the top of this doc.
+
+**Two data-path bugs were found and fixed by this run** (both would hit
+production, not just k3d):
+
+1. **`HTTPInput.Start()` blocked forever** in `ListenAndServe`, violating the
+   `component.Input` contract ("Start … must be called before Read()"). Callers
+   start the OUTPUT and the read→write loop only *after* `Start` returns, so the
+   consumer never connected its NATS output and never drained its channel — every
+   webhook was accepted with **202 and then silently dropped** once the 100-slot
+   buffer filled. A 3,000 req/s run delivered **0** messages end-to-end. Fixed to
+   serve in a background goroutine (binding synchronously so a port conflict
+   still surfaces as a `Start` error). Regression tests added
+   (`http_input_contract_test.go`) — the pre-existing tests all called `Start` in
+   a goroutine and were `//go:build integration`, so none could catch this.
+2. **`NATSOutput.Write` flushed per message** (`conn.Flush()` is a full
+   server round-trip) and logged at **Info per message** — capping end-to-end
+   delivery at a few hundred msg/s while the ingress accepted thousands. Removed
+   the per-message flush (the client buffers + flushes asynchronously; `Close`
+   flushes on shutdown; core NATS gives no per-publish ack regardless) and
+   dropped the hot-path logging to Debug.
+
 ### CDC — Postgres logical-replication capture
 
 `generators/cdc_insert.sh` bulk-inserts into the source Postgres and watches the

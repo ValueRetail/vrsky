@@ -54,18 +54,32 @@ func (h *HTTPInput) Start(ctx context.Context) error {
 		Handler: mux,
 	}
 
+	// Bind synchronously so a port conflict still surfaces as a Start() error.
+	ln, err := net.Listen("tcp", h.server.Addr)
+	if err != nil {
+		return fmt.Errorf("http input listen on %s: %w", h.server.Addr, err)
+	}
+
+	// On cancel, go through Close() so shutdown is idempotent (the caller also
+	// calls Close() on stop) and graceful (Server.Shutdown, not an abrupt Close).
 	go func() {
 		<-ctx.Done()
-		_ = h.server.Close()
+		_ = h.Close()
+	}()
+
+	// Serve in the background — Start MUST return. The component.Input contract
+	// is "Start initializes the input ... must be called before Read()", and
+	// every caller starts the OUTPUT and the read loop only after Start returns.
+	// Serving inline (ListenAndServe) blocked forever, so the consumer never
+	// connected its NATS output and never drained the message channel: webhooks
+	// were accepted with 202 and then silently dropped once the buffer filled.
+	go func() {
+		if err := h.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server error", "error", err)
+		}
 	}()
 
 	slog.Info("HTTP input started", "port", h.port, "endpoint", "POST /webhook")
-
-	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		slog.Error("HTTP server error", "error", err)
-		return fmt.Errorf("http server: %w", err)
-	}
-
 	return nil
 }
 
@@ -96,7 +110,8 @@ func (h *HTTPInput) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Send to message channel (non-blocking, fire-and-forget)
 	select {
 	case h.messages <- env:
-		slog.Info("Webhook queued", "id", env.ID)
+		// Debug, not Info: one log line per request dominates CPU under load.
+		slog.Debug("Webhook queued", "id", env.ID)
 	default:
 		// Channel full, drop message (fire-and-forget philosophy)
 		slog.Warn("Message channel full, dropping webhook", "id", env.ID)
