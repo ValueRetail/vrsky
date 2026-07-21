@@ -1881,6 +1881,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#scaled-topology-k8s-orchestrator-path-15-k3d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaled topology — k8s orchestrator path (#15, k3d)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cdc-postgres-logical-replication-capture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2097,6 +2108,17 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scaled-topology-k8s-orchestrator-path-15-k3d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaled topology — k8s orchestrator path (#15, k3d)
+      
+    </span>
+  </a>
   
 </li>
         
@@ -2341,6 +2363,51 @@ at the time; a clean re-baseline of absolute numbers remains a fixed-cluster
 item (#90), consistent with the rest of this doc. The heartbeat's cost is one
 short-lived goroutine + a ticker per message, stopped the instant the handler
 acks — negligible at the sink-bound rates above.</p>
+<h3 id="scaled-topology-k8s-orchestrator-path-15-k3d">Scaled topology — k8s orchestrator path (#15, k3d)<a class="headerlink" href="#scaled-topology-k8s-orchestrator-path-15-k3d" title="Permanent link">&para;</a></h3>
+<p>The numbers above run the <strong>compose</strong> stack (SDK connectors, one host). The
+<strong>k8s orchestrator path</strong> — where the management-api's orchestrator (#157)
+deploys per-node <code>pkg/runtime</code> workers with per-connection HPAs (#135) — was
+load-validated separately on the local k3d cluster used for the #157/#159/#160
+validations. k6 ran <strong>as an in-cluster Job</strong> driving a constant arrival rate at
+a ClusterIP Service in front of the connection's autoscaled consumer replicas:
+<code>k6 → Service → consumer(HTTP input) → NATS → producer → sink</code>.</p>
+<ul>
+<li><strong>Ingress:</strong> sustained the full <strong>3,000 req/s</strong> target at <strong>p99 &lt; 1 ms, 0%
+  HTTP failures</strong> — the webhook input accepts at the same sub-millisecond
+  latencies as the compose path.</li>
+<li><strong>Autoscaling under load (#135):</strong> the consumer HPA scaled from 1 toward
+  <code>maxReplicas</code> (consumer CPU &gt; 360% of request; producer &gt; 220%), i.e. the
+  per-node HPAs the orchestrator creates react to real traffic — consistent with
+  the dedicated #159 run (consumer 1→10 under load).</li>
+<li><strong>End-to-end delivery:</strong> confirmed working through the orchestrator pipeline
+  (messages arrive on the sink subject; the producer saturates). A <strong>precise
+  sustained delivered-msg/s ceiling is not claimed on k3d</strong>: it shares one
+  laptop's cores with everything else, a 30 s window doesn't outlast HPA
+  scale-up lag, and the delivered count here is read by grepping a <code>nats sub</code>
+  pod's log (a floor, not a ceiling). A clean scaled delivered-throughput
+  baseline stays a real-multi-node-cluster item (with in-cluster Prometheus),
+  consistent with the deferral at the top of this doc.</li>
+</ul>
+<p><strong>Two data-path bugs were found and fixed by this run</strong> (both would hit
+production, not just k3d):</p>
+<ol>
+<li><strong><code>HTTPInput.Start()</code> blocked forever</strong> in <code>ListenAndServe</code>, violating the
+   <code>component.Input</code> contract ("Start … must be called before Read()"). Callers
+   start the OUTPUT and the read→write loop only <em>after</em> <code>Start</code> returns, so the
+   consumer never connected its NATS output and never drained its channel — every
+   webhook was accepted with <strong>202 and then silently dropped</strong> once the 100-slot
+   buffer filled. A 3,000 req/s run delivered <strong>0</strong> messages end-to-end. Fixed to
+   serve in a background goroutine (binding synchronously so a port conflict
+   still surfaces as a <code>Start</code> error). Regression tests added
+   (<code>http_input_contract_test.go</code>) — the pre-existing tests all called <code>Start</code> in
+   a goroutine and were <code>//go:build integration</code>, so none could catch this.</li>
+<li><strong><code>NATSOutput.Write</code> flushed per message</strong> (<code>conn.Flush()</code> is a full
+   server round-trip) and logged at <strong>Info per message</strong> — capping end-to-end
+   delivery at a few hundred msg/s while the ingress accepted thousands. Removed
+   the per-message flush (the client buffers + flushes asynchronously; <code>Close</code>
+   flushes on shutdown; core NATS gives no per-publish ack regardless) and
+   dropped the hot-path logging to Debug.</li>
+</ol>
 <h3 id="cdc-postgres-logical-replication-capture">CDC — Postgres logical-replication capture<a class="headerlink" href="#cdc-postgres-logical-replication-capture" title="Permanent link">&para;</a></h3>
 <p><code>generators/cdc_insert.sh</code> bulk-inserts into the source Postgres and watches the
 postgres-consumer capture it. Insert side is trivially fast (~285,000 rows/s
