@@ -783,6 +783,33 @@ services:
     networks:
       - vrsky-network
 
+  # Front Systems Consumer - receives Front Systems webhooks (SaleCreated,
+  # StockMovementCreated, …) and optionally registers the callback URL.
+  # See docs/connectors/front-systems.md.
+  front-systems-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/front-systems-consumer/Dockerfile
+    container_name: vrsky-front-systems-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # subscription/API keys (*_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving POST /frontsystems/events/{connectionID}.
+      WORKER_HTTP_PORT: "9270"
+    ports:
+      - "127.0.0.1:9270:9270"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # SFTP Consumer (#76) - watches a remote SFTP dir, fetches + publishes files.
   sftp-consumer:
     build:
@@ -1138,6 +1165,29 @@ services:
       LOG_LEVEL: "info"
       # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
       # Sitoo API password (api_password_secret_id) at delivery time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Front Systems Producer - writes master data (products/prices) back into
+  # Front Systems via the REST API. See docs/connectors/front-systems.md.
+  front-systems-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/front-systems-producer/Dockerfile
+    container_name: vrsky-front-systems-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — decrypts the subscription/API
+      # keys (*_secret_id) at delivery time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     depends_on:
       nats:
