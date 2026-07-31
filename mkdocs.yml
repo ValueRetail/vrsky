@@ -76,6 +76,7 @@ nav:
       - Sitoo (POS): connectors/sitoo.md
       - Front Systems (POS): connectors/front-systems.md
       - Dynamics 365 Business Central: connectors/business-central.md
+      - Visma.net: connectors/visma.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
   - Security:
