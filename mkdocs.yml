@@ -73,6 +73,7 @@ nav:
       - Apache Kafka: connectors/kafka.md
       - RabbitMQ: connectors/rabbitmq.md
       - Salesforce: connectors/salesforce.md
+      - Sitoo (POS): connectors/sitoo.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
   - Security:
