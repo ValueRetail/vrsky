@@ -15,7 +15,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [Apache Kafka](kafka.md) | ✓ | ✓ | `kafka` |
 | [RabbitMQ](rabbitmq.md) | ✓ | ✓ | `rabbitmq` |
 | [Salesforce](salesforce.md) | ✓ | ✓ | `salesforce` |
-| [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | — | `sitoo` |
+| [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | ✓ | `sitoo` |
 | [Tenant-to-tenant](tenant.md) | ✓ | — | `tenant` |
 | [Filters & converters](filters-converters.md) | — | — | `filter` / `converter` |
 
