@@ -16,6 +16,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [RabbitMQ](rabbitmq.md) | ✓ | ✓ | `rabbitmq` |
 | [Salesforce](salesforce.md) | ✓ | ✓ | `salesforce` |
 | [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | ✓ | `sitoo` |
+| [Front Systems (POS)](front-systems.md) | ✓ (webhook) | ✓ | `front_systems` |
 | [Tenant-to-tenant](tenant.md) | ✓ | — | `tenant` |
 | [Filters & converters](filters-converters.md) | — | — | `filter` / `converter` |
 
