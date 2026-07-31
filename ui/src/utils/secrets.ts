@@ -21,6 +21,13 @@ export const SECRET_FIELDS = new Set([
   'account_key',
   'connection_string',
   'credentials_json',
+  // Retail connectors (POS/ERP/OMS): Sitoo Basic-auth password, Front Systems
+  // APIM subscription key, BC/Visma OAuth client secret, Brightpearl staff token.
+  // (Front Systems / others' `api_key` is already covered above.)
+  'api_password',
+  'subscription_key',
+  'client_secret',
+  'staff_token',
 ])
 
 /**

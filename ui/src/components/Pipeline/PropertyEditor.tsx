@@ -3126,6 +3126,156 @@ function ApiConsumerConfig({
   )
 }
 
+// --- Retail connectors (POS / ERP / OMS) ------------------------------------
+// Each editor stores config.<type> = {...}; secret fields (api_password,
+// subscription_key, api_key, client_secret, staff_token) are minted into the
+// vault at deploy time (see utils/secrets.ts SECRET_FIELDS). One editor serves
+// both the consumer (input) and producer (output) node, showing the
+// poll-interval field for input and the method field for output.
+type ConnEditorProps = {
+  config: Record<string, unknown>
+  setConfig: (config: Record<string, unknown>) => void
+  nodeType: string
+}
+
+function PollOrMethod({
+  cfg, update, nodeType, methodOptions = ['POST', 'PUT'],
+}: {
+  cfg: Record<string, unknown>
+  update: (patch: Record<string, unknown>) => void
+  nodeType: string
+  methodOptions?: string[]
+}) {
+  if (nodeType === 'input') {
+    return (
+      <StyledInput
+        label="Poll interval (seconds)"
+        type="number"
+        placeholder="300"
+        value={String((cfg.poll_interval_seconds as number) ?? 300)}
+        onChange={(v) => update({ poll_interval_seconds: parseInt(v) || 0 })}
+      />
+    )
+  }
+  return (
+    <StyledSelect
+      label="HTTP method"
+      value={(cfg.method as string) || methodOptions[0]}
+      onChange={(v) => update({ method: v })}
+      options={methodOptions.map((m) => ({ value: m, label: m }))}
+    />
+  )
+}
+
+// Sitoo (POS) — HTTP Basic auth.
+function SitooConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.sitoo as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, sitoo: { ...c, ...patch } })
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput label="Account ID" type="number" placeholder="12345" value={String((c.account_id as number) ?? '')} onChange={(v) => update({ account_id: parseInt(v) || 0 })} />
+        <StyledInput label="Site ID" type="number" placeholder="1" value={String((c.site_id as number) ?? '')} onChange={(v) => update({ site_id: parseInt(v) || 0 })} />
+      </div>
+      <StyledInput label="API ID" placeholder="Sitoo REST API ID" value={(c.api_id as string) || ''} onChange={(v) => update({ api_id: v })} />
+      <SecretInput label="API password" placeholder="Sitoo REST API password" field="api_password" config={c} defaultSecretName="sitoo-api-password" onChange={(patch) => update(patch)} />
+      <StyledInput label={nodeType === 'input' ? 'Resource (default transactions)' : 'Resource (default warehouseitems)'} placeholder={nodeType === 'input' ? 'transactions' : 'warehouseitems'} value={(c.resource as string) || ''} onChange={(v) => update({ resource: v })} />
+      <StyledInput label="Base URL (optional)" placeholder="https://api.mysitoo.com/v2" value={(c.base_url as string) || ''} onChange={(v) => update({ base_url: v })} />
+      <PollOrMethod cfg={c} update={update} nodeType={nodeType} />
+    </div>
+  )
+}
+
+// Front Systems (POS) — Azure APIM dual-header auth; webhook-first source.
+function FrontSystemsConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.front_systems as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, front_systems: { ...c, ...patch } })
+  const events = Array.isArray(c.events) ? (c.events as string[]).join(', ') : ''
+  return (
+    <div className="space-y-3">
+      <StyledInput label="Base URL (per-partner Azure APIM host)" placeholder="https://<partner-apim-host>" value={(c.base_url as string) || ''} onChange={(v) => update({ base_url: v })} />
+      <SecretInput label="Subscription key (Ocp-Apim-Subscription-Key)" placeholder="APIM subscription key" field="subscription_key" config={c} defaultSecretName="frontsystems-subscription-key" onChange={(patch) => update(patch)} />
+      <SecretInput label="API key (x-api-key)" placeholder="Per-integration key" field="api_key" config={c} defaultSecretName="frontsystems-api-key" onChange={(patch) => update(patch)} />
+      {nodeType === 'input' ? (
+        <>
+          <StyledInput label="Events to register (comma-separated)" placeholder="SaleCreated, StockMovementCreated" value={events} onChange={(v) => update({ events: v.split(',').map((s) => s.trim()).filter(Boolean) })} />
+          <StyledInput label="Callback URL (optional — auto-register)" placeholder="https://<ingress>/frontsystems/events/<connectionID>" value={(c.callback_url as string) || ''} onChange={(v) => update({ callback_url: v })} />
+        </>
+      ) : (
+        <>
+          <StyledInput label="Resource (default /api/Products/bulk-upsert)" placeholder="/api/Products/bulk-upsert" value={(c.resource as string) || ''} onChange={(v) => update({ resource: v })} />
+          <PollOrMethod cfg={c} update={update} nodeType={nodeType} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// Microsoft Dynamics 365 Business Central (ERP) — OAuth2 client-credentials.
+function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.business_central as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, business_central: { ...c, ...patch } })
+  return (
+    <div className="space-y-3">
+      <StyledInput label="Entra tenant ID" placeholder="<tenant-guid or domain>" value={(c.aad_tenant_id as string) || ''} onChange={(v) => update({ aad_tenant_id: v })} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput label="Environment" placeholder="Production" value={(c.environment as string) || ''} onChange={(v) => update({ environment: v })} />
+        <StyledInput label="Company ID (GUID)" placeholder="<company-guid>" value={(c.company_id as string) || ''} onChange={(v) => update({ company_id: v })} />
+      </div>
+      <StyledInput label="Client ID (Entra app)" placeholder="<app-id>" value={(c.client_id as string) || ''} onChange={(v) => update({ client_id: v })} />
+      <SecretInput label="Client secret" placeholder="Entra app client secret" field="client_secret" config={c} defaultSecretName="bc-client-secret" onChange={(patch) => update(patch)} />
+      <StyledInput label="Entity" placeholder={nodeType === 'input' ? 'items / customers / salesOrders' : 'items'} value={(c.entity as string) || ''} onChange={(v) => update({ entity: v })} />
+      {nodeType === 'input' && (
+        <StyledInput label="OData $filter (optional)" placeholder="lastModifiedDateTime gt 2026-01-01T00:00:00Z" value={(c.filter as string) || ''} onChange={(v) => update({ filter: v })} />
+      )}
+      <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />
+    </div>
+  )
+}
+
+// Visma.net (ERP) — OAuth2 client-credentials via Visma Connect; multi-service.
+function VismaConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.visma as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, visma: { ...c, ...patch } })
+  return (
+    <div className="space-y-3">
+      <StyledInput label="Base URL (per-service host)" placeholder="https://salesorder.visma.net/api/v3" value={(c.base_url as string) || ''} onChange={(v) => update({ base_url: v })} />
+      <StyledInput label="Scope (per-service)" placeholder="<service-scope>" value={(c.scope as string) || ''} onChange={(v) => update({ scope: v })} />
+      <StyledInput label="Client ID" placeholder="<app-id>" value={(c.client_id as string) || ''} onChange={(v) => update({ client_id: v })} />
+      <SecretInput label="Client secret" placeholder="Visma Connect client secret" field="client_secret" config={c} defaultSecretName="visma-client-secret" onChange={(patch) => update(patch)} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput label="Company ID (ipp-company-id)" placeholder="<company-id>" value={(c.company_id as string) || ''} onChange={(v) => update({ company_id: v })} />
+        <StyledInput label="Resource" placeholder="SalesOrders" value={(c.resource as string) || ''} onChange={(v) => update({ resource: v })} />
+      </div>
+      {nodeType === 'input' && (
+        <StyledInput label="Query (optional — paging/filter)" placeholder="pageNumber=1&numberToRead=100" value={(c.query as string) || ''} onChange={(v) => update({ query: v })} />
+      )}
+      <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PUT', 'PATCH']} />
+    </div>
+  )
+}
+
+// Brightpearl (OMS) — staff-token dual-header auth; poll + webhook source.
+function BrightpearlConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.brightpearl as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, brightpearl: { ...c, ...patch } })
+  return (
+    <div className="space-y-3">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput label="Datacenter" placeholder="eu1" value={(c.datacenter as string) || ''} onChange={(v) => update({ datacenter: v })} />
+        <StyledInput label="Account code" placeholder="youraccount" value={(c.account_code as string) || ''} onChange={(v) => update({ account_code: v })} />
+      </div>
+      <StyledInput label="App ref (brightpearl-app-ref)" placeholder="yourapp" value={(c.app_ref as string) || ''} onChange={(v) => update({ app_ref: v })} />
+      <SecretInput label="Staff token (brightpearl-staff-token)" placeholder="Staff auth token" field="staff_token" config={c} defaultSecretName="brightpearl-staff-token" onChange={(patch) => update(patch)} />
+      <StyledInput label="Resource" placeholder={nodeType === 'input' ? '/order-service/order-search' : '/order-service/order'} value={(c.resource as string) || ''} onChange={(v) => update({ resource: v })} />
+      {nodeType === 'input' && (
+        <StyledInput label="Query (optional — search paging/filter)" placeholder="orderTypeId=1&pageSize=100" value={(c.query as string) || ''} onChange={(v) => update({ query: v })} />
+      )}
+      <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PUT', 'PATCH']} />
+    </div>
+  )
+}
+
 export default function PropertyEditor({
   node,
   onUpdate,
@@ -3210,6 +3360,11 @@ export default function PropertyEditor({
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
                 { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
+                { value: 'sitoo', label: 'Sitoo (POS)' },
+                { value: 'front_systems', label: 'Front Systems (POS)' },
+                { value: 'business_central', label: 'Business Central (ERP)' },
+                { value: 'visma', label: 'Visma.net (ERP)' },
+                { value: 'brightpearl', label: 'Brightpearl (OMS)' },
               ]}
             />
 
@@ -3392,6 +3547,21 @@ export default function PropertyEditor({
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="consumer" />
             )}
+            {config.type === 'sitoo' && (
+              <SitooConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'front_systems' && (
+              <FrontSystemsConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'business_central' && (
+              <BusinessCentralConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'visma' && (
+              <VismaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'brightpearl' && (
+              <BrightpearlConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
           </div>
         )
 
@@ -3412,6 +3582,11 @@ export default function PropertyEditor({
                 { value: 'kafka', label: 'Kafka' },
                 { value: 'rabbitmq', label: 'RabbitMQ' },
                 { value: 'cloud_storage', label: 'Cloud Storage (S3/Azure/GCS)' },
+                { value: 'sitoo', label: 'Sitoo (POS)' },
+                { value: 'front_systems', label: 'Front Systems (POS)' },
+                { value: 'business_central', label: 'Business Central (ERP)' },
+                { value: 'visma', label: 'Visma.net (ERP)' },
+                { value: 'brightpearl', label: 'Brightpearl (OMS)' },
               ]}
             />
 
@@ -3563,6 +3738,21 @@ export default function PropertyEditor({
 
             {config.type === 'cloud_storage' && (
               <CloudStorageConfigEditor config={config} setConfig={setConfig} role="producer" />
+            )}
+            {config.type === 'sitoo' && (
+              <SitooConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'front_systems' && (
+              <FrontSystemsConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'business_central' && (
+              <BusinessCentralConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'visma' && (
+              <VismaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'brightpearl' && (
+              <BrightpearlConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
           </div>
         )
