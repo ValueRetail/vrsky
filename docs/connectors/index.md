@@ -17,6 +17,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [Salesforce](salesforce.md) | ✓ | ✓ | `salesforce` |
 | [Sitoo (POS)](sitoo.md) | ✓ (poll + webhook) | ✓ | `sitoo` |
 | [Front Systems (POS)](front-systems.md) | ✓ (webhook) | ✓ | `front_systems` |
+| [Dynamics 365 Business Central](business-central.md) | ✓ | ✓ | `business_central` |
 | [Tenant-to-tenant](tenant.md) | ✓ | — | `tenant` |
 | [Filters & converters](filters-converters.md) | — | — | `filter` / `converter` |
 

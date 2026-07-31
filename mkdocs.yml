@@ -75,6 +75,7 @@ nav:
       - Salesforce: connectors/salesforce.md
       - Sitoo (POS): connectors/sitoo.md
       - Front Systems (POS): connectors/front-systems.md
+      - Dynamics 365 Business Central: connectors/business-central.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
   - Security:
