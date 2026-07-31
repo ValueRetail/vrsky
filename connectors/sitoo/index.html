@@ -1461,6 +1461,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#as-a-destination-producer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        As a destination (producer)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2034,6 +2045,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#as-a-destination-producer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        As a destination (producer)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2115,10 +2137,35 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <p>served on <code>WORKER_HTTP_PORT</code> (9260 in compose). Each event body is published as a
 message routed to the owning tenant/connection. Configure the connection with
 <code>poll_interval_seconds: 0</code> if you want webhook-only (no polling).</p>
+<h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
+<p>A <code>sitoo</code> producer node writes each incoming message into a Sitoo REST resource
+(e.g. updating warehouse stock, prices, or products) with HTTP Basic auth —
+completing two-way sync. The message payload is sent as the request body, so an
+upstream converter/filter should shape it to the target resource's schema.</p>
+<ul>
+<li><code>account_id</code> / <code>site_id</code> / <code>api_id</code> / <code>api_password_secret_id</code> — as above.</li>
+<li><code>resource</code> — the target collection (default <code>warehouseitems</code>; e.g. <code>prices</code>).</li>
+<li><code>method</code> — <code>POST</code> (default) or <code>PUT</code>.</li>
+<li><code>base_url</code> — optional override.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sitoo&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sitoo&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;account_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;site_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;api_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-api-id&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;api_password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warehouseitems&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
+and <code>5xx</code>/network errors are retried (with the rate-limit backoff hint); <code>4xx</code>
+(bad request/data) and <code>401</code>/<code>403</code> (auth) are treated as poison and sent to the
+DLQ rather than retried forever.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Producer (write-back)</strong> — updating stock/prices/products in Sitoo (a
-  <code>sitoo</code> producer node) is the natural next step for two-way inventory sync.</li>
 <li><strong>Incremental polling</strong> — the current poller does a full paged fetch each
   cycle; a <code>modified_after</code>-style cursor is a straightforward enhancement for
   high-volume order streams.</li>
