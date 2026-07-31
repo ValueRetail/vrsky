@@ -810,6 +810,29 @@ services:
     networks:
       - vrsky-network
 
+  # Business Central Consumer - polls Dynamics 365 Business Central (OData v4,
+  # OAuth2 client-credentials). Also covers LS Central / LS Retail (runs on BC).
+  # See docs/connectors/business-central.md.
+  business-central-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/business-central-consumer/Dockerfile
+    container_name: vrsky-business-central-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — decrypts client_secret
+      # (client_secret_secret_id) at connection-start time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # SFTP Consumer (#76) - watches a remote SFTP dir, fetches + publishes files.
   sftp-consumer:
     build:
@@ -1188,6 +1211,28 @@ services:
       LOG_LEVEL: "info"
       # Must match management-api's ENCRYPTION_KEY — decrypts the subscription/API
       # keys (*_secret_id) at delivery time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Business Central Producer - writes to Dynamics 365 Business Central (items,
+  # sales orders, …) via OData, OAuth2 client-credentials.
+  # See docs/connectors/business-central.md.
+  business-central-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/business-central-producer/Dockerfile
+    container_name: vrsky-business-central-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     depends_on:
       nats:
