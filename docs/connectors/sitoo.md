@@ -62,10 +62,39 @@ served on `WORKER_HTTP_PORT` (9260 in compose). Each event body is published as 
 message routed to the owning tenant/connection. Configure the connection with
 `poll_interval_seconds: 0` if you want webhook-only (no polling).
 
+## As a destination (producer)
+
+A `sitoo` producer node writes each incoming message into a Sitoo REST resource
+(e.g. updating warehouse stock, prices, or products) with HTTP Basic auth —
+completing two-way sync. The message payload is sent as the request body, so an
+upstream converter/filter should shape it to the target resource's schema.
+
+- `account_id` / `site_id` / `api_id` / `api_password_secret_id` — as above.
+- `resource` — the target collection (default `warehouseitems`; e.g. `prices`).
+- `method` — `POST` (default) or `PUT`.
+- `base_url` — optional override.
+
+```json
+{
+  "type": "sitoo",
+  "sitoo": {
+    "account_id": 12345,
+    "site_id": 1,
+    "api_id": "your-api-id",
+    "api_password_secret_id": "<secret-uuid>",
+    "resource": "warehouseitems",
+    "method": "POST"
+  }
+}
+```
+
+Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
+and `5xx`/network errors are retried (with the rate-limit backoff hint); `4xx`
+(bad request/data) and `401`/`403` (auth) are treated as poison and sent to the
+DLQ rather than retried forever.
+
 ## Notes & roadmap
 
-- **Producer (write-back)** — updating stock/prices/products in Sitoo (a
-  `sitoo` producer node) is the natural next step for two-way inventory sync.
 - **Incremental polling** — the current poller does a full paged fetch each
   cycle; a `modified_after`-style cursor is a straightforward enhancement for
   high-volume order streams.

@@ -1125,6 +1125,29 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # Sitoo Producer - writes envelopes back into Sitoo (stock/prices/products)
+  # via the REST API. See docs/connectors/sitoo.md.
+  sitoo-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/sitoo-producer/Dockerfile
+    container_name: vrsky-sitoo-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Must match management-api's ENCRYPTION_KEY — the resolver decrypts the
+      # Sitoo API password (api_password_secret_id) at delivery time.
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
   data-filter:
     build:
       context: .
