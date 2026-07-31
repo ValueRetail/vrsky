@@ -833,6 +833,26 @@ services:
     networks:
       - vrsky-network
 
+  # Visma Consumer - polls Visma.net (OAuth2 client-credentials via Visma
+  # Connect). See docs/connectors/visma.md.
+  visma-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/visma-consumer/Dockerfile
+    container_name: vrsky-visma-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # SFTP Consumer (#76) - watches a remote SFTP dir, fetches + publishes files.
   sftp-consumer:
     build:
@@ -1229,6 +1249,27 @@ services:
       context: .
       dockerfile: src/cmd/business-central-producer/Dockerfile
     container_name: vrsky-business-central-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Visma Producer - writes to Visma.net (customers/sales orders, …) via REST,
+  # OAuth2 client-credentials. See docs/connectors/visma.md.
+  visma-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/visma-producer/Dockerfile
+    container_name: vrsky-visma-producer
     environment:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
