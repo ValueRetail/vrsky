@@ -213,6 +213,71 @@ export const TEMPLATES: PipelineTemplate[] = [
       },
     ],
   },
+  // --- Retail: omnichannel sync (POS ⇄ ERP) --------------------------------
+  // The flagship demo scenarios — connect a store POS to the ERP so sales and
+  // stock stay in sync. Both directions of the same two systems.
+  {
+    id: 'sitoo-to-business-central',
+    name: 'POS sales → ERP (Sitoo → Business Central)',
+    summary: 'Sync completed POS sales from Sitoo into Dynamics 365 Business Central as sales orders.',
+    icon: '🛒',
+    sourceLabel: 'Sitoo (POS)',
+    destLabel: 'Business Central (ERP)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        config: { type: 'sitoo', sitoo: { resource: 'transactions', poll_interval_seconds: 300 } },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        config: { type: 'business_central', business_central: { entity: 'salesOrders', method: 'POST', environment: 'Production' } },
+      },
+    ],
+    edges: [{ source: 'src', target: 'dst' }],
+    fields: [
+      { nodeId: 'src', objectPath: 'sitoo', key: 'account_id', label: 'Sitoo account ID', help: 'Your Sitoo account number.', placeholder: '12345' },
+      { nodeId: 'src', objectPath: 'sitoo', key: 'site_id', label: 'Sitoo site ID', help: 'The Sitoo site to read transactions from.', placeholder: '1' },
+      { nodeId: 'src', objectPath: 'sitoo', key: 'api_id', label: 'Sitoo API ID', help: 'From Sitoo Backoffice → Settings → Sitoo REST API.', placeholder: 'your-api-id' },
+      { nodeId: 'src', objectPath: 'sitoo', key: 'api_password', label: 'Sitoo API password', help: 'Stored encrypted — never saved in plain text.', secret: true, placeholder: 'API password' },
+      { nodeId: 'dst', objectPath: 'business_central', key: 'aad_tenant_id', label: 'Business Central Entra tenant ID', help: 'Your Microsoft Entra (Azure AD) tenant GUID or domain.', link: { text: 'BC: OAuth setup', url: 'https://learn.microsoft.com/dynamics365/business-central/dev-itpro/webservices/authenticate-web-services-using-oauth' }, placeholder: '<tenant-guid>' },
+      { nodeId: 'dst', objectPath: 'business_central', key: 'company_id', label: 'BC company ID (GUID)', help: 'The Business Central company the orders are created in.', placeholder: '<company-guid>' },
+      { nodeId: 'dst', objectPath: 'business_central', key: 'client_id', label: 'BC app (client) ID', help: 'The Entra app registration id with Business Central API.ReadWrite.All.', placeholder: '<app-id>' },
+      { nodeId: 'dst', objectPath: 'business_central', key: 'client_secret', label: 'BC client secret', help: 'The Entra app client secret. Stored encrypted.', secret: true, placeholder: 'client secret' },
+    ],
+  },
+  {
+    id: 'business-central-to-sitoo',
+    name: 'ERP inventory → POS (Business Central → Sitoo)',
+    summary: 'Push item stock levels from Dynamics 365 Business Central out to Sitoo POS to prevent overselling.',
+    icon: '📦',
+    sourceLabel: 'Business Central (ERP)',
+    destLabel: 'Sitoo (POS)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        config: { type: 'business_central', business_central: { entity: 'items', poll_interval_seconds: 300, environment: 'Production' } },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        config: { type: 'sitoo', sitoo: { resource: 'warehouseitems', method: 'POST' } },
+      },
+    ],
+    edges: [{ source: 'src', target: 'dst' }],
+    fields: [
+      { nodeId: 'src', objectPath: 'business_central', key: 'aad_tenant_id', label: 'Business Central Entra tenant ID', help: 'Your Microsoft Entra (Azure AD) tenant GUID or domain.', placeholder: '<tenant-guid>' },
+      { nodeId: 'src', objectPath: 'business_central', key: 'company_id', label: 'BC company ID (GUID)', help: 'The Business Central company to read items from.', placeholder: '<company-guid>' },
+      { nodeId: 'src', objectPath: 'business_central', key: 'client_id', label: 'BC app (client) ID', help: 'The Entra app registration id.', placeholder: '<app-id>' },
+      { nodeId: 'src', objectPath: 'business_central', key: 'client_secret', label: 'BC client secret', help: 'Stored encrypted.', secret: true, placeholder: 'client secret' },
+      { nodeId: 'dst', objectPath: 'sitoo', key: 'account_id', label: 'Sitoo account ID', help: 'Your Sitoo account number.', placeholder: '12345' },
+      { nodeId: 'dst', objectPath: 'sitoo', key: 'site_id', label: 'Sitoo site ID', help: 'The Sitoo site whose stock is updated.', placeholder: '1' },
+      { nodeId: 'dst', objectPath: 'sitoo', key: 'api_id', label: 'Sitoo API ID', help: 'From Sitoo Backoffice → Settings → Sitoo REST API.', placeholder: 'your-api-id' },
+      { nodeId: 'dst', objectPath: 'sitoo', key: 'api_password', label: 'Sitoo API password', help: 'Stored encrypted.', secret: true, placeholder: 'API password' },
+    ],
+  },
 ]
 
 export function templateById(id: string): PipelineTemplate | undefined {
