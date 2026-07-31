@@ -853,6 +853,30 @@ services:
     networks:
       - vrsky-network
 
+  # Brightpearl Consumer (OMS) - polls Brightpearl (orders/inventory) and
+  # receives webhooks. See docs/connectors/brightpearl.md.
+  brightpearl-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/brightpearl-consumer/Dockerfile
+    container_name: vrsky-brightpearl-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port serving POST /brightpearl/events/{connectionID}.
+      WORKER_HTTP_PORT: "9280"
+    ports:
+      - "127.0.0.1:9280:9280"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+
   # SFTP Consumer (#76) - watches a remote SFTP dir, fetches + publishes files.
   sftp-consumer:
     build:
@@ -1270,6 +1294,27 @@ services:
       context: .
       dockerfile: src/cmd/visma-producer/Dockerfile
     container_name: vrsky-visma-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Brightpearl Producer (OMS) - writes orders/inventory back into Brightpearl
+  # via REST. See docs/connectors/brightpearl.md.
+  brightpearl-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/brightpearl-producer/Dockerfile
+    container_name: vrsky-brightpearl-producer
     environment:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
