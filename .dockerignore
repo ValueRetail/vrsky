@@ -1,0 +1,28 @@
+# Build context for `az acr build` and any repo-root `docker build`.
+# Every VRSky Dockerfile uses the repo ROOT as its build context. This
+# allowlists only the sources the images actually COPY, keeping the ~1.8 GB
+# working copy out of the upload: .git, data/, node_modules, ui/node_modules,
+# and the stray compiled binaries sitting at src/ root (git-ignored but on disk).
+#
+# Docker negation rule: to re-include a path you must first re-include its
+# parent dir, THEN exclude the unwanted children — hence the !dir / dir/* / !dir/keep triples.
+*
+
+# --- Go services: source only, NOT the stray compiled binaries at src/ root ---
+!src
+src/*
+!src/go.mod
+!src/go.sum
+!src/cmd
+!src/pkg
+!src/internal
+
+# --- UI: all source except installed deps / build output ---
+!ui
+ui/node_modules
+ui/dist
+
+# --- DB migrations are bundled into the management-api image ---
+!infrastructure
+infrastructure/*
+!infrastructure/migrations
