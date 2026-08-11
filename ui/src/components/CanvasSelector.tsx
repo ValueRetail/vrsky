@@ -5,6 +5,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Canvas } from '../types/pipeline'
 
 interface CanvasSelectorProps {
@@ -32,6 +33,7 @@ export default function CanvasSelector({
   const [editingName, setEditingName] = useState('')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
 
   // Focus input when editing starts
   useEffect(() => {
@@ -264,6 +266,34 @@ export default function CanvasSelector({
         title={canCreateMore ? 'Create new tenant' : 'Maximum 10 tenants reached'}
       >
         +
+      </button>
+
+      {/* New pipeline from a template — reopens the onboarding gallery (#93),
+          so templates are reachable any time (not just first login) and you
+          can build several pipelines from them. */}
+      <button
+        onClick={() => navigate('/welcome')}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          height: '32px',
+          padding: '0 12px',
+          backgroundColor: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          color: '#2563eb',
+          fontSize: '13px',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dbeafe' }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#eff6ff' }}
+        title="Start a new pipeline from a template"
+      >
+        ⊞ From template
       </button>
 
       {/* Tenant Limit Indicator */}

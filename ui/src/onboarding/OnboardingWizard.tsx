@@ -55,6 +55,9 @@ const help: React.CSSProperties = { fontSize: '12px', color: '#6b7280', marginTo
 const input: React.CSSProperties = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }
 const primaryBtn: React.CSSProperties = { padding: '9px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }
 const ghostBtn: React.CSSProperties = { padding: '9px 16px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: '7px', fontSize: '14px', cursor: 'pointer' }
+// The /welcome route renders outside RootLayout, and <body> is overflow:hidden,
+// so the wizard needs its own full-height scroll container or tall content clips.
+const scrollWrap: React.CSSProperties = { height: '100vh', overflowY: 'auto' }
 
 type Step = 'pick' | 'configure' | 'done'
 
@@ -151,9 +154,17 @@ export default function OnboardingWizard() {
         /* best-effort auto-start; connection still created */
       }
       setDeployedId(id)
-      if (template.webhookSource) setWebhookUrl(`${config.webhookIngressUrl}/webhook/${id}`)
       markOnboarded(currentTenant?.id)
-      setStep('done')
+      // Drop the user straight onto the builder canvas with the freshly-deployed
+      // pipeline loaded — no dashboard→Edit detour. Webhook-source templates
+      // first show the done screen (which surfaces the webhook URL + sample
+      // send) and open the canvas from there.
+      if (template.webhookSource) {
+        setWebhookUrl(`${config.webhookIngressUrl}/webhook/${id}`)
+        setStep('done')
+      } else {
+        navigate(`/connections/${id}/edit`)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to deploy the pipeline')
     } finally {
@@ -179,6 +190,7 @@ export default function OnboardingWizard() {
   // --- render --------------------------------------------------------------
 
   return (
+    <div style={scrollWrap}>
     <div style={page}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
         <h1 style={{ fontSize: '26px', fontWeight: 700, margin: 0 }}>Get started</h1>
@@ -301,15 +313,16 @@ export default function OnboardingWizard() {
           )}
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '18px' }}>
-            <button onClick={finish} style={primaryBtn}>Go to dashboard</button>
             {deployedId && (
-              <button onClick={() => navigate(`/connections/${deployedId}`)} style={ghostBtn}>
-                View connection
+              <button onClick={() => navigate(`/connections/${deployedId}/edit`)} style={primaryBtn}>
+                Open on canvas
               </button>
             )}
+            <button onClick={finish} style={ghostBtn}>Go to dashboard</button>
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }
