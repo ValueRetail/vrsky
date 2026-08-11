@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -273,7 +274,7 @@ func (s *webhookConsumer) handleTunnelStatus() http.HandlerFunc {
 		s.tunnel.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"running":%t,"url":"%s"}`, running, url)))
+		_ = json.NewEncoder(w).Encode(map[string]any{"running": running, "url": url})
 	}
 }
 
@@ -290,6 +291,10 @@ func (s *webhookConsumer) stopTunnel() {
 	s.tunnel.publicURL = ""
 	s.tunnel.running = false
 }
+
+// quickTunnelRe matches a cloudflared quick-tunnel public URL
+// (https://<name>.trycloudflare.com) — no path, no trailing punctuation.
+var quickTunnelRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 
 // ensureTunnel starts the tunnel if not running and returns the public URL.
 // Blocks up to 15 seconds waiting for the URL. The tunnel forwards to the SDK
@@ -323,16 +328,14 @@ func (s *webhookConsumer) ensureTunnel() (string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			s.logger.Debug("cloudflared", "line", line)
-			if idx := strings.Index(line, "https://"); idx >= 0 {
-				part := line[idx:]
-				if end := strings.IndexAny(part, " \t\n"); end > 0 {
-					part = part[:end]
-				}
-				if strings.Contains(part, "trycloudflare.com") {
-					select {
-					case urlCh <- part:
-					default:
-					}
+			// cloudflared logs the public URL (https://<name>.trycloudflare.com)
+			// AND its api.trycloudflare.com control endpoint; match the former
+			// and skip the latter. The regex also drops any trailing log
+			// punctuation (e.g. a quote) that previously produced a broken URL.
+			if m := quickTunnelRe.FindString(line); m != "" && !strings.HasPrefix(m, "https://api.") {
+				select {
+				case urlCh <- m:
+				default:
 				}
 			}
 		}

@@ -91,6 +91,7 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 		s.dial = realDial
 	}
 	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }
