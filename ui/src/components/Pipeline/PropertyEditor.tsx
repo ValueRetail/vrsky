@@ -19,6 +19,7 @@ import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
+import { projectSchemaThroughFilter } from './schema'
 import TestConnectionButton from './TestConnectionButton'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
@@ -46,6 +47,37 @@ function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Nod
       const src = nodeById.get(sourceId)
       if (!src) continue
       if (src.type === 'input') return src
+      queue.push(src.id)
+    }
+  }
+  return undefined
+}
+
+// findUpstreamFilter walks edges upstream and returns the nearest Filter node
+// feeding nodeId (before reaching the source), or undefined. Used so a
+// Converter's "Discover schema" reflects the fields a projecting Filter emits,
+// not the raw source.
+function findUpstreamFilter(nodeId: string, nodes: Node[], edges: Edge[]): Node | undefined {
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const sourcesByTarget = new Map<string, string[]>()
+  for (const edge of edges) {
+    const list = sourcesByTarget.get(edge.target)
+    if (list) list.push(edge.source)
+    else sourcesByTarget.set(edge.target, [edge.source])
+  }
+
+  const visited = new Set<string>()
+  const queue = [nodeId]
+  let head = 0
+  while (head < queue.length) {
+    const current = queue[head++]
+    if (visited.has(current)) continue
+    visited.add(current)
+    for (const sourceId of sourcesByTarget.get(current) || []) {
+      const src = nodeById.get(sourceId)
+      if (!src) continue
+      if (src.type === 'filter') return src
+      if (src.type === 'input') continue // this branch has no filter
       queue.push(src.id)
     }
   }
@@ -2632,8 +2664,16 @@ function ConverterConfig({
     setSchemaError('')
     try {
       const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId, tenantId: currentTenant?.id })
-      setSchemaFields(fields)
-      if (fields.length === 0) setSchemaError('No fields found in the sample.')
+      // If a Filter node sits between the source and this converter and it
+      // projects fields (extract/flatten), only offer the fields it emits —
+      // not the ones the user filtered out.
+      const upstreamFilter = (currentNodeId && allNodes && allEdges)
+        ? findUpstreamFilter(currentNodeId, allNodes, allEdges)
+        : undefined
+      const filterCfg = upstreamFilter?.data?.config as Record<string, unknown> | undefined
+      const projected = projectSchemaThroughFilter(fields, filterCfg)
+      setSchemaFields(projected)
+      if (projected.length === 0) setSchemaError('No fields found in the sample.')
     } catch (err) {
       setSchemaFields([])
       setSchemaError(err instanceof Error ? err.message : 'Schema discovery failed')
