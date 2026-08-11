@@ -1,0 +1,510 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-sitoo-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sitoo-consumer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-sitoo-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-sitoo-consumer
+        tier: connector
+    spec:
+      containers:
+      - name: sitoo-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/sitoo-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        - name: WORKER_HTTP_PORT
+          value: "9260"
+        ports:
+        - name: webhook
+          containerPort: 9260
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-sitoo-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sitoo-consumer
+spec:
+  selector:
+    app: vrsky-sitoo-consumer
+  ports:
+  - name: webhook
+    port: 9260
+    targetPort: 9260
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-front-systems-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-front-systems-consumer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-front-systems-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-front-systems-consumer
+        tier: connector
+    spec:
+      containers:
+      - name: front-systems-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/front-systems-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        - name: WORKER_HTTP_PORT
+          value: "9270"
+        ports:
+        - name: webhook
+          containerPort: 9270
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-front-systems-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-front-systems-consumer
+spec:
+  selector:
+    app: vrsky-front-systems-consumer
+  ports:
+  - name: webhook
+    port: 9270
+    targetPort: 9270
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-brightpearl-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-brightpearl-consumer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-brightpearl-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-brightpearl-consumer
+        tier: connector
+    spec:
+      containers:
+      - name: brightpearl-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/brightpearl-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        - name: WORKER_HTTP_PORT
+          value: "9280"
+        ports:
+        - name: webhook
+          containerPort: 9280
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-brightpearl-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-brightpearl-consumer
+spec:
+  selector:
+    app: vrsky-brightpearl-consumer
+  ports:
+  - name: webhook
+    port: 9280
+    targetPort: 9280
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-business-central-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-business-central-consumer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-business-central-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-business-central-consumer
+        tier: connector
+    spec:
+      containers:
+      - name: business-central-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/business-central-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-visma-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-visma-consumer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-visma-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-visma-consumer
+        tier: connector
+    spec:
+      containers:
+      - name: visma-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/visma-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-sitoo-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sitoo-producer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-sitoo-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-sitoo-producer
+        tier: connector
+    spec:
+      containers:
+      - name: sitoo-producer
+        image: vrskyprodacr.azurecr.io/vrsky/sitoo-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-front-systems-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-front-systems-producer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-front-systems-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-front-systems-producer
+        tier: connector
+    spec:
+      containers:
+      - name: front-systems-producer
+        image: vrskyprodacr.azurecr.io/vrsky/front-systems-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-business-central-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-business-central-producer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-business-central-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-business-central-producer
+        tier: connector
+    spec:
+      containers:
+      - name: business-central-producer
+        image: vrskyprodacr.azurecr.io/vrsky/business-central-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-visma-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-visma-producer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-visma-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-visma-producer
+        tier: connector
+    spec:
+      containers:
+      - name: visma-producer
+        image: vrskyprodacr.azurecr.io/vrsky/visma-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-brightpearl-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-brightpearl-producer
+    tier: connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-brightpearl-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-brightpearl-producer
+        tier: connector
+    spec:
+      containers:
+      - name: brightpearl-producer
+        image: vrskyprodacr.azurecr.io/vrsky/brightpearl-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
