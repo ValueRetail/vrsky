@@ -2630,6 +2630,56 @@ function ConverterConfig({
         })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data'))
+      } else if (consumerType === 'kafka') {
+        const kc = (consumerConfig.kafka as Record<string, unknown>) || {}
+        if (!kc.brokers || !kc.topic) { setPreviewInput('// Set the Kafka brokers and topic on the input first'); return }
+        const resp = await fetch('http://localhost:9220/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brokers: kc.brokers, topic: kc.topic, consumer_group: kc.consumer_group,
+            auth_type: kc.auth_type, username: kc.username, password: kc.password,
+            ca_cert: kc.ca_cert, client_cert: kc.client_cert, client_key: kc.client_key,
+          }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the topic yet'))
+      } else if (consumerType === 'rabbitmq') {
+        const rc = (consumerConfig.rabbitmq as Record<string, unknown>) || {}
+        if (!rc.url || !rc.queue) { setPreviewInput('// Set the RabbitMQ URL and queue on the input first'); return }
+        const resp = await fetch('http://localhost:9230/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: rc.url, username: rc.username, password: rc.password, queue: rc.queue }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the queue yet'))
+      } else if (consumerType === 'sap_s4hana') {
+        const sap = (consumerConfig.sap_s4hana as Record<string, unknown>) || {}
+        if (!sap.api_base_url && !sap.host) { setPreviewInput('// Set the SAP host or API base URL first'); return }
+        if (!sap.entity_set) { setPreviewInput('// Set the entity set first'); return }
+        const resp = await fetch('http://localhost:9290/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sap, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data from SAP'))
+      } else if (consumerType === 'sftp') {
+        const sftp = (consumerConfig.sftp as Record<string, unknown>) || {}
+        if (!sftp.host) { setPreviewInput('// Set the SFTP host first'); return }
+        const resp = await fetch('http://localhost:9210/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sftp, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No files in the remote directory yet'))
+      } else if (consumerType === 'cloud_storage') {
+        const cs = (consumerConfig.cloud_storage as Record<string, unknown>) || {}
+        if (!cs.bucket) { setPreviewInput('// Set the cloud storage bucket first'); return }
+        const resp = await fetch('http://localhost:9240/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...cs, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No objects under the prefix yet'))
       } else {
         // http / webhook and others: only a deployed connection has a sample.
         if (!deployedConnectionId) {
