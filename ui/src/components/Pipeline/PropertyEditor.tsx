@@ -19,6 +19,7 @@ import * as tenantDataService from '../../services/tenantDataService'
 import type { TenantDataConnection, DataConnectionRequest } from '../../types/models'
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
+import { projectSchemaThroughFilter } from './schema'
 import TestConnectionButton from './TestConnectionButton'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
@@ -46,6 +47,37 @@ function findUpstreamConsumer(nodeId: string, nodes: Node[], edges: Edge[]): Nod
       const src = nodeById.get(sourceId)
       if (!src) continue
       if (src.type === 'input') return src
+      queue.push(src.id)
+    }
+  }
+  return undefined
+}
+
+// findUpstreamFilter walks edges upstream and returns the nearest Filter node
+// feeding nodeId (before reaching the source), or undefined. Used so a
+// Converter's "Discover schema" reflects the fields a projecting Filter emits,
+// not the raw source.
+function findUpstreamFilter(nodeId: string, nodes: Node[], edges: Edge[]): Node | undefined {
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const sourcesByTarget = new Map<string, string[]>()
+  for (const edge of edges) {
+    const list = sourcesByTarget.get(edge.target)
+    if (list) list.push(edge.source)
+    else sourcesByTarget.set(edge.target, [edge.source])
+  }
+
+  const visited = new Set<string>()
+  const queue = [nodeId]
+  let head = 0
+  while (head < queue.length) {
+    const current = queue[head++]
+    if (visited.has(current)) continue
+    visited.add(current)
+    for (const sourceId of sourcesByTarget.get(current) || []) {
+      const src = nodeById.get(sourceId)
+      if (!src) continue
+      if (src.type === 'filter') return src
+      if (src.type === 'input') continue // this branch has no filter
       queue.push(src.id)
     }
   }
@@ -1756,6 +1788,7 @@ function FilterConfig({
   const flattenInclude = (config.flatten_include as Record<string, string>) || {}
 
   // Data structure browser state
+  const { currentTenant } = useAuthStore()
   const [sampleData, setSampleData] = useState<unknown>(null)
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState('')
@@ -1966,8 +1999,93 @@ function FilterConfig({
         } else {
           setDataError(result.error || 'No messages on the queue to sample yet')
         }
+      } else if (consumerType === 'sap_s4hana') {
+        // Live pre-deploy sample: the worker GETs the first OData page directly.
+        const sap = (consumerConfig?.sap_s4hana as Record<string, unknown>) || {}
+        if (!sap.api_base_url && !sap.host) { setDataError('Set the SAP host or API base URL first'); return }
+        if (!sap.entity_set) { setDataError('Set the entity set first'); return }
+        const resp = await fetch('http://localhost:9290/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sap, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'Failed to fetch a sample from SAP')
+        }
+      } else if (consumerType === 'sftp') {
+        // Live pre-deploy sample: the worker reads the newest file in the dir.
+        const sftp = (consumerConfig?.sftp as Record<string, unknown>) || {}
+        if (!sftp.host) { setDataError('Set the SFTP host first'); return }
+        const resp = await fetch('http://localhost:9210/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sftp, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No files in the remote directory to sample yet')
+        }
+      } else if (consumerType === 'cloud_storage') {
+        // Live pre-deploy sample: the worker reads the newest object under prefix.
+        const cs = (consumerConfig?.cloud_storage as Record<string, unknown>) || {}
+        if (!cs.bucket) { setDataError('Set the cloud storage bucket first'); return }
+        const resp = await fetch('http://localhost:9240/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...cs, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No objects under the prefix to sample yet')
+        }
+      } else if (consumerType === 'salesforce') {
+        // Live pre-deploy sample: the worker runs the configured SOQL (LIMIT 5).
+        const sf = (consumerConfig?.salesforce as Record<string, unknown>) || {}
+        if (!sf.instance_url || !sf.oauth_grant_id) { setDataError('Set the Salesforce instance URL and connect an account first'); return }
+        if (!sf.soql) { setDataError('Enter a SOQL query first'); return }
+        if (!currentTenant?.id) { setDataError('No active tenant'); return }
+        const resp = await fetch('http://localhost:9250/sample-data/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: currentTenant.id,
+            instance_url: sf.instance_url, oauth_grant_id: sf.oauth_grant_id,
+            api_version: sf.api_version, soql: sf.soql,
+          }),
+        })
+        const result = await resp.json()
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'Salesforce query failed')
+        }
       } else {
-        setDataError(`Preview not available for "${consumerType || 'unknown'}" input type`)
+        // Remaining types — the retail/ERP connectors (Sitoo, Front Systems,
+        // Business Central, Visma, Brightpearl) plus http webhooks — can't be
+        // sampled pre-deploy (push-only or no test endpoint yet), so read the
+        // deployed connection's last payload once data has flowed through once.
+        const connId = deployedConnectionId
+        if (!connId) { setDataError('Deploy the pipeline and send data through once, then load the structure'); return }
+        const { default: apiClient } = await import('../../services/api')
+        const resp = await apiClient.get(`/api/v1/connections/${connId}/sample-data`)
+        const result = resp.data
+        if (result.ok) {
+          setSampleData(result.data)
+          setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3)))
+        } else {
+          setDataError(result.error || 'No data yet — send data through the pipeline first')
+        }
       }
     } catch (err) {
       setDataError('Connection failed — is the service running?')
@@ -2512,6 +2630,52 @@ function ConverterConfig({
         })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data'))
+      } else if (consumerType === 'kafka') {
+        const kc = (consumerConfig.kafka as Record<string, unknown>) || {}
+        if (!kc.brokers || !kc.topic) { setPreviewInput('// Set the Kafka brokers and topic on the input first'); return }
+        const resp = await fetch('http://localhost:9220/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...kc, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the topic yet'))
+      } else if (consumerType === 'rabbitmq') {
+        const rc = (consumerConfig.rabbitmq as Record<string, unknown>) || {}
+        if (!rc.url || !rc.queue) { setPreviewInput('// Set the RabbitMQ URL and queue on the input first'); return }
+        const resp = await fetch('http://localhost:9230/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...rc, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the queue yet'))
+      } else if (consumerType === 'sap_s4hana') {
+        const sap = (consumerConfig.sap_s4hana as Record<string, unknown>) || {}
+        if (!sap.api_base_url && !sap.host) { setPreviewInput('// Set the SAP host or API base URL first'); return }
+        if (!sap.entity_set) { setPreviewInput('// Set the entity set first'); return }
+        const resp = await fetch('http://localhost:9290/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sap, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No data from SAP'))
+      } else if (consumerType === 'sftp') {
+        const sftp = (consumerConfig.sftp as Record<string, unknown>) || {}
+        if (!sftp.host) { setPreviewInput('// Set the SFTP host first'); return }
+        const resp = await fetch('http://localhost:9210/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sftp, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No files in the remote directory yet'))
+      } else if (consumerType === 'cloud_storage') {
+        const cs = (consumerConfig.cloud_storage as Record<string, unknown>) || {}
+        if (!cs.bucket) { setPreviewInput('// Set the cloud storage bucket first'); return }
+        const resp = await fetch('http://localhost:9240/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...cs, tenant_id: currentTenant?.id }),
+        })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No objects under the prefix yet'))
       } else {
         // http / webhook and others: only a deployed connection has a sample.
         if (!deployedConnectionId) {
@@ -2546,8 +2710,16 @@ function ConverterConfig({
     setSchemaError('')
     try {
       const fields = await discoverSchema(consumerType, consumerConfig, { deployedConnectionId, tenantId: currentTenant?.id })
-      setSchemaFields(fields)
-      if (fields.length === 0) setSchemaError('No fields found in the sample.')
+      // If a Filter node sits between the source and this converter and it
+      // projects fields (extract/flatten), only offer the fields it emits —
+      // not the ones the user filtered out.
+      const upstreamFilter = (currentNodeId && allNodes && allEdges)
+        ? findUpstreamFilter(currentNodeId, allNodes, allEdges)
+        : undefined
+      const filterCfg = upstreamFilter?.data?.config as Record<string, unknown> | undefined
+      const projected = projectSchemaThroughFilter(fields, filterCfg)
+      setSchemaFields(projected)
+      if (projected.length === 0) setSchemaError('No fields found in the sample.')
     } catch (err) {
       setSchemaFields([])
       setSchemaError(err instanceof Error ? err.message : 'Schema discovery failed')
@@ -3146,6 +3318,16 @@ function PollOrMethod({
   nodeType: string
   methodOptions?: string[]
 }) {
+  // Persist the default poll interval on mount. The field only *displayed* 300;
+  // if the user never edited it, poll_interval_seconds stayed unset and the
+  // connector refused to poll ("needs poll_interval_seconds > 0"). Writing the
+  // default here means an input left at its default still polls.
+  useEffect(() => {
+    if (nodeType === 'input' && cfg.poll_interval_seconds === undefined) {
+      update({ poll_interval_seconds: 300 })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   if (nodeType === 'input') {
     return (
       <StyledInput
@@ -3276,6 +3458,44 @@ function BrightpearlConfigEditor({ config, setConfig, nodeType }: ConnEditorProp
   )
 }
 
+// SAP S/4HANA (ERP) — OData v2/v4; Basic (Communication User) or OAuth2 client-credentials.
+function SapS4HanaConfigEditor({ config, setConfig, nodeType }: ConnEditorProps) {
+  const c = (config.sap_s4hana as Record<string, unknown>) || {}
+  const update = (patch: Record<string, unknown>) => setConfig({ ...config, sap_s4hana: { ...c, ...patch } })
+  const authType = (c.auth_type as string) || 'basic'
+  return (
+    <div className="space-y-3">
+      <StyledInput label="Host" placeholder="my347623.s4hana.ondemand.com" value={(c.host as string) || ''} onChange={(v) => update({ host: v })} />
+      <StyledInput label="API base URL (override — on-prem / mock)" placeholder="blank = https cloud host; e.g. http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV" value={(c.api_base_url as string) || ''} onChange={(v) => update({ api_base_url: v })} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledInput label="OData service" placeholder="API_SALES_ORDER_SRV" value={(c.service as string) || ''} onChange={(v) => update({ service: v })} />
+        <StyledInput label="Entity set" placeholder="A_SalesOrder" value={(c.entity_set as string) || ''} onChange={(v) => update({ entity_set: v })} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <StyledSelect label="OData version" value={(c.odata_version as string) || 'v2'} onChange={(v) => update({ odata_version: v })} options={[{ value: 'v2', label: 'v2' }, { value: 'v4', label: 'v4' }]} />
+        <StyledInput label="SAP client (optional)" placeholder="100" value={(c.sap_client as string) || ''} onChange={(v) => update({ sap_client: v })} />
+      </div>
+      <StyledSelect label="Authentication" value={authType} onChange={(v) => update({ auth_type: v })} options={[{ value: 'basic', label: 'Basic (Communication User)' }, { value: 'oauth2', label: 'OAuth 2.0 (client credentials)' }]} />
+      {authType === 'oauth2' ? (
+        <>
+          <StyledInput label="Client ID" placeholder="<client-id>" value={(c.client_id as string) || ''} onChange={(v) => update({ client_id: v })} />
+          <SecretInput label="Client secret" placeholder="OAuth client secret" field="client_secret" config={c} defaultSecretName="sap-client-secret" onChange={(patch) => update(patch)} />
+          <StyledInput label="Token URL (optional)" placeholder="https://<host>/sap/bc/sec/oauth2/token" value={(c.token_url as string) || ''} onChange={(v) => update({ token_url: v })} />
+        </>
+      ) : (
+        <>
+          <StyledInput label="Username (Communication User)" placeholder="<comm-user>" value={(c.username as string) || ''} onChange={(v) => update({ username: v })} />
+          <SecretInput label="Password" placeholder="Communication User password" field="password" config={c} defaultSecretName="sap-password" onChange={(patch) => update(patch)} />
+        </>
+      )}
+      {nodeType === 'input' && (
+        <StyledInput label="OData $filter (optional)" placeholder="LastChangeDateTime gt datetime'2026-01-01T00:00:00'" value={(c.filter as string) || ''} onChange={(v) => update({ filter: v })} />
+      )}
+      <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />
+    </div>
+  )
+}
+
 export default function PropertyEditor({
   node,
   onUpdate,
@@ -3365,6 +3585,7 @@ export default function PropertyEditor({
                 { value: 'business_central', label: 'Business Central (ERP)' },
                 { value: 'visma', label: 'Visma.net (ERP)' },
                 { value: 'brightpearl', label: 'Brightpearl (OMS)' },
+                { value: 'sap_s4hana', label: 'SAP S/4HANA (ERP)' },
               ]}
             />
 
@@ -3562,6 +3783,9 @@ export default function PropertyEditor({
             {config.type === 'brightpearl' && (
               <BrightpearlConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
+            {config.type === 'sap_s4hana' && (
+              <SapS4HanaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
           </div>
         )
 
@@ -3587,6 +3811,7 @@ export default function PropertyEditor({
                 { value: 'business_central', label: 'Business Central (ERP)' },
                 { value: 'visma', label: 'Visma.net (ERP)' },
                 { value: 'brightpearl', label: 'Brightpearl (OMS)' },
+                { value: 'sap_s4hana', label: 'SAP S/4HANA (ERP)' },
               ]}
             />
 
@@ -3753,6 +3978,9 @@ export default function PropertyEditor({
             )}
             {config.type === 'brightpearl' && (
               <BrightpearlConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'sap_s4hana' && (
+              <SapS4HanaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
           </div>
         )

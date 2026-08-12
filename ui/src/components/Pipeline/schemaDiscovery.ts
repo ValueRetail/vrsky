@@ -132,9 +132,34 @@ export async function discoverSchema(
       return inferSchema(data.data)
     }
 
+    case 'sap_s4hana': {
+      const sap = (consumerConfig.sap_s4hana as Record<string, unknown>) || {}
+      if (!sap.api_base_url && !sap.host) throw new Error('Set the SAP host or API base URL first')
+      if (!sap.entity_set) throw new Error('Set the entity set first')
+      const data = await postJSON('http://localhost:9290/sample-data/', { ...sap, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'Failed to fetch a sample from SAP')
+      return inferSchema(data.data)
+    }
+
+    case 'sftp': {
+      const sftp = (consumerConfig.sftp as Record<string, unknown>) || {}
+      if (!sftp.host) throw new Error('Set the SFTP host first')
+      const data = await postJSON('http://localhost:9210/sample-data/', { ...sftp, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No files in the remote directory to sample yet')
+      return inferSchema(data.data)
+    }
+
+    case 'cloud_storage': {
+      const cs = (consumerConfig.cloud_storage as Record<string, unknown>) || {}
+      if (!cs.bucket) throw new Error('Set the cloud storage bucket first')
+      const data = await postJSON('http://localhost:9240/sample-data/', { ...cs, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No objects under the prefix to sample yet')
+      return inferSchema(data.data)
+    }
+
     default: {
-      // http / webhook (and anything else): the only sample is a deployed
-      // connection's last payload.
+      // http / webhook (and the retail/ERP connectors without a test endpoint
+      // yet): the only sample is a deployed connection's last payload.
       if (!opts?.deployedConnectionId) {
         throw new Error('Deploy the pipeline and send data once, then discover the schema')
       }

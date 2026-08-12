@@ -98,6 +98,7 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 		s.newEvents = newEventSource
 	}
 	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }

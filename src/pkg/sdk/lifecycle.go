@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -85,12 +86,39 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 	return run(ctx, name, c,
 		func(ctx context.Context, res *Resources) error { return c.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, pub *messaging.Publisher, res *Resources) (func(), error) {
+			// last_payload preview writes are throttled per connection so a
+			// high-throughput consumer doesn't UPDATE the row on every message
+			// (write amplification). State is per consumer process.
+			var lpMu sync.Mutex
+			lpLastWrite := make(map[string]time.Time)
+			const lpMinInterval = 30 * time.Second
 			publish := func(pctx context.Context, env *envelope.Envelope) error {
 				body, err := envelope.Marshal(env)
 				if err != nil {
 					return fmt.Errorf("marshal envelope: %w", err)
 				}
-				return pub.Publish(pctx, env.TenantID, env.IntegrationID, env.ID, body)
+				if perr := pub.Publish(pctx, env.TenantID, env.IntegrationID, env.ID, body); perr != nil {
+					return perr
+				}
+				// Store the last payload so the UI's "show data structure" preview
+				// (filter + converter) can sample ANY source once it has passed
+				// data through once — not just the handful of consumers that used
+				// to write it themselves. Best-effort, throttled, and tenant-scoped:
+				// never fail a publish over a preview write.
+				if res.DB != nil && env.IntegrationID != "" {
+					now := time.Now()
+					lpMu.Lock()
+					last, seen := lpLastWrite[env.IntegrationID]
+					due := !seen || now.Sub(last) >= lpMinInterval
+					if due {
+						lpLastWrite[env.IntegrationID] = now
+					}
+					lpMu.Unlock()
+					if due {
+						_, _ = res.DB.ExecContext(pctx, "UPDATE connections SET last_payload = $1 WHERE id = $2 AND tenant_id = $3", body, env.IntegrationID, env.TenantID)
+					}
+				}
+				return nil
 			}
 			done := make(chan struct{})
 			go func() {

@@ -549,6 +549,11 @@ services:
       context: .
       dockerfile: src/cmd/webhook-consumer/Dockerfile
     container_name: vrsky-webhook-consumer
+    # Telenor's DNS (Nettvern filter) redirects api.trycloudflare.com to a block
+    # page, so cloudflared quick tunnels fail TLS. Use public DNS to bypass it.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       NATS_URL: "nats://nats:4222"
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
@@ -1325,6 +1330,61 @@ services:
         condition: service_healthy
       postgres-management:
         condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  sap-s4hana-consumer:
+    build:
+      context: .
+      dockerfile: src/cmd/sap-s4hana-consumer/Dockerfile
+    container_name: vrsky-sap-s4hana-consumer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port the SDK serves /sample-data on (UI's pre-deploy preview).
+      WORKER_HTTP_PORT: "9290"
+    ports:
+      - "127.0.0.1:9290:9290"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  sap-s4hana-producer:
+    build:
+      context: .
+      dockerfile: src/cmd/sap-s4hana-producer/Dockerfile
+    container_name: vrsky-sap-s4hana-producer
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
+  # Local mock of SAP S/4HANA OData (test only) — point a sap_s4hana node's
+  # api_base_url at http://mock-sap:8099/... to see records flow end-to-end.
+  mock-sap:
+    build:
+      context: .
+      dockerfile: src/cmd/mock-sap/Dockerfile
+    container_name: vrsky-mock-sap
+    ports:
+      - "127.0.0.1:8099:8099"
     networks:
       - vrsky-network
     restart: unless-stopped
