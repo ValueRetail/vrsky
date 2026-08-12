@@ -291,10 +291,10 @@ func (cfg *SAPProducerConfig) validate() error {
 	}
 	if cfg.effectiveAuthType() == authOAuth2 {
 		if cfg.ClientID == "" || cfg.ClientSecret == "" {
-			return errors.New("oauth2 auth needs client_id + client_secret_secret_id")
+			return errors.New("oauth2 auth needs client_id + client_secret (from client_secret_secret_id)")
 		}
 	} else if cfg.Username == "" || cfg.Password == "" {
-		return errors.New("basic auth needs username + password_secret_id")
+		return errors.New("basic auth needs username + password (from password_secret_id)")
 	}
 	return nil
 }

@@ -2635,11 +2635,7 @@ function ConverterConfig({
         if (!kc.brokers || !kc.topic) { setPreviewInput('// Set the Kafka brokers and topic on the input first'); return }
         const resp = await fetch('http://localhost:9220/sample-data/', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            brokers: kc.brokers, topic: kc.topic, consumer_group: kc.consumer_group,
-            auth_type: kc.auth_type, username: kc.username, password: kc.password,
-            ca_cert: kc.ca_cert, client_cert: kc.client_cert, client_key: kc.client_key,
-          }),
+          body: JSON.stringify({ ...kc, tenant_id: currentTenant?.id }),
         })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the topic yet'))
@@ -2648,7 +2644,7 @@ function ConverterConfig({
         if (!rc.url || !rc.queue) { setPreviewInput('// Set the RabbitMQ URL and queue on the input first'); return }
         const resp = await fetch('http://localhost:9230/sample-data/', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: rc.url, username: rc.username, password: rc.password, queue: rc.queue }),
+          body: JSON.stringify({ ...rc, tenant_id: currentTenant?.id }),
         })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No messages on the queue yet'))

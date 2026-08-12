@@ -162,7 +162,8 @@ func (s *sftpConsumer) handleSampleData() http.HandlerFunc {
 
 // sampleFromFileBytes turns raw file bytes into a {ok,filename,data|columns}
 // preview: parsed JSON when it looks like JSON, header+first-row for CSV/TSV,
-// else a plain-text envelope. Shared by the SFTP + cloud-storage samplers.
+// else a plain-text envelope. (cloud-storage has its own sampleFromObject,
+// which keys off the store's returned content-type.)
 func sampleFromFileBytes(filename string, data []byte) map[string]interface{} {
 	resp := map[string]interface{}{"ok": true, "filename": filename}
 	trimmed := bytes.TrimSpace(data)
