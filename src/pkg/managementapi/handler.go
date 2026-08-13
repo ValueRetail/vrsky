@@ -489,6 +489,21 @@ func (h *Handler) DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		_ = h.repo.UpdateConnectionStatus(ctx, id, "stopped", nil)
 	}
 
+	// Tear down any orchestrator-spawned K8s resources (Deployments + HPAs) so a
+	// delete never orphans crash-looping workers (#175). The NATS stop above only
+	// stops standing connectors' in-process pollers; graph/orchestrator-based
+	// connections run as per-connection Deployments that must be removed via the
+	// orchestrator (mirrors StopConnection). Best-effort: a teardown failure must
+	// not block the delete (orphans can still be GC'd), and we attempt it
+	// regardless of status since a partially-stopped connection can still hold
+	// live k8s resources.
+	if len(conn.Nodes) > 0 && h.orchestratorFactory != nil {
+		orch := h.orchestratorFactory(conn)
+		if terr := orch.StopPipeline(ctx, conn); terr != nil {
+			slog.Default().Error("connection delete: orchestrator teardown failed", "connection", id, "error", terr)
+		}
+	}
+
 	// Delete connection (cascade delete events)
 	if err := h.repo.DeleteConnection(ctx, id); err != nil {
 		if _, ok := err.(*NotFoundError); ok {
