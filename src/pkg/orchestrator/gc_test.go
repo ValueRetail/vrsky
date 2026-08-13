@@ -73,6 +73,26 @@ func TestGarbageCollectOrphanedWorkers(t *testing.T) {
 	}
 }
 
+// TestGarbageCollectOrphanedWorkers_OrphanHPAOnly: a partial teardown can leave
+// an orphaned HPA with its Deployment already gone. The GC must still discover
+// the connection (from the HPA label) and delete the HPA.
+func TestGarbageCollectOrphanedWorkers_OrphanHPAOnly(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		gcWorkerHPA("vrsky-D-src", "D", "src"), // HPA present, no Deployment
+	)
+	removed, err := GarbageCollectOrphanedWorkers(context.Background(), client, gcNS, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("GC error: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1 (orphan discovered via its HPA)", removed)
+	}
+	hpas, _ := client.AutoscalingV2().HorizontalPodAutoscalers(gcNS).List(context.Background(), metav1.ListOptions{})
+	if len(hpas.Items) != 0 {
+		t.Errorf("orphan HPA not deleted: %d remain", len(hpas.Items))
+	}
+}
+
 // TestGarbageCollectOrphanedWorkers_DBErrorKeepsWorkers: when `exists` can't
 // confirm a connection is gone (returns true on error), workers are kept.
 func TestGarbageCollectOrphanedWorkers_DBErrorKeepsWorkers(t *testing.T) {

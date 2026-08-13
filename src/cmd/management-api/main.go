@@ -517,21 +517,26 @@ func runOrphanedWorkerGC(ctx context.Context, k8sClient kubernetes.Interface, na
 	const tick = 5 * time.Minute
 	logger.Printf("orphaned-worker GC started (tick=%s namespace=%s)", tick, namespace)
 
-	// exists reports whether a connection is still in the DB. On any non
-	// not-found error it returns true, so a transient DB blip never deletes a
-	// live worker.
-	exists := func(connectionID string) bool {
-		if _, err := repo.GetConnection(ctx, connectionID); err != nil {
-			if _, ok := err.(*managementapi.NotFoundError); ok {
-				return false
+	sweep := func() {
+		// Bound each sweep so a hung DB/K8s call can't stall the loop forever
+		// and starve subsequent ticks.
+		sctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		// exists reports whether a connection is still in the DB. On any non
+		// not-found error it returns true, so a transient DB blip (or the
+		// per-sweep timeout) never deletes a live worker.
+		exists := func(connectionID string) bool {
+			if _, err := repo.GetConnection(sctx, connectionID); err != nil {
+				if _, ok := err.(*managementapi.NotFoundError); ok {
+					return false
+				}
+				return true
 			}
 			return true
 		}
-		return true
-	}
 
-	sweep := func() {
-		n, err := orchestrator.GarbageCollectOrphanedWorkers(ctx, k8sClient, namespace, exists)
+		n, err := orchestrator.GarbageCollectOrphanedWorkers(sctx, k8sClient, namespace, exists)
 		if err != nil {
 			logger.Printf("orphaned-worker GC: %v", err)
 			return

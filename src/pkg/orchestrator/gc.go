@@ -26,16 +26,26 @@ func GarbageCollectOrphanedWorkers(ctx context.Context, k8s kubernetes.Interface
 	// All orchestrator-spawned workers carry app=vrsky (LabelAppValue); the
 	// standing services use app=vrsky-<name>, so this selector is exact.
 	sel := BuildLabelSelector(map[string]string{LabelApp: LabelAppValue})
+
+	// Collect candidate connection IDs from BOTH Deployments and HPAs — a
+	// partial teardown can leave an orphaned HPA with its Deployment already
+	// gone, and it must still be discovered + cleaned up.
+	connIDs := make(map[string]struct{})
 	deployments, err := deployClient.List(ctx, metav1.ListOptions{LabelSelector: sel})
 	if err != nil {
 		return 0, fmt.Errorf("list worker deployments: %w", err)
 	}
-
-	// Unique connection IDs across the worker deployments (each connection has a
-	// src + dst worker, so dedupe before checking the DB).
-	connIDs := make(map[string]struct{})
 	for i := range deployments.Items {
 		if cid := deployments.Items[i].Labels[LabelPipeline]; cid != "" {
+			connIDs[cid] = struct{}{}
+		}
+	}
+	hpas, err := hpaClient.List(ctx, metav1.ListOptions{LabelSelector: sel})
+	if err != nil {
+		return 0, fmt.Errorf("list worker HPAs: %w", err)
+	}
+	for i := range hpas.Items {
+		if cid := hpas.Items[i].Labels[LabelPipeline]; cid != "" {
 			connIDs[cid] = struct{}{}
 		}
 	}
