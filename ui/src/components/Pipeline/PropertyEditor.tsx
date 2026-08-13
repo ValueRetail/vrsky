@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useId, type ReactNode } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -118,10 +118,12 @@ function StyledInput({
   type?: string
 }) {
   const [focused, setFocused] = useState(false)
+  const id = useId()
 
   return (
     <div style={{ marginBottom: '16px' }}>
       <label
+        htmlFor={id}
         style={{
           display: 'block',
           fontSize: '12px',
@@ -135,6 +137,7 @@ function StyledInput({
         {label}
       </label>
       <input
+        id={id}
         type={type}
         placeholder={placeholder}
         value={value}
@@ -172,10 +175,12 @@ function StyledSelect({
   options: { value: string; label: string }[]
 }) {
   const [focused, setFocused] = useState(false)
+  const id = useId()
 
   return (
     <div style={{ marginBottom: '16px' }}>
       <label
+        htmlFor={id}
         style={{
           display: 'block',
           fontSize: '12px',
@@ -189,6 +194,7 @@ function StyledSelect({
         {label}
       </label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
