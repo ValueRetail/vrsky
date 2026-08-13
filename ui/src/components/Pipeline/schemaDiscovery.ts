@@ -167,7 +167,7 @@ export async function discoverSchema(
 
     case 'business_central': {
       const bc = (consumerConfig.business_central as Record<string, unknown>) || {}
-      if (!bc.client_id || !bc.client_secret) throw new Error('Set the Business Central client ID and secret first')
+      if (!bc.client_id || (!bc.client_secret && !bc.client_secret_secret_id)) throw new Error('Set the Business Central client ID and secret first')
       const data = await postJSON('http://localhost:9310/sample-data/', { ...bc, tenant_id: opts?.tenantId })
       if (!data.ok) throw new Error((data.error as string) || 'No Business Central data to sample yet')
       return inferSchema(data.data)
@@ -183,7 +183,7 @@ export async function discoverSchema(
 
     case 'brightpearl': {
       const bp = (consumerConfig.brightpearl as Record<string, unknown>) || {}
-      if (!bp.app_ref || !bp.staff_token || !bp.resource) throw new Error('Set the Brightpearl app ref, staff token and resource first')
+      if (!bp.app_ref || (!bp.staff_token && !bp.staff_token_secret_id) || !bp.resource) throw new Error('Set the Brightpearl app ref, staff token and resource first')
       const data = await postJSON('http://localhost:9280/sample-data/', { ...bp, tenant_id: opts?.tenantId })
       if (!data.ok) throw new Error((data.error as string) || 'No Brightpearl data to sample yet')
       return inferSchema(data.data)

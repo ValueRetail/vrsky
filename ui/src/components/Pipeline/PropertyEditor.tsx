@@ -2082,7 +2082,7 @@ function FilterConfig({
         else { setDataError(result.error || 'No Sitoo data to sample yet') }
       } else if (consumerType === 'business_central') {
         const bc = (consumerConfig?.business_central as Record<string, unknown>) || {}
-        if (!bc.client_id || !bc.client_secret) { setDataError('Set the Business Central client ID and secret first'); return }
+        if (!bc.client_id || (!bc.client_secret && !bc.client_secret_secret_id)) { setDataError('Set the Business Central client ID and secret first'); return }
         const resp = await fetch('http://localhost:9310/sample-data/', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...bc, tenant_id: currentTenant?.id }),
@@ -2102,7 +2102,7 @@ function FilterConfig({
         else { setDataError(result.error || 'No Visma data to sample yet') }
       } else if (consumerType === 'brightpearl') {
         const bp = (consumerConfig?.brightpearl as Record<string, unknown>) || {}
-        if (!bp.app_ref || !bp.staff_token || !bp.resource) { setDataError('Set the Brightpearl app ref, staff token and resource first'); return }
+        if (!bp.app_ref || (!bp.staff_token && !bp.staff_token_secret_id) || !bp.resource) { setDataError('Set the Brightpearl app ref, staff token and resource first'); return }
         const resp = await fetch('http://localhost:9280/sample-data/', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...bp, tenant_id: currentTenant?.id }),
@@ -2723,7 +2723,7 @@ function ConverterConfig({
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Sitoo data yet'))
       } else if (consumerType === 'business_central') {
         const bc = (consumerConfig.business_central as Record<string, unknown>) || {}
-        if (!bc.client_id || !bc.client_secret) { setPreviewInput('// Set the Business Central client ID and secret first'); return }
+        if (!bc.client_id || (!bc.client_secret && !bc.client_secret_secret_id)) { setPreviewInput('// Set the Business Central client ID and secret first'); return }
         const resp = await fetch('http://localhost:9310/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bc, tenant_id: currentTenant?.id }) })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Business Central data yet'))
@@ -2735,7 +2735,7 @@ function ConverterConfig({
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Visma data yet'))
       } else if (consumerType === 'brightpearl') {
         const bp = (consumerConfig.brightpearl as Record<string, unknown>) || {}
-        if (!bp.app_ref || !bp.staff_token || !bp.resource) { setPreviewInput('// Set the Brightpearl app ref, staff token and resource first'); return }
+        if (!bp.app_ref || (!bp.staff_token && !bp.staff_token_secret_id) || !bp.resource) { setPreviewInput('// Set the Brightpearl app ref, staff token and resource first'); return }
         const resp = await fetch('http://localhost:9280/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bp, tenant_id: currentTenant?.id }) })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Brightpearl data yet'))
