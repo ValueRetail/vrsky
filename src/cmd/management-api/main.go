@@ -334,6 +334,9 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 				k8sClient, orchConfig, validator, orchestrator.WithNATSURLResolver(natsResolver)))
 			logger.Printf("per-connection K8s orchestrator enabled (namespace=%s registry=%s version=%s nats=%s)",
 				orchConfig.Namespace, orchConfig.ImageRegistry, orchConfig.ImageVersion, orchConfig.NATSURLs)
+			// Safety net: periodically delete worker Deployments/HPAs whose
+			// connection no longer exists (teardown failed or predates #176).
+			go runOrphanedWorkerGC(context.Background(), k8sClient, orchConfig.Namespace, repo, logger)
 		}
 	}
 
@@ -505,6 +508,50 @@ func initK8sNATSProvisioner(k8sClient kubernetes.Interface, logger *log.Logger) 
 		return nil
 	}
 	return managementapi.NewK8sNATSProvisioner(k8sClient, logger)
+}
+
+// runOrphanedWorkerGC periodically deletes orchestrator worker Deployments/HPAs
+// whose connection no longer exists in the DB — a safety net for connection
+// deletes whose teardown failed or predates #176. Blocks until ctx is cancelled.
+func runOrphanedWorkerGC(ctx context.Context, k8sClient kubernetes.Interface, namespace string, repo managementapi.Repository, logger *log.Logger) {
+	const tick = 5 * time.Minute
+	logger.Printf("orphaned-worker GC started (tick=%s namespace=%s)", tick, namespace)
+
+	// exists reports whether a connection is still in the DB. On any non
+	// not-found error it returns true, so a transient DB blip never deletes a
+	// live worker.
+	exists := func(connectionID string) bool {
+		if _, err := repo.GetConnection(ctx, connectionID); err != nil {
+			if _, ok := err.(*managementapi.NotFoundError); ok {
+				return false
+			}
+			return true
+		}
+		return true
+	}
+
+	sweep := func() {
+		n, err := orchestrator.GarbageCollectOrphanedWorkers(ctx, k8sClient, namespace, exists)
+		if err != nil {
+			logger.Printf("orphaned-worker GC: %v", err)
+			return
+		}
+		if n > 0 {
+			logger.Printf("orphaned-worker GC: removed resources for %d orphaned connection(s)", n)
+		}
+	}
+
+	sweep() // sweep once at startup
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
 }
 
 // orchestratorConfigFromEnv builds the per-connection orchestrator config (#157)
