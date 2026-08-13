@@ -384,6 +384,64 @@ func TestDeleteConnection_Valid(t *testing.T) {
 	}
 }
 
+// fakeOrchestrator records StopPipeline invocations so a test can assert that
+// deleting a graph-based connection tears down its k8s resources (#175).
+type fakeOrchestrator struct {
+	stopCalls   int
+	stoppedConn string
+}
+
+func (f *fakeOrchestrator) StartPipeline(_ context.Context, _ *Connection) error { return nil }
+func (f *fakeOrchestrator) StopPipeline(_ context.Context, conn *Connection) error {
+	f.stopCalls++
+	f.stoppedConn = conn.ID
+	return nil
+}
+func (f *fakeOrchestrator) GetPipelineStatus(_ context.Context, _ *Connection) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+// TestDeleteConnection_TearsDownOrchestratorResources asserts that deleting a
+// graph-based connection invokes the orchestrator teardown (StopPipeline), so
+// per-connection Deployments + HPAs aren't orphaned (#175). Before the fix,
+// delete only published a NATS stop and never called the orchestrator.
+func TestDeleteConnection_TearsDownOrchestratorResources(t *testing.T) {
+	handler, mockRepo := setupTestHandler()
+	ctx := contextWithTenant("tenant-1")
+
+	fake := &fakeOrchestrator{}
+	handler.SetOrchestratorFactory(func(_ *Connection) PipelineOrchestrator { return fake })
+
+	conn := &Connection{
+		ID:       "graph-conn",
+		TenantID: "tenant-1",
+		Name:     "graph-connection",
+		Status:   "stopped",
+		Nodes:    []*Node{{ID: "src", Type: "consumer"}},
+	}
+	mockRepo.connections["graph-conn"] = conn
+
+	r := httptest.NewRequest("DELETE", "/api/v1/connections/graph-conn", nil)
+	r = r.WithContext(ctx)
+	r.SetPathValue("id", "graph-conn")
+	w := httptest.NewRecorder()
+
+	handler.DeleteConnection(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", w.Code)
+	}
+	if fake.stopCalls != 1 {
+		t.Errorf("expected orchestrator StopPipeline to be called once on delete, got %d", fake.stopCalls)
+	}
+	if fake.stoppedConn != "graph-conn" {
+		t.Errorf("expected teardown for graph-conn, got %q", fake.stoppedConn)
+	}
+	if _, err := mockRepo.GetConnection(ctx, "graph-conn"); err == nil {
+		t.Error("expected connection to be deleted from repo")
+	}
+}
+
 // Test StartConnection
 func TestStartConnection_Valid(t *testing.T) {
 	handler, mockRepo := setupTestHandler()
