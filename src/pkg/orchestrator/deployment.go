@@ -178,11 +178,13 @@ func buildDeployment(node *managementapi.Node, graph *ExecutionGraph, config *Or
 						{
 							Name:  "component",
 							Image: containerImage,
-							// IfNotPresent so pre-pulled / k3d-imported images run
-							// without a registry round-trip (and unreachable
-							// registries don't ErrImagePull). Matches the platform's
-							// other manifests; redeploys use a new image tag/digest.
-							ImagePullPolicy: corev1.PullIfNotPresent,
+							// Always: per-connection workers are pinned to a moving
+							// :latest tag (WORKER_IMAGE_VERSION), so IfNotPresent
+							// would let a worker landing on a node with a stale
+							// cached :latest run old code after a platform redeploy
+							// (#175 follow-up). A worker starts once per connection
+							// start, so the extra registry pull is cheap.
+							ImagePullPolicy: corev1.PullAlways,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
