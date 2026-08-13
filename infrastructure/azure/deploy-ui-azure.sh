@@ -59,11 +59,15 @@ kubectl apply -f infrastructure/kubernetes/ui/service.yaml
 WORKUI="$(mktemp -d)/ui-deployment.yaml"
 cp infrastructure/kubernetes/ui/deployment.yaml "$WORKUI"
 perl -pi -e 's{ghcr\.io/[Vv]alue[Rr]etail/vrsky/ui:latest}{'"$ACR_LOGIN"'/vrsky/ui:latest}g;' "$WORKUI"
-perl -pi -e 's/^(\s*replicas:)\s*3\b/${1} 1/;' "$WORKUI"
+perl -pi -e 's/^(\s*replicas:)\s*3\b/${1} 2/;' "$WORKUI"
 # mount the nginx config over the image's default.conf
 perl -0777 -pi -e 's/(        - name: tmp\n          mountPath: \/tmp\n)/$1        - name: nginx-conf\n          mountPath: \/etc\/nginx\/conf.d\/default.conf\n          subPath: default.conf\n/' "$WORKUI"
 perl -0777 -pi -e 's/(      - name: tmp\n        emptyDir: \{\}\n)/$1      - name: nginx-conf\n        configMap:\n          name: vrsky-ui-nginx\n/' "$WORKUI"
 kubectl apply -f "$WORKUI"
+
+# HA: PodDisruptionBudget so a node drain keeps a UI replica up (pairs with
+# replicas: 2 above).
+kubectl apply -f infrastructure/kubernetes/ui/pdb.yaml
 
 echo ">>> waiting for UI to roll out..."
 kubectl rollout status deploy/vrsky-ui -n vrsky-ui --timeout=180s

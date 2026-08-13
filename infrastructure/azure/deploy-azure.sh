@@ -57,11 +57,14 @@ grep -rlE 'ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/|storageClassN
   ' "$f"
 done
 
-# --- 3c. right-size app requests to fit small nodes (Standard_A2_v2, 2vCPU/4GB) ---
+# --- 3c. right-size app requests + run core services HA (2 replicas) ---
+# Nodes are now E4bds_v5 (4vCPU/32GB) with ample headroom, so filter runs 2
+# replicas for HA (paired with its PDB, applied in step 4b). Requests stay
+# trimmed for good bin-packing.
 # The manifests are sized for big ServeTheWorld nodes; the filter alone asks for
 # 1 CPU + 2Gi x3, which won't schedule here. Shrink it and drop replica counts.
 # (management-api is already 100m/128Mi; just trim it to a single replica.)
-perl -pi -e 's/^(\s*replicas:)\s*3\b/${1} 1/; s/cpu:\s*1000m/cpu: 100m/; s/memory:\s*2Gi/memory: 128Mi/; s/cpu:\s*2000m/cpu: 500m/; s/memory:\s*4Gi/memory: 256Mi/;' "$WORK/filter/deployment.yaml"
+perl -pi -e 's/^(\s*replicas:)\s*3\b/${1} 2/; s/cpu:\s*1000m/cpu: 100m/; s/memory:\s*2Gi/memory: 128Mi/; s/cpu:\s*2000m/cpu: 500m/; s/memory:\s*4Gi/memory: 256Mi/;' "$WORK/filter/deployment.yaml"
 perl -pi -e 's/^(\s*replicas:)\s*2\b/${1} 1/;' "$WORK/management-api/deployment.yaml"
 
 # management-api runs under its OWN service account (for orchestration RBAC),
@@ -89,6 +92,9 @@ SKIP_MONITORING=true SKIP_INGRESS=true bash "$WORK/deploy-vrsky-platform.sh" <<<
 # --- 5. point the orchestrator at ACR for per-connection worker images ------
 kubectl set env deploy/vrsky-management-api -n vrsky-platform \
   WORKER_IMAGE_REGISTRY="$WORKER_REGISTRY" WORKER_IMAGE_VERSION=latest
+
+# --- 4b. HA: PodDisruptionBudget so a node drain keeps a filter replica up ----
+kubectl apply -f infrastructure/kubernetes/filter/pdb.yaml
 
 cat <<EOF
 
