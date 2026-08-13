@@ -1,0 +1,15 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vrsky-filter
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-filter
+    tier: core
+spec:
+  # Keep at least one filter replica serving during voluntary disruptions
+  # (node drain / upgrade). Pairs with replicas: 2 for real HA.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vrsky-filter
