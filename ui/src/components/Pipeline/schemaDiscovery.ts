@@ -157,9 +157,41 @@ export async function discoverSchema(
       return inferSchema(data.data)
     }
 
+    case 'sitoo': {
+      const sc = (consumerConfig.sitoo as Record<string, unknown>) || {}
+      if (!sc.api_id || !sc.account_id || !sc.site_id) throw new Error('Set the Sitoo API ID, account ID and site ID first')
+      const data = await postJSON('http://localhost:9260/sample-data/', { ...sc, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No Sitoo data to sample yet')
+      return inferSchema(data.data)
+    }
+
+    case 'business_central': {
+      const bc = (consumerConfig.business_central as Record<string, unknown>) || {}
+      if (!bc.client_id || (!bc.client_secret && !bc.client_secret_secret_id)) throw new Error('Set the Business Central client ID and secret first')
+      const data = await postJSON('http://localhost:9310/sample-data/', { ...bc, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No Business Central data to sample yet')
+      return inferSchema(data.data)
+    }
+
+    case 'visma': {
+      const vc = (consumerConfig.visma as Record<string, unknown>) || {}
+      if (!vc.client_id || !vc.base_url || !vc.resource) throw new Error('Set the Visma client ID, base URL and resource first')
+      const data = await postJSON('http://localhost:9320/sample-data/', { ...vc, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No Visma data to sample yet')
+      return inferSchema(data.data)
+    }
+
+    case 'brightpearl': {
+      const bp = (consumerConfig.brightpearl as Record<string, unknown>) || {}
+      if (!bp.app_ref || (!bp.staff_token && !bp.staff_token_secret_id) || !bp.resource) throw new Error('Set the Brightpearl app ref, staff token and resource first')
+      const data = await postJSON('http://localhost:9280/sample-data/', { ...bp, tenant_id: opts?.tenantId })
+      if (!data.ok) throw new Error((data.error as string) || 'No Brightpearl data to sample yet')
+      return inferSchema(data.data)
+    }
+
     default: {
-      // http / webhook (and the retail/ERP connectors without a test endpoint
-      // yet): the only sample is a deployed connection's last payload.
+      // Front Systems (push-only) + http/webhook: the only sample is a deployed
+      // connection's last payload.
       if (!opts?.deployedConnectionId) {
         throw new Error('Deploy the pipeline and send data once, then discover the schema')
       }

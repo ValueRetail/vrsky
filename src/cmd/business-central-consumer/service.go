@@ -96,6 +96,8 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
+	// Aux endpoint for the UI's pre-deploy "show data structure" preview.
+	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }

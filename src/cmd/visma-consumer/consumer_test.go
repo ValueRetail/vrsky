@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -98,5 +99,38 @@ func TestFetchAndPublish_SingleObjectWrapped(t *testing.T) {
 	var recs []map[string]any
 	if err := json.Unmarshal((*got)[0].Payload, &recs); err != nil || len(recs) != 1 {
 		t.Errorf("single object not wrapped into a 1-element array: %v / %d", err, len(recs))
+	}
+}
+
+// TestSampleData_Visma exercises the pre-deploy /sample-data aux endpoint.
+func TestSampleData_Visma(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"access_token":"tok-abc","expires_in":3600}`)
+	}))
+	defer tokenSrv.Close()
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[{"orderNumber":"SO-1","customer":"Acme"},{"orderNumber":"SO-2","customer":"Beta"}]`)
+	}))
+	defer apiSrv.Close()
+
+	c := &vismaConsumer{httpClient: http.DefaultClient}
+	body := fmt.Sprintf(`{"client_id":"id","client_secret":"sec","base_url":%q,"token_url":%q,"scope":"s","resource":"SalesOrders"}`, apiSrv.URL, tokenSrv.URL)
+	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		OK    bool          `json:"ok"`
+		Data  []interface{} `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK || len(resp.Data) != 2 {
+		t.Fatalf("want ok+2 records, got ok=%v n=%d err=%q", resp.OK, len(resp.Data), resp.Error)
 	}
 }

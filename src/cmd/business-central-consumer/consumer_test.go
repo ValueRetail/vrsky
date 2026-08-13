@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -94,5 +95,42 @@ func TestEntityURL(t *testing.T) {
 	want := "https://host/api/v2.0/companies(GUID)/salesOrders?$filter=status+eq+%27Open%27"
 	if got != want {
 		t.Errorf("entityURL = %q\nwant %q", got, want)
+	}
+}
+
+// TestSampleData_BC exercises the pre-deploy /sample-data aux endpoint: it must
+// acquire a token, GET the first OData page, and return the records as {ok,data}.
+func TestSampleData_BC(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"access_token":"tok-abc","expires_in":3600}`)
+	}))
+	defer tokenSrv.Close()
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"value":[{"number":"C1","displayName":"Acme"},{"number":"C2","displayName":"Beta"}]}`)
+	}))
+	defer apiSrv.Close()
+
+	c := &bcConsumer{httpClient: http.DefaultClient}
+	body := fmt.Sprintf(`{"client_id":"id","client_secret":"sec","api_base_url":%q,"token_url":%q,"company_id":"GUID","entity":"customers"}`, apiSrv.URL, tokenSrv.URL)
+	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		OK    bool          `json:"ok"`
+		Data  []interface{} `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("ok=false error=%q", resp.Error)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("want 2 records, got %d: %s", len(resp.Data), w.Body.String())
 	}
 }
