@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -106,5 +107,35 @@ func TestWebhook(t *testing.T) {
 	h(rec3, httptest.NewRequest(http.MethodGet, "/brightpearl/events/c9", nil))
 	if rec3.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d, want 405", rec3.Code)
+	}
+}
+
+// TestSampleData_Brightpearl exercises the pre-deploy /sample-data aux endpoint,
+// including unwrapping the {"response": …} envelope.
+func TestSampleData_Brightpearl(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"response":[{"id":1,"total":"10.00"},{"id":2,"total":"20.00"}]}`)
+	}))
+	defer apiSrv.Close()
+
+	c := &brightpearlConsumer{httpClient: http.DefaultClient}
+	body := fmt.Sprintf(`{"app_ref":"app","staff_token":"tok","base_url":%q,"resource":"/order-service/order"}`, apiSrv.URL)
+	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		OK    bool          `json:"ok"`
+		Data  []interface{} `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK || len(resp.Data) != 2 {
+		t.Fatalf("want ok+2 records, got ok=%v n=%d err=%q", resp.OK, len(resp.Data), resp.Error)
 	}
 }

@@ -830,6 +830,10 @@ services:
       # Must match management-api's ENCRYPTION_KEY — decrypts client_secret
       # (client_secret_secret_id) at connection-start time.
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port the SDK serves /sample-data on (UI's pre-deploy preview).
+      WORKER_HTTP_PORT: "9310"
+    ports:
+      - "127.0.0.1:9310:9310"
     depends_on:
       nats:
         condition: service_healthy
@@ -850,6 +854,10 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # Aux HTTP port the SDK serves /sample-data on (UI's pre-deploy preview).
+      WORKER_HTTP_PORT: "9320"
+    ports:
+      - "127.0.0.1:9320:9320"
     depends_on:
       nats:
         condition: service_healthy

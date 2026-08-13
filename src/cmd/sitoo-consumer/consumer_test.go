@@ -156,3 +156,32 @@ func TestWebhook_PublishesBody(t *testing.T) {
 		t.Errorf("GET status = %d, want 405", rec3.Code)
 	}
 }
+
+// TestSampleData_Sitoo exercises the pre-deploy /sample-data aux endpoint.
+func TestSampleData_Sitoo(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"totalcount":2,"items":[{"transactionid":1,"total":"10.00"},{"transactionid":2,"total":"20.00"}]}`)
+	}))
+	defer apiSrv.Close()
+
+	c := &sitooConsumer{httpClient: http.DefaultClient}
+	body := fmt.Sprintf(`{"api_id":"id","api_password":"pw","account_id":1,"site_id":2,"base_url":%q,"resource":"transactions"}`, apiSrv.URL)
+	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		OK    bool          `json:"ok"`
+		Data  []interface{} `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.OK || len(resp.Data) != 2 {
+		t.Fatalf("want ok+2 records, got ok=%v n=%d err=%q", resp.OK, len(resp.Data), resp.Error)
+	}
+}

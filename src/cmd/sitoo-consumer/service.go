@@ -110,6 +110,7 @@ func (s *sitooConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	// Real-time SPI Events (webhook mode): Sitoo POSTs event notifications to
 	// /sitoo/events/{connectionID} on the SDK auxiliary HTTP port.
 	s.RegisterHTTPHandler("/sitoo/events/", s.handleWebhook())
+	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 
 	res.Health.SetReady(true)
 	return nil

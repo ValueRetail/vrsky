@@ -1,12 +1,97 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
+
+const sitooSampleLimit = 5
+
+// handleSampleData GETs the first page of the configured Sitoo resource and
+// returns up to sitooSampleLimit items, reusing the poller's Basic-auth fetch.
+// Registered in Configure on the SDK aux HTTP port for the UI's pre-deploy
+// "show data structure" preview.
+func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeErr := func(msg string) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": msg})
+		}
+
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			writeErr("read request body: " + err.Error())
+			return
+		}
+		var meta struct {
+			TenantID string `json:"tenant_id"`
+		}
+		_ = json.Unmarshal(raw, &meta)
+		cfgJSON := json.RawMessage(raw)
+		if meta.TenantID != "" && s.db != nil {
+			if resolved, rerr := crypto.ResolveSecretsInJSON(r.Context(), crypto.NewSQLSecretReader(s.db), meta.TenantID, cfgJSON); rerr == nil {
+				cfgJSON = resolved
+			}
+		}
+
+		var cfg SitooConfig
+		if err := json.Unmarshal(cfgJSON, &cfg); err != nil {
+			writeErr("invalid Sitoo config: " + err.Error())
+			return
+		}
+		if cfg.APIID == "" || cfg.APIPassword == "" {
+			writeErr("set the API ID and API password first")
+			return
+		}
+		if cfg.AccountID == 0 || cfg.SiteID == 0 {
+			writeErr("set the account ID and site ID first")
+			return
+		}
+
+		reqURL := fmt.Sprintf("%s/accounts/%d/sites/%d/%s?start=0&num=%d",
+			cfg.effectiveBaseURL(), cfg.AccountID, cfg.SiteID, cfg.effectiveResource(), sitooSampleLimit)
+		body, err := s.get(r.Context(), &cfg, reqURL)
+		if err != nil {
+			writeErr(err.Error())
+			return
+		}
+		var coll sitooCollection
+		if err := json.Unmarshal(body, &coll); err != nil {
+			writeErr("parse Sitoo collection: " + err.Error())
+			return
+		}
+		items := coll.Items
+		if len(items) > sitooSampleLimit {
+			items = items[:sitooSampleLimit]
+		}
+		out := make([]interface{}, 0, len(items))
+		for _, rec := range items {
+			var v interface{}
+			if json.Unmarshal(rec, &v) == nil {
+				out = append(out, v)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": out})
+	}
+}
 
 // handleWebhook serves Sitoo SPI Event notifications (real-time mode). Sitoo is
 // configured to POST events to /sitoo/events/{connectionID}; each request body

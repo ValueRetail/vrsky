@@ -89,6 +89,7 @@ func (c *brightpearlConsumer) Configure(ctx context.Context, res *sdk.Resources)
 		c.resolveTenant = c.getConnectionTenant
 	}
 	c.RegisterHTTPHandler("/brightpearl/events/", c.handleWebhook())
+	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
 }

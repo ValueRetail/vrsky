@@ -2070,11 +2070,50 @@ function FilterConfig({
         } else {
           setDataError(result.error || 'Salesforce query failed')
         }
+      } else if (consumerType === 'sitoo') {
+        const sc = (consumerConfig?.sitoo as Record<string, unknown>) || {}
+        if (!sc.api_id || !sc.account_id || !sc.site_id) { setDataError('Set the Sitoo API ID, account ID and site ID first'); return }
+        const resp = await fetch('http://localhost:9260/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...sc, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) { setSampleData(result.data); setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3))) }
+        else { setDataError(result.error || 'No Sitoo data to sample yet') }
+      } else if (consumerType === 'business_central') {
+        const bc = (consumerConfig?.business_central as Record<string, unknown>) || {}
+        if (!bc.client_id || !bc.client_secret) { setDataError('Set the Business Central client ID and secret first'); return }
+        const resp = await fetch('http://localhost:9310/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...bc, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) { setSampleData(result.data); setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3))) }
+        else { setDataError(result.error || 'No Business Central data to sample yet') }
+      } else if (consumerType === 'visma') {
+        const vc = (consumerConfig?.visma as Record<string, unknown>) || {}
+        if (!vc.client_id || !vc.base_url || !vc.resource) { setDataError('Set the Visma client ID, base URL and resource first'); return }
+        const resp = await fetch('http://localhost:9320/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...vc, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) { setSampleData(result.data); setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3))) }
+        else { setDataError(result.error || 'No Visma data to sample yet') }
+      } else if (consumerType === 'brightpearl') {
+        const bp = (consumerConfig?.brightpearl as Record<string, unknown>) || {}
+        if (!bp.app_ref || !bp.staff_token || !bp.resource) { setDataError('Set the Brightpearl app ref, staff token and resource first'); return }
+        const resp = await fetch('http://localhost:9280/sample-data/', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...bp, tenant_id: currentTenant?.id }),
+        })
+        const result = await resp.json()
+        if (result.ok) { setSampleData(result.data); setExpandedPaths(new Set(collectPaths(result.data, '', 0, 3))) }
+        else { setDataError(result.error || 'No Brightpearl data to sample yet') }
       } else {
-        // Remaining types — the retail/ERP connectors (Sitoo, Front Systems,
-        // Business Central, Visma, Brightpearl) plus http webhooks — can't be
-        // sampled pre-deploy (push-only or no test endpoint yet), so read the
-        // deployed connection's last payload once data has flowed through once.
+        // Remaining types — Front Systems (push-only, webhook) + http webhooks —
+        // can't be sampled pre-deploy, so read the deployed connection's last
+        // payload once data has flowed through once.
         const connId = deployedConnectionId
         if (!connId) { setDataError('Deploy the pipeline and send data through once, then load the structure'); return }
         const { default: apiClient } = await import('../../services/api')
@@ -2676,8 +2715,33 @@ function ConverterConfig({
         })
         const data = await resp.json()
         setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No objects under the prefix yet'))
+      } else if (consumerType === 'sitoo') {
+        const sc = (consumerConfig.sitoo as Record<string, unknown>) || {}
+        if (!sc.api_id || !sc.account_id || !sc.site_id) { setPreviewInput('// Set the Sitoo API ID, account ID and site ID first'); return }
+        const resp = await fetch('http://localhost:9260/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...sc, tenant_id: currentTenant?.id }) })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Sitoo data yet'))
+      } else if (consumerType === 'business_central') {
+        const bc = (consumerConfig.business_central as Record<string, unknown>) || {}
+        if (!bc.client_id || !bc.client_secret) { setPreviewInput('// Set the Business Central client ID and secret first'); return }
+        const resp = await fetch('http://localhost:9310/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bc, tenant_id: currentTenant?.id }) })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Business Central data yet'))
+      } else if (consumerType === 'visma') {
+        const vc = (consumerConfig.visma as Record<string, unknown>) || {}
+        if (!vc.client_id || !vc.base_url || !vc.resource) { setPreviewInput('// Set the Visma client ID, base URL and resource first'); return }
+        const resp = await fetch('http://localhost:9320/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...vc, tenant_id: currentTenant?.id }) })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Visma data yet'))
+      } else if (consumerType === 'brightpearl') {
+        const bp = (consumerConfig.brightpearl as Record<string, unknown>) || {}
+        if (!bp.app_ref || !bp.staff_token || !bp.resource) { setPreviewInput('// Set the Brightpearl app ref, staff token and resource first'); return }
+        const resp = await fetch('http://localhost:9280/sample-data/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...bp, tenant_id: currentTenant?.id }) })
+        const data = await resp.json()
+        setPreviewInput(data.ok ? JSON.stringify(data.data, null, 2) : '// Error: ' + (data.error || 'No Brightpearl data yet'))
       } else {
-        // http / webhook and others: only a deployed connection has a sample.
+        // Front Systems (push-only) + http webhooks: only a deployed connection
+        // has a sample.
         if (!deployedConnectionId) {
           setPreviewInput('// Deploy the pipeline and send data once, then fetch the sample')
           return
