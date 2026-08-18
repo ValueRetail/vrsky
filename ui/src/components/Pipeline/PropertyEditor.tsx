@@ -20,6 +20,7 @@ import type { TenantDataConnection, DataConnectionRequest } from '../../types/mo
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
 import { projectSchemaThroughFilter } from './schema'
+import { onKeyActivate } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
@@ -4116,7 +4117,10 @@ export default function PropertyEditor({
             />
           ) : (
             <span
+              role="button"
+              tabIndex={0}
               onClick={() => setEditingLabel(true)}
+              onKeyDown={onKeyActivate}
               style={{ cursor: 'pointer' }}
               title="Click to rename"
             >

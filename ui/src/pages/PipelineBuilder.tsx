@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { onKeyActivate } from '../utils/a11y'
 import { connectionService } from '../services/connectionService'
 import { connectionToCanvas } from '../utils/connectionToCanvas'
 import KonvaCanvas from '../components/Pipeline/KonvaCanvas'
@@ -1363,7 +1364,7 @@ export default function PipelineBuilder() {
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for converter activity...</p>
                     ) : converterEvents.map((evt, i) => (
                       <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
-                        <div style={{ padding: '2px 0', cursor: (evt.before || evt.after) ? 'pointer' : 'default' }} onClick={() => (evt.before || evt.after) && setExpandedConverterEvent(expandedConverterEvent === i ? null : i)}>
+                        <div style={{ padding: '2px 0', cursor: (evt.before || evt.after) ? 'pointer' : 'default' }} onClick={() => (evt.before || evt.after) && setExpandedConverterEvent(expandedConverterEvent === i ? null : i)} role={(evt.before || evt.after) ? 'button' : undefined} tabIndex={(evt.before || evt.after) ? 0 : undefined} aria-expanded={(evt.before || evt.after) ? expandedConverterEvent === i : undefined} onKeyDown={onKeyActivate}>
                           <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
                           <span style={{ fontWeight: 600, color: evt.type === 'converted' ? '#16a34a' : evt.type === 'error' ? '#dc2626' : evt.type === 'info' ? '#2563eb' : '#6b7280' }}>
                             {evt.type === 'converted' ? '\u2713 CONVERTED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
@@ -1401,7 +1402,7 @@ export default function PipelineBuilder() {
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for filter activity...</p>
                     ) : filterEvents.map((evt, i) => (
                       <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
-                        <div style={{ padding: '2px 0', cursor: evt.data ? 'pointer' : 'default' }} onClick={() => evt.data && setExpandedFilterEvent(expandedFilterEvent === i ? null : i)}>
+                        <div style={{ padding: '2px 0', cursor: evt.data ? 'pointer' : 'default' }} onClick={() => evt.data && setExpandedFilterEvent(expandedFilterEvent === i ? null : i)} role={evt.data ? 'button' : undefined} tabIndex={evt.data ? 0 : undefined} aria-expanded={evt.data ? expandedFilterEvent === i : undefined} onKeyDown={onKeyActivate}>
                           <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
                           <span style={{ fontWeight: 600, color: evt.type === 'passed' ? '#16a34a' : evt.type === 'dropped' ? '#ea580c' : evt.type === 'error' ? '#dc2626' : '#6b7280' }}>
                             {evt.type === 'passed' ? '\u2713 PASSED' : evt.type === 'dropped' ? '\u2717 DROPPED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
@@ -1430,7 +1431,7 @@ export default function PipelineBuilder() {
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for HTTP activity...</p>
                     ) : httpProducerEvents.map((evt, i) => (
                       <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
-                        <div style={{ padding: '2px 0', cursor: (evt.payload || evt.response) ? 'pointer' : 'default' }} onClick={() => (evt.payload || evt.response) && setExpandedEvent(expandedEvent === i ? null : i)}>
+                        <div style={{ padding: '2px 0', cursor: (evt.payload || evt.response) ? 'pointer' : 'default' }} onClick={() => (evt.payload || evt.response) && setExpandedEvent(expandedEvent === i ? null : i)} role={(evt.payload || evt.response) ? 'button' : undefined} tabIndex={(evt.payload || evt.response) ? 0 : undefined} aria-expanded={(evt.payload || evt.response) ? expandedEvent === i : undefined} onKeyDown={onKeyActivate}>
                           <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
                           <span style={{ fontWeight: 600, color: evt.type === 'sent' ? '#16a34a' : evt.type === 'error' ? '#dc2626' : evt.type === 'info' ? '#2563eb' : '#6b7280' }}>
                             {evt.type === 'sent' ? '\u2713 SENT' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
@@ -1471,7 +1472,7 @@ export default function PipelineBuilder() {
                       <p style={{ color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', marginTop: '12px' }}>Waiting for database write activity...</p>
                     ) : dbProducerEvents.map((evt, i) => (
                       <div key={i} style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: '4px', marginBottom: '4px' }}>
-                        <div style={{ padding: '2px 0', cursor: evt.payload ? 'pointer' : 'default' }} onClick={() => evt.payload && setExpandedDbEvent(expandedDbEvent === i ? null : i)}>
+                        <div style={{ padding: '2px 0', cursor: evt.payload ? 'pointer' : 'default' }} onClick={() => evt.payload && setExpandedDbEvent(expandedDbEvent === i ? null : i)} role={evt.payload ? 'button' : undefined} tabIndex={evt.payload ? 0 : undefined} aria-expanded={evt.payload ? expandedDbEvent === i : undefined} onKeyDown={onKeyActivate}>
                           <span style={{ color: '#9ca3af' }}>{evt.time ? new Date(evt.time).toLocaleTimeString() : ''}</span>{' '}
                           <span style={{ fontWeight: 600, color: evt.type === 'inserted' ? '#16a34a' : evt.type === 'created' ? '#2563eb' : evt.type === 'error' ? '#dc2626' : '#6b7280' }}>
                             {evt.type === 'inserted' ? '\u2713 INSERTED' : evt.type === 'created' ? '\u2713 CREATED' : evt.type === 'error' ? '\u2717 ERROR' : evt.type.toUpperCase()}
@@ -1544,6 +1545,9 @@ export default function PipelineBuilder() {
                               fetchFileList(parent)
                             }}
                             style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', cursor: 'pointer', borderBottom: '1px solid #e5e7eb', color: '#2563eb' }}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={onKeyActivate}
                           >
                             .. (up)
                           </div>
