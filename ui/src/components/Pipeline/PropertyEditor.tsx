@@ -544,7 +544,7 @@ function SalesforceProducerConfig({
         onChange={(v) => update({ instance_url: v })}
       />
       <div>
-        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <div style={labelStyle}>Salesforce account (OAuth)</div>
         <OAuthGrantSelector
           value={(sf.oauth_grant_id as string) || ''}
           onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
@@ -618,7 +618,7 @@ function SalesforceConsumerConfig({
       />
 
       <div>
-        <label style={labelStyle}>Salesforce account (OAuth)</label>
+        <div style={labelStyle}>Salesforce account (OAuth)</div>
         <OAuthGrantSelector
           value={(sf.oauth_grant_id as string) || ''}
           onChange={(grantId) => update({ oauth_grant_id: grantId || '' })}
@@ -627,8 +627,9 @@ function SalesforceConsumerConfig({
       </div>
 
       <div>
-        <label style={labelStyle}>SOQL query</label>
+        <div style={labelStyle}>SOQL query</div>
         <textarea
+          aria-label="SOQL query"
           style={{
             width: '100%', minHeight: '70px', padding: '8px 10px',
             border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
@@ -711,7 +712,6 @@ function SFTPConsumerConfig({
       />
 
       <div>
-        <label style={labelStyle}>Password</label>
         <SecretInput
           label="Password"
           placeholder="SFTP password (or use a private key below)"
@@ -723,8 +723,9 @@ function SFTPConsumerConfig({
       </div>
 
       <div>
-        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <div style={labelStyle}>Private key (PEM, optional — use instead of password)</div>
         <textarea
+          aria-label="Private key (PEM)"
           style={{
             width: '100%', minHeight: '70px', padding: '8px 10px',
             border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
@@ -737,8 +738,9 @@ function SFTPConsumerConfig({
       </div>
 
       <div>
-        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <div style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</div>
         <textarea
+          aria-label="Host key"
           style={{
             width: '100%', minHeight: '50px', padding: '8px 10px',
             border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
@@ -849,7 +851,6 @@ function SFTPProducerConfig({
       />
 
       <div>
-        <label style={labelStyle}>Password</label>
         <SecretInput
           label="Password"
           placeholder="SFTP password (or use a private key below)"
@@ -861,8 +862,9 @@ function SFTPProducerConfig({
       </div>
 
       <div>
-        <label style={labelStyle}>Private key (PEM, optional — use instead of password)</label>
+        <div style={labelStyle}>Private key (PEM, optional — use instead of password)</div>
         <textarea
+          aria-label="Private key (PEM)"
           style={{
             width: '100%', minHeight: '70px', padding: '8px 10px',
             border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
@@ -875,8 +877,9 @@ function SFTPProducerConfig({
       </div>
 
       <div>
-        <label style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</label>
+        <div style={labelStyle}>Host key (optional — pin the server's key to verify its identity)</div>
         <textarea
+          aria-label="Host key"
           style={{
             width: '100%', minHeight: '50px', padding: '8px 10px',
             border: '1px solid #d1d5db', borderRadius: '4px', fontSize: '12px',
@@ -1000,7 +1003,6 @@ function KafkaConfigEditor({
             onChange={(v) => update({ username: v })}
           />
           <div>
-            <label style={labelStyle}>Password</label>
             <SecretInput
               label="Password"
               placeholder="SASL password"
@@ -1045,10 +1047,6 @@ function RabbitMQConfigEditor({
   const update = (patch: Record<string, unknown>) =>
     setConfig({ ...config, rabbitmq: { ...rmq, ...patch } })
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
-  }
-
   return (
     <div className="space-y-3">
       <StyledInput
@@ -1064,7 +1062,6 @@ function RabbitMQConfigEditor({
           onChange={(v) => update({ username: v })}
         />
         <div>
-          <label style={labelStyle}>Password (optional)</label>
           <SecretInput
             label="Password"
             placeholder="AMQP password"
@@ -1123,9 +1120,6 @@ function CloudStorageConfigEditor({
   const update = (patch: Record<string, unknown>) =>
     setConfig({ ...config, cloud_storage: { ...cs, ...patch } })
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: '12px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '4px',
-  }
   const provider = (cs.provider as string) || 's3'
   const afterAction = (cs.after_action as string) || 'none'
   const mode = (cs.mode as string) || 'poll'
@@ -1179,7 +1173,6 @@ function CloudStorageConfigEditor({
             onChange={(v) => update({ access_key_id: v })}
           />
           <div>
-            <label style={labelStyle}>Secret access key</label>
             <SecretInput
               label="Secret access key"
               placeholder="S3 secret access key"
@@ -1195,7 +1188,6 @@ function CloudStorageConfigEditor({
       {provider === 'azure' && (
         <>
           <div>
-            <label style={labelStyle}>Connection string</label>
             <SecretInput
               label="Connection string"
               placeholder="DefaultEndpointsProtocol=…;AccountName=…;AccountKey=…"
@@ -1215,7 +1207,6 @@ function CloudStorageConfigEditor({
             onChange={(v) => update({ account_name: v })}
           />
           <div>
-            <label style={labelStyle}>Account key (optional)</label>
             <SecretInput
               label="Account key"
               placeholder="Azure storage account key"
@@ -1237,7 +1228,6 @@ function CloudStorageConfigEditor({
             onChange={(v) => update({ endpoint: v })}
           />
           <div>
-            <label style={labelStyle}>Service account JSON</label>
             <SecretInput
               label="Service account JSON"
               placeholder='{"type":"service_account", …}'
@@ -3137,7 +3127,7 @@ function ApiConsumerConfig({
         >
           {/* Retrieval Mode Toggle */}
           <div style={{ marginBottom: '16px' }}>
-            <label
+            <div
               style={{
                 display: 'block',
                 fontSize: '12px',
@@ -3149,7 +3139,7 @@ function ApiConsumerConfig({
               }}
             >
               Retrieval Mode
-            </label>
+            </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 onClick={() => updateApiConfig({ one_time_only: false })}
@@ -3212,7 +3202,7 @@ function ApiConsumerConfig({
 
           {/* Endpoints */}
           <div style={{ marginBottom: '12px' }}>
-            <label
+            <div
               style={{
                 display: 'block',
                 fontSize: '12px',
@@ -3224,7 +3214,7 @@ function ApiConsumerConfig({
               }}
             >
               Endpoints
-            </label>
+            </div>
 
             {endpoints.length === 0 && (
               <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', margin: '8px 0' }}>

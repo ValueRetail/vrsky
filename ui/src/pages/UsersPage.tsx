@@ -210,8 +210,9 @@ export default function UsersPage() {
           style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px', padding: '12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px' }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 260px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Add member by email</label>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }} htmlFor="up-email">Add member by email</label>
             <input
+              id="up-email"
               type="email"
               required
               value={addEmail}
@@ -221,8 +222,9 @@ export default function UsersPage() {
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Role</label>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }} htmlFor="up-role">Role</label>
             <select
+              id="up-role"
               value={addRole}
               onChange={(e) => setAddRole(e.target.value as TenantRole)}
               style={{ padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}

@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { onKeyActivate } from '../utils/a11y'
 import type { Canvas } from '../types/pipeline'
 
 interface CanvasSelectorProps {
@@ -122,6 +123,9 @@ export default function CanvasSelector({
             onMouseEnter={() => setHoveredId(canvas.id)}
             onMouseLeave={() => setHoveredId(null)}
             onClick={() => !isEditing && handleSwitchCanvas(canvas.id)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={onKeyActivate}
             onDoubleClick={() => handleDoubleClick(canvas)}
             style={{
               position: 'relative',

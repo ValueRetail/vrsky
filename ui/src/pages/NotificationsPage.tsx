@@ -182,48 +182,48 @@ export default function NotificationsPage() {
           <h2 className="text-sm font-semibold text-neutral-800 mb-3">Add a target</h2>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelClass}>Name</label>
-              <input className={inputClass} placeholder="Ops Slack #alerts" value={name} onChange={(e) => setName(e.target.value)} />
+              <label className={labelClass} htmlFor="nt-name">Name</label>
+              <input id="nt-name" className={inputClass} placeholder="Ops Slack #alerts" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div>
-              <label className={labelClass}>Type</label>
-              <select className={inputClass} value={type} onChange={(e) => setType(e.target.value as NotificationTargetType)}>
+              <label className={labelClass} htmlFor="nt-type">Type</label>
+              <select id="nt-type" className={inputClass} value={type} onChange={(e) => setType(e.target.value as NotificationTargetType)}>
                 {TARGET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
             {type === 'slack' && (
               <div className="col-span-2">
-                <label className={labelClass}>Incoming webhook URL</label>
-                <input className={inputClass} type="password" autoComplete="new-password" placeholder="https://hooks.slack.com/services/…" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                <label className={labelClass} htmlFor="nt-slack-secret">Incoming webhook URL</label>
+                <input id="nt-slack-secret" className={inputClass} type="password" autoComplete="new-password" placeholder="https://hooks.slack.com/services/…" value={secret} onChange={(e) => setSecret(e.target.value)} />
               </div>
             )}
             {type === 'email' && (
               <div className="col-span-2">
-                <label className={labelClass}>Recipient address</label>
-                <input className={inputClass} placeholder="ops@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <label className={labelClass} htmlFor="nt-email">Recipient address</label>
+                <input id="nt-email" className={inputClass} placeholder="ops@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
             )}
             {type === 'pagerduty' && (
               <div className="col-span-2">
-                <label className={labelClass}>Events API v2 routing key</label>
-                <input className={inputClass} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                <label className={labelClass} htmlFor="nt-pd-key">Events API v2 routing key</label>
+                <input id="nt-pd-key" className={inputClass} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} />
               </div>
             )}
             {type === 'webhook' && (
               <>
                 <div className="col-span-2">
-                  <label className={labelClass}>Destination URL</label>
-                  <input className={inputClass} placeholder="https://example.com/alerts" value={url} onChange={(e) => setUrl(e.target.value)} />
+                  <label className={labelClass} htmlFor="nt-url">Destination URL</label>
+                  <input id="nt-url" className={inputClass} placeholder="https://example.com/alerts" value={url} onChange={(e) => setUrl(e.target.value)} />
                 </div>
                 <div className="col-span-2">
-                  <label className={labelClass}>HMAC signing secret (optional)</label>
-                  <input className={inputClass} type="password" autoComplete="new-password" placeholder="adds X-VRSky-Signature" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                  <label className={labelClass} htmlFor="nt-hmac">HMAC signing secret (optional)</label>
+                  <input id="nt-hmac" className={inputClass} type="password" autoComplete="new-password" placeholder="adds X-VRSky-Signature" value={secret} onChange={(e) => setSecret(e.target.value)} />
                 </div>
               </>
             )}
             <div>
-              <label className={labelClass}>Minimum severity</label>
-              <select className={inputClass} value={minSeverity} onChange={(e) => setMinSeverity(e.target.value)}>
+              <label className={labelClass} htmlFor="nt-sev">Minimum severity</label>
+              <select id="nt-sev" className={inputClass} value={minSeverity} onChange={(e) => setMinSeverity(e.target.value)}>
                 {SEVERITIES.map((s) => <option key={s} value={s}>{s === '' ? 'all' : s}</option>)}
               </select>
             </div>

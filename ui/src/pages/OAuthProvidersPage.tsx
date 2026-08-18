@@ -129,36 +129,36 @@ export default function OAuthProvidersPage() {
         <h2 className="text-sm font-semibold text-neutral-800 mb-3">Add a provider</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelClass}>Name</label>
-            <input className={inputClass} placeholder="Google – My Project" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className={labelClass} htmlFor="op-name">Name</label>
+            <input id="op-name" className={inputClass} placeholder="Google – My Project" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className={labelClass}>Type</label>
-            <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
+            <label className={labelClass} htmlFor="op-type">Type</label>
+            <select id="op-type" className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
               {PROVIDER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>
-            <label className={labelClass}>Client ID</label>
-            <input className={inputClass} value={clientId} onChange={(e) => setClientId(e.target.value)} />
+            <label className={labelClass} htmlFor="op-client-id">Client ID</label>
+            <input id="op-client-id" className={inputClass} value={clientId} onChange={(e) => setClientId(e.target.value)} />
           </div>
           <div>
-            <label className={labelClass}>Client secret</label>
-            <input className={inputClass} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} />
+            <label className={labelClass} htmlFor="op-secret">Client secret</label>
+            <input id="op-secret" className={inputClass} type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
           <div className="col-span-2">
-            <label className={labelClass}>Redirect URL</label>
-            <input className={inputClass} value={redirect} onChange={(e) => setRedirect(e.target.value)} />
+            <label className={labelClass} htmlFor="op-redirect">Redirect URL</label>
+            <input id="op-redirect" className={inputClass} value={redirect} onChange={(e) => setRedirect(e.target.value)} />
           </div>
           {type === 'custom' && (
             <>
               <div>
-                <label className={labelClass}>Authorize URL</label>
-                <input className={inputClass} value={authURL} onChange={(e) => setAuthURL(e.target.value)} />
+                <label className={labelClass} htmlFor="op-auth-url">Authorize URL</label>
+                <input id="op-auth-url" className={inputClass} value={authURL} onChange={(e) => setAuthURL(e.target.value)} />
               </div>
               <div>
-                <label className={labelClass}>Token URL</label>
-                <input className={inputClass} value={tokenURL} onChange={(e) => setTokenURL(e.target.value)} />
+                <label className={labelClass} htmlFor="op-token-url">Token URL</label>
+                <input id="op-token-url" className={inputClass} value={tokenURL} onChange={(e) => setTokenURL(e.target.value)} />
               </div>
             </>
           )}

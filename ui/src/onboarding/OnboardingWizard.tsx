@@ -235,8 +235,8 @@ export default function OnboardingWizard() {
           </div>
 
           <div style={card}>
-            <label style={label}>Pipeline name</label>
-            <input style={input} value={name} onChange={(e) => setName(e.target.value)} />
+            <label style={label} htmlFor="ob-pipeline-name">Pipeline name</label>
+            <input id="ob-pipeline-name" style={input} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
           {template.fields.map((f) => {
@@ -298,7 +298,7 @@ export default function OnboardingWizard() {
 
           {template.webhookSource && webhookUrl && (
             <div style={{ marginTop: '10px' }}>
-              <label style={label}>Your webhook URL</label>
+              <div style={label}>Your webhook URL</div>
               <code style={{ display: 'block', background: '#f3f4f6', padding: '9px 11px', borderRadius: '6px', fontSize: '12px', wordBreak: 'break-all' }}>
                 {webhookUrl}
               </code>
