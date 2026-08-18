@@ -63,6 +63,13 @@ export default function PipelineBuilder() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [edgeContextMenu, setEdgeContextMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
+  // Keyboard: Escape closes the edge context menu (works regardless of focus).
+  useEffect(() => {
+    if (!edgeContextMenu) return
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setEdgeContextMenu(null) }
+    document.addEventListener('keydown', onEsc)
+    return () => document.removeEventListener('keydown', onEsc)
+  }, [edgeContextMenu])
   const [isLoading, setIsLoading] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [sidebarWidth, setSidebarWidth] = useState(320)
@@ -1200,9 +1207,14 @@ export default function PipelineBuilder() {
               minWidth: '140px',
               overflow: 'hidden',
             }}
+            role="menu"
+            aria-label="Edge actions"
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             <button
+              role="menuitem"
               onClick={() => handleEdgeDelete(edgeContextMenu.edgeId)}
               style={{
                 width: '100%',
@@ -1228,7 +1240,11 @@ export default function PipelineBuilder() {
 
         {/* Click overlay to close context menu */}
         {edgeContextMenu && (
+          // Full-canvas click-catcher that dismisses the menu on an outside click;
+          // keyboard users dismiss via Escape (listener above). aria-hidden since
+          // it's decorative and intentionally not keyboard-focusable.
           <div
+            aria-hidden="true"
             style={{
               position: 'absolute',
               top: 0,
@@ -1604,9 +1620,25 @@ export default function PipelineBuilder() {
           overflowY: 'auto',
           zIndex: 40
         }}>
-          {/* Resize handle */}
+          {/* Resize handle — ARIA APG window-splitter: a focusable separator with
+              aria-valuenow + arrow-key resize. jsx-a11y treats role=separator as
+              noninteractive and doesn't model the splitter pattern, so its two
+              noninteractive rules are disabled for this element only. */}
+          {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
           <div
             onMouseDown={handleResizeStart}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize property panel"
+            aria-valuenow={sidebarWidth}
+            aria-valuemin={280}
+            aria-valuemax={800}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              // Match the drag: dragging the handle left widens the panel.
+              if (e.key === 'ArrowLeft') { e.preventDefault(); setSidebarWidth((w) => Math.min(800, w + 16)) }
+              else if (e.key === 'ArrowRight') { e.preventDefault(); setSidebarWidth((w) => Math.max(280, w - 16)) }
+            }}
             style={{
               position: 'absolute',
               left: 0,
@@ -1619,6 +1651,7 @@ export default function PipelineBuilder() {
             onMouseEnter={(e) => { (e.target as HTMLElement).style.backgroundColor = '#3b82f6' }}
             onMouseLeave={(e) => { if (!isResizing.current) (e.target as HTMLElement).style.backgroundColor = 'transparent' }}
           />
+          {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
           <PropertyEditor
             node={selectedNode}
             onUpdate={updateNodeConfig}
