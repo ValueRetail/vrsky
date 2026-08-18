@@ -20,7 +20,7 @@ import type { TenantDataConnection, DataConnectionRequest } from '../../types/mo
 import { SchemaTree } from './SchemaTree'
 import { discoverSchema, type SchemaField } from './schemaDiscovery'
 import { projectSchemaThroughFilter } from './schema'
-import { onKeyActivate } from '../../utils/a11y'
+import { onKeyActivate, treeNodeKeyDown } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
@@ -2143,6 +2143,11 @@ function FilterConfig({
       return (
         <div>
           <div
+            role="treeitem"
+            aria-expanded={isExpanded}
+            aria-selected={isSelectedAsList}
+            aria-level={depth + 1}
+            tabIndex={0}
             style={{
               display: 'flex', alignItems: 'center', gap: '4px',
               padding: '4px 4px 4px ' + indent + 'px', cursor: 'pointer',
@@ -2154,6 +2159,7 @@ function FilterConfig({
               isExpanded ? next.delete(path) : next.add(path)
               setExpandedPaths(next)
             }}
+            onKeyDown={treeNodeKeyDown(isExpanded)}
           >
             <span style={{ fontSize: '10px', color: '#6b7280', width: '12px', textAlign: 'center', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
             <span style={{ fontSize: '11px', color: '#1e40af', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -2174,7 +2180,7 @@ function FilterConfig({
             )}
           </div>
           {isExpanded && data.length > 0 && (
-            <div style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
+            <div role="group" style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
               {renderTree(data[0], path, depth + 1, isSelectedAsList || insideListPath, parentMatched)}
             </div>
           )}
@@ -2203,6 +2209,11 @@ function FilterConfig({
               return (
                 <div key={key}>
                   <div
+                    role="treeitem"
+                    aria-expanded={isExpanded}
+                    aria-selected={false}
+                    aria-level={depth + 1}
+                    tabIndex={0}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '4px',
                       padding: '3px 4px 3px ' + indent + 'px', cursor: 'pointer',
@@ -2219,12 +2230,13 @@ function FilterConfig({
                       }
                       setExpandedPaths(next)
                     }}
+                    onKeyDown={treeNodeKeyDown(isExpanded)}
                   >
                     <span style={{ fontSize: '10px', color: '#6b7280', width: '12px', textAlign: 'center', flexShrink: 0 }}>{isExpanded ? '▾' : '▸'}</span>
                     <span style={{ fontSize: '11px', color: '#374151', fontFamily: 'monospace', fontWeight: 500 }}>{key}</span>
                   </div>
                   {isExpanded && (
-                    <div style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
+                    <div role="group" style={{ borderLeft: '1px solid #e2e8f0', marginLeft: indent + 8 }}>
                       {renderTree(val, fullPath, depth + 1, insideListPath, (keyMatches && !term.includes('.')) || parentMatched)}
                     </div>
                   )}
@@ -2256,7 +2268,12 @@ function FilterConfig({
             }
 
             return (
-              <div key={key} style={{
+              <div key={key}
+                role="treeitem"
+                aria-selected={isAlreadyAdded}
+                aria-level={depth + 1}
+                tabIndex={0}
+                style={{
                 display: 'flex', alignItems: 'center', gap: '4px',
                 padding: '2px 4px 2px ' + (indent + 12) + 'px',
                 borderRadius: '4px', overflow: 'hidden',
@@ -2264,6 +2281,7 @@ function FilterConfig({
                 cursor: isAlreadyAdded ? 'default' : 'pointer',
               }}
               onClick={addField}
+              onKeyDown={onKeyActivate}
               >
                 <span style={{ fontSize: '11px', fontFamily: 'monospace', color: isAlreadyAdded ? '#16a34a' : '#374151', fontWeight: highlightMatch || isAlreadyAdded ? 600 : 400, whiteSpace: 'nowrap' }}>{key}</span>
                 <span style={{ fontSize: '10px', color: '#94a3b8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{shortVal}</span>
@@ -2329,7 +2347,7 @@ function FilterConfig({
                 Click fields to add them. Click a list to "Split into rows".
               </p>
             </div>
-            <div style={{ maxHeight: '350px', overflowY: 'auto', overflowX: 'hidden', padding: '4px 0' }}>
+            <div role="tree" aria-label="Data structure" style={{ maxHeight: '350px', overflowY: 'auto', overflowX: 'hidden', padding: '4px 0' }}>
               {renderTree(sampleData, '', 0, false)}
             </div>
           </div>
