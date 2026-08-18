@@ -147,9 +147,10 @@ export default function ConnectionRequestsPage() {
         <div className="mb-6 p-4 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg space-y-4">
           <h3 className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Send Connection Request</h3>
           <div>
-            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1">Target Workspace</label>
+            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1" htmlFor="cr-target-select">Target Workspace</label>
             {otherTenants.length > 0 && (
               <select
+                id="cr-target-select"
                 value={otherTenants.some(t => t.id === targetTenantId) ? targetTenantId : ''}
                 onChange={e => setTargetTenantId(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 mb-2"
@@ -160,8 +161,9 @@ export default function ConnectionRequestsPage() {
                 ))}
               </select>
             )}
-            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1">{otherTenants.length > 0 ? 'Or paste an API key' : 'Target API Key'}</label>
+            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1" htmlFor="cr-target-key">{otherTenants.length > 0 ? 'Or paste an API key' : 'Target API Key'}</label>
             <input
+              id="cr-target-key"
               type="text"
               value={otherTenants.some(t => t.id === targetTenantId) ? '' : targetTenantId}
               onChange={e => setTargetTenantId(e.target.value)}
@@ -170,8 +172,9 @@ export default function ConnectionRequestsPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1">Permission Type</label>
+            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1" htmlFor="cr-perm">Permission Type</label>
             <select
+              id="cr-perm"
               value={permissionType}
               onChange={e => setPermissionType(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100"
@@ -182,8 +185,9 @@ export default function ConnectionRequestsPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1">Message (optional)</label>
+            <label className="block text-xs text-neutral-500 dark:text-neutral-400 mb-1" htmlFor="cr-message">Message (optional)</label>
             <input
+              id="cr-message"
               type="text"
               value={message}
               onChange={e => setMessage(e.target.value)}
@@ -249,9 +253,13 @@ export default function ConnectionRequestsPage() {
               <p className="text-sm text-neutral-500">No connections found. You can still approve without sharing specific connections.</p>
             ) : (
               <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+                {/* Each label wraps its checkbox (htmlFor/id) but its accessible name
+                    is the dynamic {conn.name}, which the rule can't verify statically. */}
+                {/* eslint-disable jsx-a11y/label-has-associated-control */}
                 {myConnections.map(conn => (
-                  <label key={conn.id} className="flex items-center gap-3 p-2 rounded hover:bg-neutral-50 dark:hover:bg-neutral-700 cursor-pointer">
+                  <label key={conn.id} htmlFor={`share-${conn.id}`} className="flex items-center gap-3 p-2 rounded hover:bg-neutral-50 dark:hover:bg-neutral-700 cursor-pointer">
                     <input
+                      id={`share-${conn.id}`}
                       type="checkbox"
                       checked={selectedSharedIds.includes(conn.id)}
                       onChange={() => toggleSharedConnection(conn.id)}
@@ -263,6 +271,7 @@ export default function ConnectionRequestsPage() {
                     </div>
                   </label>
                 ))}
+                {/* eslint-enable jsx-a11y/label-has-associated-control */}
               </div>
             )}
 

@@ -167,8 +167,9 @@ export default function ConnectionsList() {
 
         {/* Filters Section */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center animate-fade-in">
-          <label className="label">Status Filter:</label>
+          <label className="label" htmlFor="cl-status">Status Filter:</label>
           <select
+            id="cl-status"
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value as StatusFilter)}
             className="input-base"

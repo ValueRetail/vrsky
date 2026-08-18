@@ -26,12 +26,12 @@ export default defineConfig([
       // components (node kind), which is not the DOM ARIA attribute. ignoreNonDOM
       // stops the rule from flagging those custom-component props.
       'jsx-a11y/aria-role': ['error', { ignoreNonDOM: true }],
-      // Adopting jsx-a11y on an existing UI: the systematic sources (shared
-      // StyledInput/StyledSelect) are fixed; the remaining raw-label + clickable-
-      // div findings are surfaced as WARNINGS so `npm run lint` stays green while
-      // they're burned down incrementally (then ratcheted back to error). New
-      // code still gets the feedback in-editor + in CI logs.
-      'jsx-a11y/label-has-associated-control': 'warn',
+      // label-has-associated-control is fully burned down → enforced as error so
+      // regressions fail the build. The remaining clickable-<div> keyboard
+      // findings (pipeline canvas + context menus) need a proper keyboard-nav
+      // design, and no-autofocus fires on two intentional just-opened-field
+      // focuses; both stay WARN until addressed, so `npm run lint` stays green
+      // while new violations are still surfaced in-editor + CI.
       'jsx-a11y/no-static-element-interactions': 'warn',
       'jsx-a11y/click-events-have-key-events': 'warn',
       'jsx-a11y/no-autofocus': 'warn',
