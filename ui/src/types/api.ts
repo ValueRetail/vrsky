@@ -51,7 +51,7 @@ export interface ListConnectionsResponse {
   page_size: number
 }
 
-export interface UpdateConnectionResponse extends GetConnectionResponse {}
+export type UpdateConnectionResponse = GetConnectionResponse
 
 export interface DeleteConnectionResponse {
   success: boolean
@@ -130,9 +130,9 @@ export interface AutoGeneratorStatusResponse {
   uptime?: string
 }
 
-export interface StartGeneratorResponse extends AutoGeneratorStatusResponse {}
+export type StartGeneratorResponse = AutoGeneratorStatusResponse
 
-export interface StopGeneratorResponse extends AutoGeneratorStatusResponse {}
+export type StopGeneratorResponse = AutoGeneratorStatusResponse
 
 // Health & Status
 export interface HealthResponse {

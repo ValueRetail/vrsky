@@ -347,7 +347,7 @@ describe('MessageProgressBar Component', () => {
 
   describe('Accessibility', () => {
     it('should render proper structure for screen readers', () => {
-      const { container } = render(
+      render(
         <MessageProgressBar messagesIn={100} messagesOut={50} throughputMps={10} />
       )
 

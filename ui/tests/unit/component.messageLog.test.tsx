@@ -2,7 +2,7 @@
  * MessageLog Component Tests
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MessageLog, type MessageLogEntry } from '@/components/TestData/MessageLog'
 
