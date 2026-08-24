@@ -1,6 +1,6 @@
 # ADR 0002 — Large payloads through pipeline transforms (filter / converter)
 
-- **Status:** Proposed
+- **Status:** Accepted (phase A implemented in the same PR)
 - **Date:** 2026-08-24
 - **Relates to:** #187, [ADR 0001](0001-streaming-payload-contract.md) (phase 2),
   PRs #189–#197

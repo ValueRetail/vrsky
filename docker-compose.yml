@@ -666,6 +666,14 @@ services:
       # Distributed tracing (#87): export to the collector for tail-sampling.
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
       OTEL_SERVICE_NAME: "data-converter"
+      # Claim-check spill store (ADR 0002 phase A): rehydrate offloaded inputs,
+      # offload large outputs. Mirrors prod's PAYLOAD_STORE_* (bucket vrsky-objects).
+      PAYLOAD_STORE_PROVIDER: "s3"
+      PAYLOAD_STORE_BUCKET: "vrsky-objects"
+      PAYLOAD_STORE_ENDPOINT: "http://minio-test:9000"
+      PAYLOAD_STORE_REGION: "us-east-1"
+      PAYLOAD_STORE_ACCESS_KEY: "minioadmin"
+      PAYLOAD_STORE_SECRET_KEY: "minioadmin"
     ports:
       - "127.0.0.1:9600:9600"
     depends_on:
@@ -1149,7 +1157,8 @@ services:
       /bin/sh -c "
       until mc alias set local http://minio-test:9000 minioadmin minioadmin; do echo 'waiting for minio'; sleep 1; done;
       mc mb -p local/vrsky-bucket || true;
-      echo 'minio bucket ready';
+      mc mb -p local/vrsky-objects || true;
+      echo 'minio buckets ready';
       "
     networks:
       - vrsky-network
@@ -1411,6 +1420,14 @@ services:
       # Distributed tracing (#87): export to the collector for tail-sampling.
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
       OTEL_SERVICE_NAME: "data-filter"
+      # Claim-check spill store (ADR 0002 phase A): rehydrate offloaded inputs,
+      # offload large outputs. Mirrors prod's PAYLOAD_STORE_* (bucket vrsky-objects).
+      PAYLOAD_STORE_PROVIDER: "s3"
+      PAYLOAD_STORE_BUCKET: "vrsky-objects"
+      PAYLOAD_STORE_ENDPOINT: "http://minio-test:9000"
+      PAYLOAD_STORE_REGION: "us-east-1"
+      PAYLOAD_STORE_ACCESS_KEY: "minioadmin"
+      PAYLOAD_STORE_SECRET_KEY: "minioadmin"
     ports:
       - "127.0.0.1:9700:9700"
     depends_on:
