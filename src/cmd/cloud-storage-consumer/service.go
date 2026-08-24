@@ -384,7 +384,10 @@ func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID strin
 // multi-GB object transfers with a bounded buffer instead of being read into
 // memory whole. Returns the payload size and whether the streaming path was used.
 func (s *cloudConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string) (int64, bool, error) {
-	if s.publishStream == nil {
+	// inlineMax <= 0 means the SDK has offload switched off entirely (everything
+	// travels inline), so streaming here would contradict that configuration —
+	// and a negative value would panic when sizing the peek buffer below.
+	if s.publishStream == nil || s.inlineMax <= 0 {
 		data, ct, err := store.Get(ctx, key)
 		if err != nil {
 			return 0, false, fmt.Errorf("get: %w", err)

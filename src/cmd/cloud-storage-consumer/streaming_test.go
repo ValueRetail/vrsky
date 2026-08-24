@@ -147,6 +147,30 @@ func TestFetchAndPublish_NoStreamingFallsBackToBufferedGet(t *testing.T) {
 	}
 }
 
+// PAYLOAD_INLINE_MAX_BYTES <= 0 switches offload off in the SDK (everything
+// inline), so the connector must not stream either — and must not panic sizing a
+// peek buffer from a negative threshold.
+func TestFetchAndPublish_OffloadDisabledStaysInline(t *testing.T) {
+	payload := bytes.Repeat([]byte("B"), 512)
+	for _, inlineMax := range []int{0, -1, -512} {
+		store := &fakeStore{objects: map[string][]byte{"in/big.bin": payload}}
+		probe := &ingestProbe{}
+		s := newTestConsumer(probe, inlineMax, true) // publishStream IS available
+
+		_, streamed, err := s.fetchAndPublish(context.Background(), "conn-1", "tenant-x",
+			store, &cloudConfig{}, "in/big.bin")
+		if err != nil {
+			t.Fatalf("inlineMax=%d: %v", inlineMax, err)
+		}
+		if streamed {
+			t.Errorf("inlineMax=%d: offload is disabled, nothing should stream", inlineMax)
+		}
+		if probe.inline == nil || !bytes.Equal(probe.inline.Payload, payload) {
+			t.Errorf("inlineMax=%d: expected the whole object published inline", inlineMax)
+		}
+	}
+}
+
 // Content type is sniffed from the peeked head, so a streamed object is still
 // typed even though it was never fully read into memory.
 func TestFetchAndPublish_StreamedObjectSniffsContentTypeFromHead(t *testing.T) {
