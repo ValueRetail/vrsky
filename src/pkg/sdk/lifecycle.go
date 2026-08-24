@@ -443,6 +443,9 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 		// Rehydrate an offloaded payload (claim-check) before the connector sees
 		// it. No-op for inline payloads. A transient store error is returned as
 		// retriable so the message is redelivered rather than delivered empty.
+		// Capture the ref first — rehydrate clears it — so we can reclaim the
+		// object once this hop has consumed it.
+		spillRef := env.PayloadRef
 		if rerr := rehydrate(ctx, res.payloadStore, env); rerr != nil {
 			span.RecordError(rerr)
 			span.SetStatus(codes.Error, rerr.Error())
@@ -451,6 +454,9 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 
 		derr := deliver(ctx, env)
 		if derr == nil {
+			// Delivered/republished — the inbound spill object is now orphaned;
+			// reclaim it eagerly (best-effort; TTL backstops the rest).
+			cleanupSpill(ctx, res.payloadStore, spillRef, logger)
 			return nil
 		}
 		span.RecordError(derr)

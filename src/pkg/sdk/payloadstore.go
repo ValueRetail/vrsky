@@ -103,6 +103,21 @@ func offloadIfLarge(ctx context.Context, store objectstore.ObjectStore, env *env
 	return true, nil
 }
 
+// cleanupSpill best-effort deletes an offloaded object once the consumer that
+// read it has finished (delivered/republished successfully). Each hop re-offloads
+// under a fresh envelope ID, so the inbound object is otherwise orphaned; this
+// reclaims it immediately in the common case. Failures are swallowed — the bucket
+// lifecycle TTL is the backstop that reaps anything a delete misses (a crash, a
+// deliver-ok/ack-fail race, or a store hiccup).
+func cleanupSpill(ctx context.Context, store objectstore.ObjectStore, ref string, logger *slog.Logger) {
+	if ref == "" || store == nil {
+		return
+	}
+	if err := store.Delete(ctx, ref); err != nil {
+		logger.Warn("spill cleanup failed; lifecycle TTL will reap it", "ref", ref, "error", err)
+	}
+}
+
 // rehydrate loads an offloaded payload back into the envelope before the
 // connector sees it, and clears the reference. No-op when the payload is inline.
 // A missing/unreadable object is returned as an error so the message is retried

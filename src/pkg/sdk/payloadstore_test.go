@@ -154,6 +154,28 @@ func TestRehydrate_RefButNoStoreErrors(t *testing.T) {
 	}
 }
 
+func TestCleanupSpill_DeletesObject(t *testing.T) {
+	store := newMemStore()
+	env := mkEnv(bytes.Repeat([]byte("A"), 1000))
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
+		t.Fatalf("offloadIfLarge: %v", err)
+	}
+	ref := env.PayloadRef
+	if _, ok := store.objects[ref]; !ok {
+		t.Fatalf("object %q should exist before cleanup", ref)
+	}
+	cleanupSpill(context.Background(), store, ref, slog.Default())
+	if _, ok := store.objects[ref]; ok {
+		t.Errorf("object %q should be deleted after cleanup", ref)
+	}
+}
+
+func TestCleanupSpill_NoopOnEmptyRefOrNilStore(t *testing.T) {
+	// Neither should panic or error.
+	cleanupSpill(context.Background(), newMemStore(), "", slog.Default())
+	cleanupSpill(context.Background(), nil, "spill/t/c/e", slog.Default())
+}
+
 func TestOffloadIfLarge_ThresholdDisabled(t *testing.T) {
 	store := newMemStore()
 	env := mkEnv(bytes.Repeat([]byte("A"), 1000))

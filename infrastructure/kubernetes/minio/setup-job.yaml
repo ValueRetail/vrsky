@@ -31,7 +31,12 @@ spec:
               echo "Creating default bucket: vrsky-objects..."
               mc mb --ignore-existing vrsky-minio/vrsky-objects
 
-              echo "Setting lifecycle policy (15 minute TTL for temp objects)..."
+              echo "Setting lifecycle policies (expire temp/ and spill/ objects)..."
+              # spill/ holds large-payload claim-check offloads (#187). Workers
+              # delete these eagerly after each hop, so this rule is only a
+              # backstop for objects orphaned by a crash/retry; 1 day is the S3
+              # lifecycle minimum granularity and safely outlives the 15-min
+              # envelope TTL, so no in-flight message loses its payload.
               cat > /tmp/lifecycle.json <<EOF
               {
                 "Rules": [
@@ -40,6 +45,16 @@ spec:
                     "Status": "Enabled",
                     "Filter": {
                       "Prefix": "temp/"
+                    },
+                    "Expiration": {
+                      "Days": 1
+                    }
+                  },
+                  {
+                    "ID": "DeleteSpillPayloads",
+                    "Status": "Enabled",
+                    "Filter": {
+                      "Prefix": "spill/"
                     },
                     "Expiration": {
                       "Days": 1
