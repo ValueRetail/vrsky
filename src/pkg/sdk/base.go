@@ -36,8 +36,9 @@ type Resources struct {
 	// payloadStore + inlineMaxBytes drive the large-payload claim-check (see
 	// payloadstore.go). Unexported so connectors don't couple to them — only the
 	// SDK publish/consume path uses them. payloadStore is nil when unconfigured.
-	payloadStore   objectstore.ObjectStore
-	inlineMaxBytes int
+	payloadStore      objectstore.ObjectStore
+	inlineMaxBytes    int
+	rehydrateMaxBytes int64
 }
 
 // healthToggle is the narrow slice of the health server connectors may touch.

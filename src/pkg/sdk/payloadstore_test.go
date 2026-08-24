@@ -20,6 +20,7 @@ type memStore struct {
 	objects map[string][]byte
 	ctByKey map[string]string // optional per-key content type
 	puts    int
+	gets    int
 }
 
 func newMemStore() *memStore { return &memStore{objects: map[string][]byte{}} }
@@ -48,6 +49,7 @@ func (m *memStore) Put(_ context.Context, key string, body []byte, _ string) err
 func (m *memStore) GetStream(_ context.Context, key string) (io.ReadCloser, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.gets++
 	b, ok := m.objects[key]
 	if !ok {
 		return nil, "", io.ErrUnexpectedEOF
@@ -101,7 +103,7 @@ func TestOffloadRehydrate_LargePayloadRoundTrips(t *testing.T) {
 
 	// The (small) envelope is what would ride NATS — verify the offloaded object
 	// is retrievable and rehydrate restores the exact bytes.
-	if err := rehydrate(context.Background(), store, env); err != nil {
+	if err := rehydrate(context.Background(), store, env, defaultRehydrateMaxBytes); err != nil {
 		t.Fatalf("rehydrate: %v", err)
 	}
 	if !bytes.Equal(env.Payload, big) {
@@ -146,7 +148,7 @@ func TestOffloadIfLarge_NoStoreKeepsInline(t *testing.T) {
 
 func TestRehydrate_RefButNoStoreErrors(t *testing.T) {
 	env := &envelope.Envelope{ID: "e", PayloadRef: "spill/t/c/e"}
-	err := rehydrate(context.Background(), nil, env)
+	err := rehydrate(context.Background(), nil, env, defaultRehydrateMaxBytes)
 	if err == nil {
 		t.Fatal("expected error when a ref is set but no store is configured")
 	}
@@ -163,11 +165,115 @@ func TestRehydrate_FillsContentTypeFromStore(t *testing.T) {
 	store.objects[ref] = []byte("a,b\n1,2\n")
 	env := &envelope.Envelope{ID: "env-1", PayloadRef: ref}
 
-	if err := rehydrate(context.Background(), store, env); err != nil {
+	if err := rehydrate(context.Background(), store, env, defaultRehydrateMaxBytes); err != nil {
 		t.Fatalf("rehydrate: %v", err)
 	}
 	if env.ContentType != "text/csv" {
 		t.Errorf("ContentType = %q, want text/csv (from store)", env.ContentType)
+	}
+}
+
+func TestOffload_StampsChecksum(t *testing.T) {
+	store := newMemStore()
+	payload := bytes.Repeat([]byte("A"), 1000)
+	env := mkEnv(payload)
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
+		t.Fatalf("offloadIfLarge: %v", err)
+	}
+	want := payloadChecksum(payload)
+	if env.Checksum != want {
+		t.Errorf("Checksum = %q, want %q", env.Checksum, want)
+	}
+	if !strings.HasPrefix(env.Checksum, "sha256:") {
+		t.Errorf("checksum should be sha256-prefixed, got %q", env.Checksum)
+	}
+}
+
+func TestRehydrate_RejectsOverCapBeforeDownload(t *testing.T) {
+	store := newMemStore()
+	env := mkEnv(bytes.Repeat([]byte("A"), 1000))
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
+		t.Fatalf("offloadIfLarge: %v", err)
+	}
+	// Cap below the payload size → rejected without reading the object.
+	before := store.gets
+	err := rehydrate(context.Background(), store, env, 500)
+	if err == nil {
+		t.Fatal("expected an over-cap rehydrate to fail")
+	}
+	if !strings.Contains(err.Error(), "rehydrate cap") {
+		t.Errorf("error should explain the cap, got: %v", err)
+	}
+	if store.gets != before {
+		t.Errorf("over-cap payload should be rejected without downloading (gets went %d→%d)", before, store.gets)
+	}
+	// The envelope must stay intact so the DLQ entry still points at the object.
+	if env.PayloadRef == "" {
+		t.Error("PayloadRef should be preserved on rejection")
+	}
+}
+
+func TestRehydrate_CapDisabledAllowsAnySize(t *testing.T) {
+	store := newMemStore()
+	env := mkEnv(bytes.Repeat([]byte("A"), 1000))
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
+		t.Fatalf("offloadIfLarge: %v", err)
+	}
+	if err := rehydrate(context.Background(), store, env, 0); err != nil {
+		t.Fatalf("cap<=0 disables the limit, got: %v", err)
+	}
+	if len(env.Payload) != 1000 {
+		t.Errorf("payload not restored: %d bytes", len(env.Payload))
+	}
+}
+
+func TestRehydrate_BoundsReadWhenPayloadSizeUnderstatesObject(t *testing.T) {
+	store := newMemStore()
+	const ref = "spill/tenant-x/conn-1/env-1"
+	store.objects[ref] = bytes.Repeat([]byte("A"), 1000)
+	// Envelope lies: claims 10 bytes, object is 1000. The cap must still hold.
+	env := &envelope.Envelope{ID: "env-1", PayloadRef: ref, PayloadSize: 10}
+
+	err := rehydrate(context.Background(), store, env, 500)
+	if err == nil {
+		t.Fatal("expected the read-side bound to reject an understated payload")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRehydrate_ChecksumMismatchIsDetected(t *testing.T) {
+	store := newMemStore()
+	env := mkEnv(bytes.Repeat([]byte("A"), 1000))
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
+		t.Fatalf("offloadIfLarge: %v", err)
+	}
+	// Corrupt the stored object behind the envelope's back.
+	store.objects[env.PayloadRef] = bytes.Repeat([]byte("B"), 1000)
+
+	err := rehydrate(context.Background(), store, env, defaultRehydrateMaxBytes)
+	if err == nil {
+		t.Fatal("expected a checksum mismatch to be detected")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRehydrate_NoChecksumStillWorks(t *testing.T) {
+	// Envelopes published before checksums existed (or by an older worker during
+	// a rollout) carry no checksum — they must still rehydrate.
+	store := newMemStore()
+	const ref = "spill/tenant-x/conn-1/legacy"
+	store.objects[ref] = []byte("legacy-payload")
+	env := &envelope.Envelope{ID: "legacy", PayloadRef: ref, PayloadSize: 14}
+
+	if err := rehydrate(context.Background(), store, env, defaultRehydrateMaxBytes); err != nil {
+		t.Fatalf("rehydrate without checksum should succeed: %v", err)
+	}
+	if string(env.Payload) != "legacy-payload" {
+		t.Errorf("payload = %q", env.Payload)
 	}
 }
 
@@ -181,5 +287,85 @@ func TestOffloadIfLarge_ThresholdDisabled(t *testing.T) {
 	}
 	if offloaded {
 		t.Fatal("offload should be disabled when inlineMax <= 0")
+	}
+}
+
+// captureLogs returns a logger writing into buf, so a test can assert that a
+// misconfiguration was actually reported and not just quietly corrected.
+func captureLogs(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
+
+func TestEnvBytes_MissingUsesDefault(t *testing.T) {
+	var buf bytes.Buffer
+	if got := envBytes("SDK_TEST_ABSENT_BYTES", 4096, captureLogs(&buf)); got != 4096 {
+		t.Fatalf("envBytes = %d, want 4096", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("an unset variable should not warn, logged: %s", buf.String())
+	}
+}
+
+// A cap an operator cannot express as an int32 is the whole reason this parses
+// as int64. 8 GiB is a plausible value for a worker with the memory to match.
+func TestEnvBytes_ParsesValuesBeyondInt32(t *testing.T) {
+	const eightGiB = int64(8) * 1024 * 1024 * 1024
+
+	var buf bytes.Buffer
+	t.Setenv(envRehydrateMax, "8589934592")
+
+	if got := rehydrateMaxFromEnv(captureLogs(&buf)); got != eightGiB {
+		t.Fatalf("rehydrateMaxFromEnv = %d, want %d", got, eightGiB)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("a valid value should not warn, logged: %s", buf.String())
+	}
+}
+
+// The failure mode this guards against: an operator raises the cap, fat-fingers
+// the value, and the worker goes on rejecting payloads at the old limit with
+// nothing in the logs to explain why.
+func TestEnvBytes_InvalidValueWarnsAndFallsBack(t *testing.T) {
+	for _, bad := range []string{"128MiB", "not-a-number", "12.5", "99999999999999999999999"} {
+		t.Run(bad, func(t *testing.T) {
+			var buf bytes.Buffer
+			t.Setenv(envRehydrateMax, bad)
+
+			got := rehydrateMaxFromEnv(captureLogs(&buf))
+			if got != defaultRehydrateMaxBytes {
+				t.Fatalf("got %d, want the default %d", got, int64(defaultRehydrateMaxBytes))
+			}
+
+			logged := buf.String()
+			if !strings.Contains(logged, envRehydrateMax) || !strings.Contains(logged, bad) {
+				t.Errorf("warning should name the variable and the offending value, got: %q", logged)
+			}
+		})
+	}
+}
+
+func TestInlineMaxFromEnv_InvalidValueWarnsAndFallsBack(t *testing.T) {
+	var buf bytes.Buffer
+	t.Setenv(envInlineMax, "256KiB")
+
+	if got := inlineMaxFromEnv(captureLogs(&buf)); got != defaultInlineMaxBytes {
+		t.Fatalf("got %d, want the default %d", got, defaultInlineMaxBytes)
+	}
+	if !strings.Contains(buf.String(), envInlineMax) {
+		t.Errorf("warning should name the variable, got: %q", buf.String())
+	}
+}
+
+// A negative value is a deliberate "switch this off", not a mistake, so it is
+// passed through rather than warned about.
+func TestEnvBytes_NegativeIsHonoured(t *testing.T) {
+	var buf bytes.Buffer
+	t.Setenv(envRehydrateMax, "-1")
+
+	if got := rehydrateMaxFromEnv(captureLogs(&buf)); got != -1 {
+		t.Fatalf("got %d, want -1 (cap disabled)", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("disabling the cap should not warn, logged: %s", buf.String())
 	}
 }
