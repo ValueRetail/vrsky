@@ -12,25 +12,23 @@
       
       
       
-        <link rel="next" href="tutorials/first-pipeline/">
-      
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>VRSky Documentation</title>
+        <title>ADR 0001 — Streaming payload contract for unbounded (multi-GB) transfers - VRSky Documentation</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +47,7 @@
       
     
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vrsky-documentation" class="md-skip">
+        <a href="#adr-0001-streaming-payload-contract-for-unbounded-multi-gb-transfers" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              ADR 0001 — Streaming payload contract for unbounded (multi-GB) transfers
             
           </span>
         </div>
@@ -216,7 +214,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -231,37 +229,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -277,59 +248,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Where to start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core concepts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Platform reference
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -393,7 +311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tutorials/first-pipeline/" class="md-nav__link">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
         
   
   
@@ -421,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/tutorial/first-connector/" class="md-nav__link">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
         
   
   
@@ -508,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -536,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/getting-started/" class="md-nav__link">
+      <a href="../../guide/getting-started/" class="md-nav__link">
         
   
   
@@ -564,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/workspaces-and-members/" class="md-nav__link">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
         
   
   
@@ -592,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/building-a-pipeline/" class="md-nav__link">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
         
   
   
@@ -620,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/connectors-and-nodes/" class="md-nav__link">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
         
   
   
@@ -648,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/credentials-and-oauth/" class="md-nav__link">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
         
   
   
@@ -676,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/deploying-and-monitoring/" class="md-nav__link">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
         
   
   
@@ -704,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/data-sharing/" class="md-nav__link">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
         
   
   
@@ -732,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/settings/" class="md-nav__link">
+      <a href="../../guide/settings/" class="md-nav__link">
         
   
   
@@ -760,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/troubleshooting/" class="md-nav__link">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
         
   
   
@@ -847,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/install/" class="md-nav__link">
+      <a href="../../operator/install/" class="md-nav__link">
         
   
   
@@ -875,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/upgrade/" class="md-nav__link">
+      <a href="../../operator/upgrade/" class="md-nav__link">
         
   
   
@@ -903,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/backup/" class="md-nav__link">
+      <a href="../../operator/backup/" class="md-nav__link">
         
   
   
@@ -931,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/monitoring/" class="md-nav__link">
+      <a href="../../operator/monitoring/" class="md-nav__link">
         
   
   
@@ -959,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/troubleshooting/" class="md-nav__link">
+      <a href="../../operator/troubleshooting/" class="md-nav__link">
         
   
   
@@ -987,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -1015,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SLA/" class="md-nav__link">
+      <a href="../../SLA/" class="md-nav__link">
         
   
   
@@ -1043,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DEPLOYMENT_GUIDE/" class="md-nav__link">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
         
   
   
@@ -1071,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DR/" class="md-nav__link">
+      <a href="../../DR/" class="md-nav__link">
         
   
   
@@ -1158,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/" class="md-nav__link">
+      <a href="../../connectors/" class="md-nav__link">
         
   
   
@@ -1186,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/http/" class="md-nav__link">
+      <a href="../../connectors/http/" class="md-nav__link">
         
   
   
@@ -1214,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/api/" class="md-nav__link">
+      <a href="../../connectors/api/" class="md-nav__link">
         
   
   
@@ -1242,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/database/" class="md-nav__link">
+      <a href="../../connectors/database/" class="md-nav__link">
         
   
   
@@ -1270,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/file/" class="md-nav__link">
+      <a href="../../connectors/file/" class="md-nav__link">
         
   
   
@@ -1298,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sftp/" class="md-nav__link">
+      <a href="../../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1326,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/cloud-storage/" class="md-nav__link">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1354,7 +1272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/kafka/" class="md-nav__link">
+      <a href="../../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1382,7 +1300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/rabbitmq/" class="md-nav__link">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1410,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/salesforce/" class="md-nav__link">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1438,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sitoo/" class="md-nav__link">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1466,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/front-systems/" class="md-nav__link">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1494,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/business-central/" class="md-nav__link">
+      <a href="../../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1522,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/visma/" class="md-nav__link">
+      <a href="../../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1550,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/brightpearl/" class="md-nav__link">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1578,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/tenant/" class="md-nav__link">
+      <a href="../../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1606,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/filters-converters/" class="md-nav__link">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -1693,7 +1611,7 @@
   
   
     <li class="md-nav__item">
-      <a href="security/whitepaper/" class="md-nav__link">
+      <a href="../../security/whitepaper/" class="md-nav__link">
         
   
   
@@ -1721,7 +1639,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SECURITY/" class="md-nav__link">
+      <a href="../../SECURITY/" class="md-nav__link">
         
   
   
@@ -1756,7 +1674,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/api/" class="md-nav__link">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1835,7 +1753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="CONNECTION_NODE_SPEC/" class="md-nav__link">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
         
   
   
@@ -1863,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TENANT_MODEL/" class="md-nav__link">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
         
   
   
@@ -1891,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="NATS_ARCHITECTURE/" class="md-nav__link">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -1919,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="OBSERVABILITY/" class="md-nav__link">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
         
   
   
@@ -1947,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TRACING/" class="md-nav__link">
+      <a href="../../TRACING/" class="md-nav__link">
         
   
   
@@ -1975,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="LOAD/" class="md-nav__link">
+      <a href="../../LOAD/" class="md-nav__link">
         
   
   
@@ -2003,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="oauth-framework/" class="md-nav__link">
+      <a href="../../oauth-framework/" class="md-nav__link">
         
   
   
@@ -2031,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/" class="md-nav__link">
+      <a href="../../sdk/" class="md-nav__link">
         
   
   
@@ -2086,10 +2004,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Where to start
+        Context
       
     </span>
   </a>
@@ -2097,10 +2015,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
+  <a href="#decision-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core concepts
+        Decision drivers
       
     </span>
   </a>
@@ -2108,10 +2026,121 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
+  <a href="#options-considered" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Platform reference
+        Options considered
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Options considered">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-big-bang-change-all-four-interfaces-to-ioreader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Big-bang: change all four interfaces to io.Reader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-opt-in-streaming-capability-detected-by-type-assertion-chosen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Opt-in streaming capability, detected by type assertion ← chosen
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-no-rehydrate-hand-connectors-the-payloadref-and-let-them-fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. No rehydrate: hand connectors the PayloadRef and let them fetch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-streaming-edges-consumer-producer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — streaming edges (consumer + producer)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-record-streaming-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — record-streaming transforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-presigned-urls-zero-copy-edges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — presigned URLs (zero-copy edges)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test plan
       
     </span>
   </a>
@@ -2135,65 +2164,170 @@
 
 
 
-<h1 id="vrsky-documentation">VRSky Documentation<a class="headerlink" href="#vrsky-documentation" title="Permanent link">&para;</a></h1>
-<p>VRSky is a multi-tenant integration platform (iPaaS): tenants build <strong>pipelines</strong>
-that move data from a <strong>source</strong> (consumer) through optional <strong>filters</strong> and
-<strong>converters</strong> to a <strong>destination</strong> (producer). Data flows through NATS
-JetStream; large payloads spill to object storage.</p>
-<h2 id="where-to-start">Where to start<a class="headerlink" href="#where-to-start" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>You are…</th>
-<th>Start here</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>New</strong> and want a pipeline running</td>
-<td><a href="tutorials/first-pipeline/">Build your first pipeline</a> (≤10 min)</td>
-</tr>
-<tr>
-<td><strong>Integrating</strong> a specific system</td>
-<td><a href="connectors/">Connectors</a></td>
-</tr>
-<tr>
-<td><strong>Operating</strong> VRSky in production</td>
-<td><a href="operator/install/">Operator guide</a></td>
-</tr>
-<tr>
-<td><strong>Building a connector</strong></td>
-<td><a href="sdk/tutorial/first-connector/">Build your first connector</a> (≤30 min)</td>
-</tr>
-<tr>
-<td><strong>Calling the API</strong></td>
-<td><a href="reference/api/">API reference</a></td>
-</tr>
-<tr>
-<td><strong>Evaluating security</strong></td>
-<td><a href="security/whitepaper/">Security whitepaper</a></td>
-</tr>
-</tbody>
-</table>
-<h2 id="core-concepts">Core concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
+<h1 id="adr-0001-streaming-payload-contract-for-unbounded-multi-gb-transfers">ADR 0001 — Streaming payload contract for unbounded (multi-GB) transfers<a class="headerlink" href="#adr-0001-streaming-payload-contract-for-unbounded-multi-gb-transfers" title="Permanent link">&para;</a></h1>
 <ul>
-<li><strong>Connection / pipeline</strong> — a graph of nodes (<code>consumer</code> → optional
-  <code>filter</code>/<code>converter</code> → <code>producer</code>) plus the edges between them. Created in the
-  visual builder or the onboarding wizard, deployed as a running set of workers.</li>
-<li><strong>Connector</strong> — a worker implementing one node kind, keyed by <code>config.type</code>
-  (e.g. <code>http</code>, <code>database</code>, <code>kafka</code>). See <a href="connectors/">Connectors</a>.</li>
-<li><strong>Tenant / workspace</strong> — the isolation boundary. Every resource is scoped to a
-  tenant; see the <a href="TENANT_MODEL/">tenant model</a>.</li>
-<li><strong>Secrets</strong> — credentials are stored encrypted and referenced as
-  <code>&lt;field&gt;_secret_id</code>; workers resolve them at runtime. See the
-  <a href="security/whitepaper/">security whitepaper</a>.</li>
+<li><strong>Status:</strong> Accepted</li>
+<li><strong>Date:</strong> 2026-08-24</li>
+<li><strong>Relates to:</strong> #187 (large-payload handling), PR #189 (claim-check + streaming
+  object I/O), PR #190 (Azure Copy streaming)</li>
 </ul>
-<h2 id="platform-reference">Platform reference<a class="headerlink" href="#platform-reference" title="Permanent link">&para;</a></h2>
-<p>Architecture and internals — <a href="NATS_ARCHITECTURE/">NATS architecture</a>,
-<a href="OBSERVABILITY/">observability</a>, <a href="TRACING/">tracing</a>,
-<a href="LOAD/">load benchmarks</a>, <a href="oauth-framework/">OAuth framework</a>,
-<a href="sdk/">connector SDK</a>, <a href="scalability/">scalability</a>.</p>
-<p>Design decisions — <a href="adr/0001-streaming-payload-contract/">ADR 0001: streaming payload contract</a>.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>PR #189 lifted the <em>message-bus</em> ceiling: payloads over 256 KiB are offloaded to
+object storage (claim-check) and only a <code>PayloadRef</code> rides NATS, so message size
+no longer bounds payload size. But the connector contract is still <code>[]byte</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kd">type</span><span class="w"> </span><span class="nx">Consumer</span><span class="w"> </span><span class="kd">interface</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nx">Run</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">publish</span><span class="w"> </span><span class="nx">PublishFunc</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">}</span><span class="w">            </span><span class="c1">// publishes *envelope.Envelope</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Producer</span><span class="w"> </span><span class="kd">interface</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nx">Deliver</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">env</span><span class="w"> </span><span class="o">*</span><span class="nx">envelope</span><span class="p">.</span><span class="nx">Envelope</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">}</span><span class="w">     </span><span class="c1">// env.Payload []byte</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Filter</span><span class="w"> </span><span class="kd">interface</span><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nx">Evaluate</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">env</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">keep</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="nx">out</span><span class="w"> </span><span class="o">*</span><span class="nx">Envelope</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Converter</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Convert</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">env</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">Envelope</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>The SDK <code>rehydrate</code> does <code>io.ReadAll</code> before every deliver, and consumers build
+<code>env.Payload</code> in memory before every publish. So the whole payload is
+materialized <strong>twice per hop</strong> (connector buffer + envelope), plus parsing
+overhead. Per-connection workers run with a <strong>512 MiB memory limit</strong>
+(<code>orchestrator.MemoryLimit</code>), which puts the practical payload ceiling around
+100–200 MB — far short of the multi-GB requirement, and a payload past that
+doesn't fail cleanly: the worker OOM-kills mid-message and the message retries
+into the same wall.</p>
+<p>The principle from #187 stands: <strong>pass by reference, move by streaming, never
+hold the whole payload in bus or memory</strong> — and never build our own
+chunk/split-and-reassemble protocol (provider-native multipart inside
+<code>PutStream</code> is fine; it's the storage layer's implementation detail).</p>
+<h2 id="decision-drivers">Decision drivers<a class="headerlink" href="#decision-drivers" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Multi-GB files must flow source → destination with bounded worker memory.</li>
+<li>~20 existing connectors must keep working unchanged — most (retail/ERP APIs:
+   Sitoo, Brightpearl, Business Central, Visma, SAP, Salesforce) deal in
+   paginated JSON that is <em>correctly</em> small; forcing streams on them is pure
+   churn.</li>
+<li>Filters/converters are in-memory JSON transforms and <strong>cannot</strong> hold
+   multi-GB payloads; whatever we do must give them a <em>predictable</em> behavior,
+   not a silent OOM.</li>
+<li>Today an oversized payload fails by OOM-kill; any outcome must be an
+   explicit, observable error instead.</li>
+</ol>
+<h2 id="options-considered">Options considered<a class="headerlink" href="#options-considered" title="Permanent link">&para;</a></h2>
+<h3 id="a-big-bang-change-all-four-interfaces-to-ioreader">A. Big-bang: change all four interfaces to <code>io.Reader</code><a class="headerlink" href="#a-big-bang-change-all-four-interfaces-to-ioreader" title="Permanent link">&para;</a></h3>
+<p>Every connector rewritten; transforms gain a streaming signature they mostly
+can't honor (a JSON-tree converter fundamentally needs the document). Massive
+churn for a capability only edge connectors (file, SFTP, cloud-storage, HTTP)
+can use. <strong>Rejected.</strong></p>
+<h3 id="b-opt-in-streaming-capability-detected-by-type-assertion-chosen">B. Opt-in streaming capability, detected by type assertion  ← chosen<a class="headerlink" href="#b-opt-in-streaming-capability-detected-by-type-assertion-chosen" title="Permanent link">&para;</a></h3>
+<p>Keep the existing interfaces untouched. Add <em>optional</em> companion interfaces; the
+SDK type-asserts at the chokepoints it already owns (the publish closure and
+<code>subscribeDispatch</code>) and switches to the streaming path only when both the
+connector opts in <strong>and</strong> a payload store is configured. Everything else runs
+the existing inline/rehydrate path.</p>
+<h3 id="c-no-rehydrate-hand-connectors-the-payloadref-and-let-them-fetch">C. No rehydrate: hand connectors the <code>PayloadRef</code> and let them fetch<a class="headerlink" href="#c-no-rehydrate-hand-connectors-the-payloadref-and-let-them-fetch" title="Permanent link">&para;</a></h3>
+<p>Every connector grows objectstore plumbing, credentials leak into connector
+code, and the SDK loses the single place where offload policy (thresholds,
+checksums, cleanup) lives. <strong>Rejected.</strong></p>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p>Option B, in three phases. Phase 1 is the substance; 2 and 3 are follow-ups
+that become mechanical once 1 exists.</p>
+<h3 id="phase-1-streaming-edges-consumer-producer">Phase 1 — streaming edges (consumer + producer)<a class="headerlink" href="#phase-1-streaming-edges-consumer-producer" title="Permanent link">&para;</a></h3>
+<p><strong>Consumer side</strong> — a streaming-capable consumer implements:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// PublishStreamFunc streams a large payload into the pipeline. The SDK uploads</span>
+<span class="c1">// body to the spill store (provider-native multipart; TeeReader-sha256 for the</span>
+<span class="c1">// checksum), stamps PayloadRef/PayloadSize/Checksum, and publishes the small</span>
+<span class="c1">// envelope. The payload never exists in worker memory beyond the copy buffer.</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">PublishStreamFunc</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">env</span><span class="w"> </span><span class="o">*</span><span class="nx">envelope</span><span class="p">.</span><span class="nx">Envelope</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="w"> </span><span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+
+<span class="kd">type</span><span class="w"> </span><span class="nx">StreamingConsumer</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Consumer</span>
+<span class="w">    </span><span class="nx">RunStream</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">publish</span><span class="w"> </span><span class="nx">PublishFunc</span><span class="p">,</span><span class="w"> </span><span class="nx">publishStream</span><span class="w"> </span><span class="nx">PublishStreamFunc</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>RunConsumer</code> type-asserts: a <code>StreamingConsumer</code> gets <code>RunStream</code> (with the
+plain <code>publish</code> still available for its small payloads); everyone else gets
+<code>Run</code> exactly as today. <code>publishStream</code> on a worker with no payload store
+configured returns a permanent error at first use — streaming is meaningless
+inline, and this surfaces the misconfiguration instead of buffering.</p>
+<p><strong>Producer side:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="kd">type</span><span class="w"> </span><span class="nx">StreamingProducer</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Producer</span>
+<span class="w">    </span><span class="c1">// DeliverStream is called instead of Deliver when the payload is offloaded.</span>
+<span class="w">    </span><span class="c1">// body streams from the spill store; env.Payload is nil.</span>
+<span class="w">    </span><span class="nx">DeliverStream</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">env</span><span class="w"> </span><span class="o">*</span><span class="nx">envelope</span><span class="p">.</span><span class="nx">Envelope</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="w"> </span><span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>In <code>subscribeDispatch</code>: if <code>env.PayloadRef != ""</code> and the node implements
+<code>StreamingProducer</code> → <code>GetStream</code> and hand over the reader (checksum-verifying
+wrapper); no rehydrate. Otherwise rehydrate as today.</p>
+<p><strong>Rehydrate guard (independent hardening, do first — shipped):</strong> cap <code>rehydrate</code>
+at <code>PAYLOAD_REHYDRATE_MAX_BYTES</code> (default 128 MiB — comfortable inside the
+512 MiB limit). The check runs on <code>PayloadSize</code> <em>before</em> any download, with an
+<code>io.LimitReader</code> bound on the read itself in case the declared size understates
+the object. This replaces today's OOM-kill loop with an explicit error, and is
+worth shipping before any connector opts in.</p>
+<p><em>Error classification:</em> the over-cap error is returned bare, so it rides the
+SDK's <strong>default Retriable</strong> classification, and the envelope reaches the <strong>DLQ</strong>
+after the retry budget. This is deliberate and contradicts an earlier draft of
+this ADR that said "permanent": <code>sdk.Permanent</code> <strong>acks and drops</strong> the message
+(see <code>pkg/sdk/errors.go</code>), and silently discarding a customer payload is
+unacceptable for an integration platform. Retries are cheap here because the
+rejection happens without downloading, and a DLQ'd envelope keeps its
+<code>PayloadRef</code> so an operator can inspect it and replay once a streaming-capable
+connector is in place (within the spill object's 1-day TTL).</p>
+<p><strong>Integrity (shipped with the guard):</strong> <code>Checksum string</code> (<code>sha256:&lt;hex&gt;</code>) on the
+envelope, computed during offload and verified on rehydrate. Empty checksums are
+skipped so envelopes in flight across a rollout still deliver. When streaming
+lands, <code>DeliverStream</code> verifies via a wrapping reader that errors on Close if the
+digest mismatches, and offload computes the digest with a <code>TeeReader</code> rather than
+over a buffer.</p>
+<p><strong>First adopters</strong> (they already hold an <code>io.Reader</code> from disk or network, so
+this is deleting buffering, not adding machinery): cloud-storage consumer +
+producer, file consumer + producer, SFTP consumer, http-producer. Retail/ERP
+API connectors don't change.</p>
+<h3 id="phase-2-record-streaming-transforms">Phase 2 — record-streaming transforms<a class="headerlink" href="#phase-2-record-streaming-transforms" title="Permanent link">&para;</a></h3>
+<p>Filters/converters get a predictable policy for offloaded payloads <strong>now</strong>, and
+a streaming capability <strong>later</strong>:</p>
+<ul>
+<li><strong>Default (phase 1):</strong> a <code>PayloadRef</code> envelope reaching a plain
+  filter/converter is rehydrated under the same 128 MiB cap → beyond it,
+  permanent error → DLQ ("transform does not support payloads this large").
+  Predictable, observable, no silent skip.</li>
+<li><strong>Explicit bypass:</strong> per-node config <code>"large_payloads": "passthrough"</code>
+  forwards over-cap envelopes untouched (ref and all) for pipelines where the
+  transform is only meant for the small records. Opt-in only — silently
+  skipping a transform is a correctness decision the user must make.</li>
+<li><strong>Phase 2 proper:</strong> <code>StreamingTransformer</code> for <em>record-oriented</em> formats
+  (NDJSON, CSV): SDK streams spill-object → record iterator → per-record
+  Evaluate/Convert → streamed new spill object, memory bounded by record size.
+  Only per-record transforms qualify; anything cross-record (sort, aggregate,
+  whole-document JSONPath) stays small-payload-only by nature — that's a
+  documented product boundary, not a TODO.</li>
+</ul>
+<h3 id="phase-3-presigned-urls-zero-copy-edges">Phase 3 — presigned URLs (zero-copy edges)<a class="headerlink" href="#phase-3-presigned-urls-zero-copy-edges" title="Permanent link">&para;</a></h3>
+<p><code>PresignGet</code>/<code>PresignPut</code> on <code>ObjectStore</code> (S3 presign / Azure SAS / GCS signed
+URLs), so an external system uploads or downloads <strong>directly</strong> against the
+store and even the edge worker never carries the bytes. Valuable but orthogonal
+— it changes who moves the bytes, not the contract — hence last.</p>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Positive</strong>
+- Multi-GB transfers with worker memory bounded by the multipart buffer
+  (~5–16 MiB), on 512 MiB pods, no interface breakage, no connector churn
+  outside the edge connectors that benefit.
+- Oversized payloads become explicit DLQ errors instead of OOM-kill loops —
+  strictly better operability even for pipelines that never opt in.
+- Checksums close the integrity gap flagged in #187.</p>
+<p><strong>Negative / accepted</strong>
+- Two delivery paths (inline vs streaming) live in the SDK forever; the
+  chokepoints are already centralized, which contains the cost.
+- Transforms on huge payloads are constrained by design (per-record streaming
+  or explicit passthrough). This is honest: no architecture makes a
+  whole-document JSON transform of a 5 GB payload cheap.
+- The 1-day <code>spill/</code> TTL bounds end-to-end pipeline latency for offloaded
+  payloads; fine against the 15-minute envelope TTL, but a future "park large
+  files for a day" feature would need its own prefix and rule.</p>
+<h2 id="test-plan">Test plan<a class="headerlink" href="#test-plan" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Unit: type-assertion routing (streaming vs plain, both sides), rehydrate cap
+  → permanent error, checksum mismatch → error, passthrough config.</li>
+<li>Integration (<code>-tags=integration</code>, MinIO): consumer→spill→producer round-trip
+  of a synthetic ~100 MB payload asserting the envelope on the bus stays under
+  1 KB; multi-GB verified manually against the TEST env (per the standing rule:
+  validate in TEST before prod).</li>
+</ul>
 
 
 
@@ -2249,10 +2383,10 @@ JetStream; large payloads spill to object storage.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
