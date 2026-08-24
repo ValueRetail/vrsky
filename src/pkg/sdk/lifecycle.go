@@ -304,8 +304,8 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		NATS:              nc,
 		Health:            &healthToggle{setReady: setReady, addCheck: addCheck},
 		payloadStore:      payloadStore,
-		inlineMaxBytes:    inlineMaxFromEnv(),
-		rehydrateMaxBytes: rehydrateMaxFromEnv(),
+		inlineMaxBytes:    inlineMaxFromEnv(logger),
+		rehydrateMaxBytes: rehydrateMaxFromEnv(logger),
 	}
 
 	if err := configure(ctx, res); err != nil {

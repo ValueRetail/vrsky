@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
+	"strconv"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
@@ -83,18 +85,46 @@ func openPayloadStore(ctx context.Context, logger *slog.Logger) (objectstore.Obj
 	return store, nil
 }
 
+// envBytes resolves a byte-size setting from the environment.
+//
+// Parsed as int64 rather than through envInt: these are memory limits an
+// operator may legitimately set above 2 GiB, and int is not guaranteed to be
+// 64-bit. A malformed value is logged and falls back to the default rather than
+// being swallowed — somebody raising a cap needs to find out that their value
+// did not take effect, and finding out from a warning beats finding out from a
+// payload that is still being rejected.
+func envBytes(key string, def int64, logger *slog.Logger) int64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		logger.Warn("invalid byte-size setting; falling back to the default",
+			"env", key, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return n
+}
+
 // inlineMaxFromEnv resolves the inline payload limit (PAYLOAD_INLINE_MAX_BYTES),
 // defaulting to 256 KiB. A non-positive value disables offload (everything stays
 // inline), which is the pre-claim-check behavior.
-func inlineMaxFromEnv() int {
-	return envInt(envInlineMax, defaultInlineMaxBytes)
+func inlineMaxFromEnv(logger *slog.Logger) int {
+	// Compared against len(payload), so it lives in an int. Clamped rather than
+	// truncated: a wrapped negative here would silently disable offload.
+	n := envBytes(envInlineMax, defaultInlineMaxBytes, logger)
+	if n > math.MaxInt {
+		return math.MaxInt
+	}
+	return int(n)
 }
 
 // rehydrateMaxFromEnv resolves the buffering cap (PAYLOAD_REHYDRATE_MAX_BYTES),
 // defaulting to 128 MiB. A non-positive value disables the cap (unbounded
 // buffering — only sensible if worker memory has been raised to match).
-func rehydrateMaxFromEnv() int64 {
-	return int64(envInt(envRehydrateMax, defaultRehydrateMaxBytes))
+func rehydrateMaxFromEnv(logger *slog.Logger) int64 {
+	return envBytes(envRehydrateMax, defaultRehydrateMaxBytes, logger)
 }
 
 // payloadChecksum is the canonical "sha256:<hex>" digest stamped on offloaded
@@ -148,14 +178,18 @@ func rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope
 	if store == nil {
 		return fmt.Errorf("envelope %s references offloaded payload %q but no offload store is configured", env.ID, env.PayloadRef)
 	}
-	// Reject BEFORE downloading: buffering a payload this large would OOM-kill
-	// the worker, and no retry can change that. Returning a plain error rides the
-	// SDK's default Retriable classification ON PURPOSE — Permanent would ack and
-	// silently drop a customer payload, whereas exhausting the (cheap, since we
-	// reject without downloading) retries routes the envelope to the DLQ, where
-	// an operator can inspect it and replay once a streaming-capable connector is
-	// in place. The spilled object outlives the message (1-day lifecycle TTL), so
-	// replay within that window recovers the data.
+	// Rejection happens in two stages. The declared size is checked first, so an
+	// honestly-labelled oversized payload costs nothing to refuse; but
+	// PayloadSize is envelope metadata and may be absent or understated, so the
+	// read below is bounded as well. Either way the worker never buffers a
+	// payload this large, which is the OOM no retry could fix.
+	//
+	// Returning a plain error rides the SDK's default Retriable classification ON
+	// PURPOSE — Permanent would ack and silently drop a customer payload, whereas
+	// exhausting the retries routes the envelope to the DLQ, where an operator can
+	// inspect it and replay once a streaming-capable connector is in place. The
+	// spilled object outlives the message (1-day lifecycle TTL), so replay within
+	// that window recovers the data.
 	if maxBytes > 0 && env.PayloadSize > maxBytes {
 		return fmt.Errorf("payload %q is %d bytes, over the %d-byte rehydrate cap (%s): this connector buffers payloads in memory; use a streaming-capable connector or raise the cap",
 			env.PayloadRef, env.PayloadSize, maxBytes, envRehydrateMax)
