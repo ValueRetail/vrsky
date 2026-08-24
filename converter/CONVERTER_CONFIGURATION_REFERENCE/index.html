@@ -3271,42 +3271,42 @@ Result: max_retries = 5 (ConfigService takes priority)
 <h2 id="configservice-api-format">ConfigService API Format<a class="headerlink" href="#configservice-api-format" title="Permanent link">&para;</a></h2>
 <p>Configuration can be loaded from ConfigService API in the following format:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;converter_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;converter-001&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;tenant_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tenant-123&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;input_topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;webhook.received&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;output_topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;webhook.converted&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;error_topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;webhook.errors&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;transformations&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="nt">"converter_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"converter-001"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tenant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tenant-123"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"input_topic"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook.received"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"output_topic"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook.converted"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"error_topic"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook.errors"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"transformations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;customer.email&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;email&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span>
+<span class="w">      </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer.email"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"email"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;order.total&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;amount&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;condition&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;order.total &gt; 100&quot;</span>
+<span class="w">      </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"order.total"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"amount"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"condition"</span><span class="p">:</span><span class="w"> </span><span class="s2">"order.total &gt; 100"</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;function&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;lookup_customer(customer.id)&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;customer_data&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;object&quot;</span>
+<span class="w">      </span><span class="nt">"function"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lookup_customer(customer.id)"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"customer_data"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"object"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;input_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;required_fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;order.id&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;customer.email&quot;</span><span class="p">]</span>
+<span class="w">  </span><span class="nt">"input_schema"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"required_fields"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"order.id"</span><span class="p">,</span><span class="w"> </span><span class="s2">"customer.email"</span><span class="p">]</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;output_schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;required_fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;order_id&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;customer_email&quot;</span><span class="p">]</span>
+<span class="w">  </span><span class="nt">"output_schema"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"required_fields"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"order_id"</span><span class="p">,</span><span class="w"> </span><span class="s2">"customer_email"</span><span class="p">]</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;error_handling&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;missing_fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fail&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;type_mismatch&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;coerce&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;validation_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fail&quot;</span>
+<span class="w">  </span><span class="nt">"error_handling"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"missing_fields"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fail"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"type_mismatch"</span><span class="p">:</span><span class="w"> </span><span class="s2">"coerce"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"validation_error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fail"</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;max_retries&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;retry_backoff&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;exponential&quot;</span>
+<span class="w">  </span><span class="nt">"max_retries"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"retry_backoff"</span><span class="p">:</span><span class="w"> </span><span class="s2">"exponential"</span>
 <span class="p">}</span>
 </code></pre></div>
 <hr />
@@ -3387,7 +3387,7 @@ kubectl<span class="w"> </span>logs<span class="w"> </span>deployment/vrsky-conv
 
 <span class="c1"># ConfigService API</span>
 curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://config-service:8080/v1/config<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;max_retries&quot;: 5}&#39;</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"max_retries": 5}'</span>
 
 <span class="c1"># Environment variable</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">MAX_RETRIES</span><span class="o">=</span><span class="m">3</span>

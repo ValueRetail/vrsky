@@ -2171,15 +2171,15 @@ is set (required by the Financials API).</p>
 <li><code>poll_interval_seconds</code> — poll cadence.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;visma&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;visma&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;base_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://salesorder.visma.net/api/v3&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;service-scope&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;app-id&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;client_secret_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;company_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;company-id&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SalesOrders&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;poll_interval_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"visma"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"visma"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://salesorder.visma.net/api/v3"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;service-scope&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"company_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;company-id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SalesOrders"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2193,15 +2193,15 @@ a one-element array so downstream steps always see a list.</p>
 <li><code>method</code> — <code>POST</code> (default), <code>PUT</code>, or <code>PATCH</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;visma&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;visma&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;base_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://salesorder.visma.net/api/v3&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;service-scope&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;app-id&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;client_secret_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;company_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;company-id&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SalesOrders&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"visma"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"visma"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://salesorder.visma.net/api/v3"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;service-scope&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"company_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;company-id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SalesOrders"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

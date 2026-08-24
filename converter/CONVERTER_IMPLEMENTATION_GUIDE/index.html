@@ -2779,7 +2779,7 @@ Output Message (NATS) / Error Topic (NATS)
 <h4 id="3-schema-validator-validatorgo">3. Schema Validator (validator.go)<a class="headerlink" href="#3-schema-validator-validatorgo" title="Permanent link">&para;</a></h4>
 <p>Provides thread-safe JSON Schema validation for input/output data.</p>
 <div class="highlight"><pre><span></span><code><span class="kd">type</span><span class="w"> </span><span class="nx">SchemaValidator</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">schemas</span><span class="w">  </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">jsonschema</span><span class="p">.</span><span class="nx">Schema</span>
+<span class="w">    </span><span class="nx">schemas</span><span class="w">  </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">jsonschema</span><span class="p">.</span><span class="nx">Schema</span>
 <span class="w">    </span><span class="nx">compiler</span><span class="w"> </span><span class="o">*</span><span class="nx">jsonschema</span><span class="p">.</span><span class="nx">Compiler</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2802,8 +2802,8 @@ Output Message (NATS) / Error Topic (NATS)
 - Logical: <code>&amp;&amp;</code>, <code>||</code>, <code>!</code></p>
 <p><strong>Example Rules</strong>:
 <div class="highlight"><pre><span></span><code>order.total &gt; 5000
-customer.status == &quot;gold&quot;
-product.category in_list [&quot;electronics&quot;, &quot;furniture&quot;]
+customer.status == "gold"
+product.category in_list ["electronics", "furniture"]
 </code></pre></div></p>
 <h4 id="5-expression-evaluator-expression_evaluatorgo">5. Expression Evaluator (expression_evaluator.go)<a class="headerlink" href="#5-expression-evaluator-expression_evaluatorgo" title="Permanent link">&para;</a></h4>
 <p>Evaluates mathematical and logical expressions for calculated fields.</p>
@@ -2837,7 +2837,7 @@ ${discount_rate} * ${order_total}
 <h4 id="7-function-registry-function_registrygo">7. Function Registry (function_registry.go)<a class="headerlink" href="#7-function-registry-function_registrygo" title="Permanent link">&para;</a></h4>
 <p>Manages built-in and plugin functions for data transformation.</p>
 <div class="highlight"><pre><span></span><code><span class="kd">type</span><span class="w"> </span><span class="nx">FunctionRegistry</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">functions</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">TransformFunction</span>
+<span class="w">    </span><span class="nx">functions</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">TransformFunction</span>
 <span class="p">}</span>
 </code></pre></div>
 <p><strong>Built-in Functions</strong> (15+):
@@ -2858,8 +2858,8 @@ ${discount_rate} * ${order_total}
 <h4 id="8-function-cache-function_cachego">8. Function Cache (function_cache.go)<a class="headerlink" href="#8-function-cache-function_cachego" title="Permanent link">&para;</a></h4>
 <p>Caches function results to improve performance.</p>
 <div class="highlight"><pre><span></span><code><span class="kd">type</span><span class="w"> </span><span class="nx">FunctionCache</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">cache</span><span class="w">  </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">CacheEntry</span>
-<span class="w">    </span><span class="nx">ttlMap</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="w">    </span><span class="nx">cache</span><span class="w">  </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">CacheEntry</span>
+<span class="w">    </span><span class="nx">ttlMap</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
 <span class="p">}</span>
 </code></pre></div>
 <p><strong>Features</strong>:
@@ -3006,10 +3006,10 @@ Converter Instance 2:
 <h3 id="1-function-result-caching">1. Function Result Caching<a class="headerlink" href="#1-function-result-caching" title="Permanent link">&para;</a></h3>
 <p>Functions like <code>lookup_postgres()</code> and <code>lookup_http()</code> have results cached:</p>
 <div class="highlight"><pre><span></span><code><span class="c1">// First call: Database query executed</span>
-<span class="nx">result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">lookup_customer</span><span class="p">(</span><span class="nx">customer_id</span><span class="p">)</span><span class="w"> </span><span class="c1">// 50ms</span>
+<span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">lookup_customer</span><span class="p">(</span><span class="nx">customer_id</span><span class="p">)</span><span class="w"> </span><span class="c1">// 50ms</span>
 
 <span class="c1">// Subsequent calls within TTL: Cache hit</span>
-<span class="nx">result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">lookup_customer</span><span class="p">(</span><span class="nx">customer_id</span><span class="p">)</span><span class="w"> </span><span class="c1">// &lt;1ms</span>
+<span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">lookup_customer</span><span class="p">(</span><span class="nx">customer_id</span><span class="p">)</span><span class="w"> </span><span class="c1">// &lt;1ms</span>
 </code></pre></div>
 <h3 id="2-schema-caching">2. Schema Caching<a class="headerlink" href="#2-schema-caching" title="Permanent link">&para;</a></h3>
 <p>Compiled JSON schemas are cached:</p>
@@ -3038,8 +3038,8 @@ Converter Instance 2:
 <div class="highlight"><pre><span></span><code><span class="nx">funcRegistry</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">NewFunctionRegistry</span><span class="p">()</span>
 
 <span class="c1">// Add custom function</span>
-<span class="nx">funcRegistry</span><span class="p">.</span><span class="nx">Register</span><span class="p">(</span><span class="s">&quot;my_function&quot;</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">CustomFunction</span><span class="p">{</span>
-<span class="w">    </span><span class="nx">Execute</span><span class="p">:</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">args</span><span class="w"> </span><span class="o">...</span><span class="kd">interface</span><span class="p">{})</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="nx">funcRegistry</span><span class="p">.</span><span class="nx">Register</span><span class="p">(</span><span class="s">"my_function"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">CustomFunction</span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Execute</span><span class="p">:</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">args</span><span class="w"> </span><span class="p">...</span><span class="kd">interface</span><span class="p">{})</span><span class="w"> </span><span class="p">(</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="c1">// Implementation</span>
 <span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span>
 <span class="w">    </span><span class="p">},</span>
@@ -3055,7 +3055,7 @@ kubectl<span class="w"> </span>cp<span class="w"> </span>target/wasm32-wasi/rele
 <span class="w">  </span>pod:/app/wasm-modules/my_plugin.wasm
 
 <span class="c1"># Use in transformation</span>
-<span class="s2">&quot;function&quot;</span>:<span class="w"> </span><span class="s2">&quot;wasm:my_plugin:transform&quot;</span>
+<span class="s2">"function"</span>:<span class="w"> </span><span class="s2">"wasm:my_plugin:transform"</span>
 </code></pre></div>
 <h3 id="lookup-backends">Lookup Backends<a class="headerlink" href="#lookup-backends" title="Permanent link">&para;</a></h3>
 <p>Implement custom lookup backends:</p>
@@ -3067,7 +3067,7 @@ kubectl<span class="w"> </span>cp<span class="w"> </span>target/wasm32-wasi/rele
 <span class="p">}</span>
 
 <span class="c1">// Register in composite backend</span>
-<span class="nx">compositeBackend</span><span class="p">.</span><span class="nx">AddBackend</span><span class="p">(</span><span class="s">&quot;custom&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">customLookup</span><span class="p">)</span>
+<span class="nx">compositeBackend</span><span class="p">.</span><span class="nx">AddBackend</span><span class="p">(</span><span class="s">"custom"</span><span class="p">,</span><span class="w"> </span><span class="nx">customLookup</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="health-checks">Health Checks<a class="headerlink" href="#health-checks" title="Permanent link">&para;</a></h2>
 <h3 id="liveness-probe">Liveness Probe<a class="headerlink" href="#liveness-probe" title="Permanent link">&para;</a></h3>

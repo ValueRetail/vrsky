@@ -2182,15 +2182,15 @@ record becomes a message.</p>
 <li>Secret/cert fields — see Notes.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kafka&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;kafka&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;brokers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;broker1:9092&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;broker2:9092&quot;</span><span class="p">],</span>
-<span class="w">    </span><span class="nt">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;events&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;group_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vrsky&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;auth&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;mechanism&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sasl_scram&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vrsky&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"kafka"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"kafka"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"brokers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"broker1:9092"</span><span class="p">,</span><span class="w"> </span><span class="s2">"broker2:9092"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"topic"</span><span class="p">:</span><span class="w"> </span><span class="s2">"events"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"group_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"auth"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"mechanism"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sasl_scram"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
@@ -2205,15 +2205,15 @@ used for producers.</p>
 <li><code>auth</code> — same options as the consumer.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;kafka&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;kafka&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;brokers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;broker1:9092&quot;</span><span class="p">],</span>
-<span class="w">    </span><span class="nt">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;events-out&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;auth&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;mechanism&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mtls&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;ca_cert&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;-----BEGIN CERTIFICATE-----...&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;client_cert_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;client_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"kafka"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"kafka"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"brokers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"broker1:9092"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"topic"</span><span class="p">:</span><span class="w"> </span><span class="s2">"events-out"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"auth"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"mechanism"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mtls"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"ca_cert"</span><span class="p">:</span><span class="w"> </span><span class="s2">"-----BEGIN CERTIFICATE-----..."</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"client_cert_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"client_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>

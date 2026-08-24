@@ -2181,15 +2181,15 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
 <li><code>event_mode</code> — <code>poll</code> (default) or <code>event</code> for notification-driven reads.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;cloud_storage&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;cloud_storage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;provider&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;bucket&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-bucket&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;incoming/&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;us-east-1&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;access_key_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AKIA...&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;secret_access_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;event_mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;event&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cloud_storage"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"cloud_storage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my-bucket"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"incoming/"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="s2">"us-east-1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"access_key_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AKIA..."</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"secret_access_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"event_mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"event"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2206,14 +2206,14 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
 <li><code>encryption.kms_key_id</code> — KMS key when <code>mode</code> is <code>sse-kms</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;cloud_storage&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;cloud_storage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;provider&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;azure&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;bucket&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-container&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;outgoing/&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;account_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mystorageacct&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;account_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;encryption&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;none&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cloud_storage"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"cloud_storage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"azure"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my-container"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"outgoing/"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"account_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mystorageacct"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"account_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"encryption"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="w"> </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

@@ -2134,7 +2134,7 @@ method(s) + <code>Configure</code>:</p>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span>
 <span class="p">}</span>
 
-<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">sdk</span><span class="p">.</span><span class="nx">RunProducer</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="s">&quot;my-producer&quot;</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">myProducer</span><span class="p">{})</span><span class="w"> </span><span class="p">}</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">sdk</span><span class="p">.</span><span class="nx">RunProducer</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="s">"my-producer"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">myProducer</span><span class="p">{})</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p><code>RunProducer</code> / <code>RunConsumer</code> / <code>RunFilter</code> / <code>RunConverter</code> own the boilerplate.</p>
 <h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>

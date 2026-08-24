@@ -2229,7 +2229,7 @@ versioning can't protect you from, so guard the key independently.</p>
 <li>
 <p><strong>Restore into the new database:</strong>
    <div class="highlight"><pre><span></span><code>vrsky-cli<span class="w"> </span>restore<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--target-db-url<span class="w"> </span><span class="s1">&#39;postgres://postgres:PASSWORD@NEW-HOST:5432/management_db?sslmode=disable&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target-db-url<span class="w"> </span><span class="s1">'postgres://postgres:PASSWORD@NEW-HOST:5432/management_db?sslmode=disable'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--confirm<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>mgmt-backups/management_db-20260610T020000Z.dump.gz.enc
 </code></pre></div>
@@ -2242,7 +2242,7 @@ versioning can't protect you from, so guard the key independently.</p>
 <p><strong>Bring migrations up to date.</strong> A backup is a point-in-time snapshot at
    whatever migration version was live then. After restoring, run the migrations
    so the schema matches the current code:
-   <div class="highlight"><pre><span></span><code>migrate<span class="w"> </span>-path<span class="w"> </span>infrastructure/migrations<span class="w"> </span>-database<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TARGET_DB_URL</span><span class="s2">&quot;</span><span class="w"> </span>up
+   <div class="highlight"><pre><span></span><code>migrate<span class="w"> </span>-path<span class="w"> </span>infrastructure/migrations<span class="w"> </span>-database<span class="w"> </span><span class="s2">"</span><span class="nv">$TARGET_DB_URL</span><span class="s2">"</span><span class="w"> </span>up
 </code></pre></div>
    (The management-api also runs migrations on boot, so simply starting the new
    management-api against the restored DB achieves the same.)</p>

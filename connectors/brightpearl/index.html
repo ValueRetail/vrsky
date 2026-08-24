@@ -2227,15 +2227,15 @@ connector unwraps and publishes the inner <code>response</code> value.</p>
   webhook-only).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;brightpearl&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;brightpearl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;datacenter&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eu1&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;account_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;youraccount&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;app_ref&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;yourapp&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;staff_token_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/order-service/order-search&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;orderTypeId=1&amp;pageSize=100&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;poll_interval_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"brightpearl"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"brightpearl"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eu1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"account_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"youraccount"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"app_ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yourapp"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"staff_token_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/order-service/order-search"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"query"</span><span class="p">:</span><span class="w"> </span><span class="s2">"orderTypeId=1&amp;pageSize=100"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2252,14 +2252,14 @@ a message routed to the owning tenant/connection.</p>
 <li><code>method</code> — <code>POST</code> (default), <code>PUT</code>, or <code>PATCH</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;brightpearl&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;brightpearl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;datacenter&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eu1&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;account_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;youraccount&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;app_ref&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;yourapp&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;staff_token_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/order-service/order&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"brightpearl"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"brightpearl"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"datacenter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eu1"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"account_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"youraccount"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"app_ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yourapp"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"staff_token_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/order-service/order"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

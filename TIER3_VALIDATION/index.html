@@ -2253,7 +2253,7 @@ automates the happy path; the manual steps here are the source of truth.</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Core platform (namespaces, platform NATS, postgres, minio, management-api, workers, monitoring)</span>
 infrastructure/kubernetes/deploy-vrsky-platform.sh
 
-<span class="c1"># Swap in the HA variants the deploy script doesn&#39;t apply by default:</span>
+<span class="c1"># Swap in the HA variants the deploy script doesn't apply by default:</span>
 kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/postgresql/cnpg-cluster.yaml<span class="w">   </span><span class="c1"># #137 (replaces single statefulset)</span>
 kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/postgresql/cnpg-pooler.yaml
 kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/minio/statefulset-distributed.yaml<span class="w">  </span><span class="c1"># #136 (replaces deployment.yaml)</span>

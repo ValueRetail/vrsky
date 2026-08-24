@@ -2158,17 +2158,17 @@
 </ul>
 <p>Other request handling options not listed here are set via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;tls&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;client_ca_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sec_clientca_01&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tls"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"client_ca_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_clientca_01"</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;http&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;signature&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;header&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;X-Signature&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;algorithm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;encoding&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;hex&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;secret_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sec_hmac_01&quot;</span>
+<span class="w">  </span><span class="nt">"http"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"signature"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"header"</span><span class="p">:</span><span class="w"> </span><span class="s2">"X-Signature"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"algorithm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sha256"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"encoding"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hex"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_hmac_01"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
@@ -2191,17 +2191,17 @@
 </li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;http&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://example.com/ingest&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;headers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;Content-Type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/json&quot;</span><span class="w"> </span><span class="p">},</span>
-<span class="w">    </span><span class="nt">&quot;auth_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;oauth&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;oauth_grant_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4-0000-1111-2222-333344445555&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;tls&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;cert_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sec_clientcert_01&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sec_clientkey_01&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;client_ca_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sec_serverca_01&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"http"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://example.com/ingest"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"Content-Type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"application/json"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"auth_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"oauth"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"oauth_grant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4-0000-1111-2222-333344445555"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"tls"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"cert_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_clientcert_01"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_clientkey_01"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"client_ca_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_serverca_01"</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>

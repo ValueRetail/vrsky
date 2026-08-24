@@ -2228,15 +2228,15 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <li><code>base_url</code> — optional override (default <code>https://api.mysitoo.com/v2</code>).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sitoo&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;sitoo&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;account_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;site_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-api-id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;transactions&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;poll_interval_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;page_size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitoo"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sitoo"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"account_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"site_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-api-id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"transactions"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"page_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2261,14 +2261,14 @@ upstream converter/filter should shape it to the target resource's schema.</p>
 <li><code>base_url</code> — optional override.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sitoo&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;sitoo&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;account_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;site_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-api-id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warehouseitems&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitoo"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sitoo"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"account_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"site_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-api-id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"warehouseitems"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

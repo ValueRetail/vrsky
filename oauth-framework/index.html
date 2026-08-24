@@ -2242,9 +2242,9 @@ refresh token can't be raced across the fleet.</p>
 <p><code>POST /api/v1/oauth/providers</code> (admin role). The five shipped profiles seed
 their auth/token URLs and default scopes — you supply <code>client_id</code>,
 <code>client_secret</code>, and <code>redirect_url</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Acme MS365&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;provider_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;microsoft365&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;client_secret&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;redirect_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://app.example.com/api/v1/oauth/callback&quot;</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Acme MS365"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"microsoft365"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"client_secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"redirect_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://app.example.com/api/v1/oauth/callback"</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>Per-provider notes:</p>
 <table>
@@ -2297,7 +2297,7 @@ resolve a token via:</p>
 <div class="highlight"><pre><span></span><code>GET /api/v1/oauth/grants/{id}/token
     X-Service-Token: &lt;OAUTH_TOKEN_SERVICE_SECRET&gt;
     X-Tenant-ID: &lt;tenant&gt;
-→ { &quot;access_token&quot;: &quot;...&quot;, &quot;expires_at&quot;: &quot;...&quot; }
+→ { "access_token": "...", "expires_at": "..." }
 </code></pre></div>
 <p><code>?refresh=1</code> forces a refresh (the retry-once-on-401 path). Required env:</p>
 <ul>

@@ -11,28 +11,24 @@
       
       
       
-        <link rel="prev" href="../..">
-      
-      
-        <link rel="next" href="../../sdk/tutorial/first-connector/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Build your first pipeline - VRSky Documentation</title>
+        <title>VRSky Scalability — Assessment & Roadmap - VRSky Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,7 +47,7 @@
       
     
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -76,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#build-your-first-pipeline" class="md-skip">
+        <a href="#vrsky-scalability-assessment-roadmap" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -112,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Build your first pipeline
+              VRSky Scalability — Assessment &amp; Roadmap
             
           </span>
         </div>
@@ -218,7 +214,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -236,7 +232,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -260,8 +256,6 @@
       
   
   
-    
-  
   
   
     
@@ -274,11 +268,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
@@ -299,7 +293,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -314,37 +308,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Build your first pipeline
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../tutorials/first-pipeline/" class="md-nav__link">
         
   
   
@@ -360,103 +327,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#before-you-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Before you start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#1-sign-in" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Sign in
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-pick-a-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Pick a template
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-fill-the-one-field" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Fill the one field
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-see-it-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. See it work
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5-send-your-own-data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Send your own data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-you-just-built" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What you just built
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -469,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
+      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
         
   
   
@@ -556,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/" class="md-nav__link">
+      <a href="../guide/" class="md-nav__link">
         
   
   
@@ -584,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/getting-started/" class="md-nav__link">
+      <a href="../guide/getting-started/" class="md-nav__link">
         
   
   
@@ -612,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
+      <a href="../guide/workspaces-and-members/" class="md-nav__link">
         
   
   
@@ -640,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
+      <a href="../guide/building-a-pipeline/" class="md-nav__link">
         
   
   
@@ -668,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
+      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
         
   
   
@@ -696,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
+      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
         
   
   
@@ -724,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
+      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
         
   
   
@@ -752,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/data-sharing/" class="md-nav__link">
+      <a href="../guide/data-sharing/" class="md-nav__link">
         
   
   
@@ -780,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/settings/" class="md-nav__link">
+      <a href="../guide/settings/" class="md-nav__link">
         
   
   
@@ -808,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guide/troubleshooting/" class="md-nav__link">
+      <a href="../guide/troubleshooting/" class="md-nav__link">
         
   
   
@@ -895,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/install/" class="md-nav__link">
+      <a href="../operator/install/" class="md-nav__link">
         
   
   
@@ -923,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/upgrade/" class="md-nav__link">
+      <a href="../operator/upgrade/" class="md-nav__link">
         
   
   
@@ -951,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/backup/" class="md-nav__link">
+      <a href="../operator/backup/" class="md-nav__link">
         
   
   
@@ -979,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/monitoring/" class="md-nav__link">
+      <a href="../operator/monitoring/" class="md-nav__link">
         
   
   
@@ -1007,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/troubleshooting/" class="md-nav__link">
+      <a href="../operator/troubleshooting/" class="md-nav__link">
         
   
   
@@ -1035,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../operator/encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -1063,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SLA/" class="md-nav__link">
+      <a href="../SLA/" class="md-nav__link">
         
   
   
@@ -1091,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
+      <a href="../DEPLOYMENT_GUIDE/" class="md-nav__link">
         
   
   
@@ -1119,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../DR/" class="md-nav__link">
+      <a href="../DR/" class="md-nav__link">
         
   
   
@@ -1206,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/" class="md-nav__link">
+      <a href="../connectors/" class="md-nav__link">
         
   
   
@@ -1234,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/http/" class="md-nav__link">
+      <a href="../connectors/http/" class="md-nav__link">
         
   
   
@@ -1262,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/api/" class="md-nav__link">
+      <a href="../connectors/api/" class="md-nav__link">
         
   
   
@@ -1290,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/database/" class="md-nav__link">
+      <a href="../connectors/database/" class="md-nav__link">
         
   
   
@@ -1318,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/file/" class="md-nav__link">
+      <a href="../connectors/file/" class="md-nav__link">
         
   
   
@@ -1346,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/sftp/" class="md-nav__link">
+      <a href="../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1374,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/cloud-storage/" class="md-nav__link">
+      <a href="../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1402,7 +1272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/kafka/" class="md-nav__link">
+      <a href="../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1430,7 +1300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/rabbitmq/" class="md-nav__link">
+      <a href="../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1458,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/salesforce/" class="md-nav__link">
+      <a href="../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1486,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/sitoo/" class="md-nav__link">
+      <a href="../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1514,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/front-systems/" class="md-nav__link">
+      <a href="../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1542,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/business-central/" class="md-nav__link">
+      <a href="../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1570,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/visma/" class="md-nav__link">
+      <a href="../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1598,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/brightpearl/" class="md-nav__link">
+      <a href="../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1626,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/tenant/" class="md-nav__link">
+      <a href="../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1654,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../connectors/filters-converters/" class="md-nav__link">
+      <a href="../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -1741,7 +1611,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../security/whitepaper/" class="md-nav__link">
+      <a href="../security/whitepaper/" class="md-nav__link">
         
   
   
@@ -1769,7 +1639,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../SECURITY/" class="md-nav__link">
+      <a href="../SECURITY/" class="md-nav__link">
         
   
   
@@ -1804,7 +1674,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/api/" class="md-nav__link">
+      <a href="../reference/api/" class="md-nav__link">
         
   
   
@@ -1883,7 +1753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
+      <a href="../CONNECTION_NODE_SPEC/" class="md-nav__link">
         
   
   
@@ -1911,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../TENANT_MODEL/" class="md-nav__link">
+      <a href="../TENANT_MODEL/" class="md-nav__link">
         
   
   
@@ -1939,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
+      <a href="../NATS_ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -1967,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../OBSERVABILITY/" class="md-nav__link">
+      <a href="../OBSERVABILITY/" class="md-nav__link">
         
   
   
@@ -1995,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../TRACING/" class="md-nav__link">
+      <a href="../TRACING/" class="md-nav__link">
         
   
   
@@ -2023,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../LOAD/" class="md-nav__link">
+      <a href="../LOAD/" class="md-nav__link">
         
   
   
@@ -2051,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../oauth-framework/" class="md-nav__link">
+      <a href="../oauth-framework/" class="md-nav__link">
         
   
   
@@ -2079,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../sdk/" class="md-nav__link">
+      <a href="../sdk/" class="md-nav__link">
         
   
   
@@ -2134,10 +2004,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#before-you-start" class="md-nav__link">
+  <a href="#verdict" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Before you start
+        Verdict
       
     </span>
   </a>
@@ -2145,10 +2015,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-sign-in" class="md-nav__link">
+  <a href="#what-scales-well-by-design" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Sign in
+        What scales well (by design)
       
     </span>
   </a>
@@ -2156,10 +2026,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-pick-a-template" class="md-nav__link">
+  <a href="#ceilings-priority-order" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Pick a template
+        Ceilings (priority order)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ceilings (priority order)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-single-in-cluster-postgresql-highest-priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Single in-cluster PostgreSQL ← highest priority
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-pod-per-connection-orchestration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Pod-per-connection orchestration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-in-cluster-stateful-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. In-cluster stateful services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-node-capacity-azure-quota" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Node capacity + Azure quota
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#immediate-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Immediate roadmap
       
     </span>
   </a>
@@ -2167,43 +2098,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-fill-the-one-field" class="md-nav__link">
+  <a href="#empirical-next-step" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Fill the one field
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-see-it-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. See it work
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5-send-your-own-data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Send your own data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-you-just-built" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What you just built
+        Empirical next step
       
     </span>
   </a>
@@ -2227,51 +2125,114 @@
 
 
 
-<h1 id="build-your-first-pipeline">Build your first pipeline<a class="headerlink" href="#build-your-first-pipeline" title="Permanent link">&para;</a></h1>
-<p><strong>Goal:</strong> receive a webhook and forward it somewhere — running in under 10
-minutes, no code. You'll use the onboarding wizard.</p>
-<h2 id="before-you-start">Before you start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h2>
-<ul>
-<li>VRSky is running and you can reach the UI (<code>http://localhost:5173</code> locally).</li>
-<li>That's it — no credentials needed for this tutorial.</li>
-</ul>
-<h2 id="1-sign-in">1. Sign in<a class="headerlink" href="#1-sign-in" title="Permanent link">&para;</a></h2>
-<p>Register or log in. On first login (a workspace with no pipelines yet) you land
-on the <strong>Get started</strong> wizard automatically. You can also reach it any time at
-<code>/welcome</code>.</p>
-<h2 id="2-pick-a-template">2. Pick a template<a class="headerlink" href="#2-pick-a-template" title="Permanent link">&para;</a></h2>
-<p>Choose <strong>Webhook → HTTP endpoint</strong>. Templates pre-fill ~80% of the pipeline; you
-only fill what's yours.</p>
+<h1 id="vrsky-scalability-assessment-roadmap">VRSky Scalability — Assessment &amp; Roadmap<a class="headerlink" href="#vrsky-scalability-assessment-roadmap" title="Permanent link">&para;</a></h1>
 <blockquote>
-<p>Other starter templates: <strong>Webhook → Slack</strong> (paste a Slack incoming-webhook
-URL), <strong>CSV → Database</strong>, <strong>API poll → File</strong>.</p>
+<p>Grounded in the current architecture. <strong>Caveat:</strong> prod has 0 real connections and
+the cluster is cost-parked, so this is an <em>architectural</em> assessment, not an
+empirical benchmark. A k6 load-smoke harness exists (<code>.github/workflows/
+load-smoke.yml</code>, p99 + error-rate regression guards) but hasn't been run at
+target scale — doing so is how we'd find the real ceiling.</p>
 </blockquote>
-<h2 id="3-fill-the-one-field">3. Fill the one field<a class="headerlink" href="#3-fill-the-one-field" title="Permanent link">&para;</a></h2>
-<p>For Webhook → HTTP, enter a <strong>Destination URL</strong> — any endpoint that accepts a
-POST. For a no-setup target, use a request-bin style service, or
-<code>https://httpbin.org/post</code>. Click <strong>Deploy pipeline</strong>.</p>
-<h2 id="4-see-it-work">4. See it work<a class="headerlink" href="#4-see-it-work" title="Permanent link">&para;</a></h2>
-<p>The final step shows your <strong>webhook URL</strong> and a <strong>Send a sample event</strong> button.
-Click it — VRSky POSTs a sample body to your webhook, runs it through the
-pipeline, and forwards it to your destination. A green ✓ with an HTTP status
-means it worked end-to-end.</p>
-<h2 id="5-send-your-own-data">5. Send your own data<a class="headerlink" href="#5-send-your-own-data" title="Permanent link">&para;</a></h2>
-<p>POST anything to the webhook URL shown:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>&lt;your-webhook-url&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"hello":"world"}'</span>
-</code></pre></div>
-<p>Watch the producer node's live event panel light up with each delivery.</p>
-<h2 id="what-you-just-built">What you just built<a class="headerlink" href="#what-you-just-built" title="Permanent link">&para;</a></h2>
-<p>A running connection: <strong>webhook consumer → HTTP producer</strong>, with delivery
-flowing through NATS. From here:</p>
+<h2 id="verdict">Verdict<a class="headerlink" href="#verdict" title="Permanent link">&para;</a></h2>
+<p>The building blocks are the right ones for horizontal scale, and multi-tenancy is
+genuinely built in — not bolted on. The limits are <strong>(1) a single PostgreSQL</strong> and
+<strong>(2) the pod-per-connection worker model</strong>; neither is a rewrite.</p>
+<h2 id="what-scales-well-by-design">What scales well (by design)<a class="headerlink" href="#what-scales-well-by-design" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Add a <strong>filter</strong> or <strong>converter</strong> between the nodes in the visual builder.</li>
-<li>Try a <a href="../../connectors/">different connector</a> as the source or
-  destination.</li>
-<li>Watch traffic on <strong>Settings → Usage</strong> and in Grafana
-  (<a href="../../operator/monitoring/">monitoring</a>).</li>
+<li><strong>Per-connection worker autoscaling</strong> — the orchestrator gives each connection a
+  Deployment + <strong>HPA</strong> (<code>MinReplicas</code>/<code>MaxReplicas</code>/<code>TargetCPUPercent</code>), and NATS
+  <strong>JetStream durable consumers load-balance across replicas</strong>, so a connection's
+  throughput scales out.</li>
+<li><strong>Multi-tenancy</strong> — <strong>per-tenant NATS instances</strong> (<code>nats_instances</code>, migration
+  000018), tenant-scoped queries throughout (<code>lint:tenant-ok</code>), enforced <strong>quotas</strong>
+  (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily usage metering.</li>
+<li><strong>Stateless control plane</strong> — UI / filter / management-api at 2 replicas + PDB;
+  horizontally scalable, HA today.</li>
+<li><strong>Independent connectors</strong> — adding an integration type scales linearly.</li>
 </ul>
+<h2 id="ceilings-priority-order">Ceilings (priority order)<a class="headerlink" href="#ceilings-priority-order" title="Permanent link">&para;</a></h2>
+<h3 id="1-single-in-cluster-postgresql-highest-priority">1. Single in-cluster PostgreSQL  ← highest priority<a class="headerlink" href="#1-single-in-cluster-postgresql-highest-priority" title="Permanent link">&para;</a></h3>
+<p>The management DB is one StatefulSet instance that every connection, tenant, and
+usage-metering write hits. With pod-per-connection fan-out, each worker holds a DB
+pool — connection count multiplies fast and can exhaust <code>max_connections</code>.</p>
+<p><strong>Fix (staged):</strong>
+- <strong>(a) Bound every worker's connection pool</strong> in code — <strong>✅ done.</strong> Pools already
+  existed but were monolith-sized (25 open / 5 idle per worker, no idle reaping),
+  which is exactly what multiplies across pod-per-connection fan-out. Now each
+  worker defaults to a lean <strong>6 open / 2 idle</strong> with a <strong>90 s <code>ConnMaxIdleTime</code></strong>
+  so idle pollers stop pinning connections; the control plane keeps 25/5. All
+  values are env-tunable (<code>DB_MAX_OPEN_CONNS</code>, <code>DB_MAX_IDLE_CONNS</code>,
+  <code>DB_CONN_MAX_LIFETIME_SECONDS</code>, <code>DB_CONN_MAX_IDLE_SECONDS</code>) for per-deployment
+  sizing. Caps the connection explosion; PgBouncer (b) is the next multiplier.
+- <strong>(b) PgBouncer</strong> (transaction pooling) in front of Postgres — one more multiplier
+  of headroom.
+- <strong>(c) Managed Postgres</strong> (Azure DB for PostgreSQL Flexible Server) + read replicas
+  for the read-heavy paths (usage/metrics, connection listing).</p>
+<h3 id="2-pod-per-connection-orchestration">2. Pod-per-connection orchestration<a class="headerlink" href="#2-pod-per-connection-orchestration" title="Permanent link">&para;</a></h3>
+<p>Each connection = 1–2 pods (src/dst) + an HPA. Elegant isolation, but a practical
+ceiling around a few thousand connections/cluster (etcd/scheduler/object pressure,
+cost), and wasteful for many small or idle connections.</p>
+<p><strong>Fix:</strong> a <strong>shared multi-tenant worker-pool mode</strong> for light connections (one
+worker process multiplexing many connections off the shared NATS subjects), keeping
+dedicated pods only for heavy/isolated ones. The connector SDK already loads
+per-connection config by ID, so a pool worker is a routing layer on top — not a
+connector rewrite. This is the biggest <em>architectural</em> lever for density + cost.</p>
+<h3 id="3-in-cluster-stateful-services">3. In-cluster stateful services<a class="headerlink" href="#3-in-cluster-stateful-services" title="Permanent link">&para;</a></h3>
+<p>Postgres, MinIO, NATS all run in-cluster. For scale:
+- Storage → <strong>Azure Blob</strong> (the cloud-storage connector already speaks S3/Azure/GCS).
+- Postgres → managed (see #1c).
+- NATS is 3-pod HA, but per-tenant instances add pod count — consider <strong>shared NATS
+  instances for small tenants</strong>, dedicated for large (density vs isolation).</p>
+<h3 id="4-node-capacity-azure-quota">4. Node capacity + Azure quota<a class="headerlink" href="#4-node-capacity-azure-quota" title="Permanent link">&para;</a></h3>
+<p>Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
+needs the <strong>cluster autoscaler</strong> + quota headroom.</p>
+<h2 id="immediate-roadmap">Immediate roadmap<a class="headerlink" href="#immediate-roadmap" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Ceiling</th>
+<th>Effort</th>
+<th>Needs cluster?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~Bound worker DB pools~~ ✅</td>
+<td>1a</td>
+<td>small (code)</td>
+<td>no — <strong>done</strong></td>
+</tr>
+<tr>
+<td>PgBouncer</td>
+<td>1b</td>
+<td>small (infra)</td>
+<td>yes ← <strong>next</strong></td>
+</tr>
+<tr>
+<td>Shared worker-pool mode</td>
+<td>2</td>
+<td>large (code)</td>
+<td>for load test</td>
+</tr>
+<tr>
+<td>Managed Postgres / Blob</td>
+<td>1c / 3</td>
+<td>medium (infra + migration)</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Run k6 at target scale</td>
+<td>all</td>
+<td>small</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="empirical-next-step">Empirical next step<a class="headerlink" href="#empirical-next-step" title="Permanent link">&para;</a></h2>
+<p>Run the k6 load-smoke at realistic rates + connection counts to turn this
+architectural read into measured limits — that's the only way to know the real
+ceiling and validate each fix.</p>
 
 
 
@@ -2327,10 +2288,10 @@ flowing through NATS. From here:</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

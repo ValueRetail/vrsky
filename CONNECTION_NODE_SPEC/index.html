@@ -2519,8 +2519,8 @@
 <div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">connector</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="p">(</span>
-<span class="w">    </span><span class="s">&quot;context&quot;</span>
-<span class="w">    </span><span class="s">&quot;time&quot;</span>
+<span class="w">    </span><span class="s">"context"</span>
+<span class="w">    </span><span class="s">"time"</span>
 <span class="p">)</span>
 
 <span class="c1">// Message represents a data message flowing through the pipeline</span>
@@ -2531,14 +2531,14 @@
 <span class="w">    </span><span class="c1">// Payload: The actual data (any format: JSON, XML, binary, etc.)</span>
 <span class="w">    </span><span class="nx">Payload</span><span class="w"> </span><span class="p">[]</span><span class="kt">byte</span>
 
-<span class="w">    </span><span class="c1">// ContentType: MIME type of payload (e.g., &quot;application/json&quot;)</span>
+<span class="w">    </span><span class="c1">// ContentType: MIME type of payload (e.g., "application/json")</span>
 <span class="w">    </span><span class="nx">ContentType</span><span class="w"> </span><span class="kt">string</span>
 
 <span class="w">    </span><span class="c1">// Metadata: Message metadata</span>
 <span class="w">    </span><span class="nx">Metadata</span><span class="w"> </span><span class="nx">MessageMetadata</span>
 
 <span class="w">    </span><span class="c1">// Headers: Protocol-specific headers</span>
-<span class="w">    </span><span class="nx">Headers</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">Headers</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
 
 <span class="w">    </span><span class="c1">// Timestamp: When message was created</span>
 <span class="w">    </span><span class="nx">Timestamp</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
@@ -2580,10 +2580,10 @@
 <span class="w">    </span><span class="nx">Type</span><span class="w"> </span><span class="kt">string</span>
 
 <span class="w">    </span><span class="c1">// Settings: Connection-specific settings (varies by connector)</span>
-<span class="w">    </span><span class="nx">Settings</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+<span class="w">    </span><span class="nx">Settings</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
 
 <span class="w">    </span><span class="c1">// Credentials: Sensitive credentials (should use secure secrets manager)</span>
-<span class="w">    </span><span class="nx">Credentials</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">Credentials</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
 
 <span class="w">    </span><span class="c1">// Timeout: Default timeout for operations</span>
 <span class="w">    </span><span class="nx">Timeout</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
@@ -2652,7 +2652,7 @@
 <span class="w">    </span><span class="nx">ProtocolVersion</span><span class="w"> </span><span class="kt">int</span>
 
 <span class="w">    </span><span class="c1">// SupportedTypes: Connection types this plugin supports</span>
-<span class="w">    </span><span class="c1">// e.g., [&quot;http-webhook&quot;, &quot;http-rest&quot;]</span>
+<span class="w">    </span><span class="c1">// e.g., ["http-webhook", "http-rest"]</span>
 <span class="w">    </span><span class="nx">SupportedTypes</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span>
 
 <span class="w">    </span><span class="c1">// Description: Plugin description</span>
@@ -2676,22 +2676,22 @@
 
 <span class="kd">const</span><span class="w"> </span><span class="p">(</span>
 <span class="w">    </span><span class="c1">// CapabilityBiDirectional: Connection can both send and receive</span>
-<span class="w">    </span><span class="nx">CapabilityBiDirectional</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;bidirectional&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityBiDirectional</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"bidirectional"</span>
 
 <span class="w">    </span><span class="c1">// CapabilityRetryable: Connection supports retries</span>
-<span class="w">    </span><span class="nx">CapabilityRetryable</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;retryable&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityRetryable</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"retryable"</span>
 
 <span class="w">    </span><span class="c1">// CapabilityBatching: Connection supports batch operations</span>
-<span class="w">    </span><span class="nx">CapabilityBatching</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;batching&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityBatching</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"batching"</span>
 
 <span class="w">    </span><span class="c1">// CapabilityStreaming: Connection supports streaming</span>
-<span class="w">    </span><span class="nx">CapabilityStreaming</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;streaming&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityStreaming</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"streaming"</span>
 
 <span class="w">    </span><span class="c1">// CapabilityTLS: Connection supports TLS</span>
-<span class="w">    </span><span class="nx">CapabilityTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;tls&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"tls"</span>
 
 <span class="w">    </span><span class="c1">// CapabilityMTLS: Connection supports mutual TLS</span>
-<span class="w">    </span><span class="nx">CapabilityMTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;mtls&quot;</span>
+<span class="w">    </span><span class="nx">CapabilityMTLS</span><span class="w"> </span><span class="nx">Capabilities</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"mtls"</span>
 <span class="p">)</span>
 </code></pre></div>
 <h2 id="plugin-entry-point">Plugin Entry Point<a class="headerlink" href="#plugin-entry-point" title="Permanent link">&para;</a></h2>
@@ -2699,8 +2699,8 @@
 <div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="p">(</span>
-<span class="w">    </span><span class="s">&quot;github.com/ValueRetail/vrsky/pkg/connector&quot;</span>
-<span class="w">    </span><span class="s">&quot;github.com/hashicorp/go-plugin&quot;</span>
+<span class="w">    </span><span class="s">"github.com/ValueRetail/vrsky/pkg/connector"</span>
+<span class="w">    </span><span class="s">"github.com/hashicorp/go-plugin"</span>
 <span class="p">)</span>
 
 <span class="c1">// MyHTTPConnector: Implementation of ConnectionNode for HTTP</span>
@@ -2712,8 +2712,8 @@
 <span class="kd">func</span><span class="w"> </span><span class="nx">Serve</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nx">plugin</span><span class="p">.</span><span class="nx">Serve</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">plugin</span><span class="p">.</span><span class="nx">ServeConfig</span><span class="p">{</span>
 <span class="w">        </span><span class="nx">HandshakeConfig</span><span class="p">:</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">Handshake</span><span class="p">,</span>
-<span class="w">        </span><span class="nx">Plugins</span><span class="p">:</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">plugin</span><span class="p">.</span><span class="nx">Plugin</span><span class="p">{</span>
-<span class="w">            </span><span class="s">&quot;connection&quot;</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionNodePlugin</span><span class="p">{</span>
+<span class="w">        </span><span class="nx">Plugins</span><span class="p">:</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">plugin</span><span class="p">.</span><span class="nx">Plugin</span><span class="p">{</span>
+<span class="w">            </span><span class="s">"connection"</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionNodePlugin</span><span class="p">{</span>
 <span class="w">                </span><span class="nx">Impl</span><span class="p">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{},</span>
 <span class="w">            </span><span class="p">},</span>
 <span class="w">        </span><span class="p">},</span>
@@ -2763,23 +2763,23 @@
 <p>Connection plugins should return typed errors:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">connector</span>
 
-<span class="kn">import</span><span class="w"> </span><span class="s">&quot;fmt&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="s">"fmt"</span>
 
 <span class="c1">// PluginError: Base error type</span>
 <span class="kd">type</span><span class="w"> </span><span class="nx">PluginError</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">Code</span><span class="w">       </span><span class="kt">string</span><span class="w"> </span><span class="c1">// &quot;INVALID_CONFIG&quot;, &quot;CONNECTION_FAILED&quot;, &quot;SEND_FAILED&quot;</span>
+<span class="w">    </span><span class="nx">Code</span><span class="w">       </span><span class="kt">string</span><span class="w"> </span><span class="c1">// "INVALID_CONFIG", "CONNECTION_FAILED", "SEND_FAILED"</span>
 <span class="w">    </span><span class="nx">Message</span><span class="w">    </span><span class="kt">string</span>
 <span class="w">    </span><span class="nx">Recoverable</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="c1">// true = retry, false = dead-letter</span>
 <span class="p">}</span>
 
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="p">)</span><span class="w"> </span><span class="nx">Error</span><span class="p">()</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">&quot;[%s] %s (recoverable=%v)&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Code</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Message</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Recoverable</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">"[%s] %s (recoverable=%v)"</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Code</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Message</span><span class="p">,</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">Recoverable</span><span class="p">)</span>
 <span class="p">}</span>
 
 <span class="c1">// Example errors</span>
 <span class="kd">func</span><span class="w"> </span><span class="nx">NewConnectionError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
-<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;CONNECTION_FAILED&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">"CONNECTION_FAILED"</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="c1">// Can retry connection</span>
 <span class="w">    </span><span class="p">}</span>
@@ -2787,7 +2787,7 @@
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">NewInvalidConfigError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
-<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;INVALID_CONFIG&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">"INVALID_CONFIG"</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="c1">// Cannot recover from bad config</span>
 <span class="w">    </span><span class="p">}</span>
@@ -2795,7 +2795,7 @@
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">NewSendError</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">recoverable</span><span class="w"> </span><span class="kt">bool</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="nx">PluginError</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">PluginError</span><span class="p">{</span>
-<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">&quot;SEND_FAILED&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Code</span><span class="p">:</span><span class="w">        </span><span class="s">"SEND_FAILED"</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Message</span><span class="p">:</span><span class="w">     </span><span class="nx">msg</span><span class="p">,</span>
 <span class="w">        </span><span class="nx">Recoverable</span><span class="p">:</span><span class="w"> </span><span class="nx">recoverable</span><span class="p">,</span>
 <span class="w">    </span><span class="p">}</span>
@@ -2832,24 +2832,24 @@
 <h3 id="security-best-practices">Security Best Practices<a class="headerlink" href="#security-best-practices" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1">// ✅ GOOD: Use credentials passed in config</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Connect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">config</span><span class="p">.</span><span class="nx">Credentials</span><span class="p">[</span><span class="s">&quot;api_key&quot;</span><span class="p">]</span>
+<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">config</span><span class="p">.</span><span class="nx">Credentials</span><span class="p">[</span><span class="s">"api_key"</span><span class="p">]</span>
 <span class="w">    </span><span class="c1">// Use apiKey to authenticate</span>
 <span class="p">}</span>
 
-<span class="c1">// ❌ BAD: Don&#39;t hardcode credentials</span>
+<span class="c1">// ❌ BAD: Don't hardcode credentials</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Connect</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="w"> </span><span class="nx">ConnectionConfig</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="s">&quot;hardcoded-secret-key&quot;</span><span class="w"> </span><span class="c1">// SECURITY ISSUE</span>
+<span class="w">    </span><span class="nx">apiKey</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="s">"hardcoded-secret-key"</span><span class="w"> </span><span class="c1">// SECURITY ISSUE</span>
 <span class="p">}</span>
 
 <span class="c1">// ✅ GOOD: Log important events without exposing secrets</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="w"> </span><span class="nx">Message</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;Sending message for customer %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Metadata</span><span class="p">.</span><span class="nx">CustomerID</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">"Sending message for customer %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Metadata</span><span class="p">.</span><span class="nx">CustomerID</span><span class="p">)</span>
 <span class="w">    </span><span class="c1">// Send message...</span>
 <span class="p">}</span>
 
-<span class="c1">// ❌ BAD: Don&#39;t log sensitive data</span>
+<span class="c1">// ❌ BAD: Don't log sensitive data</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">c</span><span class="w"> </span><span class="o">*</span><span class="nx">MyConnector</span><span class="p">)</span><span class="w"> </span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="w"> </span><span class="nx">Message</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;Sending payload: %s&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">string</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">Payload</span><span class="p">))</span><span class="w"> </span><span class="c1">// May contain secrets</span>
+<span class="w">    </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">"Sending payload: %s"</span><span class="p">,</span><span class="w"> </span><span class="kt">string</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">Payload</span><span class="p">))</span><span class="w"> </span><span class="c1">// May contain secrets</span>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="host-functions-available-to-plugins">Host Functions Available to Plugins<a class="headerlink" href="#host-functions-available-to-plugins" title="Permanent link">&para;</a></h2>
@@ -2863,7 +2863,7 @@
 <span class="w">    </span><span class="nx">Log</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">level</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">message</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
 
 <span class="w">    </span><span class="c1">// RecordMetric: Record a metric (for monitoring)</span>
-<span class="w">    </span><span class="nx">RecordMetric</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">value</span><span class="w"> </span><span class="kt">float64</span><span class="p">,</span><span class="w"> </span><span class="nx">tags</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
+<span class="w">    </span><span class="nx">RecordMetric</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">name</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">value</span><span class="w"> </span><span class="kt">float64</span><span class="p">,</span><span class="w"> </span><span class="nx">tags</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span>
 
 <span class="w">    </span><span class="c1">// GetConfiguration: Get plugin configuration</span>
 <span class="w">    </span><span class="nx">GetConfiguration</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">ConnectionConfig</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
@@ -2874,11 +2874,11 @@
 <div class="highlight"><pre><span></span><code><span class="c1"># Applied by Control Plane when spawning plugin subprocess</span>
 <span class="nt">resources</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">requests</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;100m&quot;</span>
-<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;64Mi&quot;</span>
+<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">"100m"</span>
+<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">"64Mi"</span>
 <span class="w">  </span><span class="nt">limits</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;500m&quot;</span>
-<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;256Mi&quot;</span>
+<span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s">"500m"</span>
+<span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="s">"256Mi"</span>
 </code></pre></div>
 <p><strong>Plugin responsibilities:</strong>
 - Respect timeout in ConnectionConfig
@@ -2889,38 +2889,38 @@
 <div class="highlight"><pre><span></span><code><span class="kn">package</span><span class="w"> </span><span class="nx">main</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="p">(</span>
-<span class="w">    </span><span class="s">&quot;context&quot;</span>
-<span class="w">    </span><span class="s">&quot;testing&quot;</span>
+<span class="w">    </span><span class="s">"context"</span>
+<span class="w">    </span><span class="s">"testing"</span>
 
-<span class="w">    </span><span class="s">&quot;github.com/ValueRetail/vrsky/pkg/connector&quot;</span>
+<span class="w">    </span><span class="s">"github.com/ValueRetail/vrsky/pkg/connector"</span>
 <span class="p">)</span>
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">TestMyConnectorValidate</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nx">c</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{}</span>
 <span class="w">    </span><span class="nx">config</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionConfig</span><span class="p">{</span>
-<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">&quot;test-http&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http-webhook&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nx">Settings</span><span class="p">:</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}{</span>
-<span class="w">            </span><span class="s">&quot;port&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8080</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">"test-http"</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">"http-webhook"</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Settings</span><span class="p">:</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}{</span>
+<span class="w">            </span><span class="s">"port"</span><span class="p">:</span><span class="w"> </span><span class="mi">8080</span><span class="p">,</span>
 <span class="w">        </span><span class="p">},</span>
 <span class="w">    </span><span class="p">}</span>
 
 <span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Validate</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="nx">config</span><span class="p">)</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">&quot;Validate failed: %v&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">"Validate failed: %v"</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
 
 <span class="kd">func</span><span class="w"> </span><span class="nx">TestMyConnectorConnect</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nx">c</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">MyHTTPConnector</span><span class="p">{}</span>
 <span class="w">    </span><span class="nx">config</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">connector</span><span class="p">.</span><span class="nx">ConnectionConfig</span><span class="p">{</span>
-<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">&quot;test-http&quot;</span><span class="p">,</span>
-<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http-webhook&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">ID</span><span class="p">:</span><span class="w">   </span><span class="s">"test-http"</span><span class="p">,</span>
+<span class="w">        </span><span class="nx">Type</span><span class="p">:</span><span class="w"> </span><span class="s">"http-webhook"</span><span class="p">,</span>
 <span class="w">    </span><span class="p">}</span>
 
 <span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Connect</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">(),</span><span class="w"> </span><span class="nx">config</span><span class="p">)</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">&quot;Connect failed: %v&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">t</span><span class="p">.</span><span class="nx">Fatalf</span><span class="p">(</span><span class="s">"Connect failed: %v"</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="p">)</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">c</span><span class="p">.</span><span class="nx">Disconnect</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Background</span><span class="p">())</span>
 <span class="p">}</span>

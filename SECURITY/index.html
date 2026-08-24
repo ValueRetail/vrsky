@@ -2803,7 +2803,7 @@ database. Plaintext is never written to disk by the application.</p>
 <h3 id="reference-model">Reference model<a class="headerlink" href="#reference-model" title="Permanent link">&para;</a></h3>
 <p>Connector configs hold references — never plaintext:</p>
 <div class="highlight"><pre><span></span><code>{
-  &quot;password_secret_id&quot;: &quot;f0e0a3c2-…&quot;  // resolved at worker startup
+  "password_secret_id": "f0e0a3c2-…"  // resolved at worker startup
 }
 </code></pre></div>
 <p>For database DSNs (a single string containing user, password, host, etc.)
@@ -2950,14 +2950,14 @@ encrypted in the <code>secrets</code> table (#66); only the UUID reference lives
 <h3 id="tenant-configuration">Tenant configuration<a class="headerlink" href="#tenant-configuration" title="Permanent link">&para;</a></h3>
 <p>Admins of a tenant call <code>PUT /api/v1/tenants/{tenant_id}/oidc</code> with:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;issuer_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://accounts.google.com&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;client_secret&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;redirect_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://app.vrsky.example/api/v1/auth/oidc/callback&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;scopes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;openid&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;email&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;profile&quot;</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;allowed_domains&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;acme.com&quot;</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;default_role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;viewer&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;provider_label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Acme SSO&quot;</span>
+<span class="w">  </span><span class="nt">"issuer_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://accounts.google.com"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"client_secret"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"redirect_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://app.vrsky.example/api/v1/auth/oidc/callback"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"scopes"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"openid"</span><span class="p">,</span><span class="w"> </span><span class="s2">"email"</span><span class="p">,</span><span class="w"> </span><span class="s2">"profile"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"allowed_domains"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"acme.com"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"default_role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"viewer"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"provider_label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Acme SSO"</span>
 <span class="p">}</span>
 </code></pre></div>
 <p>The same <code>redirect_url</code> must be registered with the IdP. <code>allowed_domains</code>
@@ -2981,7 +2981,7 @@ denied at callback time, before any session is minted.</p>
 <span class="w">  </span><span class="nt">environment</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">KEYCLOAK_ADMIN</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin</span>
 <span class="w">    </span><span class="nt">KEYCLOAK_ADMIN_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin</span>
-<span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;8081:8080&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"8081:8080"</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>Create a realm <code>vrsky-dev</code>, a confidential client <code>vrsky-app</code> with redirect
 URI <code>http://localhost:3000/api/v1/auth/oidc/callback</code>, then point the
@@ -3007,19 +3007,19 @@ in <code>auth_audit_log</code> with event type <code>oidc_login</code>. The gene
 <h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h2>
 <p>After deploying:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Management-api refuses to start without the key.</span>
-<span class="nv">ENCRYPTION_KEY</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>management-api<span class="w">  </span><span class="c1"># expect Fatal</span>
+<span class="nv">ENCRYPTION_KEY</span><span class="o">=</span><span class="s2">""</span><span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>management-api<span class="w">  </span><span class="c1"># expect Fatal</span>
 
 <span class="c1"># 2. Create a secret.</span>
 curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:3000/api/v1/secrets<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;pg-pwd&quot;,&quot;value&quot;:&quot;hunter2&quot;}&#39;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"name":"pg-pwd","value":"hunter2"}'</span>
 
 <span class="c1"># 3. Read it back — value must NOT appear in the response.</span>
 curl<span class="w"> </span>localhost:3000/api/v1/secrets/<span class="nv">$ID</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">&quot;</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"X-Tenant-ID: </span><span class="nv">$TENANT</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$API_KEY</span><span class="s2">"</span>
 
 <span class="c1"># 4. Verify the database holds ciphertext only.</span>
-psql<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;SELECT ciphertext FROM secrets WHERE id = &#39;</span><span class="nv">$ID</span><span class="s2">&#39;&quot;</span>
+psql<span class="w"> </span>-c<span class="w"> </span><span class="s2">"SELECT ciphertext FROM secrets WHERE id = '</span><span class="nv">$ID</span><span class="s2">'"</span>
 <span class="c1"># expected: aes256:&lt;base64...&gt;</span>
 </code></pre></div>
 <h2 id="gateway-rate-limiting-phase-3g-90">Gateway rate limiting (Phase 3G, #90)<a class="headerlink" href="#gateway-rate-limiting-phase-3g-90" title="Permanent link">&para;</a></h2>
@@ -3063,8 +3063,8 @@ rate-limit drops), visible in Grafana alongside the app metrics (#84).</p>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>traefik<span class="w"> </span>management-api<span class="w"> </span>postgres-management<span class="w"> </span>nats<span class="w"> </span>prometheus
 <span class="c1"># Free tier is intentionally low for the demo (avg 5 / burst 10). Burst past it:</span>
 <span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">30</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<span class="w">  </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code} &quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>-H<span class="w"> </span><span class="s2">&quot;X-Tenant-ID: tenant-A&quot;</span><span class="w"> </span>http://localhost:8090/api/v1/health
+<span class="w">  </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">"%{http_code} "</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-H<span class="w"> </span><span class="s2">"X-Tenant-ID: tenant-A"</span><span class="w"> </span>http://localhost:8090/api/v1/health
 <span class="k">done</span><span class="w">            </span><span class="c1"># expect a run of 200s then 429s</span>
 <span class="c1"># A 429 response carries Retry-After and Server: traefik. A different</span>
 <span class="c1"># X-Tenant-ID (tenant-B) is unaffected — independent buckets.</span>
@@ -3108,7 +3108,7 @@ key with the de-suffixed key, e.g. <code>cert_secret_id</code> → <code>cert</c
 </tbody>
 </table>
 <p>Example consumer node config (after the CA secret is stored):</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tls&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;client_ca_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tls"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"client_ca_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <p>The <code>tls</code> block is settable today via the connections API; UI cert pickers are a
 follow-up. The webhook consumer's own server identity comes from
@@ -3135,21 +3135,21 @@ self-signed cert (dev only) — mTLS security here comes from verifying the
 <h3 id="verify-compose_1">Verify (compose)<a class="headerlink" href="#verify-compose_1" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Throwaway CA + server + client certs.</span>
 openssl<span class="w"> </span>ecparam<span class="w"> </span>-genkey<span class="w"> </span>-name<span class="w"> </span>prime256v1<span class="w"> </span>-out<span class="w"> </span>ca.key
-openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>ca.key<span class="w"> </span>-sha256<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-subj<span class="w"> </span><span class="s2">&quot;/CN=test-ca&quot;</span><span class="w"> </span>-out<span class="w"> </span>ca.crt
+openssl<span class="w"> </span>req<span class="w"> </span>-x509<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>ca.key<span class="w"> </span>-sha256<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-subj<span class="w"> </span><span class="s2">"/CN=test-ca"</span><span class="w"> </span>-out<span class="w"> </span>ca.crt
 openssl<span class="w"> </span>ecparam<span class="w"> </span>-genkey<span class="w"> </span>-name<span class="w"> </span>prime256v1<span class="w"> </span>-out<span class="w"> </span>client.key
-openssl<span class="w"> </span>req<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>client.key<span class="w"> </span>-subj<span class="w"> </span><span class="s2">&quot;/CN=client&quot;</span><span class="w"> </span>-out<span class="w"> </span>client.csr
+openssl<span class="w"> </span>req<span class="w"> </span>-new<span class="w"> </span>-key<span class="w"> </span>client.key<span class="w"> </span>-subj<span class="w"> </span><span class="s2">"/CN=client"</span><span class="w"> </span>-out<span class="w"> </span>client.csr
 openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> </span>-in<span class="w"> </span>client.csr<span class="w"> </span>-CA<span class="w"> </span>ca.crt<span class="w"> </span>-CAkey<span class="w"> </span>ca.key<span class="w"> </span>-CAcreateserial<span class="w"> </span>-days<span class="w"> </span><span class="m">1</span><span class="w"> </span>-out<span class="w"> </span>client.crt
 
-<span class="c1"># 2. Store ca.crt as a tenant secret and put its id in the consumer node&#39;s</span>
+<span class="c1"># 2. Store ca.crt as a tenant secret and put its id in the consumer node's</span>
 <span class="c1">#    tls.client_ca_secret_id, then start a webhook→http connection.</span>
 
 <span class="c1"># 3. No client cert → TLS handshake refused (RequireAnyClientCert, no HTTP</span>
 <span class="c1">#    response — curl exits 35/56); valid client cert → 202.</span>
-curl<span class="w"> </span>-k<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;x&quot;:1}&#39;</span><span class="w">                       </span><span class="c1"># handshake refused</span>
-curl<span class="w"> </span>-k<span class="w"> </span>--cert<span class="w"> </span>client.crt<span class="w"> </span>--key<span class="w"> </span>client.key<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;x&quot;:1}&#39;</span><span class="w">  </span><span class="c1"># 202</span>
+curl<span class="w"> </span>-k<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"x":1}'</span><span class="w">                       </span><span class="c1"># handshake refused</span>
+curl<span class="w"> </span>-k<span class="w"> </span>--cert<span class="w"> </span>client.crt<span class="w"> </span>--key<span class="w"> </span>client.key<span class="w"> </span>https://localhost:9101/webhook/&lt;conn-id&gt;<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"x":1}'</span><span class="w">  </span><span class="c1"># 202</span>
 <span class="c1"># A cert signed by a different CA completes the handshake but fails app-layer</span>
 <span class="c1"># verification → 401. (macOS system curl uses LibreSSL, which mishandles EC</span>
-<span class="c1"># client keys with &quot;bad decrypt&quot;; use an OpenSSL-based curl to test.)</span>
+<span class="c1"># client keys with "bad decrypt"; use an OpenSSL-based curl to test.)</span>
 </code></pre></div>
 
 

@@ -2151,11 +2151,11 @@ pipeline message.</p>
 <li><code>queue</code> — the queue to consume from.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rabbitmq&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;rabbitmq&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;amqp://host:5672&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;queue&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;events&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rabbitmq"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"rabbitmq"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"amqp://host:5672"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"queue"</span><span class="p">:</span><span class="w"> </span><span class="s2">"events"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2170,12 +2170,12 @@ where <code>routing_key</code> names the target queue directly.</p>
 <li><code>routing_key</code> — routing key for the publish.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rabbitmq&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;rabbitmq&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;amqp://host:5672&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;password_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;field&gt;_secret_id&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;exchange&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;events&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;routing_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;orders.created&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rabbitmq"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"rabbitmq"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"amqp://host:5672"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"exchange"</span><span class="p">:</span><span class="w"> </span><span class="s2">"events"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"routing_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"orders.created"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

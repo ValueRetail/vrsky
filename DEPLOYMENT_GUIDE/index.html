@@ -3925,7 +3925,7 @@ kubectl<span class="w"> </span>rollout<span class="w"> </span>undo<span class="w
 <p>Example: <code>v1.2.3</code></p>
 <h3 id="git-tag-strategy">Git Tag Strategy<a class="headerlink" href="#git-tag-strategy" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Create a release tag</span>
-git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>v1.2.3<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Release v1.2.3: Add UI deployment&quot;</span>
+git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>v1.2.3<span class="w"> </span>-m<span class="w"> </span><span class="s2">"Release v1.2.3: Add UI deployment"</span>
 git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v1.2.3
 
 <span class="c1"># GitHub Actions automatically builds and pushes:</span>
@@ -3939,8 +3939,8 @@ git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </
 <span class="c1"># Returns git tag (v1.2.3) or commit hash (sha-a1b2c3d4)</span>
 
 <span class="nv">VERSION</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>describe<span class="w"> </span>--exact-match<span class="w"> </span>--tags<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
-<span class="w">          </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;sha-</span><span class="k">$(</span>git<span class="w"> </span>rev-parse<span class="w"> </span>--short<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="k">)</span>
-<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span>
+<span class="w">          </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"sha-</span><span class="k">$(</span>git<span class="w"> </span>rev-parse<span class="w"> </span>--short<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">"</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VERSION</span><span class="s2">"</span>
 </code></pre></div>
 <h3 id="deployment-by-version">Deployment by Version<a class="headerlink" href="#deployment-by-version" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Deploy latest (always works)</span>
@@ -3975,14 +3975,14 @@ docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </
 <span class="c1"># Comment out: RUN npm run test</span>
 
 <span class="c1"># To verify tests passed in build:</span>
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;✓.*tests&quot;</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">"✓.*tests"</span>
 </code></pre></div>
 <h4 id="kubernetes-pod-stays-in-pending">Kubernetes Pod Stays in "Pending"<a class="headerlink" href="#kubernetes-pod-stays-in-pending" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><span class="c1"># Check resource availability</span>
 kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>&lt;pod-name&gt;
 
 <span class="c1"># Check node resources</span>
-kubectl<span class="w"> </span>describe<span class="w"> </span>nodes<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="s2">&quot;Allocated resources&quot;</span>
+kubectl<span class="w"> </span>describe<span class="w"> </span>nodes<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="s2">"Allocated resources"</span>
 
 <span class="c1"># Reduce resource requests in deployment.yaml and reapply</span>
 kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/deployment.yaml
@@ -4014,7 +4014,7 @@ docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </
 docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>/bin/sh
 
 <span class="c1"># Check K8s events</span>
-kubectl<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>--sort-by<span class="o">=</span><span class="s1">&#39;.lastTimestamp&#39;</span>
+kubectl<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>--sort-by<span class="o">=</span><span class="s1">'.lastTimestamp'</span>
 
 <span class="c1"># Describe deployment issues</span>
 kubectl<span class="w"> </span>describe<span class="w"> </span>deployment<span class="w"> </span>vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui

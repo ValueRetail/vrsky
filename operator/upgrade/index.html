@@ -2151,7 +2151,7 @@ JetStream.</p>
    (<code>NNNNNN_name.{up,down}.sql</code>). They are forward-only in practice; every <code>up</code>
    has a tested <code>down</code>.
    <div class="highlight"><pre><span></span><code>migrate<span class="w"> </span>-path<span class="w"> </span>infrastructure/migrations<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-database<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MANAGEMENT_DB_URL</span><span class="s2">&quot;</span><span class="w"> </span>up
+<span class="w">  </span>-database<span class="w"> </span><span class="s2">"</span><span class="nv">$MANAGEMENT_DB_URL</span><span class="s2">"</span><span class="w"> </span>up
 </code></pre></div>
    Migrations are additive and safe to run before rolling new code (new columns
    default sensibly; old code ignores them).</li>

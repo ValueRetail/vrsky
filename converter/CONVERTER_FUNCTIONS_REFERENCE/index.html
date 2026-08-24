@@ -2775,8 +2775,8 @@
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_name_upper</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;john doe&quot;
-Output: &quot;JOHN DOE&quot;
+<div class="highlight"><pre><span></span><code>Input:  "john doe"
+Output: "JOHN DOE"
 </code></pre></div></p>
 <h3 id="lower">lower()<a class="headerlink" href="#lower" title="Permanent link">&para;</a></h3>
 <p>Converts a string to lowercase.</p>
@@ -2787,8 +2787,8 @@ Output: &quot;JOHN DOE&quot;
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email_normalized</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;John@EXAMPLE.COM&quot;
-Output: &quot;john@example.com&quot;
+<div class="highlight"><pre><span></span><code>Input:  "John@EXAMPLE.COM"
+Output: "john@example.com"
 </code></pre></div></p>
 <h3 id="substringstart-end">substring(start, end)<a class="headerlink" href="#substringstart-end" title="Permanent link">&para;</a></h3>
 <p>Extracts a substring from a string.</p>
@@ -2799,54 +2799,54 @@ Output: &quot;john@example.com&quot;
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order_prefix</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;ORD-2026-001-XYZ&quot;
-Output: &quot;ORD-2026&quot;
+<div class="highlight"><pre><span></span><code>Input:  "ORD-2026-001-XYZ"
+Output: "ORD-2026"
 </code></pre></div></p>
 <h3 id="concatparts">concat(...parts)<a class="headerlink" href="#concatparts" title="Permanent link">&para;</a></h3>
 <p>Concatenates multiple strings.</p>
 <p><strong>Signature</strong>: <code>concat(part1: string, part2: string, ...) → string</code></p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concat(customer.first_name, &quot; &quot;, customer.last_name)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">concat(customer.first_name, " ", customer.last_name)</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">full_name</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  first_name=&quot;John&quot;, last_name=&quot;Doe&quot;
-Output: &quot;John Doe&quot;
+<div class="highlight"><pre><span></span><code>Input:  first_name="John", last_name="Doe"
+Output: "John Doe"
 </code></pre></div></p>
 <h3 id="splitdelimiter">split(delimiter)<a class="headerlink" href="#splitdelimiter" title="Permanent link">&para;</a></h3>
 <p>Splits a string by delimiter into an array.</p>
 <p><strong>Signature</strong>: <code>split(input: string, delimiter: string) → array[string]</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tags</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">split(&quot;,&quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">split(",")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tag_array</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;tag1,tag2,tag3&quot;
-Output: [&quot;tag1&quot;, &quot;tag2&quot;, &quot;tag3&quot;]
+<div class="highlight"><pre><span></span><code>Input:  "tag1,tag2,tag3"
+Output: ["tag1", "tag2", "tag3"]
 </code></pre></div></p>
 <h3 id="joindelimiter">join(delimiter)<a class="headerlink" href="#joindelimiter" title="Permanent link">&para;</a></h3>
 <p>Joins array elements with a delimiter.</p>
 <p><strong>Signature</strong>: <code>join(input: array[string], delimiter: string) → string</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.items</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">join(&quot;, &quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">join(", ")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">items_string</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  [&quot;apple&quot;, &quot;banana&quot;, &quot;orange&quot;]
-Output: &quot;apple, banana, orange&quot;
+<div class="highlight"><pre><span></span><code>Input:  ["apple", "banana", "orange"]
+Output: "apple, banana, orange"
 </code></pre></div></p>
 <h3 id="containssubstring">contains(substring)<a class="headerlink" href="#containssubstring" title="Permanent link">&para;</a></h3>
 <p>Checks if a string contains a substring.</p>
 <p><strong>Signature</strong>: <code>contains(input: string, substring: string) → boolean</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">email</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contains(&quot;@&quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contains("@")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_valid_email</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;john@example.com&quot;
+<div class="highlight"><pre><span></span><code>Input:  "john@example.com"
 Output: true
 </code></pre></div></p>
 <h3 id="startswithprefix">startswith(prefix)<a class="headerlink" href="#startswithprefix" title="Permanent link">&para;</a></h3>
@@ -2854,11 +2854,11 @@ Output: true
 <p><strong>Signature</strong>: <code>startswith(input: string, prefix: string) → boolean</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.id</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">startswith(&quot;ORD-&quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">startswith("ORD-")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_order</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;ORD-2026-001&quot;
+<div class="highlight"><pre><span></span><code>Input:  "ORD-2026-001"
 Output: true
 </code></pre></div></p>
 <h3 id="endswithsuffix">endswith(suffix)<a class="headerlink" href="#endswithsuffix" title="Permanent link">&para;</a></h3>
@@ -2866,11 +2866,11 @@ Output: true
 <p><strong>Signature</strong>: <code>endswith(input: string, suffix: string) → boolean</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filename</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">endswith(&quot;.pdf&quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">endswith(".pdf")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">is_pdf</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;document.pdf&quot;
+<div class="highlight"><pre><span></span><code>Input:  "document.pdf"
 Output: true
 </code></pre></div></p>
 <h3 id="trim">trim()<a class="headerlink" href="#trim" title="Permanent link">&para;</a></h3>
@@ -2882,20 +2882,20 @@ Output: true
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">name_trimmed</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;  John Doe  &quot;
-Output: &quot;John Doe&quot;
+<div class="highlight"><pre><span></span><code>Input:  "  John Doe  "
+Output: "John Doe"
 </code></pre></div></p>
 <h3 id="replacesearch-replacement">replace(search, replacement)<a class="headerlink" href="#replacesearch-replacement" title="Permanent link">&para;</a></h3>
 <p>Replaces all occurrences of a substring.</p>
 <p><strong>Signature</strong>: <code>replace(input: string, search: string, replacement: string) → string</code></p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">address</span>
-<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">replace(&quot;,&quot;, &quot;;&quot;)</span>
+<span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">replace(",", ";")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">address_normalized</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;123 Main St, New York, NY&quot;
-Output: &quot;123 Main St; New York; NY&quot;
+<div class="highlight"><pre><span></span><code>Input:  "123 Main St, New York, NY"
+Output: "123 Main St; New York; NY"
 </code></pre></div></p>
 <h3 id="length">length()<a class="headerlink" href="#length" title="Permanent link">&para;</a></h3>
 <p>Returns the length of a string or array.</p>
@@ -2906,7 +2906,7 @@ Output: &quot;123 Main St; New York; NY&quot;
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">name_length</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;MacBook Pro&quot;
+<div class="highlight"><pre><span></span><code>Input:  "MacBook Pro"
 Output: 11
 </code></pre></div></p>
 <hr />
@@ -2922,7 +2922,7 @@ Output: 11
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
 <div class="highlight"><pre><span></span><code>Input:  123
-Output: &quot;123&quot;
+Output: "123"
 </code></pre></div></p>
 <h3 id="tonumber">toNumber()<a class="headerlink" href="#tonumber" title="Permanent link">&para;</a></h3>
 <p>Converts a value to a number (int or float).</p>
@@ -2934,7 +2934,7 @@ Output: &quot;123&quot;
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">float</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;99.99&quot;
+<div class="highlight"><pre><span></span><code>Input:  "99.99"
 Output: 99.99
 </code></pre></div></p>
 <h3 id="toboolean">toBoolean()<a class="headerlink" href="#toboolean" title="Permanent link">&para;</a></h3>
@@ -2947,9 +2947,9 @@ Output: 99.99
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">boolean</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &quot;true&quot;, 1, true, &quot;yes&quot;
+<div class="highlight"><pre><span></span><code>Input:  "true", 1, true, "yes"
 Output: true
-Input:  &quot;false&quot;, 0, false, &quot;no&quot;
+Input:  "false", 0, false, "no"
 Output: false
 </code></pre></div></p>
 <h3 id="parsejson">parseJSON()<a class="headerlink" href="#parsejson" title="Permanent link">&para;</a></h3>
@@ -2962,8 +2962,8 @@ Output: false
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  &#39;{&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}&#39;
-Output: {&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}
+<div class="highlight"><pre><span></span><code>Input:  '{"key": "value", "count": 42}'
+Output: {"key": "value", "count": 42}
 </code></pre></div></p>
 <h3 id="stringifyjson">stringifyJSON()<a class="headerlink" href="#stringifyjson" title="Permanent link">&para;</a></h3>
 <p>Converts an object to a JSON string.</p>
@@ -2975,8 +2975,8 @@ Output: {&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
 </code></pre></div></p>
 <p><strong>Input/Output</strong>:
-<div class="highlight"><pre><span></span><code>Input:  {&quot;key&quot;: &quot;value&quot;, &quot;count&quot;: 42}
-Output: &#39;{&quot;key&quot;:&quot;value&quot;,&quot;count&quot;:42}&#39;
+<div class="highlight"><pre><span></span><code>Input:  {"key": "value", "count": 42}
+Output: '{"key":"value","count":42}'
 </code></pre></div></p>
 <hr />
 <h2 id="numeric-functions">Numeric Functions<a class="headerlink" href="#numeric-functions" title="Permanent link">&para;</a></h2>
@@ -3059,7 +3059,7 @@ Output: 99.99
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
 </code></pre></div></p>
 <p><strong>Output</strong>:
-<div class="highlight"><pre><span></span><code>&quot;2026-02-23T12:30:45.123456789Z&quot;
+<div class="highlight"><pre><span></span><code>"2026-02-23T12:30:45.123456789Z"
 </code></pre></div></p>
 <h3 id="today">today()<a class="headerlink" href="#today" title="Permanent link">&para;</a></h3>
 <p>Returns today's date in YYYY-MM-DD format.</p>
@@ -3070,7 +3070,7 @@ Output: 99.99
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
 </code></pre></div></p>
 <p><strong>Output</strong>:
-<div class="highlight"><pre><span></span><code>&quot;2026-02-23&quot;
+<div class="highlight"><pre><span></span><code>"2026-02-23"
 </code></pre></div></p>
 <h3 id="timestamp">timestamp()<a class="headerlink" href="#timestamp" title="Permanent link">&para;</a></h3>
 <p>Returns the current Unix timestamp in seconds.</p>
@@ -3091,7 +3091,7 @@ Output: 99.99
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">string</span>
 </code></pre></div></p>
 <p><strong>Output</strong>:
-<div class="highlight"><pre><span></span><code>&quot;550e8400-e29b-41d4-a716-446655440000&quot;
+<div class="highlight"><pre><span></span><code>"550e8400-e29b-41d4-a716-446655440000"
 </code></pre></div></p>
 <h3 id="randommin-max">random(min, max)<a class="headerlink" href="#randommin-max" title="Permanent link">&para;</a></h3>
 <p>Generates a random integer between min and max (inclusive).</p>
@@ -3104,7 +3104,7 @@ Output: 99.99
 <p>Reads an environment variable.</p>
 <p><strong>Signature</strong>: <code>env(variable_name: string) → string</code></p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env(&quot;TENANT_ID&quot;)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">env("TENANT_ID")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant_id</span>
 </code></pre></div></p>
 <hr />
@@ -3119,7 +3119,7 @@ Output: 99.99
 - Result caching with TTL
 - Transaction support</p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM customers WHERE id = $1&quot;, [customer.id])</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM customers WHERE id = $1", [customer.id])</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_data</span>
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
 </code></pre></div></p>
@@ -3141,7 +3141,7 @@ Output: 99.99
 - Result caching
 - Timeout configuration</p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http(&quot;https://api.example.com/customer/&quot; + customer.id, &quot;GET&quot;, {&quot;Authorization&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;Bearer</span><span class="nv"> </span><span class="s">token&quot;</span><span class="err">}</span><span class="l l-Scalar l-Scalar-Plain">)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http("https://api.example.com/customer/" + customer.id, "GET", {"Authorization"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"Bearer</span><span class="nv"> </span><span class="s">token"</span><span class="err">}</span><span class="l l-Scalar l-Scalar-Plain">)</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_api_data</span>
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
 </code></pre></div></p>
@@ -3160,8 +3160,8 @@ Output: 99.99
 - Configurable per-backend timeouts</p>
 <p><strong>Example</strong>:
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_composite([</span>
-<span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">{type</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;postgres&quot;</span><span class="err">,</span><span class="w"> </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">id</span><span class="nv"> </span><span class="s">=</span><span class="nv"> </span><span class="s">$1&quot;</span><span class="err">},</span>
-<span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http&quot;</span><span class="p p-Indicator">,</span><span class="nt"> url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;https://api.example.com/customer/$1&quot;</span><span class="p p-Indicator">}</span><span class="err">,</span>
+<span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">{type</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"postgres"</span><span class="err">,</span><span class="w"> </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">"SELECT</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">id</span><span class="nv"> </span><span class="s">=</span><span class="nv"> </span><span class="s">$1"</span><span class="err">},</span>
+<span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">"http"</span><span class="p p-Indicator">,</span><span class="nt"> url</span><span class="p">:</span><span class="w"> </span><span class="s">"https://api.example.com/customer/$1"</span><span class="p p-Indicator">}</span><span class="err">,</span>
 <span class="w">  </span><span class="err">]</span><span class="l l-Scalar l-Scalar-Plain">)</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_data</span>
 <span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">object</span>
@@ -3176,7 +3176,7 @@ Output: 99.99
 <p>Retrieves a value from the cache.</p>
 <p><strong>Signature</strong>: <code>cache_get(key: string) → any | null</code></p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_get(&quot;customer_&quot; + customer.id)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_get("customer_" + customer.id)</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cached_customer</span>
 <span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cached_customer != null</span>
 </code></pre></div></p>
@@ -3184,7 +3184,7 @@ Output: 99.99
 <p>Stores a value in the cache with TTL.</p>
 <p><strong>Signature</strong>: <code>cache_set(key: string, value: any, ttl: int) → boolean</code></p>
 <p><strong>Example</strong>:
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_set(&quot;customer_&quot; + customer.id, lookup_result, 300)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_set("customer_" + customer.id, lookup_result, 300)</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cache_result</span>
 </code></pre></div></p>
 <p><strong>Cache Configuration</strong>:
@@ -3198,7 +3198,7 @@ Output: 99.99
 <li>
 <p><strong>Write WASM module</strong> (Rust/C/etc.):
 <div class="highlight"><pre><span></span><code><span class="cp">#[no_mangle]</span>
-<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">transform</span><span class="p">(</span><span class="n">input_ptr</span><span class="p">:</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="p">,</span><span class="w"> </span><span class="n">input_len</span><span class="p">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="w"> </span><span class="p">{</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">transform</span><span class="p">(</span><span class="n">input_ptr</span><span class="p">:</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="p">,</span><span class="w"> </span><span class="n">input_len</span><span class="p">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="kt">u8</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="c1">// Custom transformation logic</span>
 <span class="w">    </span><span class="c1">// Return transformed data pointer</span>
 <span class="p">}</span>
@@ -3242,7 +3242,7 @@ Output: 99.99
 <span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.total</span>
 <span class="w">  </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">multiply(1.1)</span><span class="w">  </span><span class="c1"># Add 10% markup</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">final_price</span>
-<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.status == &quot;pending&quot;</span>
+<span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">order.status == "pending"</span>
 </code></pre></div>
 <h3 id="chained-functions">Chained Functions<a class="headerlink" href="#chained-functions" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
@@ -3253,31 +3253,31 @@ Output: 99.99
 </code></pre></div>
 <h3 id="with-lookup">With Lookup<a class="headerlink" href="#with-lookup" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">transformations</span><span class="p">:</span>
-<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM customers WHERE id = $1&quot;, [customer.id])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM customers WHERE id = $1", [customer.id])</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_details</span>
 <span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer.id != null</span>
 </code></pre></div>
 <hr />
 <h2 id="performance-tips">Performance Tips<a class="headerlink" href="#performance-tips" title="Permanent link">&para;</a></h2>
 <h3 id="1-cache-expensive-operations">1. Cache Expensive Operations<a class="headerlink" href="#1-cache-expensive-operations" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http(&quot;https://api.expensive.com/data&quot;)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_http("https://api.expensive.com/data")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
 <span class="w">  </span><span class="c1"># Results cached for CACHE_TTL seconds</span>
 </code></pre></div>
 <h3 id="2-use-conditions-to-skip-unnecessary-lookups">2. Use Conditions to Skip Unnecessary Lookups<a class="headerlink" href="#2-use-conditions-to-skip-unnecessary-lookups" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM big_table ...&quot;)</span>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM big_table ...")</span>
 <span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data</span>
 <span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always_need_this == true</span><span class="w">  </span><span class="c1"># Only if really needed</span>
 </code></pre></div>
 <h3 id="3-batch-lookup-requests">3. Batch Lookup Requests<a class="headerlink" href="#3-batch-lookup-requests" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Instead of multiple lookups:</span>
 <span class="c1"># Bad:</span>
-<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id1])</span>
-<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id2])</span>
-<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id = $1&quot;, [id3])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM users WHERE id = $1", [id1])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM users WHERE id = $1", [id2])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM users WHERE id = $1", [id3])</span>
 
 <span class="c1"># Good:</span>
-<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres(&quot;SELECT * FROM users WHERE id IN ($1, $2, $3)&quot;, [id1, id2, id3])</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">function</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lookup_postgres("SELECT * FROM users WHERE id IN ($1, $2, $3)", [id1, id2, id3])</span>
 </code></pre></div>
 <h3 id="4-use-connection-pooling">4. Use Connection Pooling<a class="headerlink" href="#4-use-connection-pooling" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">POSTGRES_MAX_CONNECTIONS</span><span class="o">=</span><span class="m">50</span><span class="w">  </span><span class="c1"># Pre-allocate connections</span>

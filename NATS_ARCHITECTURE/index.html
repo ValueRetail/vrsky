@@ -3093,7 +3093,7 @@ Examples:
 <span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
 <span class="w">    </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
-<span class="w">    </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">    </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span>
 <span class="w">  </span><span class="nt">ports</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4222</span>
 <span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">client</span>
@@ -3106,51 +3106,51 @@ Examples:
 <ol>
 <li><strong>Control Plane tracking</strong>:
    <div class="highlight"><pre><span></span><code><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">nats_instances</span><span class="w"> </span><span class="p">(</span><span class="n">tenant_id</span><span class="p">,</span><span class="w"> </span><span class="n">instance_id</span><span class="p">,</span><span class="w"> </span><span class="n">dns_name</span><span class="p">,</span><span class="w"> </span><span class="n">status</span><span class="p">)</span>
-<span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;tenant-a&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;nats-tenant-a-1.vrsky-tenants.svc.cluster.local:4222&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;active&#39;</span><span class="p">);</span>
+<span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">'tenant-a'</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">'nats-tenant-a-1.vrsky-tenants.svc.cluster.local:4222'</span><span class="p">,</span><span class="w"> </span><span class="s1">'active'</span><span class="p">);</span>
 </code></pre></div></li>
 </ol>
 <h3 id="worker-connection-strategy">Worker Connection Strategy<a class="headerlink" href="#worker-connection-strategy" title="Permanent link">&para;</a></h3>
 <p><strong>Workers connect to ALL tenant NATS instances</strong> for resilience:</p>
 <div class="highlight"><pre><span></span><code><span class="c1">// Worker startup: Fetch all NATS instances for this tenant</span>
 <span class="nx">tenantNATS</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">controlPlane</span><span class="p">.</span><span class="nx">GetNATSInstances</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
-<span class="c1">// Returns: [&quot;nats-tenant-a-1:4222&quot;, &quot;nats-tenant-a-2:4222&quot;]</span>
+<span class="c1">// Returns: ["nats-tenant-a-1:4222", "nats-tenant-a-2:4222"]</span>
 
 <span class="c1">// Connect to all instances (NATS client handles failover)</span>
 <span class="nx">nc</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">nats</span><span class="p">.</span><span class="nx">Connect</span><span class="p">(</span>
-<span class="w">    </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">tenantNATS</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;,&quot;</span><span class="p">),</span>
-<span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">Name</span><span class="p">(</span><span class="s">&quot;worker-converter-1&quot;</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">tenantNATS</span><span class="p">,</span><span class="w"> </span><span class="s">","</span><span class="p">),</span>
+<span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">Name</span><span class="p">(</span><span class="s">"worker-converter-1"</span><span class="p">),</span>
 <span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">ReconnectWait</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
 <span class="w">    </span><span class="nx">nats</span><span class="p">.</span><span class="nx">MaxReconnects</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">),</span><span class="w"> </span><span class="c1">// Infinite reconnects</span>
 <span class="p">)</span>
 
 <span class="c1">// Workers subscribe to all relevant subjects</span>
-<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">&quot;tenant-a.webhook.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">processWebhook</span><span class="p">)</span>
-<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">&quot;tenant-a.convert.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">processConversion</span><span class="p">)</span>
+<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">"tenant-a.webhook.*"</span><span class="p">,</span><span class="w"> </span><span class="nx">processWebhook</span><span class="p">)</span>
+<span class="nx">nc</span><span class="p">.</span><span class="nx">Subscribe</span><span class="p">(</span><span class="s">"tenant-a.convert.*"</span><span class="p">,</span><span class="w"> </span><span class="nx">processConversion</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>Publishing Strategy</strong>: Round-robin (NATS client handles automatically)</p>
 <hr />
 <h2 id="message-flow-architecture">Message Flow Architecture<a class="headerlink" href="#message-flow-architecture" title="Permanent link">&para;</a></h2>
 <h3 id="standard-message-flow-small-payloads-256kb">Standard Message Flow (Small Payloads &lt;256KB)<a class="headerlink" href="#standard-message-flow-small-payloads-256kb" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>1. Integration receives data
-   └─&gt; Publishes to Tenant NATS: &quot;tenant-a.webhook.received&quot;
+   └─&gt; Publishes to Tenant NATS: "tenant-a.webhook.received"
 
 2. Worker subscribes to Tenant NATS
-   └─&gt; Receives message on &quot;tenant-a.webhook.received&quot;
+   └─&gt; Receives message on "tenant-a.webhook.received"
 
 3. Worker tracks state in Platform NATS KV
-   └─&gt; KV.Put(&quot;msg-12345&quot;, {status: &quot;processing&quot;, timestamp: ...})
+   └─&gt; KV.Put("msg-12345", {status: "processing", timestamp: ...})
 
 4. Worker processes message
    └─&gt; Convert, filter, route, etc.
 
 5. Worker publishes result to Tenant NATS
-   └─&gt; &quot;tenant-a.producer.send&quot;
+   └─&gt; "tenant-a.producer.send"
 
 6. Producer consumes from Tenant NATS
    └─&gt; Sends to external system
 
 7. Worker updates state in Platform NATS KV
-   └─&gt; KV.Put(&quot;msg-12345&quot;, {status: &quot;completed&quot;, timestamp: ...})
+   └─&gt; KV.Put("msg-12345", {status: "completed", timestamp: ...})
    └─&gt; Auto-deleted after TTL (15min)
 </code></pre></div>
 <h3 id="large-payload-flow-256kb">Large Payload Flow (&gt;256KB)<a class="headerlink" href="#large-payload-flow-256kb" title="Permanent link">&para;</a></h3>
@@ -3162,8 +3162,8 @@ Examples:
 
 3. Integration publishes reference to Tenant NATS
    └─&gt; Payload: {
-         message_id: &quot;msg-12345&quot;,
-         payload_ref: &quot;s3://bucket/tenant-a/messages/msg-12345.bin&quot;,
+         message_id: "msg-12345",
+         payload_ref: "s3://bucket/tenant-a/messages/msg-12345.bin",
          size: 5242880,
          ttl: 900 // 15min
        }
@@ -3189,7 +3189,7 @@ Examples:
 </code></pre></div>
 <h3 id="retry-logic">Retry Logic<a class="headerlink" href="#retry-logic" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="nx">processMessage</span><span class="p">(</span><span class="nx">msg</span><span class="w"> </span><span class="o">*</span><span class="nx">nats</span><span class="p">.</span><span class="nx">Msg</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nx">msgID</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="s">&quot;Message-ID&quot;</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">msgID</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">msg</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="s">"Message-ID"</span><span class="p">)</span>
 
 <span class="w">    </span><span class="c1">// Get current state from Platform NATS KV</span>
 <span class="w">    </span><span class="nx">state</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Get</span><span class="p">(</span><span class="nx">msgID</span><span class="p">)</span>
@@ -3197,24 +3197,24 @@ Examples:
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="c1">// Move to dead letter queue</span>
 <span class="w">        </span><span class="nx">deadLetterQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
-<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;dead_letter&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">})</span>
+<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"dead_letter"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">})</span>
 <span class="w">        </span><span class="k">return</span>
 <span class="w">    </span><span class="p">}</span>
 
 <span class="w">    </span><span class="c1">// Track processing</span>
-<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;processing&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
+<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"processing"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
 
 <span class="w">    </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">doWork</span><span class="p">(</span><span class="nx">msg</span><span class="p">)</span>
 <span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="c1">// Schedule retry with exponential backoff</span>
-<span class="w">        </span><span class="nx">retryDelay</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">Pow</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nb">float64</span><span class="p">(</span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">)))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
+<span class="w">        </span><span class="nx">retryDelay</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">Pow</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="kt">float64</span><span class="p">(</span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">)))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
 <span class="w">        </span><span class="nx">retryQueue</span><span class="p">.</span><span class="nx">Publish</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="nx">nats</span><span class="p">.</span><span class="nx">RetryDelay</span><span class="p">(</span><span class="nx">retryDelay</span><span class="p">))</span>
-<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;retry&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">})</span>
+<span class="w">        </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"retry"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">})</span>
 <span class="w">        </span><span class="k">return</span>
 <span class="w">    </span><span class="p">}</span>
 
 <span class="w">    </span><span class="c1">// Success</span>
-<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;completed&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
+<span class="w">    </span><span class="nx">platformKV</span><span class="p">.</span><span class="nx">Put</span><span class="p">(</span><span class="nx">msgID</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="nx">status</span><span class="p">:</span><span class="w"> </span><span class="s">"completed"</span><span class="p">,</span><span class="w"> </span><span class="nx">retry_count</span><span class="p">:</span><span class="w"> </span><span class="nx">state</span><span class="p">.</span><span class="nx">RetryCount</span><span class="p">})</span>
 <span class="p">}</span>
 </code></pre></div>
 <h3 id="ackwait-in-progress-heartbeats-redelivery-139">AckWait, in-progress heartbeats &amp; redelivery (#139)<a class="headerlink" href="#ackwait-in-progress-heartbeats-redelivery-139" title="Permanent link">&para;</a></h3>
@@ -3271,9 +3271,9 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 <span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
 <span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats:2.12-alpine</span>
 <span class="w">          </span><span class="nt">args</span><span class="p">:</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-js&quot;</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-c&quot;</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;/etc/nats/nats.conf&quot;</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"-js"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"-c"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"/etc/nats/nats.conf"</span>
 <span class="w">          </span><span class="nt">resources</span><span class="p">:</span>
 <span class="w">            </span><span class="nt">requests</span><span class="p">:</span>
 <span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
@@ -3290,7 +3290,7 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">metadata</span><span class="p">:</span>
 <span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jetstream</span>
 <span class="w">      </span><span class="nt">spec</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;ReadWriteOnce&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">        </span><span class="nt">accessModes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"ReadWriteOnce"</span><span class="p p-Indicator">]</span>
 <span class="w">        </span><span class="nt">resources</span><span class="p">:</span>
 <span class="w">          </span><span class="nt">requests</span><span class="p">:</span>
 <span class="w">            </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100Gi</span>
@@ -3307,20 +3307,20 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 <span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
 <span class="w">      </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
-<span class="w">      </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">      </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span>
 <span class="w">  </span><span class="nt">template</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
 <span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
 <span class="w">        </span><span class="nt">tenant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span>
-<span class="w">        </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+<span class="w">        </span><span class="nt">instance</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span>
 <span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
 <span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats</span>
 <span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nats:2.12-alpine</span>
 <span class="w">          </span><span class="nt">args</span><span class="p">:</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;-m&quot;</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;8222&quot;</span><span class="w"> </span><span class="c1"># Monitoring port</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"-m"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"8222"</span><span class="w"> </span><span class="c1"># Monitoring port</span>
 <span class="w">          </span><span class="nt">resources</span><span class="p">:</span>
 <span class="w">            </span><span class="nt">requests</span><span class="p">:</span>
 <span class="w">              </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
@@ -3340,17 +3340,17 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 <span class="w">        </span><span class="c1">// Check integration count</span>
 <span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">IntegrationCount</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">50</span><span class="w"> </span><span class="p">{</span>
 <span class="w">            </span><span class="nx">provisionNewNATSInstance</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
-<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">&quot;Scaling tenant NATS (integration limit)&quot;</span><span class="p">,</span>
-<span class="w">                </span><span class="s">&quot;tenant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
-<span class="w">                </span><span class="s">&quot;count&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">IntegrationCount</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">"Scaling tenant NATS (integration limit)"</span><span class="p">,</span>
+<span class="w">                </span><span class="s">"tenant"</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
+<span class="w">                </span><span class="s">"count"</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">IntegrationCount</span><span class="p">)</span>
 <span class="w">        </span><span class="p">}</span>
 
 <span class="w">        </span><span class="c1">// Check throughput</span>
-<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="nx">_000</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100_000</span><span class="w"> </span><span class="p">{</span>
 <span class="w">            </span><span class="nx">provisionNewNATSInstance</span><span class="p">(</span><span class="nx">tenantID</span><span class="p">)</span>
-<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">&quot;Scaling tenant NATS (throughput limit)&quot;</span><span class="p">,</span>
-<span class="w">                </span><span class="s">&quot;tenant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
-<span class="w">                </span><span class="s">&quot;rate&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Info</span><span class="p">(</span><span class="s">"Scaling tenant NATS (throughput limit)"</span><span class="p">,</span>
+<span class="w">                </span><span class="s">"tenant"</span><span class="p">,</span><span class="w"> </span><span class="nx">tenantID</span><span class="p">,</span>
+<span class="w">                </span><span class="s">"rate"</span><span class="p">,</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">MsgRateSustained</span><span class="p">)</span>
 <span class="w">        </span><span class="p">}</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="p">}</span>
@@ -3409,7 +3409,7 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
 </ul>
 <h3 id="isolation">Isolation<a class="headerlink" href="#isolation" title="Permanent link">&para;</a></h3>
 <p><strong>Network Policies</strong>:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Tenant NATS can only be accessed by tenant&#39;s workers</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Tenant NATS can only be accessed by tenant's workers</span>
 <span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">networking.k8s.io/v1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NetworkPolicy</span>
 <span class="nt">metadata</span><span class="p">:</span>

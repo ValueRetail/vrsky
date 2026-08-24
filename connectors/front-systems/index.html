@@ -2178,13 +2178,13 @@ Otherwise register the webhook out of band.</p>
   ingress → <code>/frontsystems/events/{connectionID}</code>).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;front_systems&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;front_systems&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;base_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://&lt;partner-apim-host&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;subscription_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;SaleCreated&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;StockMovementCreated&quot;</span><span class="p">],</span>
-<span class="w">    </span><span class="nt">&quot;callback_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://&lt;your-ingress&gt;/frontsystems/events/&lt;connectionID&gt;&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"front_systems"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"front_systems"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://&lt;partner-apim-host&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"subscription_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"events"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"SaleCreated"</span><span class="p">,</span><span class="w"> </span><span class="s2">"StockMovementCreated"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"callback_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://&lt;your-ingress&gt;/frontsystems/events/&lt;connectionID&gt;"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2197,12 +2197,12 @@ Front Systems with the two auth headers.</p>
 <li><code>method</code> — <code>POST</code> (default) or <code>PUT</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;front_systems&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;front_systems&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;base_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://&lt;partner-apim-host&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;subscription_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;api_key_secret_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;secret-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/Products/bulk-upsert&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"front_systems"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"front_systems"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://&lt;partner-apim-host&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"subscription_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/api/Products/bulk-upsert"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>

@@ -2160,13 +2160,13 @@ as messages.</p>
 <li><code>interval</code> — poll interval (e.g. <code>5m</code>).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;salesforce&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;salesforce&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;instance_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://xxx.my.salesforce.com&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;oauth_grant_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;grant-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;object&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Account&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;soql&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SELECT Id, Name FROM Account WHERE LastModifiedDate &gt; YESTERDAY&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5m&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"salesforce"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"salesforce"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"instance_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://xxx.my.salesforce.com"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"oauth_grant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;grant-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"object"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Account"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"soql"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SELECT Id, Name FROM Account WHERE LastModifiedDate &gt; YESTERDAY"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"5m"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2186,13 +2186,13 @@ field used to match existing records.</p>
 <li><code>external_id_field</code> — external-id field for <code>upsert</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;salesforce&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;salesforce&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;instance_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://xxx.my.salesforce.com&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;oauth_grant_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;grant-uuid&gt;&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;object&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Contact&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;operation&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;upsert&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;external_id_field&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;External_Id__c&quot;</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"salesforce"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"salesforce"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"instance_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://xxx.my.salesforce.com"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"oauth_grant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;grant-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"object"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Contact"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"operation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"upsert"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"external_id_field"</span><span class="p">:</span><span class="w"> </span><span class="s2">"External_Id__c"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
