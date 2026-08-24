@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -50,6 +52,26 @@ func (f *fakeStore) Put(_ context.Context, key string, body []byte, _ string) er
 	cp := make([]byte, len(body))
 	copy(cp, body)
 	f.objects[key] = cp
+	return nil
+}
+
+func (f *fakeStore) GetStream(_ context.Context, key string) (io.ReadCloser, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return io.NopCloser(bytes.NewReader(f.objects[key])), "", nil
+}
+
+func (f *fakeStore) PutStream(_ context.Context, key string, body io.Reader, _ string) error {
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.objects == nil {
+		f.objects = map[string][]byte{}
+	}
+	f.objects[key] = b
 	return nil
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/natsdiscovery"
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
@@ -52,6 +53,7 @@ type RunOption func(*runOptions)
 type runOptions struct {
 	nc            *nats.Conn
 	db            *sql.DB
+	payloadStore  objectstore.ObjectStore
 	disableHealth bool
 }
 
@@ -62,6 +64,13 @@ func WithNATSConn(nc *nats.Conn) RunOption { return func(o *runOptions) { o.nc =
 // WithDB supplies a database handle instead of opening DATABASE_URL. The
 // runner will not close a caller-supplied DB.
 func WithDB(db *sql.DB) RunOption { return func(o *runOptions) { o.db = db } }
+
+// WithPayloadStore supplies the large-payload offload store instead of building
+// one from PAYLOAD_STORE_* env (used by tests). The runner will not close a
+// caller-supplied store.
+func WithPayloadStore(s objectstore.ObjectStore) RunOption {
+	return func(o *runOptions) { o.payloadStore = s }
+}
 
 // WithoutHealthServer skips starting the health/metrics HTTP server (used in
 // tests to avoid port conflicts).
@@ -74,7 +83,7 @@ func RunProducer(ctx context.Context, name string, p Producer, opts ...RunOption
 	return run(ctx, name, p,
 		func(ctx context.Context, res *Resources) error { return p.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, _ *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				return p.Deliver(c, env)
 			})
 		}, opts...)
@@ -93,6 +102,13 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 			lpLastWrite := make(map[string]time.Time)
 			const lpMinInterval = 30 * time.Second
 			publish := func(pctx context.Context, env *envelope.Envelope) error {
+				// Offload an over-threshold payload to object storage (claim-check)
+				// so the published message stays under NATS's max_payload. No-op
+				// for the common small-payload case.
+				offloaded, err := offloadIfLarge(pctx, res.payloadStore, env, res.inlineMaxBytes, res.Logger)
+				if err != nil {
+					return err
+				}
 				body, err := envelope.Marshal(env)
 				if err != nil {
 					return fmt.Errorf("marshal envelope: %w", err)
@@ -104,8 +120,10 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 				// (filter + converter) can sample ANY source once it has passed
 				// data through once — not just the handful of consumers that used
 				// to write it themselves. Best-effort, throttled, and tenant-scoped:
-				// never fail a publish over a preview write.
-				if res.DB != nil && env.IntegrationID != "" {
+				// never fail a publish over a preview write. Skipped when the
+				// payload was offloaded — the wire body carries only a reference,
+				// so there's no payload structure to preview.
+				if !offloaded && res.DB != nil && env.IntegrationID != "" {
 					now := time.Now()
 					lpMu.Lock()
 					last, seen := lpLastWrite[env.IntegrationID]
@@ -142,7 +160,7 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 	return run(ctx, name, f,
 		func(ctx context.Context, res *Resources) error { return f.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, pub *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				keep, out, err := f.Evaluate(c, env)
 				if err != nil {
 					return err
@@ -150,7 +168,7 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 				if !keep || out == nil {
 					return nil // dropped — ack
 				}
-				return republish(c, pub, out)
+				return republish(c, pub, res, out)
 			})
 		}, opts...)
 }
@@ -161,7 +179,7 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 	return run(ctx, name, cv,
 		func(ctx context.Context, res *Resources) error { return cv.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, pub *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				out, err := cv.Convert(c, env)
 				if err != nil {
 					return err
@@ -169,7 +187,7 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 				if out == nil {
 					return nil
 				}
-				return republish(c, pub, out)
+				return republish(c, pub, res, out)
 			})
 		}, opts...)
 }
@@ -266,11 +284,27 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		drainFn = func() { hsrv.SetReady(false) }
 	}
 
+	// Large-payload offload store — injected (harness) or built from
+	// PAYLOAD_STORE_* env. nil when unconfigured; only close what we opened.
+	payloadStore := o.payloadStore
+	if payloadStore == nil {
+		ps, perr := openPayloadStore(ctx, logger)
+		if perr != nil {
+			return fmt.Errorf("open payload store: %w", perr)
+		}
+		if ps != nil {
+			payloadStore = ps
+			defer func() { _ = ps.Close() }()
+		}
+	}
+
 	res := &Resources{
-		Logger: logger,
-		DB:     db,
-		NATS:   nc,
-		Health: &healthToggle{setReady: setReady, addCheck: addCheck},
+		Logger:         logger,
+		DB:             db,
+		NATS:           nc,
+		Health:         &healthToggle{setReady: setReady, addCheck: addCheck},
+		payloadStore:   payloadStore,
+		inlineMaxBytes: inlineMaxFromEnv(),
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -368,7 +402,8 @@ func ackWaitFromEnv(logger *slog.Logger) time.Duration {
 // unmarshals the envelope and calls deliver, mapping the SDK error classes
 // onto messaging's NAK/DLQ semantics: nil → ack; Permanent → ack+log (poison);
 // anything else → NAK (messaging retries with backoff, then DLQs).
-func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Logger, deliver func(context.Context, *envelope.Envelope) error) (func(), error) {
+func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error) (func(), error) {
+	logger := res.Logger
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
 		// AckWait left at the messaging default: the per-message budget is no
@@ -405,8 +440,21 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 		)
 		defer span.End()
 
+		// Rehydrate an offloaded payload (claim-check) before the connector sees
+		// it. No-op for inline payloads. A transient store error is returned as
+		// retriable so the message is redelivered rather than delivered empty.
+		if rerr := rehydrate(ctx, res.payloadStore, env); rerr != nil {
+			span.RecordError(rerr)
+			span.SetStatus(codes.Error, rerr.Error())
+			return rerr
+		}
+
 		derr := deliver(ctx, env)
 		if derr == nil {
+			// Spilled objects are reclaimed by the bucket lifecycle TTL (spill/
+			// prefix), NOT eagerly here: an eager delete races the JetStream ACK,
+			// and a delete before an ACK that then fails would leave a redelivered
+			// message unable to rehydrate. TTL cleanup is safe against redelivery.
 			return nil
 		}
 		span.RecordError(derr)
@@ -426,8 +474,13 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 // republish forwards an envelope to the data stream with a FRESH envelope ID.
 // Reusing the inbound ID would be dropped by JetStream's dedup window (and by
 // downstream per-ID dedup) — the well-known filter/converter footgun.
-func republish(ctx context.Context, pub *messaging.Publisher, env *envelope.Envelope) error {
+func republish(ctx context.Context, pub *messaging.Publisher, res *Resources, env *envelope.Envelope) error {
 	env.ID = uuid.NewString()
+	// Re-offload if the transformed payload is over threshold (claim-check), so a
+	// filter/converter output that grew large still stays under NATS max_payload.
+	if _, err := offloadIfLarge(ctx, res.payloadStore, env, res.inlineMaxBytes, res.Logger); err != nil {
+		return err
+	}
 	body, err := envelope.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("marshal envelope: %w", err)

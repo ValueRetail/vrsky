@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/component"
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 )
 
 // Resources are the wired dependencies the SDK runner hands a connector at
@@ -31,6 +32,12 @@ type Resources struct {
 	DB     *sql.DB
 	NATS   *nats.Conn
 	Health *healthToggle
+
+	// payloadStore + inlineMaxBytes drive the large-payload claim-check (see
+	// payloadstore.go). Unexported so connectors don't couple to them — only the
+	// SDK publish/consume path uses them. payloadStore is nil when unconfigured.
+	payloadStore   objectstore.ObjectStore
+	inlineMaxBytes int
 }
 
 // healthToggle is the narrow slice of the health server connectors may touch.

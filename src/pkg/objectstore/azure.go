@@ -99,6 +99,38 @@ func (a *azureStore) Get(ctx context.Context, key string) ([]byte, string, error
 	return body, ct, nil
 }
 
+// GetStream returns the blob body as a stream. The caller must Close it. The
+// download body is streamed, so a multi-GB blob is not buffered in memory.
+func (a *azureStore) GetStream(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	resp, err := a.client.DownloadStream(ctx, a.container, key, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("azure get %q: %w", key, err)
+	}
+	ct := ""
+	if resp.ContentType != nil {
+		ct = *resp.ContentType
+	}
+	return resp.Body, ct, nil
+}
+
+// PutStream uploads from body using UploadStream, which stages the reader into
+// blocks and commits them, so nothing is buffered whole in memory.
+func (a *azureStore) PutStream(ctx context.Context, key string, body io.Reader, contentType string) error {
+	opts := &azblob.UploadStreamOptions{}
+	if contentType != "" {
+		ct := contentType
+		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &ct}
+	}
+	if a.sse.KMSKeyID != "" {
+		scope := a.sse.KMSKeyID
+		opts.CPKScopeInfo = &blob.CPKScopeInfo{EncryptionScope: &scope}
+	}
+	if _, err := a.client.UploadStream(ctx, a.container, key, body, opts); err != nil {
+		return fmt.Errorf("azure put-stream %q: %w", key, err)
+	}
+	return nil
+}
+
 func (a *azureStore) Put(ctx context.Context, key string, body []byte, contentType string) error {
 	opts := &azblob.UploadBufferOptions{}
 	if contentType != "" {

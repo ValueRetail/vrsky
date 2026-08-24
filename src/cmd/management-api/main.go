@@ -590,6 +590,16 @@ func orchestratorConfigFromEnv(config *Config) *orchestrator.OrchestratorConfig 
 	if v := os.Getenv("NATS_ACCOUNT"); v != "" {
 		c.NATSAccount = v
 	}
+	// Large-payload offload store (#187). Passed through to per-connection
+	// workers; PAYLOAD_STORE_BUCKET being empty leaves the feature off (payloads
+	// stay inline). PAYLOAD_STORE_SECRET_NAME names a K8s secret in the worker
+	// namespace holding accesskey/secretkey.
+	c.PayloadStoreProvider = os.Getenv("PAYLOAD_STORE_PROVIDER")
+	c.PayloadStoreBucket = os.Getenv("PAYLOAD_STORE_BUCKET")
+	c.PayloadStoreEndpoint = os.Getenv("PAYLOAD_STORE_ENDPOINT")
+	c.PayloadStoreRegion = os.Getenv("PAYLOAD_STORE_REGION")
+	c.PayloadStoreSecretName = os.Getenv("PAYLOAD_STORE_SECRET_NAME")
+	c.PayloadInlineMaxBytes = os.Getenv("PAYLOAD_INLINE_MAX_BYTES")
 	return c
 }
 
