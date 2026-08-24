@@ -156,16 +156,22 @@ func (a *azureStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// Copy implements after_action=move via download+upload. Azure's server-side
-// copy (StartCopyFromURL) needs a SAS-signed source URL; for pipeline-sized
-// objects a read+write round-trip is simpler and the only caller is the move
-// after-action.
+// Copy implements after_action=move via a streamed download+upload. Azure's
+// server-side copy (StartCopyFromURL) needs a SAS-signed source URL and, for
+// large blobs, an async poll-until-complete loop, so a client-side round-trip is
+// simpler and the only caller is the move after-action. Unlike the previous
+// buffered Get+Put, this streams source→dest so a multi-GB blob is bounded to a
+// small buffer instead of being held whole in memory (which would OOM the worker).
 func (a *azureStore) Copy(ctx context.Context, srcKey, dstKey string) error {
-	body, ct, err := a.Get(ctx, srcKey)
+	rc, ct, err := a.GetStream(ctx, srcKey)
 	if err != nil {
 		return err
 	}
-	return a.Put(ctx, dstKey, body, ct)
+	defer rc.Close()
+	if err := a.PutStream(ctx, dstKey, rc, ct); err != nil {
+		return fmt.Errorf("azure copy %q->%q: %w", srcKey, dstKey, err)
+	}
+	return nil
 }
 
 // Close is a no-op: the azblob client holds no resources requiring release.
