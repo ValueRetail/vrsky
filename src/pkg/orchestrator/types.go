@@ -95,6 +95,20 @@ type OrchestratorConfig struct {
 	DefaultMinReplicas int32
 	DefaultMaxReplicas int32
 	TargetCPUPercent   int32
+
+	// Large-payload offload store (claim-check, #187). When PayloadStoreBucket is
+	// set, per-connection workers are configured to offload over-threshold
+	// payloads to this object store instead of putting them on the message bus.
+	// Empty bucket = feature off (payloads stay inline). Non-secret settings are
+	// injected as plain env; the access/secret keys come from PayloadStoreSecretName
+	// — a K8s secret in the WORKER namespace with keys accesskey/secretkey (the
+	// same shape as the platform `minio-credentials` secret).
+	PayloadStoreProvider   string
+	PayloadStoreBucket     string
+	PayloadStoreEndpoint   string
+	PayloadStoreRegion     string
+	PayloadStoreSecretName string
+	PayloadInlineMaxBytes  string
 }
 
 // DefaultConfig returns the default orchestrator configuration.
@@ -227,4 +241,21 @@ const (
 	EnvConfig            = "CONFIG"
 	EnvNATSURLs          = "NATS_URLS"
 	EnvNATSAccount       = "NATS_ACCOUNT"
+
+	// Large-payload offload (#187) — must match the keys the SDK reads in
+	// pkg/sdk/payloadstore.go.
+	EnvPayloadStoreProvider  = "PAYLOAD_STORE_PROVIDER"
+	EnvPayloadStoreBucket    = "PAYLOAD_STORE_BUCKET"
+	EnvPayloadStoreEndpoint  = "PAYLOAD_STORE_ENDPOINT"
+	EnvPayloadStoreRegion    = "PAYLOAD_STORE_REGION"
+	EnvPayloadStoreAccessKey = "PAYLOAD_STORE_ACCESS_KEY"
+	EnvPayloadStoreSecretKey = "PAYLOAD_STORE_SECRET_KEY"
+	EnvPayloadInlineMaxBytes = "PAYLOAD_INLINE_MAX_BYTES"
+)
+
+// Secret keys inside PayloadStoreSecretName (matches the platform
+// minio-credentials secret shape).
+const (
+	payloadSecretAccessKey = "accesskey"
+	payloadSecretSecretKey = "secretkey"
 )
