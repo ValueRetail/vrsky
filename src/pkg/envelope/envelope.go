@@ -18,6 +18,11 @@ type Envelope struct {
 	PayloadRef  string `json:"payload_ref,omitempty"` // MinIO reference for large payloads
 	PayloadSize int64  `json:"payload_size"`
 	ContentType string `json:"content_type"`
+	// Checksum is "sha256:<hex>" of the payload, set when the payload is
+	// offloaded (PayloadRef) and verified when it is read back, so corruption or
+	// a mismatched object is caught rather than delivered. Empty for inline
+	// payloads and for envelopes written before checksums existed.
+	Checksum string `json:"checksum,omitempty"`
 
 	// Pipeline tracking
 	Source      string   `json:"source"`       // Component that created this envelope

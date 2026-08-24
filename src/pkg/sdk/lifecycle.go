@@ -83,9 +83,16 @@ func RunProducer(ctx context.Context, name string, p Producer, opts ...RunOption
 	return run(ctx, name, p,
 		func(ctx context.Context, res *Resources) error { return p.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, _ *messaging.Publisher, res *Resources) (func(), error) {
+			// A StreamingProducer (ADR 0001) receives offloaded payloads as a
+			// stream instead of a buffered []byte, lifting the rehydrate cap.
+			var streamDeliver streamDeliverFunc
+			if sp, ok := p.(StreamingProducer); ok {
+				streamDeliver = sp.DeliverStream
+				res.Logger.Info("streaming delivery enabled")
+			}
 			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				return p.Deliver(c, env)
-			})
+			}, streamDeliver)
 		}, opts...)
 }
 
@@ -138,6 +145,16 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 				}
 				return nil
 			}
+			// A StreamingConsumer (ADR 0001) drives RunStream and additionally gets
+			// publishStream for payloads too large to hold in memory. Without a
+			// payload store there is nowhere to stream to, so such a worker stays
+			// on the plain Run contract.
+			sc, streaming := c.(StreamingConsumer)
+			streaming = streaming && res.payloadStore != nil
+			if streaming {
+				res.Logger.Info("streaming ingestion enabled")
+			}
+
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -146,7 +163,13 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 						res.Logger.Error("consumer Run panicked", "panic", r)
 					}
 				}()
-				if err := c.Run(ctx, publish); err != nil && ctx.Err() == nil {
+				var err error
+				if streaming {
+					err = sc.RunStream(ctx, publish, newPublishStream(publish, res))
+				} else {
+					err = c.Run(ctx, publish)
+				}
+				if err != nil && ctx.Err() == nil {
 					res.Logger.Error("consumer Run exited with error", "error", err)
 				}
 			}()
@@ -169,7 +192,9 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 					return nil // dropped — ack
 				}
 				return republish(c, pub, res, out)
-			})
+				// nil: record-streaming transforms are ADR 0001 phase 2; until
+				// then an over-cap payload at a filter is a clear DLQ error.
+			}, nil)
 		}, opts...)
 }
 
@@ -188,7 +213,8 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 					return nil
 				}
 				return republish(c, pub, res, out)
-			})
+				// nil: see RunFilter — phase 2 covers streaming transforms.
+			}, nil)
 		}, opts...)
 }
 
@@ -299,12 +325,13 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	}
 
 	res := &Resources{
-		Logger:         logger,
-		DB:             db,
-		NATS:           nc,
-		Health:         &healthToggle{setReady: setReady, addCheck: addCheck},
-		payloadStore:   payloadStore,
-		inlineMaxBytes: inlineMaxFromEnv(),
+		Logger:            logger,
+		DB:                db,
+		NATS:              nc,
+		Health:            &healthToggle{setReady: setReady, addCheck: addCheck},
+		payloadStore:      payloadStore,
+		inlineMaxBytes:    inlineMaxFromEnv(logger),
+		rehydrateMaxBytes: rehydrateMaxFromEnv(logger),
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -402,7 +429,11 @@ func ackWaitFromEnv(logger *slog.Logger) time.Duration {
 // unmarshals the envelope and calls deliver, mapping the SDK error classes
 // onto messaging's NAK/DLQ semantics: nil → ack; Permanent → ack+log (poison);
 // anything else → NAK (messaging retries with backoff, then DLQs).
-func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error) (func(), error) {
+// streamDeliver, when non-nil, is used INSTEAD of deliver for envelopes whose
+// payload was offloaded — the object is handed over as a stream and never
+// buffered (so the rehydrate cap does not apply). nil for connectors and node
+// kinds that don't stream.
+func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error, streamDeliver streamDeliverFunc) (func(), error) {
 	logger := res.Logger
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
@@ -440,16 +471,10 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 		)
 		defer span.End()
 
-		// Rehydrate an offloaded payload (claim-check) before the connector sees
-		// it. No-op for inline payloads. A transient store error is returned as
-		// retriable so the message is redelivered rather than delivered empty.
-		if rerr := rehydrate(ctx, res.payloadStore, env); rerr != nil {
-			span.RecordError(rerr)
-			span.SetStatus(codes.Error, rerr.Error())
-			return rerr
+		streamed, derr := dispatchEnvelope(ctx, res, env, deliver, streamDeliver)
+		if streamed {
+			span.SetAttributes(attribute.Bool("vrsky.payload.streamed", true))
 		}
-
-		derr := deliver(ctx, env)
 		if derr == nil {
 			// Spilled objects are reclaimed by the bucket lifecycle TTL (spill/
 			// prefix), NOT eagerly here: an eager delete races the JetStream ACK,
