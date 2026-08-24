@@ -3,6 +3,8 @@ package envelope
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Envelope represents a message as it flows through the VRSky pipeline.
@@ -41,9 +43,17 @@ type Envelope struct {
 	LastError  string `json:"last_error,omitempty"`
 }
 
-// New creates a new envelope with a generated ID and timestamps
+// New creates a new envelope with a generated ID and timestamps.
+//
+// The ID is not decoration. It is the JetStream dedup key (Nats-Msg-Id) and the
+// object key for claim-check payload offload (spill/<tenant>/<connection>/<id>),
+// so an envelope without one loses duplicate suppression AND collides with every
+// other offloaded payload on its connection. Callers may overwrite ID with their
+// own stable identifier (that is how a source's natural key gets dedup); they
+// must not clear it.
 func New() *Envelope {
 	return &Envelope{
+		ID:          uuid.NewString(),
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(15 * time.Minute), // 15-minute TTL by default
 		RetryCount:  0,
