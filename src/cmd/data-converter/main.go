@@ -19,8 +19,10 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/claimcheck"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 )
 
 type Config struct {
@@ -83,6 +85,13 @@ type ConverterService struct {
 	eventSubsMu    sync.RWMutex
 	recentEvents   map[string][]ConvertEvent
 	recentEventsMu sync.RWMutex
+
+	// Claim-check (ADR 0002): this service is NOT on the SDK runner, so it must
+	// rehydrate offloaded payloads on entry and offload large outputs itself.
+	// spill is nil when PAYLOAD_STORE_* is unconfigured.
+	spill        objectstore.ObjectStore
+	inlineMax    int
+	rehydrateMax int64
 
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
@@ -164,6 +173,17 @@ func main() {
 		recentEvents:      make(map[string][]ConvertEvent),
 		stopCh:            make(chan struct{}),
 		stoppedCh:         make(chan struct{}),
+		inlineMax:         claimcheck.InlineMaxFromEnv(logger),
+		rehydrateMax:      claimcheck.RehydrateMaxFromEnv(logger),
+	}
+	spill, err := claimcheck.OpenStoreFromEnv(context.Background(), logger)
+	if err != nil {
+		logger.Error("Failed to open payload offload store", "error", err)
+		os.Exit(1)
+	}
+	service.spill = spill
+	if spill == nil {
+		logger.Warn("no payload offload store configured (PAYLOAD_STORE_BUCKET unset); offloaded envelopes will be NAKed and large outputs cannot be offloaded")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -196,11 +216,11 @@ func (s *ConverterService) Start(ctx context.Context) error {
 		DurableName: "data-converter",
 		Logger:      s.logger,
 	}, func(ctx context.Context, msg *nats.Msg) error {
-		// Converter failures are deterministic (bad JSON, bad mapping
-		// config) and don't benefit from retry. Errors are logged via
-		// emitEvent inside handleMessage. Always ack.
-		s.handleMessage(ctx, msg)
-		return nil
+		// Transform-logic failures (bad JSON, bad mapping config) are
+		// deterministic and ack — errors surface via emitEvent. Infrastructure
+		// failures — rehydrate, offload, publish — return an error so the
+		// message is NAKed and retried rather than silently lost (ADR 0002).
+		return s.handleMessage(ctx, msg)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
@@ -220,11 +240,20 @@ func (s *ConverterService) Stop() {
 	<-s.stoppedCh
 }
 
-func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
+func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) error {
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
 		s.logger.Error("Failed to unmarshal envelope", "error", err)
-		return
+		return nil // will never parse — ack, don't burn retries
+	}
+
+	// Rehydrate an offloaded payload (claim-check) before converting. An error
+	// here is infrastructure, not converter logic: NAK so the message is retried
+	// (transient store blip) or lands in the DLQ (over-cap) instead of being
+	// silently dropped as invalid JSON.
+	if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
+		s.emitEvent(env.IntegrationID, ConvertEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
+		return fmt.Errorf("rehydrate: %w", err)
 	}
 
 	connectionID := env.IntegrationID
@@ -235,12 +264,12 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		}
 	}
 	if connectionID == "" {
-		return
+		return nil
 	}
 
 	info, err := s.getPipelineInfo(ctx, connectionID)
 	if err != nil || info == nil || len(info.Entries) == 0 {
-		return
+		return nil
 	}
 
 	// Find which converter entry should handle this message based on predecessor
@@ -260,16 +289,26 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 			continue
 		}
 
-		s.processEntry(ctx, connectionID, msg.Subject, &env, entry)
+		// An infrastructure failure in any entry NAKs the whole message.
+		// Redelivery reprocesses every entry (at-least-once; downstream sees
+		// fresh envelope IDs), matching the SDK's semantics for connectors.
+		if perr := s.processEntry(ctx, connectionID, msg.Subject, &env, entry); perr != nil && err == nil {
+			err = perr
+		}
 	}
+	return err
 }
 
-func (s *ConverterService) processEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *ConverterEntry) {
+// processEntry applies one converter node and republishes the result. It
+// returns an error only for infrastructure failures (offload, publish) — the
+// caller NAKs those; transform-logic failures emit a UI event and ack, exactly
+// as before.
+func (s *ConverterService) processEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *ConverterEntry) error {
 	converterCfg := entry.Config
 	hasMapping := len(converterCfg.Mappings) > 0
 	hasFormat := converterCfg.OutputFormat != ""
 	if !hasMapping && !hasFormat {
-		return
+		return nil
 	}
 
 	// Work on a copy of the original payload to avoid mutating shared state
@@ -279,7 +318,7 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	var data interface{}
 	if err := json.Unmarshal(payload, &data); err != nil {
 		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload is not valid JSON: " + err.Error(), Time: now()})
-		return
+		return nil
 	}
 
 	beforePreview := string(payload)
@@ -324,7 +363,7 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		newPayload, err = json.Marshal(transformed)
 		if err != nil {
 			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to marshal: " + err.Error(), Time: now()})
-			return
+			return nil
 		}
 		newContentType = "application/json"
 	}
@@ -354,14 +393,24 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		env.Metadata["_output_format"] = converterCfg.OutputFormat
 	}
 
+	// Offload an over-threshold result (claim-check) so the published message
+	// stays under NATS max_payload — conversion can INFLATE a payload (XML,
+	// row-expanded formats), so this applies even when the input arrived inline.
+	if _, err := claimcheck.OffloadIfLarge(ctx, s.spill, &env, s.inlineMax, s.logger); err != nil {
+		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload offload failed: " + err.Error(), Time: now()})
+		return fmt.Errorf("offload: %w", err)
+	}
+
 	envData, err := json.Marshal(env)
 	if err != nil {
-		return
+		return nil
 	}
 
 	if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, envData); err != nil {
+		// Publish failures were previously logged and ACKED — output silently
+		// lost. NAK instead so redelivery retries the publish.
 		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
-		return
+		return fmt.Errorf("publish: %w", err)
 	}
 
 	msg2 := fmt.Sprintf("Converted to %s", formatLabel)
@@ -377,6 +426,7 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		After:   afterPreview,
 		Fields:  fieldCount,
 	})
+	return nil
 }
 
 func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[string]interface{}, int) {
