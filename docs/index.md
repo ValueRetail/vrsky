@@ -34,4 +34,6 @@ JetStream; large payloads spill to object storage.
 Architecture and internals — [NATS architecture](NATS_ARCHITECTURE.md),
 [observability](OBSERVABILITY.md), [tracing](TRACING.md),
 [load benchmarks](LOAD.md), [OAuth framework](oauth-framework.md),
-[connector SDK](sdk/README.md).
+[connector SDK](sdk/README.md), [scalability](scalability.md).
+
+Design decisions — [ADR 0001: streaming payload contract](adr/0001-streaming-payload-contract.md).
