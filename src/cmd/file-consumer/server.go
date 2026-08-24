@@ -196,9 +196,12 @@ func (s *fileConsumer) ingestFile(ctx context.Context, ac *ActiveConnection, fil
 		return nil, err
 	}
 	// Cache last payload (the SDK publish path marshals the envelope itself;
-	// envelope.Marshal == json.Marshal — identical bytes).
-	if envData, mErr := json.Marshal(env); mErr == nil {
-		_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, ac.ConnectionID)
+	// envelope.Marshal == json.Marshal — identical bytes). Opportunistic: a
+	// missing DB must not fail an ingest that already succeeded.
+	if s.db != nil {
+		if envData, mErr := json.Marshal(env); mErr == nil {
+			_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, ac.ConnectionID)
+		}
 	}
 	return env, nil
 }
