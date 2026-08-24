@@ -2289,6 +2289,15 @@ this is deleting buffering, not adding machinery): cloud-storage consumer +
 producer, file consumer + producer, SFTP consumer, http-producer. Retail/ERP
 API connectors don't change.</p>
 <h3 id="phase-2-record-streaming-transforms">Phase 2 — record-streaming transforms<a class="headerlink" href="#phase-2-record-streaming-transforms" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Superseded by <a href="../0002-transform-large-payloads/">ADR 0002</a>.</strong> This section
+assumed the transforms run on the SDK runner, where <code>subscribeDispatch</code>
+rehydrates under the cap. They do not — <code>sdk.RunFilter</code>/<code>RunConverter</code> have no
+callers; the deployed transforms are the standalone <code>cmd/data-filter</code> and
+<code>cmd/data-converter</code> services, which never rehydrate and ack unconditionally,
+so an offloaded envelope is silently dropped, not DLQ'd. ADR 0002 records the
+corrected design; the sketch below is kept for history.</p>
+</blockquote>
 <p>Filters/converters get a predictable policy for offloaded payloads <strong>now</strong>, and
 a streaming capability <strong>later</strong>:</p>
 <ul>

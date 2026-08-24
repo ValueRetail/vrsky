@@ -12,25 +12,23 @@
       
       
       
-        <link rel="next" href="tutorials/first-pipeline/">
-      
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>VRSky Documentation</title>
+        <title>ADR 0002 — Large payloads through pipeline transforms (filter / converter) - VRSky Documentation</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +47,7 @@
       
     
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vrsky-documentation" class="md-skip">
+        <a href="#adr-0002-large-payloads-through-pipeline-transforms-filter-converter" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              ADR 0002 — Large payloads through pipeline transforms (filter / converter)
             
           </span>
         </div>
@@ -216,7 +214,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -231,37 +229,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -277,59 +248,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Where to start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core concepts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Platform reference
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -393,7 +311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tutorials/first-pipeline/" class="md-nav__link">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
         
   
   
@@ -421,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/tutorial/first-connector/" class="md-nav__link">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
         
   
   
@@ -508,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -536,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/getting-started/" class="md-nav__link">
+      <a href="../../guide/getting-started/" class="md-nav__link">
         
   
   
@@ -564,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/workspaces-and-members/" class="md-nav__link">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
         
   
   
@@ -592,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/building-a-pipeline/" class="md-nav__link">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
         
   
   
@@ -620,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/connectors-and-nodes/" class="md-nav__link">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
         
   
   
@@ -648,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/credentials-and-oauth/" class="md-nav__link">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
         
   
   
@@ -676,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/deploying-and-monitoring/" class="md-nav__link">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
         
   
   
@@ -704,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/data-sharing/" class="md-nav__link">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
         
   
   
@@ -732,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/settings/" class="md-nav__link">
+      <a href="../../guide/settings/" class="md-nav__link">
         
   
   
@@ -760,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/troubleshooting/" class="md-nav__link">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
         
   
   
@@ -847,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/install/" class="md-nav__link">
+      <a href="../../operator/install/" class="md-nav__link">
         
   
   
@@ -875,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/upgrade/" class="md-nav__link">
+      <a href="../../operator/upgrade/" class="md-nav__link">
         
   
   
@@ -903,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/backup/" class="md-nav__link">
+      <a href="../../operator/backup/" class="md-nav__link">
         
   
   
@@ -931,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/monitoring/" class="md-nav__link">
+      <a href="../../operator/monitoring/" class="md-nav__link">
         
   
   
@@ -959,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/troubleshooting/" class="md-nav__link">
+      <a href="../../operator/troubleshooting/" class="md-nav__link">
         
   
   
@@ -987,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -1015,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SLA/" class="md-nav__link">
+      <a href="../../SLA/" class="md-nav__link">
         
   
   
@@ -1043,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DEPLOYMENT_GUIDE/" class="md-nav__link">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
         
   
   
@@ -1071,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DR/" class="md-nav__link">
+      <a href="../../DR/" class="md-nav__link">
         
   
   
@@ -1158,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/" class="md-nav__link">
+      <a href="../../connectors/" class="md-nav__link">
         
   
   
@@ -1186,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/http/" class="md-nav__link">
+      <a href="../../connectors/http/" class="md-nav__link">
         
   
   
@@ -1214,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/api/" class="md-nav__link">
+      <a href="../../connectors/api/" class="md-nav__link">
         
   
   
@@ -1242,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/database/" class="md-nav__link">
+      <a href="../../connectors/database/" class="md-nav__link">
         
   
   
@@ -1270,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/file/" class="md-nav__link">
+      <a href="../../connectors/file/" class="md-nav__link">
         
   
   
@@ -1298,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sftp/" class="md-nav__link">
+      <a href="../../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1326,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/cloud-storage/" class="md-nav__link">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1354,7 +1272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/kafka/" class="md-nav__link">
+      <a href="../../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1382,7 +1300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/rabbitmq/" class="md-nav__link">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1410,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/salesforce/" class="md-nav__link">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1438,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sitoo/" class="md-nav__link">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1466,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/front-systems/" class="md-nav__link">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1494,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/business-central/" class="md-nav__link">
+      <a href="../../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1522,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/visma/" class="md-nav__link">
+      <a href="../../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1550,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/brightpearl/" class="md-nav__link">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1578,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/tenant/" class="md-nav__link">
+      <a href="../../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1606,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/filters-converters/" class="md-nav__link">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -1693,7 +1611,7 @@
   
   
     <li class="md-nav__item">
-      <a href="security/whitepaper/" class="md-nav__link">
+      <a href="../../security/whitepaper/" class="md-nav__link">
         
   
   
@@ -1721,7 +1639,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SECURITY/" class="md-nav__link">
+      <a href="../../SECURITY/" class="md-nav__link">
         
   
   
@@ -1756,7 +1674,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/api/" class="md-nav__link">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1835,7 +1753,7 @@
   
   
     <li class="md-nav__item">
-      <a href="CONNECTION_NODE_SPEC/" class="md-nav__link">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
         
   
   
@@ -1863,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TENANT_MODEL/" class="md-nav__link">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
         
   
   
@@ -1891,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="NATS_ARCHITECTURE/" class="md-nav__link">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -1919,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="OBSERVABILITY/" class="md-nav__link">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
         
   
   
@@ -1947,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TRACING/" class="md-nav__link">
+      <a href="../../TRACING/" class="md-nav__link">
         
   
   
@@ -1975,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="LOAD/" class="md-nav__link">
+      <a href="../../LOAD/" class="md-nav__link">
         
   
   
@@ -2003,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="oauth-framework/" class="md-nav__link">
+      <a href="../../oauth-framework/" class="md-nav__link">
         
   
   
@@ -2031,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/" class="md-nav__link">
+      <a href="../../sdk/" class="md-nav__link">
         
   
   
@@ -2086,10 +2004,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
+  <a href="#context-and-a-correction-to-adr-0001" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Where to start
+        Context — and a correction to ADR 0001
       
     </span>
   </a>
@@ -2097,10 +2015,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
+  <a href="#what-the-transforms-actually-do-grounded" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core concepts
+        What the transforms actually do (grounded)
       
     </span>
   </a>
@@ -2108,10 +2026,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
+  <a href="#options" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Platform reference
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-a-close-the-correctness-gap-small-do-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase A — close the correctness gap (small, do first)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-b-record-streaming-the-multi-gb-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase B — record streaming (the multi-GB path)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-c-explicit-policy-for-the-un-streamable-remainder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase C — explicit policy for the un-streamable remainder
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test plan
       
     </span>
   </a>
@@ -2135,66 +2125,163 @@
 
 
 
-<h1 id="vrsky-documentation">VRSky Documentation<a class="headerlink" href="#vrsky-documentation" title="Permanent link">&para;</a></h1>
-<p>VRSky is a multi-tenant integration platform (iPaaS): tenants build <strong>pipelines</strong>
-that move data from a <strong>source</strong> (consumer) through optional <strong>filters</strong> and
-<strong>converters</strong> to a <strong>destination</strong> (producer). Data flows through NATS
-JetStream; large payloads spill to object storage.</p>
-<h2 id="where-to-start">Where to start<a class="headerlink" href="#where-to-start" title="Permanent link">&para;</a></h2>
+<h1 id="adr-0002-large-payloads-through-pipeline-transforms-filter-converter">ADR 0002 — Large payloads through pipeline transforms (filter / converter)<a class="headerlink" href="#adr-0002-large-payloads-through-pipeline-transforms-filter-converter" title="Permanent link">&para;</a></h1>
+<ul>
+<li><strong>Status:</strong> Accepted (phase A implemented in the same PR)</li>
+<li><strong>Date:</strong> 2026-08-24</li>
+<li><strong>Relates to:</strong> #187, <a href="../0001-streaming-payload-contract/">ADR 0001</a> (phase 2),
+  PRs #189–#197</li>
+</ul>
+<h2 id="context-and-a-correction-to-adr-0001">Context — and a correction to ADR 0001<a class="headerlink" href="#context-and-a-correction-to-adr-0001" title="Permanent link">&para;</a></h2>
+<p>ADR 0001 phase 1 gave the <em>edge</em> connectors streaming. For transforms it
+claimed: <em>"a <code>PayloadRef</code> envelope reaching a plain filter/converter is
+rehydrated under the 128 MiB cap → beyond it, permanent error → DLQ."</em></p>
+<p><strong>That claim assumed the transforms run on the SDK runner. They do not.</strong>
+<code>sdk.RunFilter</code> / <code>sdk.RunConverter</code> have <strong>zero callers</strong> — they are dead code.
+The transforms that actually run are the standalone services <code>cmd/data-filter</code>
+and <code>cmd/data-converter</code>, which predate the SDK runner: they hold their own
+JetStream durables (<code>data-filter</code> / <code>data-converter</code>), <strong>ack unconditionally</strong>
+("failures are deterministic; ack always"), <code>json.Unmarshal(env.Payload)</code>
+directly, and publish outputs through a bare <code>messaging.Publisher</code>.</p>
+<p>So with payload offload active (#189), today's real behavior is:</p>
+<ul>
+<li><strong>Input — silent data loss.</strong> An offloaded envelope arrives with
+  <code>Payload: nil</code> and <code>PayloadRef</code> set. <code>json.Unmarshal(nil)</code> fails, the service
+  emits an "Invalid JSON payload" UI event, and <strong>acks</strong>. The message is gone:
+  no retry, no DLQ, nothing downstream. Every pipeline
+  <code>source → filter/converter → destination</code> <strong>loses any payload over 256 KiB</strong>.</li>
+<li><strong>Output — silent data loss.</strong> A transform output larger than NATS
+  <code>max_payload</code> (1 MB) fails at publish; ack-always drops it. This bites even
+  <em>small</em> inputs: flatten multiplies rows, JSON→XML inflates.</li>
+</ul>
+<p>These are correctness bugs at ordinary sizes (256 KiB – a few MB), independent
+of any multi-GB ambition. Fixing them is phase A; streaming is phase B.</p>
+<h2 id="what-the-transforms-actually-do-grounded">What the transforms actually do (grounded)<a class="headerlink" href="#what-the-transforms-actually-do-grounded" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>You are…</th>
-<th>Start here</th>
+<th>Operation</th>
+<th>Scope</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>New</strong> and want a pipeline running</td>
-<td><a href="tutorials/first-pipeline/">Build your first pipeline</a> (≤10 min)</td>
+<td>Filter rules (<code>equals</code>, <code>contains</code>, <code>gt</code>, …, <code>regex</code>)</td>
+<td><strong>per record</strong></td>
 </tr>
 <tr>
-<td><strong>Integrating</strong> a specific system</td>
-<td><a href="connectors/">Connectors</a></td>
+<td><code>extract_fields</code> (projection)</td>
+<td><strong>per record</strong></td>
 </tr>
 <tr>
-<td><strong>Operating</strong> VRSky in production</td>
-<td><a href="operator/install/">Operator guide</a></td>
+<td>Flatten (unroll <code>flatten_path</code> array into rows)</td>
+<td>array streams; <strong>parent-include fields need document context</strong></td>
 </tr>
 <tr>
-<td><strong>Building a connector</strong></td>
-<td><a href="sdk/tutorial/first-connector/">Build your first connector</a> (≤30 min)</td>
+<td>Converter <code>mappings</code> (rename/convert per field)</td>
+<td><strong>per record</strong> (<code>toRows</code> → row-wise)</td>
 </tr>
 <tr>
-<td><strong>Calling the API</strong></td>
-<td><a href="reference/api/">API reference</a></td>
-</tr>
-<tr>
-<td><strong>Evaluating security</strong></td>
-<td><a href="security/whitepaper/">Security whitepaper</a></td>
+<td>Format conversion (JSON → CSV / XML / YAML / text)</td>
+<td><strong>row-wise</strong>; CSV header already comes from the <strong>first row only</strong> (<code>stableKeys</code>)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="core-concepts">Core concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
+<p>Payloads are JSON: either a single object (one record) or an array of records.
+There is <strong>no</strong> genuinely cross-record operation today — no sort, no aggregate,
+no key-union CSV header. That makes record streaming a faithful reimplementation
+of existing semantics, not a semantic change.</p>
+<h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
+<p><strong>A. Migrate the transforms onto <code>sdk.RunFilter</code>/<code>RunConverter</code>.</strong> Cleanest
+long-term — rehydrate, offload, cap, tracing all for free — but the standalone
+services support multiple filter/converter entries per connection (branching),
+which doesn't fit the single-<code>Evaluate</code> contract; they carry SSE event feeds and
+preview endpoints; and their ack policy differs. A live-service rewrite is the
+wrong vehicle for an urgent correctness fix. <strong>Rejected for now</strong>; recorded as
+the preferred eventual direction.</p>
+<p><strong>B. Extract the claim-check helpers into a shared package and wire them into
+the standalone services at their boundaries.</strong> Surgical; small diffs at the two
+choke points each service already has (message entry, publish exit);
+behavior-identical for small payloads. <strong>← chosen for phase A.</strong></p>
+<p><strong>C. Record streaming inside the transforms.</strong> The multi-GB path. <strong>← phase B,
+built on B's plumbing.</strong></p>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<h3 id="phase-a-close-the-correctness-gap-small-do-first">Phase A — close the correctness gap (small, do first)<a class="headerlink" href="#phase-a-close-the-correctness-gap-small-do-first" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Extract</strong> the claim-check machinery from <code>pkg/sdk/payloadstore.go</code> into a
+   shared package (<code>pkg/claimcheck</code>): store-from-env, <code>OffloadIfLarge</code>,
+   <code>Rehydrate</code> (with the cap), key/checksum helpers. The SDK delegates to it —
+   no behavior change for connectors.</li>
+<li><strong>data-filter / data-converter</strong>: open the store from <code>PAYLOAD_STORE_*</code> at
+   startup; <code>Rehydrate</code> on message entry; <code>OffloadIfLarge</code> before every publish.</li>
+<li><strong>Error semantics change, deliberately.</strong> Store/rehydrate errors (including
+   over-cap) <strong>return an error from the subscribe handler → NAK → retry → DLQ</strong>.
+   Transient store blips recover via redelivery; over-cap becomes an explicit
+   DLQ entry instead of a vanished message. Transform-logic failures (bad JSON,
+   bad mapping) keep today's ack + UI-event behavior — ack-always narrows to
+   the deterministic failures it was meant for.</li>
+<li><strong>Manifests</strong>: add <code>PAYLOAD_STORE_*</code> to the platform filter/converter
+   deployments (orchestrator-spawned workers already receive it from #189).</li>
+</ol>
+<p>After phase A the pipeline is <em>correct</em> at every size: ≤256 KiB unchanged,
+256 KiB–128 MiB transforms work via rehydrate, &gt;128 MiB is an explicit DLQ
+error pointing at the object.</p>
+<h3 id="phase-b-record-streaming-the-multi-gb-path">Phase B — record streaming (the multi-GB path)<a class="headerlink" href="#phase-b-record-streaming-the-multi-gb-path" title="Permanent link">&para;</a></h3>
+<p>When the input is offloaded <strong>and</strong> over the rehydrate cap, and the payload is a
+<strong>JSON array</strong> (later: NDJSON), the transform streams instead of buffering:</p>
+<div class="highlight"><pre><span></span><code>GetStream(spill object)
+  → json.Decoder token loop (one record at a time)
+  → rules / extract / mappings per record
+  → streaming encoder (JSON array | NDJSON | CSV | XML | YAML | text)
+  → PutStream via io.Pipe to a NEW spill object (TeeReader → size + sha256)
+  → publish the small ref envelope
+</code></pre></div>
+<p>Memory is bounded by the largest single record, not the payload. Notes:</p>
 <ul>
-<li><strong>Connection / pipeline</strong> — a graph of nodes (<code>consumer</code> → optional
-  <code>filter</code>/<code>converter</code> → <code>producer</code>) plus the edges between them. Created in the
-  visual builder or the onboarding wizard, deployed as a running set of workers.</li>
-<li><strong>Connector</strong> — a worker implementing one node kind, keyed by <code>config.type</code>
-  (e.g. <code>http</code>, <code>database</code>, <code>kafka</code>). See <a href="connectors/">Connectors</a>.</li>
-<li><strong>Tenant / workspace</strong> — the isolation boundary. Every resource is scoped to a
-  tenant; see the <a href="TENANT_MODEL/">tenant model</a>.</li>
-<li><strong>Secrets</strong> — credentials are stored encrypted and referenced as
-  <code>&lt;field&gt;_secret_id</code>; workers resolve them at runtime. See the
-  <a href="security/whitepaper/">security whitepaper</a>.</li>
+<li><strong>CSV header from the first output row</strong> — exactly today's <code>stableKeys</code>
+  semantics, so streaming changes nothing.</li>
+<li><strong>Flatten</strong> is B2: parent-include fields live outside the array, so the
+  streamer must buffer the (small) non-array document context while streaming
+  the (large) <code>flatten_path</code> array — a token-walking decoder. Ship B without it
+  first; over-cap + flatten falls to the phase-C policy until B2 lands.</li>
+<li><strong>A single JSON object</strong> over the cap has no records to stream — phase-C
+  policy. This is the honest product boundary from ADR 0001: no architecture
+  makes a whole-document transform of one multi-GB JSON object cheap.</li>
 </ul>
-<h2 id="platform-reference">Platform reference<a class="headerlink" href="#platform-reference" title="Permanent link">&para;</a></h2>
-<p>Architecture and internals — <a href="NATS_ARCHITECTURE/">NATS architecture</a>,
-<a href="OBSERVABILITY/">observability</a>, <a href="TRACING/">tracing</a>,
-<a href="LOAD/">load benchmarks</a>, <a href="oauth-framework/">OAuth framework</a>,
-<a href="sdk/">connector SDK</a>, <a href="scalability/">scalability</a>.</p>
-<p>Design decisions — <a href="adr/0001-streaming-payload-contract/">ADR 0001: streaming payload contract</a>,
-<a href="adr/0002-transform-large-payloads/">ADR 0002: large payloads through transforms</a>.</p>
+<h3 id="phase-c-explicit-policy-for-the-un-streamable-remainder">Phase C — explicit policy for the un-streamable remainder<a class="headerlink" href="#phase-c-explicit-policy-for-the-un-streamable-remainder" title="Permanent link">&para;</a></h3>
+<p>Per-node config <code>"large_payloads": "error" | "passthrough"</code> (default <code>error</code>):</p>
+<ul>
+<li><strong><code>error</code></strong> — over-cap, un-streamable input → NAK → DLQ with a message naming
+  the node and the cap. Loud and inspectable.</li>
+<li><strong><code>passthrough</code></strong> — forward the ref envelope untouched, skipping this
+  transform. Explicit opt-in only: silently skipping a transform is a
+  correctness decision the user must make, never a default.</li>
+</ul>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Positive.</strong> The silent-loss bugs die in phase A — the most important outcome,
+and it needs no streaming at all. Phase B extends the multi-GB path through
+transforms for array data with bounded memory, completing
+<code>source → filter/converter → destination</code> at any size for record-shaped
+payloads. One shared claim-check package instead of SDK-private copies.</p>
+<p><strong>Negative / accepted.</strong> The transforms gain a payload-store dependency (nil
+store degrades to phase-0 behavior, logged). Two processing paths (buffered /
+streamed) in the transforms, mirroring the SDK's own two paths. Flatten and
+single-object payloads stay bounded until B2 / phase C. The ack-policy change
+means some messages that used to vanish now occupy DLQ space — that is the
+point, but DLQ volume becomes a signal worth watching after rollout.</p>
+<p><strong>Deployment note.</strong> Phase A changes live services (filter/converter are
+platform deployments, 2 replicas). Per the standing rule: validate in the TEST
+(docker-compose) environment first, then roll prod images + manifests together.</p>
+<h2 id="test-plan">Test plan<a class="headerlink" href="#test-plan" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Unit: rehydrate-on-entry (offloaded → transformed → republished), over-cap →
+  NAK not ack, output offload (large flatten result), store-error → NAK.</li>
+<li>Phase B: stream a synthetic multi-hundred-MB array through filter and
+  converter asserting bounded memory and byte-identical output vs the buffered
+  path on the same (smaller) input; CSV first-row header parity.</li>
+<li>E2E in TEST env: consumer → filter → converter → producer at 10 MB (phase A)
+  and ≥1 GB (phase B) before any prod rollout.</li>
+</ul>
 
 
 
@@ -2250,10 +2337,10 @@ JetStream; large payloads spill to object storage.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
