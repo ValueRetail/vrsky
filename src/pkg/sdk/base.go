@@ -41,6 +41,14 @@ type Resources struct {
 	rehydrateMaxBytes int64
 }
 
+// InlineMaxBytes reports the payload size above which the SDK offloads to the
+// payload store instead of putting the bytes on the message bus. A streaming
+// connector uses it to decide when streaming is worth it: at or below this size
+// the plain publish path is simpler and keeps the UI's data-structure preview
+// working, above it the payload would be offloaded anyway, so streaming avoids
+// ever holding it in memory.
+func (r *Resources) InlineMaxBytes() int { return r.inlineMaxBytes }
+
 // healthToggle is the narrow slice of the health server connectors may touch.
 type healthToggle struct {
 	setReady func(bool)

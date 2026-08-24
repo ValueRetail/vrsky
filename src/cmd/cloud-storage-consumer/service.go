@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path"
 	"strings"
@@ -32,6 +34,13 @@ type cloudConsumer struct {
 	nc      *nats.Conn
 	publish sdk.PublishFunc
 	logger  *slog.Logger
+
+	// publishStream is non-nil only when the SDK selected the streaming path
+	// (ADR 0001) — i.e. this worker has a payload store. inlineMax is the size
+	// above which the SDK would offload anyway, so it's the point where reading
+	// the object into memory stops being worthwhile.
+	publishStream sdk.PublishStreamFunc
+	inlineMax     int
 
 	// newStore opens an ObjectStore. Defaulted to objectstore.New in Configure;
 	// tests inject a fake so the poller runs without a live bucket.
@@ -90,6 +99,7 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	s.db = res.DB
 	s.nc = res.NATS
 	s.logger = res.Logger
+	s.inlineMax = res.InlineMaxBytes()
 	s.active = make(map[string]context.CancelFunc)
 	if s.newStore == nil {
 		s.newStore = objectstore.New
@@ -101,6 +111,15 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
+}
+
+// RunStream is Run with the large-payload streaming path enabled (ADR 0001).
+// The SDK calls it instead of Run when a payload store is configured; ingest
+// then streams objects larger than the inline threshold straight from the
+// bucket into the pipeline, so a multi-GB object is never held in memory.
+func (s *cloudConsumer) RunStream(ctx context.Context, publish sdk.PublishFunc, publishStream sdk.PublishStreamFunc) error {
+	s.publishStream = publishStream
+	return s.Run(ctx, publish)
 }
 
 // Run subscribes to the connection command subjects and blocks until ctx is
@@ -349,21 +368,70 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, connID, tenantID strin
 // ingestObject fetches one object, publishes it into the pipeline, and applies
 // the after-action. Shared by poll and event modes.
 func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) error {
-	data, ct, err := store.Get(ctx, key)
+	size, streamed, err := s.fetchAndPublish(ctx, connID, tenantID, store, cfg, key)
 	if err != nil {
-		return fmt.Errorf("get: %w", err)
+		return err
 	}
-	if ct == "" {
-		ct = detectContentType(path.Base(key), data)
-	}
-	if err := s.publishObject(ctx, connID, tenantID, cfg.Bucket, key, ct, data); err != nil {
-		return fmt.Errorf("publish: %w", err)
-	}
-	logger.Info("cloud-storage object ingested", "key", key, "size", len(data))
+	logger.Info("cloud-storage object ingested", "key", key, "size", size, "streamed", streamed)
 	if err := s.afterAction(ctx, store, cfg, key); err != nil {
 		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", err)
 	}
 	return nil
+}
+
+// fetchAndPublish reads one object and publishes it, streaming when this worker
+// supports it and the object is larger than the inline threshold — so a
+// multi-GB object transfers with a bounded buffer instead of being read into
+// memory whole. Returns the payload size and whether the streaming path was used.
+func (s *cloudConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string) (int64, bool, error) {
+	if s.publishStream == nil {
+		data, ct, err := store.Get(ctx, key)
+		if err != nil {
+			return 0, false, fmt.Errorf("get: %w", err)
+		}
+		if ct == "" {
+			ct = detectContentType(path.Base(key), data)
+		}
+		if err := s.publishObject(ctx, connID, tenantID, cfg.Bucket, key, ct, data); err != nil {
+			return 0, false, fmt.Errorf("publish: %w", err)
+		}
+		return int64(len(data)), false, nil
+	}
+
+	rc, ct, err := store.GetStream(ctx, key)
+	if err != nil {
+		return 0, false, fmt.Errorf("get: %w", err)
+	}
+	defer rc.Close()
+
+	// Read up to one byte past the inline threshold. That single read answers
+	// both questions: whether the object is small enough to publish inline, and
+	// what bytes detectContentType should sniff. Nothing larger is ever buffered.
+	head := make([]byte, s.inlineMax+1)
+	n, rerr := io.ReadFull(rc, head)
+	if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+		return 0, false, fmt.Errorf("read: %w", rerr)
+	}
+	head = head[:n]
+	if ct == "" {
+		ct = detectContentType(path.Base(key), head)
+	}
+
+	if n <= s.inlineMax {
+		// Whole object already in hand — take the normal path so small objects
+		// keep behaving exactly as before (including the UI preview).
+		if err := s.publishObject(ctx, connID, tenantID, cfg.Bucket, key, ct, head); err != nil {
+			return 0, false, fmt.Errorf("publish: %w", err)
+		}
+		return int64(n), false, nil
+	}
+
+	env := s.newObjectEnvelope(connID, tenantID, cfg.Bucket, key, ct)
+	body := io.MultiReader(bytes.NewReader(head), rc)
+	if err := s.publishStream(ctx, env, body); err != nil {
+		return 0, false, fmt.Errorf("publish stream: %w", err)
+	}
+	return env.PayloadSize, true, nil
 }
 
 // finishConn marks the connection's terminal status and removes it from the
@@ -394,16 +462,24 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 	}
 }
 
-func (s *cloudConsumer) publishObject(ctx context.Context, connID, tenantID, bucket, key, contentType string, data []byte) error {
+// newObjectEnvelope builds the envelope for one ingested object, minus the
+// payload — shared by the inline and streaming paths so both carry identical
+// metadata.
+func (s *cloudConsumer) newObjectEnvelope(connID, tenantID, bucket, key, contentType string) *envelope.Envelope {
 	env := envelope.New()
 	env.TenantID = tenantID
 	env.IntegrationID = connID
 	env.ContentType = contentType
 	env.Source = "cloud-storage:" + key
-	env.Payload = data
-	env.PayloadSize = int64(len(data))
 	env.StepHistory = []string{"cloud-storage-consumer"}
 	env.Metadata = map[string]interface{}{"object_key": key, "bucket": bucket, "filename": path.Base(key)}
+	return env
+}
+
+func (s *cloudConsumer) publishObject(ctx context.Context, connID, tenantID, bucket, key, contentType string, data []byte) error {
+	env := s.newObjectEnvelope(connID, tenantID, bucket, key, contentType)
+	env.Payload = data
+	env.PayloadSize = int64(len(data))
 	return s.publish(ctx, env)
 }
 
