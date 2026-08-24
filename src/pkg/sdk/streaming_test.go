@@ -135,6 +135,161 @@ func TestVerifyingReader_SkipsWhenNoChecksum(t *testing.T) {
 	}
 }
 
+// --- dispatchEnvelope: the routing chokepoint (streaming vs buffered) ---
+
+// dispatchProbe records which delivery path a test envelope took.
+type dispatchProbe struct {
+	delivered    *envelope.Envelope // set when the buffered path ran
+	streamedBody []byte             // set when the streaming path ran
+	streamCalls  int
+	declineWith  error // when non-nil, DeliverStream returns this instead of reading
+}
+
+func (p *dispatchProbe) deliver(_ context.Context, env *envelope.Envelope) error {
+	p.delivered = env
+	return nil
+}
+
+func (p *dispatchProbe) deliverStream(_ context.Context, _ *envelope.Envelope, body io.Reader) error {
+	p.streamCalls++
+	if p.declineWith != nil {
+		return p.declineWith
+	}
+	b, err := io.ReadAll(body)
+	p.streamedBody = b
+	return err
+}
+
+// offloadedEnv puts a payload in the store and returns the (small) envelope
+// referencing it, as it would arrive off NATS.
+func offloadedEnv(t *testing.T, store *memStore, payload []byte) *envelope.Envelope {
+	t.Helper()
+	env := mkEnv(payload)
+	if _, err := offloadIfLarge(context.Background(), store, env, 256, testLogger()); err != nil {
+		t.Fatalf("offload: %v", err)
+	}
+	return env
+}
+
+func TestDispatchEnvelope_StreamsWithoutRehydrating(t *testing.T) {
+	store := newMemStore()
+	payload := bytes.Repeat([]byte("Z"), 4096)
+	env := offloadedEnv(t, store, payload)
+	res := &Resources{Logger: testLogger(), payloadStore: store, rehydrateMaxBytes: defaultRehydrateMaxBytes}
+	probe := &dispatchProbe{}
+
+	streamed, err := dispatchEnvelope(context.Background(), res, env, probe.deliver, probe.deliverStream)
+	if err != nil {
+		t.Fatalf("dispatchEnvelope: %v", err)
+	}
+	if !streamed {
+		t.Error("expected the streaming path to be used")
+	}
+	if probe.delivered != nil {
+		t.Error("buffered Deliver must NOT be called on the streaming path")
+	}
+	if !bytes.Equal(probe.streamedBody, payload) {
+		t.Errorf("streamed %d bytes, want %d", len(probe.streamedBody), len(payload))
+	}
+	// The decisive proof that rehydrate was skipped: it would have populated
+	// Payload and cleared PayloadRef.
+	if env.Payload != nil {
+		t.Errorf("payload was buffered into the envelope (%d bytes) — rehydrate ran", len(env.Payload))
+	}
+	if env.PayloadRef == "" {
+		t.Error("PayloadRef was cleared — rehydrate ran")
+	}
+}
+
+func TestDispatchEnvelope_FallsBackWhenConnectorDeclines(t *testing.T) {
+	store := newMemStore()
+	payload := bytes.Repeat([]byte("Z"), 4096)
+	env := offloadedEnv(t, store, payload)
+	res := &Resources{Logger: testLogger(), payloadStore: store, rehydrateMaxBytes: defaultRehydrateMaxBytes}
+	probe := &dispatchProbe{declineWith: ErrStreamUnsupported}
+
+	streamed, err := dispatchEnvelope(context.Background(), res, env, probe.deliver, probe.deliverStream)
+	if err != nil {
+		t.Fatalf("a declined stream must fall back cleanly, got: %v", err)
+	}
+	if streamed {
+		t.Error("a declined message did not stream")
+	}
+	if probe.streamCalls != 1 {
+		t.Errorf("DeliverStream should have been offered the message once, got %d", probe.streamCalls)
+	}
+	if probe.delivered == nil {
+		t.Fatal("expected fallback to buffered Deliver")
+	}
+	// Fallback means a full rehydrate: payload restored, ref cleared.
+	if !bytes.Equal(probe.delivered.Payload, payload) {
+		t.Errorf("fallback delivered %d bytes, want %d", len(probe.delivered.Payload), len(payload))
+	}
+	if probe.delivered.PayloadRef != "" {
+		t.Error("PayloadRef should be cleared after the fallback rehydrate")
+	}
+}
+
+func TestDispatchEnvelope_BufferedWhenNotStreamingCapable(t *testing.T) {
+	store := newMemStore()
+	payload := bytes.Repeat([]byte("Z"), 4096)
+	env := offloadedEnv(t, store, payload)
+	res := &Resources{Logger: testLogger(), payloadStore: store, rehydrateMaxBytes: defaultRehydrateMaxBytes}
+	probe := &dispatchProbe{}
+
+	// streamDeliver nil = a plain Producer.
+	streamed, err := dispatchEnvelope(context.Background(), res, env, probe.deliver, nil)
+	if err != nil {
+		t.Fatalf("dispatchEnvelope: %v", err)
+	}
+	if streamed || probe.streamCalls != 0 {
+		t.Error("a non-streaming producer must never take the streaming path")
+	}
+	if probe.delivered == nil || !bytes.Equal(probe.delivered.Payload, payload) {
+		t.Error("expected the buffered path to rehydrate and deliver")
+	}
+}
+
+func TestDispatchEnvelope_InlinePayloadGoesStraightToDeliver(t *testing.T) {
+	res := &Resources{Logger: testLogger(), payloadStore: newMemStore(), rehydrateMaxBytes: defaultRehydrateMaxBytes}
+	probe := &dispatchProbe{}
+	env := mkEnv([]byte("small")) // never offloaded — no PayloadRef
+
+	streamed, err := dispatchEnvelope(context.Background(), res, env, probe.deliver, probe.deliverStream)
+	if err != nil {
+		t.Fatalf("dispatchEnvelope: %v", err)
+	}
+	if streamed || probe.streamCalls != 0 {
+		t.Error("an inline payload must not take the streaming path")
+	}
+	if probe.delivered == nil || string(probe.delivered.Payload) != "small" {
+		t.Error("expected direct buffered delivery")
+	}
+}
+
+func TestDispatchEnvelope_StreamingBypassesTheRehydrateCap(t *testing.T) {
+	// The headline claim of ADR 0001: a streaming connector has no size cap.
+	store := newMemStore()
+	payload := bytes.Repeat([]byte("Z"), 4096)
+	env := offloadedEnv(t, store, payload)
+	// A cap far below the payload — fatal on the buffered path.
+	res := &Resources{Logger: testLogger(), payloadStore: store, rehydrateMaxBytes: 100}
+
+	streamed, err := dispatchEnvelope(context.Background(), res, env, (&dispatchProbe{}).deliver, (&dispatchProbe{}).deliverStream)
+	if err != nil {
+		t.Fatalf("streaming must ignore the rehydrate cap, got: %v", err)
+	}
+	if !streamed {
+		t.Error("expected the streaming path")
+	}
+
+	// Same envelope, same cap, but a non-streaming connector → rejected.
+	env2 := offloadedEnv(t, store, payload)
+	if _, err := dispatchEnvelope(context.Background(), res, env2, (&dispatchProbe{}).deliver, nil); err == nil {
+		t.Fatal("the buffered path must still enforce the cap")
+	}
+}
+
 func TestErrStreamUnsupported_IsIdentifiable(t *testing.T) {
 	// Connectors wrap it; the SDK must still recognise it to fall back.
 	wrapped := errors.New("cloud: " + ErrStreamUnsupported.Error())

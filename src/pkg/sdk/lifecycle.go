@@ -3,7 +3,6 @@ package sdk
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -472,28 +471,9 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 		)
 		defer span.End()
 
-		var derr error
-		streamed := false
-		if env.PayloadRef != "" && streamDeliver != nil && res.payloadStore != nil {
-			// Streaming-capable connector + offloaded payload: hand over the object
-			// stream. Never buffered, so payload size is unbounded (ADR 0001).
-			derr = deliverStreamed(ctx, res.payloadStore, env, streamDeliver)
-			// The connector may decline THIS message (e.g. fan-out needs several
-			// passes); fall through to buffered delivery, exactly as if it were a
-			// non-streaming connector.
-			streamed = !errors.Is(derr, ErrStreamUnsupported)
-			span.SetAttributes(attribute.Bool("vrsky.payload.streamed", streamed))
-		}
-		if !streamed {
-			// Rehydrate an offloaded payload (claim-check) before the connector sees
-			// it. No-op for inline payloads. A transient store error is returned as
-			// retriable so the message is redelivered rather than delivered empty.
-			if rerr := rehydrate(ctx, res.payloadStore, env, res.rehydrateMaxBytes); rerr != nil {
-				span.RecordError(rerr)
-				span.SetStatus(codes.Error, rerr.Error())
-				return rerr
-			}
-			derr = deliver(ctx, env)
+		streamed, derr := dispatchEnvelope(ctx, res, env, deliver, streamDeliver)
+		if streamed {
+			span.SetAttributes(attribute.Bool("vrsky.payload.streamed", true))
 		}
 		if derr == nil {
 			// Spilled objects are reclaimed by the bucket lifecycle TTL (spill/

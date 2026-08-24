@@ -107,6 +107,42 @@ func newPublishStream(publish PublishFunc, res *Resources) PublishStreamFunc {
 	}
 }
 
+// dispatchEnvelope routes one envelope to the streaming or the buffered delivery
+// path, and reports which it used.
+//
+// Streaming is taken only when all three hold: the payload was offloaded, the
+// connector implements StreamingProducer, and a payload store is configured.
+// The connector may still decline THIS message with ErrStreamUnsupported (e.g.
+// fan-out needs several passes over a payload that reads once), in which case
+// delivery falls back to rehydrate + Deliver — behaviour identical to a
+// non-streaming connector, cap included. A decline costs one open/close of the
+// object; it is the rare path, and it keeps the capability check per-message
+// without a second interface.
+//
+// Rehydrate errors are returned like delivery errors: they are always plain
+// (never Permanent), so the caller's classification NAKs them either way.
+func dispatchEnvelope(
+	ctx context.Context,
+	res *Resources,
+	env *envelope.Envelope,
+	deliver func(context.Context, *envelope.Envelope) error,
+	streamDeliver streamDeliverFunc,
+) (streamed bool, err error) {
+	if env.PayloadRef != "" && streamDeliver != nil && res.payloadStore != nil {
+		err = deliverStreamed(ctx, res.payloadStore, env, streamDeliver)
+		if !errors.Is(err, ErrStreamUnsupported) {
+			return true, err
+		}
+	}
+	// Buffered path: rehydrate an offloaded payload (no-op when inline) before
+	// the connector sees it. A store error is retriable so the message is
+	// redelivered rather than delivered empty.
+	if rerr := rehydrate(ctx, res.payloadStore, env, res.rehydrateMaxBytes); rerr != nil {
+		return false, rerr
+	}
+	return false, deliver(ctx, env)
+}
+
 // deliverStreamed hands an offloaded payload to a StreamingProducer as a stream,
 // bypassing rehydration (and therefore the buffering cap).
 func deliverStreamed(ctx context.Context, store objectstore.ObjectStore, env *envelope.Envelope, fn streamDeliverFunc) error {
