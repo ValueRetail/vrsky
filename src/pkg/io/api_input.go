@@ -1017,17 +1017,9 @@ func (a *APIInput) createEnvelope(record json.RawMessage, endpoint string) (*env
 	env.Metadata["endpoint"] = endpoint
 	env.Metadata["pagination_type"] = a.state.PaginationType
 
-	// Handle large payloads (>256KB)
-	const maxInlinePayload = 256 * 1024 // 256KB
-	if env.PayloadSize > maxInlinePayload {
-		// For now, log warning - MinIO integration to be added
-		a.logger.Warn("large payload detected, should be stored in object storage",
-			"consumer_id", a.config.ID,
-			"envelope_id", env.ID,
-			"size", env.PayloadSize)
-		// TODO: Store in MinIO and set env.PayloadRef
-		// For now, keep inline (consumer should handle this externally if needed)
-	}
+	// Large payloads are handled centrally by the SDK publish path (claim-check
+	// offload to object storage; see pkg/sdk/payloadstore.go), so no per-consumer
+	// handling is needed here.
 
 	return env, nil
 }
