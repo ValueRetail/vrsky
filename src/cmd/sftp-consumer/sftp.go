@@ -24,6 +24,10 @@ type remoteFile struct {
 type sftpConn interface {
 	List(dir string) ([]remoteFile, error)
 	Read(filePath string) ([]byte, error)
+	// Open returns the file as a stream for large transfers (ADR 0001); the
+	// caller must Close it. Read is the buffered equivalent, kept for small
+	// files and for workers with no payload store configured.
+	Open(filePath string) (io.ReadCloser, error)
 	Remove(filePath string) error
 	Rename(oldPath, newPath string) error
 	MkdirAll(dir string) error
@@ -62,6 +66,12 @@ func (r *realSFTP) Read(filePath string) ([]byte, error) {
 	}
 	defer f.Close()
 	return io.ReadAll(f)
+}
+
+// Open hands back the remote file as a stream, so a large transfer never has to
+// be materialised in worker memory the way Read does.
+func (r *realSFTP) Open(filePath string) (io.ReadCloser, error) {
+	return r.sftp.Open(filePath)
 }
 
 func (r *realSFTP) Remove(filePath string) error { return r.sftp.Remove(filePath) }
