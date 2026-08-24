@@ -34,12 +34,23 @@ type Resources struct {
 	Health *healthToggle
 
 	// payloadStore + inlineMaxBytes drive the large-payload claim-check (see
-	// payloadstore.go). Unexported so connectors don't couple to them — only the
-	// SDK publish/consume path uses them. payloadStore is nil when unconfigured.
+	// payloadstore.go). Unexported so connectors can't reach the store or rewrite
+	// the thresholds — offload policy stays owned by the SDK publish/consume path.
+	// payloadStore is nil when unconfigured. The threshold alone is readable via
+	// InlineMaxBytes(), which a streaming connector needs to branch at the same
+	// point the SDK does.
 	payloadStore      objectstore.ObjectStore
 	inlineMaxBytes    int
 	rehydrateMaxBytes int64
 }
+
+// InlineMaxBytes reports the payload size above which the SDK offloads to the
+// payload store instead of putting the bytes on the message bus. A streaming
+// connector uses it to decide when streaming is worth it: at or below this size
+// the plain publish path is simpler and keeps the UI's data-structure preview
+// working, above it the payload would be offloaded anyway, so streaming avoids
+// ever holding it in memory.
+func (r *Resources) InlineMaxBytes() int { return r.inlineMaxBytes }
 
 // healthToggle is the narrow slice of the health server connectors may touch.
 type healthToggle struct {
