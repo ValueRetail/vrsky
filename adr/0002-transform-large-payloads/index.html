@@ -2227,6 +2227,15 @@ built on B's plumbing.</strong></p>
 256 KiB–128 MiB transforms work via rehydrate, &gt;128 MiB is an explicit DLQ
 error pointing at the object.</p>
 <h3 id="phase-b-record-streaming-the-multi-gb-path">Phase B — record streaming (the multi-GB path)<a class="headerlink" href="#phase-b-record-streaming-the-multi-gb-path" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Implemented.</strong> Shipped scope: filter (rules + <code>extract_fields</code>) and
+converter (mappings; output <code>""</code>/json, <code>ndjson</code>, <code>csv</code>, <code>tsv</code>) stream; results
+go through a <em>spool</em> that keeps small outputs inline (UI preview intact) and
+spills past the inline threshold. Declining with error → NAK → DLQ: flatten
+(B2), single JSON objects, and <code>xml</code>/<code>text</code>/<code>yaml</code> output — all replayable
+after raising the cap or changing the node. Streamed output is byte-identical
+to the buffered path (shared row encoders + parity tests).</p>
+</blockquote>
 <p>When the input is offloaded <strong>and</strong> over the rehydrate cap, and the payload is a
 <strong>JSON array</strong> (later: NDJSON), the transform streams instead of buffering:</p>
 <div class="highlight"><pre><span></span><code>GetStream(spill object)
