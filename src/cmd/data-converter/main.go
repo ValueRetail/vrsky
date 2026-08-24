@@ -247,13 +247,18 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 		return nil // will never parse — ack, don't burn retries
 	}
 
-	// Rehydrate an offloaded payload (claim-check) before converting. An error
-	// here is infrastructure, not converter logic: NAK so the message is retried
-	// (transient store blip) or lands in the DLQ (over-cap) instead of being
-	// silently dropped as invalid JSON.
-	if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
-		s.emitEvent(env.IntegrationID, ConvertEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
-		return fmt.Errorf("rehydrate: %w", err)
+	// Rehydrate an offloaded payload (claim-check) before converting — EXCEPT
+	// when it is over the rehydrate cap and a store is available: then the ref
+	// stays set and each entry takes the record-streaming path instead of
+	// buffering (ADR 0002 phase B). Other rehydrate errors are infrastructure,
+	// not converter logic: NAK so the message is retried (transient store blip)
+	// or lands in the DLQ instead of being silently dropped as invalid JSON.
+	overCap := env.PayloadRef != "" && s.rehydrateMax > 0 && env.PayloadSize > s.rehydrateMax && s.spill != nil
+	if !overCap {
+		if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
+			s.emitEvent(env.IntegrationID, ConvertEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
+			return fmt.Errorf("rehydrate: %w", err)
+		}
 	}
 
 	connectionID := env.IntegrationID
@@ -309,6 +314,12 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	hasFormat := converterCfg.OutputFormat != ""
 	if !hasMapping && !hasFormat {
 		return nil
+	}
+
+	// An envelope still carrying a ref here is over the rehydrate cap — take the
+	// record-streaming path (ADR 0002 phase B) instead of buffering it.
+	if origEnv.PayloadRef != "" {
+		return s.streamEntry(ctx, connectionID, origEnv, entry)
 	}
 
 	// Work on a copy of the original payload to avoid mutating shared state
@@ -604,14 +615,7 @@ func convertCSV(rows []map[string]interface{}, cfg *ConverterNodeConfig) string 
 	if len(rows) == 0 {
 		return ""
 	}
-	delim := cfg.CsvDelimiter
-	if delim == "" {
-		delim = ","
-	}
-	if cfg.OutputFormat == "tsv" {
-		delim = "\t"
-	}
-
+	delim := csvDelim(cfg)
 	keys := stableKeys(rows)
 	var sb strings.Builder
 
@@ -623,23 +627,40 @@ func convertCSV(rows []map[string]interface{}, cfg *ConverterNodeConfig) string 
 	}
 
 	for _, row := range rows {
-		vals := make([]string, len(keys))
-		for i, k := range keys {
-			v := row[k]
-			s := fmt.Sprintf("%v", v)
-			if v == nil {
-				s = ""
-			}
-			// Quote if contains delimiter or newline
-			if strings.ContainsAny(s, delim+"\n\"") {
-				s = "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
-			}
-			vals[i] = s
-		}
-		sb.WriteString(strings.Join(vals, delim))
-		sb.WriteString("\n")
+		sb.WriteString(csvLine(keys, row, delim))
 	}
 	return sb.String()
+}
+
+// csvDelim resolves the effective delimiter for a csv/tsv node.
+func csvDelim(cfg *ConverterNodeConfig) string {
+	delim := cfg.CsvDelimiter
+	if delim == "" {
+		delim = ","
+	}
+	if cfg.OutputFormat == "tsv" {
+		delim = "\t"
+	}
+	return delim
+}
+
+// csvLine renders one row against a pinned key order — shared by the buffered
+// and streaming paths so their output cannot drift.
+func csvLine(keys []string, row map[string]interface{}, delim string) string {
+	vals := make([]string, len(keys))
+	for i, k := range keys {
+		v := row[k]
+		s := fmt.Sprintf("%v", v)
+		if v == nil {
+			s = ""
+		}
+		// Quote if contains delimiter or newline
+		if strings.ContainsAny(s, delim+"\n\"") {
+			s = "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+		}
+		vals[i] = s
+	}
+	return strings.Join(vals, delim) + "\n"
 }
 
 func convertXML(rows []map[string]interface{}, cfg *ConverterNodeConfig) string {
