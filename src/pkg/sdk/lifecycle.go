@@ -299,12 +299,13 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	}
 
 	res := &Resources{
-		Logger:         logger,
-		DB:             db,
-		NATS:           nc,
-		Health:         &healthToggle{setReady: setReady, addCheck: addCheck},
-		payloadStore:   payloadStore,
-		inlineMaxBytes: inlineMaxFromEnv(),
+		Logger:            logger,
+		DB:                db,
+		NATS:              nc,
+		Health:            &healthToggle{setReady: setReady, addCheck: addCheck},
+		payloadStore:      payloadStore,
+		inlineMaxBytes:    inlineMaxFromEnv(),
+		rehydrateMaxBytes: rehydrateMaxFromEnv(),
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -443,7 +444,7 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 		// Rehydrate an offloaded payload (claim-check) before the connector sees
 		// it. No-op for inline payloads. A transient store error is returned as
 		// retriable so the message is redelivered rather than delivered empty.
-		if rerr := rehydrate(ctx, res.payloadStore, env); rerr != nil {
+		if rerr := rehydrate(ctx, res.payloadStore, env, res.rehydrateMaxBytes); rerr != nil {
 			span.RecordError(rerr)
 			span.SetStatus(codes.Error, rerr.Error())
 			return rerr

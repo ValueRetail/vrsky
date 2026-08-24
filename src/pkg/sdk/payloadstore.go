@@ -3,6 +3,8 @@ package sdk
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,8 +27,17 @@ import (
 // connector payload contract to become a stream (io.Reader). See #187.
 const defaultInlineMaxBytes = 256 * 1024
 
+// defaultRehydrateMaxBytes bounds how much an offloaded payload may be buffered
+// back into memory for a connector that speaks []byte. Worker pods run with a
+// 512 MiB limit (orchestrator.MemoryLimit), so 128 MiB leaves comfortable room
+// for the envelope copy and parsing overhead. Past this the payload is rejected
+// rather than OOM-killing the worker; a streaming-capable connector (ADR 0001)
+// bypasses this path entirely and has no such limit.
+const defaultRehydrateMaxBytes = 128 * 1024 * 1024
+
 const (
 	envInlineMax      = "PAYLOAD_INLINE_MAX_BYTES"
+	envRehydrateMax   = "PAYLOAD_REHYDRATE_MAX_BYTES"
 	envStoreProvider  = "PAYLOAD_STORE_PROVIDER"
 	envStoreBucket    = "PAYLOAD_STORE_BUCKET"
 	envStoreEndpoint  = "PAYLOAD_STORE_ENDPOINT"
@@ -79,6 +90,20 @@ func inlineMaxFromEnv() int {
 	return envInt(envInlineMax, defaultInlineMaxBytes)
 }
 
+// rehydrateMaxFromEnv resolves the buffering cap (PAYLOAD_REHYDRATE_MAX_BYTES),
+// defaulting to 128 MiB. A non-positive value disables the cap (unbounded
+// buffering — only sensible if worker memory has been raised to match).
+func rehydrateMaxFromEnv() int64 {
+	return int64(envInt(envRehydrateMax, defaultRehydrateMaxBytes))
+}
+
+// payloadChecksum is the canonical "sha256:<hex>" digest stamped on offloaded
+// payloads and verified when they are read back.
+func payloadChecksum(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // payloadKey is the object key an offloaded payload is stored under. Tenant- and
 // connection-scoped, unique per envelope so concurrent workers never collide.
 func payloadKey(env *envelope.Envelope) string {
@@ -106,6 +131,7 @@ func offloadIfLarge(ctx context.Context, store objectstore.ObjectStore, env *env
 		return false, fmt.Errorf("offload payload %q: %w", key, err)
 	}
 	env.PayloadSize = int64(len(env.Payload))
+	env.Checksum = payloadChecksum(env.Payload)
 	env.PayloadRef = key
 	env.Payload = nil
 	return true, nil
@@ -115,21 +141,50 @@ func offloadIfLarge(ctx context.Context, store objectstore.ObjectStore, env *env
 // connector sees it, and clears the reference. No-op when the payload is inline.
 // A missing/unreadable object is returned as an error so the message is retried
 // (the object may be transiently unavailable) rather than delivered empty.
-func rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope.Envelope) error {
+func rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope.Envelope, maxBytes int64) error {
 	if env.PayloadRef == "" {
 		return nil
 	}
 	if store == nil {
 		return fmt.Errorf("envelope %s references offloaded payload %q but no offload store is configured", env.ID, env.PayloadRef)
 	}
+	// Reject BEFORE downloading: buffering a payload this large would OOM-kill
+	// the worker, and no retry can change that. Returning a plain error rides the
+	// SDK's default Retriable classification ON PURPOSE — Permanent would ack and
+	// silently drop a customer payload, whereas exhausting the (cheap, since we
+	// reject without downloading) retries routes the envelope to the DLQ, where
+	// an operator can inspect it and replay once a streaming-capable connector is
+	// in place. The spilled object outlives the message (1-day lifecycle TTL), so
+	// replay within that window recovers the data.
+	if maxBytes > 0 && env.PayloadSize > maxBytes {
+		return fmt.Errorf("payload %q is %d bytes, over the %d-byte rehydrate cap (%s): this connector buffers payloads in memory; use a streaming-capable connector or raise the cap",
+			env.PayloadRef, env.PayloadSize, maxBytes, envRehydrateMax)
+	}
 	rc, ct, err := store.GetStream(ctx, env.PayloadRef)
 	if err != nil {
 		return fmt.Errorf("rehydrate payload %q: %w", env.PayloadRef, err)
 	}
 	defer rc.Close()
-	body, err := io.ReadAll(rc)
+	// PayloadSize is envelope metadata and may understate the object, so bound
+	// the read itself too (+1 byte to detect an over-cap object).
+	var src io.Reader = rc
+	if maxBytes > 0 {
+		src = io.LimitReader(rc, maxBytes+1)
+	}
+	body, err := io.ReadAll(src)
 	if err != nil {
 		return fmt.Errorf("rehydrate read %q: %w", env.PayloadRef, err)
+	}
+	if maxBytes > 0 && int64(len(body)) > maxBytes {
+		return fmt.Errorf("object %q exceeds the %d-byte rehydrate cap (%s) despite a declared size of %d",
+			env.PayloadRef, maxBytes, envRehydrateMax, env.PayloadSize)
+	}
+	// Verify integrity across the offload hop. Skipped when the envelope carries
+	// no checksum (inline-era envelopes still in flight during a rollout).
+	if env.Checksum != "" {
+		if got := payloadChecksum(body); got != env.Checksum {
+			return fmt.Errorf("checksum mismatch for %q: envelope declares %s, object is %s", env.PayloadRef, env.Checksum, got)
+		}
 	}
 	env.Payload = body
 	// Fall back to the store's content type if the envelope didn't carry one, so

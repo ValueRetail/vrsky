@@ -1,6 +1,6 @@
 # ADR 0001 — Streaming payload contract for unbounded (multi-GB) transfers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-24
 - **Relates to:** #187 (large-payload handling), PR #189 (claim-check + streaming
   object I/O), PR #190 (Azure Copy streaming)
@@ -111,16 +111,29 @@ In `subscribeDispatch`: if `env.PayloadRef != ""` and the node implements
 `StreamingProducer` → `GetStream` and hand over the reader (checksum-verifying
 wrapper); no rehydrate. Otherwise rehydrate as today.
 
-**Rehydrate guard (independent hardening, do first):** cap `rehydrate` at
-`PAYLOAD_REHYDRATE_MAX_BYTES` (default 128 MiB — comfortable inside the 512 MiB
-limit). Beyond the cap, return a *permanent* error ("payload too large for
-non-streaming connector X") → DLQ with a clear message, replacing today's
-OOM-kill loop. This alone converts the failure mode from opaque to explicit and
-is worth shipping even before any connector opts in.
+**Rehydrate guard (independent hardening, do first — shipped):** cap `rehydrate`
+at `PAYLOAD_REHYDRATE_MAX_BYTES` (default 128 MiB — comfortable inside the
+512 MiB limit). The check runs on `PayloadSize` *before* any download, with an
+`io.LimitReader` bound on the read itself in case the declared size understates
+the object. This replaces today's OOM-kill loop with an explicit error, and is
+worth shipping before any connector opts in.
 
-**Integrity:** add `Checksum string` (`sha256:<hex>`) to the envelope, computed
-during offload, verified on rehydrate and on `DeliverStream` (via a verifying
-reader that errors on Close if the digest mismatches).
+*Error classification:* the over-cap error is returned bare, so it rides the
+SDK's **default Retriable** classification, and the envelope reaches the **DLQ**
+after the retry budget. This is deliberate and contradicts an earlier draft of
+this ADR that said "permanent": `sdk.Permanent` **acks and drops** the message
+(see `pkg/sdk/errors.go`), and silently discarding a customer payload is
+unacceptable for an integration platform. Retries are cheap here because the
+rejection happens without downloading, and a DLQ'd envelope keeps its
+`PayloadRef` so an operator can inspect it and replay once a streaming-capable
+connector is in place (within the spill object's 1-day TTL).
+
+**Integrity (shipped with the guard):** `Checksum string` (`sha256:<hex>`) on the
+envelope, computed during offload and verified on rehydrate. Empty checksums are
+skipped so envelopes in flight across a rollout still deliver. When streaming
+lands, `DeliverStream` verifies via a wrapping reader that errors on Close if the
+digest mismatches, and offload computes the digest with a `TeeReader` rather than
+over a buffer.
 
 **First adopters** (they already hold an `io.Reader` from disk or network, so
 this is deleting buffering, not adding machinery): cloud-storage consumer +
