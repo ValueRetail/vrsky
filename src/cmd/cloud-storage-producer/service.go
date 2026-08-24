@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path"
 	"strings"
@@ -132,6 +133,49 @@ func (p *cloudProducer) Stop(ctx context.Context) error {
 // failures (connect/write) → sdk.Retriable. A missing producer config for the
 // connection is not an error — this binary just isn't the producer for it.
 func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
+	targets := p.eligibleTargets(ctx, env)
+
+	var transient error
+	for _, t := range targets {
+		if err := p.upload(ctx, &t.cfg, env, nil); err != nil && transient == nil {
+			transient = err
+		}
+	}
+	if transient != nil {
+		return sdk.Retriable(transient)
+	}
+	return nil
+}
+
+// DeliverStream writes a large, offloaded payload straight from the pipeline's
+// object stream to the destination bucket, so a multi-GB object transfers with
+// a bounded buffer instead of being held in memory (ADR 0001).
+//
+// A stream can only be read once, so fan-out to several targets is declined
+// (sdk.ErrStreamUnsupported) and the SDK falls back to buffered delivery —
+// identical behaviour to before, subject to the rehydrate cap.
+//
+// Note: the key template is rendered without payload-derived fields (the
+// content hasn't been read, and reading it to template a key would defeat the
+// purpose). A template referencing payload fields falls back to a generated key
+// with a warning, the same as any other template miss.
+func (p *cloudProducer) DeliverStream(ctx context.Context, env *envelope.Envelope, body io.Reader) error {
+	targets := p.eligibleTargets(ctx, env)
+	if len(targets) == 0 {
+		return nil
+	}
+	if len(targets) > 1 {
+		return sdk.ErrStreamUnsupported
+	}
+	if err := p.upload(ctx, &targets[0].cfg, env, body); err != nil {
+		return sdk.Retriable(err)
+	}
+	return nil
+}
+
+// eligibleTargets resolves the configured targets for this connection and drops
+// the ones whose predecessor predicate doesn't match this envelope.
+func (p *cloudProducer) eligibleTargets(ctx context.Context, env *envelope.Envelope) []*cloudTarget {
 	connID := env.IntegrationID
 	if connID == "" {
 		return nil
@@ -149,7 +193,7 @@ func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 		}
 	}
 
-	var transient error
+	out := make([]*cloudTarget, 0, len(targets))
 	for _, t := range targets {
 		if t.predIsConsumer && lastProcessedBy != "" {
 			continue
@@ -157,18 +201,15 @@ func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 		if !t.predIsConsumer && t.predecessorID != "" && lastProcessedBy != t.predecessorID {
 			continue
 		}
-		if err := p.upload(ctx, &t.cfg, env); err != nil && transient == nil {
-			transient = err
-		}
+		out = append(out, t)
 	}
-	if transient != nil {
-		return sdk.Retriable(transient)
-	}
-	return nil
+	return out
 }
 
-// upload renders the object key and writes the payload to the bucket.
-func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envelope.Envelope) error {
+// upload renders the object key and writes the payload to the bucket. When body
+// is non-nil the payload is streamed from it (never buffered); otherwise
+// env.Payload is written.
+func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envelope.Envelope, body io.Reader) error {
 	if cfg.Bucket == "" {
 		p.logger.Error("cloud-storage producer config incomplete (need bucket); skipping")
 		return nil
@@ -203,6 +244,13 @@ func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envel
 	contentType := env.ContentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	if body != nil {
+		if err := store.PutStream(ctx, key, body, contentType); err != nil {
+			return fmt.Errorf("put-stream %s: %w", key, err)
+		}
+		p.logger.Info("cloud-storage streamed upload complete", "bucket", cfg.Bucket, "key", key, "size", env.PayloadSize)
+		return nil
 	}
 	if err := store.Put(ctx, key, env.Payload, contentType); err != nil {
 		return fmt.Errorf("put %s: %w", key, err)

@@ -111,6 +111,17 @@ In `subscribeDispatch`: if `env.PayloadRef != ""` and the node implements
 `StreamingProducer` → `GetStream` and hand over the reader (checksum-verifying
 wrapper); no rehydrate. Otherwise rehydrate as today.
 
+**Per-message escape hatch (`ErrStreamUnsupported`) — added during
+implementation.** Building the first adopter surfaced a gap: the cloud-storage
+producer can fan out to several targets, and a stream can only be read once.
+Buffering to serve N targets would reintroduce the OOM this ADR exists to
+prevent, while failing outright would regress configurations that work today
+(multi-target + a 1–128 MB payload). So `DeliverStream` may return
+`ErrStreamUnsupported` for a message it cannot stream; the SDK then falls back to
+rehydrate + `Deliver`, giving behaviour identical to a non-streaming connector.
+Returning it is free — nothing has been read yet. Capability is therefore
+declared statically (type assertion) but *applied* per message.
+
 **Rehydrate guard (independent hardening, do first — shipped):** cap `rehydrate`
 at `PAYLOAD_REHYDRATE_MAX_BYTES` (default 128 MiB — comfortable inside the
 512 MiB limit). The check runs on `PayloadSize` *before* any download, with an
