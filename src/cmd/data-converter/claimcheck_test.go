@@ -175,3 +175,133 @@ func TestConverter_RehydratesInputAndOffloadsOutput(t *testing.T) {
 		t.Fatal("no republished envelope — the offloaded input was dropped")
 	}
 }
+
+// --- ADR 0002 phase B: record streaming ---
+
+// streamThrough boots a converter on embedded JetStream with a tiny rehydrate
+// cap, pushes an offloaded payload through, and returns the output bytes
+// (inline or read back from the spill store).
+func streamThrough(t *testing.T, cfg *ConverterNodeConfig, payload []byte) []byte {
+	t.Helper()
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	defer cleanup()
+
+	store := newMemStore()
+	entry := &ConverterEntry{NodeID: "cv1", Config: cfg, PredIsConsumer: true}
+	s := newTestConverterService(store, entry)
+	s.nc = nc
+	s.pub = messaging.NewPublisher(js)
+	s.rehydrateMax = 100 // far below the payloads → streaming path
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+
+	out := make(chan *envelope.Envelope, 4)
+	sub, err := nc.Subscribe("vrsky.data.tenant-x.pipeline.conn-1", func(m *nats.Msg) {
+		var env envelope.Envelope
+		if json.Unmarshal(m.Data, &env) == nil && env.Metadata != nil {
+			if v, _ := env.Metadata["_last_processed_by"].(string); v == "cv1" {
+				out <- &env
+			}
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	msg := refEnvelopeMsg(t, store, payload)
+	if _, err := js.Publish(msg.Subject, msg.Data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		if got.PayloadRef != "" {
+			body, _, _ := store.Get(context.Background(), got.PayloadRef)
+			return body
+		}
+		return got.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("no republished envelope from the streaming path")
+		return nil
+	}
+}
+
+// bufferedExpected computes what the BUFFERED path produces for the same input,
+// using the very functions it runs — the parity oracle.
+func bufferedExpected(t *testing.T, cfg *ConverterNodeConfig, payload []byte) []byte {
+	t.Helper()
+	var data interface{}
+	if err := json.Unmarshal(payload, &data); err != nil {
+		t.Fatalf("test payload: %v", err)
+	}
+	arr := data.([]interface{})
+	mapped := make([]interface{}, 0, len(arr))
+	for _, item := range arr {
+		if obj, ok := item.(map[string]interface{}); ok && len(cfg.Mappings) > 0 {
+			m, _ := applyMappings(obj, cfg)
+			mapped = append(mapped, m)
+		} else {
+			mapped = append(mapped, item)
+		}
+	}
+	if cfg.OutputFormat == "" {
+		b, _ := json.Marshal(mapped)
+		return b
+	}
+	rows := toRows(mapped)
+	formatted, _, _ := convertFormat(rows, cfg)
+	return []byte(formatted)
+}
+
+func streamingParityPayload() []byte {
+	// Heterogeneous values + padding to clear the 100-byte cap.
+	return []byte(`[{"name":"a","n":1,"pad":"` + string(bytes.Repeat([]byte("x"), 200)) + `"},` +
+		`{"name":"b,with:delim","n":2,"pad":"y"},{"name":"c\"quoted\"","n":3,"pad":"z"}]`)
+}
+
+func TestConverter_StreamedJSONMatchesBuffered(t *testing.T) {
+	cfg := &ConverterNodeConfig{Mappings: []FieldMapping{{Source: "name", Target: "full_name", Type: "rename"}}}
+	payload := streamingParityPayload()
+	got := streamThrough(t, cfg, payload)
+	want := bufferedExpected(t, cfg, payload)
+	if !bytes.Equal(got, want) {
+		t.Errorf("streamed JSON differs from buffered:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestConverter_StreamedNDJSONMatchesBuffered(t *testing.T) {
+	cfg := &ConverterNodeConfig{OutputFormat: "ndjson", Mappings: []FieldMapping{{Source: "name", Target: "full_name", Type: "rename"}}}
+	payload := streamingParityPayload()
+	got := streamThrough(t, cfg, payload)
+	want := bufferedExpected(t, cfg, payload)
+	if !bytes.Equal(got, want) {
+		t.Errorf("streamed NDJSON differs from buffered:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestConverter_StreamedCSVMatchesBuffered(t *testing.T) {
+	cfg := &ConverterNodeConfig{OutputFormat: "csv"}
+	payload := streamingParityPayload()
+	got := streamThrough(t, cfg, payload)
+	want := bufferedExpected(t, cfg, payload)
+	if !bytes.Equal(got, want) {
+		t.Errorf("streamed CSV differs from buffered:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// XML needs whole-document context phase B doesn't cover — over-cap NAKs
+// (phase-C error policy) instead of producing wrong output.
+func TestConverter_StreamingDeclinesXML(t *testing.T) {
+	store := newMemStore()
+	entry := &ConverterEntry{NodeID: "cv1", Config: &ConverterNodeConfig{OutputFormat: "xml"}, PredIsConsumer: true}
+	s := newTestConverterService(store, entry)
+	s.rehydrateMax = 100
+
+	msg := refEnvelopeMsg(t, store, streamingParityPayload())
+	if err := s.handleMessage(context.Background(), msg); err == nil {
+		t.Fatal("xml + over-cap must NAK (phase C error policy), not stream")
+	}
+}

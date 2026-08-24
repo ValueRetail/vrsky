@@ -250,13 +250,18 @@ func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) error 
 		return nil // malformed envelope will never parse — ack, don't burn retries
 	}
 
-	// Rehydrate an offloaded payload (claim-check) before filtering. An error
-	// here is infrastructure, not filter logic: NAK so the message is retried
-	// (transient store blip) or lands in the DLQ (over-cap) instead of being
-	// silently dropped as "Invalid JSON payload".
-	if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
-		s.emitEvent(env.IntegrationID, FilterEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
-		return fmt.Errorf("rehydrate: %w", err)
+	// Rehydrate an offloaded payload (claim-check) before filtering — EXCEPT
+	// when it is over the rehydrate cap and a store is available: then the ref
+	// stays set and each entry takes the record-streaming path instead of
+	// buffering (ADR 0002 phase B). Other rehydrate errors are infrastructure,
+	// not filter logic: NAK so the message is retried (transient store blip) or
+	// lands in the DLQ instead of being silently dropped as invalid JSON.
+	overCap := env.PayloadRef != "" && s.rehydrateMax > 0 && env.PayloadSize > s.rehydrateMax && s.spill != nil
+	if !overCap {
+		if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
+			s.emitEvent(env.IntegrationID, FilterEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
+			return fmt.Errorf("rehydrate: %w", err)
+		}
 	}
 
 	connectionID := env.IntegrationID
@@ -307,6 +312,12 @@ func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) error 
 // caller NAKs those; transform-logic failures emit a UI event and ack, exactly
 // as before.
 func (s *FilterService) processFilterEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *FilterEntry) error {
+	// An envelope still carrying a ref here is over the rehydrate cap — take the
+	// record-streaming path (ADR 0002 phase B) instead of buffering it.
+	if origEnv.PayloadRef != "" {
+		return s.streamFilterEntry(ctx, connectionID, origEnv, entry)
+	}
+
 	var data interface{}
 	if err := json.Unmarshal(origEnv.Payload, &data); err != nil {
 		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Invalid JSON payload", Time: now()})

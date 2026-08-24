@@ -91,6 +91,14 @@ error pointing at the object.
 
 ### Phase B — record streaming (the multi-GB path)
 
+> **Implemented.** Shipped scope: filter (rules + `extract_fields`) and
+> converter (mappings; output `""`/json, `ndjson`, `csv`, `tsv`) stream; results
+> go through a *spool* that keeps small outputs inline (UI preview intact) and
+> spills past the inline threshold. Declining with error → NAK → DLQ: flatten
+> (B2), single JSON objects, and `xml`/`text`/`yaml` output — all replayable
+> after raising the cap or changing the node. Streamed output is byte-identical
+> to the buffered path (shared row encoders + parity tests).
+
 When the input is offloaded **and** over the rehydrate cap, and the payload is a
 **JSON array** (later: NDJSON), the transform streams instead of buffering:
 

@@ -119,14 +119,25 @@ func TestFilter_OffloadedEnvelopeWithoutStoreNAKs(t *testing.T) {
 	}
 }
 
-func TestFilter_OverCapEnvelopeNAKs(t *testing.T) {
+// Since phase B an over-cap payload STREAMS rather than NAKing outright — but an
+// infrastructure failure on that path (the spill object is gone or the store is
+// unreachable) must still NAK so the message retries or DLQs, never acks empty.
+func TestFilter_OverCapMissingObjectNAKs(t *testing.T) {
 	store := newMemStore()
-	msg := refEnvelopeMsg(t, store, bytes.Repeat([]byte("A"), 4096))
+	entry := &FilterEntry{NodeID: "f1", Config: &FilterNodeConfig{Rules: []FilterRule{{Field: "a", Operator: "equals", Value: "b"}}}, PredIsConsumer: true}
+	s := newTestFilterService(store, entry)
+	s.rehydrateMax = 100
 
-	s := newTestFilterService(store)
-	s.rehydrateMax = 100 // cap far below the payload
+	env := envelope.New()
+	env.TenantID = "tenant-x"
+	env.IntegrationID = "conn-1"
+	env.PayloadRef = "spill/tenant-x/conn-1/vanished"
+	env.PayloadSize = 4096 // over the cap → streaming path
+	data, _ := json.Marshal(env)
+	msg := &nats.Msg{Subject: "vrsky.data.tenant-x.pipeline.conn-1", Data: data}
+
 	if err := s.handleMessage(context.Background(), msg); err == nil {
-		t.Fatal("an over-cap payload must NAK (explicit DLQ path), not ack")
+		t.Fatal("a missing spill object on the streaming path must NAK, not ack")
 	}
 }
 
@@ -247,5 +258,154 @@ func TestFilter_OffloadsLargeOutput(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no republished envelope")
+	}
+}
+
+// --- ADR 0002 phase B: record streaming ---
+
+// startStreamingFilter boots a filter on embedded JetStream with a tiny
+// rehydrate cap, so any offloaded input takes the streaming path.
+func startStreamingFilter(t *testing.T, store objectstore.ObjectStore, entry *FilterEntry) (*FilterService, *nats.Conn, nats.JetStreamContext, chan *envelope.Envelope, func()) {
+	t.Helper()
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	s := newTestFilterService(store, entry)
+	s.nc = nc
+	s.pub = messaging.NewPublisher(js)
+	s.rehydrateMax = 100 // far below the test payloads → streaming path
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	out := make(chan *envelope.Envelope, 4)
+	sub, err := nc.Subscribe("vrsky.data.tenant-x.pipeline.conn-1", func(m *nats.Msg) {
+		var env envelope.Envelope
+		if json.Unmarshal(m.Data, &env) == nil && env.Metadata != nil {
+			if v, _ := env.Metadata["_last_processed_by"].(string); v == entry.NodeID {
+				out <- &env
+			}
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	return s, nc, js, out, func() { _ = sub.Unsubscribe(); s.Stop(); cleanup() }
+}
+
+// An over-cap array is filtered record by record and republished — never
+// buffered, and byte-identical to what the buffered path would produce.
+func TestFilter_StreamsOverCapArray(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{
+		NodeID:         "f1",
+		Config:         &FilterNodeConfig{Rules: []FilterRule{{Field: "keep", Operator: "equals", Value: "yes"}}},
+		PredIsConsumer: true,
+	}
+	_, _, js, out, done := startStreamingFilter(t, store, entry)
+	defer done()
+
+	// ~4 KB payload, cap is 100 bytes → must stream.
+	payload := []byte(`[{"keep":"yes","v":1},{"keep":"no","v":2},{"keep":"yes","pad":"` +
+		string(bytes.Repeat([]byte("x"), 4000)) + `"}]`)
+	msg := refEnvelopeMsg(t, store, payload)
+	if _, err := js.Publish(msg.Subject, msg.Data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		var body []byte
+		if got.PayloadRef != "" {
+			body, _, _ = store.Get(context.Background(), got.PayloadRef)
+		} else {
+			body = got.Payload
+		}
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("streamed output not JSON: %v", err)
+		}
+		if len(rows) != 2 || rows[0]["keep"] != "yes" || rows[1]["keep"] != "yes" {
+			t.Errorf("streamed filter semantics wrong: %d rows", len(rows))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no republished envelope from the streaming path")
+	}
+}
+
+// A large streamed result is re-offloaded via the spool (output over inlineMax).
+func TestFilter_StreamedLargeOutputSpills(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{NodeID: "f1", Config: &FilterNodeConfig{}, PredIsConsumer: true} // pass-through
+	s, _, js, out, done := startStreamingFilter(t, store, entry)
+	defer done()
+	s.inlineMax = 64 // output must spill
+
+	payload := []byte(`[{"pad":"` + string(bytes.Repeat([]byte("y"), 3000)) + `"}]`)
+	msg := refEnvelopeMsg(t, store, payload)
+	if _, err := js.Publish(msg.Subject, msg.Data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		if got.PayloadRef == "" {
+			t.Fatalf("output of %d bytes should have spilled (inlineMax=64)", got.PayloadSize)
+		}
+		if got.Checksum == "" {
+			t.Error("spilled output should carry a checksum")
+		}
+		body, _, _ := store.Get(context.Background(), got.PayloadRef)
+		if !bytes.Equal(body, payload) {
+			t.Errorf("pass-through streamed output differs from input: %d vs %d bytes", len(body), len(payload))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no republished envelope")
+	}
+}
+
+// Flatten needs document context (phase B2) — an over-cap payload at a flatten
+// node NAKs instead of streaming wrong results or buffering into an OOM.
+func TestFilter_StreamingDeclinesFlatten(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{NodeID: "f1", Config: &FilterNodeConfig{FlattenPath: "items"}, PredIsConsumer: true}
+	s := newTestFilterService(store, entry)
+	s.rehydrateMax = 100
+
+	msg := refEnvelopeMsg(t, store, []byte(`[{"items":[1,2],"pad":"`+string(bytes.Repeat([]byte("p"), 500))+`"}]`))
+	if err := s.handleMessage(context.Background(), msg); err == nil {
+		t.Fatal("flatten + over-cap must NAK (phase C error policy), not stream")
+	}
+}
+
+// A single JSON object has no records to stream — over the cap it NAKs.
+func TestFilter_StreamingDeclinesSingleObject(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{NodeID: "f1", Config: &FilterNodeConfig{Rules: []FilterRule{{Field: "a", Operator: "equals", Value: "b"}}}, PredIsConsumer: true}
+	s := newTestFilterService(store, entry)
+	s.rehydrateMax = 100
+
+	msg := refEnvelopeMsg(t, store, []byte(`{"a":"b","pad":"`+string(bytes.Repeat([]byte("z"), 500))+`"}`))
+	if err := s.handleMessage(context.Background(), msg); err == nil {
+		t.Fatal("a single object over the cap cannot record-stream and must NAK")
+	}
+}
+
+// Rules that drop every record publish nothing — and leave no partial spill
+// object behind.
+func TestFilter_StreamedAllDroppedPublishesNothing(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{
+		NodeID:         "f1",
+		Config:         &FilterNodeConfig{Rules: []FilterRule{{Field: "keep", Operator: "equals", Value: "never"}}},
+		PredIsConsumer: true,
+	}
+	s := newTestFilterService(store, entry)
+	s.rehydrateMax = 100
+
+	msg := refEnvelopeMsg(t, store, []byte(`[{"keep":"no","pad":"`+string(bytes.Repeat([]byte("q"), 500))+`"},{"keep":"also-no"}]`))
+	objectsBefore := len(store.objects)
+	if err := s.handleMessage(context.Background(), msg); err != nil {
+		t.Fatalf("all-dropped is a normal outcome, not an error: %v", err)
+	}
+	if len(store.objects) != objectsBefore {
+		t.Errorf("no output object should exist after an all-dropped stream")
 	}
 }
