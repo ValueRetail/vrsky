@@ -18,6 +18,7 @@ import (
 type memStore struct {
 	mu      sync.Mutex
 	objects map[string][]byte
+	ctByKey map[string]string // optional per-key content type
 	puts    int
 }
 
@@ -51,7 +52,7 @@ func (m *memStore) GetStream(_ context.Context, key string) (io.ReadCloser, stri
 	if !ok {
 		return nil, "", io.ErrUnexpectedEOF
 	}
-	return io.NopCloser(bytes.NewReader(b)), "", nil
+	return io.NopCloser(bytes.NewReader(b)), m.ctByKey[key], nil
 }
 func (m *memStore) PutStream(_ context.Context, key string, body io.Reader, _ string) error {
 	b, err := io.ReadAll(body)
@@ -154,26 +155,20 @@ func TestRehydrate_RefButNoStoreErrors(t *testing.T) {
 	}
 }
 
-func TestCleanupSpill_DeletesObject(t *testing.T) {
+func TestRehydrate_FillsContentTypeFromStore(t *testing.T) {
 	store := newMemStore()
-	env := mkEnv(bytes.Repeat([]byte("A"), 1000))
-	if _, err := offloadIfLarge(context.Background(), store, env, 256, slog.Default()); err != nil {
-		t.Fatalf("offloadIfLarge: %v", err)
-	}
-	ref := env.PayloadRef
-	if _, ok := store.objects[ref]; !ok {
-		t.Fatalf("object %q should exist before cleanup", ref)
-	}
-	cleanupSpill(context.Background(), store, ref, slog.Default())
-	if _, ok := store.objects[ref]; ok {
-		t.Errorf("object %q should be deleted after cleanup", ref)
-	}
-}
+	// Store an object under a ref; envelope has no ContentType of its own.
+	const ref = "spill/tenant-x/conn-1/env-1"
+	store.ctByKey = map[string]string{ref: "text/csv"}
+	store.objects[ref] = []byte("a,b\n1,2\n")
+	env := &envelope.Envelope{ID: "env-1", PayloadRef: ref}
 
-func TestCleanupSpill_NoopOnEmptyRefOrNilStore(t *testing.T) {
-	// Neither should panic or error.
-	cleanupSpill(context.Background(), newMemStore(), "", slog.Default())
-	cleanupSpill(context.Background(), nil, "spill/t/c/e", slog.Default())
+	if err := rehydrate(context.Background(), store, env); err != nil {
+		t.Fatalf("rehydrate: %v", err)
+	}
+	if env.ContentType != "text/csv" {
+		t.Errorf("ContentType = %q, want text/csv (from store)", env.ContentType)
+	}
 }
 
 func TestOffloadIfLarge_ThresholdDisabled(t *testing.T) {

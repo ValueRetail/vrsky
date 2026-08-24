@@ -44,13 +44,21 @@ func openPayloadStore(ctx context.Context, logger *slog.Logger) (objectstore.Obj
 	if bucket == "" {
 		return nil, nil
 	}
+	access := os.Getenv(envStoreAccessKey)
+	secret := os.Getenv(envStoreSecretKey)
+	// Both or neither: a lone key makes the S3 backend silently fall back to the
+	// AWS default credential chain, which then fails opaquely against MinIO. Fail
+	// fast at startup instead.
+	if (access == "") != (secret == "") {
+		return nil, fmt.Errorf("payload store: set both %s and %s, or neither", envStoreAccessKey, envStoreSecretKey)
+	}
 	cfg := &objectstore.Config{
 		Provider:        os.Getenv(envStoreProvider),
 		Bucket:          bucket,
 		Region:          os.Getenv(envStoreRegion),
 		Endpoint:        os.Getenv(envStoreEndpoint),
-		AccessKeyID:     os.Getenv(envStoreAccessKey),
-		SecretAccessKey: os.Getenv(envStoreSecretKey),
+		AccessKeyID:     access,
+		SecretAccessKey: secret,
 	}
 	store, err := objectstore.New(ctx, cfg)
 	if err != nil {
@@ -103,21 +111,6 @@ func offloadIfLarge(ctx context.Context, store objectstore.ObjectStore, env *env
 	return true, nil
 }
 
-// cleanupSpill best-effort deletes an offloaded object once the consumer that
-// read it has finished (delivered/republished successfully). Each hop re-offloads
-// under a fresh envelope ID, so the inbound object is otherwise orphaned; this
-// reclaims it immediately in the common case. Failures are swallowed — the bucket
-// lifecycle TTL is the backstop that reaps anything a delete misses (a crash, a
-// deliver-ok/ack-fail race, or a store hiccup).
-func cleanupSpill(ctx context.Context, store objectstore.ObjectStore, ref string, logger *slog.Logger) {
-	if ref == "" || store == nil {
-		return
-	}
-	if err := store.Delete(ctx, ref); err != nil {
-		logger.Warn("spill cleanup failed; lifecycle TTL will reap it", "ref", ref, "error", err)
-	}
-}
-
 // rehydrate loads an offloaded payload back into the envelope before the
 // connector sees it, and clears the reference. No-op when the payload is inline.
 // A missing/unreadable object is returned as an error so the message is retried
@@ -129,7 +122,7 @@ func rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope
 	if store == nil {
 		return fmt.Errorf("envelope %s references offloaded payload %q but no offload store is configured", env.ID, env.PayloadRef)
 	}
-	rc, _, err := store.GetStream(ctx, env.PayloadRef)
+	rc, ct, err := store.GetStream(ctx, env.PayloadRef)
 	if err != nil {
 		return fmt.Errorf("rehydrate payload %q: %w", env.PayloadRef, err)
 	}
@@ -139,6 +132,11 @@ func rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope
 		return fmt.Errorf("rehydrate read %q: %w", env.PayloadRef, err)
 	}
 	env.Payload = body
+	// Fall back to the store's content type if the envelope didn't carry one, so
+	// connectors always see a content type when the object has one.
+	if env.ContentType == "" {
+		env.ContentType = ct
+	}
 	env.PayloadRef = ""
 	return nil
 }

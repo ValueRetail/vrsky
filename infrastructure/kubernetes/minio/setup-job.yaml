@@ -32,11 +32,11 @@ spec:
               mc mb --ignore-existing vrsky-minio/vrsky-objects
 
               echo "Setting lifecycle policies (expire temp/ and spill/ objects)..."
-              # spill/ holds large-payload claim-check offloads (#187). Workers
-              # delete these eagerly after each hop, so this rule is only a
-              # backstop for objects orphaned by a crash/retry; 1 day is the S3
-              # lifecycle minimum granularity and safely outlives the 15-min
-              # envelope TTL, so no in-flight message loses its payload.
+              # spill/ holds large-payload claim-check offloads (#187). This TTL
+              # is how spilled objects are reclaimed (each hop re-offloads under a
+              # fresh id, orphaning the inbound object); 1 day is the S3 lifecycle
+              # minimum granularity and safely outlives the 15-min envelope TTL, so
+              # no in-flight message loses its payload before it's consumed.
               cat > /tmp/lifecycle.json <<EOF
               {
                 "Rules": [
