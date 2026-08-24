@@ -166,10 +166,15 @@ func initDatabase(dbURL string, logger *log.Logger) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// Configure connection pool. The control plane (2 replicas) serves UI/API
+	// and orchestration, so it keeps a higher ceiling than the lean per-connection
+	// workers — but all values are env-tunable so the total footprint against the
+	// single shared Postgres can be sized per deployment. ConnMaxIdleTime reaps
+	// idle connections that would otherwise be pinned until ConnMaxLifetime.
+	db.SetMaxOpenConns(envIntDefault("DB_MAX_OPEN_CONNS", 25))
+	db.SetMaxIdleConns(envIntDefault("DB_MAX_IDLE_CONNS", 5))
+	db.SetConnMaxLifetime(time.Duration(envIntDefault("DB_CONN_MAX_LIFETIME_SECONDS", 300)) * time.Second)
+	db.SetConnMaxIdleTime(time.Duration(envIntDefault("DB_CONN_MAX_IDLE_SECONDS", 90)) * time.Second)
 
 	logger.Printf("Database connected successfully")
 	return db, nil
@@ -598,4 +603,14 @@ func shutdownDrainSeconds() time.Duration {
 		}
 	}
 	return 5 * time.Second
+}
+
+// envIntDefault reads an integer env var, falling back to def when unset or unparseable.
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }

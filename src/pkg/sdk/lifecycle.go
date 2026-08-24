@@ -477,9 +477,18 @@ func openDB(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// Pool sizing is lean by DEFAULT because of the pod-per-connection model:
+	// each connection runs its own worker pod, and every worker holds its own
+	// pool against the single shared Postgres. A worker's DB work is light and
+	// sequential (load config on start, throttled last_payload writes), so a
+	// small ceiling is plenty — and 6 open × N workers is what keeps the total
+	// under Postgres `max_connections` as connection count grows. ConnMaxIdleTime
+	// reaps connections that idle pollers would otherwise pin indefinitely.
+	// All tunable via env for per-deployment sizing (e.g. heavier control-plane).
+	db.SetMaxOpenConns(envInt("DB_MAX_OPEN_CONNS", 6))
+	db.SetMaxIdleConns(envInt("DB_MAX_IDLE_CONNS", 2))
+	db.SetConnMaxLifetime(time.Duration(envInt("DB_CONN_MAX_LIFETIME_SECONDS", 300)) * time.Second)
+	db.SetConnMaxIdleTime(time.Duration(envInt("DB_CONN_MAX_IDLE_SECONDS", 90)) * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
