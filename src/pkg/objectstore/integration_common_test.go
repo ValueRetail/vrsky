@@ -3,7 +3,9 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"testing"
 )
@@ -61,6 +63,31 @@ func assertRoundTrip(t *testing.T, ctx context.Context, store ObjectStore) {
 	}
 
 	_ = store.Delete(ctx, dst) // cleanup
+
+	// Streaming round-trip: PutStream -> GetStream. Exercises the provider's
+	// native multipart/chunked upload and streamed download (the multi-GB path),
+	// here with a small payload so the test stays fast.
+	skey := "in/stream-1.bin"
+	spayload := []byte("streamed-content-\x00\x01\x02-payload")
+	if err := store.PutStream(ctx, skey, bytes.NewReader(spayload), "application/octet-stream"); err != nil {
+		t.Fatalf("PutStream: %v", err)
+	}
+	rc, ct, err := store.GetStream(ctx, skey)
+	if err != nil {
+		t.Fatalf("GetStream: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatalf("GetStream read: %v", err)
+	}
+	if !bytes.Equal(got, spayload) {
+		t.Errorf("GetStream body = %q, want %q", got, spayload)
+	}
+	if ct != "application/octet-stream" {
+		t.Errorf("GetStream content-type = %q, want application/octet-stream", ct)
+	}
+	_ = store.Delete(ctx, skey) // cleanup
 }
 
 func envOr(k, def string) string {

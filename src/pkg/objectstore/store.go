@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -45,10 +46,23 @@ type SSEConfig struct {
 type ObjectStore interface {
 	// List returns every (non-directory) object under prefix.
 	List(ctx context.Context, prefix string) ([]Object, error)
-	// Get fetches an object's bytes and its content type (may be empty).
+	// Get fetches an object's bytes and its content type (may be empty). It
+	// buffers the whole object in memory, so it's for small payloads only; use
+	// GetStream for anything that may be large.
 	Get(ctx context.Context, key string) (body []byte, contentType string, err error)
-	// Put writes body under key with the given content type (empty = backend default).
+	// Put writes body under key with the given content type (empty = backend
+	// default). It holds the whole object in memory; use PutStream for large
+	// payloads.
 	Put(ctx context.Context, key string, body []byte, contentType string) error
+	// GetStream opens an object for streaming reads without buffering it in
+	// memory — the path for large (multi-GB) payloads. The caller MUST Close the
+	// returned reader. contentType may be empty.
+	GetStream(ctx context.Context, key string) (body io.ReadCloser, contentType string, err error)
+	// PutStream writes an object by streaming from body, without holding the
+	// whole object in memory. Backends use the provider's native multipart /
+	// chunked upload, so a multi-GB object transfers with a bounded buffer. The
+	// caller retains ownership of body (PutStream does not Close it).
+	PutStream(ctx context.Context, key string, body io.Reader, contentType string) error
 	// Delete removes an object.
 	Delete(ctx context.Context, key string) error
 	// Copy copies srcKey to dstKey within the same bucket (used to implement

@@ -76,6 +76,36 @@ func (g *gcsStore) Get(ctx context.Context, key string) ([]byte, string, error) 
 	return body, rc.Attrs.ContentType, nil
 }
 
+// GetStream returns the object body as a stream. The caller must Close it. The
+// GCS reader streams, so a multi-GB object is not buffered in memory.
+func (g *gcsStore) GetStream(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	rc, err := g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("gcs get %q: %w", key, err)
+	}
+	return rc, rc.Attrs.ContentType, nil
+}
+
+// PutStream uploads by copying body into the object Writer, which flushes in
+// chunks (default 16 MiB) rather than buffering the whole object in memory.
+func (g *gcsStore) PutStream(ctx context.Context, key string, body io.Reader, contentType string) error {
+	w := g.client.Bucket(g.bucket).Object(key).NewWriter(ctx)
+	if contentType != "" {
+		w.ContentType = contentType
+	}
+	if g.sse.KMSKeyID != "" {
+		w.KMSKeyName = g.sse.KMSKeyID
+	}
+	if _, err := io.Copy(w, body); err != nil {
+		_ = w.Close()
+		return fmt.Errorf("gcs put-stream %q: %w", key, err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("gcs put-stream %q close: %w", key, err)
+	}
+	return nil
+}
+
 func (g *gcsStore) Put(ctx context.Context, key string, body []byte, contentType string) error {
 	w := g.client.Bucket(g.bucket).Object(key).NewWriter(ctx)
 	if contentType != "" {
