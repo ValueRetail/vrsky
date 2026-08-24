@@ -36,4 +36,5 @@ Architecture and internals — [NATS architecture](NATS_ARCHITECTURE.md),
 [load benchmarks](LOAD.md), [OAuth framework](oauth-framework.md),
 [connector SDK](sdk/README.md), [scalability](scalability.md).
 
-Design decisions — [ADR 0001: streaming payload contract](adr/0001-streaming-payload-contract.md).
+Design decisions — [ADR 0001: streaming payload contract](adr/0001-streaming-payload-contract.md),
+[ADR 0002: large payloads through transforms](adr/0002-transform-large-payloads.md).
