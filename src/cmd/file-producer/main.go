@@ -804,3 +804,19 @@ func getHostOwner() (int, int) {
 	}
 	return -1, -1
 }
+
+// ServesConnection reports whether this connection has a file destination so
+// the SDK can ack foreign connections before rehydrating large payloads
+// (sdk.ConnectionScoped). Unlike the other producers, Deliver treats a config
+// lookup failure as RETRIABLE — so a failed lookup answers true here, letting
+// Deliver run and keep that retry semantic.
+func (p *fileProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	configs, err := p.getConnectionConfigs(ctx, connectionID)
+	if err != nil {
+		return true
+	}
+	return len(configs) > 0
+}
