@@ -154,6 +154,23 @@ platform deployments, 2 replicas). Per the standing rule: validate in the TEST
 
 ## Test plan
 
+> **Validated in the TEST compose env (2026-08-24)** with `cmd/spill-e2e`, which
+> streams a generated JSON array into the real MinIO spill bucket, publishes the
+> ref envelope on real NATS, and verifies content + DLQ. Result at **1 GiB**
+> (rules keep half, mapping rename, NDJSON out): envelope on the bus **537
+> bytes**; filter 8.5 s → 512 MiB spilled; converter 14 s total → 514 MiB NDJSON,
+> 507,246 lines — exact expected count, mapped field present, DLQ empty.
+> Container memory: filter peaked **246.8 MiB**, converter **290.5 MiB** —
+> identical to a 192 MiB run's peaks, i.e. flat with payload size (steady-state
+> heap + S3 multipart buffers, not proportional buffering).
+>
+> Seed row for the e2e connection (id `11111111-2222-3333-4444-555555555555`,
+> tenant `e2e-tenant`): nodes `consumer c1 → filter f1 (keep=="yes") →
+> converter cv1 (rename i→index, ndjson)`, edges `c1→f1→cv1`, status running.
+> Clean up afterwards: delete the row and
+> `mc rm -r --force local/vrsky-objects/spill/e2e-tenant` (the compose MinIO has
+> no lifecycle TTL, unlike prod).
+
 - Unit: rehydrate-on-entry (offloaded → transformed → republished), over-cap →
   NAK not ack, output offload (large flatten result), store-error → NAK.
 - Phase B: stream a synthetic multi-hundred-MB array through filter and
