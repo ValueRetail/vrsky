@@ -2282,6 +2282,23 @@ point, but DLQ volume becomes a signal worth watching after rollout.</p>
 platform deployments, 2 replicas). Per the standing rule: validate in the TEST
 (docker-compose) environment first, then roll prod images + manifests together.</p>
 <h2 id="test-plan">Test plan<a class="headerlink" href="#test-plan" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Validated in the TEST compose env (2026-08-24)</strong> with <code>cmd/spill-e2e</code>, which
+streams a generated JSON array into the real MinIO spill bucket, publishes the
+ref envelope on real NATS, and verifies content + DLQ. Result at <strong>1 GiB</strong>
+(rules keep half, mapping rename, NDJSON out): envelope on the bus <strong>537
+bytes</strong>; filter 8.5 s → 512 MiB spilled; converter 14 s total → 514 MiB NDJSON,
+507,246 lines — exact expected count, mapped field present, DLQ empty.
+Container memory: filter peaked <strong>246.8 MiB</strong>, converter <strong>290.5 MiB</strong> —
+identical to a 192 MiB run's peaks, i.e. flat with payload size (steady-state
+heap + S3 multipart buffers, not proportional buffering).</p>
+<p>Seed row for the e2e connection (id <code>11111111-2222-3333-4444-555555555555</code>,
+tenant <code>e2e-tenant</code>): nodes <code>consumer c1 → filter f1 (keep=="yes") →
+converter cv1 (rename i→index, ndjson)</code>, edges <code>c1→f1→cv1</code>, status running.
+Clean up afterwards: delete the row and
+<code>mc rm -r --force local/vrsky-objects/spill/e2e-tenant</code> (the compose MinIO has
+no lifecycle TTL, unlike prod).</p>
+</blockquote>
 <ul>
 <li>Unit: rehydrate-on-entry (offloaded → transformed → republished), over-cap →
   NAK not ack, output offload (large flatten result), store-error → NAK.</li>
