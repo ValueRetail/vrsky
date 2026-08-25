@@ -127,6 +127,17 @@ func (h *ProducerHarness) ExpectDLQ(t *testing.T, timeout time.Duration) *envelo
 	}
 }
 
+// ExpectNoDLQ asserts nothing is dead-lettered within the window — the
+// counterpart to ExpectDLQ for paths that must ack quietly.
+func (h *ProducerHarness) ExpectNoDLQ(t *testing.T, window time.Duration) {
+	t.Helper()
+	select {
+	case env := <-h.dlqCh:
+		t.Fatalf("harness: expected no DLQ message, got envelope %s", env.ID)
+	case <-time.After(window):
+	}
+}
+
 // Stop cancels the connector and tears down the embedded server.
 func (h *ProducerHarness) Stop() {
 	if h.cancel != nil {

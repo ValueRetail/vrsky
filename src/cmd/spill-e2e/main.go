@@ -4,13 +4,15 @@
 // and converter stream it through with correct content and an empty DLQ.
 //
 // Prereqs (see docs/adr/0002-transform-large-payloads.md, Test plan):
-//   docker compose up -d nats postgres-management minio-test data-filter data-converter
-//   docker compose up minio-init
-//   seed the e2e connection row (SQL in the ADR), then:
-//   go run ./cmd/spill-e2e -mb 1024
+//
+//	docker compose up -d nats postgres-management minio-test data-filter data-converter
+//	docker compose up minio-init
+//	seed the e2e connection row (SQL in the ADR), then:
+//	go run ./cmd/spill-e2e -mb 1024
 //
 // Watch transform memory while it runs:
-//   docker stats vrsky-data-filter vrsky-data-converter
+//
+//	docker stats vrsky-data-filter vrsky-data-converter
 package main
 
 import (
@@ -79,14 +81,25 @@ func (g *recordGen) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	sizeMB := flag.Int64("mb", 1024, "approximate payload size in MiB")
 	flag.Parse()
 	ctx := context.Background()
 
+	// Defaults match the TEST compose stack; override via env to target another
+	// stack (e.g. prod through port-forwards).
 	store, err := objectstore.New(ctx, &objectstore.Config{
 		Provider: "s3", Bucket: "vrsky-objects", Region: "us-east-1",
-		Endpoint: "http://127.0.0.1:9000", AccessKeyID: "minioadmin", SecretAccessKey: "minioadmin",
+		Endpoint:        envOr("SPILL_E2E_MINIO_ENDPOINT", "http://127.0.0.1:9000"),
+		AccessKeyID:     envOr("SPILL_E2E_MINIO_ACCESS_KEY", "minioadmin"),
+		SecretAccessKey: envOr("SPILL_E2E_MINIO_SECRET_KEY", "minioadmin"),
 	})
 	if err != nil {
 		log.Fatalf("minio: %v", err)
@@ -113,7 +126,7 @@ func main() {
 	fmt.Printf("UPLOADED  %.1f MiB, %d records, in %s\n", float64(gen.written)/(1<<20), totalRecords, time.Since(start).Round(time.Millisecond))
 
 	// Watch for the transform outputs before publishing.
-	nc, err := nats.Connect("nats://127.0.0.1:4222")
+	nc, err := nats.Connect(envOr("SPILL_E2E_NATS_URL", "nats://127.0.0.1:4222"))
 	if err != nil {
 		log.Fatalf("nats: %v", err)
 	}

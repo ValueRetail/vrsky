@@ -63,6 +63,27 @@ spec:
             secretKeyRef:
               name: postgres-credentials
               key: encryption_key
+        # Claim-check spill store (#187/#201): consumers offload >256KiB
+        # payloads; producers rehydrate/stream them. Prereq: minio-credentials
+        # secret copied into this namespace from vrsky-storage.
+        - name: PAYLOAD_STORE_PROVIDER
+          value: "s3"
+        - name: PAYLOAD_STORE_BUCKET
+          value: "vrsky-objects"
+        - name: PAYLOAD_STORE_ENDPOINT
+          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
+        - name: PAYLOAD_STORE_REGION
+          value: "us-east-1"
+        - name: PAYLOAD_STORE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: accesskey
+        - name: PAYLOAD_STORE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secretkey
 EOF
   if [ -n "$port" ]; then
     cat <<EOF
