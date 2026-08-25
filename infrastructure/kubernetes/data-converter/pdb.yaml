@@ -1,0 +1,12 @@
+# Keep one data-converter replica up through node drains/upgrades (HA pairing for
+# the 2-replica deployment).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vrsky-data-converter
+  namespace: vrsky-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vrsky-data-converter

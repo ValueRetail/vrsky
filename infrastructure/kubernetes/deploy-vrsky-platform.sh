@@ -183,24 +183,32 @@ deploy_minio() {
 }
 
 deploy_filter() {
-	print_header "Deploying VRSky Filter Component (Phase 1E)"
+	print_header "Deploying VRSky Transforms (data-filter + data-converter)"
 
-	cd "$SCRIPT_DIR/filter"
-
+	# The shared pipeline transforms (#201): JetStream durables on
+	# vrsky.data.*.pipeline.*, claim-check + record streaming (ADR 0002).
+	cd "$SCRIPT_DIR/data-filter"
 	kubectl apply -f deployment.yaml
-	kubectl apply -f service.yaml
+	kubectl apply -f pdb.yaml
+	cd "$SCRIPT_DIR/data-converter"
+	kubectl apply -f deployment.yaml
+	kubectl apply -f pdb.yaml
 
-	print_success "Filter manifests applied"
+	print_success "Transform manifests applied"
 
-	echo "Waiting for Filter pods to be ready (3 replicas)..."
-	kubectl wait --for=condition=ready pod -l app=vrsky-filter -n vrsky-platform --timeout=300s || {
-		print_error "Filter pods did not become ready in time"
-		kubectl get pods -n vrsky-platform -l app=vrsky-filter
+	echo "Waiting for transform pods to be ready..."
+	kubectl wait --for=condition=ready pod -l app=vrsky-data-filter -n vrsky-platform --timeout=300s || {
+		print_error "data-filter pods did not become ready in time"
+		kubectl get pods -n vrsky-platform -l app=vrsky-data-filter
+		exit 1
+	}
+	kubectl wait --for=condition=ready pod -l app=vrsky-data-converter -n vrsky-platform --timeout=300s || {
+		print_error "data-converter pods did not become ready in time"
+		kubectl get pods -n vrsky-platform -l app=vrsky-data-converter
 		exit 1
 	}
 
-	print_success "Filter is ready (all 3 replicas)"
-	print_success "Filter deployment complete"
+	print_success "Transforms are ready"
 }
 
 deploy_management_api() {
@@ -376,7 +384,7 @@ print_summary() {
 	echo "     Open: http://localhost:9001"
 	echo ""
 	echo "7. Monitor filter logs:"
-	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-filter"
+	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-data-filter"
 	echo ""
 	echo "8. Monitor Management API logs:"
 	echo "     kubectl logs -f -n vrsky-platform -l app=vrsky-management-api"

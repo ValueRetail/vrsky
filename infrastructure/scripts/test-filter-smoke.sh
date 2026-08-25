@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 NAMESPACE="vrsky-platform"
-FILTER_SELECTOR="app=vrsky-filter"
+FILTER_SELECTOR="app=vrsky-data-filter"
 EXPECTED_REPLICAS=3
 TIMEOUT=300
 
@@ -176,11 +176,11 @@ print_summary() {
     
     echo ""
     echo "Filter Deployment Status:"
-    kubectl get deployment -n $NAMESPACE vrsky-filter -o wide
+    kubectl get deployment -n $NAMESPACE vrsky-data-filter -o wide
     
     echo ""
     echo "Filter Service Status:"
-    kubectl get svc -n $NAMESPACE vrsky-filter
+    kubectl get svc -n $NAMESPACE vrsky-data-filter
     
     echo ""
     echo "Filter Pod Status:"
@@ -213,7 +213,7 @@ main() {
     # Wait for deployment to be ready
     echo "Waiting for filter deployment to be ready (timeout: ${TIMEOUT}s)..."
     if kubectl wait --for=condition=available --timeout=${TIMEOUT}s \
-        deployment/vrsky-filter -n $NAMESPACE 2>/dev/null; then
+        deployment/vrsky-data-filter -n $NAMESPACE 2>/dev/null; then
         print_success "Deployment is ready"
     else
         print_warning "Deployment wait timed out or not yet available - continuing tests"
@@ -242,7 +242,7 @@ main() {
         echo ""
         echo "Next Steps:"
         echo "  1. Monitor logs: kubectl logs -f -n $NAMESPACE -l $FILTER_SELECTOR"
-        echo "  2. Port-forward: kubectl port-forward -n $NAMESPACE svc/vrsky-filter 9090:9090"
+        echo "  2. Port-forward: kubectl port-forward -n $NAMESPACE svc/vrsky-data-filter 9090:9090"
         echo "  3. Check metrics: kubectl top pods -n $NAMESPACE -l $FILTER_SELECTOR"
         echo ""
         exit 0

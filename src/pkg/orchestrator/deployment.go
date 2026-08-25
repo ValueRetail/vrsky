@@ -341,6 +341,19 @@ func CreateAllDeploymentSpecs(graph *ExecutionGraph, config *OrchestratorConfig)
 			return nil, err
 		}
 
+		// Filter and converter nodes are served by the SHARED data-filter /
+		// data-converter platform services (JetStream durables on
+		// vrsky.data.*.pipeline.*, routing by node config + predecessor
+		// metadata), not by per-connection workers (#201). The per-connection
+		// transform workers this used to spawn were provable no-ops: the
+		// orchestrator wired them to {tenant}.pipeline-{conn}.{node}.output
+		// topics that nothing publishes to — SDK connectors publish and
+		// subscribe on the vrsky.data.* subjects and ignore INPUT/OUTPUT
+		// _NATS_SUBJECT entirely.
+		if node.Type == "filter" || node.Type == "converter" {
+			continue
+		}
+
 		spec, err := CreateDeploymentSpec(node, graph, config)
 		if err != nil {
 			return nil, err
