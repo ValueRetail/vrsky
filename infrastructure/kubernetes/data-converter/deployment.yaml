@@ -1,0 +1,99 @@
+# data-converter — the SHARED pipeline converter service (#201, ADR 0002).
+# Same binary dev/TEST runs: JetStream durable "data-converter" on
+# vrsky.data.*.pipeline.*, per-connection converter-node configs read from the
+# management DB, claim-check rehydrate/offload + record streaming for large
+# payloads. Replaces the legacy per-connection cmd/converter workers and the old
+# standing `converter` path (which listened on topics nothing publishes to).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-data-converter
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-data-converter
+    component: transform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vrsky-data-converter
+  template:
+    metadata:
+      labels:
+        app: vrsky-data-converter
+        component: transform
+    spec:
+      containers:
+      - name: data-converter
+        # Registry is rewritten to the target (e.g. ACR) by deploy-azure.sh.
+        image: ghcr.io/valueretail/vrsky/data-converter:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONVERTER_PORT
+          value: "9600"
+        - name: NATS_SUBSCRIPTION_TOPIC
+          value: "vrsky.data.*.pipeline.*"
+        # Claim-check spill store (ADR 0002): rehydrate offloaded inputs,
+        # stream over-cap payloads, offload large outputs. Prereq: the
+        # minio-credentials secret copied into vrsky-platform (it lives in
+        # vrsky-storage):
+        #   kubectl get secret minio-credentials -n vrsky-storage -o yaml \
+        #     | sed 's/namespace: vrsky-storage/namespace: vrsky-platform/' \
+        #     | kubectl apply -n vrsky-platform -f -
+        - name: PAYLOAD_STORE_PROVIDER
+          value: "s3"
+        - name: PAYLOAD_STORE_BUCKET
+          value: "vrsky-objects"
+        - name: PAYLOAD_STORE_ENDPOINT
+          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
+        - name: PAYLOAD_STORE_REGION
+          value: "us-east-1"
+        - name: PAYLOAD_STORE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: accesskey
+        - name: PAYLOAD_STORE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secretkey
+        ports:
+        - name: http
+          containerPort: 9600
+          protocol: TCP
+        # The aux HTTP server (events/preview) doubles as a liveness signal.
+        livenessProbe:
+          tcpSocket:
+            port: 9600
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 9600
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL

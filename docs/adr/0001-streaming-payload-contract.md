@@ -153,6 +153,14 @@ API connectors don't change.
 
 ### Phase 2 — record-streaming transforms
 
+> **Superseded by [ADR 0002](0002-transform-large-payloads.md).** This section
+> assumed the transforms run on the SDK runner, where `subscribeDispatch`
+> rehydrates under the cap. They do not — `sdk.RunFilter`/`RunConverter` have no
+> callers; the deployed transforms are the standalone `cmd/data-filter` and
+> `cmd/data-converter` services, which never rehydrate and ack unconditionally,
+> so an offloaded envelope is silently dropped, not DLQ'd. ADR 0002 records the
+> corrected design; the sketch below is kept for history.
+
 Filters/converters get a predictable policy for offloaded payloads **now**, and
 a streaming capability **later**:
 

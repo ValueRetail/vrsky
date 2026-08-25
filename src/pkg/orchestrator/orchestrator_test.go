@@ -653,12 +653,12 @@ func TestCreateAllDeploymentSpecs(t *testing.T) {
 	specs, err := CreateAllDeploymentSpecs(graph, config)
 
 	require.NoError(t, err)
-	assert.Len(t, specs, 3)
-
-	// Verify order matches execution order
+	// Filter/converter nodes get NO per-connection worker: they are served by
+	// the shared data-filter/data-converter platform services (#201). Only the
+	// edge nodes are deployed, in execution order.
+	assert.Len(t, specs, 2)
 	assert.Equal(t, "consumer-0", specs[0].NodeID)
-	assert.Equal(t, "filter-1", specs[1].NodeID)
-	assert.Equal(t, "producer-0", specs[2].NodeID)
+	assert.Equal(t, "producer-0", specs[1].NodeID)
 }
 
 func TestGetDeploymentLabelsForConnection(t *testing.T) {

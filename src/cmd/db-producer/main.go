@@ -652,3 +652,18 @@ func testConnectionHandler() http.HandlerFunc {
 // --- Helpers ---
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+
+// ServesConnection reports whether this connection has a matching destination —
+// mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
+// ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
+func (p *dbProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	targets, err := p.getTargetConnections(ctx, connectionID, tenantID)
+	if err != nil {
+		return false // Deliver treats lookup errors as "not ours" too
+	}
+	return len(targets) > 0
+}

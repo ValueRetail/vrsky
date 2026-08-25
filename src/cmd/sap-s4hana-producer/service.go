@@ -335,3 +335,15 @@ func (p *sapProducer) getConfig(ctx context.Context, connectionID, tenantID stri
 	}
 	return nil, errors.New("no sap_s4hana producer node found")
 }
+
+
+// ServesConnection reports whether this connection has a SAP destination —
+// mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
+// ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
+func (p *sapProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	_, err := p.getConfig(ctx, connectionID, tenantID)
+	return err == nil
+}

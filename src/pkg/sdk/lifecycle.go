@@ -90,9 +90,15 @@ func RunProducer(ctx context.Context, name string, p Producer, opts ...RunOption
 				streamDeliver = sp.DeliverStream
 				res.Logger.Info("streaming delivery enabled")
 			}
+			// A ConnectionScoped producer lets the dispatch ack foreign
+			// connections before the payload is rehydrated or delivered.
+			var serves servesFunc
+			if cs, ok := p.(ConnectionScoped); ok {
+				serves = cs.ServesConnection
+			}
 			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				return p.Deliver(c, env)
-			}, streamDeliver)
+			}, streamDeliver, serves)
 		}, opts...)
 }
 
@@ -192,9 +198,9 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 					return nil // dropped — ack
 				}
 				return republish(c, pub, res, out)
-				// nil: record-streaming transforms are ADR 0001 phase 2; until
-				// then an over-cap payload at a filter is a clear DLQ error.
-			}, nil)
+				// nils: no streaming transform path here (ADR 0001 phase 2),
+				// and filters aren't connection-scoped.
+			}, nil, nil)
 		}, opts...)
 }
 
@@ -213,8 +219,8 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 					return nil
 				}
 				return republish(c, pub, res, out)
-				// nil: see RunFilter — phase 2 covers streaming transforms.
-			}, nil)
+				// nils: see RunFilter.
+			}, nil, nil)
 		}, opts...)
 }
 
@@ -433,7 +439,11 @@ func ackWaitFromEnv(logger *slog.Logger) time.Duration {
 // payload was offloaded — the object is handed over as a stream and never
 // buffered (so the rehydrate cap does not apply). nil for connectors and node
 // kinds that don't stream.
-func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error, streamDeliver streamDeliverFunc) (func(), error) {
+// servesFunc reports whether this worker serves a (tenant, connection); nil
+// means "serves everything" (transforms, single-purpose workers).
+type servesFunc func(ctx context.Context, tenantID, connectionID string) bool
+
+func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error, streamDeliver streamDeliverFunc, serves servesFunc) (func(), error) {
 	logger := res.Logger
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
@@ -470,6 +480,14 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 			),
 		)
 		defer span.End()
+
+		// Foreign connection: ack before touching the payload. Without this,
+		// every producer's shared durable rehydrated (and, past the cap,
+		// NAK'd) large payloads destined for other connectors entirely.
+		if serves != nil && !serves(ctx, env.TenantID, env.IntegrationID) {
+			span.SetAttributes(attribute.Bool("vrsky.foreign_connection", true))
+			return nil
+		}
 
 		streamed, derr := dispatchEnvelope(ctx, res, env, deliver, streamDeliver)
 		if streamed {

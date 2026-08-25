@@ -252,16 +252,17 @@ func TestFileProducer_PermissionRespect(t *testing.T) {
 	env.Payload = []byte("test")
 	env.ContentType = "text/plain"
 
-	err = producer.Write(ctx, env)
-	if err != nil {
-		t.Errorf("Write() error = %v", err)
+	// Fatal, not Error: everything below dereferences the result of a successful
+	// write, so continuing after a failure panics and buries the real error.
+	if err = producer.Write(ctx, env); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
 
 	// Verify permissions
 	filePath := filepath.Join(tmpDir, "test-perms.txt")
 	info, err := os.Stat(filePath)
 	if err != nil {
-		t.Errorf("Failed to stat file: %v", err)
+		t.Fatalf("Failed to stat file: %v", err)
 	}
 
 	// Check that permissions match (mask with 0777 to ignore platform-specific bits)
