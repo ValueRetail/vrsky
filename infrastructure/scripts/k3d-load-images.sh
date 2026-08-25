@@ -24,7 +24,8 @@ cd "$ROOT"
 # image-ref  cmd-dir  — refs match exactly what the k8s manifests pull.
 CORE=(
   "ghcr.io/valueretail/vrsky/management-api:latest  management-api"
-  "localhost:5000/vrsky/filter:latest               filter"
+  "localhost:5000/vrsky/data-filter:latest          data-filter"
+  "localhost:5000/vrsky/data-converter:latest       data-converter"
 )
 # The orchestrator deploys per-connection workers as {registry}/vrsky-{type}:tag
 # (DefaultConfig registry gcr.io/vrsky). Override the registry via the
