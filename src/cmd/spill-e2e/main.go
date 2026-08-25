@@ -137,7 +137,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	pub := messaging.NewPublisher(js)
 	body, _ := json.Marshal(env)
