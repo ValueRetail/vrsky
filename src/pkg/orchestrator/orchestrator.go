@@ -11,14 +11,23 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// Orchestrator manages the deployment and lifecycle of pipeline components
-// to a Kubernetes cluster. It transforms the graph-based connection model
-// (nodes and edges) into K8s Deployments and coordinates component startup/shutdown.
+// Orchestrator turns a connection's node/edge graph into a validated execution
+// order, and owns what little Kubernetes state a connection still has.
+//
+// It no longer deploys anything. Every node kind is served by a standing
+// platform service — the shared data-filter/data-converter for transforms
+// (#201) and the SDK connector services for sources and destinations (#205) —
+// which the management API activates by publishing
+// vrsky.commands.{tenant}.connection.start. See ADR 0004.
+//
+// What remains here is validation (a connection that cannot be ordered must not
+// start) and cleanup of the per-connection worker Deployments that older
+// versions created.
 type Orchestrator struct {
 	// Connection being orchestrated
 	Connection *managementapi.Connection
 
-	// K8sClient is the Kubernetes client for deploying resources
+	// K8sClient is the Kubernetes client for managing resources
 	K8sClient kubernetes.Interface
 
 	// Config contains orchestrator configuration
@@ -35,8 +44,8 @@ type Orchestrator struct {
 //
 // Args:
 //   - conn: The connection to orchestrate
-//   - k8sClient: Kubernetes client for deploying resources
-//   - config: Orchestrator configuration (namespace, images, etc.)
+//   - k8sClient: Kubernetes client for managing resources
+//   - config: Orchestrator configuration (namespace, NATS, …)
 //   - validator: Validator for graph structure validation
 //
 // Returns:
@@ -70,17 +79,18 @@ func (o *Orchestrator) BuildGraph(ctx context.Context) (*ExecutionGraph, error) 
 	return graph, nil
 }
 
-// StartConnection deploys all pipeline components to Kubernetes.
-// It creates K8s Deployments for each node in the execution order.
+// StartConnection prepares a connection to run.
 //
-// IMPORTANT: Call BuildGraph() before calling this method.
+// IMPORTANT: Call BuildGraph() before calling this method — the graph build is
+// where an unorderable or malformed pipeline is rejected, and reaching this
+// method means the connection is about to be marked running.
 //
-// Deployment follows the execution order (consumer first, producer last).
-// If any deployment fails, the method returns an error but leaves
-// previously deployed components running (partial deployment - decision B).
-//
-// Returns:
-//   - error: If deployment fails for any component
+// Nothing is deployed: the standing services pick the connection up from the
+// start command the management API publishes next. The one Kubernetes action
+// left is sweeping away per-connection worker Deployments from before #201/#205,
+// so a connection created back then sheds its leftover no-op pods the next time
+// it starts. That sweep is best-effort — a stale worker is inert, so failing a
+// start over one would be strictly worse than leaving it running.
 func (o *Orchestrator) StartConnection(ctx context.Context) error {
 	if o.K8sClient == nil {
 		return NewOrchestratorError(ErrCodeK8sClientNil, "Kubernetes client is nil", nil)
@@ -90,141 +100,22 @@ func (o *Orchestrator) StartConnection(ctx context.Context) error {
 		return NewOrchestratorError(ErrCodeInvalidGraph, "execution graph not built - call BuildGraph first", nil)
 	}
 
-	// Create deployment specs for all nodes
-	specs, err := CreateAllDeploymentSpecs(o.Graph, o.Config)
-	if err != nil {
-		return err
+	slog.Default().Info("orchestrator starting connection",
+		"connection", o.Graph.ConnectionID, "nodes", len(o.Graph.ExecutionOrder))
+
+	if errs := o.deleteConnectionWorkers(ctx); len(errs) > 0 {
+		slog.Default().Warn("orchestrator could not sweep legacy per-connection workers",
+			"connection", o.Connection.ID, "errors", errs)
 	}
-
-	slog.Default().Info("orchestrator deploying connection components",
-		"connection", o.Graph.ConnectionID, "components", len(specs), "namespace", o.Config.Namespace)
-
-	// Track successfully deployed nodes for error reporting
-	var deployedNodes []string
-
-	// Deploy each component in execution order
-	for _, spec := range specs {
-		err := o.deployComponent(ctx, spec)
-		if err != nil {
-			// Partial deployment - leave deployed components and return error
-			return NewOrchestratorError(ErrCodePartialDeployment,
-				fmt.Sprintf("failed to deploy node %s: %v", spec.NodeID, err),
-				map[string]string{
-					"failedNode":    spec.NodeID,
-					"deployedNodes": fmt.Sprintf("%v", deployedNodes),
-				})
-		}
-		deployedNodes = append(deployedNodes, spec.NodeID)
-	}
-
-	// Remove any per-connection worker this start no longer wants. Today that
-	// means every one of them (#201/#205 moved all node kinds onto standing
-	// services), so restarting a connection created before those changes sweeps
-	// away its leftover no-op pods without an operator having to. Best-effort:
-	// a stale worker is inert, so a failed prune must not fail the start.
-	o.pruneUnwantedWorkers(ctx, specs)
 
 	return nil
 }
 
-// pruneUnwantedWorkers deletes per-connection Deployments (and their HPAs) that
-// belong to this connection but are not in wanted. Errors are logged, never
-// returned: the resources it removes are no-ops, so failing a connection start
-// over them would be strictly worse than leaving them running.
-func (o *Orchestrator) pruneUnwantedWorkers(ctx context.Context, wanted []*DeploymentSpec) {
-	keep := make(map[string]struct{}, len(wanted))
-	for _, spec := range wanted {
-		keep[spec.Deployment.Name] = struct{}{}
-	}
-
-	logger := slog.Default()
-	selector := BuildLabelSelector(GetDeploymentLabelsForConnection(o.Connection.ID))
-	listOpts := metav1.ListOptions{LabelSelector: selector}
-
-	deployClient := o.K8sClient.AppsV1().Deployments(o.Config.Namespace)
-	existing, err := deployClient.List(ctx, listOpts)
-	if err != nil {
-		logger.Warn("orchestrator could not list per-connection workers to prune",
-			"connection", o.Connection.ID, "error", err)
-		return
-	}
-	for i := range existing.Items {
-		name := existing.Items[i].Name
-		if _, ok := keep[name]; ok {
-			continue
-		}
-		if err := deployClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-			logger.Warn("orchestrator could not prune stale worker deployment",
-				"deployment", name, "error", err)
-			continue
-		}
-		logger.Info("orchestrator pruned stale per-connection worker",
-			"deployment", name, "connection", o.Connection.ID)
-	}
-
-	// HPAs share the deployment name and the connection labels.
-	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
-	hpas, err := hpaClient.List(ctx, listOpts)
-	if err != nil {
-		return
-	}
-	for i := range hpas.Items {
-		name := hpas.Items[i].Name
-		if _, ok := keep[name]; ok {
-			continue
-		}
-		if err := hpaClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-			logger.Warn("orchestrator could not prune stale worker HPA", "hpa", name, "error", err)
-		}
-	}
-}
-
-// deployComponent deploys a single component to Kubernetes.
-func (o *Orchestrator) deployComponent(ctx context.Context, spec *DeploymentSpec) error {
-	deploymentsClient := o.K8sClient.AppsV1().Deployments(o.Config.Namespace)
-
-	// Check if deployment already exists
-	existing, err := deploymentsClient.Get(ctx, spec.Deployment.Name, metav1.GetOptions{})
-	if err == nil && existing != nil {
-		// Deployment exists - update it
-		_, err = deploymentsClient.Update(ctx, spec.Deployment, metav1.UpdateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to update deployment %s: %w", spec.Deployment.Name, err)
-		}
-		return o.applyHPA(ctx, spec)
-	}
-
-	// Create new deployment
-	_, err = deploymentsClient.Create(ctx, spec.Deployment, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create deployment %s: %w", spec.Deployment.Name, err)
-	}
-
-	return o.applyHPA(ctx, spec)
-}
-
-// applyHPA creates or updates the HorizontalPodAutoscaler for a deployment so
-// the connection's worker scales between min/max replicas under load (#135).
-func (o *Orchestrator) applyHPA(ctx context.Context, spec *DeploymentSpec) error {
-	if spec.HPA == nil {
-		return nil
-	}
-	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
-	if existing, err := hpaClient.Get(ctx, spec.HPA.Name, metav1.GetOptions{}); err == nil && existing != nil {
-		spec.HPA.ResourceVersion = existing.ResourceVersion
-		if _, err = hpaClient.Update(ctx, spec.HPA, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("failed to update HPA %s: %w", spec.HPA.Name, err)
-		}
-		return nil
-	}
-	if _, err := hpaClient.Create(ctx, spec.HPA, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to create HPA %s: %w", spec.HPA.Name, err)
-	}
-	return nil
-}
-
-// StopConnection removes all pipeline components from Kubernetes.
-// It deletes all K8s Deployments associated with the connection.
+// StopConnection removes any Kubernetes resources still associated with the
+// connection. Since #201/#205 that is only the per-connection workers older
+// versions deployed; a connection created after them owns no cluster state, and
+// stopping it is the DB status change plus the stop command the management API
+// publishes.
 //
 // Returns:
 //   - error: If cleanup fails
@@ -233,122 +124,51 @@ func (o *Orchestrator) StopConnection(ctx context.Context) error {
 		return NewOrchestratorError(ErrCodeK8sClientNil, "Kubernetes client is nil", nil)
 	}
 
-	deploymentsClient := o.K8sClient.AppsV1().Deployments(o.Config.Namespace)
-
-	// Build label selector to find all deployments for this connection
-	labels := GetDeploymentLabelsForConnection(o.Connection.ID)
-	labelSelector := BuildLabelSelector(labels)
-
-	// List all deployments for this connection
-	deployments, err := deploymentsClient.List(ctx, metav1.ListOptions{
-		LabelSelector: labelSelector,
-	})
-	if err != nil {
+	if errs := o.deleteConnectionWorkers(ctx); len(errs) > 0 {
 		return NewOrchestratorError(ErrCodeK8sDeleteFailed,
-			fmt.Sprintf("failed to list deployments: %v", err),
-			map[string]string{"connectionID": o.Connection.ID})
-	}
-
-	// Delete each deployment
-	var deleteErrors []string
-	for _, deployment := range deployments.Items {
-		err := deploymentsClient.Delete(ctx, deployment.Name, metav1.DeleteOptions{})
-		if err != nil {
-			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", deployment.Name, err))
-		}
-	}
-
-	// Delete the connection's HPAs too (#135) — they share the connection
-	// label selector. Best-effort: an HPA delete failure shouldn't mask the
-	// deployment teardown result.
-	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
-	if hpas, listErr := hpaClient.List(ctx, metav1.ListOptions{LabelSelector: labelSelector}); listErr == nil {
-		for _, hpa := range hpas.Items {
-			if err := hpaClient.Delete(ctx, hpa.Name, metav1.DeleteOptions{}); err != nil {
-				deleteErrors = append(deleteErrors, fmt.Sprintf("hpa/%s: %v", hpa.Name, err))
-			}
-		}
-	}
-
-	if len(deleteErrors) > 0 {
-		return NewOrchestratorError(ErrCodeK8sDeleteFailed,
-			fmt.Sprintf("failed to delete some resources: %v", deleteErrors),
+			fmt.Sprintf("failed to delete some resources: %v", errs),
 			map[string]string{"connectionID": o.Connection.ID})
 	}
 
 	return nil
 }
 
-// GetNATSTopicForNode returns the output NATS topic for a node.
-// Returns empty string for the producer (it has no output topic).
-func (o *Orchestrator) GetNATSTopicForNode(nodeID string) (string, error) {
-	if o.Graph == nil {
-		return "", NewOrchestratorError(ErrCodeInvalidGraph, "execution graph not built", nil)
-	}
+// deleteConnectionWorkers removes every Deployment and HorizontalPodAutoscaler
+// labelled for this connection, returning a message per failure. Both the start
+// sweep and the stop teardown want exactly this; they differ only in whether a
+// failure is fatal.
+func (o *Orchestrator) deleteConnectionWorkers(ctx context.Context) []string {
+	labelSelector := BuildLabelSelector(GetDeploymentLabelsForConnection(o.Connection.ID))
+	listOpts := metav1.ListOptions{LabelSelector: labelSelector}
 
-	// Verify node exists
-	if _, err := o.Graph.GetNodeByID(nodeID); err != nil {
-		return "", err
-	}
-
-	return GetOutputTopicForNode(o.Graph, nodeID), nil
-}
-
-// GetDeploymentStatus returns the status of deployments for this connection.
-// This is useful for monitoring pipeline health.
-func (o *Orchestrator) GetDeploymentStatus(ctx context.Context) (map[string]string, error) {
-	if o.K8sClient == nil {
-		return nil, NewOrchestratorError(ErrCodeK8sClientNil, "Kubernetes client is nil", nil)
-	}
+	var errs []string
 
 	deploymentsClient := o.K8sClient.AppsV1().Deployments(o.Config.Namespace)
-
-	// Build label selector to find all deployments for this connection
-	labels := GetDeploymentLabelsForConnection(o.Connection.ID)
-	labelSelector := BuildLabelSelector(labels)
-
-	// List all deployments for this connection
-	deployments, err := deploymentsClient.List(ctx, metav1.ListOptions{
-		LabelSelector: labelSelector,
-	})
+	deployments, err := deploymentsClient.List(ctx, listOpts)
 	if err != nil {
-		return nil, NewOrchestratorError(ErrCodeK8sDeployFailed,
-			fmt.Sprintf("failed to list deployments: %v", err),
-			map[string]string{"connectionID": o.Connection.ID})
+		return []string{fmt.Sprintf("list deployments: %v", err)}
+	}
+	for i := range deployments.Items {
+		name := deployments.Items[i].Name
+		if err := deploymentsClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
+		slog.Default().Info("orchestrator removed per-connection worker",
+			"deployment", name, "connection", o.Connection.ID)
 	}
 
-	// Build status map
-	status := make(map[string]string)
-	for _, deployment := range deployments.Items {
-		nodeID := deployment.Labels[LabelNode]
-		if deployment.Status.ReadyReplicas > 0 {
-			status[nodeID] = "running"
-		} else if deployment.Status.Replicas > 0 {
-			status[nodeID] = "starting"
-		} else {
-			status[nodeID] = "stopped"
+	// HPAs share the connection's label selector. Best-effort: an HPA failure
+	// shouldn't mask the deployment teardown result.
+	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
+	if hpas, listErr := hpaClient.List(ctx, listOpts); listErr == nil {
+		for i := range hpas.Items {
+			name := hpas.Items[i].Name
+			if err := hpaClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+				errs = append(errs, fmt.Sprintf("hpa/%s: %v", name, err))
+			}
 		}
 	}
 
-	return status, nil
-}
-
-// GetGraph returns the execution graph.
-// Returns nil if BuildGraph has not been called.
-func (o *Orchestrator) GetGraph() *ExecutionGraph {
-	return o.Graph
-}
-
-// GetConfig returns the orchestrator configuration.
-func (o *Orchestrator) GetConfig() *OrchestratorConfig {
-	return o.Config
-}
-
-// ValidateConnection validates the connection's DAG structure.
-// This is a convenience method that wraps the validator.
-func (o *Orchestrator) ValidateConnection() error {
-	if o.Validator == nil {
-		return nil // No validator configured
-	}
-	return o.Validator.ValidateDAG(o.Connection)
+	return errs
 }

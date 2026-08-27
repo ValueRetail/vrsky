@@ -93,8 +93,7 @@ SKIP_MONITORING=true SKIP_INGRESS=true bash "$WORK/deploy-vrsky-platform.sh" <<<
 # NOTE: there is no step to point the orchestrator at per-connection worker
 # images. It stopped spawning them in #201 (transforms) and #205 (edges) — every
 # node kind is served by a standing connector service instead, deployed by
-# deploy-connectors-azure.sh. WORKER_IMAGE_REGISTRY/VERSION are still read by
-# management-api but reach no live code path.
+# deploy-connectors-azure.sh (ADR 0004).
 
 # --- 4b. HA: PodDisruptionBudget so a node drain keeps a filter replica up ----
 kubectl apply -f infrastructure/kubernetes/data-filter/pdb.yaml

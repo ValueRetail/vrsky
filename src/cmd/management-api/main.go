@@ -337,8 +337,8 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 			}
 			restHandler.SetOrchestratorFactory(orchestrator.NewOrchestratorFactory(
 				k8sClient, orchConfig, validator, orchestrator.WithNATSURLResolver(natsResolver)))
-			logger.Printf("per-connection K8s orchestrator enabled (namespace=%s registry=%s version=%s nats=%s)",
-				orchConfig.Namespace, orchConfig.ImageRegistry, orchConfig.ImageVersion, orchConfig.NATSURLs)
+			logger.Printf("K8s orchestrator enabled (namespace=%s) — validates connection graphs and cleans up legacy per-connection workers; node kinds are served by standing services (ADR 0004)",
+				orchConfig.Namespace)
 			// Safety net: periodically delete worker Deployments/HPAs whose
 			// connection no longer exists (teardown failed or predates #176).
 			go runOrphanedWorkerGC(context.Background(), k8sClient, orchConfig.Namespace, repo, logger)
@@ -564,14 +564,16 @@ func runOrphanedWorkerGC(ctx context.Context, k8sClient kubernetes.Interface, na
 	}
 }
 
-// orchestratorConfigFromEnv builds the per-connection orchestrator config (#157)
-// from the environment, falling back to DefaultConfig values. Worker pods
-// connect to the same NATS the management-api uses (the in-cluster platform
-// NATS) unless WORKER_NATS_URL overrides it.
+// orchestratorConfigFromEnv builds the orchestrator config (#157) from the
+// environment, falling back to DefaultConfig values.
+//
+// The image and payload-store settings this used to read
+// (WORKER_IMAGE_REGISTRY/VERSION, PAYLOAD_STORE_*) are gone: they only ever
+// reached per-connection worker pods, which are no longer deployed (ADR 0004).
+// The standing connector services carry their own PAYLOAD_STORE_* env, set by
+// infrastructure/azure/deploy-connectors-azure.sh.
 func orchestratorConfigFromEnv(config *Config) *orchestrator.OrchestratorConfig {
 	c := orchestrator.DefaultConfig()
-	// Default worker NATS to the management-api's own NATS URL (the platform
-	// service in-cluster); WORKER_NATS_URL can point workers elsewhere.
 	if config != nil && config.NATSUrl != "" {
 		c.NATSURLs = config.NATSUrl
 	}
@@ -581,25 +583,9 @@ func orchestratorConfigFromEnv(config *Config) *orchestrator.OrchestratorConfig 
 	if v := os.Getenv("ORCHESTRATOR_NAMESPACE"); v != "" {
 		c.Namespace = v
 	}
-	if v := os.Getenv("WORKER_IMAGE_REGISTRY"); v != "" {
-		c.ImageRegistry = v
-	}
-	if v := os.Getenv("WORKER_IMAGE_VERSION"); v != "" {
-		c.ImageVersion = v
-	}
 	if v := os.Getenv("NATS_ACCOUNT"); v != "" {
 		c.NATSAccount = v
 	}
-	// Large-payload offload store (#187). Passed through to per-connection
-	// workers; PAYLOAD_STORE_BUCKET being empty leaves the feature off (payloads
-	// stay inline). PAYLOAD_STORE_SECRET_NAME names a K8s secret in the worker
-	// namespace holding accesskey/secretkey.
-	c.PayloadStoreProvider = os.Getenv("PAYLOAD_STORE_PROVIDER")
-	c.PayloadStoreBucket = os.Getenv("PAYLOAD_STORE_BUCKET")
-	c.PayloadStoreEndpoint = os.Getenv("PAYLOAD_STORE_ENDPOINT")
-	c.PayloadStoreRegion = os.Getenv("PAYLOAD_STORE_REGION")
-	c.PayloadStoreSecretName = os.Getenv("PAYLOAD_STORE_SECRET_NAME")
-	c.PayloadInlineMaxBytes = os.Getenv("PAYLOAD_INLINE_MAX_BYTES")
 	return c
 }
 

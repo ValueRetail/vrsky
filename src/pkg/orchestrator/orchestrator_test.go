@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 )
 
 // =============================================================================
@@ -53,31 +52,6 @@ func createEdge(id, source, target string, order int) *managementapi.Edge {
 	}
 }
 
-// =============================================================================
-// Types Tests
-// =============================================================================
-
-func TestGetContainerImage(t *testing.T) {
-	config := DefaultConfig()
-
-	tests := []struct {
-		nodeType string
-		expected string
-	}{
-		{"consumer", "gcr.io/vrsky/vrsky-consumer:latest"},
-		{"filter", "gcr.io/vrsky/vrsky-filter:latest"},
-		{"converter", "gcr.io/vrsky/vrsky-converter:latest"},
-		{"producer", "gcr.io/vrsky/vrsky-producer:latest"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.nodeType, func(t *testing.T) {
-			result := GetContainerImage(config, tt.nodeType)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestIsValidNodeType(t *testing.T) {
 	tests := []struct {
 		nodeType string
@@ -104,8 +78,6 @@ func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
 	assert.Equal(t, "vrsky", config.Namespace)
-	assert.Equal(t, "gcr.io/vrsky", config.ImageRegistry)
-	assert.Equal(t, "latest", config.ImageVersion)
 	assert.Equal(t, "nats://nats:4222", config.NATSURLs)
 }
 
@@ -117,136 +89,6 @@ func TestOrchestratorError(t *testing.T) {
 	assert.Contains(t, err.Error(), "INVALID_GRAPH")
 	assert.Contains(t, err.Error(), "test error")
 	assert.Contains(t, err.Error(), "key")
-}
-
-// =============================================================================
-// NATS Topic Tests
-// =============================================================================
-
-func TestGetOutputTopic(t *testing.T) {
-	result := GetOutputTopic("tenant-acme", "conn-123", "consumer-0")
-	expected := "tenant-acme.pipeline-conn-123.consumer-0.output"
-	assert.Equal(t, expected, result)
-}
-
-func TestGetOutputTopic_SanitizesInput(t *testing.T) {
-	// Test that special characters are sanitized
-	result := GetOutputTopic("tenant.with.dots", "conn 123", "consumer*0")
-	assert.NotContains(t, result, ".with.")
-	assert.NotContains(t, result, " ")
-	assert.NotContains(t, result, "*")
-}
-
-func TestGetInputTopicForNode_Consumer(t *testing.T) {
-	graph := &ExecutionGraph{
-		ExecutionOrder: []string{"consumer-0", "filter-1", "producer-0"},
-		TenantID:       "tenant-acme",
-		ConnectionID:   "conn-123",
-		ConsumerNodeID: "consumer-0",
-		ProducerNodeID: "producer-0",
-	}
-
-	// Consumer has no input topic
-	result := GetInputTopicForNode(graph, "consumer-0")
-	assert.Empty(t, result)
-}
-
-func TestGetInputTopicForNode_Filter(t *testing.T) {
-	graph := &ExecutionGraph{
-		ExecutionOrder: []string{"consumer-0", "filter-1", "producer-0"},
-		TenantID:       "tenant-acme",
-		ConnectionID:   "conn-123",
-		ConsumerNodeID: "consumer-0",
-		ProducerNodeID: "producer-0",
-	}
-
-	// Filter reads from consumer's output
-	result := GetInputTopicForNode(graph, "filter-1")
-	expected := "tenant-acme.pipeline-conn-123.consumer-0.output"
-	assert.Equal(t, expected, result)
-}
-
-func TestGetInputTopicForNode_Producer(t *testing.T) {
-	graph := &ExecutionGraph{
-		ExecutionOrder: []string{"consumer-0", "filter-1", "producer-0"},
-		TenantID:       "tenant-acme",
-		ConnectionID:   "conn-123",
-		ConsumerNodeID: "consumer-0",
-		ProducerNodeID: "producer-0",
-	}
-
-	// Producer reads from filter's output
-	result := GetInputTopicForNode(graph, "producer-0")
-	expected := "tenant-acme.pipeline-conn-123.filter-1.output"
-	assert.Equal(t, expected, result)
-}
-
-func TestGetOutputTopicForNode_Producer(t *testing.T) {
-	graph := &ExecutionGraph{
-		ExecutionOrder: []string{"consumer-0", "producer-0"},
-		TenantID:       "tenant-acme",
-		ConnectionID:   "conn-123",
-		ConsumerNodeID: "consumer-0",
-		ProducerNodeID: "producer-0",
-	}
-
-	// Producer has no output topic (writes to external destination)
-	result := GetOutputTopicForNode(graph, "producer-0")
-	assert.Empty(t, result)
-}
-
-func TestComputeAllTopics(t *testing.T) {
-	graph := &ExecutionGraph{
-		ExecutionOrder: []string{"consumer-0", "filter-1", "producer-0"},
-		TenantID:       "tenant-acme",
-		ConnectionID:   "conn-123",
-		ConsumerNodeID: "consumer-0",
-		ProducerNodeID: "producer-0",
-	}
-
-	topics := ComputeAllTopics(graph)
-
-	// Consumer
-	assert.Empty(t, topics["consumer-0"].InputTopic)
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", topics["consumer-0"].OutputTopic)
-
-	// Filter
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", topics["filter-1"].InputTopic)
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.filter-1.output", topics["filter-1"].OutputTopic)
-
-	// Producer
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.filter-1.output", topics["producer-0"].InputTopic)
-	assert.Empty(t, topics["producer-0"].OutputTopic)
-}
-
-func TestValidateTopicName(t *testing.T) {
-	tests := []struct {
-		topic   string
-		wantErr bool
-	}{
-		{"", false}, // Empty is valid
-		{"tenant.pipeline.node.output", false},
-		{"a.b.c", false},
-		{"topic with space", true},
-		{"topic..empty", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.topic, func(t *testing.T) {
-			err := ValidateTopicName(tt.topic)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestBuildTopicPrefix(t *testing.T) {
-	result := BuildTopicPrefix("tenant-acme", "conn-123")
-	expected := "tenant-acme.pipeline-conn-123.>"
-	assert.Equal(t, expected, result)
 }
 
 // =============================================================================
@@ -332,6 +174,30 @@ func TestBuildExecutionGraph_NoNodes(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, graph)
 	assert.Contains(t, err.Error(), "no nodes")
+}
+
+// An unrecognised node type has no standing service that would claim it, so the
+// connection would start "successfully" and then silently do nothing. The graph
+// build rejects it — this check moved here from the retired per-connection
+// deployment builder (ADR 0004), where it was the last validation left.
+func TestBuildExecutionGraph_InvalidNodeType(t *testing.T) {
+	nodes := []*managementapi.Node{
+		createNode("consumer-0", "consumer", nil),
+		createNode("mystery-1", "transmogrifier", nil),
+		createNode("producer-0", "producer", nil),
+	}
+	edges := []*managementapi.Edge{
+		createEdge("edge-0", "consumer-0", "mystery-1", 0),
+		createEdge("edge-1", "mystery-1", "producer-0", 1),
+	}
+	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
+
+	graph, err := BuildExecutionGraph(conn, nil)
+
+	require.Error(t, err)
+	assert.Nil(t, graph)
+	assert.Contains(t, err.Error(), "INVALID_NODE_TYPE")
+	assert.Contains(t, err.Error(), "transmogrifier")
 }
 
 func TestBuildExecutionGraph_NoConsumer(t *testing.T) {
@@ -438,234 +304,6 @@ func TestExecutionGraph_GetPreviousNextNode(t *testing.T) {
 	// Producer has no next
 	assert.Equal(t, "filter-1", graph.GetPreviousNode("producer-0").ID)
 	assert.Nil(t, graph.GetNextNode("producer-0"))
-}
-
-// =============================================================================
-// Deployment Tests
-// =============================================================================
-
-func TestCreateDeploymentSpec_ValidConsumer(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", map[string]interface{}{"url": "http://example.com"}),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(nodes[0], graph, config)
-
-	require.NoError(t, err)
-	assert.NotNil(t, spec)
-	assert.Equal(t, "consumer-0", spec.NodeID)
-	assert.Equal(t, "consumer", spec.NodeType)
-
-	deployment := spec.Deployment
-	assert.Equal(t, "vrsky-conn-123-consumer-0", deployment.Name)
-	assert.Equal(t, "vrsky", deployment.Namespace)
-
-	// Check labels
-	assert.Equal(t, "vrsky", deployment.Labels[LabelApp])
-	assert.Equal(t, "conn-123", deployment.Labels[LabelPipeline])
-	assert.Equal(t, "consumer-0", deployment.Labels[LabelNode])
-	assert.Equal(t, "consumer", deployment.Labels[LabelType])
-	assert.Equal(t, "tenant-acme", deployment.Labels[LabelTenant])
-
-	// Check container
-	container := deployment.Spec.Template.Spec.Containers[0]
-	assert.Equal(t, "gcr.io/vrsky/vrsky-consumer:latest", container.Image)
-	assert.Len(t, container.Ports, 2)
-
-	// Check environment variables
-	envMap := make(map[string]string)
-	for _, env := range container.Env {
-		envMap[env.Name] = env.Value
-	}
-	assert.Equal(t, "tenant-acme", envMap[EnvTenantID])
-	assert.Equal(t, "conn-123", envMap[EnvConnectionID])
-	assert.Equal(t, "consumer-0", envMap[EnvNodeID])
-	assert.Equal(t, "consumer", envMap[EnvNodeType])
-	assert.Empty(t, envMap[EnvInputNATSSubject]) // Consumer has no input
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", envMap[EnvOutputNATSSubject])
-	assert.Contains(t, envMap[EnvConfig], "url")
-}
-
-func TestCreateDeploymentSpec_ValidFilter(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("filter-1", "filter", map[string]interface{}{"rule": "x > 0"}),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "filter-1", 0),
-		createEdge("edge-1", "filter-1", "producer-0", 1),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(nodes[1], graph, config)
-
-	require.NoError(t, err)
-	assert.NotNil(t, spec)
-
-	container := spec.Deployment.Spec.Template.Spec.Containers[0]
-	envMap := make(map[string]string)
-	for _, env := range container.Env {
-		envMap[env.Name] = env.Value
-	}
-
-	// Filter has both input and output
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", envMap[EnvInputNATSSubject])
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.filter-1.output", envMap[EnvOutputNATSSubject])
-}
-
-func TestCreateDeploymentSpec_ValidProducer(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", map[string]interface{}{"path": "/output"}),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(nodes[1], graph, config)
-
-	require.NoError(t, err)
-	assert.NotNil(t, spec)
-
-	container := spec.Deployment.Spec.Template.Spec.Containers[0]
-	envMap := make(map[string]string)
-	for _, env := range container.Env {
-		envMap[env.Name] = env.Value
-	}
-
-	// Producer has input but no output
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", envMap[EnvInputNATSSubject])
-	assert.Empty(t, envMap[EnvOutputNATSSubject])
-}
-
-func TestCreateDeploymentSpec_ResourceLimits(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(nodes[0], graph, config)
-	require.NoError(t, err)
-
-	resources := spec.Deployment.Spec.Template.Spec.Containers[0].Resources
-
-	// Check requests (reduced for constrained clusters)
-	cpuRequest := resources.Requests.Cpu()
-	assert.Equal(t, "50m", cpuRequest.String())
-
-	memRequest := resources.Requests.Memory()
-	assert.Equal(t, "64Mi", memRequest.String())
-
-	// Check limits
-	cpuLimit := resources.Limits.Cpu()
-	assert.Equal(t, "500m", cpuLimit.String())
-
-	memLimit := resources.Limits.Memory()
-	assert.Equal(t, "512Mi", memLimit.String())
-}
-
-func TestCreateDeploymentSpec_HealthCheck(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(nodes[0], graph, config)
-	require.NoError(t, err)
-
-	livenessProbe := spec.Deployment.Spec.Template.Spec.Containers[0].LivenessProbe
-	assert.NotNil(t, livenessProbe)
-	assert.Equal(t, "/health", livenessProbe.HTTPGet.Path)
-	assert.Equal(t, int32(8080), livenessProbe.HTTPGet.Port.IntVal)
-	assert.Equal(t, int32(5), livenessProbe.InitialDelaySeconds)
-	assert.Equal(t, int32(10), livenessProbe.PeriodSeconds)
-}
-
-func TestCreateDeploymentSpec_InvalidNodeType(t *testing.T) {
-	node := createNode("invalid-0", "invalid_type", nil)
-	graph := &ExecutionGraph{
-		TenantID:     "tenant-acme",
-		ConnectionID: "conn-123",
-	}
-
-	config := DefaultConfig()
-	spec, err := CreateDeploymentSpec(node, graph, config)
-
-	assert.Error(t, err)
-	assert.Nil(t, spec)
-	assert.Contains(t, err.Error(), "invalid node type")
-}
-
-func TestCreateDeploymentSpec_NilNode(t *testing.T) {
-	graph := &ExecutionGraph{}
-	config := DefaultConfig()
-
-	spec, err := CreateDeploymentSpec(nil, graph, config)
-
-	assert.Error(t, err)
-	assert.Nil(t, spec)
-}
-
-func TestCreateAllDeploymentSpecs(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("filter-1", "filter", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "filter-1", 0),
-		createEdge("edge-1", "filter-1", "producer-0", 1),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	graph, err := BuildExecutionGraph(conn, nil)
-	require.NoError(t, err)
-
-	config := DefaultConfig()
-	specs, err := CreateAllDeploymentSpecs(graph, config)
-
-	require.NoError(t, err)
-	// NO node gets a per-connection worker. Transforms are served by the shared
-	// data-filter/data-converter services (#201) and the edges by the standing
-	// SDK connector services (#205); the workers this used to spawn were wired
-	// to topics nothing publishes to.
-	assert.Empty(t, specs)
-}
-
-func TestIsServedByStandingService(t *testing.T) {
-	for _, nodeType := range []string{"consumer", "filter", "converter", "producer"} {
-		assert.True(t, isServedByStandingService(nodeType), "%s should be served by a standing service", nodeType)
-	}
-	assert.False(t, isServedByStandingService("unknown"))
 }
 
 // A connection created before #201/#205 has leftover no-op worker Deployments.
@@ -899,118 +537,6 @@ func TestOrchestrator_StopConnection_NoK8sClient(t *testing.T) {
 	assert.Contains(t, err.Error(), "nil")
 }
 
-func TestOrchestrator_GetNATSTopicForNode(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	k8sClient := fake.NewSimpleClientset()
-
-	orch := New(conn, k8sClient, nil, nil)
-	_, _ = orch.BuildGraph(context.Background())
-
-	topic, err := orch.GetNATSTopicForNode("consumer-0")
-	require.NoError(t, err)
-	assert.Equal(t, "tenant-acme.pipeline-conn-123.consumer-0.output", topic)
-
-	// Producer has no output topic
-	topic, err = orch.GetNATSTopicForNode("producer-0")
-	require.NoError(t, err)
-	assert.Empty(t, topic)
-}
-
-func TestOrchestrator_GetNATSTopicForNode_NoGraph(t *testing.T) {
-	conn := createTestConnection("tenant-acme", "conn-123", nil, nil)
-	orch := New(conn, nil, nil, nil)
-
-	_, err := orch.GetNATSTopicForNode("consumer-0")
-
-	assert.Error(t, err)
-}
-
-func TestOrchestrator_GetNATSTopicForNode_InvalidNode(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	k8sClient := fake.NewSimpleClientset()
-
-	orch := New(conn, k8sClient, nil, nil)
-	_, _ = orch.BuildGraph(context.Background())
-
-	_, err := orch.GetNATSTopicForNode("nonexistent")
-
-	assert.Error(t, err)
-}
-
-// deployComponent is retained for a possible future dedicated-worker mode; no
-// live path reaches it (#205). This keeps its failure handling covered.
-func TestOrchestrator_DeployComponentSurfacesK8sErrors(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{createEdge("edge-0", "consumer-0", "producer-0", 0)}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-
-	k8sClient := fake.NewSimpleClientset()
-	k8sClient.PrependReactor("create", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, assert.AnError
-	})
-
-	orch := New(conn, k8sClient, nil, nil)
-	graph, err := orch.BuildGraph(context.Background())
-	require.NoError(t, err)
-
-	spec, err := CreateDeploymentSpec(nodes[0], graph, orch.Config)
-	require.NoError(t, err)
-
-	err = orch.deployComponent(context.Background(), spec)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create deployment")
-}
-
-func TestOrchestrator_UpdateExistingDeployment(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-
-	// Pre-create a deployment
-	existingDeployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vrsky-conn-123-consumer-0",
-			Namespace: "vrsky",
-		},
-	}
-	k8sClient := fake.NewSimpleClientset(existingDeployment)
-
-	orch := New(conn, k8sClient, nil, nil)
-	graph, err := orch.BuildGraph(context.Background())
-	require.NoError(t, err)
-
-	spec, err := CreateDeploymentSpec(nodes[0], graph, orch.Config)
-	require.NoError(t, err)
-
-	// Should update the existing object instead of creating a second one.
-	require.NoError(t, orch.deployComponent(context.Background(), spec))
-
-	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
-	assert.Len(t, deployments.Items, 1)
-}
-
 // =============================================================================
 // Adapter Tests
 // =============================================================================
@@ -1081,56 +607,6 @@ func TestPipelineOrchestratorAdapter_StopPipeline(t *testing.T) {
 	// Verify deployments were deleted
 	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
 	assert.Len(t, deployments.Items, 0)
-}
-
-func TestPipelineOrchestratorAdapter_GetPipelineStatus(t *testing.T) {
-	nodes := []*managementapi.Node{
-		createNode("consumer-0", "consumer", nil),
-		createNode("producer-0", "producer", nil),
-	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "producer-0", 0),
-	}
-	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-
-	// Pre-create deployments with proper labels and status
-	deployment1 := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vrsky-conn-123-consumer-0",
-			Namespace: "vrsky",
-			Labels: map[string]string{
-				LabelApp:      LabelAppValue,
-				LabelPipeline: "conn-123",
-				LabelNode:     "consumer-0",
-			},
-		},
-		Status: appsv1.DeploymentStatus{
-			ReadyReplicas: 1,
-			Replicas:      1,
-		},
-	}
-	deployment2 := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vrsky-conn-123-producer-0",
-			Namespace: "vrsky",
-			Labels: map[string]string{
-				LabelApp:      LabelAppValue,
-				LabelPipeline: "conn-123",
-				LabelNode:     "producer-0",
-			},
-		},
-		Status: appsv1.DeploymentStatus{
-			ReadyReplicas: 0,
-			Replicas:      1,
-		},
-	}
-	k8sClient := fake.NewSimpleClientset(deployment1, deployment2)
-	adapter := NewPipelineOrchestratorAdapter(k8sClient, nil, nil)
-
-	status, err := adapter.GetPipelineStatus(context.Background(), conn)
-	require.NoError(t, err)
-	assert.Equal(t, "running", status["consumer-0"])
-	assert.Equal(t, "starting", status["producer-0"])
 }
 
 func TestNewOrchestratorFactory(t *testing.T) {
