@@ -69,6 +69,10 @@ func (s *FilterService) streamFilterEntry(ctx context.Context, connectionID stri
 	env := *origEnv
 	env.ID = uuid.New().String()
 	env.Payload, env.PayloadRef, env.Checksum, env.PayloadSize = nil, "", "", 0
+	// The filter always emits JSON, whatever the input format was (ADR 0003).
+	// Without this the next node auto-detects from the INPUT's content type and
+	// mis-parses this JSON — e.g. reads a streamed CSV pipeline's JSON as CSV.
+	env.ContentType = "application/json"
 	env.Metadata = make(map[string]interface{})
 	for k, v := range origEnv.Metadata {
 		env.Metadata[k] = v

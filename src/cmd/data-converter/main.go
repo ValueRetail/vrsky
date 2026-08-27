@@ -407,6 +407,9 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	if newContentType != "" {
 		env.ContentType = newContentType
 	}
+	// Never inherit the INPUT's size/checksum/ref — they describe a different
+	// payload. OffloadIfLarge re-stamps them when it spills.
+	env.PayloadRef, env.PayloadSize, env.Checksum = "", int64(len(newPayload)), ""
 	env.Metadata = make(map[string]interface{})
 	for k, v := range origEnv.Metadata {
 		env.Metadata[k] = v

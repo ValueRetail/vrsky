@@ -536,3 +536,83 @@ func patchContentType(t *testing.T, msg *nats.Msg, ct string) {
 	}
 	msg.Data = data
 }
+
+// The filter emits JSON whatever it consumed, so it MUST stamp
+// application/json — the next node auto-detects from ContentType, and
+// inheriting "text/csv" made the converter parse the filter's JSON as CSV and
+// silently produce zero records. Found by the TEST-env run; guarded here on
+// both the buffered and the streaming path.
+func TestFilter_OutputContentTypeIsJSONForNonJSONInput(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		streaming bool
+	}{{"buffered", false}, {"streamed", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+			defer cleanup()
+
+			store := newMemStore()
+			entry := &FilterEntry{
+				NodeID:         "f1",
+				Config:         &FilterNodeConfig{InputFormat: "csv", Rules: []FilterRule{{Field: "keep", Operator: "equals", Value: "yes"}}},
+				PredIsConsumer: true,
+			}
+			s := newTestFilterService(store, entry)
+			s.nc = nc
+			s.pub = messaging.NewPublisher(js)
+			if tc.streaming {
+				s.rehydrateMax = 100 // force the streaming path
+			}
+			if err := s.Start(context.Background()); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			defer s.Stop()
+
+			out := make(chan *envelope.Envelope, 4)
+			sub, err := nc.Subscribe("vrsky.data.tenant-x.pipeline.conn-1", func(m *nats.Msg) {
+				var env envelope.Envelope
+				if json.Unmarshal(m.Data, &env) == nil && env.Metadata != nil {
+					if v, _ := env.Metadata["_last_processed_by"].(string); v == "f1" {
+						out <- &env
+					}
+				}
+			})
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			defer func() { _ = sub.Unsubscribe() }()
+
+			payload := []byte("keep,v\nyes,1\nno,2\nyes,3\n")
+			if tc.streaming {
+				msg := refEnvelopeMsg(t, store, payload)
+				patchContentType(t, msg, "text/csv")
+				if _, err := js.Publish(msg.Subject, msg.Data); err != nil {
+					t.Fatalf("publish: %v", err)
+				}
+			} else {
+				env := envelope.New()
+				env.TenantID = "tenant-x"
+				env.IntegrationID = "conn-1"
+				env.ContentType = "text/csv"
+				env.Payload = payload
+				data, _ := json.Marshal(env)
+				if _, err := js.Publish("vrsky.data.tenant-x.pipeline.conn-1", data); err != nil {
+					t.Fatalf("publish: %v", err)
+				}
+			}
+
+			select {
+			case got := <-out:
+				if got.ContentType != "application/json" {
+					t.Errorf("ContentType = %q, want application/json — a downstream node would mis-parse this", got.ContentType)
+				}
+				// And the size/checksum must describe THIS payload, not the input's.
+				if got.PayloadRef == "" && got.PayloadSize != int64(len(got.Payload)) {
+					t.Errorf("PayloadSize %d does not match the inline payload (%d bytes)", got.PayloadSize, len(got.Payload))
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("no republished envelope")
+			}
+		})
+	}
+}

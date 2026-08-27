@@ -172,6 +172,34 @@ gain another axis of config surface.
 
 ## Test plan
 
+> **Validated in the TEST compose env (2026-08-27)** — real NATS + MinIO, rebuilt
+> transform images, pipeline `CSV -> filter (csv in, rules) -> converter
+> (rename, ndjson out)` driven by `cmd/spill-e2e -format csv`:
+>
+> | Run | Result |
+> |---|---|
+> | 8 MiB CSV (buffered path) | PASS — 4,059 NDJSON lines, exact expected count |
+> | 300 MiB CSV (streaming path) | PASS — 151,948 lines, exact count |
+>
+> Memory during the 300 MiB run peaked at **44.2 MiB (filter)** and **42.2 MiB
+> (converter)** — the record-streaming bound holds for CSV exactly as it does
+> for JSON. Output carried `"index":"1"` as a *string*, confirming the
+> values-stay-strings decision end to end.
+>
+> **The run earned its keep — it caught two bugs unit tests did not:**
+>
+> 1. **ContentType propagation.** The filter parses CSV but emits JSON, and it
+>    was inheriting the input's `text/csv`. The next node auto-detects from
+>    ContentType, so the converter parsed the filter's JSON *as CSV*, read the
+>    whole single-line array as a header row, and produced **zero records** —
+>    silently. Both transforms now stamp the content type they actually emit,
+>    and neither inherits the input's `PayloadSize`/`Checksum` (which described
+>    a different payload). Guarded by a regression test over both paths.
+> 2. **Empty streamed output.** `Spool.Result()` returned a nil `Inline` for an
+>    empty result, which callers read as "spilled" — publishing an envelope with
+>    neither payload nor reference. Now a non-nil empty slice.
+
+
 - Per-reader unit tests incl. the nasty cases: quoted/ragged CSV, duplicate
   headers, XML attributes/repeats/mixed content, YAML multi-doc.
 - Round-trip parity: CSV → records → CSV re-encode is stable; XML fixture →

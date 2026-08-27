@@ -414,6 +414,13 @@ func (s *FilterService) processFilterEntry(ctx context.Context, connectionID, su
 	env := *origEnv
 	env.ID = uuid.New().String()
 	env.Payload = newPayload
+	// The filter always emits JSON, whatever the input format was (ADR 0003).
+	// Saying so matters: the next node auto-detects from ContentType, and
+	// inheriting "text/csv" here would make it parse this JSON as CSV.
+	env.ContentType = "application/json"
+	// Never inherit the INPUT's size/checksum/ref — they describe a different
+	// payload. OffloadIfLarge re-stamps them when it spills.
+	env.PayloadRef, env.PayloadSize, env.Checksum = "", int64(len(newPayload)), ""
 	env.Metadata = make(map[string]interface{})
 	for k, v := range origEnv.Metadata {
 		env.Metadata[k] = v
