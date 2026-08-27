@@ -49,6 +49,7 @@ type recordGen struct {
 	buf     []byte
 	done    bool
 	pad     string
+	csv     bool
 }
 
 func (g *recordGen) Read(p []byte) (int, error) {
@@ -56,24 +57,43 @@ func (g *recordGen) Read(p []byte) (int, error) {
 		if g.done {
 			return 0, io.EOF
 		}
-		switch {
-		case g.i == 0:
-			g.buf = []byte("[")
-		case g.written >= g.target:
-			g.buf = []byte("]")
-			g.done = true
-		default:
-			keep := "no"
-			if g.i%2 == 1 {
-				keep = "yes"
+		if g.csv {
+			// CSV: a header row then one row per record. Exercises the ADR 0003
+			// streaming CSV reader end to end.
+			switch {
+			case g.i == 0:
+				g.buf = []byte("keep,i,pad\n")
+			case g.written >= g.target:
+				g.done = true
+				return 0, io.EOF
+			default:
+				keep := "no"
+				if g.i%2 == 1 {
+					keep = "yes"
+				}
+				g.buf = []byte(fmt.Sprintf("%s,%d,%s\n", keep, g.i, g.pad))
 			}
-			sep := ","
-			if g.i == 1 {
-				sep = ""
+			g.i++
+		} else {
+			switch {
+			case g.i == 0:
+				g.buf = []byte("[")
+			case g.written >= g.target:
+				g.buf = []byte("]")
+				g.done = true
+			default:
+				keep := "no"
+				if g.i%2 == 1 {
+					keep = "yes"
+				}
+				sep := ","
+				if g.i == 1 {
+					sep = ""
+				}
+				g.buf = []byte(fmt.Sprintf(`%s{"keep":%q,"i":%d,"pad":%q}`, sep, keep, g.i, g.pad))
 			}
-			g.buf = []byte(fmt.Sprintf(`%s{"keep":%q,"i":%d,"pad":%q}`, sep, keep, g.i, g.pad))
+			g.i++
 		}
-		g.i++
 	}
 	n := copy(p, g.buf)
 	g.buf = g.buf[n:]
@@ -90,7 +110,11 @@ func envOr(k, def string) string {
 
 func main() {
 	sizeMB := flag.Int64("mb", 1024, "approximate payload size in MiB")
+	format := flag.String("format", "json", "payload format to generate: json | csv")
 	flag.Parse()
+	if *format != "json" && *format != "csv" {
+		log.Fatalf("unsupported -format %q (json|csv)", *format)
+	}
 	ctx := context.Background()
 
 	// Defaults match the TEST compose stack; override via env to target another
@@ -109,10 +133,13 @@ func main() {
 	env.TenantID = tenant
 	env.IntegrationID = connID
 	env.ContentType = "application/json"
+	if *format == "csv" {
+		env.ContentType = "text/csv"
+	}
 	key := fmt.Sprintf("spill/%s/%s/%s", tenant, connID, env.ID)
 
 	// Stream-generate the payload into MinIO, hashing and counting as we go.
-	gen := &recordGen{target: *sizeMB << 20, pad: strings.Repeat("x", 1024)}
+	gen := &recordGen{target: *sizeMB << 20, pad: strings.Repeat("x", 1024), csv: *format == "csv"}
 	h := sha256.New()
 	counted := io.TeeReader(gen, h)
 	start := time.Now()
@@ -122,8 +149,11 @@ func main() {
 	env.PayloadRef = key
 	env.PayloadSize = gen.written
 	env.Checksum = "sha256:" + hex.EncodeToString(h.Sum(nil))
-	totalRecords := gen.i - 2 // minus '[' and ']' emissions
-	fmt.Printf("UPLOADED  %.1f MiB, %d records, in %s\n", float64(gen.written)/(1<<20), totalRecords, time.Since(start).Round(time.Millisecond))
+	totalRecords := gen.i - 2 // json: minus the '[' and ']' emissions
+	if *format == "csv" {
+		totalRecords = gen.i - 1 // csv: minus the header row
+	}
+	fmt.Printf("UPLOADED  %.1f MiB %s, %d records, in %s\n", float64(gen.written)/(1<<20), *format, totalRecords, time.Since(start).Round(time.Millisecond))
 
 	// Watch for the transform outputs before publishing.
 	nc, err := nats.Connect(envOr("SPILL_E2E_NATS_URL", "nats://127.0.0.1:4222"))

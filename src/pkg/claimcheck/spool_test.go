@@ -141,3 +141,20 @@ func TestSpool_AbortDeletesSpilledObject(t *testing.T) {
 		t.Errorf("expected one delete, got %v", store.deleted)
 	}
 }
+
+// An empty output must come back as inline-but-empty, not as a nil Inline —
+// callers read Inline != nil as "did not spill", so nil would make an empty
+// result look like a spill with no reference and publish a broken envelope.
+func TestSpool_EmptyOutputIsInlineNotNil(t *testing.T) {
+	sp := NewSpool(context.Background(), newSpoolStore(), "spill/t/c/x", "", 1024)
+	if err := sp.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	res := sp.Result()
+	if res.Inline == nil {
+		t.Fatal("empty output must be a non-nil empty slice, not nil")
+	}
+	if len(res.Inline) != 0 || res.Ref != "" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+}

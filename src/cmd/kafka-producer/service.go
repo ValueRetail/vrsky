@@ -219,7 +219,6 @@ func (p *kafkaProducer) getTargets(ctx context.Context, connID, tenantID string)
 	return targets, nil
 }
 
-
 // ServesConnection reports whether this connection has a matching destination —
 // mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
 // ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).

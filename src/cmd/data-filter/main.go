@@ -55,6 +55,18 @@ type FilterRule struct {
 }
 
 type FilterNodeConfig struct {
+	// Input parsing (ADR 0003). Empty InputFormat = auto-detect from the
+	// envelope's ContentType, then a content sniff, then json. The filter's
+	// OUTPUT stays JSON regardless of input format — add a converter after it
+	// to emit another format.
+	InputFormat        string `json:"input_format"`          // "", "json", "ndjson", "csv", "tsv", "xml", "yaml"
+	InputCsvDelimiter  string `json:"input_csv_delimiter"`   // "" = sniff
+	InputCsvNoHeader   bool   `json:"input_csv_no_header"`   // treat the first row as data
+	InputCsvTrimSpace  bool   `json:"input_csv_trim_space"`  // trim whitespace in values
+	InputXmlRecordPath string `json:"input_xml_record_path"` // REQUIRED for xml, e.g. "Orders.Order"
+	InputXmlAttrPrefix string `json:"input_xml_attr_prefix"` // default "@"
+	InputXmlTextKey    string `json:"input_xml_text_key"`    // default "#text"
+
 	Rules         []FilterRule `json:"rules"`
 	Logic         string       `json:"logic"`          // "and", "or" (default "and")
 	ExtractFields []string     `json:"extract_fields"` // JSON paths to keep
@@ -318,9 +330,10 @@ func (s *FilterService) processFilterEntry(ctx context.Context, connectionID, su
 		return s.streamFilterEntry(ctx, connectionID, origEnv, entry)
 	}
 
-	var data interface{}
-	if err := json.Unmarshal(origEnv.Payload, &data); err != nil {
-		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Invalid JSON payload", Time: now()})
+	// Parse the payload in whatever format this node accepts (ADR 0003).
+	data, perr := parsePayload(entry.Config, origEnv)
+	if perr != nil {
+		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Payload parse failed: " + perr.Error(), Time: now()})
 		return nil
 	}
 
@@ -401,6 +414,13 @@ func (s *FilterService) processFilterEntry(ctx context.Context, connectionID, su
 	env := *origEnv
 	env.ID = uuid.New().String()
 	env.Payload = newPayload
+	// The filter always emits JSON, whatever the input format was (ADR 0003).
+	// Saying so matters: the next node auto-detects from ContentType, and
+	// inheriting "text/csv" here would make it parse this JSON as CSV.
+	env.ContentType = "application/json"
+	// Never inherit the INPUT's size/checksum/ref — they describe a different
+	// payload. OffloadIfLarge re-stamps them when it spills.
+	env.PayloadRef, env.PayloadSize, env.Checksum = "", int64(len(newPayload)), ""
 	env.Metadata = make(map[string]interface{})
 	for k, v := range origEnv.Metadata {
 		env.Metadata[k] = v

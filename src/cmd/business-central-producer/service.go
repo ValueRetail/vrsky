@@ -225,7 +225,6 @@ func (p *bcProducer) getConfig(ctx context.Context, connectionID, tenantID strin
 	return nil, errors.New("no business_central producer node found")
 }
 
-
 // ServesConnection reports whether this connection has a Business Central destination —
 // mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
 // ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).

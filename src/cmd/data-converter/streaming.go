@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/google/uuid"
 
 	"github.com/ValueRetail/vrsky/pkg/claimcheck"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/records"
 )
 
 // streamEntry is the record-streaming path (ADR 0002 phase B): the input
@@ -48,15 +52,27 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 	}
 	defer rc.Close()
 
-	dec := json.NewDecoder(rc)
-	tok, err := dec.Token()
-	if err != nil {
-		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Streamed payload is not valid JSON: " + err.Error(), Time: now()})
-		return nil // will never parse — ack, like the buffered invalid-JSON path
+	// Resolve the input format from the node config / ContentType and build a
+	// streaming reader for it (ADR 0003). csv/tsv, json, ndjson and xml all
+	// parse incrementally, so a multi-GB payload in any of them streams; yaml
+	// buffers each document and is declined above.
+	head := make([]byte, records.SniffLen)
+	n, _ := io.ReadFull(rc, head)
+	head = head[:n]
+	body := io.MultiReader(bytes.NewReader(head), rc)
+
+	format := records.Detect(cfg.InputFormat, origEnv.ContentType, head)
+	if !records.Streams(format) {
+		return fmt.Errorf("converter node %s: %s input cannot be streamed (payload is %d bytes, over the %d-byte rehydrate cap); raise %s to buffer it",
+			entry.NodeID, format, origEnv.PayloadSize, s.rehydrateMax, claimcheck.EnvRehydrateMax)
 	}
-	if d, ok := tok.(json.Delim); !ok || d != '[' {
-		return fmt.Errorf("converter node %s: only JSON array payloads can be streamed; this payload (%d bytes) starts with %v — raise %s to buffer it",
-			entry.NodeID, origEnv.PayloadSize, tok, claimcheck.EnvRehydrateMax)
+	opts := cfg.inputOptions()
+	opts.RequireSequence = true // a lone top-level value would buffer the whole payload
+	reader, rerr := records.New(format, body, opts)
+	if rerr != nil {
+		// Config errors (e.g. xml without a record path) will never succeed on
+		// redelivery, but they are the operator's to fix — surface loudly.
+		return fmt.Errorf("converter node %s: %w", entry.NodeID, rerr)
 	}
 
 	env := *origEnv
@@ -88,13 +104,23 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 		delim      = csvDelim(cfg)
 	)
 
-	for dec.More() {
-		var rec interface{}
-		if derr := dec.Decode(&rec); derr != nil {
-			spool.Abort(s.logger)
-			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Streamed payload record is not valid JSON: " + derr.Error(), Time: now()})
-			return nil // deterministic — ack, matching the buffered invalid-JSON path
+	for {
+		parsedRec, derr := reader.Next()
+		if derr == io.EOF {
+			break
 		}
+		if derr != nil {
+			spool.Abort(s.logger)
+			if errors.Is(derr, records.ErrNotASequence) {
+				// Well-formed but unstreamable (a lone top-level value): decline
+				// so it reaches the DLQ, rather than acking it away.
+				return fmt.Errorf("converter node %s: %w (payload is %d bytes, over the %d-byte rehydrate cap); raise %s to buffer it",
+					entry.NodeID, derr, origEnv.PayloadSize, s.rehydrateMax, claimcheck.EnvRehydrateMax)
+			}
+			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Streamed payload record is malformed: " + derr.Error(), Time: now()})
+			return nil // deterministic — ack, matching the buffered parse-failure path
+		}
+		var rec interface{} = map[string]interface{}(parsedRec)
 
 		obj, isMap := rec.(map[string]interface{})
 		if hasMapping && isMap {

@@ -37,4 +37,5 @@ Architecture and internals — [NATS architecture](NATS_ARCHITECTURE.md),
 [connector SDK](sdk/README.md), [scalability](scalability.md).
 
 Design decisions — [ADR 0001: streaming payload contract](adr/0001-streaming-payload-contract.md),
-[ADR 0002: large payloads through transforms](adr/0002-transform-large-payloads.md).
+[ADR 0002: large payloads through transforms](adr/0002-transform-large-payloads.md),
+[ADR 0003: transform input formats](adr/0003-transform-input-formats.md).

@@ -188,7 +188,6 @@ func (p *brightpearlProducer) getConfig(ctx context.Context, connectionID, tenan
 	return nil, errors.New("no brightpearl producer node found")
 }
 
-
 // ServesConnection reports whether this connection has a Brightpearl destination —
 // mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
 // ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).

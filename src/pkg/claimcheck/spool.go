@@ -146,7 +146,13 @@ func (s *Spool) Abort(logger *slog.Logger) {
 func (s *Spool) Result() SpoolResult {
 	if !s.spilled {
 		// Copy: the caller owns the result; the spool may be reused/GC'd.
-		return SpoolResult{Inline: append([]byte(nil), s.buf.Bytes()...)}
+		// make() rather than append(nil, ...) so an EMPTY output is a non-nil
+		// empty slice: callers distinguish inline from spilled by Inline != nil,
+		// and a nil here would make an empty result look like a spill with no
+		// reference — a malformed envelope.
+		inline := make([]byte, s.buf.Len())
+		copy(inline, s.buf.Bytes())
+		return SpoolResult{Inline: inline}
 	}
 	return SpoolResult{
 		Ref:      s.key,

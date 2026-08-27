@@ -653,7 +653,6 @@ func testConnectionHandler() http.HandlerFunc {
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
-
 // ServesConnection reports whether this connection has a matching destination —
 // mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
 // ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
