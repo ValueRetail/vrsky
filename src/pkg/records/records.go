@@ -14,10 +14,18 @@ package records
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 )
+
+// ErrNotASequence is returned when RequireSequence is set and the payload turns
+// out to be a single value rather than a sequence of records. Callers on the
+// streaming path should treat it as a structural refusal (decline/NAK), not as
+// a malformed-data ack: the payload is well-formed, it simply cannot be
+// processed under a memory bound.
+var ErrNotASequence = errors.New("payload is a single value, not a sequence of records")
 
 // Record is one parsed row/element/object. Values are whatever the format
 // naturally yields: JSON/YAML produce typed values, CSV produces strings, XML
@@ -48,6 +56,13 @@ type Options struct {
 	Delimiter rune // 0 = sniff from the header line
 	NoHeader  bool // true: synthesise column_1..column_N instead of consuming a header row
 	TrimSpace bool // trim leading/trailing space in values
+	// RequireSequence rejects inputs that are a single value rather than a
+	// sequence of records. The streaming transform paths set it: a lone
+	// top-level JSON object is ONE record, so decoding it necessarily
+	// materialises the whole payload — which is the very OOM the streaming path
+	// exists to avoid. The buffered path leaves it false, where single objects
+	// are both fine and long-standing behaviour.
+	RequireSequence bool
 	// XML.
 	RecordPath string // REQUIRED: dotted path to the repeating record element, e.g. "Orders.Order"
 	AttrPrefix string // attribute key prefix, default "@"
@@ -75,10 +90,11 @@ func New(format string, r io.Reader, opts Options) (Reader, error) {
 
 	switch format {
 	case FormatJSON:
-		return newJSONReader(r), nil
+		return newJSONReader(r, opts.RequireSequence), nil
 	case FormatNDJSON:
 		// NDJSON is JSON's concatenated-value case; one decoder handles both.
-		return newJSONReader(r), nil
+		// It is inherently a sequence, so RequireSequence never applies.
+		return newJSONReader(r, false), nil
 	case FormatCSV, FormatTSV:
 		return newCSVReader(bufio.NewReader(r), opts)
 	case FormatXML:

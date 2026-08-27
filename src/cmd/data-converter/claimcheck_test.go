@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -303,5 +304,150 @@ func TestConverter_StreamingDeclinesXML(t *testing.T) {
 	msg := refEnvelopeMsg(t, store, streamingParityPayload())
 	if err := s.handleMessage(context.Background(), msg); err == nil {
 		t.Fatal("xml + over-cap must NAK (phase C error policy), not stream")
+	}
+}
+
+// --- ADR 0003: non-JSON input formats ---
+
+// bufferedThrough runs an INLINE (non-offloaded) payload through the converter
+// and returns the republished output — the ordinary small-payload path.
+func bufferedThrough(t *testing.T, cfg *ConverterNodeConfig, contentType string, payload []byte) *envelope.Envelope {
+	t.Helper()
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	defer cleanup()
+
+	store := newMemStore()
+	entry := &ConverterEntry{NodeID: "cv1", Config: cfg, PredIsConsumer: true}
+	s := newTestConverterService(store, entry)
+	s.nc = nc
+	s.pub = messaging.NewPublisher(js)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+
+	out := make(chan *envelope.Envelope, 4)
+	sub, err := nc.Subscribe("vrsky.data.tenant-x.pipeline.conn-1", func(m *nats.Msg) {
+		var env envelope.Envelope
+		if json.Unmarshal(m.Data, &env) == nil && env.Metadata != nil {
+			if v, _ := env.Metadata["_last_processed_by"].(string); v == "cv1" {
+				out <- &env
+			}
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	env := envelope.New()
+	env.TenantID = "tenant-x"
+	env.IntegrationID = "conn-1"
+	env.ContentType = contentType
+	env.Payload = payload
+	data, _ := json.Marshal(env)
+	if _, err := js.Publish("vrsky.data.tenant-x.pipeline.conn-1", data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatal("no republished envelope")
+		return nil
+	}
+}
+
+// The headline ask: deliver CSV, want JSON.
+func TestConverter_CSVInJSONOut(t *testing.T) {
+	cfg := &ConverterNodeConfig{} // no output_format = JSON out
+	got := bufferedThrough(t, cfg, "text/csv", []byte("name,qty\nwidget,3\ngadget,7\n"))
+
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(got.Payload, &rows); err != nil {
+		t.Fatalf("output is not JSON: %v (%s)", err, got.Payload)
+	}
+	if len(rows) != 2 || rows[0]["name"] != "widget" || rows[1]["qty"] != "7" {
+		t.Errorf("CSV was not parsed into records: %v", rows)
+	}
+}
+
+// The other headline ask: deliver XML, want CSV.
+func TestConverter_XMLInCSVOut(t *testing.T) {
+	cfg := &ConverterNodeConfig{
+		OutputFormat:       "csv",
+		InputFormat:        "xml",
+		InputXmlRecordPath: "Orders.Order",
+	}
+	doc := []byte(`<Orders><Order><id>1</id><city>Oslo</city></Order><Order><id>2</id><city>Bergen</city></Order></Orders>`)
+	got := bufferedThrough(t, cfg, "application/xml", doc)
+
+	csvOut := string(got.Payload)
+	if !strings.Contains(csvOut, "Oslo") || !strings.Contains(csvOut, "Bergen") {
+		t.Errorf("XML rows missing from CSV output: %q", csvOut)
+	}
+	if got.ContentType != "text/csv" {
+		t.Errorf("ContentType = %q, want text/csv", got.ContentType)
+	}
+	if lines := strings.Count(strings.TrimSpace(csvOut), "\n"); lines != 2 { // header + 2 rows
+		t.Errorf("expected a header and 2 rows, got:\n%s", csvOut)
+	}
+}
+
+// Auto-detection: no input_format set, format comes from the ContentType the
+// consumer stamped.
+func TestConverter_AutoDetectsCSVFromContentType(t *testing.T) {
+	got := bufferedThrough(t, &ConverterNodeConfig{OutputFormat: "ndjson"}, "text/csv", []byte("a,b\n1,2\n"))
+	if !strings.Contains(string(got.Payload), `"a":"1"`) {
+		t.Errorf("CSV not auto-detected from ContentType: %q", got.Payload)
+	}
+}
+
+// A mapping applies to CSV records the same way it does to JSON ones.
+func TestConverter_CSVWithFieldMapping(t *testing.T) {
+	cfg := &ConverterNodeConfig{
+		InputFormat: "csv",
+		Mappings:    []FieldMapping{{Source: "qty", Target: "quantity", Type: "rename"}},
+	}
+	got := bufferedThrough(t, cfg, "text/csv", []byte("name,qty\nwidget,3\n"))
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(got.Payload, &rows); err != nil {
+		t.Fatalf("output not JSON: %v", err)
+	}
+	if rows[0]["quantity"] != "3" {
+		t.Errorf("mapping did not apply to a CSV record: %v", rows[0])
+	}
+	if _, still := rows[0]["qty"]; still {
+		t.Errorf("rename should have removed the source field: %v", rows[0])
+	}
+}
+
+// XML without a record path is a config error the operator must fix — the
+// message has to name the field, not fail obscurely.
+func TestConverter_XMLWithoutRecordPathIsAClearError(t *testing.T) {
+	cfg := &ConverterNodeConfig{InputFormat: "xml"}
+	env := envelope.New()
+	env.ContentType = "application/xml"
+	env.Payload = []byte("<a><b/></a>")
+	_, err := parsePayload(cfg, env)
+	if err == nil {
+		t.Fatal("xml without a record path must error")
+	}
+	if !strings.Contains(err.Error(), "input_xml_record_path") {
+		t.Errorf("error should name the config field, got: %v", err)
+	}
+}
+
+// JSON keeps its original code path — the accepted zero-regression condition.
+func TestConverter_JSONInputUnchanged(t *testing.T) {
+	cfg := &ConverterNodeConfig{Mappings: []FieldMapping{{Source: "name", Target: "full_name", Type: "rename"}}}
+	got := bufferedThrough(t, cfg, "application/json", []byte(`{"name":"acme"}`))
+	var obj map[string]interface{}
+	if err := json.Unmarshal(got.Payload, &obj); err != nil {
+		t.Fatalf("a single JSON object should still convert to a single object: %v (%s)", err, got.Payload)
+	}
+	if obj["full_name"] != "acme" {
+		t.Errorf("JSON behaviour changed: %v", obj)
 	}
 }

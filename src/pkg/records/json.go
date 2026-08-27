@@ -17,13 +17,14 @@ import (
 // failing the payload, matching the buffered transforms' long-standing
 // behaviour of dropping non-map rows.
 type jsonReader struct {
-	dec     *json.Decoder
-	inArray bool
-	started bool
+	dec        *json.Decoder
+	inArray    bool
+	started    bool
+	requireSeq bool
 }
 
-func newJSONReader(r io.Reader) *jsonReader {
-	return &jsonReader{dec: json.NewDecoder(r)}
+func newJSONReader(r io.Reader, requireSequence bool) *jsonReader {
+	return &jsonReader{dec: json.NewDecoder(r), requireSeq: requireSequence}
 }
 
 func (j *jsonReader) Next() (Record, error) {
@@ -41,6 +42,9 @@ func (j *jsonReader) Next() (Record, error) {
 		if d, ok := tok.(json.Delim); ok && d == '[' {
 			j.inArray = true
 		} else {
+			if j.requireSeq {
+				return nil, fmt.Errorf("json: decoding it would buffer the whole payload: %w", ErrNotASequence)
+			}
 			// Not an array — rewind isn't possible, so re-decode this value from
 			// the token we already consumed. Only '{' can start a record; other
 			// scalars are skipped by falling through to the normal loop.

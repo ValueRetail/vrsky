@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -408,4 +409,130 @@ func TestFilter_StreamedAllDroppedPublishesNothing(t *testing.T) {
 	if len(store.objects) != objectsBefore {
 		t.Errorf("no output object should exist after an all-dropped stream")
 	}
+}
+
+// --- ADR 0003: non-JSON input formats ---
+
+// The filter evaluates rules against CSV rows and still emits JSON — its output
+// format is deliberately unchanged (ADR 0003).
+func TestFilter_CSVInputRulesApplyJSONOut(t *testing.T) {
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	defer cleanup()
+
+	entry := &FilterEntry{
+		NodeID:         "f1",
+		Config:         &FilterNodeConfig{Rules: []FilterRule{{Field: "keep", Operator: "equals", Value: "yes"}}},
+		PredIsConsumer: true,
+	}
+	s := newTestFilterService(newMemStore(), entry)
+	s.nc = nc
+	s.pub = messaging.NewPublisher(js)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+
+	out := make(chan *envelope.Envelope, 4)
+	sub, err := nc.Subscribe("vrsky.data.tenant-x.pipeline.conn-1", func(m *nats.Msg) {
+		var env envelope.Envelope
+		if json.Unmarshal(m.Data, &env) == nil && env.Metadata != nil {
+			if v, _ := env.Metadata["_last_processed_by"].(string); v == "f1" {
+				out <- &env
+			}
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	env := envelope.New()
+	env.TenantID = "tenant-x"
+	env.IntegrationID = "conn-1"
+	env.ContentType = "text/csv"
+	env.Payload = []byte("keep,v\nyes,1\nno,2\nyes,3\n")
+	data, _ := json.Marshal(env)
+	if _, err := js.Publish("vrsky.data.tenant-x.pipeline.conn-1", data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(got.Payload, &rows); err != nil {
+			t.Fatalf("filter output should be JSON: %v (%s)", err, got.Payload)
+		}
+		if len(rows) != 2 {
+			t.Errorf("rules should have kept 2 CSV rows, got %d: %v", len(rows), rows)
+		}
+		for _, r := range rows {
+			if r["keep"] != "yes" {
+				t.Errorf("wrong row kept: %v", r)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no republished envelope for a CSV input")
+	}
+}
+
+// An over-cap CSV takes the streaming path — the ADR 0002 machinery now carries
+// non-JSON formats too, so a multi-GB CSV never buffers.
+func TestFilter_StreamsOverCapCSV(t *testing.T) {
+	store := newMemStore()
+	entry := &FilterEntry{
+		NodeID:         "f1",
+		Config:         &FilterNodeConfig{InputFormat: "csv", Rules: []FilterRule{{Field: "keep", Operator: "equals", Value: "yes"}}},
+		PredIsConsumer: true,
+	}
+	_, _, js, out, done := startStreamingFilter(t, store, entry)
+	defer done()
+
+	var sb strings.Builder
+	sb.WriteString("keep,pad\n")
+	for i := 0; i < 200; i++ {
+		keep := "no"
+		if i%2 == 0 {
+			keep = "yes"
+		}
+		sb.WriteString(keep + "," + strings.Repeat("x", 40) + "\n")
+	}
+	msg := refEnvelopeMsg(t, store, []byte(sb.String()))
+	// refEnvelopeMsg stamps JSON; this payload is CSV.
+	patchContentType(t, msg, "text/csv")
+	if _, err := js.Publish(msg.Subject, msg.Data); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case got := <-out:
+		body := got.Payload
+		if got.PayloadRef != "" {
+			body, _, _ = store.Get(context.Background(), got.PayloadRef)
+		}
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("streamed CSV output should be JSON: %v", err)
+		}
+		if len(rows) != 100 {
+			t.Errorf("expected 100 kept rows from a streamed CSV, got %d", len(rows))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no republished envelope from the streamed CSV")
+	}
+}
+
+// patchContentType rewrites the ContentType on an already-marshalled envelope
+// message, so the streaming helpers can be reused for non-JSON payloads.
+func patchContentType(t *testing.T, msg *nats.Msg, ct string) {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(msg.Data, &env); err != nil {
+		t.Fatalf("patch content type: %v", err)
+	}
+	env.ContentType = ct
+	data, err := json.Marshal(&env)
+	if err != nil {
+		t.Fatalf("patch content type: %v", err)
+	}
+	msg.Data = data
 }

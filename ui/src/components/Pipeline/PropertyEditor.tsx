@@ -2573,6 +2573,7 @@ function ConverterConfig({
   deployedConnectionId?: string
 }) {
   const outputFormat = (config.output_format as string) || ''
+  const inputFormat = (config.input_format as string) || ''
   const csvDelimiter = (config.csv_delimiter as string) || ','
   const csvHeaders = (config.csv_headers as boolean) !== false
   const textTemplate = (config.text_template as string) || ''
@@ -2866,6 +2867,41 @@ function ConverterConfig({
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
     <div className="space-y-3">
+      {/* Input Format (ADR 0003) — what arrives; blank auto-detects from the
+          source's content type, so existing pipelines keep working untouched. */}
+      <StyledSelect
+        label="Input Format"
+        value={inputFormat}
+        onChange={(v) => setConfig({ ...config, input_format: v })}
+        options={[
+          { value: '', label: 'Auto-detect (from source)' },
+          { value: 'json', label: 'JSON' },
+          { value: 'ndjson', label: 'NDJSON (line-delimited JSON)' },
+          { value: 'csv', label: 'CSV' },
+          { value: 'tsv', label: 'TSV (Tab-separated)' },
+          { value: 'xml', label: 'XML' },
+          { value: 'yaml', label: 'YAML' },
+        ]}
+      />
+
+      {(inputFormat === 'csv' || inputFormat === 'tsv') && (
+        <StyledInput
+          label="Input delimiter (blank = detect)"
+          placeholder=","
+          value={(config.input_csv_delimiter as string) || ''}
+          onChange={(v) => setConfig({ ...config, input_csv_delimiter: v })}
+        />
+      )}
+
+      {inputFormat === 'xml' && (
+        <StyledInput
+          label="XML record path (required)"
+          placeholder="Orders.Order"
+          value={(config.input_xml_record_path as string) || ''}
+          onChange={(v) => setConfig({ ...config, input_xml_record_path: v })}
+        />
+      )}
+
       {/* Output Format */}
       <StyledSelect
         label="Output Format"

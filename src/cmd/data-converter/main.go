@@ -47,6 +47,16 @@ type ConverterNodeConfig struct {
 	Mappings     []FieldMapping `json:"mappings"`
 	DropUnmapped bool           `json:"drop_unmapped"`
 
+	// Input parsing (ADR 0003). Empty InputFormat = auto-detect from the
+	// envelope's ContentType, then a content sniff, then json.
+	InputFormat        string `json:"input_format"`          // "", "json", "ndjson", "csv", "tsv", "xml", "yaml"
+	InputCsvDelimiter  string `json:"input_csv_delimiter"`   // "" = sniff
+	InputCsvNoHeader   bool   `json:"input_csv_no_header"`   // treat the first row as data
+	InputCsvTrimSpace  bool   `json:"input_csv_trim_space"`  // trim whitespace in values
+	InputXmlRecordPath string `json:"input_xml_record_path"` // REQUIRED for xml, e.g. "Orders.Order"
+	InputXmlAttrPrefix string `json:"input_xml_attr_prefix"` // default "@"
+	InputXmlTextKey    string `json:"input_xml_text_key"`    // default "#text"
+
 	// Format conversion
 	OutputFormat string `json:"output_format"` // "", "csv", "tsv", "xml", "text", "yaml", "ndjson"
 	CsvDelimiter string `json:"csv_delimiter"`
@@ -312,7 +322,9 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	converterCfg := entry.Config
 	hasMapping := len(converterCfg.Mappings) > 0
 	hasFormat := converterCfg.OutputFormat != ""
-	if !hasMapping && !hasFormat {
+	// A non-JSON input is a conversion in itself (ADR 0003): "CSV in, nothing
+	// else configured" means "give me JSON", so it is not a no-op.
+	if !hasMapping && !hasFormat && !converterCfg.transcodes(origEnv) {
 		return nil
 	}
 
@@ -326,9 +338,11 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	payload := make([]byte, len(origEnv.Payload))
 	copy(payload, origEnv.Payload)
 
-	var data interface{}
-	if err := json.Unmarshal(payload, &data); err != nil {
-		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload is not valid JSON: " + err.Error(), Time: now()})
+	// Parse the payload in whatever format this node accepts (ADR 0003): json
+	// (default, unchanged code path), ndjson, csv/tsv, xml or yaml.
+	data, perr := parsePayload(converterCfg, origEnv)
+	if perr != nil {
+		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload parse failed: " + perr.Error(), Time: now()})
 		return nil
 	}
 
