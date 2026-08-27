@@ -92,13 +92,6 @@ func (a *PipelineOrchestratorAdapter) StopPipeline(ctx context.Context, conn *ma
 	return orch.StopConnection(ctx)
 }
 
-// GetPipelineStatus implements managementapi.PipelineOrchestrator.
-// It returns the status of each node's deployment.
-func (a *PipelineOrchestratorAdapter) GetPipelineStatus(ctx context.Context, conn *managementapi.Connection) (map[string]string, error) {
-	orch := New(conn, a.k8sClient, a.config, a.validator)
-	return orch.GetDeploymentStatus(ctx)
-}
-
 // NewOrchestratorFactory creates an OrchestratorFactory function for use with managementapi.Handler.
 // This factory creates adapters that reuse the same K8s client and config for all connections.
 //

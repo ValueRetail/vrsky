@@ -1,14 +1,15 @@
-// Package orchestrator manages the deployment and lifecycle of pipeline components
-// to a Kubernetes cluster. It transforms the graph-based connection model
-// (nodes and edges) into K8s Deployments and coordinates component startup/shutdown.
+// Package orchestrator validates a connection's graph-based model (nodes and
+// edges) into an execution order, and cleans up the per-connection Kubernetes
+// workers that older versions deployed.
+//
+// It does not deploy pipeline components. Standing platform services run every
+// node kind — see ADR 0004 and the Orchestrator doc comment.
 package orchestrator
 
 import (
 	"fmt"
 
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
-	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv2 "k8s.io/api/autoscaling/v2"
 )
 
 // ExecutionGraph represents a validated and topologically ordered pipeline.
@@ -38,90 +39,28 @@ type ExecutionGraph struct {
 	ConnectionID string
 }
 
-// TopicPair contains the input and output NATS topics for a node.
-type TopicPair struct {
-	// InputTopic is where this node reads from (empty for consumer)
-	InputTopic string
-
-	// OutputTopic is where this node writes to (empty for producer)
-	OutputTopic string
-}
-
-// DeploymentSpec wraps a K8s Deployment with orchestrator metadata.
-type DeploymentSpec struct {
-	// NodeID is the ID of the node this deployment represents
-	NodeID string
-
-	// NodeType is the type of node (consumer, filter, converter, producer)
-	NodeType string
-
-	// Deployment is the K8s Deployment specification
-	Deployment *appsv1.Deployment
-
-	// HPA is the HorizontalPodAutoscaler for this deployment so a single
-	// connection's worker scales out under load instead of being pinned to one
-	// replica (#135). nil only if autoscaling is explicitly disabled.
-	HPA *autoscalingv2.HorizontalPodAutoscaler
-}
-
-// NodeScaling is the optional per-node autoscaling override, read from a
-// top-level "scaling" key in the node config. Zero fields fall back to the
-// orchestrator defaults.
-type NodeScaling struct {
-	MinReplicas      int32 `json:"min_replicas"`
-	MaxReplicas      int32 `json:"max_replicas"`
-	TargetCPUPercent int32 `json:"target_cpu_percent"`
-}
-
 // OrchestratorConfig contains configuration for the orchestrator.
 type OrchestratorConfig struct {
-	// Namespace is the K8s namespace to deploy to
+	// Namespace is the K8s namespace per-connection resources live in
 	Namespace string
 
-	// ImageRegistry is the container registry (e.g., "gcr.io/vrsky")
-	ImageRegistry string
-
-	// ImageVersion is the image tag to use (e.g., "latest")
-	ImageVersion string
-
-	// NATSURLs is the NATS server URLs for components
+	// NATSURLs is the NATS server URL a connection is placed on (#19).
+	//
+	// NOTE: currently inert. Its only consumer was the NATS_URLS env stamped on
+	// per-connection worker pods, which are no longer deployed; the standing
+	// connector services dial the NATS_URL in their own env. Tracked in #209.
 	NATSURLs string
 
 	// NATSAccount is the NATS account for tenant isolation
 	NATSAccount string
-
-	// Default autoscaling bounds for per-connection worker deployments (#135).
-	// A node's config may override these via a "scaling" block.
-	DefaultMinReplicas int32
-	DefaultMaxReplicas int32
-	TargetCPUPercent   int32
-
-	// Large-payload offload store (claim-check, #187). When PayloadStoreBucket is
-	// set, per-connection workers are configured to offload over-threshold
-	// payloads to this object store instead of putting them on the message bus.
-	// Empty bucket = feature off (payloads stay inline). Non-secret settings are
-	// injected as plain env; the access/secret keys come from PayloadStoreSecretName
-	// — a K8s secret in the WORKER namespace with keys accesskey/secretkey (the
-	// same shape as the platform `minio-credentials` secret).
-	PayloadStoreProvider   string
-	PayloadStoreBucket     string
-	PayloadStoreEndpoint   string
-	PayloadStoreRegion     string
-	PayloadStoreSecretName string
-	PayloadInlineMaxBytes  string
 }
 
 // DefaultConfig returns the default orchestrator configuration.
 func DefaultConfig() *OrchestratorConfig {
 	return &OrchestratorConfig{
-		Namespace:          "vrsky",
-		ImageRegistry:      "gcr.io/vrsky",
-		ImageVersion:       "latest",
-		NATSURLs:           "nats://nats:4222",
-		NATSAccount:        "",
-		DefaultMinReplicas: 1,
-		DefaultMaxReplicas: 10,
-		TargetCPUPercent:   75,
+		Namespace:   "vrsky",
+		NATSURLs:    "nats://nats:4222",
+		NATSAccount: "",
 	}
 }
 
@@ -147,15 +86,12 @@ func (e *OrchestratorError) Error() string {
 
 // Common error codes
 const (
-	ErrCodeInvalidGraph      = "INVALID_GRAPH"
-	ErrCodeK8sDeployFailed   = "K8S_DEPLOY_FAILED"
-	ErrCodeK8sDeleteFailed   = "K8S_DELETE_FAILED"
-	ErrCodeK8sClientNil      = "K8S_CLIENT_NIL"
-	ErrCodeTopologicalSort   = "TOPOLOGICAL_SORT_FAILED"
-	ErrCodeImageNotFound     = "IMAGE_NOT_FOUND"
-	ErrCodeNodeNotFound      = "NODE_NOT_FOUND"
-	ErrCodeInvalidNodeType   = "INVALID_NODE_TYPE"
-	ErrCodePartialDeployment = "PARTIAL_DEPLOYMENT"
+	ErrCodeInvalidGraph    = "INVALID_GRAPH"
+	ErrCodeK8sDeleteFailed = "K8S_DELETE_FAILED"
+	ErrCodeK8sClientNil    = "K8S_CLIENT_NIL"
+	ErrCodeTopologicalSort = "TOPOLOGICAL_SORT_FAILED"
+	ErrCodeNodeNotFound    = "NODE_NOT_FOUND"
+	ErrCodeInvalidNodeType = "INVALID_NODE_TYPE"
 )
 
 // NewOrchestratorError creates a new OrchestratorError.
@@ -167,13 +103,11 @@ func NewOrchestratorError(code, message string, details map[string]string) *Orch
 	}
 }
 
-// GetContainerImage returns the container image for a given node type.
-// Uses the fixed registry pattern: {registry}/vrsky-{nodeType}:{version}
-func GetContainerImage(config *OrchestratorConfig, nodeType string) string {
-	return fmt.Sprintf("%s/vrsky-%s:%s", config.ImageRegistry, nodeType, config.ImageVersion)
-}
-
 // ValidNodeTypes contains the valid node types for pipeline components.
+//
+// Each maps to a standing service that claims the node by its config `type`:
+// consumer/producer to the SDK connector services, filter/converter to the
+// shared data-filter/data-converter.
 var ValidNodeTypes = map[string]bool{
 	"consumer":  true,
 	"filter":    true,
@@ -186,39 +120,7 @@ func IsValidNodeType(nodeType string) bool {
 	return ValidNodeTypes[nodeType]
 }
 
-// Resource limits and requests for K8s deployments
-// Note: Requests are conservative to allow scheduling on memory-constrained nodes.
-// Limits are higher to allow bursting when needed.
-const (
-	// CPURequest is the CPU request for each component (50m = 0.05 CPU)
-	CPURequest = "50m"
-
-	// MemoryRequest is the memory request for each component
-	MemoryRequest = "64Mi"
-
-	// CPULimit is the CPU limit for each component (500m = 0.5 CPU)
-	CPULimit = "500m"
-
-	// MemoryLimit is the memory limit for each component
-	MemoryLimit = "512Mi"
-
-	// HealthCheckPort is the port for health check endpoint
-	HealthCheckPort = 8080
-
-	// MetricsPort is the port for Prometheus metrics
-	MetricsPort = 9090
-
-	// HealthCheckPath is the path for liveness probe
-	HealthCheckPath = "/health"
-
-	// LivenessProbeInitialDelay is the initial delay before liveness probe starts
-	LivenessProbeInitialDelay = 5
-
-	// LivenessProbePeriod is the period between liveness probes
-	LivenessProbePeriod = 10
-)
-
-// K8s label keys
+// K8s label keys carried by per-connection resources.
 const (
 	LabelApp      = "app"
 	LabelPipeline = "pipeline"
@@ -228,34 +130,4 @@ const (
 
 	// LabelAppValue is the value for the "app" label
 	LabelAppValue = "vrsky"
-)
-
-// Environment variable names for component configuration
-const (
-	EnvTenantID          = "TENANT_ID"
-	EnvConnectionID      = "CONNECTION_ID"
-	EnvNodeID            = "NODE_ID"
-	EnvNodeType          = "NODE_TYPE"
-	EnvInputNATSSubject  = "INPUT_NATS_SUBJECT"
-	EnvOutputNATSSubject = "OUTPUT_NATS_SUBJECT"
-	EnvConfig            = "CONFIG"
-	EnvNATSURLs          = "NATS_URLS"
-	EnvNATSAccount       = "NATS_ACCOUNT"
-
-	// Large-payload offload (#187) — must match the keys the SDK reads in
-	// pkg/sdk/payloadstore.go.
-	EnvPayloadStoreProvider  = "PAYLOAD_STORE_PROVIDER"
-	EnvPayloadStoreBucket    = "PAYLOAD_STORE_BUCKET"
-	EnvPayloadStoreEndpoint  = "PAYLOAD_STORE_ENDPOINT"
-	EnvPayloadStoreRegion    = "PAYLOAD_STORE_REGION"
-	EnvPayloadStoreAccessKey = "PAYLOAD_STORE_ACCESS_KEY"
-	EnvPayloadStoreSecretKey = "PAYLOAD_STORE_SECRET_KEY"
-	EnvPayloadInlineMaxBytes = "PAYLOAD_INLINE_MAX_BYTES"
-)
-
-// Secret keys inside PayloadStoreSecretName (matches the platform
-// minio-credentials secret shape).
-const (
-	payloadSecretAccessKey = "accesskey"
-	payloadSecretSecretKey = "secretkey"
 )

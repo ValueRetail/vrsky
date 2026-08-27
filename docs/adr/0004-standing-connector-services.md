@@ -1,6 +1,6 @@
 # ADR 0004 — Standing connector services replace per-connection workers
 
-- **Status:** Accepted (2026-08-27)
+- **Status:** Accepted (2026-08-27), amended 2026-08-27 (decision 4)
 - **Date:** 2026-08-27
 - **Relates to:** #201 (transform fork), #205 (edge fork), #135 (worker HPAs),
   #19 (tenant NATS placement), `docs/scalability.md` ceiling 2
@@ -63,11 +63,35 @@ ingestion (directory watches, API polls, CDC cursors) and would double-ingest;
 producers with an HTTP surface hold the UI's SSE event buffer per pod and would
 show an operator half the events.
 
-**4. The Deployment-building machinery stays, unreached.**
-Dedicated pods for a noisy or isolation-sensitive connection is a plausible
-future feature, and this code is its starting point. It is documented as
-unreachable at its entry point, and `StopConnection` plus the orphan GC still
-use its label helpers to clean up pre-change workers.
+**4. The Deployment-building machinery is deleted.**
+It was initially retained, on the argument that dedicated pods for a noisy or
+isolation-sensitive connection is a plausible future feature and this code would
+be its starting point. That was reversed immediately: unreachable code with
+passing tests is precisely how the fork in this ADR survived unnoticed for
+months, and a reviewer cannot tell which half of `pkg/orchestrator` is live. The
+future feature, if it arrives, will want the *standing* services' claim model
+anyway — not the topic-wired one this code encodes.
+
+Deleted: `CreateDeploymentSpec` / `CreateAllDeploymentSpecs` and every builder
+below them, `deployComponent` / `applyHPA`, the whole `nats.go` topic scheme
+(`GetOutputTopic` and friends — the dead subjects themselves), `GetContainerImage`,
+`DeploymentSpec` / `NodeScaling` / `TopicPair`, the pod resource and env-name
+constants, and the `ImageRegistry` / `ImageVersion` / `PayloadStore*` / autoscaling
+fields on `OrchestratorConfig` along with the management-API env that fed them
+(`WORKER_IMAGE_*`, `PAYLOAD_STORE_*` — the standing services carry their own).
+`GetPipelineStatus` went too, from the adapter and from
+`managementapi.PipelineOrchestrator`: it derived per-node status from the worker
+Deployments, had no production caller, and would now always answer `{}`.
+
+What survives is the part with a live purpose: graph validation, the label and
+name helpers, connection teardown, and the orphan GC.
+
+One piece of behaviour had to be rescued rather than deleted. `CreateDeploymentSpec`
+called `IsValidNodeType`, and once the builder stopped deploying, that check was
+the *only* thing rejecting an unrecognised node type — a type with no standing
+service would otherwise start "successfully" and silently do nothing. It now lives
+in `BuildExecutionGraph`, which is a better home: validation happens as the graph
+is built, before the handler marks the connection running.
 
 ## Consequences
 
@@ -120,3 +144,8 @@ second correct implementation is still a fork.
 for a noisy or regulated tenant. But it should be an opt-in on top of a runtime
 that works, not the default path for every connection — and it was never
 delivering that isolation, because the pods did no work.
+
+**Keep the machinery in place for that future feature** (the original decision 4,
+reversed the same day — see above). Retaining dead code to seed a hypothetical
+feature is what let this fork persist; git history preserves it just as well, and
+without the ambiguity about what runs.

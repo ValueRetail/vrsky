@@ -83,4 +83,4 @@ done
 echo
 echo "Done. Restart any already-deployed pods to pick up the imported images, e.g.:"
 echo "  kubectl rollout restart deploy/vrsky-management-api -n vrsky-platform"
-echo "  kubectl rollout restart deploy/vrsky-filter         -n vrsky-platform"
+echo "  kubectl rollout restart deploy/vrsky-data-filter     -n vrsky-platform"

@@ -39,6 +39,19 @@ func BuildExecutionGraph(conn *managementapi.Connection, validator *managementap
 		if node == nil {
 			continue
 		}
+
+		// An unrecognised node type has no standing service that would claim it,
+		// so the connection would start "successfully" and then do nothing.
+		// Reject it here, while the graph is being built and before the handler
+		// marks the connection running. (This check used to sit in the
+		// per-connection deployment builder — the only validation that machinery
+		// still performed once it stopped deploying, retired in ADR 0004.)
+		if !IsValidNodeType(node.Type) {
+			return nil, NewOrchestratorError(ErrCodeInvalidNodeType,
+				fmt.Sprintf("invalid node type: %s", node.Type),
+				map[string]string{"nodeID": node.ID, "nodeType": node.Type})
+		}
+
 		nodeMap[node.ID] = node
 
 		switch node.Type {

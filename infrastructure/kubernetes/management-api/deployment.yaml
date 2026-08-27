@@ -86,32 +86,17 @@ spec:
         # connection deploys a Deployment + HPA per node (enables #135
         # worker autoscaling). Workers land in this namespace and connect to
         # the platform NATS above (WORKER_NATS_URL unset → MGMT_API_NATS_URL).
-        # Worker images are gcr.io/vrsky/vrsky-{consumer,filter,converter,producer}:latest
-        # (build/import with infrastructure/scripts/k3d-load-images.sh workers).
+        #
+        # ORCHESTRATOR_MODE=k8s no longer deploys anything: it validates each
+        # connection's graph on start and cleans up per-connection workers left
+        # by versions before #201/#205 (ADR 0004). Node kinds are run by the
+        # standing connector and transform services, which carry their own
+        # PAYLOAD_STORE_* env — see infrastructure/azure/deploy-connectors-azure.sh.
+        # That is why no PAYLOAD_STORE_* / WORKER_IMAGE_* settings appear here.
         - name: ORCHESTRATOR_MODE
           value: "k8s"
         - name: ORCHESTRATOR_NAMESPACE
           value: "vrsky-platform"
-        # Large-payload offload (#187): the management-api passes these through to
-        # every per-connection worker so payloads over PAYLOAD_INLINE_MAX_BYTES are
-        # spilled to MinIO (claim-check) instead of the NATS message bus. Setting
-        # PAYLOAD_STORE_BUCKET is what turns the feature on; leave it empty to keep
-        # payloads inline. Prereq: the secret named in PAYLOAD_STORE_SECRET_NAME
-        # (keys accesskey/secretkey) must exist in ORCHESTRATOR_NAMESPACE — copy it
-        # from vrsky-storage:
-        #   kubectl get secret minio-credentials -n vrsky-storage -o yaml \
-        #     | sed 's/namespace: vrsky-storage/namespace: vrsky-platform/' \
-        #     | kubectl apply -n vrsky-platform -f -
-        - name: PAYLOAD_STORE_PROVIDER
-          value: "s3"
-        - name: PAYLOAD_STORE_BUCKET
-          value: "vrsky-objects"
-        - name: PAYLOAD_STORE_ENDPOINT
-          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
-        - name: PAYLOAD_STORE_REGION
-          value: "us-east-1"
-        - name: PAYLOAD_STORE_SECRET_NAME
-          value: "minio-credentials"
         - name: MGMT_API_LISTEN
           value: ":3000"
         - name: MGMT_API_METRICS_LISTEN

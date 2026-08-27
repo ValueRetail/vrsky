@@ -3,31 +3,25 @@ package managementapi
 
 import "context"
 
-// PipelineOrchestrator defines the interface for deploying and managing
-// pipeline components on Kubernetes. This interface allows the handler
-// to use the orchestrator package without creating an import cycle.
+// PipelineOrchestrator defines the interface the handler uses to prepare and
+// tear down a connection's Kubernetes state, without importing the orchestrator
+// package (which would create an import cycle).
 //
-// Implementations must:
-// - Deploy K8s Deployments for each node in a graph-based connection
-// - Clean up all K8s resources when stopping a connection
-// - Handle partial failures according to project decisions (leave partial deployments)
+// Since #201/#205 there is no per-connection deployment: standing platform
+// services run every node kind, activated by the connection start/stop commands
+// the handler publishes. Implementations validate the graph on start and clean
+// up whatever cluster state a connection still owns on stop.
 type PipelineOrchestrator interface {
-	// StartPipeline deploys all components for a connection to Kubernetes.
-	// It creates K8s Deployments for each node in the execution order.
+	// StartPipeline validates a connection's graph and prepares it to run.
 	//
-	// Returns an error if deployment fails for any component.
-	// Previously deployed components are left running (partial deployment).
+	// Returns an error if the connection's graph is invalid, in which case the
+	// handler must not mark it running.
 	StartPipeline(ctx context.Context, conn *Connection) error
 
-	// StopPipeline removes all K8s resources for a connection.
-	// It deletes all Deployments associated with the connection ID.
+	// StopPipeline removes any K8s resources still associated with a connection.
 	//
 	// Returns an error if cleanup fails.
 	StopPipeline(ctx context.Context, conn *Connection) error
-
-	// GetPipelineStatus returns the status of each node's deployment.
-	// Returns a map of nodeID -> status (running, starting, stopped).
-	GetPipelineStatus(ctx context.Context, conn *Connection) (map[string]string, error)
 }
 
 // OrchestratorFactory creates PipelineOrchestrator instances.
