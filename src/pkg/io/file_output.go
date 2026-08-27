@@ -239,12 +239,22 @@ func (f *FileProducer) Write(ctx context.Context, env *envelope.Envelope) error 
 	if err != nil {
 		return fmt.Errorf("resolve absolute path: %w", err)
 	}
-	// Resolve symlinks in the target path. The file may not exist yet, so
-	// ignore "not exist" errors and fall back to the absolute path.
+	// Resolve symlinks in the target path. The file usually does NOT exist yet,
+	// and falling back to the unresolved absolute path is not good enough: the
+	// output directory below IS fully resolved, so comparing the two whenever the
+	// directory contains a symlinked component (/var -> /private/var on macOS, a
+	// mount alias such as /data -> /mnt/data) makes filepath.Rel report a bogus
+	// "path traversal" and rejects every legitimate write. Resolve the parent —
+	// which does exist, Start() created it — and re-attach the base name so both
+	// sides of the comparison are resolved.
 	resolvedAbsPath := absPath
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		resolvedAbsPath = resolved
-	} else if !os.IsNotExist(err) {
+	} else if os.IsNotExist(err) {
+		if resolvedDir, derr := filepath.EvalSymlinks(filepath.Dir(absPath)); derr == nil {
+			resolvedAbsPath = filepath.Join(resolvedDir, filepath.Base(absPath))
+		}
+	} else {
 		return fmt.Errorf("resolve symlinks for target path: %w", err)
 	}
 

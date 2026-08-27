@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -177,14 +178,7 @@ func (p *fileProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 	}
 
 	var transient error
-	for _, config := range configs {
-		if config.PredIsConsumer && lastProcessedBy != "" {
-			continue
-		}
-		if !config.PredIsConsumer && config.PredecessorID != "" && lastProcessedBy != config.PredecessorID {
-			continue
-		}
-
+	for _, config := range p.eligibleConfigs(configs, lastProcessedBy) {
 		outputPath := config.OutputPath
 		if outputPath == "" {
 			outputPath = p.defaultOutputDir
@@ -193,7 +187,7 @@ func (p *fileProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 			outputPath = filepath.Join(outputPath, config.FolderName)
 		}
 
-		if werr := p.writeFile(env, outputPath, config.FilePattern); werr != nil {
+		if werr := p.writeFile(env, outputPath, config.FilePattern, nil); werr != nil {
 			if errors.Is(werr, errPathNotAllowed) {
 				// Misconfiguration — don't burn the retry budget on it.
 				p.logger.Error("dropping: output path not allowed", "error", werr, "envelope_id", env.ID, "path", outputPath)
@@ -327,7 +321,79 @@ func (p *fileProducer) cacheConfigs(connectionID string, configs []*ConnectionCo
 }
 
 // writeFile writes the envelope payload to a file under outputPath.
-func (p *fileProducer) writeFile(env *envelope.Envelope, outputPath, filePattern string) error {
+// DeliverStream writes a large, offloaded payload straight from the pipeline's
+// object stream to disk, so a multi-GB file is written with a bounded buffer
+// instead of being held in memory (ADR 0001).
+//
+// A stream reads once, so writing the same payload to several configured output
+// directories is declined (sdk.ErrStreamUnsupported) and the SDK falls back to
+// buffered delivery — behaviour identical to before.
+func (p *fileProducer) DeliverStream(ctx context.Context, env *envelope.Envelope, body io.Reader) error {
+	connectionID := env.IntegrationID
+	if connectionID == "" {
+		return sdk.Permanent(fmt.Errorf("envelope %s has no integration_id; cannot route to a file config", env.ID))
+	}
+	configs, err := p.getConnectionConfigs(ctx, connectionID)
+	if err != nil {
+		return sdk.Retriable(fmt.Errorf("get connection config: %w", err))
+	}
+
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
+		}
+	}
+
+	eligible := p.eligibleConfigs(configs, lastProcessedBy)
+	if len(eligible) == 0 {
+		return nil
+	}
+	if len(eligible) > 1 {
+		return sdk.ErrStreamUnsupported
+	}
+
+	config := eligible[0]
+	outputPath := config.OutputPath
+	if outputPath == "" {
+		outputPath = p.defaultOutputDir
+	}
+	if config.FolderName != "" {
+		outputPath = filepath.Join(outputPath, config.FolderName)
+	}
+
+	if werr := p.writeFile(env, outputPath, config.FilePattern, body); werr != nil {
+		if errors.Is(werr, errPathNotAllowed) {
+			// Misconfiguration — retrying can't fix it.
+			p.logger.Error("dropping: output path not allowed", "error", werr, "envelope_id", env.ID, "path", outputPath)
+			return nil
+		}
+		return sdk.Retriable(werr)
+	}
+	p.logger.Info("file streamed successfully",
+		"envelope_id", env.ID, "connection_id", connectionID, "path", outputPath, "size", env.PayloadSize)
+	return nil
+}
+
+// eligibleConfigs drops the output configs whose predecessor predicate doesn't
+// match this envelope. Shared by the buffered and streaming paths.
+func (p *fileProducer) eligibleConfigs(configs []*ConnectionConfig, lastProcessedBy string) []*ConnectionConfig {
+	out := make([]*ConnectionConfig, 0, len(configs))
+	for _, config := range configs {
+		if config.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !config.PredIsConsumer && config.PredecessorID != "" && lastProcessedBy != config.PredecessorID {
+			continue
+		}
+		out = append(out, config)
+	}
+	return out
+}
+
+// writeFile writes the envelope to disk. When body is non-nil the contents are
+// streamed from it and env.Payload is ignored.
+func (p *fileProducer) writeFile(env *envelope.Envelope, outputPath, filePattern string, body io.Reader) error {
 	// Refuse to write outside a mounted root (would silently vanish into the
 	// container FS — looks like success in the logs otherwise).
 	if len(p.allowedRoots) > 0 && !isPathAllowed(outputPath, p.allowedRoots) {
@@ -354,14 +420,40 @@ func (p *fileProducer) writeFile(env *envelope.Envelope, outputPath, filePattern
 		return fmt.Errorf("path traversal detected")
 	}
 
-	if err := os.WriteFile(absPath, env.Payload, 0o644); err != nil {
+	size := int64(len(env.Payload))
+	if body != nil {
+		size = env.PayloadSize
+		if err := writeStream(absPath, body); err != nil {
+			return err
+		}
+	} else if err := os.WriteFile(absPath, env.Payload, 0o644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 
 	chownToHostUser(absPath)
 	chownToHostUser(absOutputPath)
 
-	p.logger.Debug("wrote file", "path", absPath, "size", len(env.Payload))
+	p.logger.Debug("wrote file", "path", absPath, "size", size)
+	return nil
+}
+
+// writeStream copies body to path. A failed copy removes the partial file: a
+// truncated file left on disk looks complete to whatever watches that directory,
+// and the redelivery will write it again anyway.
+func writeStream(path string, body io.Reader) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("create file: %w", err)
+	}
+	if _, err := io.Copy(f, body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return fmt.Errorf("write file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("close file: %w", err)
+	}
 	return nil
 }
 
@@ -508,20 +600,42 @@ func isPathAllowed(path string, allowedRoots []string) bool {
 	if err != nil {
 		return false
 	}
-	resolved, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		resolved = absPath
-	}
+	// Resolve BOTH sides. Comparing a symlink-resolved candidate against an
+	// unresolved root fails whenever the root contains a symlinked component
+	// (/var -> /private/var on macOS, or a mount alias such as /data ->
+	// /mnt/data), which silently rejected every legitimate write. Resolving both
+	// keeps the escape check intact — a real traversal still resolves outside the
+	// root — while making containment correct.
+	resolved := resolveExisting(absPath)
 	for _, root := range allowedRoots {
 		absRoot, err := filepath.Abs(root)
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(resolved, absRoot+"/") || resolved == absRoot {
+		resolvedRoot := resolveExisting(absRoot)
+		// The separator matters: without it "/data-evil" would pass as "/data".
+		if resolved == resolvedRoot || strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveExisting resolves symlinks in path, tolerating a path that does not
+// exist yet — the normal case here, since the output directory is checked before
+// it is created. It resolves the deepest existing ancestor and re-attaches the
+// remainder, so a not-yet-created directory under a symlinked root still
+// compares correctly against a resolved root.
+func resolveExisting(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return resolved
+	}
+	parent := filepath.Dir(clean)
+	if parent == clean {
+		return clean // reached the root; nothing further to resolve
+	}
+	return filepath.Join(resolveExisting(parent), filepath.Base(clean))
 }
 
 type fileEntry struct {
@@ -689,4 +803,20 @@ func getHostOwner() (int, int) {
 		}
 	}
 	return -1, -1
+}
+
+// ServesConnection reports whether this connection has a file destination so
+// the SDK can ack foreign connections before rehydrating large payloads
+// (sdk.ConnectionScoped). Unlike the other producers, Deliver treats a config
+// lookup failure as RETRIABLE — so a failed lookup answers true here, letting
+// Deliver run and keep that retry semantic.
+func (p *fileProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	configs, err := p.getConnectionConfigs(ctx, connectionID)
+	if err != nil {
+		return true
+	}
+	return len(configs) > 0
 }

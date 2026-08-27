@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -100,6 +101,41 @@ func (s *s3Store) Get(ctx context.Context, key string) ([]byte, string, error) {
 	return body, aws.ToString(resp.ContentType), nil
 }
 
+// GetStream returns the object body as a stream. The caller must Close it. The
+// underlying HTTP response body is streamed, so a multi-GB object is never
+// buffered in memory.
+func (s *s3Store) GetStream(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("s3 get %q: %w", key, err)
+	}
+	return resp.Body, aws.ToString(resp.ContentType), nil
+}
+
+// PutStream uploads from body using the SDK's multipart manager, which streams
+// the reader in parts (default 5 MiB, up to 10k parts → multi-TB objects) so
+// nothing is buffered whole in memory. sseInput applies the same SSE settings
+// as Put.
+func (s *s3Store) PutStream(ctx context.Context, key string, body io.Reader, contentType string) error {
+	in := &s3.PutObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+		Body:   body,
+	}
+	if contentType != "" {
+		in.ContentType = aws.String(contentType)
+	}
+	s.applySSE(in)
+	uploader := manager.NewUploader(s.client)
+	if _, err := uploader.Upload(ctx, in); err != nil {
+		return fmt.Errorf("s3 put-stream %q: %w", key, err)
+	}
+	return nil
+}
+
 func (s *s3Store) Put(ctx context.Context, key string, body []byte, contentType string) error {
 	in := &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -109,6 +145,16 @@ func (s *s3Store) Put(ctx context.Context, key string, body []byte, contentType 
 	if contentType != "" {
 		in.ContentType = aws.String(contentType)
 	}
+	s.applySSE(in)
+	if _, err := s.client.PutObject(ctx, in); err != nil {
+		return fmt.Errorf("s3 put %q: %w", key, err)
+	}
+	return nil
+}
+
+// applySSE sets the server-side-encryption fields on a put/upload input from the
+// store's SSE config. Shared by Put and PutStream.
+func (s *s3Store) applySSE(in *s3.PutObjectInput) {
 	switch s.sse.Mode {
 	case "sse-s3":
 		in.ServerSideEncryption = s3types.ServerSideEncryptionAes256
@@ -118,10 +164,6 @@ func (s *s3Store) Put(ctx context.Context, key string, body []byte, contentType 
 			in.SSEKMSKeyId = aws.String(s.sse.KMSKeyID)
 		}
 	}
-	if _, err := s.client.PutObject(ctx, in); err != nil {
-		return fmt.Errorf("s3 put %q: %w", key, err)
-	}
-	return nil
 }
 
 func (s *s3Store) Delete(ctx context.Context, key string) error {

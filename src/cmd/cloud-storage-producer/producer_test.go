@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +28,17 @@ func (f *fakeStore) List(context.Context, string) ([]objectstore.Object, error) 
 func (f *fakeStore) Get(context.Context, string) ([]byte, string, error)        { return nil, "", nil }
 func (f *fakeStore) Delete(context.Context, string) error                       { return nil }
 func (f *fakeStore) Copy(context.Context, string, string) error                 { return nil }
+func (f *fakeStore) GetStream(context.Context, string) (io.ReadCloser, string, error) {
+	return io.NopCloser(bytes.NewReader(nil)), "", nil
+}
+
+func (f *fakeStore) PutStream(ctx context.Context, key string, body io.Reader, ct string) error {
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return f.Put(ctx, key, b, ct)
+}
 
 func (f *fakeStore) Put(_ context.Context, key string, body []byte, ct string) error {
 	f.mu.Lock()

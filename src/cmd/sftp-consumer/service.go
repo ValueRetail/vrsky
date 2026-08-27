@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path"
 	"sync"
@@ -34,6 +36,13 @@ type sftpConsumer struct {
 	nc      *nats.Conn
 	publish sdk.PublishFunc
 	logger  *slog.Logger
+
+	// publishStream is non-nil only when the SDK selected the streaming path
+	// (ADR 0001) — i.e. this worker has a payload store. inlineMax is the size
+	// above which the SDK offloads anyway, so it marks where buffering a remote
+	// file into memory stops paying off.
+	publishStream sdk.PublishStreamFunc
+	inlineMax     int
 
 	// dial opens an SFTP connection. Defaulted to realDial in Configure; tests
 	// inject a fake so the poller runs without a live server.
@@ -86,6 +95,7 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.db = res.DB
 	s.nc = res.NATS
 	s.logger = res.Logger
+	s.inlineMax = res.InlineMaxBytes()
 	s.active = make(map[string]context.CancelFunc)
 	if s.dial == nil {
 		s.dial = realDial
@@ -94,6 +104,15 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
+}
+
+// RunStream is Run with large-file streaming enabled (ADR 0001). The SDK calls
+// it instead of Run when a payload store is configured; remote files over the
+// inline threshold are then streamed off the SFTP session straight into the
+// pipeline instead of being read into memory whole.
+func (s *sftpConsumer) RunStream(ctx context.Context, publish sdk.PublishFunc, publishStream sdk.PublishStreamFunc) error {
+	s.publishStream = publishStream
+	return s.Run(ctx, publish)
 }
 
 // Run subscribes to the connection command subjects and blocks until ctx is
@@ -266,18 +285,13 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		}
 
 		remotePath := joinRemote(cfg.RemoteDir, f.Name)
-		data, err := conn.Read(remotePath)
+		streamed, err := s.fetchAndPublish(ctx, conn, connID, tenantID, f, remotePath)
 		if err != nil {
-			logger.Error("SFTP read failed", "file", f.Name, "error", err)
-			continue
-		}
-
-		if err := s.publishFile(ctx, connID, tenantID, f.Name, data); err != nil {
-			logger.Error("publish failed", "file", f.Name, "error", err)
+			logger.Error("SFTP ingest failed", "file", f.Name, "error", err)
 			continue // leave the file in place; retried next cycle
 		}
 		processed[f.Name] = true
-		logger.Info("SFTP file ingested", "file", f.Name, "size", len(data))
+		logger.Info("SFTP file ingested", "file", f.Name, "size", f.Size, "streamed", streamed)
 
 		if err := s.afterAction(conn, cfg, f.Name, remotePath); err != nil {
 			logger.Warn("after-action failed", "file", f.Name, "action", cfg.AfterAction, "error", err)
@@ -330,6 +344,55 @@ func (s *sftpConsumer) afterAction(conn sftpConn, cfg *SFTPConfig, name, remoteP
 		return nil
 	}
 }
+
+// fetchAndPublish reads one remote file and publishes it, streaming it off the
+// SFTP session when the worker supports that and the file is over the inline
+// threshold — so a multi-GB file is never held in memory. The size comes from
+// the directory listing, so no probing read is needed. Reports whether the
+// streaming path was used.
+func (s *sftpConsumer) fetchAndPublish(ctx context.Context, conn sftpConn, connID, tenantID string, f remoteFile, remotePath string) (bool, error) {
+	if s.publishStream == nil || s.inlineMax <= 0 || f.Size <= int64(s.inlineMax) {
+		data, err := conn.Read(remotePath)
+		if err != nil {
+			return false, fmt.Errorf("read: %w", err)
+		}
+		if err := s.publishFile(ctx, connID, tenantID, f.Name, data); err != nil {
+			return false, fmt.Errorf("publish: %w", err)
+		}
+		return false, nil
+	}
+
+	rc, err := conn.Open(remotePath)
+	if err != nil {
+		return false, fmt.Errorf("open: %w", err)
+	}
+	defer rc.Close()
+
+	// Sniff the content type from a small head, then stream head + remainder so
+	// nothing is read twice and nothing is buffered.
+	head := make([]byte, contentSniffBytes)
+	n, rerr := io.ReadFull(rc, head)
+	if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+		return false, fmt.Errorf("read: %w", rerr)
+	}
+	head = head[:n]
+
+	env := envelope.New()
+	env.TenantID = tenantID
+	env.IntegrationID = connID
+	env.ContentType = detectContentType(f.Name, head)
+	env.Source = "sftp:" + f.Name
+	env.StepHistory = []string{"sftp-consumer"}
+	env.Metadata = map[string]interface{}{"filename": f.Name}
+	if err := s.publishStream(ctx, env, io.MultiReader(bytes.NewReader(head), rc)); err != nil {
+		return true, fmt.Errorf("publish stream: %w", err)
+	}
+	return true, nil
+}
+
+// contentSniffBytes is how much of a streamed file is read up front to detect
+// its content type — enough for detectContentType, small enough to be free.
+const contentSniffBytes = 512
 
 func (s *sftpConsumer) publishFile(ctx context.Context, connID, tenantID, filename string, data []byte) error {
 	env := envelope.New()

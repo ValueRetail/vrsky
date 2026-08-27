@@ -211,3 +211,15 @@ func (p *frontSystemsProducer) getConfig(ctx context.Context, connectionID, tena
 	}
 	return nil, errors.New("no front_systems producer node found")
 }
+
+
+// ServesConnection reports whether this connection has a Front Systems destination —
+// mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
+// ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
+func (p *frontSystemsProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	_, err := p.getConfig(ctx, connectionID, tenantID)
+	return err == nil
+}

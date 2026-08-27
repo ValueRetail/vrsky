@@ -234,3 +234,15 @@ func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenant
 	}
 	return nil, errors.New("no sitoo producer node found")
 }
+
+
+// ServesConnection reports whether this connection has a Sitoo destination —
+// mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
+// ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
+func (p *sitooProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	_, err := p.getSitooConfig(ctx, connectionID, tenantID)
+	return err == nil
+}

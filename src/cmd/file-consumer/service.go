@@ -1,18 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -28,6 +32,14 @@ type fileConsumer struct {
 	nc      *nats.Conn
 	publish sdk.PublishFunc // injected by the runner; the one data-emit path
 	logger  *slog.Logger
+
+	// publishStream is non-nil only when the SDK selected the streaming path
+	// (ADR 0001) — i.e. this worker has a payload store. When it is available a
+	// watched file is streamed from disk rather than read into memory, which is
+	// what lifts the maxWatchFileBytes ceiling. inlineMax is the size above which
+	// the SDK offloads anyway, so it marks where buffering stops paying off.
+	publishStream sdk.PublishStreamFunc
+	inlineMax     int
 
 	baseDir  string // FILE_CONSUMER_BASE_DIR; default watch root when a node has no path
 	hostHome string // HOST_HOME; used to expand a leading ~ in node paths
@@ -45,7 +57,70 @@ type fileConsumer struct {
 
 // maxWatchFileBytes caps the size of a watched file the poller will read into
 // memory before publishing (mirrors the 32 MiB cap on the HTTP upload path).
+// It applies only to the buffered path: when the worker can stream (ADR 0001)
+// a file over the inline threshold is sent straight from disk and this ceiling
+// does not apply at all.
 const maxWatchFileBytes = 32 << 20
+
+// ingestWatchedFile publishes one newly-detected file, streaming it from disk
+// when the worker supports that and the file is over the inline threshold —
+// which is what allows files larger than maxWatchFileBytes to be ingested at
+// all. Returns the envelope, the file size, and whether it was streamed.
+func (s *fileConsumer) ingestWatchedFile(ctx context.Context, ac *ActiveConnection, name, path string) (*envelope.Envelope, int64, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("stat: %w", err)
+	}
+	size := info.Size()
+
+	// Small enough to buffer, or no streaming available: existing behaviour,
+	// including the size ceiling that protects worker memory.
+	if s.publishStream == nil || s.inlineMax <= 0 || size <= int64(s.inlineMax) {
+		if size > maxWatchFileBytes {
+			return nil, size, false, fmt.Errorf("file exceeds the %d-byte limit and this worker cannot stream (no payload store configured)", int64(maxWatchFileBytes))
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil, size, false, rerr
+		}
+		env, perr := s.ingestFile(ctx, ac, name, data, "watch:"+name)
+		return env, size, false, perr
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, size, false, fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	// Sniff the content type from a small head, then hand the whole file over as
+	// head + remainder so nothing is read twice and nothing is buffered.
+	head := make([]byte, contentSniffBytes)
+	n, rerr := io.ReadFull(f, head)
+	if rerr != nil && !errors.Is(rerr, io.EOF) && !errors.Is(rerr, io.ErrUnexpectedEOF) {
+		return nil, size, false, fmt.Errorf("read: %w", rerr)
+	}
+	head = head[:n]
+
+	env := &envelope.Envelope{
+		ID:            uuid.New().String(),
+		TenantID:      ac.TenantID,
+		IntegrationID: ac.ConnectionID,
+		ContentType:   detectContentType(name, head),
+		Source:        "watch:" + name,
+		StepHistory:   []string{"file-consumer"},
+		CreatedAt:     time.Now().UTC(),
+		Metadata:      map[string]interface{}{"filename": name},
+	}
+	if err := s.publishStream(ctx, env, io.MultiReader(bytes.NewReader(head), f)); err != nil {
+		return nil, size, true, err
+	}
+	return env, size, true, nil
+}
+
+// contentSniffBytes is how much of a streamed file is read up front to detect
+// its content type — enough for detectContentType, small enough to be free.
+const contentSniffBytes = 512
 
 // FileEvent represents an activity event for the UI
 type FileEvent struct {
@@ -74,6 +149,7 @@ func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.db = res.DB
 	s.nc = res.NATS
 	s.logger = res.Logger
+	s.inlineMax = res.InlineMaxBytes()
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.eventSubs = make(map[string][]chan FileEvent)
 	s.baseDir = getEnv("FILE_CONSUMER_BASE_DIR", "/data/input")
@@ -89,6 +165,15 @@ func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 
 // Run subscribes to the connection command subjects and blocks until the runner
 // cancels ctx. Per-connection directory watching is driven from the handlers.
+// RunStream is Run with large-file streaming enabled (ADR 0001). The SDK calls
+// it instead of Run when a payload store is configured; watched files above the
+// inline threshold are then streamed from disk into the pipeline, so size is
+// bounded by the copy buffer rather than by worker memory.
+func (s *fileConsumer) RunStream(ctx context.Context, publish sdk.PublishFunc, publishStream sdk.PublishStreamFunc) error {
+	s.publishStream = publishStream
+	return s.Run(ctx, publish)
+}
+
 func (s *fileConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.publish = publish
 	s.logger.Info("Starting File Consumer Service")
@@ -278,35 +363,18 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 				}
 				logger.Info("File added", "file", name)
 				path := filepath.Join(ac.WatchDir, name)
-				if info, statErr := os.Stat(path); statErr == nil && info.Size() > maxWatchFileBytes {
-					logger.Error("Skipping oversized file", "file", name, "size", info.Size(), "limit", maxWatchFileBytes)
+				env, size, streamed, ingErr := s.ingestWatchedFile(ctx, ac, name, path)
+				if ingErr != nil {
+					logger.Error("Failed to ingest detected file", "file", name, "error", ingErr)
 					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "error", Filename: name, Size: info.Size(),
-						Message: "file exceeds size limit", Time: time.Now().UTC().Format(time.RFC3339),
-					})
-					continue
-				}
-				data, readErr := os.ReadFile(path)
-				if readErr != nil {
-					logger.Error("Failed to read detected file", "file", name, "error", readErr)
-					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "error", Filename: name, Message: readErr.Error(),
+						Type: "error", Filename: name, Size: size, Message: ingErr.Error(),
 						Time: time.Now().UTC().Format(time.RFC3339),
 					})
 					continue
 				}
-				env, pubErr := s.ingestFile(ctx, ac, name, data, "watch:"+name)
-				if pubErr != nil {
-					logger.Error("Failed to publish detected file", "file", name, "error", pubErr)
-					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "error", Filename: name, Message: pubErr.Error(),
-						Time: time.Now().UTC().Format(time.RFC3339),
-					})
-					continue
-				}
-				logger.Info("File ingested from watch dir", "file", name, "size", len(data), "envelope_id", env.ID)
+				logger.Info("File ingested from watch dir", "file", name, "size", size, "streamed", streamed, "envelope_id", env.ID)
 				s.emitEvent(ac.ConnectionID, FileEvent{
-					Type: "added", Filename: name, Size: int64(len(data)),
+					Type: "added", Filename: name, Size: size,
 					Time: time.Now().UTC().Format(time.RFC3339),
 				})
 			}

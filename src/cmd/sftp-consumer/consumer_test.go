@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +35,12 @@ func (f *fakeSFTP) Read(filePath string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.files[path_base(filePath)], nil
+}
+
+func (f *fakeSFTP) Open(filePath string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return io.NopCloser(bytes.NewReader(f.files[path_base(filePath)])), nil
 }
 
 func (f *fakeSFTP) Remove(filePath string) error {

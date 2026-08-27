@@ -21,8 +21,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/ValueRetail/vrsky/pkg/claimcheck"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 )
 
 // Per-connection filter throughput counters. Exposed on the worker's /metrics
@@ -90,6 +92,13 @@ type FilterService struct {
 	eventSubsMu    sync.RWMutex
 	recentEvents   map[string][]FilterEvent
 	recentEventsMu sync.RWMutex
+
+	// Claim-check (ADR 0002): this service is NOT on the SDK runner, so it must
+	// rehydrate offloaded payloads on entry and offload large outputs itself.
+	// spill is nil when PAYLOAD_STORE_* is unconfigured.
+	spill        objectstore.ObjectStore
+	inlineMax    int
+	rehydrateMax int64
 
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
@@ -169,6 +178,17 @@ func main() {
 		recentEvents:      make(map[string][]FilterEvent),
 		stopCh:            make(chan struct{}),
 		stoppedCh:         make(chan struct{}),
+		inlineMax:         claimcheck.InlineMaxFromEnv(logger),
+		rehydrateMax:      claimcheck.RehydrateMaxFromEnv(logger),
+	}
+	spill, err := claimcheck.OpenStoreFromEnv(context.Background(), logger)
+	if err != nil {
+		logger.Error("Failed to open payload offload store", "error", err)
+		os.Exit(1)
+	}
+	service.spill = spill
+	if spill == nil {
+		logger.Warn("no payload offload store configured (PAYLOAD_STORE_BUCKET unset); offloaded envelopes will be NAKed and large outputs cannot be offloaded")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -200,10 +220,11 @@ func (s *FilterService) Start(ctx context.Context) error {
 		DurableName: "data-filter",
 		Logger:      s.logger,
 	}, func(ctx context.Context, msg *nats.Msg) error {
-		// Filter failures are deterministic; ack always (errors emit via
-		// emitEvent and surface in the UI).
-		s.handleMessage(ctx, msg)
-		return nil
+		// Transform-logic failures are deterministic and ack (errors emit via
+		// emitEvent and surface in the UI). Infrastructure failures — rehydrate,
+		// offload, publish — return an error so the message is NAKed and retried
+		// rather than silently lost (ADR 0002 phase A).
+		return s.handleMessage(ctx, msg)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe via JetStream: %w", err)
@@ -223,10 +244,24 @@ func (s *FilterService) Stop() {
 	<-s.stoppedCh
 }
 
-func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) {
+func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) error {
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Data, &env); err != nil {
-		return
+		return nil // malformed envelope will never parse — ack, don't burn retries
+	}
+
+	// Rehydrate an offloaded payload (claim-check) before filtering — EXCEPT
+	// when it is over the rehydrate cap and a store is available: then the ref
+	// stays set and each entry takes the record-streaming path instead of
+	// buffering (ADR 0002 phase B). Other rehydrate errors are infrastructure,
+	// not filter logic: NAK so the message is retried (transient store blip) or
+	// lands in the DLQ instead of being silently dropped as invalid JSON.
+	overCap := env.PayloadRef != "" && s.rehydrateMax > 0 && env.PayloadSize > s.rehydrateMax && s.spill != nil
+	if !overCap {
+		if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
+			s.emitEvent(env.IntegrationID, FilterEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
+			return fmt.Errorf("rehydrate: %w", err)
+		}
 	}
 
 	connectionID := env.IntegrationID
@@ -237,12 +272,12 @@ func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 		}
 	}
 	if connectionID == "" {
-		return
+		return nil
 	}
 
 	info, err := s.getPipelineInfo(ctx, connectionID)
 	if err != nil || info == nil || len(info.Entries) == 0 {
-		return
+		return nil
 	}
 
 	// Find which filter entry should handle this message based on predecessor
@@ -262,15 +297,31 @@ func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) {
 			continue
 		}
 
-		s.processFilterEntry(connectionID, msg.Subject, &env, entry)
+		// An infrastructure failure in any entry NAKs the whole message.
+		// Redelivery reprocesses every entry (at-least-once; downstream sees
+		// fresh envelope IDs), matching the SDK's semantics for connectors.
+		if perr := s.processFilterEntry(ctx, connectionID, msg.Subject, &env, entry); perr != nil && err == nil {
+			err = perr
+		}
 	}
+	return err
 }
 
-func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv *envelope.Envelope, entry *FilterEntry) {
+// processFilterEntry applies one filter node and republishes the result. It
+// returns an error only for infrastructure failures (offload, publish) — the
+// caller NAKs those; transform-logic failures emit a UI event and ack, exactly
+// as before.
+func (s *FilterService) processFilterEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *FilterEntry) error {
+	// An envelope still carrying a ref here is over the rehydrate cap — take the
+	// record-streaming path (ADR 0002 phase B) instead of buffering it.
+	if origEnv.PayloadRef != "" {
+		return s.streamFilterEntry(ctx, connectionID, origEnv, entry)
+	}
+
 	var data interface{}
 	if err := json.Unmarshal(origEnv.Payload, &data); err != nil {
 		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Invalid JSON payload", Time: now()})
-		return
+		return nil
 	}
 
 	hasRules := len(entry.Config.Rules) > 0
@@ -305,7 +356,7 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 					Type: "dropped", Message: fmt.Sprintf("All %d rows filtered out", dropped),
 					Time: now(), Rules: len(entry.Config.Rules),
 				})
-				return
+				return nil
 			}
 			filtered = result
 		case map[string]interface{}:
@@ -319,7 +370,7 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 					Type: "dropped", Message: "Message filtered out",
 					Time: now(), Rules: len(entry.Config.Rules),
 				})
-				return
+				return nil
 			}
 		default:
 			filtered = data
@@ -341,7 +392,7 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 
 	newPayload, err := json.Marshal(filtered)
 	if err != nil {
-		return
+		return nil
 	}
 
 	// Build a new envelope copy for this branch. Mint a fresh ID so the
@@ -357,10 +408,20 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 	env.Metadata["_last_processed_by"] = entry.NodeID
 	env.Metadata["_source_envelope_id"] = origEnv.ID
 
+	// Offload an over-threshold result (claim-check) so the published message
+	// stays under NATS max_payload — filtering can INFLATE a payload (flatten
+	// multiplies rows), so this applies even when the input arrived inline.
+	if _, err := claimcheck.OffloadIfLarge(ctx, s.spill, &env, s.inlineMax, s.logger); err != nil {
+		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Payload offload failed: " + err.Error(), Time: now()})
+		return fmt.Errorf("offload: %w", err)
+	}
+
 	envData, _ := json.Marshal(env)
-	if err := s.pub.Publish(context.Background(), env.TenantID, connectionID, env.ID, envData); err != nil {
+	if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, envData); err != nil {
+		// Publish failures were previously logged and ACKED — output silently
+		// lost. NAK instead so redelivery retries the publish.
 		s.emitEvent(connectionID, FilterEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
-		return
+		return fmt.Errorf("publish: %w", err)
 	}
 
 	msgParts := []string{}
@@ -391,6 +452,7 @@ func (s *FilterService) processFilterEntry(connectionID, subject string, origEnv
 		Time:    now(),
 		Rules:   len(entry.Config.Rules),
 	})
+	return nil
 }
 
 // --- Field extraction ---

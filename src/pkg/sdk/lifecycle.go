@@ -26,6 +26,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/natsdiscovery"
+	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/tracing"
 )
 
@@ -52,6 +53,7 @@ type RunOption func(*runOptions)
 type runOptions struct {
 	nc            *nats.Conn
 	db            *sql.DB
+	payloadStore  objectstore.ObjectStore
 	disableHealth bool
 }
 
@@ -62,6 +64,13 @@ func WithNATSConn(nc *nats.Conn) RunOption { return func(o *runOptions) { o.nc =
 // WithDB supplies a database handle instead of opening DATABASE_URL. The
 // runner will not close a caller-supplied DB.
 func WithDB(db *sql.DB) RunOption { return func(o *runOptions) { o.db = db } }
+
+// WithPayloadStore supplies the large-payload offload store instead of building
+// one from PAYLOAD_STORE_* env (used by tests). The runner will not close a
+// caller-supplied store.
+func WithPayloadStore(s objectstore.ObjectStore) RunOption {
+	return func(o *runOptions) { o.payloadStore = s }
+}
 
 // WithoutHealthServer skips starting the health/metrics HTTP server (used in
 // tests to avoid port conflicts).
@@ -74,9 +83,22 @@ func RunProducer(ctx context.Context, name string, p Producer, opts ...RunOption
 	return run(ctx, name, p,
 		func(ctx context.Context, res *Resources) error { return p.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, _ *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			// A StreamingProducer (ADR 0001) receives offloaded payloads as a
+			// stream instead of a buffered []byte, lifting the rehydrate cap.
+			var streamDeliver streamDeliverFunc
+			if sp, ok := p.(StreamingProducer); ok {
+				streamDeliver = sp.DeliverStream
+				res.Logger.Info("streaming delivery enabled")
+			}
+			// A ConnectionScoped producer lets the dispatch ack foreign
+			// connections before the payload is rehydrated or delivered.
+			var serves servesFunc
+			if cs, ok := p.(ConnectionScoped); ok {
+				serves = cs.ServesConnection
+			}
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				return p.Deliver(c, env)
-			})
+			}, streamDeliver, serves)
 		}, opts...)
 }
 
@@ -93,6 +115,13 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 			lpLastWrite := make(map[string]time.Time)
 			const lpMinInterval = 30 * time.Second
 			publish := func(pctx context.Context, env *envelope.Envelope) error {
+				// Offload an over-threshold payload to object storage (claim-check)
+				// so the published message stays under NATS's max_payload. No-op
+				// for the common small-payload case.
+				offloaded, err := offloadIfLarge(pctx, res.payloadStore, env, res.inlineMaxBytes, res.Logger)
+				if err != nil {
+					return err
+				}
 				body, err := envelope.Marshal(env)
 				if err != nil {
 					return fmt.Errorf("marshal envelope: %w", err)
@@ -104,8 +133,10 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 				// (filter + converter) can sample ANY source once it has passed
 				// data through once — not just the handful of consumers that used
 				// to write it themselves. Best-effort, throttled, and tenant-scoped:
-				// never fail a publish over a preview write.
-				if res.DB != nil && env.IntegrationID != "" {
+				// never fail a publish over a preview write. Skipped when the
+				// payload was offloaded — the wire body carries only a reference,
+				// so there's no payload structure to preview.
+				if !offloaded && res.DB != nil && env.IntegrationID != "" {
 					now := time.Now()
 					lpMu.Lock()
 					last, seen := lpLastWrite[env.IntegrationID]
@@ -120,6 +151,16 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 				}
 				return nil
 			}
+			// A StreamingConsumer (ADR 0001) drives RunStream and additionally gets
+			// publishStream for payloads too large to hold in memory. Without a
+			// payload store there is nowhere to stream to, so such a worker stays
+			// on the plain Run contract.
+			sc, streaming := c.(StreamingConsumer)
+			streaming = streaming && res.payloadStore != nil
+			if streaming {
+				res.Logger.Info("streaming ingestion enabled")
+			}
+
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -128,7 +169,13 @@ func RunConsumer(ctx context.Context, name string, c Consumer, opts ...RunOption
 						res.Logger.Error("consumer Run panicked", "panic", r)
 					}
 				}()
-				if err := c.Run(ctx, publish); err != nil && ctx.Err() == nil {
+				var err error
+				if streaming {
+					err = sc.RunStream(ctx, publish, newPublishStream(publish, res))
+				} else {
+					err = c.Run(ctx, publish)
+				}
+				if err != nil && ctx.Err() == nil {
 					res.Logger.Error("consumer Run exited with error", "error", err)
 				}
 			}()
@@ -142,7 +189,7 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 	return run(ctx, name, f,
 		func(ctx context.Context, res *Resources) error { return f.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, pub *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				keep, out, err := f.Evaluate(c, env)
 				if err != nil {
 					return err
@@ -150,8 +197,10 @@ func RunFilter(ctx context.Context, name string, f Filter, opts ...RunOption) er
 				if !keep || out == nil {
 					return nil // dropped — ack
 				}
-				return republish(c, pub, out)
-			})
+				return republish(c, pub, res, out)
+				// nils: no streaming transform path here (ADR 0001 phase 2),
+				// and filters aren't connection-scoped.
+			}, nil, nil)
 		}, opts...)
 }
 
@@ -161,7 +210,7 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 	return run(ctx, name, cv,
 		func(ctx context.Context, res *Resources) error { return cv.Configure(ctx, res) },
 		func(ctx context.Context, js nats.JetStreamContext, pub *messaging.Publisher, res *Resources) (func(), error) {
-			return subscribeDispatch(js, name, res.Logger, func(c context.Context, env *envelope.Envelope) error {
+			return subscribeDispatch(js, name, res, func(c context.Context, env *envelope.Envelope) error {
 				out, err := cv.Convert(c, env)
 				if err != nil {
 					return err
@@ -169,8 +218,9 @@ func RunConverter(ctx context.Context, name string, cv Converter, opts ...RunOpt
 				if out == nil {
 					return nil
 				}
-				return republish(c, pub, out)
-			})
+				return republish(c, pub, res, out)
+				// nils: see RunFilter.
+			}, nil, nil)
 		}, opts...)
 }
 
@@ -266,11 +316,28 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		drainFn = func() { hsrv.SetReady(false) }
 	}
 
+	// Large-payload offload store — injected (harness) or built from
+	// PAYLOAD_STORE_* env. nil when unconfigured; only close what we opened.
+	payloadStore := o.payloadStore
+	if payloadStore == nil {
+		ps, perr := openPayloadStore(ctx, logger)
+		if perr != nil {
+			return fmt.Errorf("open payload store: %w", perr)
+		}
+		if ps != nil {
+			payloadStore = ps
+			defer func() { _ = ps.Close() }()
+		}
+	}
+
 	res := &Resources{
-		Logger: logger,
-		DB:     db,
-		NATS:   nc,
-		Health: &healthToggle{setReady: setReady, addCheck: addCheck},
+		Logger:            logger,
+		DB:                db,
+		NATS:              nc,
+		Health:            &healthToggle{setReady: setReady, addCheck: addCheck},
+		payloadStore:      payloadStore,
+		inlineMaxBytes:    inlineMaxFromEnv(logger),
+		rehydrateMaxBytes: rehydrateMaxFromEnv(logger),
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -368,7 +435,16 @@ func ackWaitFromEnv(logger *slog.Logger) time.Duration {
 // unmarshals the envelope and calls deliver, mapping the SDK error classes
 // onto messaging's NAK/DLQ semantics: nil → ack; Permanent → ack+log (poison);
 // anything else → NAK (messaging retries with backoff, then DLQs).
-func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Logger, deliver func(context.Context, *envelope.Envelope) error) (func(), error) {
+// streamDeliver, when non-nil, is used INSTEAD of deliver for envelopes whose
+// payload was offloaded — the object is handed over as a stream and never
+// buffered (so the rehydrate cap does not apply). nil for connectors and node
+// kinds that don't stream.
+// servesFunc reports whether this worker serves a (tenant, connection); nil
+// means "serves everything" (transforms, single-purpose workers).
+type servesFunc func(ctx context.Context, tenantID, connectionID string) bool
+
+func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error, streamDeliver streamDeliverFunc, serves servesFunc) (func(), error) {
+	logger := res.Logger
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
 		// AckWait left at the messaging default: the per-message budget is no
@@ -405,8 +481,23 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 		)
 		defer span.End()
 
-		derr := deliver(ctx, env)
+		// Foreign connection: ack before touching the payload. Without this,
+		// every producer's shared durable rehydrated (and, past the cap,
+		// NAK'd) large payloads destined for other connectors entirely.
+		if serves != nil && !serves(ctx, env.TenantID, env.IntegrationID) {
+			span.SetAttributes(attribute.Bool("vrsky.foreign_connection", true))
+			return nil
+		}
+
+		streamed, derr := dispatchEnvelope(ctx, res, env, deliver, streamDeliver)
+		if streamed {
+			span.SetAttributes(attribute.Bool("vrsky.payload.streamed", true))
+		}
 		if derr == nil {
+			// Spilled objects are reclaimed by the bucket lifecycle TTL (spill/
+			// prefix), NOT eagerly here: an eager delete races the JetStream ACK,
+			// and a delete before an ACK that then fails would leave a redelivered
+			// message unable to rehydrate. TTL cleanup is safe against redelivery.
 			return nil
 		}
 		span.RecordError(derr)
@@ -426,8 +517,13 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, logger *slog.Lo
 // republish forwards an envelope to the data stream with a FRESH envelope ID.
 // Reusing the inbound ID would be dropped by JetStream's dedup window (and by
 // downstream per-ID dedup) — the well-known filter/converter footgun.
-func republish(ctx context.Context, pub *messaging.Publisher, env *envelope.Envelope) error {
+func republish(ctx context.Context, pub *messaging.Publisher, res *Resources, env *envelope.Envelope) error {
 	env.ID = uuid.NewString()
+	// Re-offload if the transformed payload is over threshold (claim-check), so a
+	// filter/converter output that grew large still stays under NATS max_payload.
+	if _, err := offloadIfLarge(ctx, res.payloadStore, env, res.inlineMaxBytes, res.Logger); err != nil {
+		return err
+	}
 	body, err := envelope.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("marshal envelope: %w", err)
@@ -477,9 +573,18 @@ func openDB(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// Pool sizing is lean by DEFAULT because of the pod-per-connection model:
+	// each connection runs its own worker pod, and every worker holds its own
+	// pool against the single shared Postgres. A worker's DB work is light and
+	// sequential (load config on start, throttled last_payload writes), so a
+	// small ceiling is plenty — and 6 open × N workers is what keeps the total
+	// under Postgres `max_connections` as connection count grows. ConnMaxIdleTime
+	// reaps connections that idle pollers would otherwise pin indefinitely.
+	// All tunable via env for per-deployment sizing (e.g. heavier control-plane).
+	db.SetMaxOpenConns(envInt("DB_MAX_OPEN_CONNS", 6))
+	db.SetMaxIdleConns(envInt("DB_MAX_IDLE_CONNS", 2))
+	db.SetConnMaxLifetime(time.Duration(envInt("DB_CONN_MAX_LIFETIME_SECONDS", 300)) * time.Second)
+	db.SetConnMaxIdleTime(time.Duration(envInt("DB_CONN_MAX_IDLE_SECONDS", 90)) * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {

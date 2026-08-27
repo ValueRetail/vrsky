@@ -126,7 +126,50 @@ func buildEnvironmentVariables(node *managementapi.Node, graph *ExecutionGraph, 
 		{Name: EnvNATSAccount, Value: config.NATSAccount},
 	}
 
+	envVars = appendPayloadStoreEnv(envVars, config)
+
 	return envVars, nil
+}
+
+// appendPayloadStoreEnv adds the large-payload offload configuration (#187) to a
+// worker's env, but only when a bucket is configured — otherwise the store stays
+// unconfigured and payloads travel inline (safe default). Non-secret settings are
+// plain values; the credentials are sourced from a K8s secret via SecretKeyRef so
+// they never appear in the pod spec in plaintext.
+func appendPayloadStoreEnv(envVars []corev1.EnvVar, config *OrchestratorConfig) []corev1.EnvVar {
+	if config == nil || config.PayloadStoreBucket == "" {
+		return envVars
+	}
+	envVars = append(envVars, corev1.EnvVar{Name: EnvPayloadStoreBucket, Value: config.PayloadStoreBucket})
+	if config.PayloadStoreProvider != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: EnvPayloadStoreProvider, Value: config.PayloadStoreProvider})
+	}
+	if config.PayloadStoreEndpoint != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: EnvPayloadStoreEndpoint, Value: config.PayloadStoreEndpoint})
+	}
+	if config.PayloadStoreRegion != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: EnvPayloadStoreRegion, Value: config.PayloadStoreRegion})
+	}
+	if config.PayloadInlineMaxBytes != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: EnvPayloadInlineMaxBytes, Value: config.PayloadInlineMaxBytes})
+	}
+	if config.PayloadStoreSecretName != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{Name: EnvPayloadStoreAccessKey, ValueFrom: secretRef(config.PayloadStoreSecretName, payloadSecretAccessKey)},
+			corev1.EnvVar{Name: EnvPayloadStoreSecretKey, ValueFrom: secretRef(config.PayloadStoreSecretName, payloadSecretSecretKey)},
+		)
+	}
+	return envVars
+}
+
+// secretRef builds an EnvVarSource that reads key from the named K8s secret.
+func secretRef(name, key string) *corev1.EnvVarSource {
+	return &corev1.EnvVarSource{
+		SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: name},
+			Key:                  key,
+		},
+	}
 }
 
 // buildLabels builds the Kubernetes labels for a deployment.
@@ -296,6 +339,19 @@ func CreateAllDeploymentSpecs(graph *ExecutionGraph, config *OrchestratorConfig)
 		node, err := graph.GetNodeByID(nodeID)
 		if err != nil {
 			return nil, err
+		}
+
+		// Filter and converter nodes are served by the SHARED data-filter /
+		// data-converter platform services (JetStream durables on
+		// vrsky.data.*.pipeline.*, routing by node config + predecessor
+		// metadata), not by per-connection workers (#201). The per-connection
+		// transform workers this used to spawn were provable no-ops: the
+		// orchestrator wired them to {tenant}.pipeline-{conn}.{node}.output
+		// topics that nothing publishes to — SDK connectors publish and
+		// subscribe on the vrsky.data.* subjects and ignore INPUT/OUTPUT
+		// _NATS_SUBJECT entirely.
+		if node.Type == "filter" || node.Type == "converter" {
+			continue
 		}
 
 		spec, err := CreateDeploymentSpec(node, graph, config)

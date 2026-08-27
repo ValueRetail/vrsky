@@ -152,14 +152,8 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 	}
 
 	var transient error
-	for _, httpCfg := range httpConfigs {
-		if httpCfg.PredIsConsumer && lastProcessedBy != "" {
-			continue
-		}
-		if !httpCfg.PredIsConsumer && httpCfg.PredecessorID != "" && lastProcessedBy != httpCfg.PredecessorID {
-			continue
-		}
-		if err := p.sendHTTPRequest(ctx, connectionID, httpCfg, env); err != nil && transient == nil {
+	for _, httpCfg := range p.eligibleConfigs(httpConfigs, lastProcessedBy) {
+		if err := p.sendHTTPRequest(ctx, connectionID, httpCfg, env, nil); err != nil && transient == nil {
 			transient = err
 		}
 	}
@@ -169,19 +163,90 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 	return nil
 }
 
+// DeliverStream sends a large, offloaded payload straight from the pipeline's
+// object stream as the request body, so a multi-GB POST never has to be held in
+// worker memory (ADR 0001).
+//
+// This works because http-producer has no in-process retry loop for ordinary
+// failures: a retriable error is returned to the SDK, JetStream redelivers, and
+// the redelivery re-opens the stream from object storage. Message-level retry is
+// stream-safe in a way an in-process one would not be.
+//
+// Two cases still need a second pass over a body that can only be read once, and
+// are declined so the SDK falls back to buffered delivery:
+//   - fan-out to more than one endpoint;
+//   - auth_type=oauth, whose 401 handler re-sends the request with a refreshed
+//     token. Converting that into a redelivery is not equivalent — the retry
+//     would resolve the token from cache again and could loop on the same
+//     expired credential until the message is DLQ'd.
+func (p *httpProducer) DeliverStream(ctx context.Context, env *envelope.Envelope, body iolib.Reader) error {
+	connectionID := env.IntegrationID
+	if connectionID == "" {
+		return nil
+	}
+	httpConfigs, err := p.getHTTPConfigs(ctx, connectionID, env.TenantID)
+	if err != nil {
+		p.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
+		return nil
+	}
+
+	lastProcessedBy := ""
+	if env.Metadata != nil {
+		if v, ok := env.Metadata["_last_processed_by"].(string); ok {
+			lastProcessedBy = v
+		}
+	}
+
+	eligible := p.eligibleConfigs(httpConfigs, lastProcessedBy)
+	if len(eligible) == 0 {
+		return nil
+	}
+	if len(eligible) > 1 || eligible[0].AuthType == "oauth" {
+		return sdk.ErrStreamUnsupported
+	}
+	if err := p.sendHTTPRequest(ctx, connectionID, eligible[0], env, body); err != nil {
+		return sdk.Retriable(err)
+	}
+	return nil
+}
+
+// eligibleConfigs drops the endpoints whose predecessor predicate doesn't match
+// this envelope. Shared by the buffered and streaming paths.
+func (p *httpProducer) eligibleConfigs(configs []*HTTPConfig, lastProcessedBy string) []*HTTPConfig {
+	out := make([]*HTTPConfig, 0, len(configs))
+	for _, httpCfg := range configs {
+		if httpCfg.PredIsConsumer && lastProcessedBy != "" {
+			continue
+		}
+		if !httpCfg.PredIsConsumer && httpCfg.PredecessorID != "" && lastProcessedBy != httpCfg.PredecessorID {
+			continue
+		}
+		out = append(out, httpCfg)
+	}
+	return out
+}
+
 // sendHTTPRequest returns nil on a successful 2xx response or a non-retriable
 // 4xx, and a non-nil error on any *retriable* failure (network error, 5xx,
 // 429). 4xx responses return nil so the SDK doesn't retry them — the request is
 // malformed and will keep failing on every redelivery.
-func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string, httpCfg *HTTPConfig, env *envelope.Envelope) error {
+// body, when non-nil, is streamed as the request body instead of env.Payload —
+// the payload is then never materialised in memory, so the activity feed shows
+// its size but not a content preview.
+func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string, httpCfg *HTTPConfig, env *envelope.Envelope, body iolib.Reader) error {
+	size := int64(len(env.Payload))
 	payloadPreview := string(env.Payload)
+	if body != nil {
+		size = env.PayloadSize
+		payloadPreview = ""
+	}
 	if len(payloadPreview) > 2000 {
 		payloadPreview = payloadPreview[:2000] + "..."
 	}
 
 	p.emitEvent(connectionID, HTTPEvent{
 		Type:    "info",
-		Message: fmt.Sprintf("Sending %d bytes to %s", len(env.Payload), httpCfg.URL),
+		Message: fmt.Sprintf("Sending %d bytes to %s", size, httpCfg.URL),
 		Payload: payloadPreview,
 		Time:    now(),
 	})
@@ -214,7 +279,17 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
 	buildAndSend := func(force bool) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, method, httpCfg.URL, bytes.NewReader(env.Payload))
+		var reqBody iolib.Reader = bytes.NewReader(env.Payload)
+		if body != nil {
+			reqBody = body
+		}
+		req, _ := http.NewRequestWithContext(ctx, method, httpCfg.URL, reqBody)
+		if body != nil {
+			// Declare the length so the request goes out with Content-Length
+			// rather than chunked encoding, which some endpoints reject. The
+			// size is known from the offloaded object.
+			req.ContentLength = env.PayloadSize
+		}
 		if env.ContentType != "" {
 			req.Header.Set("Content-Type", env.ContentType)
 		} else {
@@ -256,6 +331,12 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	// refresh once and retry (mirrors api-consumer's callEndpoint).
 	if resp.StatusCode == http.StatusUnauthorized && httpCfg.AuthType == "oauth" && httpCfg.OAuthGrantID != "" {
 		_ = resp.Body.Close()
+		if body != nil {
+			// Unreachable today — DeliverStream declines oauth precisely because
+			// of this re-send. Guard it anyway: replaying a consumed stream would
+			// silently send an empty body.
+			return fmt.Errorf("401 on a streamed request: cannot replay the body to refresh the token")
+		}
 		p.emitEvent(connectionID, HTTPEvent{Type: "info", Message: "401 — refreshing OAuth token and retrying", Time: now()})
 		resp, err = buildAndSend(true)
 		if err != nil {
@@ -269,7 +350,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	respPreview := string(respBody)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		p.logger.Info("HTTP request sent", "connection_id", connectionID, "status", resp.StatusCode, "size", len(env.Payload))
+		p.logger.Info("HTTP request sent", "connection_id", connectionID, "status", resp.StatusCode, "size", size)
 		p.emitEvent(connectionID, HTTPEvent{
 			Type: "sent", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
 			StatusCode: resp.StatusCode, Payload: payloadPreview, Response: respPreview,
@@ -534,3 +615,18 @@ func (p *httpProducer) eventsHandler() http.HandlerFunc {
 // --- Helpers ---
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+
+// ServesConnection reports whether this connection has a matching HTTP destination —
+// mirroring Deliver's own "no config -> not ours" semantics — so the SDK can
+// ack foreign connections before rehydrating large payloads (sdk.ConnectionScoped).
+func (p *httpProducer) ServesConnection(ctx context.Context, tenantID, connectionID string) bool {
+	if connectionID == "" {
+		return false
+	}
+	configs, err := p.getHTTPConfigs(ctx, connectionID, tenantID)
+	if err != nil {
+		return false // Deliver treats lookup errors as "not ours" too
+	}
+	return len(configs) > 0
+}

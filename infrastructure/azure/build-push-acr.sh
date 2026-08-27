@@ -14,10 +14,11 @@
 #   REG=myregistry infrastructure/azure/build-push-acr.sh core   # override ACR name
 #
 # Groups:
-#   core       management-api, ui, filter, converter   (needed for a running platform)
+#   core       management-api, ui, data-filter, data-converter (running platform)
 #   workers    the generic per-node images the orchestrator spins up:
-#              vrsky-consumer / vrsky-producer / vrsky-filter / vrsky-converter
-#              (image pattern must match orchestrator/types.go: {registry}/vrsky-{nodeType})
+#              vrsky-consumer / vrsky-producer
+#              (image pattern must match orchestrator/types.go: {registry}/vrsky-{nodeType};
+#              filter/converter nodes are served by the shared data-* services, #201)
 #   connectors the standing retail connectors (Sitoo, Front Systems, Business
 #              Central, Visma, Brightpearl) — built ready; they still need
 #              Kubernetes Deployment manifests before they can run on AKS.
@@ -39,17 +40,22 @@ build() {
 build_core() {
   build vrsky/management-api:latest src/cmd/management-api/Dockerfile
   build vrsky/ui:latest             ui/Dockerfile
-  build vrsky/filter:latest         src/cmd/filter/Dockerfile
-  build vrsky/converter:latest      src/cmd/converter/Dockerfile
+  # The pipeline transforms are the SHARED data-filter/data-converter services
+  # (#201) — the same binaries dev/TEST runs, with the claim-check + record
+  # streaming (ADR 0002). The legacy cmd/filter + cmd/converter images they
+  # replace were wired to topics nothing publishes to.
+  build vrsky/data-filter:latest    src/cmd/data-filter/Dockerfile
+  build vrsky/data-converter:latest src/cmd/data-converter/Dockerfile
 }
 
 build_workers() {
   # NOTE the `vrsky-` prefix in the repo name — the orchestrator resolves
   # per-node images as {WORKER_IMAGE_REGISTRY}/vrsky-{nodeType}:{version}.
+  # No vrsky-filter/vrsky-converter: the orchestrator no longer spawns
+  # per-connection transform workers (#201) — the shared data-filter and
+  # data-converter services (build_core) handle those nodes.
   build vrsky/vrsky-consumer:latest  src/cmd/consumer/Dockerfile
   build vrsky/vrsky-producer:latest  src/cmd/producer/Dockerfile
-  build vrsky/vrsky-filter:latest    src/cmd/filter/Dockerfile
-  build vrsky/vrsky-converter:latest src/cmd/converter/Dockerfile
 }
 
 build_connectors() {
