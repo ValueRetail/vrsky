@@ -14,7 +14,10 @@ valid JSON". The filter has the same restriction. So the natural expectations
 **CSV → JSON** and **XML → CSV** fail at the first step, even though every
 piece downstream of parsing already exists.
 
-Two traps documented so they aren't rediscovered:
+Two traps documented so they aren't rediscovered (both since removed outright —
+the legacy packages were deleted with their binaries, see ADR 0004 — but the
+reasoning is kept because it explains why the live transforms look the way they
+do):
 
 - `pkg/filter/parser.go` *appears* to support XML input, but it is wired only
   into the retired legacy `cmd/filter` worker — and its approach doesn't work:

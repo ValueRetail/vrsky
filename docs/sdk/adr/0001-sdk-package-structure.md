@@ -13,6 +13,11 @@ Much of what an SDK needs already exists internally: `pkg/component`
 (Component/Producer/Input/Output interfaces), `pkg/messaging` (durable
 subscribe + DLQ), `pkg/health`, `pkg/runtime`, `pkg/crypto`, `pkg/envelope`.
 
+> Note (2026-08-27): `pkg/runtime` has since been deleted. It read the
+> per-connection worker env contract (`INPUT_NATS_SUBJECT` and friends), which
+> went away with the workers themselves — see ADR 0004. The SDK never depended
+> on it.
+
 ## Decision
 
 1. **`pkg/sdk` is a thin public surface that composes the internal packages**,

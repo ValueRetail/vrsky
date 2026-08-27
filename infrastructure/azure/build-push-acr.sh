@@ -44,8 +44,8 @@ build_core() {
   build vrsky/ui:latest             ui/Dockerfile
   # The pipeline transforms are the SHARED data-filter/data-converter services
   # (#201) — the same binaries dev/TEST runs, with the claim-check + record
-  # streaming (ADR 0002). The legacy cmd/filter + cmd/converter images they
-  # replace were wired to topics nothing publishes to.
+  # streaming (ADR 0002). The legacy cmd/filter + cmd/converter they replaced
+  # were wired to topics nothing publishes to, and have since been deleted.
   build vrsky/data-filter:latest    src/cmd/data-filter/Dockerfile
   build vrsky/data-converter:latest src/cmd/data-converter/Dockerfile
 }

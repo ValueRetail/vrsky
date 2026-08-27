@@ -1,4 +1,4 @@
-.PHONY: help build build-filter build-converter docker-build-filter docker-build-converter docker-push-filter docker-push-converter docker-build-ui docker-push-ui clean test test-converter lint fmt vet
+.PHONY: help build docker-build-ui docker-push-ui clean test lint fmt vet
 
 # Variables
 BIN_DIR=./bin
@@ -19,57 +19,21 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)  %-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
-# The legacy `producer`/`consumer` binaries were retired in #205: the
-# orchestrator no longer spawns per-connection workers, and every source and
-# destination node type is served by a standing connector service instead
-# (src/cmd/{file,http,db,cloud-storage,...}-{consumer,producer}).
+# The legacy per-connection worker binaries are all retired: `producer`/
+# `consumer` in #205, `filter`/`converter` here. The orchestrator no longer
+# spawns per-connection workers — every node type is served by a standing
+# service instead: the shared data-filter/data-converter for transforms and
+# src/cmd/{file,http,db,cloud-storage,...}-{consumer,producer} for the edges.
 build: ## Build every command to ./bin
 	@echo "$(BLUE)Building all commands...$(NC)"
 	@mkdir -p $(BIN_DIR)
 	@$(GO) build -o $(BIN_DIR)/ ./cmd/...
 	@echo "$(GREEN)✓ Binaries built into $(BIN_DIR)$(NC)"
 
-build-filter: clean ## Build filter binary to ./bin/filter
-	@echo "$(BLUE)Building filter binary...$(NC)"
-	@mkdir -p $(BIN_DIR)
-	@$(GO) build -o $(BIN_DIR)/filter ./cmd/filter
-	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/filter$(NC)"
-
-docker-build-filter: ## Build Docker image: vrsky/filter:latest
-	@echo "$(BLUE)Building filter Docker image...$(NC)"
-	@docker build -t vrsky/filter:latest -f cmd/filter/Dockerfile .
-	@echo "$(GREEN)✓ Docker image built: vrsky/filter:latest$(NC)"
-
-docker-push-filter: docker-build-filter ## Push filter Docker image to registry
-	@echo "$(BLUE)Pushing filter Docker image...$(NC)"
-	@docker push vrsky/filter:latest
-	@echo "$(GREEN)✓ Filter Docker image pushed$(NC)"
-
-build-converter: clean ## Build converter binary to ./bin/converter
-	@echo "$(BLUE)Building converter binary...$(NC)"
-	@mkdir -p $(BIN_DIR)
-	@$(GO) build -o $(BIN_DIR)/converter ./cmd/converter
-	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/converter$(NC)"
-
-docker-build-converter: ## Build Docker image: vrsky/converter:latest
-	@echo "$(BLUE)Building converter Docker image...$(NC)"
-	@docker build -t vrsky/converter:latest -f cmd/converter/Dockerfile .
-	@echo "$(GREEN)✓ Docker image built: vrsky/converter:latest$(NC)"
-
-docker-push-converter: docker-build-converter ## Push converter Docker image to registry
-	@echo "$(BLUE)Pushing converter Docker image...$(NC)"
-	@docker push vrsky/converter:latest
-	@echo "$(GREEN)✓ Converter Docker image pushed$(NC)"
-
 test: ## Run Go tests
 	@echo "$(BLUE)Running tests...$(NC)"
 	@$(GO) test -v ./...
 	@echo "$(GREEN)✓ Tests passed$(NC)"
-
-test-converter: ## Run converter tests with coverage
-	@echo "$(BLUE)Running converter tests...$(NC)"
-	@$(GO) test -v -cover ./pkg/converter/...
-	@echo "$(GREEN)✓ Converter tests passed$(NC)"
 
 lint: lint-tenant lint-connector lint-openapi ## Run all linters (golangci-lint + tenant-filter + connector + openapi)
 	@echo "$(BLUE)Running linter...$(NC)"

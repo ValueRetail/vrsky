@@ -99,6 +99,12 @@ acks — negligible at the sink-bound rates above.
 
 ### Scaled topology — k8s orchestrator path (#15, k3d)
 
+> **Historical (superseded).** The per-connection `pkg/runtime` workers described
+> here no longer exist: the orchestrator stopped spawning them in #201/#205 and
+> the binaries and package were deleted (ADR 0004). Node kinds are run by
+> standing services. The measurements below still stand as a record of what was
+> tested at the time; the topology they describe does not.
+
 The numbers above run the **compose** stack (SDK connectors, one host). The
 **k8s orchestrator path** — where the management-api's orchestrator (#157)
 deploys per-node `pkg/runtime` workers with per-connection HPAs (#135) — was

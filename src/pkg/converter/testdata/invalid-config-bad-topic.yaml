@@ -1,4 +1,0 @@
-converter_id: shopify-to-internal
-tenant_id: hp
-input_topic: "hp@invalid#topic"
-error_topic: hp.webhook.errors
