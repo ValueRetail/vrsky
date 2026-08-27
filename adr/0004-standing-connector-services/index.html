@@ -16,19 +16,19 @@
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>VRSky Scalability — Assessment & Roadmap - VRSky Documentation</title>
+        <title>ADR 0004 — Standing connector services replace per-connection workers - VRSky Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -47,7 +47,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vrsky-scalability-assessment-roadmap" class="md-skip">
+        <a href="#adr-0004-standing-connector-services-replace-per-connection-workers" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              VRSky Scalability — Assessment &amp; Roadmap
+              ADR 0004 — Standing connector services replace per-connection workers
             
           </span>
         </div>
@@ -214,7 +214,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -232,7 +232,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -311,7 +311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tutorials/first-pipeline/" class="md-nav__link">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
         
   
   
@@ -339,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sdk/tutorial/first-connector/" class="md-nav__link">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
         
   
   
@@ -426,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -454,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/getting-started/" class="md-nav__link">
+      <a href="../../guide/getting-started/" class="md-nav__link">
         
   
   
@@ -482,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/workspaces-and-members/" class="md-nav__link">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
         
   
   
@@ -510,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/building-a-pipeline/" class="md-nav__link">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
         
   
   
@@ -538,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/connectors-and-nodes/" class="md-nav__link">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
         
   
   
@@ -566,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/credentials-and-oauth/" class="md-nav__link">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
         
   
   
@@ -594,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/deploying-and-monitoring/" class="md-nav__link">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
         
   
   
@@ -622,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/data-sharing/" class="md-nav__link">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
         
   
   
@@ -650,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/settings/" class="md-nav__link">
+      <a href="../../guide/settings/" class="md-nav__link">
         
   
   
@@ -678,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guide/troubleshooting/" class="md-nav__link">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
         
   
   
@@ -765,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/install/" class="md-nav__link">
+      <a href="../../operator/install/" class="md-nav__link">
         
   
   
@@ -793,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/upgrade/" class="md-nav__link">
+      <a href="../../operator/upgrade/" class="md-nav__link">
         
   
   
@@ -821,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/backup/" class="md-nav__link">
+      <a href="../../operator/backup/" class="md-nav__link">
         
   
   
@@ -849,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/monitoring/" class="md-nav__link">
+      <a href="../../operator/monitoring/" class="md-nav__link">
         
   
   
@@ -877,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/troubleshooting/" class="md-nav__link">
+      <a href="../../operator/troubleshooting/" class="md-nav__link">
         
   
   
@@ -905,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -933,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../SLA/" class="md-nav__link">
+      <a href="../../SLA/" class="md-nav__link">
         
   
   
@@ -961,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../DEPLOYMENT_GUIDE/" class="md-nav__link">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
         
   
   
@@ -989,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../DR/" class="md-nav__link">
+      <a href="../../DR/" class="md-nav__link">
         
   
   
@@ -1076,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/" class="md-nav__link">
+      <a href="../../connectors/" class="md-nav__link">
         
   
   
@@ -1104,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/http/" class="md-nav__link">
+      <a href="../../connectors/http/" class="md-nav__link">
         
   
   
@@ -1132,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/api/" class="md-nav__link">
+      <a href="../../connectors/api/" class="md-nav__link">
         
   
   
@@ -1160,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/database/" class="md-nav__link">
+      <a href="../../connectors/database/" class="md-nav__link">
         
   
   
@@ -1188,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/file/" class="md-nav__link">
+      <a href="../../connectors/file/" class="md-nav__link">
         
   
   
@@ -1216,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/sftp/" class="md-nav__link">
+      <a href="../../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1244,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/cloud-storage/" class="md-nav__link">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1272,7 +1272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/kafka/" class="md-nav__link">
+      <a href="../../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1300,7 +1300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/rabbitmq/" class="md-nav__link">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1328,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/salesforce/" class="md-nav__link">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1356,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/sitoo/" class="md-nav__link">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1384,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/front-systems/" class="md-nav__link">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1412,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/business-central/" class="md-nav__link">
+      <a href="../../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1440,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/visma/" class="md-nav__link">
+      <a href="../../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1468,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/sap-s4hana/" class="md-nav__link">
+      <a href="../../connectors/sap-s4hana/" class="md-nav__link">
         
   
   
@@ -1496,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/brightpearl/" class="md-nav__link">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1524,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/tenant/" class="md-nav__link">
+      <a href="../../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1552,7 +1552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../connectors/filters-converters/" class="md-nav__link">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -1639,7 +1639,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../security/whitepaper/" class="md-nav__link">
+      <a href="../../security/whitepaper/" class="md-nav__link">
         
   
   
@@ -1667,7 +1667,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../SECURITY/" class="md-nav__link">
+      <a href="../../SECURITY/" class="md-nav__link">
         
   
   
@@ -1702,7 +1702,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../reference/api/" class="md-nav__link">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1781,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../CONNECTION_NODE_SPEC/" class="md-nav__link">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
         
   
   
@@ -1809,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../TENANT_MODEL/" class="md-nav__link">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
         
   
   
@@ -1837,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../NATS_ARCHITECTURE/" class="md-nav__link">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -1865,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../OBSERVABILITY/" class="md-nav__link">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
         
   
   
@@ -1893,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../TRACING/" class="md-nav__link">
+      <a href="../../TRACING/" class="md-nav__link">
         
   
   
@@ -1921,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../LOAD/" class="md-nav__link">
+      <a href="../../LOAD/" class="md-nav__link">
         
   
   
@@ -1949,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../oauth-framework/" class="md-nav__link">
+      <a href="../../oauth-framework/" class="md-nav__link">
         
   
   
@@ -1977,7 +1977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sdk/" class="md-nav__link">
+      <a href="../../sdk/" class="md-nav__link">
         
   
   
@@ -2032,104 +2032,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#verdict" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Verdict
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-scales-well-by-design" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What scales well (by design)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#ceilings-priority-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Ceilings (priority order)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Ceilings (priority order)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-single-in-cluster-postgresql-highest-priority" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Single in-cluster PostgreSQL ← highest priority
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-pod-per-connection-orchestration-resolved-201-205" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. ~~Pod-per-connection orchestration~~ — resolved (#201, #205)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-in-cluster-stateful-services" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. In-cluster stateful services
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-node-capacity-azure-quota" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Node capacity + Azure quota
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#immediate-roadmap" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Immediate roadmap
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#empirical-next-step" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Empirical next step
+        Context
       
     </span>
   </a>
@@ -2153,134 +2059,108 @@
 
 
 
-<h1 id="vrsky-scalability-assessment-roadmap">VRSky Scalability — Assessment &amp; Roadmap<a class="headerlink" href="#vrsky-scalability-assessment-roadmap" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>Grounded in the current architecture. <strong>Caveat:</strong> prod has 0 real connections and
-the cluster is cost-parked, so this is an <em>architectural</em> assessment, not an
-empirical benchmark. A k6 load-smoke harness exists (<code>.github/workflows/
-load-smoke.yml</code>, p99 + error-rate regression guards) but hasn't been run at
-target scale — doing so is how we'd find the real ceiling.</p>
-</blockquote>
-<h2 id="verdict">Verdict<a class="headerlink" href="#verdict" title="Permanent link">&para;</a></h2>
-<p>The building blocks are the right ones for horizontal scale, and multi-tenancy is
-genuinely built in — not bolted on. The main limit is <strong>a single PostgreSQL</strong>;
-that is not a rewrite. The pod-per-connection worker model was the other named
-ceiling and is <strong>gone</strong> — see below.</p>
-<h2 id="what-scales-well-by-design">What scales well (by design)<a class="headerlink" href="#what-scales-well-by-design" title="Permanent link">&para;</a></h2>
+<h1 id="adr-0004-standing-connector-services-replace-per-connection-workers">ADR 0004 — Standing connector services replace per-connection workers<a class="headerlink" href="#adr-0004-standing-connector-services-replace-per-connection-workers" title="Permanent link">&para;</a></h1>
 <ul>
-<li><strong>Shared connector services on JetStream pull durables</strong> — one standing service
-  per node type (<code>file-consumer</code>, <code>http-producer</code>, <code>data-filter</code>, …) multiplexes
-  every connection of that type, routing by node config. Because they are <strong>pull</strong>
-  durables, replicas of a service share the work without coordination, so the
-  destination side scales by replica count rather than by connection count.</li>
-<li><strong>Multi-tenancy</strong> — <strong>per-tenant NATS instances</strong> (<code>nats_instances</code>, migration
-  000018), tenant-scoped queries throughout (<code>lint:tenant-ok</code>), enforced <strong>quotas</strong>
-  (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily usage metering.</li>
-<li><strong>Stateless control plane</strong> — UI / filter / management-api at 2 replicas + PDB;
-  horizontally scalable, HA today.</li>
-<li><strong>Independent connectors</strong> — adding an integration type scales linearly.</li>
+<li><strong>Status:</strong> Accepted (2026-08-27)</li>
+<li><strong>Date:</strong> 2026-08-27</li>
+<li><strong>Relates to:</strong> #201 (transform fork), #205 (edge fork), #135 (worker HPAs),
+  #19 (tenant NATS placement), <code>docs/scalability.md</code> ceiling 2</li>
 </ul>
-<h2 id="ceilings-priority-order">Ceilings (priority order)<a class="headerlink" href="#ceilings-priority-order" title="Permanent link">&para;</a></h2>
-<h3 id="1-single-in-cluster-postgresql-highest-priority">1. Single in-cluster PostgreSQL  ← highest priority<a class="headerlink" href="#1-single-in-cluster-postgresql-highest-priority" title="Permanent link">&para;</a></h3>
-<p>The management DB is one StatefulSet instance that every connection, tenant, and
-usage-metering write hits.</p>
-<p>Retiring the per-connection workers (#201/#205) took most of the pressure off:
-pool count now scales with the number of <strong>standing services</strong> (a few dozen pods,
-fixed) instead of with connection count, so <code>max_connections</code> exhaustion is no
-longer a fan-out risk. What is left is ordinary single-instance load — every
-connector polls this DB for per-connection config, and every usage write lands
-here — which is why it is still the top ceiling, just a much less steep one.</p>
-<p><strong>Fix (staged):</strong>
-- <strong>(a) Bound every worker's connection pool</strong> in code — <strong>✅ done.</strong> Pools already
-  existed but were monolith-sized (25 open / 5 idle per worker, no idle reaping),
-  which is exactly what multiplied across the old pod-per-connection fan-out. Now each
-  worker defaults to a lean <strong>6 open / 2 idle</strong> with a <strong>90 s <code>ConnMaxIdleTime</code></strong>
-  so idle pollers stop pinning connections; the control plane keeps 25/5. All
-  values are env-tunable (<code>DB_MAX_OPEN_CONNS</code>, <code>DB_MAX_IDLE_CONNS</code>,
-  <code>DB_CONN_MAX_LIFETIME_SECONDS</code>, <code>DB_CONN_MAX_IDLE_SECONDS</code>) for per-deployment
-  sizing. Caps the connection explosion; PgBouncer (b) is the next multiplier.
-- <strong>(b) PgBouncer</strong> (transaction pooling) in front of Postgres — one more multiplier
-  of headroom.
-- <strong>(c) Managed Postgres</strong> (Azure DB for PostgreSQL Flexible Server) + read replicas
-  for the read-heavy paths (usage/metrics, connection listing).</p>
-<h3 id="2-pod-per-connection-orchestration-resolved-201-205">2. ~~Pod-per-connection orchestration~~ — resolved (#201, #205)<a class="headerlink" href="#2-pod-per-connection-orchestration-resolved-201-205" title="Permanent link">&para;</a></h3>
-<p>This described each connection costing 1–2 pods + an HPA, with a practical ceiling
-of a few thousand connections per cluster. The recommended fix was a "shared
-multi-tenant worker-pool mode".</p>
-<p><strong>It turned out the platform already worked that way, and the pods were the
-vestige.</strong> The standing connector and transform services multiplex every
-connection off the shared <code>vrsky.data.*</code> subjects; the per-connection Deployments
-the orchestrator spawned alongside them were wired to
-<code>{tenant}.pipeline-{conn}.{node}.output</code> topics nothing publishes to, so they did
-no work at all. #201 stopped spawning them for transform nodes and #205 for edge
-nodes, which removes the ceiling outright: <strong>connection count now costs rows in
-<code>connections</code>, not pods.</strong></p>
-<p>What remains is the <em>replica</em> story for the standing services, which is smaller
-and better understood: pull-durable producers scale freely (2 replicas today),
-while pollers (consumers) and connectors serving per-pod SSE streams are pinned to
-one replica until they get leader election and a shared event bus respectively.</p>
-<h3 id="3-in-cluster-stateful-services">3. In-cluster stateful services<a class="headerlink" href="#3-in-cluster-stateful-services" title="Permanent link">&para;</a></h3>
-<p>Postgres, MinIO, NATS all run in-cluster. For scale:
-- Storage → <strong>Azure Blob</strong> (the cloud-storage connector already speaks S3/Azure/GCS).
-- Postgres → managed (see #1c).
-- NATS is 3-pod HA, but per-tenant instances add pod count — consider <strong>shared NATS
-  instances for small tenants</strong>, dedicated for large (density vs isolation).</p>
-<h3 id="4-node-capacity-azure-quota">4. Node capacity + Azure quota<a class="headerlink" href="#4-node-capacity-azure-quota" title="Permanent link">&para;</a></h3>
-<p>Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
-needs the <strong>cluster autoscaler</strong> + quota headroom.</p>
-<h2 id="immediate-roadmap">Immediate roadmap<a class="headerlink" href="#immediate-roadmap" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Step</th>
-<th>Ceiling</th>
-<th>Effort</th>
-<th>Needs cluster?</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>~~Bound worker DB pools~~ ✅</td>
-<td>1a</td>
-<td>small (code)</td>
-<td>no — <strong>done</strong></td>
-</tr>
-<tr>
-<td>~~Shared worker-pool mode~~ ✅</td>
-<td>2</td>
-<td>—</td>
-<td>no — <strong>done</strong> (#201/#205)</td>
-</tr>
-<tr>
-<td>PgBouncer</td>
-<td>1b</td>
-<td>small (infra)</td>
-<td>yes ← <strong>next</strong></td>
-</tr>
-<tr>
-<td>Leader election for polling consumers</td>
-<td>2</td>
-<td>medium (code)</td>
-<td>for load test</td>
-</tr>
-<tr>
-<td>Managed Postgres / Blob</td>
-<td>1c / 3</td>
-<td>medium (infra + migration)</td>
-<td>yes</td>
-</tr>
-<tr>
-<td>Run k6 at target scale</td>
-<td>all</td>
-<td>small</td>
-<td>yes</td>
-</tr>
-</tbody>
-</table>
-<h2 id="empirical-next-step">Empirical next step<a class="headerlink" href="#empirical-next-step" title="Permanent link">&para;</a></h2>
-<p>Run the k6 load-smoke at realistic rates + connection counts to turn this
-architectural read into measured limits — that's the only way to know the real
-ceiling and validate each fix.</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>VRSky carried two runtimes for the same pipeline nodes, and only one of them
+worked.</p>
+<p><strong>The runtime that works.</strong> Every node type is served by a <em>standing service</em>:
+one Deployment per connector kind (<code>file-consumer</code>, <code>http-producer</code>,
+<code>cloud-storage-producer</code>, <code>sitoo-consumer</code>, …) plus the shared <code>data-filter</code> and
+<code>data-converter</code>. Each subscribes to a JetStream pull durable on <code>vrsky.data.*</code>,
+claims a message by looking up the connection's nodes in the <code>connections</code> table
+and matching the node's config <code>type</code>, and is activated per connection by the
+<code>vrsky.commands.{tenant}.connection.start</code> command the management API publishes.
+This is what moved 1 GiB through prod on 2026-08-26.</p>
+<p><strong>The runtime that never worked.</strong> On connection start, the orchestrator also
+created a Deployment + HPA per node, running generic worker images
+(<code>vrsky-consumer</code>, <code>vrsky-producer</code>, and before #201 <code>vrsky-filter</code> /
+<code>vrsky-converter</code>). These were wired to <code>{tenant}.pipeline-{conn}.{node}.output</code>
+subjects that nothing publishes to or subscribes from — SDK connectors speak
+<code>vrsky.data.*</code> and ignore <code>INPUT_NATS_SUBJECT</code> / <code>OUTPUT_NATS_SUBJECT</code> entirely.</p>
+<p>The edge workers were worse than inert. Both read an <code>input_type</code> /
+<code>output_type</code> key that the UI never writes (it writes <code>type</code>), so:</p>
+<ul>
+<li><code>cmd/consumer</code> always fell through to its <code>"http"</code> default and sat on a bare
+  HTTP listener, publishing to a dead subject;</li>
+<li><code>cmd/producer</code> fell through to <code>"file"</code>, which <code>pkg/io.NewOutput</code> does not
+  implement — <code>os.Exit(1)</code>, i.e. a crash loop for the lifetime of the connection.</li>
+</ul>
+<h1 id="201-stopped-spawning-the-transform-half-this-adr-covers-the-edges-and-with">201 stopped spawning the transform half. This ADR covers the edges, and with<a class="headerlink" href="#201-stopped-spawning-the-transform-half-this-adr-covers-the-edges-and-with" title="Permanent link">&para;</a></h1>
+<p>them the last of the fork.</p>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p><strong>1. The orchestrator deploys no per-connection workers at all.</strong>
+<code>CreateAllDeploymentSpecs</code> skips every node type. Starting a connection now
+means: validate the DAG, mark it running, publish the start command. Connection
+count costs rows, not pods.</p>
+<p><code>StartConnection</code> additionally <em>prunes</em> per-connection Deployments and HPAs that
+its spec set no longer contains, so connections created before this change shed
+their leftover pods on the next start rather than needing an operator sweep.</p>
+<p><strong>2. Every UI-selectable node type gets a standing service in prod.</strong>
+<code>deploy-connectors-azure.sh</code> grew from the 10 retail connectors to the full set
+that the source and destination dropdowns in <code>PropertyEditor.tsx</code> offer. A node
+type with no service in that table is a type the platform silently cannot run —
+that is the failure #205 was, so the script's service table and the UI dropdowns
+must be kept in step.</p>
+<p><strong>3. Replicas are 1 unless the connector is a pure pull-durable subscriber.</strong>
+Pull durables distribute work across replicas with no coordination, so producers
+with no local state run 2 + a PDB. Singletons remain where a second replica
+would be wrong rather than merely unnecessary: consumers drive their own
+ingestion (directory watches, API polls, CDC cursors) and would double-ingest;
+producers with an HTTP surface hold the UI's SSE event buffer per pod and would
+show an operator half the events.</p>
+<p><strong>4. The Deployment-building machinery stays, unreached.</strong>
+Dedicated pods for a noisy or isolation-sensitive connection is a plausible
+future feature, and this code is its starting point. It is documented as
+unreachable at its entry point, and <code>StopConnection</code> plus the orphan GC still
+use its label helpers to clean up pre-change workers.</p>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Generic destinations work.</strong> Before this, a prod pipeline ending in an HTTP,
+database, file, cloud-storage, SFTP, Kafka, RabbitMQ or Salesforce node had
+nothing running that could deliver it. This is what makes the ADR 0003 input
+formats useful end to end: "CSV file in → converter → HTTP endpoint out" is now
+a deliverable pipeline rather than a half of one.</p>
+<p><strong>Scalability ceiling 2 is gone, not deferred.</strong> <code>docs/scalability.md</code> named
+pod-per-connection orchestration as the second ceiling and proposed a "shared
+multi-tenant worker-pool mode" as a large piece of future work. The platform was
+already that; the pods were the vestige. Deleting them removes the ceiling.</p>
+<p><strong>Ceiling 1 got shallower.</strong> DB pool count now scales with the number of
+standing services (a few dozen, fixed) instead of with connection count, so
+<code>max_connections</code> exhaustion is no longer a fan-out risk — just ordinary
+single-instance load.</p>
+<p><strong>Connector memory limits were wrong and are fixed here.</strong> Connectors were
+capped at 128Mi while the claim-check rehydrate cap
+(<code>PAYLOAD_REHYDRATE_MAX_BYTES</code>) defaults to 128 MiB. A producer that does not
+implement the ADR 0001 streaming path would be OOM-killed before the cap could
+reject anything. Limits are now 512Mi, matching what ADR 0001 assumed.</p>
+<p><strong>Tenant NATS placement (#19) is now visibly inert.</strong> It resolved a per-tenant
+NATS URL and stamped it on the worker pods — the only consumer it ever had.
+Standing services dial the <code>NATS_URL</code> in their own env, so a connection placed
+on a tenant instance is not actually served from it. The resolution logic and
+its tests are retained; wiring placement through to the standing services is
+separate work.</p>
+<p><strong>Retired:</strong> <code>cmd/consumer</code>, <code>cmd/producer</code>, their images and build entries, the
+<code>workers</code> image group, and the demo scripts that drove them
+(<code>test-pipeline.sh</code>, <code>test-pipeline-interactive.sh</code>, <code>scripts/e2e-test.sh</code>). The
+orchestrator's <code>integration</code>-tagged tests went too: they asserted per-connection
+pods and message flow over the dead subjects, needed a cluster no CI job
+provisions, and had never run.</p>
+<h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
+<p><strong>Fix the generic workers instead.</strong> Teach <code>cmd/consumer</code>/<code>cmd/producer</code> to read
+<code>type</code>, publish on <code>vrsky.data.*</code>, and speak JetStream. This rebuilds, per node
+type, what the SDK connectors already do — including claim-check, streaming
+(ADR 0001), and connection-scoped dispatch (#203) — and leaves two
+implementations of every connector to keep in sync. The fork is the bug; a
+second correct implementation is still a fork.</p>
+<p><strong>Keep spawning workers for isolation.</strong> Real per-connection isolation has value
+for a noisy or regulated tenant. But it should be an opt-in on top of a runtime
+that works, not the default path for every connection — and it was never
+delivering that isolation, because the pods did no work.</p>
 
 
 
@@ -2336,10 +2216,10 @@ ceiling and validate each fix.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

@@ -3696,7 +3696,7 @@ docker-compose<span class="w"> </span>up<span class="w"> </span>-d
 docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>-f<span class="w"> </span>ui/Dockerfile<span class="w"> </span>.
 
 <span class="c1"># Build individual backend service</span>
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/producer:latest<span class="w"> </span>-f<span class="w"> </span>src/cmd/producer/Dockerfile<span class="w"> </span>.
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/http-producer:latest<span class="w"> </span>-f<span class="w"> </span>src/cmd/http-producer/Dockerfile<span class="w"> </span>.
 
 <span class="c1"># Use Makefile for convenience</span>
 <span class="nb">cd</span><span class="w"> </span>src
@@ -3770,7 +3770,7 @@ make<span class="w"> </span>docker-push-converter
 - Tags matching <code>v*</code> (semantic versioning)
 - Pull requests to <code>main</code>, <code>develop</code></p>
 <h3 id="build-matrix">Build Matrix<a class="headerlink" href="#build-matrix" title="Permanent link">&para;</a></h3>
-<p>The workflow builds <strong>10 services in parallel</strong>:</p>
+<p>The workflow builds these services in parallel:</p>
 <table>
 <thead>
 <tr>
@@ -3781,29 +3781,19 @@ make<span class="w"> </span>docker-push-converter
 </thead>
 <tbody>
 <tr>
-<td>producer</td>
-<td>src/cmd/producer</td>
-<td>ghcr.io/ValueRetail/vrsky/producer</td>
-</tr>
-<tr>
-<td>consumer</td>
-<td>src/cmd/consumer</td>
-<td>ghcr.io/ValueRetail/vrsky/consumer</td>
-</tr>
-<tr>
-<td>converter</td>
-<td>src/cmd/converter</td>
-<td>ghcr.io/ValueRetail/vrsky/converter</td>
-</tr>
-<tr>
-<td>filter</td>
-<td>src/cmd/filter</td>
-<td>ghcr.io/ValueRetail/vrsky/filter</td>
-</tr>
-<tr>
 <td>management-api</td>
 <td>src/cmd/management-api</td>
 <td>ghcr.io/ValueRetail/vrsky/management-api</td>
+</tr>
+<tr>
+<td>data-filter</td>
+<td>src/cmd/data-filter</td>
+<td>ghcr.io/ValueRetail/vrsky/data-filter</td>
+</tr>
+<tr>
+<td>data-converter</td>
+<td>src/cmd/data-converter</td>
+<td>ghcr.io/ValueRetail/vrsky/data-converter</td>
 </tr>
 <tr>
 <td>file-consumer</td>
