@@ -2061,7 +2061,7 @@
 
 <h1 id="adr-0004-standing-connector-services-replace-per-connection-workers">ADR 0004 — Standing connector services replace per-connection workers<a class="headerlink" href="#adr-0004-standing-connector-services-replace-per-connection-workers" title="Permanent link">&para;</a></h1>
 <ul>
-<li><strong>Status:</strong> Accepted (2026-08-27)</li>
+<li><strong>Status:</strong> Accepted (2026-08-27), amended 2026-08-27 (decision 4)</li>
 <li><strong>Date:</strong> 2026-08-27</li>
 <li><strong>Relates to:</strong> #201 (transform fork), #205 (edge fork), #135 (worker HPAs),
   #19 (tenant NATS placement), <code>docs/scalability.md</code> ceiling 2</li>
@@ -2114,11 +2114,32 @@ would be wrong rather than merely unnecessary: consumers drive their own
 ingestion (directory watches, API polls, CDC cursors) and would double-ingest;
 producers with an HTTP surface hold the UI's SSE event buffer per pod and would
 show an operator half the events.</p>
-<p><strong>4. The Deployment-building machinery stays, unreached.</strong>
-Dedicated pods for a noisy or isolation-sensitive connection is a plausible
-future feature, and this code is its starting point. It is documented as
-unreachable at its entry point, and <code>StopConnection</code> plus the orphan GC still
-use its label helpers to clean up pre-change workers.</p>
+<p><strong>4. The Deployment-building machinery is deleted.</strong>
+It was initially retained, on the argument that dedicated pods for a noisy or
+isolation-sensitive connection is a plausible future feature and this code would
+be its starting point. That was reversed immediately: unreachable code with
+passing tests is precisely how the fork in this ADR survived unnoticed for
+months, and a reviewer cannot tell which half of <code>pkg/orchestrator</code> is live. The
+future feature, if it arrives, will want the <em>standing</em> services' claim model
+anyway — not the topic-wired one this code encodes.</p>
+<p>Deleted: <code>CreateDeploymentSpec</code> / <code>CreateAllDeploymentSpecs</code> and every builder
+below them, <code>deployComponent</code> / <code>applyHPA</code>, the whole <code>nats.go</code> topic scheme
+(<code>GetOutputTopic</code> and friends — the dead subjects themselves), <code>GetContainerImage</code>,
+<code>DeploymentSpec</code> / <code>NodeScaling</code> / <code>TopicPair</code>, the pod resource and env-name
+constants, and the <code>ImageRegistry</code> / <code>ImageVersion</code> / <code>PayloadStore*</code> / autoscaling
+fields on <code>OrchestratorConfig</code> along with the management-API env that fed them
+(<code>WORKER_IMAGE_*</code>, <code>PAYLOAD_STORE_*</code> — the standing services carry their own).
+<code>GetPipelineStatus</code> went too, from the adapter and from
+<code>managementapi.PipelineOrchestrator</code>: it derived per-node status from the worker
+Deployments, had no production caller, and would now always answer <code>{}</code>.</p>
+<p>What survives is the part with a live purpose: graph validation, the label and
+name helpers, connection teardown, and the orphan GC.</p>
+<p>One piece of behaviour had to be rescued rather than deleted. <code>CreateDeploymentSpec</code>
+called <code>IsValidNodeType</code>, and once the builder stopped deploying, that check was
+the <em>only</em> thing rejecting an unrecognised node type — a type with no standing
+service would otherwise start "successfully" and silently do nothing. It now lives
+in <code>BuildExecutionGraph</code>, which is a better home: validation happens as the graph
+is built, before the handler marks the connection running.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <p><strong>Generic destinations work.</strong> Before this, a prod pipeline ending in an HTTP,
 database, file, cloud-storage, SFTP, Kafka, RabbitMQ or Salesforce node had
@@ -2161,6 +2182,10 @@ second correct implementation is still a fork.</p>
 for a noisy or regulated tenant. But it should be an opt-in on top of a runtime
 that works, not the default path for every connection — and it was never
 delivering that isolation, because the pods did no work.</p>
+<p><strong>Keep the machinery in place for that future feature</strong> (the original decision 4,
+reversed the same day — see above). Retaining dead code to seed a hypothetical
+feature is what let this fork persist; git history preserves it just as well, and
+without the ambiguity about what runs.</p>
 
 
 
