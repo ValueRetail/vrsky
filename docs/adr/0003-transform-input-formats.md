@@ -1,6 +1,6 @@
 # ADR 0003 — Transform input formats (CSV / XML / NDJSON / YAML in)
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-08-26)
 - **Date:** 2026-08-26
 - **Relates to:** [ADR 0002](0002-transform-large-payloads.md) (record streaming),
   #187, PRs #198/#199
@@ -131,6 +131,21 @@ Converter and filter nodes gain: `input_format` ("" = auto, `json`, `csv`,
 mirroring the existing output-format one, with the XML record-path field shown
 conditionally. Schema preview ("show data structure") for non-JSON inputs is a
 follow-up — it currently assumes JSON samples.
+
+## Accepted decisions (2026-08-26)
+
+All three open questions were confirmed, with one amplification:
+
+1. **XML's required `input_xml_record_path` — accepted**, *and generalised*: every
+   format carries whatever configuration it genuinely needs to work correctly,
+   rather than a minimal subset. Where a format has a knob that changes whether
+   parsing is right or wrong (CSV delimiter/header presence, XML record path and
+   attribute conventions, NDJSON leniency, YAML multi-document), that knob is
+   exposed rather than assumed. All five input formats ship as first-class.
+2. **CSV values stay strings — accepted.**
+3. **Output behaviour unchanged — accepted.** The converter's output side and
+   the filter's JSON output stay exactly as they are today; this work adds an
+   input stage in front of them and changes nothing downstream.
 
 ## Implementation slices
 
