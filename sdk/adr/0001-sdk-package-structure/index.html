@@ -2102,6 +2102,12 @@ We want one stable contract + runtime that future connectors build on.</p>
 <p>Much of what an SDK needs already exists internally: <code>pkg/component</code>
 (Component/Producer/Input/Output interfaces), <code>pkg/messaging</code> (durable
 subscribe + DLQ), <code>pkg/health</code>, <code>pkg/runtime</code>, <code>pkg/crypto</code>, <code>pkg/envelope</code>.</p>
+<blockquote>
+<p>Note (2026-08-27): <code>pkg/runtime</code> has since been deleted. It read the
+per-connection worker env contract (<code>INPUT_NATS_SUBJECT</code> and friends), which
+went away with the workers themselves — see ADR 0004. The SDK never depended
+on it.</p>
+</blockquote>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
 <ol>
 <li>

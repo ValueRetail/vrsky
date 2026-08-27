@@ -2200,7 +2200,10 @@ NDJSON — but its <em>input</em> side is JSON only: <code>processEntry</code> d
 valid JSON". The filter has the same restriction. So the natural expectations
 <strong>CSV → JSON</strong> and <strong>XML → CSV</strong> fail at the first step, even though every
 piece downstream of parsing already exists.</p>
-<p>Two traps documented so they aren't rediscovered:</p>
+<p>Two traps documented so they aren't rediscovered (both since removed outright —
+the legacy packages were deleted with their binaries, see ADR 0004 — but the
+reasoning is kept because it explains why the live transforms look the way they
+do):</p>
 <ul>
 <li><code>pkg/filter/parser.go</code> <em>appears</em> to support XML input, but it is wired only
   into the retired legacy <code>cmd/filter</code> worker — and its approach doesn't work:

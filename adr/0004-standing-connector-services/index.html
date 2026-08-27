@@ -2165,12 +2165,33 @@ Standing services dial the <code>NATS_URL</code> in their own env, so a connecti
 on a tenant instance is not actually served from it. The resolution logic and
 its tests are retained; wiring placement through to the standing services is
 separate work.</p>
-<p><strong>Retired:</strong> <code>cmd/consumer</code>, <code>cmd/producer</code>, their images and build entries, the
-<code>workers</code> image group, and the demo scripts that drove them
-(<code>test-pipeline.sh</code>, <code>test-pipeline-interactive.sh</code>, <code>scripts/e2e-test.sh</code>). The
-orchestrator's <code>integration</code>-tagged tests went too: they asserted per-connection
-pods and message flow over the dead subjects, needed a cluster no CI job
-provisions, and had never run.</p>
+<p><strong>Retired:</strong> every per-connection worker binary and the code that existed only to
+serve them.</p>
+<ul>
+<li>Edges: <code>cmd/consumer</code>, <code>cmd/producer</code>, their images and build entries, the
+  <code>workers</code> image group, and the demo scripts that drove them
+  (<code>test-pipeline.sh</code>, <code>test-pipeline-interactive.sh</code>, <code>scripts/e2e-test.sh</code>).</li>
+<li>Transforms: <code>cmd/filter</code> and <code>cmd/converter</code>, which #201 left in place because
+  a compose service still built them, along with <code>pkg/filter</code> (8,956 lines) and
+  <code>pkg/converter</code> (11,937 lines) — the libraries behind them, imported by nothing
+  else — and <code>pkg/runtime</code>, the package that read the worker env contract
+  (<code>INPUT_NATS_SUBJECT</code> and friends) this ADR deleted the producer of.</li>
+<li>Tests: the orchestrator's <code>integration</code>-tagged tests and
+  <code>test/integration/checkpoint_e2e_test.go</code>. All asserted per-connection pods and
+  message flow over the dead subjects, needed a cluster no CI job provisions, and
+  had never run.</li>
+</ul>
+<p><strong>The legacy converter was richer than the live one, on paper.</strong> <code>pkg/converter</code>
+carried a function registry (string/numeric/date/ID helpers), HTTP and Postgres
+lookups, WASM plugin functions, JSON-schema validation and a rule engine;
+<code>pkg/filter</code> carried gating, routing, rate limiting and rejection queues. The
+live <code>data-converter</code> implements field mappings with <code>{field}</code> string
+interpolation, and <code>data-filter</code> implements rule-based row filtering. Deleting
+the legacy packages removes <strong>no working functionality</strong> — none of it ever ran in
+prod, and the config shapes it read were not the ones the UI writes — but it does
+discard a reference implementation. If any of those capabilities is wanted, it
+should be specified against the live transforms and their config, not restored;
+git history has the old code.</p>
 <h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
 <p><strong>Fix the generic workers instead.</strong> Teach <code>cmd/consumer</code>/<code>cmd/producer</code> to read
 <code>type</code>, publish on <code>vrsky.data.*</code>, and speak JetStream. This rebuilds, per node

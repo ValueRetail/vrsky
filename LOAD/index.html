@@ -2532,6 +2532,13 @@ item (#90), consistent with the rest of this doc. The heartbeat's cost is one
 short-lived goroutine + a ticker per message, stopped the instant the handler
 acks — negligible at the sink-bound rates above.</p>
 <h3 id="scaled-topology-k8s-orchestrator-path-15-k3d">Scaled topology — k8s orchestrator path (#15, k3d)<a class="headerlink" href="#scaled-topology-k8s-orchestrator-path-15-k3d" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Historical (superseded).</strong> The per-connection <code>pkg/runtime</code> workers described
+here no longer exist: the orchestrator stopped spawning them in #201/#205 and
+the binaries and package were deleted (ADR 0004). Node kinds are run by
+standing services. The measurements below still stand as a record of what was
+tested at the time; the topology they describe does not.</p>
+</blockquote>
 <p>The numbers above run the <strong>compose</strong> stack (SDK connectors, one host). The
 <strong>k8s orchestrator path</strong> — where the management-api's orchestrator (#157)
 deploys per-node <code>pkg/runtime</code> workers with per-connection HPAs (#135) — was

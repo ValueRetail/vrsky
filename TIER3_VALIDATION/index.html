@@ -2405,6 +2405,13 @@ connection through its lifecycle:</p>
    the native arch on a glibc (<code>debian-slim</code>) runtime.</li>
 </ol>
 <h3 id="worker-config-note">Worker config note<a class="headerlink" href="#worker-config-note" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Superseded — do not follow.</strong> The generic workers this describes were retired
+in #201/#205 and deleted with <code>pkg/runtime</code> (ADR 0004). The <code>input_type</code> /
+<code>output_type</code> config shape below was in fact never what the UI wrote, which is
+why those workers could not serve a real node. Node config is read by the
+standing connector services, keyed on the node's <code>type</code>.</p>
+</blockquote>
 <p>The generic <code>pkg/runtime</code> workers the orchestrator deploys take their source/sink
 config from the node <code>config</code> JSON: a consumer needs <code>{"input_type":...,
 "input_config":{...}}</code> (default <code>http</code> → <code>POST /webhook</code> on port 8000) and a
