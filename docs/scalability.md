@@ -9,15 +9,17 @@
 ## Verdict
 
 The building blocks are the right ones for horizontal scale, and multi-tenancy is
-genuinely built in — not bolted on. The limits are **(1) a single PostgreSQL** and
-**(2) the pod-per-connection worker model**; neither is a rewrite.
+genuinely built in — not bolted on. The main limit is **a single PostgreSQL**;
+that is not a rewrite. The pod-per-connection worker model was the other named
+ceiling and is **gone** — see below.
 
 ## What scales well (by design)
 
-- **Per-connection worker autoscaling** — the orchestrator gives each connection a
-  Deployment + **HPA** (`MinReplicas`/`MaxReplicas`/`TargetCPUPercent`), and NATS
-  **JetStream durable consumers load-balance across replicas**, so a connection's
-  throughput scales out.
+- **Shared connector services on JetStream pull durables** — one standing service
+  per node type (`file-consumer`, `http-producer`, `data-filter`, …) multiplexes
+  every connection of that type, routing by node config. Because they are **pull**
+  durables, replicas of a service share the work without coordination, so the
+  destination side scales by replica count rather than by connection count.
 - **Multi-tenancy** — **per-tenant NATS instances** (`nats_instances`, migration
   000018), tenant-scoped queries throughout (`lint:tenant-ok`), enforced **quotas**
   (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily usage metering.
@@ -29,13 +31,19 @@ genuinely built in — not bolted on. The limits are **(1) a single PostgreSQL**
 
 ### 1. Single in-cluster PostgreSQL  ← highest priority
 The management DB is one StatefulSet instance that every connection, tenant, and
-usage-metering write hits. With pod-per-connection fan-out, each worker holds a DB
-pool — connection count multiplies fast and can exhaust `max_connections`.
+usage-metering write hits.
+
+Retiring the per-connection workers (#201/#205) took most of the pressure off:
+pool count now scales with the number of **standing services** (a few dozen pods,
+fixed) instead of with connection count, so `max_connections` exhaustion is no
+longer a fan-out risk. What is left is ordinary single-instance load — every
+connector polls this DB for per-connection config, and every usage write lands
+here — which is why it is still the top ceiling, just a much less steep one.
 
 **Fix (staged):**
 - **(a) Bound every worker's connection pool** in code — **✅ done.** Pools already
   existed but were monolith-sized (25 open / 5 idle per worker, no idle reaping),
-  which is exactly what multiplies across pod-per-connection fan-out. Now each
+  which is exactly what multiplied across the old pod-per-connection fan-out. Now each
   worker defaults to a lean **6 open / 2 idle** with a **90 s `ConnMaxIdleTime`**
   so idle pollers stop pinning connections; the control plane keeps 25/5. All
   values are env-tunable (`DB_MAX_OPEN_CONNS`, `DB_MAX_IDLE_CONNS`,
@@ -46,16 +54,24 @@ pool — connection count multiplies fast and can exhaust `max_connections`.
 - **(c) Managed Postgres** (Azure DB for PostgreSQL Flexible Server) + read replicas
   for the read-heavy paths (usage/metrics, connection listing).
 
-### 2. Pod-per-connection orchestration
-Each connection = 1–2 pods (src/dst) + an HPA. Elegant isolation, but a practical
-ceiling around a few thousand connections/cluster (etcd/scheduler/object pressure,
-cost), and wasteful for many small or idle connections.
+### 2. ~~Pod-per-connection orchestration~~ — resolved (#201, #205)
+This described each connection costing 1–2 pods + an HPA, with a practical ceiling
+of a few thousand connections per cluster. The recommended fix was a "shared
+multi-tenant worker-pool mode".
 
-**Fix:** a **shared multi-tenant worker-pool mode** for light connections (one
-worker process multiplexing many connections off the shared NATS subjects), keeping
-dedicated pods only for heavy/isolated ones. The connector SDK already loads
-per-connection config by ID, so a pool worker is a routing layer on top — not a
-connector rewrite. This is the biggest *architectural* lever for density + cost.
+**It turned out the platform already worked that way, and the pods were the
+vestige.** The standing connector and transform services multiplex every
+connection off the shared `vrsky.data.*` subjects; the per-connection Deployments
+the orchestrator spawned alongside them were wired to
+`{tenant}.pipeline-{conn}.{node}.output` topics nothing publishes to, so they did
+no work at all. #201 stopped spawning them for transform nodes and #205 for edge
+nodes, which removes the ceiling outright: **connection count now costs rows in
+`connections`, not pods.**
+
+What remains is the *replica* story for the standing services, which is smaller
+and better understood: pull-durable producers scale freely (2 replicas today),
+while pollers (consumers) and connectors serving per-pod SSE streams are pinned to
+one replica until they get leader election and a shared event bus respectively.
 
 ### 3. In-cluster stateful services
 Postgres, MinIO, NATS all run in-cluster. For scale:
@@ -73,8 +89,9 @@ needs the **cluster autoscaler** + quota headroom.
 | Step | Ceiling | Effort | Needs cluster? |
 |---|---|---|---|
 | ~~Bound worker DB pools~~ ✅ | 1a | small (code) | no — **done** |
+| ~~Shared worker-pool mode~~ ✅ | 2 | — | no — **done** (#201/#205) |
 | PgBouncer | 1b | small (infra) | yes ← **next** |
-| Shared worker-pool mode | 2 | large (code) | for load test |
+| Leader election for polling consumers | 2 | medium (code) | for load test |
 | Managed Postgres / Blob | 1c / 3 | medium (infra + migration) | yes |
 | Run k6 at target scale | all | small | yes |
 

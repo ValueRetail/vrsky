@@ -341,16 +341,11 @@ func CreateAllDeploymentSpecs(graph *ExecutionGraph, config *OrchestratorConfig)
 			return nil, err
 		}
 
-		// Filter and converter nodes are served by the SHARED data-filter /
-		// data-converter platform services (JetStream durables on
-		// vrsky.data.*.pipeline.*, routing by node config + predecessor
-		// metadata), not by per-connection workers (#201). The per-connection
-		// transform workers this used to spawn were provable no-ops: the
-		// orchestrator wired them to {tenant}.pipeline-{conn}.{node}.output
-		// topics that nothing publishes to — SDK connectors publish and
-		// subscribe on the vrsky.data.* subjects and ignore INPUT/OUTPUT
-		// _NATS_SUBJECT entirely.
-		if node.Type == "filter" || node.Type == "converter" {
+		// Every node kind is served by a STANDING platform service, so no node
+		// gets a per-connection worker any more (#201 for the transforms, #205
+		// for the edges). Validation still runs above: an unknown node type is
+		// a graph error even though nothing is deployed for it.
+		if isServedByStandingService(node.Type) {
 			continue
 		}
 
@@ -363,6 +358,42 @@ func CreateAllDeploymentSpecs(graph *ExecutionGraph, config *OrchestratorConfig)
 	}
 
 	return deployments, nil
+}
+
+// isServedByStandingService reports whether a node type is handled by a standing
+// platform service rather than a per-connection worker Deployment.
+//
+// This is true of every node type today, which is the point: the per-connection
+// workers the orchestrator used to spawn were provable no-ops.
+//
+//   - Transforms (filter/converter) → the shared data-filter / data-converter
+//     services (#201).
+//   - Edges (consumer/producer) → the SDK connector services, one per connector
+//     kind (file-consumer, http-producer, …), each matching on the node's
+//     config `type` and loading per-connection config from the connections
+//     table. They are activated by the vrsky.commands.{tenant}.connection.start
+//     command the management API publishes (#205).
+//
+// The spawned edge workers were dead for the same reason the transform workers
+// were: cmd/consumer published to, and cmd/producer subscribed to, the
+// orchestrator's {tenant}.pipeline-{conn}.{node}.output topics, which nothing
+// else touches — SDK connectors speak vrsky.data.* and ignore INPUT/OUTPUT_NATS
+// _SUBJECT entirely. Worse, neither binary could serve a real node: they read an
+// `input_type`/`output_type` config key the UI never writes, so cmd/consumer
+// always fell back to a bare HTTP listener and cmd/producer to output type
+// "file", which pkg/io.NewOutput does not implement — an immediate crash loop.
+//
+// The Deployment-building machinery below is retained (not deleted) because it
+// is the starting point for a future opt-in "dedicated worker" mode for a noisy
+// connection; nothing reaches it today. StopConnection and the orphan GC still
+// use the label helpers to clean up workers left over from before this change.
+func isServedByStandingService(nodeType string) bool {
+	switch nodeType {
+	case "consumer", "producer", "filter", "converter":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetDeploymentLabelsForConnection returns the labels used to identify all deployments

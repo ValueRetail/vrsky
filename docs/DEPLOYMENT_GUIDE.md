@@ -97,7 +97,7 @@ cd vrsky
 docker build -t vrsky/ui:latest -f ui/Dockerfile .
 
 # Build individual backend service
-docker build -t vrsky/producer:latest -f src/cmd/producer/Dockerfile .
+docker build -t vrsky/http-producer:latest -f src/cmd/http-producer/Dockerfile .
 
 # Use Makefile for convenience
 cd src
@@ -192,15 +192,13 @@ Critical for build performance:
 
 ### Build Matrix
 
-The workflow builds **10 services in parallel**:
+The workflow builds these services in parallel:
 
 | Service | Path | Image Registry |
 |---------|------|----------------|
-| producer | src/cmd/producer | ghcr.io/ValueRetail/vrsky/producer |
-| consumer | src/cmd/consumer | ghcr.io/ValueRetail/vrsky/consumer |
-| converter | src/cmd/converter | ghcr.io/ValueRetail/vrsky/converter |
-| filter | src/cmd/filter | ghcr.io/ValueRetail/vrsky/filter |
 | management-api | src/cmd/management-api | ghcr.io/ValueRetail/vrsky/management-api |
+| data-filter | src/cmd/data-filter | ghcr.io/ValueRetail/vrsky/data-filter |
+| data-converter | src/cmd/data-converter | ghcr.io/ValueRetail/vrsky/data-converter |
 | file-consumer | src/cmd/file-consumer | ghcr.io/ValueRetail/vrsky/file-consumer |
 | file-producer | src/cmd/file-producer | ghcr.io/ValueRetail/vrsky/file-producer |
 | postgres-consumer | src/cmd/postgres-consumer | ghcr.io/ValueRetail/vrsky/postgres-consumer |

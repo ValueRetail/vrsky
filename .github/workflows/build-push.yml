@@ -49,12 +49,12 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          # Backend services
-          - { name: "producer", path: "src/cmd/producer" }
-          - { name: "consumer", path: "src/cmd/consumer" }
-          - { name: "converter", path: "src/cmd/converter" }
-          - { name: "filter", path: "src/cmd/filter" }
+          # Backend services. No producer/consumer/filter/converter entries:
+          # those are the legacy per-connection worker images the orchestrator
+          # stopped spawning in #201/#205 — nothing pulls them.
           - { name: "management-api", path: "src/cmd/management-api" }
+          - { name: "data-filter", path: "src/cmd/data-filter" }
+          - { name: "data-converter", path: "src/cmd/data-converter" }
           - { name: "file-consumer", path: "src/cmd/file-consumer" }
           - { name: "file-producer", path: "src/cmd/file-producer" }
           - { name: "postgres-consumer", path: "src/cmd/postgres-consumer" }

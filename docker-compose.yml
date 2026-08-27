@@ -322,29 +322,6 @@ services:
     restart: unless-stopped
 
   # Producer service (optional - can run locally for development)
-  producer:
-    build:
-      context: .
-      dockerfile: src/cmd/producer/Dockerfile
-    container_name: vrsky-producer
-    environment:
-      # Input configuration: subscribe to NATS topic
-      INPUT_TYPE: "nats"
-      INPUT_CONFIG: '{"url":"nats://nats:4222","topic":"test.>"}'
-      
-      # Output configuration: POST to httpbin
-      OUTPUT_TYPE: "http"
-      OUTPUT_CONFIG: '{"url":"http://httpbin:80/post","method":"POST","retries":1}'
-      
-      # Logging (optional - structured JSON logging is default)
-      LOG_LEVEL: "info"
-    depends_on:
-      - nats
-      - httpbin
-    networks:
-      - vrsky-network
-    restart: unless-stopped
-
   # Filter service - applies Priority 1/2/3 filtering, routing, and rate limiting
   filter:
      build:

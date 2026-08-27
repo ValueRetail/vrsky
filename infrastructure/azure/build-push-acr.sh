@@ -9,19 +9,21 @@
 #
 # Usage:
 #   infrastructure/azure/build-push-acr.sh [group]
-#     group = core | workers | connectors | all   (default: all)
+#     group = core | connectors | all   (default: all)
 #
 #   REG=myregistry infrastructure/azure/build-push-acr.sh core   # override ACR name
 #
 # Groups:
 #   core       management-api, ui, data-filter, data-converter (running platform)
-#   workers    the generic per-node images the orchestrator spins up:
-#              vrsky-consumer / vrsky-producer
-#              (image pattern must match orchestrator/types.go: {registry}/vrsky-{nodeType};
-#              filter/converter nodes are served by the shared data-* services, #201)
-#   connectors the standing retail connectors (Sitoo, Front Systems, Business
-#              Central, Visma, Brightpearl) — built ready; they still need
-#              Kubernetes Deployment manifests before they can run on AKS.
+#   connectors the standing connectors — retail/ERP (Sitoo, Front Systems,
+#              Business Central, Visma, Brightpearl) and generic (file, HTTP,
+#              database, cloud storage, SFTP, Kafka, RabbitMQ, Salesforce,
+#              webhook, API, tenant). Deploy them with deploy-connectors-azure.sh.
+#
+# There is no "workers" group any more: since #201 (transforms) and #205 (edges)
+# the orchestrator spawns no per-connection worker pods, so the vrsky-consumer /
+# vrsky-producer images it used to resolve have no consumer. Every node kind is
+# served by a standing connector service instead.
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"                 # ACR name (not the login server)
@@ -48,20 +50,24 @@ build_core() {
   build vrsky/data-converter:latest src/cmd/data-converter/Dockerfile
 }
 
-build_workers() {
-  # NOTE the `vrsky-` prefix in the repo name — the orchestrator resolves
-  # per-node images as {WORKER_IMAGE_REGISTRY}/vrsky-{nodeType}:{version}.
-  # No vrsky-filter/vrsky-converter: the orchestrator no longer spawns
-  # per-connection transform workers (#201) — the shared data-filter and
-  # data-converter services (build_core) handle those nodes.
-  build vrsky/vrsky-consumer:latest  src/cmd/consumer/Dockerfile
-  build vrsky/vrsky-producer:latest  src/cmd/producer/Dockerfile
-}
-
 build_connectors() {
+  # Retail/ERP: both directions.
   for c in sitoo front-systems business-central visma brightpearl; do
     build "vrsky/${c}-consumer:latest" "src/cmd/${c}-consumer/Dockerfile"
     build "vrsky/${c}-producer:latest" "src/cmd/${c}-producer/Dockerfile"
+  done
+  # Generic source/destination types. These must stay in step with the service
+  # table in deploy-connectors-azure.sh — a connector with no image there is a
+  # node type the UI offers and the platform cannot run (#205).
+  local generic=(
+    api-consumer webhook-consumer file-consumer db-consumer tenant-consumer
+    cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
+    salesforce-consumer
+    http-producer db-producer file-producer cloud-storage-producer
+    sftp-producer kafka-producer rabbitmq-producer salesforce-producer
+  )
+  for c in "${generic[@]}"; do
+    build "vrsky/${c}:latest" "src/cmd/${c}/Dockerfile"
   done
 }
 
@@ -71,10 +77,9 @@ echo "Context  : $REPO_ROOT (trimmed by .dockerignore)"
 
 case "$GROUP" in
   core)       build_core ;;
-  workers)    build_workers ;;
   connectors) build_connectors ;;
-  all)        build_core; build_workers; build_connectors ;;
-  *) echo "unknown group '$GROUP' (use: core | workers | connectors | all)" >&2; exit 2 ;;
+  all)        build_core; build_connectors ;;
+  *) echo "unknown group '$GROUP' (use: core | connectors | all)" >&2; exit 2 ;;
 esac
 
 echo ""
