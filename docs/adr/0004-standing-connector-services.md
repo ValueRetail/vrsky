@@ -124,12 +124,33 @@ on a tenant instance is not actually served from it. The resolution logic and
 its tests are retained; wiring placement through to the standing services is
 separate work.
 
-**Retired:** `cmd/consumer`, `cmd/producer`, their images and build entries, the
-`workers` image group, and the demo scripts that drove them
-(`test-pipeline.sh`, `test-pipeline-interactive.sh`, `scripts/e2e-test.sh`). The
-orchestrator's `integration`-tagged tests went too: they asserted per-connection
-pods and message flow over the dead subjects, needed a cluster no CI job
-provisions, and had never run.
+**Retired:** every per-connection worker binary and the code that existed only to
+serve them.
+
+- Edges: `cmd/consumer`, `cmd/producer`, their images and build entries, the
+  `workers` image group, and the demo scripts that drove them
+  (`test-pipeline.sh`, `test-pipeline-interactive.sh`, `scripts/e2e-test.sh`).
+- Transforms: `cmd/filter` and `cmd/converter`, which #201 left in place because
+  a compose service still built them, along with `pkg/filter` (8,956 lines) and
+  `pkg/converter` (11,937 lines) — the libraries behind them, imported by nothing
+  else — and `pkg/runtime`, the package that read the worker env contract
+  (`INPUT_NATS_SUBJECT` and friends) this ADR deleted the producer of.
+- Tests: the orchestrator's `integration`-tagged tests and
+  `test/integration/checkpoint_e2e_test.go`. All asserted per-connection pods and
+  message flow over the dead subjects, needed a cluster no CI job provisions, and
+  had never run.
+
+**The legacy converter was richer than the live one, on paper.** `pkg/converter`
+carried a function registry (string/numeric/date/ID helpers), HTTP and Postgres
+lookups, WASM plugin functions, JSON-schema validation and a rule engine;
+`pkg/filter` carried gating, routing, rate limiting and rejection queues. The
+live `data-converter` implements field mappings with `{field}` string
+interpolation, and `data-filter` implements rule-based row filtering. Deleting
+the legacy packages removes **no working functionality** — none of it ever ran in
+prod, and the config shapes it read were not the ones the UI writes — but it does
+discard a reference implementation. If any of those capabilities is wanted, it
+should be specified against the live transforms and their config, not restored;
+git history has the old code.
 
 ## Alternatives considered
 

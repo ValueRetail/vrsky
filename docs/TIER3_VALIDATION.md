@@ -153,6 +153,12 @@ connection through its lifecycle:
 
 ### Worker config note
 
+> **Superseded — do not follow.** The generic workers this describes were retired
+> in #201/#205 and deleted with `pkg/runtime` (ADR 0004). The `input_type` /
+> `output_type` config shape below was in fact never what the UI wrote, which is
+> why those workers could not serve a real node. Node config is read by the
+> standing connector services, keyed on the node's `type`.
+
 The generic `pkg/runtime` workers the orchestrator deploys take their source/sink
 config from the node `config` JSON: a consumer needs `{"input_type":...,
 "input_config":{...}}` (default `http` → `POST /webhook` on port 8000) and a

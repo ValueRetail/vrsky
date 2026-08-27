@@ -3,7 +3,6 @@
 
 // Package integration provides end-to-end integration tests for VRSky components.
 // These tests verify that components correctly:
-// - Load K8s runtime configuration from environment variables
 // - Expose health and metrics endpoints
 // - Process messages through NATS
 // - Support checkpoint persistence
@@ -22,7 +21,6 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/health"
 	"github.com/ValueRetail/vrsky/pkg/metrics"
-	"github.com/ValueRetail/vrsky/pkg/runtime"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -34,52 +32,6 @@ func setupNATS(t *testing.T) *nats.Conn {
 		t.Skipf("NATS not available: %v", err)
 	}
 	return nc
-}
-
-// TestRuntimeConfig_LoadFromEnv tests that runtime config loads correctly from env vars
-func TestRuntimeConfig_LoadFromEnv(t *testing.T) {
-	// Set test environment
-	t.Setenv("TENANT_ID", "test-tenant")
-	t.Setenv("CONNECTION_ID", "conn-123")
-	t.Setenv("NODE_ID", "node-abc")
-	t.Setenv("NODE_TYPE", "filter")
-	t.Setenv("INPUT_NATS_SUBJECT", "test.input")
-	t.Setenv("OUTPUT_NATS_SUBJECT", "test.output")
-	t.Setenv("NATS_URLS", "nats://localhost:4222")
-	t.Setenv("HEALTH_PORT", "9090")
-	t.Setenv("CONFIG", `{"rules": []}`)
-
-	cfg, err := runtime.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv failed: %v", err)
-	}
-
-	if cfg.TenantID != "test-tenant" {
-		t.Errorf("TenantID = %q, want %q", cfg.TenantID, "test-tenant")
-	}
-	if cfg.ConnectionID != "conn-123" {
-		t.Errorf("ConnectionID = %q, want %q", cfg.ConnectionID, "conn-123")
-	}
-	if cfg.NodeID != "node-abc" {
-		t.Errorf("NodeID = %q, want %q", cfg.NodeID, "node-abc")
-	}
-	if cfg.NodeType != "filter" {
-		t.Errorf("NodeType = %q, want %q", cfg.NodeType, "filter")
-	}
-	if cfg.InputNATSSubject != "test.input" {
-		t.Errorf("InputNATSSubject = %q, want %q", cfg.InputNATSSubject, "test.input")
-	}
-	if cfg.OutputNATSSubject != "test.output" {
-		t.Errorf("OutputNATSSubject = %q, want %q", cfg.OutputNATSSubject, "test.output")
-	}
-	if cfg.HealthPort != 9090 {
-		t.Errorf("HealthPort = %d, want %d", cfg.HealthPort, 9090)
-	}
-
-	// Validate should pass
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate failed: %v", err)
-	}
 }
 
 // TestHealthServer_Endpoints tests health server endpoint responses
@@ -391,40 +343,6 @@ func TestHealthServer_MetricsContent(t *testing.T) {
 	// Should contain at least go runtime metrics
 	// (health server registers default go collectors)
 	// This validates the metrics endpoint is working
-}
-
-// TestRuntimeConfig_ParseConfig tests JSON config parsing
-func TestRuntimeConfig_ParseConfig(t *testing.T) {
-	t.Setenv("TENANT_ID", "test")
-	t.Setenv("CONNECTION_ID", "conn")
-	t.Setenv("NODE_ID", "node")
-	t.Setenv("NODE_TYPE", "filter")
-	t.Setenv("INPUT_NATS_SUBJECT", "in")
-	t.Setenv("OUTPUT_NATS_SUBJECT", "out")
-	t.Setenv("CONFIG", `{"filter_id": "my-filter", "rules": [{"name": "test"}]}`)
-
-	cfg, err := runtime.LoadFromEnv()
-	if err != nil {
-		t.Fatalf("LoadFromEnv failed: %v", err)
-	}
-
-	type FilterConfig struct {
-		FilterID string        `json:"filter_id"`
-		Rules    []interface{} `json:"rules"`
-	}
-
-	var fc FilterConfig
-	if err := cfg.ParseConfig(&fc); err != nil {
-		t.Fatalf("ParseConfig failed: %v", err)
-	}
-
-	if fc.FilterID != "my-filter" {
-		t.Errorf("FilterID = %q, want %q", fc.FilterID, "my-filter")
-	}
-
-	if len(fc.Rules) != 1 {
-		t.Errorf("len(Rules) = %d, want 1", len(fc.Rules))
-	}
 }
 
 // TestComponentIntegration_FilterWithNATS tests filter component with real NATS
