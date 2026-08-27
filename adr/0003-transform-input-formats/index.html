@@ -12,25 +12,23 @@
       
       
       
-        <link rel="next" href="tutorials/first-pipeline/">
-      
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>VRSky Documentation</title>
+        <title>ADR 0003 — Transform input formats (CSV / XML / NDJSON / YAML in) - VRSky Documentation</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +47,7 @@
       
     
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vrsky-documentation" class="md-skip">
+        <a href="#adr-0003-transform-input-formats-csv-xml-ndjson-yaml-in" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +88,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-header__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              ADR 0003 — Transform input formats (CSV / XML / NDJSON / YAML in)
             
           </span>
         </div>
@@ -216,7 +214,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
+    <a href="../.." title="VRSky Documentation" class="md-nav__button md-logo" aria-label="VRSky Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -231,37 +229,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -277,59 +248,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Where to start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core concepts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Platform reference
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -393,7 +311,7 @@
   
   
     <li class="md-nav__item">
-      <a href="tutorials/first-pipeline/" class="md-nav__link">
+      <a href="../../tutorials/first-pipeline/" class="md-nav__link">
         
   
   
@@ -421,7 +339,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/tutorial/first-connector/" class="md-nav__link">
+      <a href="../../sdk/tutorial/first-connector/" class="md-nav__link">
         
   
   
@@ -508,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/" class="md-nav__link">
+      <a href="../../guide/" class="md-nav__link">
         
   
   
@@ -536,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/getting-started/" class="md-nav__link">
+      <a href="../../guide/getting-started/" class="md-nav__link">
         
   
   
@@ -564,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/workspaces-and-members/" class="md-nav__link">
+      <a href="../../guide/workspaces-and-members/" class="md-nav__link">
         
   
   
@@ -592,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/building-a-pipeline/" class="md-nav__link">
+      <a href="../../guide/building-a-pipeline/" class="md-nav__link">
         
   
   
@@ -620,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/connectors-and-nodes/" class="md-nav__link">
+      <a href="../../guide/connectors-and-nodes/" class="md-nav__link">
         
   
   
@@ -648,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/credentials-and-oauth/" class="md-nav__link">
+      <a href="../../guide/credentials-and-oauth/" class="md-nav__link">
         
   
   
@@ -676,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/deploying-and-monitoring/" class="md-nav__link">
+      <a href="../../guide/deploying-and-monitoring/" class="md-nav__link">
         
   
   
@@ -704,7 +622,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/data-sharing/" class="md-nav__link">
+      <a href="../../guide/data-sharing/" class="md-nav__link">
         
   
   
@@ -732,7 +650,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/settings/" class="md-nav__link">
+      <a href="../../guide/settings/" class="md-nav__link">
         
   
   
@@ -760,7 +678,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guide/troubleshooting/" class="md-nav__link">
+      <a href="../../guide/troubleshooting/" class="md-nav__link">
         
   
   
@@ -847,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/install/" class="md-nav__link">
+      <a href="../../operator/install/" class="md-nav__link">
         
   
   
@@ -875,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/upgrade/" class="md-nav__link">
+      <a href="../../operator/upgrade/" class="md-nav__link">
         
   
   
@@ -903,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/backup/" class="md-nav__link">
+      <a href="../../operator/backup/" class="md-nav__link">
         
   
   
@@ -931,7 +849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/monitoring/" class="md-nav__link">
+      <a href="../../operator/monitoring/" class="md-nav__link">
         
   
   
@@ -959,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/troubleshooting/" class="md-nav__link">
+      <a href="../../operator/troubleshooting/" class="md-nav__link">
         
   
   
@@ -987,7 +905,7 @@
   
   
     <li class="md-nav__item">
-      <a href="operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -1015,7 +933,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SLA/" class="md-nav__link">
+      <a href="../../SLA/" class="md-nav__link">
         
   
   
@@ -1043,7 +961,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DEPLOYMENT_GUIDE/" class="md-nav__link">
+      <a href="../../DEPLOYMENT_GUIDE/" class="md-nav__link">
         
   
   
@@ -1071,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="DR/" class="md-nav__link">
+      <a href="../../DR/" class="md-nav__link">
         
   
   
@@ -1158,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/" class="md-nav__link">
+      <a href="../../connectors/" class="md-nav__link">
         
   
   
@@ -1186,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/http/" class="md-nav__link">
+      <a href="../../connectors/http/" class="md-nav__link">
         
   
   
@@ -1214,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/api/" class="md-nav__link">
+      <a href="../../connectors/api/" class="md-nav__link">
         
   
   
@@ -1242,7 +1160,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/database/" class="md-nav__link">
+      <a href="../../connectors/database/" class="md-nav__link">
         
   
   
@@ -1270,7 +1188,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/file/" class="md-nav__link">
+      <a href="../../connectors/file/" class="md-nav__link">
         
   
   
@@ -1298,7 +1216,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sftp/" class="md-nav__link">
+      <a href="../../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1326,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/cloud-storage/" class="md-nav__link">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1354,7 +1272,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/kafka/" class="md-nav__link">
+      <a href="../../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1382,7 +1300,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/rabbitmq/" class="md-nav__link">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1410,7 +1328,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/salesforce/" class="md-nav__link">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1438,7 +1356,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sitoo/" class="md-nav__link">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1466,7 +1384,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/front-systems/" class="md-nav__link">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1494,7 +1412,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/business-central/" class="md-nav__link">
+      <a href="../../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1522,7 +1440,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/visma/" class="md-nav__link">
+      <a href="../../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1550,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/sap-s4hana/" class="md-nav__link">
+      <a href="../../connectors/sap-s4hana/" class="md-nav__link">
         
   
   
@@ -1578,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/brightpearl/" class="md-nav__link">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1606,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/tenant/" class="md-nav__link">
+      <a href="../../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1634,7 +1552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="connectors/filters-converters/" class="md-nav__link">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -1721,7 +1639,7 @@
   
   
     <li class="md-nav__item">
-      <a href="security/whitepaper/" class="md-nav__link">
+      <a href="../../security/whitepaper/" class="md-nav__link">
         
   
   
@@ -1749,7 +1667,7 @@
   
   
     <li class="md-nav__item">
-      <a href="SECURITY/" class="md-nav__link">
+      <a href="../../SECURITY/" class="md-nav__link">
         
   
   
@@ -1784,7 +1702,7 @@
   
   
     <li class="md-nav__item">
-      <a href="reference/api/" class="md-nav__link">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1863,7 +1781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="CONNECTION_NODE_SPEC/" class="md-nav__link">
+      <a href="../../CONNECTION_NODE_SPEC/" class="md-nav__link">
         
   
   
@@ -1891,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TENANT_MODEL/" class="md-nav__link">
+      <a href="../../TENANT_MODEL/" class="md-nav__link">
         
   
   
@@ -1919,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="NATS_ARCHITECTURE/" class="md-nav__link">
+      <a href="../../NATS_ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -1947,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="OBSERVABILITY/" class="md-nav__link">
+      <a href="../../OBSERVABILITY/" class="md-nav__link">
         
   
   
@@ -1975,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="TRACING/" class="md-nav__link">
+      <a href="../../TRACING/" class="md-nav__link">
         
   
   
@@ -2003,7 +1921,7 @@
   
   
     <li class="md-nav__item">
-      <a href="LOAD/" class="md-nav__link">
+      <a href="../../LOAD/" class="md-nav__link">
         
   
   
@@ -2031,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="oauth-framework/" class="md-nav__link">
+      <a href="../../oauth-framework/" class="md-nav__link">
         
   
   
@@ -2059,7 +1977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="sdk/" class="md-nav__link">
+      <a href="../../sdk/" class="md-nav__link">
         
   
   
@@ -2114,10 +2032,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#where-to-start" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Where to start
+        Context
       
     </span>
   </a>
@@ -2125,10 +2043,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#core-concepts" class="md-nav__link">
+  <a href="#decision-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core concepts
+        Decision drivers
       
     </span>
   </a>
@@ -2136,10 +2054,115 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#platform-reference" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Platform reference
+        Decision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-abstraction-pkgrecordsreader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One abstraction: pkg/records.Reader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-resolution-per-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format resolution (per node)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-semantics-the-decisions-that-prevent-silent-wrongness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format semantics (the decisions that prevent silent wrongness)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-filters-output-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The filter's output shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-ui-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config + UI surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#accepted-decisions-2026-08-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accepted decisions (2026-08-26)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-slices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation slices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test plan
       
     </span>
   </a>
@@ -2163,67 +2186,207 @@
 
 
 
-<h1 id="vrsky-documentation">VRSky Documentation<a class="headerlink" href="#vrsky-documentation" title="Permanent link">&para;</a></h1>
-<p>VRSky is a multi-tenant integration platform (iPaaS): tenants build <strong>pipelines</strong>
-that move data from a <strong>source</strong> (consumer) through optional <strong>filters</strong> and
-<strong>converters</strong> to a <strong>destination</strong> (producer). Data flows through NATS
-JetStream; large payloads spill to object storage.</p>
-<h2 id="where-to-start">Where to start<a class="headerlink" href="#where-to-start" title="Permanent link">&para;</a></h2>
+<h1 id="adr-0003-transform-input-formats-csv-xml-ndjson-yaml-in">ADR 0003 — Transform input formats (CSV / XML / NDJSON / YAML in)<a class="headerlink" href="#adr-0003-transform-input-formats-csv-xml-ndjson-yaml-in" title="Permanent link">&para;</a></h1>
+<ul>
+<li><strong>Status:</strong> Accepted (2026-08-26)</li>
+<li><strong>Date:</strong> 2026-08-26</li>
+<li><strong>Relates to:</strong> <a href="../0002-transform-large-payloads/">ADR 0002</a> (record streaming),
+  #187, PRs #198/#199</li>
+</ul>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>The converter's <em>output</em> side is rich — JSON, CSV, TSV, XML, YAML, text,
+NDJSON — but its <em>input</em> side is JSON only: <code>processEntry</code> does
+<code>json.Unmarshal(payload)</code> and anything else is rejected as "Payload is not
+valid JSON". The filter has the same restriction. So the natural expectations
+<strong>CSV → JSON</strong> and <strong>XML → CSV</strong> fail at the first step, even though every
+piece downstream of parsing already exists.</p>
+<p>Two traps documented so they aren't rediscovered:</p>
+<ul>
+<li><code>pkg/filter/parser.go</code> <em>appears</em> to support XML input, but it is wired only
+  into the retired legacy <code>cmd/filter</code> worker — and its approach doesn't work:
+  <code>xml.Unmarshal</code> into a <code>map[string]interface{}</code> returns <code>unknown type</code>
+  (verified). There is no working non-JSON input anywhere.</li>
+<li><code>pkg/converter</code> is the legacy <code>cmd/converter</code> worker's library, not the live
+  transform's. New code must not build on either legacy package.</li>
+</ul>
+<p>What already helps: consumers stamp <code>env.ContentType</code> from extension + content
+sniffing (<code>application/json</code>, <code>text/csv</code>, <code>application/xml</code>, <code>text/plain</code>,
+<code>application/octet-stream</code>), so format auto-detection is mostly free; <code>yaml.v3</code>
+is already a dependency; and ADR 0002's record-streaming machinery (spool,
+per-record loop) is exactly the shape a CSV/XML reader needs to plug into.</p>
+<h2 id="decision-drivers">Decision drivers<a class="headerlink" href="#decision-drivers" title="Permanent link">&para;</a></h2>
+<ol>
+<li>CSV→JSON and XML→CSV must work — the full input×output matrix, not pairs.</li>
+<li>Non-JSON inputs must not regress ADR 0002: a 2 GB CSV through a converter
+   must stream with bounded memory, not buffer.</li>
+<li>Ambiguity must be explicit, not guessed: XML has no inherent record shape.</li>
+<li>Both transforms (filter <em>and</em> converter) share the record model, so parsing
+   must be shared, not duplicated.</li>
+<li>Wrong-format payloads must fail loudly (event/DLQ), never silently
+   mis-parse.</li>
+</ol>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<h3 id="one-abstraction-pkgrecordsreader">One abstraction: <code>pkg/records.Reader</code><a class="headerlink" href="#one-abstraction-pkgrecordsreader" title="Permanent link">&para;</a></h3>
+<p>A new package <code>pkg/records</code> owns input parsing for both transforms:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Reader yields one record at a time; io.EOF ends the stream. Constructors</span>
+<span class="c1">// take an io.Reader, so the same Reader serves the buffered path</span>
+<span class="c1">// (bytes.NewReader(payload)) and the streaming path (GetStream from the spill</span>
+<span class="c1">// store) with no format-specific branching at the call sites.</span>
+<span class="kd">type</span><span class="w"> </span><span class="nx">Reader</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">Next</span><span class="p">()</span><span class="w"> </span><span class="p">(</span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{},</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="nx">New</span><span class="p">(</span><span class="nx">format</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">r</span><span class="w"> </span><span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">,</span><span class="w"> </span><span class="nx">opts</span><span class="w"> </span><span class="nx">Options</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">Reader</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+</code></pre></div>
+<p><code>Options</code> carries the per-format knobs (CSV delimiter, XML record path/attr
+prefix). Readers for <code>csv</code>/<code>tsv</code>, <code>ndjson</code>, and <code>xml</code> are <strong>truly streaming</strong>
+(bounded by record size); <code>yaml</code> buffers its document (a yaml.v3 limitation) —
+so over-cap YAML declines exactly like ADR 0002's un-streamable cases.</p>
+<h3 id="format-resolution-per-node">Format resolution (per node)<a class="headerlink" href="#format-resolution-per-node" title="Permanent link">&para;</a></h3>
+<ol>
+<li><code>input_format</code> node config, when set — explicit always wins.</li>
+<li>Else <code>env.ContentType</code> (<code>text/csv</code> → csv, <code>application/xml</code> → xml,
+   <code>application/x-ndjson</code> → ndjson, <code>application/json</code>/empty → json …).</li>
+<li>Else a small head-sniff (<code>{</code>/<code>[</code> → json, <code>&lt;</code> → xml, header-like line with
+   delimiters → csv).</li>
+</ol>
+<p>JSON remains the default and its existing code paths are <strong>untouched</strong> — the
+legacy buffered semantics (single objects, non-map array elements passing
+through) carry zero regression risk. Non-JSON formats always take the
+reader → per-record transform → spool path regardless of size; the spool keeps
+small outputs inline, so behavior stays consistent with JSON for small
+payloads.</p>
+<p><code>text/plain</code> and <code>application/octet-stream</code> are <strong>not convertible</strong> — clear
+error naming the content type (today's failure, but honest). Line-oriented
+text-as-records is deliberately out of scope until a real use case names it.</p>
+<h3 id="format-semantics-the-decisions-that-prevent-silent-wrongness">Format semantics (the decisions that prevent silent wrongness)<a class="headerlink" href="#format-semantics-the-decisions-that-prevent-silent-wrongness" title="Permanent link">&para;</a></h3>
+<p><strong>CSV / TSV</strong> — first row is the header; each subsequent row becomes
+<code>{header: value}</code> with <strong>string values</strong> (no numeric coercion — predictable
+beats clever; coercion can become a mapping feature later). Headers are
+normalised the way the schema-preview already does (blank → <code>column_N</code>,
+duplicates suffixed). Delimiter: <code>input_csv_delimiter</code> config, defaulting to a
+sniff of the header line (<code>,</code> / <code>;</code> / tab). Ragged rows tolerate
+(<code>FieldsPerRecord = -1</code>); missing cells are empty strings.</p>
+<p><strong>NDJSON</strong> — one JSON value per line; each object is a record. The streaming
+JSON path gets this nearly free: <code>json.Decoder</code> yields concatenated values
+natively.</p>
+<p><strong>XML</strong> — the genuinely ambiguous one, resolved by configuration + convention:</p>
+<ul>
+<li><code>input_xml_record_path</code> (<strong>required</strong> for XML input): the path to the
+  repeating record element, e.g. <code>Orders.Order</code>. No inherent row concept in
+  XML means guessing here silently produces wrong shapes — so we don't guess;
+  missing path with XML input is a config error.</li>
+<li>Element → map: child elements become keys; repeated same-name children
+  become arrays; leaf text is the string value; attributes become <code>@attr</code>
+  keys; mixed text alongside children lands in <code>#text</code>. (The mxj/badgerfish
+  convention — familiar, round-trippable.)</li>
+<li>Namespaces: prefixes are kept as written (<code>ns:Order</code> stays a literal key);
+  namespace <em>resolution</em> is out of scope.</li>
+<li>Implementation: a token-walking <code>encoding/xml.Decoder</code> — streams natively,
+  buffers only the current record subtree, no new dependency.</li>
+</ul>
+<p><strong>YAML</strong> — parsed with yaml.v3; a mapping document is one record, a sequence
+document is N records, multi-document streams (<code>---</code>) yield records per
+document. Non-string map keys are stringified. Buffered-only (see above).</p>
+<h3 id="the-filters-output-shape">The filter's output shape<a class="headerlink" href="#the-filters-output-shape" title="Permanent link">&para;</a></h3>
+<p>The filter gains the same input formats (rules and <code>extract_fields</code> operate on
+records regardless of where they came from), but its output stays <strong>JSON</strong> —
+it has no output-format config, and inventing implicit format preservation
+would surprise more than it helps. Pipeline wanting CSV-in → CSV-out filtering
+adds a converter after the filter. Documented, not hidden.</p>
+<h3 id="config-ui-surface">Config + UI surface<a class="headerlink" href="#config-ui-surface" title="Permanent link">&para;</a></h3>
+<p>Converter and filter nodes gain: <code>input_format</code> ("" = auto, <code>json</code>, <code>csv</code>,
+<code>tsv</code>, <code>ndjson</code>, <code>xml</code>, <code>yaml</code>), <code>input_csv_delimiter</code>, and (XML)
+<code>input_xml_record_path</code>. The PropertyEditor gets an "Input format" selector
+mirroring the existing output-format one, with the XML record-path field shown
+conditionally. Schema preview ("show data structure") for non-JSON inputs is a
+follow-up — it currently assumes JSON samples.</p>
+<h2 id="accepted-decisions-2026-08-26">Accepted decisions (2026-08-26)<a class="headerlink" href="#accepted-decisions-2026-08-26" title="Permanent link">&para;</a></h2>
+<p>All three open questions were confirmed, with one amplification:</p>
+<ol>
+<li><strong>XML's required <code>input_xml_record_path</code> — accepted</strong>, <em>and generalised</em>: every
+   format carries whatever configuration it genuinely needs to work correctly,
+   rather than a minimal subset. Where a format has a knob that changes whether
+   parsing is right or wrong (CSV delimiter/header presence, XML record path and
+   attribute conventions, NDJSON leniency, YAML multi-document), that knob is
+   exposed rather than assumed. All five input formats ship as first-class.</li>
+<li><strong>CSV values stay strings — accepted.</strong></li>
+<li><strong>Output behaviour unchanged — accepted.</strong> The converter's output side and
+   the filter's JSON output stay exactly as they are today; this work adds an
+   input stage in front of them and changes nothing downstream.</li>
+</ol>
+<h2 id="implementation-slices">Implementation slices<a class="headerlink" href="#implementation-slices" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong><code>pkg/records</code> + CSV/TSV + NDJSON</strong> wired into both transforms (buffered +
+   streaming paths), format resolution, config fields, UI selector, tests.
+   Covers CSV → anything — the headline ask — and streams at any size.</li>
+<li><strong>XML</strong> — the token-walking reader + <code>input_xml_record_path</code> + attribute
+   conventions. Covers XML → anything.</li>
+<li><strong>YAML</strong> (small, buffered-only) — take it opportunistically with slice 1 or
+   2.</li>
+</ol>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Positive.</strong> The full input×output matrix (5 inputs × 7 outputs) with one
+shared parsing package; CSV and XML inputs stream at any size through the
+ADR 0002 machinery; explicit configuration where formats are ambiguous.</p>
+<p><strong>Negative / accepted.</strong> XML requires the user to name the record path — a
+deliberate refusal to guess. YAML stays buffered (cap applies). String-typed
+CSV values may need a later coercion story for numeric filter rules
+(<code>gt</code>/<code>lt</code> on <code>"42"</code>); the filter's <code>compareNumeric</code> already coerces strings,
+so the common cases work — documented rather than solved here. The transforms
+gain another axis of config surface.</p>
+<h2 id="test-plan">Test plan<a class="headerlink" href="#test-plan" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Validated in the TEST compose env (2026-08-27)</strong> — real NATS + MinIO, rebuilt
+transform images, pipeline <code>CSV -&gt; filter (csv in, rules) -&gt; converter
+(rename, ndjson out)</code> driven by <code>cmd/spill-e2e -format csv</code>:</p>
 <table>
 <thead>
 <tr>
-<th>You are…</th>
-<th>Start here</th>
+<th>Run</th>
+<th>Result</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>New</strong> and want a pipeline running</td>
-<td><a href="tutorials/first-pipeline/">Build your first pipeline</a> (≤10 min)</td>
+<td>8 MiB CSV (buffered path)</td>
+<td>PASS — 4,059 NDJSON lines, exact expected count</td>
 </tr>
 <tr>
-<td><strong>Integrating</strong> a specific system</td>
-<td><a href="connectors/">Connectors</a></td>
-</tr>
-<tr>
-<td><strong>Operating</strong> VRSky in production</td>
-<td><a href="operator/install/">Operator guide</a></td>
-</tr>
-<tr>
-<td><strong>Building a connector</strong></td>
-<td><a href="sdk/tutorial/first-connector/">Build your first connector</a> (≤30 min)</td>
-</tr>
-<tr>
-<td><strong>Calling the API</strong></td>
-<td><a href="reference/api/">API reference</a></td>
-</tr>
-<tr>
-<td><strong>Evaluating security</strong></td>
-<td><a href="security/whitepaper/">Security whitepaper</a></td>
+<td>300 MiB CSV (streaming path)</td>
+<td>PASS — 151,948 lines, exact count</td>
 </tr>
 </tbody>
 </table>
-<h2 id="core-concepts">Core concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h2>
+<p>Memory during the 300 MiB run peaked at <strong>44.2 MiB (filter)</strong> and <strong>42.2 MiB
+(converter)</strong> — the record-streaming bound holds for CSV exactly as it does
+for JSON. Output carried <code>"index":"1"</code> as a <em>string</em>, confirming the
+values-stay-strings decision end to end.</p>
+<p><strong>The run earned its keep — it caught two bugs unit tests did not:</strong></p>
+<ol>
+<li><strong>ContentType propagation.</strong> The filter parses CSV but emits JSON, and it
+   was inheriting the input's <code>text/csv</code>. The next node auto-detects from
+   ContentType, so the converter parsed the filter's JSON <em>as CSV</em>, read the
+   whole single-line array as a header row, and produced <strong>zero records</strong> —
+   silently. Both transforms now stamp the content type they actually emit,
+   and neither inherits the input's <code>PayloadSize</code>/<code>Checksum</code> (which described
+   a different payload). Guarded by a regression test over both paths.</li>
+<li><strong>Empty streamed output.</strong> <code>Spool.Result()</code> returned a nil <code>Inline</code> for an
+   empty result, which callers read as "spilled" — publishing an envelope with
+   neither payload nor reference. Now a non-nil empty slice.</li>
+</ol>
+</blockquote>
 <ul>
-<li><strong>Connection / pipeline</strong> — a graph of nodes (<code>consumer</code> → optional
-  <code>filter</code>/<code>converter</code> → <code>producer</code>) plus the edges between them. Created in the
-  visual builder or the onboarding wizard, deployed as a running set of workers.</li>
-<li><strong>Connector</strong> — a worker implementing one node kind, keyed by <code>config.type</code>
-  (e.g. <code>http</code>, <code>database</code>, <code>kafka</code>). See <a href="connectors/">Connectors</a>.</li>
-<li><strong>Tenant / workspace</strong> — the isolation boundary. Every resource is scoped to a
-  tenant; see the <a href="TENANT_MODEL/">tenant model</a>.</li>
-<li><strong>Secrets</strong> — credentials are stored encrypted and referenced as
-  <code>&lt;field&gt;_secret_id</code>; workers resolve them at runtime. See the
-  <a href="security/whitepaper/">security whitepaper</a>.</li>
+<li>Per-reader unit tests incl. the nasty cases: quoted/ragged CSV, duplicate
+  headers, XML attributes/repeats/mixed content, YAML multi-doc.</li>
+<li>Round-trip parity: CSV → records → CSV re-encode is stable; XML fixture →
+  records matches a golden file.</li>
+<li>Streaming parity: streamed CSV output byte-identical to buffered on the same
+  input (same harness pattern as ADR 0002's parity tests).</li>
+<li>TEST-env validation with a multi-hundred-MB CSV through
+  converter (<code>csv</code> in → <code>ndjson</code> out) via <code>cmd/spill-e2e</code> (extended to
+  generate CSV), per the standing TEST-before-prod rule.</li>
 </ul>
-<h2 id="platform-reference">Platform reference<a class="headerlink" href="#platform-reference" title="Permanent link">&para;</a></h2>
-<p>Architecture and internals — <a href="NATS_ARCHITECTURE/">NATS architecture</a>,
-<a href="OBSERVABILITY/">observability</a>, <a href="TRACING/">tracing</a>,
-<a href="LOAD/">load benchmarks</a>, <a href="oauth-framework/">OAuth framework</a>,
-<a href="sdk/">connector SDK</a>, <a href="scalability/">scalability</a>.</p>
-<p>Design decisions — <a href="adr/0001-streaming-payload-contract/">ADR 0001: streaming payload contract</a>,
-<a href="adr/0002-transform-large-payloads/">ADR 0002: large payloads through transforms</a>,
-<a href="adr/0003-transform-input-formats/">ADR 0003: transform input formats</a>.</p>
 
 
 
@@ -2279,10 +2442,10 @@ JetStream; large payloads spill to object storage.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
