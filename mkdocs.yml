@@ -77,6 +77,7 @@ nav:
       - Front Systems (POS): connectors/front-systems.md
       - Dynamics 365 Business Central: connectors/business-central.md
       - Visma.net: connectors/visma.md
+      - SAP S/4HANA: connectors/sap-s4hana.md
       - Brightpearl (OMS): connectors/brightpearl.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
