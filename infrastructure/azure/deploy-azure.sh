@@ -21,7 +21,7 @@ set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"
 ACR_LOGIN="${REG}.azurecr.io"
-WORKER_REGISTRY="${ACR_LOGIN}/vrsky"          # orchestrator: {registry}/vrsky-{nodeType}:latest
+IMAGE_REGISTRY="${ACR_LOGIN}/vrsky"           # manifests are rewritten to pull from here
 STORAGE_CLASS="${STORAGE_CLASS:-managed-csi}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -52,7 +52,7 @@ cp -R infrastructure/kubernetes/. "$WORK/"
 grep -rlE 'ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/|storageClassName:[[:space:]]*local-path' \
      "$WORK" --include='*.yaml' | while IFS= read -r f; do
   perl -pi -e '
-    s{(?:ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/)}{'"$WORKER_REGISTRY"'/}g;
+    s{(?:ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/)}{'"$IMAGE_REGISTRY"'/}g;
     s{(storageClassName:\s*)local-path}{${1}'"$STORAGE_CLASS"'}g;
   ' "$f"
 done
@@ -90,9 +90,11 @@ awk -v h="$HELPER" 'NR==1{print; print h; next} {print}' "$DEPLOY" > "$DEPLOY.tm
 echo ">>> deploying core: NATS -> Postgres -> MinIO -> filter -> management-api"
 SKIP_MONITORING=true SKIP_INGRESS=true bash "$WORK/deploy-vrsky-platform.sh" <<< $'\nn\nn\nn'
 
-# --- 5. point the orchestrator at ACR for per-connection worker images ------
-kubectl set env deploy/vrsky-management-api -n vrsky-platform \
-  WORKER_IMAGE_REGISTRY="$WORKER_REGISTRY" WORKER_IMAGE_VERSION=latest
+# NOTE: there is no step to point the orchestrator at per-connection worker
+# images. It stopped spawning them in #201 (transforms) and #205 (edges) — every
+# node kind is served by a standing connector service instead, deployed by
+# deploy-connectors-azure.sh. WORKER_IMAGE_REGISTRY/VERSION are still read by
+# management-api but reach no live code path.
 
 # --- 4b. HA: PodDisruptionBudget so a node drain keeps a filter replica up ----
 kubectl apply -f infrastructure/kubernetes/data-filter/pdb.yaml

@@ -1,11 +1,9 @@
-.PHONY: help build build-consumer build-filter build-converter docker-build docker-build-consumer docker-build-filter docker-build-converter docker-push docker-push-consumer docker-push-filter docker-push-converter docker-build-ui docker-push-ui clean test test-converter run run-consumer lint fmt vet e2e-test
+.PHONY: help build build-filter build-converter docker-build-filter docker-build-converter docker-push-filter docker-push-converter docker-build-ui docker-push-ui clean test test-converter lint fmt vet
 
 # Variables
-BINARY_NAME=producer
 BIN_DIR=./bin
 GO=go
 DOCKER_REGISTRY?=vrsky
-DOCKER_IMAGE?=$(DOCKER_REGISTRY)/producer
 DOCKER_TAG?=latest
 GO_VERSION=$(shell go version | awk '{print $$3}')
 
@@ -16,47 +14,20 @@ RED=\033[0;31m
 NC=\033[0m # No Color
 
 help: ## Show this help message
-	@echo "$(BLUE)VRSky Producer & Consumer - Available Commands$(NC)"
+	@echo "$(BLUE)VRSky - Available Commands$(NC)"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)  %-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 
-build: clean ## Build producer binary to ./bin/producer
-	@echo "$(BLUE)Building producer binary...$(NC)"
+# The legacy `producer`/`consumer` binaries were retired in #205: the
+# orchestrator no longer spawns per-connection workers, and every source and
+# destination node type is served by a standing connector service instead
+# (src/cmd/{file,http,db,cloud-storage,...}-{consumer,producer}).
+build: ## Build every command to ./bin
+	@echo "$(BLUE)Building all commands...$(NC)"
 	@mkdir -p $(BIN_DIR)
-	@$(GO) build -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/producer
-	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/$(BINARY_NAME)$(NC)"
-
-docker-build: ## Build Docker image: $(DOCKER_IMAGE):$(DOCKER_TAG)
-	@echo "$(BLUE)Building Docker image...$(NC)"
-	@docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) -t $(DOCKER_IMAGE):latest -f cmd/producer/Dockerfile .
-	@echo "$(GREEN)✓ Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)$(NC)"
-
-docker-push: docker-build ## Push Docker image to registry
-	@echo "$(BLUE)Pushing Docker image to registry...$(NC)"
-	@docker push $(DOCKER_IMAGE):$(DOCKER_TAG)
-	@docker push $(DOCKER_IMAGE):latest
-	@echo "$(GREEN)✓ Docker image pushed$(NC)"
-
-run: build ## Build and run producer locally
-	@echo "$(BLUE)Running producer...$(NC)"
-	@$(BIN_DIR)/$(BINARY_NAME)
-
-build-consumer: clean ## Build consumer binary to ./bin/consumer
-	@echo "$(BLUE)Building consumer binary...$(NC)"
-	@mkdir -p $(BIN_DIR)
-	@$(GO) build -o $(BIN_DIR)/consumer ./cmd/consumer/basic
-	@echo "$(GREEN)✓ Binary built: $(BIN_DIR)/consumer$(NC)"
-
-docker-build-consumer: ## Build Docker image: vrsky/consumer:latest
-	@echo "$(BLUE)Building consumer Docker image...$(NC)"
-	@docker build -t vrsky/consumer:latest -f cmd/consumer/Dockerfile .
-	@echo "$(GREEN)✓ Docker image built: vrsky/consumer:latest$(NC)"
-
-docker-push-consumer: docker-build-consumer ## Push consumer Docker image to registry
-	@echo "$(BLUE)Pushing consumer Docker image...$(NC)"
-	@docker push vrsky/consumer:latest
-	@echo "$(GREEN)✓ Consumer Docker image pushed$(NC)"
+	@$(GO) build -o $(BIN_DIR)/ ./cmd/...
+	@echo "$(GREEN)✓ Binaries built into $(BIN_DIR)$(NC)"
 
 build-filter: clean ## Build filter binary to ./bin/filter
 	@echo "$(BLUE)Building filter binary...$(NC)"
@@ -99,12 +70,6 @@ test-converter: ## Run converter tests with coverage
 	@echo "$(BLUE)Running converter tests...$(NC)"
 	@$(GO) test -v -cover ./pkg/converter/...
 	@echo "$(GREEN)✓ Converter tests passed$(NC)"
-
-run-consumer: build-consumer ## Build and run consumer locally
-	@echo "$(BLUE)Running consumer...$(NC)"
-	@INPUT_TYPE=http INPUT_CONFIG='{"port":"8000"}' \
-	 OUTPUT_TYPE=nats OUTPUT_CONFIG='{"url":"nats://localhost:4222","subject":"test.messages"}' \
-	 ./bin/consumer
 
 lint: lint-tenant lint-connector lint-openapi ## Run all linters (golangci-lint + tenant-filter + connector + openapi)
 	@echo "$(BLUE)Running linter...$(NC)"
@@ -155,15 +120,9 @@ clean: ## Clean build artifacts
 info: ## Show build information
 	@echo "$(BLUE)Build Information:$(NC)"
 	@echo "  Go Version:      $(GO_VERSION)"
-	@echo "  Binary Name:     $(BINARY_NAME)"
-	@echo "  Binary Path:     $(BIN_DIR)/$(BINARY_NAME)"
-	@echo "  Docker Image:    $(DOCKER_IMAGE):$(DOCKER_TAG)"
+	@echo "  Binary Dir:      $(BIN_DIR)"
 	@echo "  Docker Registry: $(DOCKER_REGISTRY)"
 	@echo ""
-
-e2e-test: build build-consumer ## Run full end-to-end test (HTTP → NATS → HTTP)
-	@echo "$(BLUE)Running end-to-end test...$(NC)"
-	@bash ../scripts/e2e-test.sh
 
 docker-build-ui: ## Build UI Docker image: vrsky/ui:latest
 	@echo "$(BLUE)Building UI Docker image...$(NC)"

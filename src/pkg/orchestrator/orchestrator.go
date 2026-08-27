@@ -117,7 +117,66 @@ func (o *Orchestrator) StartConnection(ctx context.Context) error {
 		deployedNodes = append(deployedNodes, spec.NodeID)
 	}
 
+	// Remove any per-connection worker this start no longer wants. Today that
+	// means every one of them (#201/#205 moved all node kinds onto standing
+	// services), so restarting a connection created before those changes sweeps
+	// away its leftover no-op pods without an operator having to. Best-effort:
+	// a stale worker is inert, so a failed prune must not fail the start.
+	o.pruneUnwantedWorkers(ctx, specs)
+
 	return nil
+}
+
+// pruneUnwantedWorkers deletes per-connection Deployments (and their HPAs) that
+// belong to this connection but are not in wanted. Errors are logged, never
+// returned: the resources it removes are no-ops, so failing a connection start
+// over them would be strictly worse than leaving them running.
+func (o *Orchestrator) pruneUnwantedWorkers(ctx context.Context, wanted []*DeploymentSpec) {
+	keep := make(map[string]struct{}, len(wanted))
+	for _, spec := range wanted {
+		keep[spec.Deployment.Name] = struct{}{}
+	}
+
+	logger := slog.Default()
+	selector := BuildLabelSelector(GetDeploymentLabelsForConnection(o.Connection.ID))
+	listOpts := metav1.ListOptions{LabelSelector: selector}
+
+	deployClient := o.K8sClient.AppsV1().Deployments(o.Config.Namespace)
+	existing, err := deployClient.List(ctx, listOpts)
+	if err != nil {
+		logger.Warn("orchestrator could not list per-connection workers to prune",
+			"connection", o.Connection.ID, "error", err)
+		return
+	}
+	for i := range existing.Items {
+		name := existing.Items[i].Name
+		if _, ok := keep[name]; ok {
+			continue
+		}
+		if err := deployClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			logger.Warn("orchestrator could not prune stale worker deployment",
+				"deployment", name, "error", err)
+			continue
+		}
+		logger.Info("orchestrator pruned stale per-connection worker",
+			"deployment", name, "connection", o.Connection.ID)
+	}
+
+	// HPAs share the deployment name and the connection labels.
+	hpaClient := o.K8sClient.AutoscalingV2().HorizontalPodAutoscalers(o.Config.Namespace)
+	hpas, err := hpaClient.List(ctx, listOpts)
+	if err != nil {
+		return
+	}
+	for i := range hpas.Items {
+		name := hpas.Items[i].Name
+		if _, ok := keep[name]; ok {
+			continue
+		}
+		if err := hpaClient.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			logger.Warn("orchestrator could not prune stale worker HPA", "hpa", name, "error", err)
+		}
+	}
 }
 
 // deployComponent deploys a single component to Kubernetes.

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -653,12 +654,69 @@ func TestCreateAllDeploymentSpecs(t *testing.T) {
 	specs, err := CreateAllDeploymentSpecs(graph, config)
 
 	require.NoError(t, err)
-	// Filter/converter nodes get NO per-connection worker: they are served by
-	// the shared data-filter/data-converter platform services (#201). Only the
-	// edge nodes are deployed, in execution order.
-	assert.Len(t, specs, 2)
-	assert.Equal(t, "consumer-0", specs[0].NodeID)
-	assert.Equal(t, "producer-0", specs[1].NodeID)
+	// NO node gets a per-connection worker. Transforms are served by the shared
+	// data-filter/data-converter services (#201) and the edges by the standing
+	// SDK connector services (#205); the workers this used to spawn were wired
+	// to topics nothing publishes to.
+	assert.Empty(t, specs)
+}
+
+func TestIsServedByStandingService(t *testing.T) {
+	for _, nodeType := range []string{"consumer", "filter", "converter", "producer"} {
+		assert.True(t, isServedByStandingService(nodeType), "%s should be served by a standing service", nodeType)
+	}
+	assert.False(t, isServedByStandingService("unknown"))
+}
+
+// A connection created before #201/#205 has leftover no-op worker Deployments.
+// Starting it again must sweep them away rather than leave them running.
+func TestStartConnection_PrunesLegacyWorkers(t *testing.T) {
+	nodes := []*managementapi.Node{
+		createNode("consumer-0", "consumer", nil),
+		createNode("producer-0", "producer", nil),
+	}
+	edges := []*managementapi.Edge{createEdge("edge-0", "consumer-0", "producer-0", 0)}
+	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
+
+	config := DefaultConfig()
+	legacy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      buildDeploymentName("conn-123", "consumer-0"),
+			Namespace: config.Namespace,
+			Labels:    buildLabels("conn-123", "consumer-0", "consumer", "tenant-acme"),
+		},
+	}
+	legacyHPA := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      legacy.Name,
+			Namespace: config.Namespace,
+			Labels:    legacy.Labels,
+		},
+	}
+	// A worker belonging to a DIFFERENT connection must survive the prune.
+	other := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      buildDeploymentName("conn-999", "consumer-0"),
+			Namespace: config.Namespace,
+			Labels:    buildLabels("conn-999", "consumer-0", "consumer", "tenant-acme"),
+		},
+	}
+	k8sClient := fake.NewSimpleClientset(legacy, legacyHPA, other)
+
+	orch := New(conn, k8sClient, config, nil)
+	_, err := orch.BuildGraph(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, orch.StartConnection(context.Background()))
+
+	deps, err := k8sClient.AppsV1().Deployments(config.Namespace).List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, deps.Items, 1, "only the other connection's worker should remain")
+	assert.Equal(t, other.Name, deps.Items[0].Name)
+
+	hpas, err := k8sClient.AutoscalingV2().HorizontalPodAutoscalers(config.Namespace).
+		List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, hpas.Items, "the legacy HPA should be pruned with its deployment")
 }
 
 func TestGetDeploymentLabelsForConnection(t *testing.T) {
@@ -750,10 +808,12 @@ func TestOrchestrator_StartConnection(t *testing.T) {
 	err = orch.StartConnection(context.Background())
 	require.NoError(t, err)
 
-	// Verify deployments were created
+	// No per-connection worker is deployed: consumer and producer nodes are
+	// served by the standing SDK connector services (#205), which the
+	// management API activates with a vrsky.commands.*.connection.start.
 	deployments, err := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
 	require.NoError(t, err)
-	assert.Len(t, deployments.Items, 2)
+	assert.Empty(t, deployments.Items)
 }
 
 func TestOrchestrator_StartConnection_NoGraph(t *testing.T) {
@@ -797,19 +857,27 @@ func TestOrchestrator_StopConnection(t *testing.T) {
 		createEdge("edge-0", "consumer-0", "producer-0", 0),
 	}
 	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
-	k8sClient := fake.NewSimpleClientset()
+
+	// Nothing spawns per-connection workers any more (#201/#205), but teardown
+	// must still remove the ones a pre-change start left behind, so seed them.
+	seeded := []runtime.Object{}
+	for _, nodeID := range []string{"consumer-0", "producer-0"} {
+		seeded = append(seeded, &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      buildDeploymentName("conn-123", nodeID),
+				Namespace: "vrsky",
+				Labels:    buildLabels("conn-123", nodeID, "consumer", "tenant-acme"),
+			},
+		})
+	}
+	k8sClient := fake.NewSimpleClientset(seeded...)
 
 	orch := New(conn, k8sClient, nil, nil)
-
-	// Build and start
 	_, err := orch.BuildGraph(context.Background())
 	require.NoError(t, err)
-	err = orch.StartConnection(context.Background())
-	require.NoError(t, err)
 
-	// Verify deployments exist
 	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
-	assert.Len(t, deployments.Items, 2)
+	require.Len(t, deployments.Items, 2)
 
 	// Stop connection
 	err = orch.StopConnection(context.Background())
@@ -883,40 +951,31 @@ func TestOrchestrator_GetNATSTopicForNode_InvalidNode(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestOrchestrator_PartialDeploymentFailure(t *testing.T) {
+// deployComponent is retained for a possible future dedicated-worker mode; no
+// live path reaches it (#205). This keeps its failure handling covered.
+func TestOrchestrator_DeployComponentSurfacesK8sErrors(t *testing.T) {
 	nodes := []*managementapi.Node{
 		createNode("consumer-0", "consumer", nil),
-		createNode("filter-1", "filter", nil),
 		createNode("producer-0", "producer", nil),
 	}
-	edges := []*managementapi.Edge{
-		createEdge("edge-0", "consumer-0", "filter-1", 0),
-		createEdge("edge-1", "filter-1", "producer-0", 1),
-	}
+	edges := []*managementapi.Edge{createEdge("edge-0", "consumer-0", "producer-0", 0)}
 	conn := createTestConnection("tenant-acme", "conn-123", nodes, edges)
 
-	// Create fake client that fails on second deployment
 	k8sClient := fake.NewSimpleClientset()
-	deployCount := 0
-	k8sClient.PrependReactor("create", "deployments", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
-		deployCount++
-		if deployCount == 2 {
-			return true, nil, assert.AnError
-		}
-		return false, nil, nil
+	k8sClient.PrependReactor("create", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, assert.AnError
 	})
 
 	orch := New(conn, k8sClient, nil, nil)
-	_, _ = orch.BuildGraph(context.Background())
+	graph, err := orch.BuildGraph(context.Background())
+	require.NoError(t, err)
 
-	err := orch.StartConnection(context.Background())
+	spec, err := CreateDeploymentSpec(nodes[0], graph, orch.Config)
+	require.NoError(t, err)
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "PARTIAL_DEPLOYMENT")
-
-	// First deployment should still exist (partial deployment - decision B)
-	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
-	assert.Len(t, deployments.Items, 1)
+	err = orch.deployComponent(context.Background(), spec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create deployment")
 }
 
 func TestOrchestrator_UpdateExistingDeployment(t *testing.T) {
@@ -939,15 +998,17 @@ func TestOrchestrator_UpdateExistingDeployment(t *testing.T) {
 	k8sClient := fake.NewSimpleClientset(existingDeployment)
 
 	orch := New(conn, k8sClient, nil, nil)
-	_, _ = orch.BuildGraph(context.Background())
-
-	// Should update instead of create
-	err := orch.StartConnection(context.Background())
+	graph, err := orch.BuildGraph(context.Background())
 	require.NoError(t, err)
 
-	// Still only 2 deployments (update + create)
+	spec, err := CreateDeploymentSpec(nodes[0], graph, orch.Config)
+	require.NoError(t, err)
+
+	// Should update the existing object instead of creating a second one.
+	require.NoError(t, orch.deployComponent(context.Background(), spec))
+
 	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
-	assert.Len(t, deployments.Items, 2)
+	assert.Len(t, deployments.Items, 1)
 }
 
 // =============================================================================
@@ -970,9 +1031,14 @@ func TestPipelineOrchestratorAdapter_StartPipeline(t *testing.T) {
 	err := adapter.StartPipeline(context.Background(), conn)
 	require.NoError(t, err)
 
-	// Verify deployments were created
+	// The adapter validates the graph and deploys nothing: every node kind is
+	// served by a standing platform service (#201 transforms, #205 edges).
 	deployments, _ := k8sClient.AppsV1().Deployments("vrsky").List(context.Background(), metav1.ListOptions{})
-	assert.Len(t, deployments.Items, 2)
+	assert.Empty(t, deployments.Items)
+
+	hpas, _ := k8sClient.AutoscalingV2().HorizontalPodAutoscalers("vrsky").
+		List(context.Background(), metav1.ListOptions{})
+	assert.Empty(t, hpas.Items, "no per-connection HPA either")
 }
 
 func TestPipelineOrchestratorAdapter_StopPipeline(t *testing.T) {

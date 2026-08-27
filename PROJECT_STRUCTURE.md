@@ -101,7 +101,10 @@ These can be at root or in src/ (both are valid):
 
 All code is in `src/` to keep root clean:
 
-- **cmd/producer/** - Producer binary entry point
+- **cmd/** - One binary per service: the control plane (`management-api`),
+  the shared transforms (`data-filter`, `data-converter`) and the connector
+  services that run pipeline sources and destinations (`file-consumer`,
+  `http-producer`, `sitoo-consumer`, …)
 - **pkg/** - All Go packages (envelope, component, io)
 - **internal/config/** - Configuration loader
 - **Makefile** - Build automation (11 targets)
@@ -158,10 +161,10 @@ help docker-build clean:
 ### Root docker-compose.yml (Context Adjustment)
 
 ```yaml
-producer:
+http-producer:
   build:
-    context: ./src              # Build context points to src/
-    dockerfile: cmd/producer/Dockerfile
+    context: .                  # Build context is the repo root
+    dockerfile: src/cmd/http-producer/Dockerfile
 ```
 
 ### src/Makefile (Actual Implementation)
@@ -170,11 +173,7 @@ The actual build commands are in `src/Makefile`:
 
 ```makefile
 build:
-  @$(GO) build -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/producer
-
-docker-build:
-  @docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) \
-    -f cmd/producer/Dockerfile .
+  @$(GO) build -o $(BIN_DIR)/ ./cmd/...
 ```
 
 ---
@@ -227,10 +226,9 @@ Producer Main Loop
 
 ```bash
 # From root
-make build                    # Binary in src/bin/producer
-docker-compose up -d          # Start NATS + httpbin + producer
-docker exec vrsky-nats nats pub test.1 "test"  # Publish message
-docker-compose logs producer  # View results
+make build                    # Binaries in src/bin/
+docker-compose up -d          # Start the local TEST environment
+docker-compose logs http-producer  # View results
 ```
 
 ### Docker Deployment
@@ -276,8 +274,8 @@ commit 9608a50
 ### When Updating Build
 
 1. **Local changes**: Update `src/Makefile`
-2. **Docker changes**: Update `src/cmd/producer/Dockerfile`
-3. **Compose changes**: Update `src/docker-compose.yml`
+2. **Docker changes**: Update the service's `src/cmd/<service>/Dockerfile`
+3. **Compose changes**: Update `docker-compose.yml`
 4. **Root delegation**: Usually no change needed (already delegates)
 
 ### When Releasing
@@ -317,12 +315,10 @@ commit 9608a50
 
 ## Next Steps
 
-### Phase 2: Consumer Component
+### Phase 2: Consumer Components — done
 
-Create `src/cmd/consumer/` using the same pattern:
-- HTTP webhook receiver
-- NATS publisher
-- Reverse of Producer flow
+Sources are served by connector services (`src/cmd/*-consumer`), each an SDK
+Consumer that loads per-connection config from the connections table.
 
 ### Phase 3: Converter & Filter
 

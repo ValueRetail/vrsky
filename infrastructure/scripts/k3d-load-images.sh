@@ -6,12 +6,17 @@
 # imported image with a matching tag is used without any registry pull.
 #
 # Usage:
-#   infrastructure/scripts/k3d-load-images.sh [core|workers|all] [cluster-name]
+#   infrastructure/scripts/k3d-load-images.sh [core|connectors|all] [cluster-name]
 #
-#   core    (default) management-api + filter — what deploy-vrsky-platform.sh needs
-#   workers the generic node-type images the orchestrator deploys per connection
-#           (#135/#19): vrsky-{consumer,producer,filter,converter}
-#   all     core + workers
+#   core       (default) management-api + the shared transforms — what
+#              deploy-vrsky-platform.sh needs
+#   connectors the standing connector services that run pipeline source and
+#              destination nodes
+#   all        core + connectors
+#
+# There is no "workers" scope: the orchestrator stopped spawning per-connection
+# worker pods in #201 (transforms) and #205 (edges), so the vrsky-{consumer,
+# producer,filter,converter} images nothing pulls are no longer built.
 #
 # Run from the repo root. Requires docker + k3d, and the k3d cluster to exist.
 set -euo pipefail
@@ -27,14 +32,18 @@ CORE=(
   "localhost:5000/vrsky/data-filter:latest          data-filter"
   "localhost:5000/vrsky/data-converter:latest       data-converter"
 )
-# The orchestrator deploys per-connection workers as {registry}/vrsky-{type}:tag
-# (DefaultConfig registry gcr.io/vrsky). Override the registry via the
-# management-api OrchestratorConfig if yours differs.
-WORKERS=(
-  "gcr.io/vrsky/vrsky-consumer:latest   consumer"
-  "gcr.io/vrsky/vrsky-producer:latest   producer"
-  "gcr.io/vrsky/vrsky-filter:latest     filter"
-  "gcr.io/vrsky/vrsky-converter:latest  converter"
+# Standing connector services: one per source/destination node type. These are
+# what actually run a pipeline's edges (#205).
+CONNECTORS=(
+  "localhost:5000/vrsky/file-consumer:latest           file-consumer"
+  "localhost:5000/vrsky/webhook-consumer:latest        webhook-consumer"
+  "localhost:5000/vrsky/api-consumer:latest            api-consumer"
+  "localhost:5000/vrsky/db-consumer:latest             db-consumer"
+  "localhost:5000/vrsky/cloud-storage-consumer:latest  cloud-storage-consumer"
+  "localhost:5000/vrsky/http-producer:latest           http-producer"
+  "localhost:5000/vrsky/file-producer:latest           file-producer"
+  "localhost:5000/vrsky/db-producer:latest             db-producer"
+  "localhost:5000/vrsky/cloud-storage-producer:latest  cloud-storage-producer"
 )
 
 build_and_import() {
@@ -59,10 +68,10 @@ fi
 
 # Select the entries for the chosen scope (bash 3.2-compatible — no namerefs).
 case "$SCOPE" in
-  core)    SETS=("${CORE[@]}") ;;
-  workers) SETS=("${WORKERS[@]}") ;;
-  all)     SETS=("${CORE[@]}" "${WORKERS[@]}") ;;
-  *) echo "unknown scope '$SCOPE' (use core|workers|all)" >&2; exit 2 ;;
+  core)       SETS=("${CORE[@]}") ;;
+  connectors) SETS=("${CONNECTORS[@]}") ;;
+  all)        SETS=("${CORE[@]}" "${CONNECTORS[@]}") ;;
+  *) echo "unknown scope '$SCOPE' (use core|connectors|all)" >&2; exit 2 ;;
 esac
 
 echo "Loading images (scope: $SCOPE) into k3d cluster '$CLUSTER'..."
