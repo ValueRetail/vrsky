@@ -303,3 +303,61 @@ func uiConnectorTypes(t *testing.T, src, marker string) []string {
 	}
 	return out
 }
+
+// The last link in the chain: a service in the deploy table needs an image in
+// the registry, or its pods ImagePullBackOff. TestNodeConfigRulesAreDeployed
+// pins validator → deploy script; this pins deploy script → build script.
+//
+// This gap was not hypothetical. SAP S/4HANA was added to the deploy table
+// without being added to build-push-acr.sh, and the first deploy attempt would
+// have produced two ImagePullBackOff pods — the deploy script and the validator
+// agreed with each other while the registry had nothing to serve.
+func TestConnectorImagesAreBuilt(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	deploySrc, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-connectors-azure.sh"))
+	if err != nil {
+		t.Skipf("deploy script not available (%v) — image drift guard skipped", err)
+	}
+	buildSrc, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "build-push-acr.sh"))
+	if err != nil {
+		t.Skipf("build script not available (%v) — image drift guard skipped", err)
+	}
+
+	deployed := deployedServices(t, string(deploySrc))
+	built := builtConnectorImages(string(buildSrc))
+	if len(built) == 0 {
+		t.Fatal("parsed no connector images from build-push-acr.sh — build_connectors changed; update this test")
+	}
+
+	for svc := range deployed {
+		if !built[svc] {
+			t.Errorf("deploy-connectors-azure.sh deploys %q but build-push-acr.sh never builds it — "+
+				"its pods would ImagePullBackOff. Add it to build_connectors.", svc)
+		}
+	}
+	for img := range built {
+		if !deployed[img] {
+			t.Errorf("build-push-acr.sh builds %q but no service deploys it — drop it or add the service", img)
+		}
+	}
+}
+
+// builtConnectorImages returns the connector image names build_connectors
+// produces: the retail loop expands `<vendor>-{consumer,producer}`, and the
+// generic array lists full names.
+func builtConnectorImages(src string) map[string]bool {
+	out := map[string]bool{}
+
+	if m := regexp.MustCompile(`for c in ([a-z0-9 \-]+); do`).FindStringSubmatch(src); m != nil {
+		for _, vendor := range strings.Fields(m[1]) {
+			out[vendor+"-consumer"] = true
+			out[vendor+"-producer"] = true
+		}
+	}
+	if m := regexp.MustCompile(`(?s)local generic=\((.*?)\)`).FindStringSubmatch(src); m != nil {
+		for _, name := range strings.Fields(m[1]) {
+			out[name] = true
+		}
+	}
+	return out
+}

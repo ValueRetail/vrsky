@@ -52,13 +52,14 @@ build_core() {
 
 build_connectors() {
   # Retail/ERP: both directions.
-  for c in sitoo front-systems business-central visma brightpearl; do
+  for c in sitoo front-systems business-central visma brightpearl sap-s4hana; do
     build "vrsky/${c}-consumer:latest" "src/cmd/${c}-consumer/Dockerfile"
     build "vrsky/${c}-producer:latest" "src/cmd/${c}-producer/Dockerfile"
   done
-  # Generic source/destination types. These must stay in step with the service
-  # table in deploy-connectors-azure.sh — a connector with no image there is a
-  # node type the UI offers and the platform cannot run (#205).
+  # Generic source/destination types. Every name here and in the retail loop
+  # above must appear in the service table in deploy-connectors-azure.sh, and
+  # vice versa: a service with no image ImagePullBackOffs, and an image no
+  # service uses is wasted build time. TestConnectorImagesAreBuilt enforces it.
   local generic=(
     api-consumer webhook-consumer file-consumer db-consumer tenant-consumer
     cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
