@@ -100,7 +100,6 @@ var create201 = map[string]bool{
 	"post /api/v1/connections":           true,
 	"post /api/v1/secrets":               true,
 	"post /api/v1/tenants":               true,
-	"post /api/v1/api-consumers":         true,
 	"post /api/v1/oauth/providers":       true,
 	"post /api/v1/notifications/targets": true,
 }

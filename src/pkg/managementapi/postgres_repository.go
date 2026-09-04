@@ -37,13 +37,11 @@ func (r *PostgresRepository) CreateConnection(ctx context.Context, connection *C
 		INSERT INTO connections (
 			id, tenant_id, name, description,
 			nodes, edges,
-			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6,
-			$7, $8, $9, $10,
-			$11, $12, $13
+			$7, $8, $9
 		)
 	`
 
@@ -56,10 +54,6 @@ func (r *PostgresRepository) CreateConnection(ctx context.Context, connection *C
 		connection.Description,
 		nodesJSON,
 		edgesJSON,
-		connection.SourceConfig,
-		connection.ConverterConfig,
-		connection.FilterConfig,
-		connection.DestinationConfig,
 		connection.Status,
 		connection.CreatedAt,
 		connection.UpdatedAt,
@@ -82,7 +76,6 @@ func (r *PostgresRepository) GetConnection(ctx context.Context, id string) (*Con
 		SELECT
 			id, tenant_id, name, description,
 			nodes, edges,
-			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at, started_at, stopped_at, last_error
 		FROM connections
 		WHERE id = $1
@@ -98,10 +91,6 @@ func (r *PostgresRepository) GetConnection(ctx context.Context, id string) (*Con
 		&conn.Description,
 		&nodesJSON,
 		&edgesJSON,
-		&conn.SourceConfig,
-		&conn.ConverterConfig,
-		&conn.FilterConfig,
-		&conn.DestinationConfig,
 		&conn.Status,
 		&conn.CreatedAt,
 		&conn.UpdatedAt,
@@ -178,7 +167,6 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 		SELECT
 			id, tenant_id, name, description,
 			nodes, edges,
-			source_config, converter_config, filter_config, destination_config,
 			status, created_at, updated_at, started_at, stopped_at, last_error
 		FROM connections
 		WHERE %s
@@ -206,10 +194,6 @@ func (r *PostgresRepository) ListConnections(ctx context.Context, tenantID strin
 			&conn.Description,
 			&nodesJSON,
 			&edgesJSON,
-			&conn.SourceConfig,
-			&conn.ConverterConfig,
-			&conn.FilterConfig,
-			&conn.DestinationConfig,
 			&conn.Status,
 			&conn.CreatedAt,
 			&conn.UpdatedAt,
@@ -262,11 +246,7 @@ func (r *PostgresRepository) UpdateConnection(ctx context.Context, connection *C
 			description = $3,
 			nodes = $4,
 			edges = $5,
-			source_config = $6,
-			converter_config = $7,
-			filter_config = $8,
-			destination_config = $9,
-			updated_at = $10
+			updated_at = $6
 		WHERE id = $1
 	`
 
@@ -278,10 +258,6 @@ func (r *PostgresRepository) UpdateConnection(ctx context.Context, connection *C
 		connection.Description,
 		nodesJSON,
 		edgesJSON,
-		connection.SourceConfig,
-		connection.ConverterConfig,
-		connection.FilterConfig,
-		connection.DestinationConfig,
 		time.Now().UTC(),
 	)
 

@@ -1,9 +1,7 @@
 package managementapi
 
 import (
-	"database/sql/driver"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,37 +52,6 @@ type Connection struct {
 	StartedAt *time.Time `json:"started_at" db:"started_at"`
 	StoppedAt *time.Time `json:"stopped_at" db:"stopped_at"`
 	LastError *string    `json:"last_error" db:"last_error"`
-
-	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
-	// These fields will be removed in v2.0. Use Nodes/Edges instead.
-	SourceConfig      SourceConfig      `json:"source_config" db:"source_config"`
-	ConverterConfig   ConverterConfig   `json:"converter_config" db:"converter_config"`
-	FilterConfig      FilterConfig      `json:"filter_config" db:"filter_config"`
-	DestinationConfig DestinationConfig `json:"destination_config" db:"destination_config"`
-}
-
-// SourceConfig represents the source/consumer configuration
-type SourceConfig struct {
-	Type     string                `json:"type"` // http, file, database, tenant
-	HTTP     *HTTPSourceConfig     `json:"http,omitempty"`
-	File     *FileSourceConfig     `json:"file,omitempty"`
-	Database *DatabaseSourceConfig `json:"database,omitempty"`
-	Tenant   *TenantSourceConfig   `json:"tenant,omitempty"`
-}
-
-// TenantSourceConfig represents a tenant-to-tenant data consumer
-type TenantSourceConfig struct {
-	ConnectionID string `json:"connection_id"`
-}
-
-// HTTPSourceConfig represents HTTP source/webhook configuration
-type HTTPSourceConfig struct {
-	URL       string                  `json:"url"`
-	Method    string                  `json:"method"` // GET, POST, etc.
-	Headers   map[string]string       `json:"headers,omitempty"`
-	Auth      *AuthConfig             `json:"auth,omitempty"`
-	Polling   *PollingConfig          `json:"polling,omitempty"`   // For polling mode
-	Signature *WebhookSignatureConfig `json:"signature,omitempty"` // HMAC signature verification (Phase 1B / #67)
 }
 
 // WebhookSignatureConfig declares how to verify an incoming webhook's HMAC
@@ -99,99 +66,6 @@ type WebhookSignatureConfig struct {
 	SecretID  string `json:"secret_id"`        // Reference into the secrets table
 	Encoding  string `json:"encoding"`         // "hex" | "base64"
 	Prefix    string `json:"prefix,omitempty"` // Literal prefix to strip from the header value, e.g. "sha256="
-}
-
-// FileSourceConfig represents file source configuration
-type FileSourceConfig struct {
-	Path     string `json:"path"`
-	Pattern  string `json:"pattern,omitempty"`  // Regex pattern for file names
-	Encoding string `json:"encoding,omitempty"` // utf-8, latin-1, etc.
-	Watch    bool   `json:"watch"`              // Watch for file changes
-}
-
-// DatabaseSourceConfig represents database source configuration
-type DatabaseSourceConfig struct {
-	ConnectionString string `json:"connection_string"`
-	Query            string `json:"query"`
-	PollInterval     int    `json:"poll_interval,omitempty"` // Seconds, 0 = no polling
-}
-
-// ConverterConfig represents the converter configuration
-type ConverterConfig struct {
-	SchemaValidator *SchemaValidatorConfig `json:"schema_validator,omitempty"`
-	FieldMapper     *FieldMapperConfig     `json:"field_mapper,omitempty"`
-	RuleEngine      *RuleEngineConfig      `json:"rule_engine,omitempty"`
-}
-
-// SchemaValidatorConfig represents JSON schema validation configuration
-type SchemaValidatorConfig struct {
-	InputSchema  json.RawMessage `json:"input_schema"`  // JSON schema
-	OutputSchema json.RawMessage `json:"output_schema"` // JSON schema
-}
-
-// FieldMapperConfig represents field mapping configuration
-type FieldMapperConfig struct {
-	Mappings map[string]string `json:"mappings"` // source_field -> dest_field
-}
-
-// RuleEngineConfig represents rule engine configuration
-type RuleEngineConfig struct {
-	Rules []Rule `json:"rules"`
-}
-
-// Rule represents a single transformation rule
-type Rule struct {
-	Name           string `json:"name"`
-	Condition      string `json:"condition"`      // Expression that evaluates to bool
-	Transformation string `json:"transformation"` // Expression that transforms the data
-}
-
-// FilterConfig represents the filter configuration
-type FilterConfig struct {
-	Rules []*FilterRule `json:"rules,omitempty"`
-	WASM  *WASMConfig   `json:"wasm,omitempty"`
-}
-
-// FilterRule represents a filter rule
-type FilterRule struct {
-	Name      string `json:"name"`
-	Condition string `json:"condition"` // Expression that evaluates to bool
-}
-
-// WASMConfig represents WASM filter configuration
-type WASMConfig struct {
-	Binary []byte `json:"binary"` // Base64 encoded WASM binary
-}
-
-// DestinationConfig represents the destination/producer configuration
-type DestinationConfig struct {
-	Type     string                     `json:"type"` // http, file, database
-	HTTP     *HTTPDestinationConfig     `json:"http,omitempty"`
-	File     *FileDestinationConfig     `json:"file,omitempty"`
-	Database *DatabaseDestinationConfig `json:"database,omitempty"`
-}
-
-// HTTPDestinationConfig represents HTTP destination configuration
-type HTTPDestinationConfig struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"` // POST, PUT, etc.
-	Headers map[string]string `json:"headers,omitempty"`
-	Auth    *AuthConfig       `json:"auth,omitempty"`
-}
-
-// FileDestinationConfig represents file destination configuration
-type FileDestinationConfig struct {
-	Path      string `json:"path"`
-	Format    string `json:"format,omitempty"` // json, csv, etc.
-	Append    bool   `json:"append"`
-	CreateDir bool   `json:"create_dir"`
-}
-
-// DatabaseDestinationConfig represents database destination configuration
-type DatabaseDestinationConfig struct {
-	ConnectionString string `json:"connection_string"`
-	Query            string `json:"query"` // INSERT/UPDATE query
-	BatchSize        int    `json:"batch_size,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -263,110 +137,28 @@ type MetricsSnapshot struct {
 	LastUpdateTime time.Time `json:"last_update_time"`
 }
 
-// Value implements sql.Valuer for JSONB types
-func (s SourceConfig) Value() (driver.Value, error) {
-	return json.Marshal(s)
-}
-
-// Scan implements sql.Scanner for JSONB types
-func (s *SourceConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("cannot convert %T to []byte", value)
-	}
-	return json.Unmarshal(bytes, s)
-}
-
-// Similar implementations for other JSONB types
-func (c ConverterConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
-}
-
-func (c *ConverterConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("cannot convert %T to []byte", value)
-	}
-	return json.Unmarshal(bytes, c)
-}
-
-func (f FilterConfig) Value() (driver.Value, error) {
-	return json.Marshal(f)
-}
-
-func (f *FilterConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("cannot convert %T to []byte", value)
-	}
-	return json.Unmarshal(bytes, f)
-}
-
-func (d DestinationConfig) Value() (driver.Value, error) {
-	return json.Marshal(d)
-}
-
-func (d *DestinationConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("cannot convert %T to []byte", value)
-	}
-	return json.Unmarshal(bytes, d)
-}
-
 // CreateConnectionRequest is the request to create a new connection
 // Supports both the new graph-based model (Nodes/Edges) and the legacy linear model
 type CreateConnectionRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 
-	// NEW: Graph-based pipeline model (Phase 1)
-	// When provided, these take precedence over legacy fields
+	// Graph-based pipeline model: the nodes and the edges between them.
 	Nodes []*Node `json:"nodes,omitempty"`
 	Edges []*Edge `json:"edges,omitempty"`
-
-	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
-	// These fields will be removed in v2.0. Use Nodes/Edges instead.
-	SourceConfig      SourceConfig      `json:"source_config"`
-	ConverterConfig   ConverterConfig   `json:"converter_config"`
-	FilterConfig      FilterConfig      `json:"filter_config"`
-	DestinationConfig DestinationConfig `json:"destination_config"`
 }
 
-// UpdateConnectionRequest is the request to update a connection
-// Supports both the new graph-based model (Nodes/Edges) and the legacy linear model
+// UpdateConnectionRequest is the request to update a connection.
 type UpdateConnectionRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 
-	// NEW: Graph-based pipeline model (Phase 1)
-	// When provided, these take precedence over legacy fields
+	// Graph-based pipeline model: the nodes and the edges between them.
 	Nodes []*Node `json:"nodes,omitempty"`
 	Edges []*Edge `json:"edges,omitempty"`
-
-	// DEPRECATED: Legacy linear pipeline model - kept for backward compatibility
-	// These fields will be removed in v2.0. Use Nodes/Edges instead.
-	SourceConfig      *SourceConfig      `json:"source_config"`
-	ConverterConfig   *ConverterConfig   `json:"converter_config"`
-	FilterConfig      *FilterConfig      `json:"filter_config"`
-	DestinationConfig *DestinationConfig `json:"destination_config"`
 }
 
-// NewConnection creates a new Connection with default values
-// Automatically detects whether to use the new graph-based model or legacy model
-// based on whether Nodes are provided in the request
+// NewConnection creates a new Connection with default values.
 func NewConnection(tenantID string, req CreateConnectionRequest) *Connection {
 	now := time.Now().UTC()
 	conn := &Connection{
@@ -379,18 +171,8 @@ func NewConnection(tenantID string, req CreateConnectionRequest) *Connection {
 		UpdatedAt:   now,
 	}
 
-	// Use new graph-based model if Nodes are provided
-	if len(req.Nodes) > 0 {
-		conn.Nodes = req.Nodes
-		conn.Edges = req.Edges
-		// TODO(Phase 1b): Add ValidateConnection() call here to validate DAG structure
-	} else {
-		// Fall back to legacy linear model for backward compatibility
-		conn.SourceConfig = req.SourceConfig
-		conn.ConverterConfig = req.ConverterConfig
-		conn.FilterConfig = req.FilterConfig
-		conn.DestinationConfig = req.DestinationConfig
-	}
+	conn.Nodes = req.Nodes
+	conn.Edges = req.Edges
 
 	return conn
 }

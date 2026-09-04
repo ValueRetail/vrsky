@@ -5,140 +5,7 @@
 
 export type ConnectionStatus = 'running' | 'stopped' | 'error'
 
-export type SourceType = 'http' | 'file' | 'database' | 'api' | 'tenant'
-export type ConverterType = 'schema' | 'mapper' | 'rules'
-export type FilterType = 'rules' | 'wasm'
-export type DestinationType = 'http' | 'file' | 'database'
-
-// Source Configurations
-export interface HttpSourceConfig {
-  type: 'http'
-  url: string
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  headers?: Record<string, string>
-  auth?: {
-    type: 'bearer' | 'basic'
-    credentials: string
-  }
-  timeout?: number
-  retry?: {
-    max_attempts: number
-    backoff_ms: number
-  }
-}
-
-export interface FileSourceConfig {
-  type: 'file'
-  path: string
-  format: 'json' | 'csv' | 'xml'
-  encoding?: string
-  watch?: boolean
-  poll_interval_ms?: number
-}
-
-export interface DatabaseSourceConfig {
-  type: 'database'
-  connection_string: string
-  query: string
-  polling_interval_ms?: number
-}
-
-// API Consumer Source Configuration
-export interface ApiConsumerEndpoint {
-  path: string
-  auth_type: 'none' | 'bearer' | 'api_key'
-  auth_value: string
-}
-
-export interface ApiConsumerSourceConfig {
-  type: 'api'
-  base_url: string
-  endpoints: ApiConsumerEndpoint[]
-  poll_interval_seconds: number
-}
-
-export type SourceConfig = HttpSourceConfig | FileSourceConfig | DatabaseSourceConfig | ApiConsumerSourceConfig
-
-// Converter Configurations
-export interface SchemaValidatorConfig {
-  type: 'schema'
-  input_schema: Record<string, unknown>
-  validation_rules?: Record<string, unknown>
-}
-
-export interface FieldMapperConfig {
-  type: 'mapper'
-  mappings: Array<{
-    source_field: string
-    target_field: string
-    transform?: string
-  }>
-}
-
-export interface RuleEngineConfig {
-  type: 'rules'
-  rules: Array<{
-    condition: string
-    action: string
-  }>
-}
-
-export type ConverterConfig = SchemaValidatorConfig | FieldMapperConfig | RuleEngineConfig
-
-// Filter Configurations
-export interface FilterRulesConfig {
-  type: 'rules'
-  rules: Array<{
-    field: string
-    operator: 'eq' | 'ne' | 'gt' | 'lt' | 'in' | 'nin'
-    value: unknown
-  }>
-}
-
-export interface WasmScriptConfig {
-  type: 'wasm'
-  script: string
-  params?: Record<string, unknown>
-}
-
-export type FilterConfig = FilterRulesConfig | WasmScriptConfig
-
-// Destination Configurations
-export interface HttpDestinationConfig {
-  type: 'http'
-  url: string
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  headers?: Record<string, string>
-  auth?: {
-    type: 'bearer' | 'basic'
-    credentials: string
-  }
-  timeout?: number
-  retry?: {
-    max_attempts: number
-    backoff_ms: number
-  }
-}
-
-export interface FileDestinationConfig {
-  type: 'file'
-  path: string
-  format: 'json' | 'csv' | 'xml'
-  encoding?: string
-  append?: boolean
-}
-
-export interface DatabaseDestinationConfig {
-  type: 'database'
-  connection_string: string
-  table: string
-  operation: 'insert' | 'update' | 'upsert'
-}
-
-export type DestinationConfig = HttpDestinationConfig | FileDestinationConfig | DatabaseDestinationConfig
-
-// Graph pipeline model (nodes/edges). The current connection format; the
-// legacy *_config fields below are kept for backward compatibility.
+// Graph pipeline model (nodes/edges) — the only connection format.
 export interface ConnectionNode {
   id: string
   type: string
@@ -160,15 +27,8 @@ export interface Connection {
   name: string
   description: string
   status: ConnectionStatus
-  // Graph model (preferred). Present on connections created via the builder,
-  // onboarding wizard, or API.
   nodes?: ConnectionNode[]
   edges?: ConnectionEdge[]
-  // Legacy linear model — empty on graph-based connections.
-  source_config: SourceConfig
-  converter_config: ConverterConfig
-  filter_config: FilterConfig
-  destination_config: DestinationConfig
   metrics?: ConnectionMetrics
   created_at: string
   updated_at: string

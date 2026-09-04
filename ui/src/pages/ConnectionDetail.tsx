@@ -110,15 +110,10 @@ export default function ConnectionDetail() {
       const clonePayload = {
         name: `Copy of ${connection.name}`,
         description: connection.description,
-        // Carry the graph model: builder-created connections live in
-        // nodes/edges (the legacy *_config fields are empty for them), so
+        // Carry the graph model: the pipeline lives in nodes/edges, so
         // without these the clone would be an empty, undeployable pipeline.
         nodes: connection.nodes,
         edges: connection.edges,
-        source_config: connection.source_config,
-        converter_config: connection.converter_config,
-        filter_config: connection.filter_config,
-        destination_config: connection.destination_config,
       }
       const newConnection = await connectionService.create(clonePayload as unknown)
       addNotification({ type: 'success', title: 'Cloned', message: `"${newConnection.name}" created` })

@@ -32,10 +32,6 @@ export interface GetConnectionResponse {
   name: string
   description: string
   status: 'stopped' | 'running' | 'error'
-  source_config: Record<string, unknown>
-  converter_config: Record<string, unknown>
-  filter_config: Record<string, unknown>
-  destination_config: Record<string, unknown>
   metrics: Record<string, unknown>
   created_at: string
   updated_at: string
