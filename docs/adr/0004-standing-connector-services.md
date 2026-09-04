@@ -60,8 +60,9 @@ That invariant is now enforced rather than merely stated. Two tests in
 `TestNodeConfigRulesCoverUI` fails when the UI offers a type the validator does
 not know, and `TestNodeConfigRulesAreDeployed` fails when a type the validator
 accepts has no service in the deploy script (or a service is deployed that no
-type maps to). Deliberate gaps live in `deployExceptions` with their reason —
-SAP S/4HANA is there pending TEST-env validation.
+type maps to). Deliberate gaps live in `deployExceptions` with their reason; the map is
+currently empty, which is the state to keep it in — every type the UI offers has
+a service that runs it.
 
 **3. Replicas are 1 unless the connector is a pure pull-durable subscriber.**
 Pull durables distribute work across replicas with no coordination, so producers
