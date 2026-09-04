@@ -193,26 +193,15 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	// Create connection
 	conn := NewConnection(tenantID, req)
 
-	// Validate configuration
-	// If using graph-based model (nodes present), validate DAG topology
+	// Validate the pipeline's topology. Whether each node is configured
+	// completely enough to actually run is checked on start
+	// (ValidateNodeConfigs), since a pipeline mid-build is legitimately
+	// incomplete and must stay saveable.
 	if len(conn.Nodes) > 0 {
 		if err := h.validator.ValidateDAG(conn); err != nil {
 			if dagErr, ok := err.(*DAGValidationError); ok {
 				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
 					"errors": dagErr.Errors,
-				})
-			} else {
-				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
-			}
-			return
-		}
-	} else {
-		// Legacy linear model validation (DEPRECATED)
-		if err := h.validator.ValidateConnection(conn); err != nil {
-			if cfgErr, ok := err.(*ConfigError); ok {
-				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-					"field":     cfgErr.Field,
-					"component": cfgErr.Component,
 				})
 			} else {
 				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
@@ -387,27 +376,9 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply graph-based model updates (Phase 1)
-	// If Nodes are provided, use the new model; otherwise fall back to legacy
 	if len(updateReq.Nodes) > 0 {
 		existingConn.Nodes = updateReq.Nodes
 		existingConn.Edges = updateReq.Edges
-	} else {
-		// DEPRECATED: Legacy linear model updates
-		if updateReq.SourceConfig != nil {
-			existingConn.SourceConfig = *updateReq.SourceConfig
-		}
-
-		if updateReq.ConverterConfig != nil {
-			existingConn.ConverterConfig = *updateReq.ConverterConfig
-		}
-
-		if updateReq.FilterConfig != nil {
-			existingConn.FilterConfig = *updateReq.FilterConfig
-		}
-
-		if updateReq.DestinationConfig != nil {
-			existingConn.DestinationConfig = *updateReq.DestinationConfig
-		}
 	}
 
 	// Validate updated configuration
@@ -417,19 +388,6 @@ func (h *Handler) UpdateConnection(w http.ResponseWriter, r *http.Request) {
 			if dagErr, ok := err.(*DAGValidationError); ok {
 				_ = writeError(w, http.StatusBadRequest, "DAGValidationError", "pipeline validation failed", map[string]interface{}{
 					"errors": dagErr.Errors,
-				})
-			} else {
-				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
-			}
-			return
-		}
-	} else {
-		// Legacy linear model validation (DEPRECATED)
-		if err := h.validator.ValidateConnection(existingConn); err != nil {
-			if cfgErr, ok := err.(*ConfigError); ok {
-				_ = writeError(w, http.StatusBadRequest, "ValidationError", cfgErr.Error(), map[string]interface{}{
-					"field":     cfgErr.Field,
-					"component": cfgErr.Component,
 				})
 			} else {
 				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
@@ -980,7 +938,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/connections/{id}/auto-generator/status", viewer(http.HandlerFunc(h.GetAutoGeneratorStatus)))
 
 	// API Consumer routes
-	h.RegisterAPIConsumerRoutes(mux)
 
 	// Secrets (Phase 1A — #66). Reads = viewer; writes/rotate = editor;
 	// delete = admin. Branching happens inside SecretsCollection /
