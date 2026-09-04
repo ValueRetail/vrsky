@@ -55,6 +55,14 @@ type with no service in that table is a type the platform silently cannot run �
 that is the failure #205 was, so the script's service table and the UI dropdowns
 must be kept in step.
 
+That invariant is now enforced rather than merely stated. Two tests in
+`pkg/managementapi/nodeconfig_test.go` pin the chain UI → validator → deployment:
+`TestNodeConfigRulesCoverUI` fails when the UI offers a type the validator does
+not know, and `TestNodeConfigRulesAreDeployed` fails when a type the validator
+accepts has no service in the deploy script (or a service is deployed that no
+type maps to). Deliberate gaps live in `deployExceptions` with their reason —
+SAP S/4HANA is there pending TEST-env validation.
+
 **3. Replicas are 1 unless the connector is a pure pull-durable subscriber.**
 Pull durables distribute work across replicas with no coordination, so producers
 with no local state run 2 + a PDB. Singletons remain where a second replica
