@@ -133,20 +133,11 @@ func TestCreateConnection_Valid(t *testing.T) {
 	req := CreateConnectionRequest{
 		Name:        "test-connection",
 		Description: "Test connection",
-		SourceConfig: SourceConfig{
-			Type: "http",
-			HTTP: &HTTPSourceConfig{
-				URL:    "http://example.com",
-				Method: "GET",
-			},
+		Nodes: []*Node{
+			{ID: "c1", Type: "consumer", Config: json.RawMessage(`{"type":"file","file":{"path":"/data/input"}}`), Enabled: true},
+			{ID: "p1", Type: "producer", Config: json.RawMessage(`{"type":"http","http":{"url":"https://example.test/hook"}}`), Enabled: true},
 		},
-		DestinationConfig: DestinationConfig{
-			Type: "http",
-			HTTP: &HTTPDestinationConfig{
-				URL:    "http://example.com",
-				Method: "POST",
-			},
-		},
+		Edges: []*Edge{{ID: "e1", Source: "c1", Target: "p1"}},
 	}
 
 	body, _ := json.Marshal(req)
@@ -166,27 +157,17 @@ func TestCreateConnection_Valid(t *testing.T) {
 	}
 }
 
-// Test CreateConnection with invalid source config
-func TestCreateConnection_InvalidSourceConfig(t *testing.T) {
+// Create-time validation is topological now that the flat model is gone: a
+// pipeline with no producer cannot be ordered, so it is rejected.
+func TestCreateConnection_InvalidGraph(t *testing.T) {
 	handler, _ := setupTestHandler()
 	ctx := contextWithTenant("tenant-1")
 
 	req := CreateConnectionRequest{
 		Name:        "test-connection",
 		Description: "Test connection",
-		SourceConfig: SourceConfig{
-			Type: "http",
-			HTTP: &HTTPSourceConfig{
-				URL:    "invalid-url", // Invalid URL
-				Method: "GET",
-			},
-		},
-		DestinationConfig: DestinationConfig{
-			Type: "http",
-			HTTP: &HTTPDestinationConfig{
-				URL:    "http://example.com",
-				Method: "POST",
-			},
+		Nodes: []*Node{
+			{ID: "c1", Type: "consumer", Config: json.RawMessage(`{"type":"file","file":{"path":"/data/input"}}`), Enabled: true},
 		},
 	}
 
@@ -309,20 +290,11 @@ func TestUpdateConnection_Valid(t *testing.T) {
 		TenantID: "tenant-1",
 		Name:     "test-connection",
 		Status:   "stopped",
-		SourceConfig: SourceConfig{
-			Type: "http",
-			HTTP: &HTTPSourceConfig{
-				URL:    "http://example.com/api",
-				Method: "GET",
-			},
+		Nodes: []*Node{
+			{ID: "c1", Type: "consumer", Config: json.RawMessage(`{"type":"file","file":{"path":"/data/input"}}`), Enabled: true},
+			{ID: "p1", Type: "producer", Config: json.RawMessage(`{"type":"http","http":{"url":"https://example.test/hook"}}`), Enabled: true},
 		},
-		DestinationConfig: DestinationConfig{
-			Type: "http",
-			HTTP: &HTTPDestinationConfig{
-				URL:    "http://example.com/webhook",
-				Method: "POST",
-			},
-		},
+		Edges: []*Edge{{ID: "e1", Source: "c1", Target: "p1"}},
 	}
 	mockRepo.connections["test-id"] = conn
 

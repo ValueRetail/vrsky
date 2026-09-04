@@ -491,8 +491,7 @@ export default function PipelineBuilder() {
   }
 
   /**
-   * Build the connection payload with nodes and edges in the new format.
-   * This replaces the old source_config/destination_config format.
+   * Build the connection payload with nodes and edges.
    *
    * Before persisting, plaintext credentials typed into the editor are minted
    * into encrypted tenant secrets and replaced with `<field>_secret_id`

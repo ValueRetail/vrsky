@@ -148,9 +148,4 @@ var apiRoutes = []apiRoute{
 	{"GET /status.json", "get", "/status.json", "Status", "Public platform status + uptime (Prometheus-driven)", nil, tof(StatusResponse{})},
 
 	// --- API consumers (registered by RegisterAPIConsumerRoutes) ---
-	{"POST /api/v1/api-consumers", "post", "/api/v1/api-consumers", "API consumers", "Create an API consumer (programmatic ingress credential)", nil, nil},
-	{"GET /api/v1/api-consumers", "get", "/api/v1/api-consumers", "API consumers", "List API consumers", nil, nil},
-	{"GET /api/v1/api-consumers/{id}", "get", "/api/v1/api-consumers/{id}", "API consumers", "Get an API consumer", nil, nil},
-	{"PUT /api/v1/api-consumers/{id}", "put", "/api/v1/api-consumers/{id}", "API consumers", "Update an API consumer", nil, nil},
-	{"DELETE /api/v1/api-consumers/{id}", "delete", "/api/v1/api-consumers/{id}", "API consumers", "Delete an API consumer", nil, nil},
 }

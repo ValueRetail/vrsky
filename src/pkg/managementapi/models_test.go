@@ -5,60 +5,6 @@ import (
 	"testing"
 )
 
-// TestNewConnection_LegacyFormat verifies backward compatibility with the old linear pipeline model
-func TestNewConnection_LegacyFormat(t *testing.T) {
-	req := CreateConnectionRequest{
-		Name:        "Legacy Connection",
-		Description: "Testing backward compatibility",
-		SourceConfig: SourceConfig{
-			Type: "http",
-			HTTP: &HTTPSourceConfig{
-				URL:    "https://example.com/webhook",
-				Method: "POST",
-			},
-		},
-		DestinationConfig: DestinationConfig{
-			Type: "file",
-			File: &FileDestinationConfig{
-				Path:   "/tmp/output.json",
-				Format: "json",
-			},
-		},
-	}
-
-	conn := NewConnection("tenant-123", req)
-
-	// Verify legacy fields are populated
-	if conn.SourceConfig.Type != "http" {
-		t.Errorf("Expected SourceConfig.Type = 'http', got '%s'", conn.SourceConfig.Type)
-	}
-	if conn.SourceConfig.HTTP == nil || conn.SourceConfig.HTTP.URL != "https://example.com/webhook" {
-		t.Errorf("Expected SourceConfig.HTTP.URL = 'https://example.com/webhook'")
-	}
-	if conn.DestinationConfig.Type != "file" {
-		t.Errorf("Expected DestinationConfig.Type = 'file', got '%s'", conn.DestinationConfig.Type)
-	}
-
-	// Verify new fields are empty (not populated for legacy format)
-	if len(conn.Nodes) > 0 {
-		t.Errorf("Expected Nodes to be empty for legacy format, got %d nodes", len(conn.Nodes))
-	}
-	if len(conn.Edges) > 0 {
-		t.Errorf("Expected Edges to be empty for legacy format, got %d edges", len(conn.Edges))
-	}
-
-	// Verify basic fields
-	if conn.Name != "Legacy Connection" {
-		t.Errorf("Expected Name = 'Legacy Connection', got '%s'", conn.Name)
-	}
-	if conn.TenantID != "tenant-123" {
-		t.Errorf("Expected TenantID = 'tenant-123', got '%s'", conn.TenantID)
-	}
-	if conn.Status != "stopped" {
-		t.Errorf("Expected Status = 'stopped', got '%s'", conn.Status)
-	}
-}
-
 // TestNewConnection_GraphFormat verifies the new graph-based pipeline model
 func TestNewConnection_GraphFormat(t *testing.T) {
 	consumerConfig, _ := json.Marshal(map[string]interface{}{
@@ -205,8 +151,8 @@ func TestEdgeJSONSerialization(t *testing.T) {
 	}
 }
 
-// TestConnectionWithBothFormats verifies that Connection struct handles mixed data correctly
-func TestConnectionWithBothFormats(t *testing.T) {
+// TestConnectionGraphRoundTrip verifies a graph connection survives a JSON round trip.
+func TestConnectionGraphRoundTrip(t *testing.T) {
 	config, _ := json.Marshal(map[string]string{"key": "value"})
 	conn := &Connection{
 		ID:          "test-id",
@@ -220,9 +166,7 @@ func TestConnectionWithBothFormats(t *testing.T) {
 		Edges: []*Edge{
 			{ID: "edge-1", Source: "node-1", Target: "node-2", Order: 0},
 		},
-		// Legacy fields (deprecated but still present)
-		SourceConfig: SourceConfig{Type: "http"},
-		Status:       "stopped",
+		Status: "stopped",
 	}
 
 	// Verify all fields are accessible
@@ -232,10 +176,6 @@ func TestConnectionWithBothFormats(t *testing.T) {
 	if len(conn.Edges) != 1 {
 		t.Errorf("Expected 1 edge, got %d", len(conn.Edges))
 	}
-	if conn.SourceConfig.Type != "http" {
-		t.Errorf("Expected SourceConfig.Type = 'http', got '%s'", conn.SourceConfig.Type)
-	}
-
 	// Test JSON serialization/deserialization
 	data, err := json.Marshal(conn)
 	if err != nil {
@@ -252,58 +192,5 @@ func TestConnectionWithBothFormats(t *testing.T) {
 	}
 	if len(unmarshaled.Edges) != 1 {
 		t.Errorf("Unmarshaled Edges count mismatch: expected 1, got %d", len(unmarshaled.Edges))
-	}
-}
-
-// TestCreateConnectionRequest_BothFormats verifies CreateConnectionRequest handles both formats
-func TestCreateConnectionRequest_BothFormats(t *testing.T) {
-	// Test legacy format JSON
-	legacyJSON := `{
-		"name": "Legacy Test",
-		"description": "Legacy format",
-		"source_config": {"type": "http"},
-		"destination_config": {"type": "file"}
-	}`
-
-	var legacyReq CreateConnectionRequest
-	if err := json.Unmarshal([]byte(legacyJSON), &legacyReq); err != nil {
-		t.Fatalf("Failed to unmarshal legacy request: %v", err)
-	}
-
-	if legacyReq.Name != "Legacy Test" {
-		t.Errorf("Expected Name = 'Legacy Test', got '%s'", legacyReq.Name)
-	}
-	if legacyReq.SourceConfig.Type != "http" {
-		t.Errorf("Expected SourceConfig.Type = 'http', got '%s'", legacyReq.SourceConfig.Type)
-	}
-	if len(legacyReq.Nodes) != 0 {
-		t.Errorf("Expected empty Nodes for legacy request, got %d", len(legacyReq.Nodes))
-	}
-
-	// Test new format JSON
-	newJSON := `{
-		"name": "Graph Test",
-		"description": "New format",
-		"nodes": [
-			{"id": "consumer-0", "type": "consumer", "config": {}, "enabled": true}
-		],
-		"edges": [
-			{"id": "edge-0", "source": "consumer-0", "target": "producer-0", "order": 0}
-		]
-	}`
-
-	var newReq CreateConnectionRequest
-	if err := json.Unmarshal([]byte(newJSON), &newReq); err != nil {
-		t.Fatalf("Failed to unmarshal new format request: %v", err)
-	}
-
-	if newReq.Name != "Graph Test" {
-		t.Errorf("Expected Name = 'Graph Test', got '%s'", newReq.Name)
-	}
-	if len(newReq.Nodes) != 1 {
-		t.Errorf("Expected 1 node, got %d", len(newReq.Nodes))
-	}
-	if len(newReq.Edges) != 1 {
-		t.Errorf("Expected 1 edge, got %d", len(newReq.Edges))
 	}
 }

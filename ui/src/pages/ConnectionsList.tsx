@@ -10,17 +10,16 @@ type StatusFilter = 'all' | ConnectionStatus
 
 const PAGE_SIZE = 10
 
-// Legacy source_config/destination_config are empty on graph-based
-// (builder-created) connections, where the pipeline lives in nodes/edges.
-// Prefer the legacy field, then fall back to the matching node, then a dash —
-// reading .type off an absent source_config would throw and crash the list.
+// A pipeline lives in nodes/edges, so a connection's source and destination
+// labels come from its consumer/producer nodes. Falls back to a dash rather
+// than reading .type off an absent node, which would crash the list.
 const nodeLabel = (connection: Connection, role: string): string => {
   const node = connection.nodes?.find(n => n.type === role)
   const cfgType = node?.config?.type
   return typeof cfgType === 'string' ? cfgType : (node?.type ?? '—')
 }
-const sourceLabel = (c: Connection): string => c.source_config?.type || nodeLabel(c, 'consumer')
-const destinationLabel = (c: Connection): string => c.destination_config?.type || nodeLabel(c, 'producer')
+const sourceLabel = (c: Connection): string => nodeLabel(c, 'consumer')
+const destinationLabel = (c: Connection): string => nodeLabel(c, 'producer')
 const formatDate = (value?: string): string => {
   if (!value) return '—'
   const d = new Date(value)
