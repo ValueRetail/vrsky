@@ -2112,8 +2112,9 @@ must be kept in step.</p>
 <code>TestNodeConfigRulesCoverUI</code> fails when the UI offers a type the validator does
 not know, and <code>TestNodeConfigRulesAreDeployed</code> fails when a type the validator
 accepts has no service in the deploy script (or a service is deployed that no
-type maps to). Deliberate gaps live in <code>deployExceptions</code> with their reason —
-SAP S/4HANA is there pending TEST-env validation.</p>
+type maps to). Deliberate gaps live in <code>deployExceptions</code> with their reason; the map is
+currently empty, which is the state to keep it in — every type the UI offers has
+a service that runs it.</p>
 <p><strong>3. Replicas are 1 unless the connector is a pure pull-durable subscriber.</strong>
 Pull durables distribute work across replicas with no coordination, so producers
 with no local state run 2 + a PDB. Singletons remain where a second replica

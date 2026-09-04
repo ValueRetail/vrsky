@@ -1567,6 +1567,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2162,6 +2173,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2278,6 +2300,36 @@ producer re-fetches once and retries transparently.</p>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
 and <code>503</code>/<code>5xx</code>/network errors retry with backoff; <code>4xx</code> bad-data and
 <code>401</code>/<code>403</code> auth failures are poison and go to the DLQ.</p>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>Validated end to end in the TEST (docker-compose) environment on 2026-09-04
+against <code>mock-sap</code>, with a <code>sap_s4hana</code> source feeding a <code>sap_s4hana</code>
+destination — both pointed at the mock's service root via <code>api_base_url</code>:</p>
+<ul>
+<li><strong>OData v2 pagination</strong> — the consumer read page 1, followed the relative
+  <code>d.__next</code> cursor, and read page 2 (3 sales orders total).</li>
+<li><strong>Basic auth</strong> — <code>username</code> + <code>password_secret_id</code>, with the password
+  resolved from the secrets vault at claim time.</li>
+<li><strong>CSRF handshake</strong> — the producer fetched a token (<code>X-CSRF-Token: Fetch</code>)
+  before each write and reused it.</li>
+<li><strong>Delivery</strong> — both pages written back with <code>POST</code>, <code>201</code> on all four calls,
+  no DLQ entries.</li>
+</ul>
+<p>One thing worth knowing before configuring a node: with <code>auth_type: basic</code>, a
+<code>username</code> alone is not enough. The connector refuses the connection with</p>
+<div class="highlight"><pre><span></span><code>SAP S/4HANA config incomplete: basic auth needs username + password (from password_secret_id)
+</code></pre></div>
+<p>which is a loud, logged failure rather than a silent one — but it happens at
+claim time, not at save time, so check the consumer's logs if a SAP connection
+starts and no polling appears.</p>
+<p>To reproduce:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>nats<span class="w"> </span>postgres-management<span class="w"> </span>management-api<span class="w"> </span>mock-sap<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>sap-s4hana-consumer<span class="w"> </span>sap-s4hana-producer
+</code></pre></div>
+<p>then create a connection whose nodes set
+<code>api_base_url: http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV</code> and
+<code>entity_set: A_SalesOrder</code>, and watch <code>docker logs vrsky-mock-sap</code>.</p>
+<p>Both services are deployed to prod as of this validation
+(<code>infrastructure/azure/deploy-connectors-azure.sh</code>).</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Which OData version?</strong> Most <code>API_*</code> S/4HANA Cloud services are v2 — keep the
