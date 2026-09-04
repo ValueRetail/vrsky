@@ -100,6 +100,46 @@ Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors retry with backoff; `4xx` bad-data and
 `401`/`403` auth failures are poison and go to the DLQ.
 
+## Validation
+
+Validated end to end in the TEST (docker-compose) environment on 2026-09-04
+against `mock-sap`, with a `sap_s4hana` source feeding a `sap_s4hana`
+destination — both pointed at the mock's service root via `api_base_url`:
+
+- **OData v2 pagination** — the consumer read page 1, followed the relative
+  `d.__next` cursor, and read page 2 (3 sales orders total).
+- **Basic auth** — `username` + `password_secret_id`, with the password
+  resolved from the secrets vault at claim time.
+- **CSRF handshake** — the producer fetched a token (`X-CSRF-Token: Fetch`)
+  before each write and reused it.
+- **Delivery** — both pages written back with `POST`, `201` on all four calls,
+  no DLQ entries.
+
+One thing worth knowing before configuring a node: with `auth_type: basic`, a
+`username` alone is not enough. The connector refuses the connection with
+
+```
+SAP S/4HANA config incomplete: basic auth needs username + password (from password_secret_id)
+```
+
+which is a loud, logged failure rather than a silent one — but it happens at
+claim time, not at save time, so check the consumer's logs if a SAP connection
+starts and no polling appears.
+
+To reproduce:
+
+```bash
+docker compose up -d nats postgres-management management-api mock-sap \
+  sap-s4hana-consumer sap-s4hana-producer
+```
+
+then create a connection whose nodes set
+`api_base_url: http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV` and
+`entity_set: A_SalesOrder`, and watch `docker logs vrsky-mock-sap`.
+
+Both services are deployed to prod as of this validation
+(`infrastructure/azure/deploy-connectors-azure.sh`).
+
 ## Notes & roadmap
 
 - **Which OData version?** Most `API_*` S/4HANA Cloud services are v2 — keep the

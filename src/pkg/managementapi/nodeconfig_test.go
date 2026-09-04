@@ -205,10 +205,9 @@ func TestNodeConfigRulesCoverUI(t *testing.T) {
 // the #205 shape, accepted knowingly and tracked, not overlooked.
 //
 // Empty this map as the services ship; do not add to it to silence a failure.
-var deployExceptions = map[string]string{
-	"sap-s4hana-consumer": "SAP S/4HANA awaits TEST-env validation before prod (docs/connectors/sap-s4hana.md)",
-	"sap-s4hana-producer": "SAP S/4HANA awaits TEST-env validation before prod (docs/connectors/sap-s4hana.md)",
-}
+// It is currently empty, which is the state to keep it in: every type the UI
+// offers has a service that runs it.
+var deployExceptions = map[string]string{}
 
 // The other half of the ADR 0004 invariant: "a node type with no service in that
 // table is a type the platform silently cannot run — that is the failure #205

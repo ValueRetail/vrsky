@@ -475,6 +475,98 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: vrsky-sap-s4hana-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sap-s4hana-consumer
+    tier: connector
+    role: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-sap-s4hana-consumer
+  template:
+    metadata:
+      labels:
+        app: vrsky-sap-s4hana-consumer
+        tier: connector
+        role: consumer
+    spec:
+      containers:
+      - name: sap-s4hana-consumer
+        image: vrskyprodacr.azurecr.io/vrsky/sap-s4hana-consumer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        # Claim-check spill store (#187/#201): consumers offload >256KiB
+        # payloads; producers rehydrate/stream them. Prereq: minio-credentials
+        # secret copied into this namespace from vrsky-storage.
+        - name: PAYLOAD_STORE_PROVIDER
+          value: "s3"
+        - name: PAYLOAD_STORE_BUCKET
+          value: "vrsky-objects"
+        - name: PAYLOAD_STORE_ENDPOINT
+          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
+        - name: PAYLOAD_STORE_REGION
+          value: "us-east-1"
+        - name: PAYLOAD_STORE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: accesskey
+        - name: PAYLOAD_STORE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secretkey
+        - name: WORKER_HTTP_PORT
+          value: "9290"
+        ports:
+        - name: http
+          containerPort: 9290
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            # 512Mi, NOT 128Mi: a producer that does not implement the ADR 0001
+            # streaming path buffers an offloaded payload up to the rehydrate
+            # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
+            # OOM-kills the pod before the cap can reject anything.
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-sap-s4hana-consumer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sap-s4hana-consumer
+spec:
+  selector:
+    app: vrsky-sap-s4hana-consumer
+  ports:
+  - name: http
+    port: 9290
+    targetPort: 9290
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: vrsky-sitoo-producer
   namespace: vrsky-platform
   labels:
@@ -886,6 +978,89 @@ spec:
   selector:
     matchLabels:
       app: vrsky-brightpearl-producer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-sap-s4hana-producer
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-sap-s4hana-producer
+    tier: connector
+    role: producer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vrsky-sap-s4hana-producer
+  template:
+    metadata:
+      labels:
+        app: vrsky-sap-s4hana-producer
+        tier: connector
+        role: producer
+    spec:
+      containers:
+      - name: sap-s4hana-producer
+        image: vrskyprodacr.azurecr.io/vrsky/sap-s4hana-producer:latest
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        # Claim-check spill store (#187/#201): consumers offload >256KiB
+        # payloads; producers rehydrate/stream them. Prereq: minio-credentials
+        # secret copied into this namespace from vrsky-storage.
+        - name: PAYLOAD_STORE_PROVIDER
+          value: "s3"
+        - name: PAYLOAD_STORE_BUCKET
+          value: "vrsky-objects"
+        - name: PAYLOAD_STORE_ENDPOINT
+          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
+        - name: PAYLOAD_STORE_REGION
+          value: "us-east-1"
+        - name: PAYLOAD_STORE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: accesskey
+        - name: PAYLOAD_STORE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secretkey
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            # 512Mi, NOT 128Mi: a producer that does not implement the ADR 0001
+            # streaming path buffers an offloaded payload up to the rehydrate
+            # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
+            # OOM-kills the pod before the cap can reject anything.
+            memory: 512Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vrsky-sap-s4hana-producer
+  namespace: vrsky-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vrsky-sap-s4hana-producer
 ---
 apiVersion: apps/v1
 kind: Deployment

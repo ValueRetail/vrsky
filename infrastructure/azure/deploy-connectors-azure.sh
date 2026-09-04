@@ -54,11 +54,13 @@ front-systems-consumer    consumer 9270
 brightpearl-consumer      consumer 9280
 business-central-consumer consumer 9310
 visma-consumer            consumer 9320
+sap-s4hana-consumer       consumer 9290
 sitoo-producer            producer -
 front-systems-producer    producer -
 business-central-producer producer -
 visma-producer            producer -
 brightpearl-producer      producer -
+sap-s4hana-producer       producer -
 "
 
 # Generic connectors: the source/destination types that are not tied to one
@@ -84,10 +86,6 @@ kafka-producer            producer -
 rabbitmq-producer         producer -
 salesforce-producer       producer -
 "
-
-# SAP S/4HANA is intentionally NOT here: it is validated in the TEST env first
-# (see docs/connectors/sap-s4hana.md). Add sap-s4hana-consumer/producer to
-# GENERIC once that is done.
 
 # extra_env <name> — connector-specific env beyond the shared block.
 extra_env() {
