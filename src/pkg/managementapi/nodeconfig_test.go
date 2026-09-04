@@ -199,6 +199,90 @@ func TestNodeConfigRulesCoverUI(t *testing.T) {
 	}
 }
 
+// deployExceptions are connector services intentionally absent from the prod
+// deploy script. A type in here still validates and still appears in the UI, so
+// a user CAN build a pipeline with it that then does nothing in prod — that is
+// the #205 shape, accepted knowingly and tracked, not overlooked.
+//
+// Empty this map as the services ship; do not add to it to silence a failure.
+var deployExceptions = map[string]string{
+	"sap-s4hana-consumer": "SAP S/4HANA awaits TEST-env validation before prod (docs/connectors/sap-s4hana.md)",
+	"sap-s4hana-producer": "SAP S/4HANA awaits TEST-env validation before prod (docs/connectors/sap-s4hana.md)",
+}
+
+// The other half of the ADR 0004 invariant: "a node type with no service in that
+// table is a type the platform silently cannot run — that is the failure #205
+// was". TestNodeConfigRulesCoverUI proves the UI's types are known to the
+// validator; this proves they are also *deployed*. Without both, a type can be
+// offered, accepted, started, and served by nothing.
+func TestNodeConfigRulesAreDeployed(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "infrastructure", "azure", "deploy-connectors-azure.sh")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("deploy script not available (%v) — deploy drift guard skipped", err)
+	}
+
+	deployed := deployedServices(t, string(src))
+	if len(deployed) == 0 {
+		t.Fatal("parsed no services from deploy-connectors-azure.sh — the RETAIL/GENERIC table format changed; update this test")
+	}
+
+	// Every service a validator rule promises must actually be deployed.
+	seen := make(map[string]bool)
+	for kind, rule := range nodeConfigRules {
+		if rule.service == "" || seen[rule.service] {
+			continue
+		}
+		seen[rule.service] = true
+		if deployed[rule.service] {
+			continue
+		}
+		if why, ok := deployExceptions[rule.service]; ok {
+			t.Logf("known gap: %s (%s/%s) is not deployed — %s", rule.service, kind.node, kind.config, why)
+			continue
+		}
+		t.Errorf("node type %s/%s validates but its service %q is not in deploy-connectors-azure.sh — "+
+			"a pipeline using it would start, report running, and do nothing (#205). Add it to the "+
+			"RETAIL or GENERIC table, or record it in deployExceptions with the reason.",
+			kind.node, kind.config, rule.service)
+	}
+
+	// And nothing is deployed that no rule accounts for — that would be a
+	// service burning resources for node types the UI cannot produce.
+	for svc := range deployed {
+		if !seen[svc] {
+			t.Errorf("deploy-connectors-azure.sh deploys %q but no node config rule maps to it — "+
+				"either add the rule (and the UI option) or drop the service", svc)
+		}
+	}
+}
+
+// deployedServices returns the service names in the script's RETAIL and GENERIC
+// tables. Each row is "name role port"; the name is the first field.
+func deployedServices(t *testing.T, src string) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	for _, table := range []string{"RETAIL=\"", "GENERIC=\""} {
+		start := strings.Index(src, table)
+		if start < 0 {
+			t.Fatalf("table %q not found in deploy-connectors-azure.sh — format changed; update this test", table)
+		}
+		body := src[start+len(table):]
+		end := strings.Index(body, "\"")
+		if end < 0 {
+			t.Fatalf("could not find the end of the %s table", table)
+		}
+		for _, line := range strings.Split(body[:end], "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+				continue
+			}
+			out[fields[0]] = true
+		}
+	}
+	return out
+}
+
 // uiConnectorTypes extracts the `value:` strings of the options list that starts
 // at marker, stopping at the end of that options array.
 func uiConnectorTypes(t *testing.T, src, marker string) []string {
