@@ -644,6 +644,11 @@ func (v *Validator) ValidateDAG(conn *Connection) error {
 	// A file producer's output path must be an absolute directory: the worker
 	// rejects relative paths / filenames at runtime and would silently drop
 	// every message, so we catch it here at create/deploy (#142).
+	//
+	// Note this is a check on a value the user HAS supplied. Whether a node is
+	// configured completely enough for a connector to claim it is checked by
+	// ValidateNodeConfigs on start, not here — ValidateDAG also runs on save,
+	// and a half-built pipeline on the canvas must stay saveable (#212).
 	for _, node := range conn.Nodes {
 		if node == nil || node.Type != "producer" {
 			continue

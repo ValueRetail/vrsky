@@ -565,6 +565,25 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every node must be configured completely enough for a standing connector
+	// service to claim it (#212). A node that falls short is skipped at runtime
+	// in silence, so the connection would report "running" and move nothing.
+	// Checked here rather than on save: a pipeline mid-build on the canvas is
+	// legitimately incomplete, but starting one is a promise that it works.
+	if len(conn.Nodes) > 0 && h.validator != nil {
+		if err := h.validator.ValidateNodeConfigs(conn); err != nil {
+			if dagErr, ok := err.(*DAGValidationError); ok {
+				_ = writeError(w, http.StatusBadRequest, "NodeConfigError",
+					"pipeline is not fully configured", map[string]interface{}{
+						"errors": dagErr.Errors,
+					})
+			} else {
+				_ = writeError(w, http.StatusBadRequest, "ValidationError", err.Error(), nil)
+			}
+			return
+		}
+	}
+
 	// Pin the connection to a tenant NATS instance for discovery/placement (#19)
 	// BEFORE deploying, so the orchestrator points the workers' NATS_URLS at the
 	// placed instance (the pkg/runtime workers can't self-discover). No-op unless
