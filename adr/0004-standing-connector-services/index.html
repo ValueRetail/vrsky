@@ -2107,6 +2107,13 @@ that the source and destination dropdowns in <code>PropertyEditor.tsx</code> off
 type with no service in that table is a type the platform silently cannot run —
 that is the failure #205 was, so the script's service table and the UI dropdowns
 must be kept in step.</p>
+<p>That invariant is now enforced rather than merely stated. Two tests in
+<code>pkg/managementapi/nodeconfig_test.go</code> pin the chain UI → validator → deployment:
+<code>TestNodeConfigRulesCoverUI</code> fails when the UI offers a type the validator does
+not know, and <code>TestNodeConfigRulesAreDeployed</code> fails when a type the validator
+accepts has no service in the deploy script (or a service is deployed that no
+type maps to). Deliberate gaps live in <code>deployExceptions</code> with their reason —
+SAP S/4HANA is there pending TEST-env validation.</p>
 <p><strong>3. Replicas are 1 unless the connector is a pure pull-durable subscriber.</strong>
 Pull durables distribute work across replicas with no coordination, so producers
 with no local state run 2 + a PDB. Singletons remain where a second replica
