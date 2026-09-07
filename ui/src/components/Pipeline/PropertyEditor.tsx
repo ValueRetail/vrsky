@@ -22,6 +22,20 @@ import { discoverSchema, type SchemaField } from './schemaDiscovery'
 import { projectSchemaThroughFilter } from './schema'
 import { onKeyActivate, treeNodeKeyDown } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
+import { config as appConfig } from '../../config/env'
+
+// The cloudflared quick tunnel is a LOCAL DEVELOPMENT affordance: it gives a
+// laptop a temporary public URL so a partner can POST to a pipeline that is
+// not deployed anywhere. Its control endpoints (/tunnel/start|stop|status) are
+// served by webhook-consumer on its aux port on this machine — hence
+// "localhost" rather than appConfig.webhookIngressUrl, which in a deployment
+// points at the cluster, where no tunnel process exists.
+//
+// In a deployed environment the tunnel is both impossible (mixed content from
+// an HTTPS page; localhost is the operator's laptop) and unnecessary — the
+// webhook ingress serves a permanent public URL. Everything that touches it is
+// gated on appConfig.isDev.
+const TUNNEL_CONTROL_BASE = 'http://localhost:9100'
 
 // Walk upstream from a node via edges, returning the first ancestor that's
 // an 'input' (consumer). Returns undefined if none reachable.
@@ -3638,9 +3652,14 @@ export default function PropertyEditor({
   const [editingLabel, setEditingLabel] = useState(false)
   const [labelValue, setLabelValue] = useState(node.data.label || '')
 
-  // Check tunnel status on mount
+  // Check tunnel status on mount. Dev only: the tunnel control endpoints live
+  // on the webhook-consumer's aux port on this machine, which only exists when
+  // you are running compose locally. From a deployed HTTPS page this fetch is
+  // blocked as mixed content before it leaves the browser, and the .catch()
+  // below made that failure invisible.
   useEffect(() => {
-    fetch('http://localhost:9100/tunnel/status')
+    if (!appConfig.isDev) return
+    fetch(`${TUNNEL_CONTROL_BASE}/tunnel/status`)
       .then(r => r.json())
       .then(d => { if (d.running && d.url) setTunnelUrl(d.url) })
       .catch(() => {})
@@ -3732,20 +3751,62 @@ export default function PropertyEditor({
             {config.type === 'http' && (
               <div className="space-y-3">
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Listens for incoming POST requests from external services like GitHub, Stripe, or Bruno. Click Connect to get a public URL.
+                  Listens for incoming POST requests from external services like GitHub, Stripe, or Shopify. Give the sender the URL below.
                 </p>
 
-                {tunnelUrl ? (
+                {/*
+                  The permanent endpoint. This panel used to lead with the
+                  cloudflared "Connect" button, which meant the deployed UI
+                  offered a temporary URL it could not actually create and never
+                  showed the real one — the /webhook route has been served by the
+                  ingress since #218. Same URL the deploy summary and the
+                  onboarding wizard show, from the same config value, so the three
+                  cannot drift apart.
+                */}
+                {deployedConnectionId ? (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">Webhook URL</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs text-green-800 dark:text-green-200 bg-green-100 dark:bg-green-900/40 p-1.5 rounded font-mono break-all">
+                        {`${appConfig.webhookIngressUrl}/webhook/${deployedConnectionId}`}
+                      </code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${appConfig.webhookIngressUrl}/webhook/${deployedConnectionId}`)
+                        }}
+                        className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <p className="text-xs text-green-700 dark:text-green-300 mt-1.5">
+                      POST here. This URL is stable for as long as the pipeline is deployed.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 rounded-md">
+                    <p className="text-xs text-neutral-600 dark:text-neutral-300">
+                      Deploy the pipeline to get its webhook URL. It will look like{' '}
+                      <code className="font-mono break-all">{`${appConfig.webhookIngressUrl}/webhook/<id>`}</code>.
+                    </p>
+                  </div>
+                )}
+
+                {/*
+                  Local development only — see TUNNEL_CONTROL_BASE. A deployed
+                  pipeline already has the permanent URL above and needs no tunnel.
+                */}
+                {appConfig.isDev && (tunnelUrl ? (
                   <div className="space-y-3">
-                    {/* Connection status */}
-                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                    {/* Temporary dev tunnel — not the pipeline's real endpoint */}
+                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
                       <div className="flex items-center justify-between mb-1">
-                        <p className="text-xs text-green-600 dark:text-green-400 font-medium">Connected</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">Dev tunnel &mdash; temporary</p>
                         <button
                           onClick={async () => {
                             setTunnelLoading(true)
                             try {
-                              await fetch('http://localhost:9100/tunnel/stop', { method: 'POST' })
+                              await fetch(`${TUNNEL_CONTROL_BASE}/tunnel/stop`, { method: 'POST' })
                               setTunnelUrl('')
                               _setTestResponse(null)
                             } catch (e) { console.error(e) }
@@ -3758,18 +3819,21 @@ export default function PropertyEditor({
                         </button>
                       </div>
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 text-xs text-green-800 dark:text-green-200 bg-green-100 dark:bg-green-900/40 p-1.5 rounded font-mono break-all">
+                        <code className="flex-1 text-xs text-amber-900 dark:text-amber-100 bg-amber-100 dark:bg-amber-900/40 p-1.5 rounded font-mono break-all">
                           {tunnelUrl}/webhook/{deployedConnectionId || '<deploy first>'}
                         </code>
                         <button
                           onClick={() => {
                             navigator.clipboard.writeText(`${tunnelUrl}/webhook/${deployedConnectionId || ''}`)
                           }}
-                          className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap"
+                          className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 whitespace-nowrap"
                         >
                           Copy
                         </button>
                       </div>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-1.5">
+                        Points at this machine and dies with the tunnel. Fine for testing a sender; never hand it to a partner.
+                      </p>
                     </div>
 
                   </div>
@@ -3778,14 +3842,14 @@ export default function PropertyEditor({
                     onClick={async () => {
                       setTunnelLoading(true)
                       try {
-                        const res = await fetch('http://localhost:9100/tunnel/start', { method: 'POST' })
+                        const res = await fetch(`${TUNNEL_CONTROL_BASE}/tunnel/start`, { method: 'POST' })
                         const data = await res.json()
                         if (data.url) {
                           setTunnelUrl(data.url)
                         } else {
                           for (let i = 0; i < 10; i++) {
                             await new Promise(r => setTimeout(r, 2000))
-                            const s = await fetch('http://localhost:9100/tunnel/status')
+                            const s = await fetch(`${TUNNEL_CONTROL_BASE}/tunnel/status`)
                             const st = await s.json()
                             if (st.url) { setTunnelUrl(st.url); break }
                           }
@@ -3794,11 +3858,11 @@ export default function PropertyEditor({
                       setTunnelLoading(false)
                     }}
                     disabled={tunnelLoading}
-                    className="w-full px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+                    className="w-full px-4 py-2 text-sm bg-neutral-200 dark:bg-neutral-700 text-neutral-800 dark:text-neutral-100 rounded-md hover:bg-neutral-300 dark:hover:bg-neutral-600 disabled:opacity-50 font-medium"
                   >
-                    {tunnelLoading ? 'Connecting...' : 'Connect'}
+                    {tunnelLoading ? 'Starting tunnel...' : 'Start dev tunnel'}
                   </button>
-                )}
+                ))}
 
                 <WebhookSignatureConfig
                   http={(config.http as Record<string, unknown>) || {}}
