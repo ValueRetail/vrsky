@@ -16,8 +16,25 @@ FROM alpine:3.19
 
 RUN apk --no-cache add ca-certificates curl
 
-# Install cloudflared for tunnel support
-RUN curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \
+# cloudflared powers the on-demand quick tunnel (/tunnel/start), a LOCAL
+# DEVELOPMENT affordance that gives a laptop a temporary public URL. Deployed
+# pipelines use the permanent /webhook route from the webhook ingress instead.
+#
+# Pinned to an exact release and checksum-verified. This used to fetch
+# `releases/latest`, which meant every image build pulled whatever Cloudflare
+# had published that morning, unverified, straight into a production image:
+# builds were not reproducible and the contents of a prod binary depended on
+# the build date.
+#
+# To update: pick a tag from https://github.com/cloudflare/cloudflared/releases,
+# then
+#   curl -sSL https://github.com/cloudflare/cloudflared/releases/download/<TAG>/cloudflared-linux-amd64 | sha256sum
+# and put both values here.
+ARG CLOUDFLARED_VERSION=2026.8.3
+ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
+RUN curl -fsSL -o /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" && \
+    echo "${CLOUDFLARED_SHA256}  /usr/local/bin/cloudflared" | sha256sum -c - && \
     chmod +x /usr/local/bin/cloudflared
 
 WORKDIR /app

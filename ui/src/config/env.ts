@@ -3,6 +3,31 @@
  * Validates and provides typed access to environment variables
  */
 
+// Where inbound webhooks reach the platform, when nothing overrides it.
+//
+// This cannot be a fixed string. Vite freezes every VITE_* value into the
+// bundle at `npm run build`, and the UI image is built once with no build args
+// (ui/Dockerfile), so a hardcoded default ships to every environment — which
+// is how the deployed UI came to hand out "http://localhost:9100/webhook/..."
+// as a partner-facing URL. The k8s ConfigMap cannot fix that either: env vars
+// reach nginx, not an already-compiled bundle.
+//
+// The page's own origin is the right answer in a served deployment, because
+// the webhook ingress routes /webhook on the SAME host that serves this UI
+// (infrastructure/kubernetes/ingress/webhooks-ingress.yaml). That also means
+// it keeps working when the host changes — the sslip.io address today, the
+// real DNS name later — with no rebuild.
+//
+// Local dev is the exception: Vite serves the UI on :5173 while
+// webhook-consumer listens on :9100, so there the origin is wrong and the
+// compose port is right.
+const defaultWebhookBase = (): string => {
+  if (import.meta.env.DEV) return 'http://localhost:9100'
+  // Non-browser contexts (unit tests, any SSR) have no origin to read.
+  if (typeof window === 'undefined') return 'http://localhost:9100'
+  return window.location.origin
+}
+
 const getEnv = (key: string, defaultValue?: string): string => {
   const value = import.meta.env[key as keyof ImportMetaEnv] ?? defaultValue
   if (value === undefined) {
@@ -23,11 +48,14 @@ export const config = {
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
   fileProducerUrl: getEnv('VITE_FILE_PRODUCER_URL', 'http://localhost:9900'),
-  // Public base URL of the webhook-consumer ingress. The onboarding wizard (#93)
-  // surfaces `${webhookIngressUrl}/webhook/{id}` and POSTs the sample event to
-  // it. Defaults to the local compose port; override in deployments where
-  // webhooks enter via the gateway/public host.
-  webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', 'http://localhost:9100'),
+  // Public base URL of the webhook-consumer ingress. The onboarding wizard
+  // (#93), the pipeline builder's deploy summary, and the Webhook (HTTP)
+  // source panel all surface `${webhookIngressUrl}/webhook/{id}` — this is the
+  // URL a partner is given, so it has to be reachable from outside. See
+  // defaultWebhookBase above for why the default is computed rather than
+  // fixed. Set VITE_WEBHOOK_INGRESS_URL only when webhooks enter on a
+  // different host than the UI.
+  webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', defaultWebhookBase()),
   // Base URLs for the per-worker live-test event streams (SSE) and the file
   // upload endpoint surfaced by the builder's test panels. These hit worker
   // aux ports directly, so they default to the local compose ports; override

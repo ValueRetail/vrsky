@@ -8,6 +8,26 @@ metadata:
     component: frontend
     phase: "12"
 
+# WARNING: these VITE_* values do NOT reach the application.
+#
+# The deployment mounts this ConfigMap with envFrom into the nginx container,
+# but nginx only serves static files. Vite substitutes VITE_* at `npm run
+# build` (ui/Dockerfile, stage 1), so by the time the image runs, every value
+# is already frozen into the JS bundle and no environment variable can change
+# it. VITE_API_BASE_URL below has never had any effect.
+#
+# This is not harmless decoration: it looks like the place to configure the UI
+# per environment, so a real problem gets "fixed" here and silently stays
+# broken. The webhook URL bug worked exactly that way — the deployed bundle
+# handed out http://localhost:9100/webhook/<id> and nothing here could correct
+# it. That one is now solved by deriving the URL from the page's own origin at
+# runtime (ui/src/config/env.ts). Anything else that must vary per environment
+# needs the same treatment, a Docker build arg, or a runtime config endpoint —
+# not a key in this file.
+#
+# Kept rather than deleted only because the nginx container reads no env at
+# all, so removing them changes nothing either; treat every line below as
+# documentation of intent, not configuration.
 data:
   # API configuration
   VITE_API_BASE_URL: "http://api.vrsky.local/api"
