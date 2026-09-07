@@ -424,3 +424,91 @@ func connectorServicePorts(src string) map[string]string {
 	}
 	return out
 }
+
+// The UI manifest is shared between two deploy paths that need different image
+// references, and only one of them rewrites it.
+//
+// infrastructure/kubernetes/ui/deployment.yaml names a ghcr.io image because
+// the local k3d path side-loads images under exactly that ref
+// (infrastructure/scripts/k3d-load-images.sh). AKS cannot pull from ghcr.io, so
+// deploy-ui-azure.sh rewrites the ref to ACR with a perl substitution — and
+// that substitution carries a hardcoded copy of the manifest's image string.
+//
+// Edit the manifest's image line and the regex silently stops matching. The
+// script still exits 0, still reports a successful rollout, and ships a
+// deployment pointing at a registry the cluster cannot reach: ImagePullBackOff,
+// discovered in prod. Same for the imagePullPolicy rewrite, which is what stops
+// a mutable :latest tag from serving a stale cached image on AKS — the failure
+// that made a green `rollout restart` redeploy the previous UI build on
+// 2026-09-07.
+//
+// This pins manifest → deploy script, the same way TestConnectorImagesAreBuilt
+// pins deploy script → build script.
+func TestUIDeployRewritesMatchManifest(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	manifest, err := os.ReadFile(filepath.Join(root, "infrastructure", "kubernetes", "ui", "deployment.yaml"))
+	if err != nil {
+		t.Skipf("UI manifest not available (%v) — rewrite drift guard skipped", err)
+	}
+	script, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-ui-azure.sh"))
+	if err != nil {
+		t.Skipf("deploy-ui-azure.sh not available (%v) — rewrite drift guard skipped", err)
+	}
+
+	imageLine := regexp.MustCompile(`(?m)^\s*image:\s*(\S+)\s*$`).FindStringSubmatch(string(manifest))
+	if imageLine == nil {
+		t.Fatal("no image: line in ui/deployment.yaml — update this test")
+	}
+	policyLine := regexp.MustCompile(`(?m)^\s*imagePullPolicy:\s*(\S+)\s*$`).FindStringSubmatch(string(manifest))
+	if policyLine == nil {
+		t.Fatal("no imagePullPolicy: line in ui/deployment.yaml — update this test")
+	}
+
+	// The script's substitution patterns, extracted rather than duplicated so
+	// this fails when either side moves. Two delimiter styles are in use:
+	// s{PATTERN}{...} (chosen where the pattern contains slashes) and
+	// s/PATTERN/.../. The brace form must be read to its closing brace — a
+	// pattern like ghcr\.io/... contains slashes, and stopping at the first one
+	// silently reduces the guard to matching "ghcr\.io", which every plausible
+	// edit still satisfies.
+	var patterns []string
+	for _, m := range regexp.MustCompile(`perl -pi -e 's\{([^}]*)\}`).FindAllStringSubmatch(string(script), -1) {
+		patterns = append(patterns, m[1])
+	}
+	for _, m := range regexp.MustCompile(`perl -pi -e 's/((?:[^/\\]|\\.)*)/`).FindAllStringSubmatch(string(script), -1) {
+		patterns = append(patterns, m[1])
+	}
+	if len(patterns) == 0 {
+		t.Fatal("no perl substitutions found in deploy-ui-azure.sh — the rewrite mechanism changed; update this test")
+	}
+
+	var matchedImage, matchedPolicy bool
+	for _, p := range patterns {
+		// Perl and Go share the syntax used here. A pattern this test cannot
+		// compile is not one it can reason about, so skip it rather than fail.
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		// Anchored: the substitution has to cover the whole reference, not
+		// merely appear somewhere inside it.
+		if loc := re.FindStringIndex(imageLine[1]); loc != nil && loc[0] == 0 && loc[1] == len(imageLine[1]) {
+			matchedImage = true
+		}
+		if re.MatchString("          imagePullPolicy: " + policyLine[1]) {
+			matchedPolicy = true
+		}
+	}
+
+	if !matchedImage {
+		t.Errorf("no substitution in deploy-ui-azure.sh matches the manifest image %q — "+
+			"an AKS deploy would ship that ref unrewritten and the pods would ImagePullBackOff",
+			imageLine[1])
+	}
+	if !matchedPolicy {
+		t.Errorf("no substitution in deploy-ui-azure.sh rewrites imagePullPolicy %q — "+
+			"on AKS a mutable tag would then serve whatever :latest a node already cached, "+
+			"and a successful-looking rollout would redeploy the old build",
+			policyLine[1])
+	}
+}

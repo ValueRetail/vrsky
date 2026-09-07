@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# deploy-ui-azure.sh — deploy the VRSky UI on AKS, wired to work via port-forward.
+# deploy-ui-azure.sh — deploy the VRSky UI on AKS.
 #
 # The SPA calls the API same-origin (axios baseURL:'' + a cookie rule), but the
 # stock UI nginx doesn't proxy /api. So we mount a custom nginx config that
-# serves the SPA AND proxies /api + /ws to the in-cluster management-api. Then a
-# single `kubectl port-forward` to the UI gives a fully working, PRIVATE UI —
-# no public ingress, no extra controller (kind to the small A2_v2 nodes).
+# serves the SPA AND proxies /api + /ws to the in-cluster management-api.
+#
+# This script used to describe a PRIVATE UI reached over `kubectl port-forward`,
+# with "no public ingress, no extra controller". That stopped being true: the
+# cluster now runs ingress-nginx and serves the UI publicly over TLS via the
+# `vrsky` Ingress (infrastructure/kubernetes/ui/ingress.yaml, applied below).
+# Port-forward still works and is still the way in when the ingress is down.
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"
@@ -59,6 +63,14 @@ kubectl apply -f infrastructure/kubernetes/ui/service.yaml
 WORKUI="$(mktemp -d)/ui-deployment.yaml"
 cp infrastructure/kubernetes/ui/deployment.yaml "$WORKUI"
 perl -pi -e 's{ghcr\.io/[Vv]alue[Rr]etail/vrsky/ui:latest}{'"$ACR_LOGIN"'/vrsky/ui:latest}g;' "$WORKUI"
+# The manifest carries imagePullPolicy: IfNotPresent, which is correct for the
+# k3d path it is shared with (images are side-loaded, there is no registry to
+# pull from — see infrastructure/scripts/k3d-load-images.sh). On AKS with a
+# MUTABLE :latest tag it is a trap: a node that already has *a* :latest keeps
+# serving it, so `kubectl rollout restart` reports a successful rollout and
+# redeploys the old build. That is exactly what happened on 2026-09-07 — a
+# freshly pushed UI image, a green rollout, and the previous bundle still live.
+perl -pi -e 's/^(\s*imagePullPolicy:)\s*IfNotPresent\s*$/${1} Always/;' "$WORKUI"
 perl -pi -e 's/^(\s*replicas:)\s*3\b/${1} 2/;' "$WORKUI"
 # mount the nginx config over the image's default.conf
 perl -0777 -pi -e 's/(        - name: tmp\n          mountPath: \/tmp\n)/$1        - name: nginx-conf\n          mountPath: \/etc\/nginx\/conf.d\/default.conf\n          subPath: default.conf\n/' "$WORKUI"
@@ -69,12 +81,22 @@ kubectl apply -f "$WORKUI"
 # replicas: 2 above).
 kubectl apply -f infrastructure/kubernetes/ui/pdb.yaml
 
+# Public ingress + TLS. This owns the certificate for the host; the
+# vrsky-webhooks Ingress depends on it (see that file's header).
+kubectl apply -f infrastructure/kubernetes/ui/ingress.yaml
+
 echo ">>> waiting for UI to roll out..."
 kubectl rollout status deploy/vrsky-ui -n vrsky-ui --timeout=180s
 
 cat <<EOF
 
-UI deployed. Open it (private, via port-forward):
+UI deployed. Public:  https://20.251.107.2.sslip.io/
+
+Or privately, without the ingress:
   kubectl port-forward -n vrsky-ui svc/vrsky-ui 8080:80
 Then browse http://localhost:8080  (the UI proxies /api + /ws to the management-api).
+
+Verify the build that is actually being served — a rollout can succeed while
+serving a stale bundle if the image reference did not change:
+  kubectl -n vrsky-ui exec deploy/vrsky-ui -- ls /usr/share/nginx/html/assets
 EOF

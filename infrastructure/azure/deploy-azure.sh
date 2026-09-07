@@ -108,8 +108,13 @@ Core platform deployed. Verify:
 NEXT (not done by this script):
   * real secrets  — replace the DEV secret.example values (ENCRYPTION_KEY, DB
     password, MinIO creds) with real ones before any real connection.
-  * UI            — deploy infrastructure/kubernetes/ui/ (add acr-pull to the
-    vrsky-ui namespace the same way).
-  * ingress + TLS — cert-manager + Ingress + a DNS record -> the LB IP, so the
-    UI/API and the retail webhooks are reachable.
+  * UI            — run infrastructure/azure/deploy-ui-azure.sh. Do NOT
+    'kubectl apply -f infrastructure/kubernetes/ui/' directly: those manifests
+    are shared with the local k3d path and reference ghcr.io, which this
+    cluster cannot pull. The script rewrites the image to ACR, copies in the
+    acr-pull secret, and applies the ingress.
+  * ingress + TLS — deploy-ui-azure.sh applies the Ingress that owns the host
+    certificate; deploy-connectors-azure.sh and
+    infrastructure/kubernetes/ingress/webhooks-ingress.yaml cover the retail
+    webhook routes. A real DNS record -> the LB IP is still outstanding.
 EOF
