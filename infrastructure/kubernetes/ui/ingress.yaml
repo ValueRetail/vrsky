@@ -1,44 +1,70 @@
+# Public ingress for the VRSky UI (and, by extension, the whole host).
+#
+# WHY THIS FILE WAS REWRITTEN: it previously described an Ingress named
+# `vrsky-ui` for hosts `ui.vrsky.local` and `ui.valueretalgroup.no` (the latter
+# also misspelled — no second "i") with secret `vrsky-ui-tls`. No such object
+# has ever existed in the cluster. The real one is named `vrsky`, serves
+# `20.251.107.2.sslip.io`, and uses secret `vrsky-tls`.
+#
+# That was not a harmless inaccuracy. Applying the old file would have created
+# a SECOND Ingress alongside the real one and, through the cert-manager
+# annotation, asked Let's Encrypt for certificates for two hostnames that do
+# not resolve — failing issuance attempts, retried on a backoff, against a
+# rate-limited ACME account. Same class as the webhook Ingress reconstructed in
+# #218: state that lived only in the cluster, with fiction committed next to it.
+#
+# BEFORE APPLYING: diff against the live object, which stays authoritative
+# until this file matches it —
+#
+#   kubectl -n vrsky-ui get ingress vrsky -o yaml
+#
+# Note when you do: the live object's `last-applied-configuration` carries only
+# the proxy-body-size annotation, but the object itself also has the
+# cert-manager issuer, force-ssl-redirect, and the whole `tls:` block. Those
+# were added by hand after the last apply (hence `generation: 2`). They are
+# reproduced here so an apply no longer silently strips TLS off the host.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: vrsky-ui
+  name: vrsky
   namespace: vrsky-ui
   labels:
     app: vrsky-ui
     component: frontend
-    phase: "12"
   annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # This is the Ingress that owns TLS for the host. The vrsky-webhooks
+    # Ingress in vrsky-platform deliberately declares no `tls:` block and
+    # depends on this certificate (see that file's header) — so deleting or
+    # detaching this one takes webhook HTTPS down with it.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-
+    # Matches the webhook Ingress. Bounds inbound request bodies at the edge;
+    # anything larger is rejected with a 413 before the backend sees it.
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
 spec:
   ingressClassName: nginx
   tls:
-  - hosts:
-    - ui.vrsky.local
-    - ui.valueretalgroup.no
-    secretName: vrsky-ui-tls
-
+    - hosts:
+        - 20.251.107.2.sslip.io
+      secretName: vrsky-tls
   rules:
-  - host: ui.vrsky.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: vrsky-ui
-            port:
-              number: 80
-
-  - host: ui.valueretalgroup.no
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: vrsky-ui
-            port:
-              number: 80
+    # sslip.io resolves <ip>.sslip.io to that IP, so this tracks the ingress
+    # LoadBalancer address without a DNS record. It survives `az aks
+    # stop`/`start` (verified 2026-09-07).
+    #
+    # KNOWN LIMITATION: some ISP DNS filters block sslip.io and answer with
+    # their own block page — Telenor's Nettvern does, which makes the site
+    # unreachable from those networks with a TLS error that points nowhere near
+    # the real cause. See docs/operator/troubleshooting.md. A real DNS name is
+    # the fix; swap the host here and on the vrsky-webhooks Ingress together,
+    # and cert-manager reissues on its own.
+    - host: 20.251.107.2.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-ui
+                port:
+                  number: 80
