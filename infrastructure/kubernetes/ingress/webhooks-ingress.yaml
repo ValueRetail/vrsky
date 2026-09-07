@@ -36,9 +36,13 @@ metadata:
     component: webhooks
   annotations:
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    # Webhook bodies are small; this bounds what an unauthenticated caller can
-    # push at a connector before it is ever parsed.
-    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+    # 10m matches what the hand-applied Ingress carried in prod from 2026-08-10
+    # to 2026-09-07. Do NOT lower it without checking real payload sizes: this
+    # bounds inbound webhook bodies, and anything over the limit is rejected
+    # with a 413 at the edge — the connector never sees it, so the failure is
+    # visible only to the sender. A tighter bound is defensible as DoS
+    # headroom, but it is a decision about partner payloads, not a default.
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
   ingressClassName: nginx
   rules:
