@@ -52,6 +52,23 @@ again.
 !!! note
     If usage still looks wrong after a while, raise it with an operator.
 
+## The site won't load, or a sender can't reach a webhook URL
+
+If the app shows a security or certificate warning that makes no sense, or a
+partner reports that their webhook deliveries fail with a certificate error
+while the pipeline looks fine on your side, the cause may be **outside the
+platform**: some internet providers block the kind of address the platform
+currently uses and answer with their own notice page instead.
+
+Two quick things you can check yourself:
+
+- Try the same URL from a different network — a phone on mobile data is enough.
+  If it works there, the problem is the network, not the platform.
+- Ask whoever reported it to try from a different network too.
+
+Send that answer to an operator along with the URL; the fix is on their side and
+is covered in the [operator troubleshooting guide](../operator/troubleshooting.md).
+
 ## Forgot your password
 
 Use the **reset link** on the login screen and follow the email instructions.
