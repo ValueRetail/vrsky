@@ -82,17 +82,41 @@ Done out-of-band when the master key may have been compromised. The
 high-level procedure:
 
 1. Generate a new 64-hex-character key. Call it `NEW_KEY`.
-2. Stop the management-api with the old key (graceful — workers can keep
-   running).
-3. Run the re-wrap helper:
+   ```
+   openssl rand -hex 32
+   ```
+2. Back up `secrets` before touching it, and keep `OLD_KEY` somewhere you can
+   still reach — until step 5 it is the only thing that can read the table.
+3. Preview the rewrap. It reports what it would change and writes nothing:
+   ```
+   ENCRYPTION_KEY_PREVIOUS=$OLD_KEY ENCRYPTION_KEY=$NEW_KEY \
+     go run ./cmd/migrate-secrets --rewrap --dry-run
+   ```
+   A row that neither key can decrypt aborts the run with no changes written.
+   Resolve that before continuing — it means material sealed under a third,
+   unknown key.
+4. Run it for real. Every row moves in one transaction, so the table is never
+   half-rotated; re-running after an interruption skips what already moved:
    ```
    ENCRYPTION_KEY_PREVIOUS=$OLD_KEY ENCRYPTION_KEY=$NEW_KEY \
      go run ./cmd/migrate-secrets --rewrap
    ```
-   *(The `--rewrap` flag is a follow-up addition to migrate-secrets and is
-   not part of #66; track in a future issue.)*
-4. Roll out the new `ENCRYPTION_KEY` to all services. Workers using the old
-   key will fail to decrypt until they restart.
+5. Roll out the new `ENCRYPTION_KEY` to management-api and every connector.
+   Do this *after* the rewrap, not before: a service holding `NEW_KEY` cannot
+   read rows still sealed with the old one, and services still holding
+   `OLD_KEY` cannot read rows after it. Some decryption failure during the
+   rollout window is expected.
+
+Only `secrets.ciphertext` is rotated, and that is sufficient: every other
+credential column in the schema (`oauth_grants.access_token_secret_id`,
+`oauth_providers.client_secret_id`, `notification_targets.secret_id`, the
+`<field>_secret_id` refs inside `connections.nodes`) stores a UUID pointing at
+a row in `secrets`, not ciphertext of its own.
+
+**What rotation does not cover:** `vrsky-cli backup` seals its archives with
+the master key too. Archives taken before a rotation are readable only with
+`OLD_KEY`, so retain it until those backups have aged out of your retention
+window — deleting it strands them.
 
 Audit-trail entries for rotation events will be added when issue #72
 (audit log) lands.

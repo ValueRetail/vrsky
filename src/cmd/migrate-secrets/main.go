@@ -23,6 +23,12 @@
 //
 // Requires MGMT_API_DB_URL and ENCRYPTION_KEY in the environment, same as
 // the management-api service.
+//
+// The binary also carries an unrelated second mode, --rewrap, which rotates
+// the master key over the secrets table. See rewrap.go. It lives here because
+// it needs the same DB URL, the same crypto package, and the same "run it as
+// an operator, not as a service" posture — not because the two modes share
+// logic.
 package main
 
 import (
@@ -42,15 +48,13 @@ import (
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "Print the changes that would be made without writing anything.")
+	rewrap := flag.Bool("rewrap", false,
+		"Re-encrypt every row in the secrets table from $"+keyPrevEnvVar+" to $"+crypto.KeyEnvVar+" (master-key rotation). See rewrap.go.")
 	flag.Parse()
 
 	dbURL := os.Getenv("MGMT_API_DB_URL")
 	if dbURL == "" {
 		log.Fatal("MGMT_API_DB_URL is required")
-	}
-	keyHex, err := crypto.Key()
-	if err != nil {
-		log.Fatalf("ENCRYPTION_KEY: %v", err)
 	}
 
 	db, err := sql.Open("postgres", dbURL)
@@ -60,6 +64,23 @@ func main() {
 	defer db.Close()
 
 	ctx := context.Background()
+
+	// --rewrap is a separate mode, not an extra step: extraction moves
+	// cleartext INTO the secrets table under the current key, rewrap re-seals
+	// what is already there under a new one. Running both in one invocation
+	// would encrypt some rows twice under a half-rotated key set.
+	if *rewrap {
+		if err := runRewrap(ctx, db, *dryRun); err != nil {
+			log.Fatalf("rewrap: %v", err)
+		}
+		return
+	}
+
+	keyHex, err := crypto.Key()
+	if err != nil {
+		log.Fatalf("ENCRYPTION_KEY: %v", err)
+	}
+
 	rows, err := db.QueryContext(ctx, `SELECT id, tenant_id, nodes FROM connections`)
 	if err != nil {
 		log.Fatalf("query connections: %v", err)
