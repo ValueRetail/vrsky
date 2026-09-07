@@ -987,6 +987,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#https-fails-with-a-certificate-error-or-a-webhook-never-arrives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTPS fails with a certificate error, or a webhook never arrives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mtls-webhook-handshake-fails-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2195,6 +2206,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#https-fails-with-a-certificate-error-or-a-webhook-never-arrives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTPS fails with a certificate error, or a webhook never arrives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mtls-webhook-handshake-fails-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2263,6 +2285,56 @@ the counter itself is correct.</p>
 <p>The data stream is bounded (512 MiB / 1M msgs, discard-old) so a backlog can't
 OOM the broker. If you see exit 137 on an older deployment, upgrade and confirm
 <code>EnsureStreams</code> reconciled the cap (<code>nats stream info VRSKY_DATA</code>).</p>
+<h2 id="https-fails-with-a-certificate-error-or-a-webhook-never-arrives">HTTPS fails with a certificate error, or a webhook never arrives<a class="headerlink" href="#https-fails-with-a-certificate-error-or-a-webhook-never-arrives" title="Permanent link">&para;</a></h2>
+<p>Symptom: the platform URL gives a TLS error that makes no sense —</p>
+<div class="highlight"><pre><span></span><code>curl: (60) SSL: no alternative certificate subject name matches target host name
+</code></pre></div>
+<p>— or the page loads as a <code>302</code> to an ISP notice page, or a partner reports that
+their webhook deliveries fail with a certificate error while everything looks
+healthy in the cluster.</p>
+<p><strong>Cause: an ISP DNS filter is answering for the host.</strong> Some Norwegian ISPs
+block wildcard-DNS services, and <code>sslip.io</code> is one of them. Telenor's <em>Nettvern</em>
+filter resolves <code>&lt;ip&gt;.sslip.io</code> to its own block-page server instead of to the
+real address. That server presents a certificate for its own name, which is
+where the mismatch comes from — the platform's certificate is fine and was
+never involved.</p>
+<p><strong>Diagnose it in one command.</strong> Compare your resolver against a public one:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s2">"ISP:"</span><span class="p">;</span><span class="w"> </span>dig<span class="w"> </span>+short<span class="w"> </span><span class="m">20</span>.251.107.2.sslip.io
+<span class="nb">echo</span><span class="w"> </span><span class="s2">"public:"</span><span class="p">;</span><span class="w"> </span>dig<span class="w"> </span>+short<span class="w"> </span>@1.1.1.1<span class="w"> </span><span class="m">20</span>.251.107.2.sslip.io
+</code></pre></div>
+<p>Two different answers means interception. A blocked lookup looks like this:</p>
+<div class="highlight"><pre><span></span><code>ISP:
+nettvern-info.telenor.net.
+148.123.15.44
+public:
+20.251.107.2
+</code></pre></div>
+<p><strong>Confirm the platform is healthy</strong> by bypassing DNS entirely. If this returns
+the page, nothing is wrong server-side and you can stop investigating the
+cluster:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>--resolve<span class="w"> </span><span class="m">20</span>.251.107.2.sslip.io:443:20.251.107.2<span class="w"> </span>https://20.251.107.2.sslip.io/<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-c<span class="w"> </span><span class="m">200</span>
+</code></pre></div>
+<p><strong>Fixes</strong>, in order of preference:</p>
+<ol>
+<li>Point the machine's DNS at a public resolver (1.1.1.1 or 8.8.8.8), or turn
+   off the ISP filter on the subscription.</li>
+<li>Pin the host locally. Fastest, but it hardcodes the IP — if the ingress
+   LoadBalancer address ever changes you get a fresh, confusing failure until
+   you update the line:
+   <div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s2">"20.251.107.2 20.251.107.2.sslip.io"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>-a<span class="w"> </span>/etc/hosts
+</code></pre></div></li>
+<li>Use the real DNS name once it exists. This removes the whole class of
+   problem and is the only fix that helps <strong>partners</strong> — a sender behind an
+   affected resolver cannot reach a <code>sslip.io</code> webhook URL at all, and sees
+   only a TLS error with nothing pointing at DNS.</li>
+</ol>
+<p>Two things worth knowing. First, the failure is asymmetric: it is invisible
+from inside the cluster, where every check passes, so it is easy to spend a
+long time on certificates and ingress before suspecting the network you are
+sitting on. Second, this is not the first time — <code>docker-compose.yml</code> already
+carries a <code>dns:</code> override on <code>webhook-consumer</code> for exactly this reason, because
+Nettvern also blocks <code>api.trycloudflare.com</code> and breaks cloudflared quick
+tunnels. If a hostname behaves impossibly, check the resolver early.</p>
 <h2 id="mtls-webhook-handshake-fails-locally">mTLS webhook handshake fails locally<a class="headerlink" href="#mtls-webhook-handshake-fails-locally" title="Permanent link">&para;</a></h2>
 <p>macOS system <code>curl</code> (LibreSSL) mishandles EC client keys (<code>bad decrypt</code>). Test
 with an OpenSSL-based curl (e.g. a Linux container). See the
