@@ -97,6 +97,13 @@ spec:
           value: "k8s"
         - name: ORCHESTRATOR_NAMESPACE
           value: "vrsky-platform"
+        # How the API reaches a worker's auxiliary HTTP port to proxy its live
+        # event stream to the builder's test panels (worker_events_proxy.go).
+        # The default suits docker-compose, where services resolve by bare
+        # name; in the cluster they carry a "vrsky-" prefix. Only the services
+        # on the allowlist in that file are ever substituted in.
+        - name: WORKER_ADDR_TEMPLATE
+          value: "http://vrsky-%s.vrsky-platform.svc.cluster.local:%d"
         - name: MGMT_API_LISTEN
           value: ":3000"
         - name: MGMT_API_METRICS_LISTEN

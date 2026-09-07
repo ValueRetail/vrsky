@@ -927,6 +927,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/connections/{id}/metrics/stream", viewer(http.HandlerFunc(h.HandleMetricsSSE)))
 	mux.Handle("GET /api/v1/connections/{id}/metrics/ws", viewer(http.HandlerFunc(h.HandleMetricsWebSocket)))
 
+	// Live worker event streams for the builder's test panels. The workers
+	// serve these unauthenticated on their aux ports; this route is what puts
+	// an auth and tenant check in front of them. See worker_events_proxy.go.
+	mux.Handle("GET /api/v1/connections/{id}/workers/{worker}/events", viewer(http.HandlerFunc(h.ProxyWorkerEvents)))
+
 	// Sample data for filter preview
 	mux.Handle("GET /api/v1/connections/{id}/sample-data", viewer(http.HandlerFunc(h.GetSampleData)))
 	mux.Handle("GET /api/v1/sample-data/source", viewer(http.HandlerFunc(h.GetSourceSampleData)))

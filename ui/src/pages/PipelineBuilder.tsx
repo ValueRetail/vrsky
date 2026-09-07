@@ -18,6 +18,7 @@ import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
 import TenantSelector from '../components/Tenants/TenantSelector'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { config } from '../config/env'
+import { subscribeWorkerEvents, type EventWorker } from '../services/workerEvents'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
@@ -389,78 +390,44 @@ export default function PipelineBuilder() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedEdgeId, handleEdgeDelete])
 
-  // SSE connection for file watcher events
-  useEffect(() => {
-    if (!fileUploadPanel) return
-    setFileEvents([])
-    const evtSource = new EventSource(`${config.fileConsumerUrl}/events/${fileUploadPanel.connectionId}`)
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data)
-        setFileEvents((prev) => [event, ...prev].slice(0, 50))
-      } catch { /* ignore parse errors */ }
-    }
-    evtSource.onerror = () => {
-      // Will auto-reconnect
-    }
-    return () => evtSource.close()
-  }, [fileUploadPanel?.connectionId])
+  // Live worker event streams for the test panels.
+  //
+  // These went through the management API in #224. They previously opened an
+  // EventSource straight at a worker's aux port on localhost, which worked in
+  // compose and silently failed everywhere else — the panel opened, stayed
+  // empty, and the onerror handler was a comment saying it would reconnect.
+  // The proxy authenticates and checks workspace ownership; the worker
+  // endpoints have none of their own. See services/workerEvents.ts.
+  //
+  // One subscription per panel, all the same shape, so the wiring is shared.
+  // Generic over the element type: each panel keeps its own event shape, and
+  // the stream is untyped JSON from the worker either way — the cast below is
+  // the same trust these panels have always placed in it.
+  const useWorkerEvents = <T,>(
+    panel: { connectionId: string } | null,
+    worker: EventWorker,
+    label: string,
+    setEvents: React.Dispatch<React.SetStateAction<T[]>>,
+  ) => {
+    const connectionId = panel?.connectionId
+    useEffect(() => {
+      if (!connectionId) return
+      setEvents([])
+      return subscribeWorkerEvents(connectionId, worker, {
+        onEvent: (event) => setEvents((prev) => [event as T, ...prev].slice(0, 50)),
+        // Surfaced rather than swallowed: an unreachable stream used to be
+        // indistinguishable from a pipeline that simply had no traffic.
+        onError: (message) => showErrorNotification(`${label} events`, message),
+      })
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [connectionId])
+  }
 
-  // SSE connection for HTTP producer events
-  useEffect(() => {
-    if (!httpProducerPanel) return
-    setHttpProducerEvents([])
-    const evtSource = new EventSource(`${config.httpProducerUrl}/events/${httpProducerPanel.connectionId}`)
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data)
-        setHttpProducerEvents((prev) => [event, ...prev].slice(0, 50))
-      } catch { /* ignore */ }
-    }
-    return () => evtSource.close()
-  }, [httpProducerPanel?.connectionId])
-
-  // SSE connection for DB producer events
-  useEffect(() => {
-    if (!dbProducerPanel) return
-    setDbProducerEvents([])
-    const evtSource = new EventSource(`${config.dbProducerUrl}/events/${dbProducerPanel.connectionId}`)
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data)
-        setDbProducerEvents((prev) => [event, ...prev].slice(0, 50))
-      } catch { /* ignore */ }
-    }
-    return () => evtSource.close()
-  }, [dbProducerPanel?.connectionId])
-
-  // SSE connection for converter events
-  useEffect(() => {
-    if (!converterPanel) return
-    setConverterEvents([])
-    const evtSource = new EventSource(`${config.converterUrl}/events/${converterPanel.connectionId}`)
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data)
-        setConverterEvents((prev) => [event, ...prev].slice(0, 50))
-      } catch { /* ignore */ }
-    }
-    return () => evtSource.close()
-  }, [converterPanel?.connectionId])
-
-  // SSE connection for filter events
-  useEffect(() => {
-    if (!filterPanel) return
-    setFilterEvents([])
-    const evtSource = new EventSource(`${config.filterUrl}/events/${filterPanel.connectionId}`)
-    evtSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data)
-        setFilterEvents((prev) => [event, ...prev].slice(0, 50))
-      } catch { /* ignore */ }
-    }
-    return () => evtSource.close()
-  }, [filterPanel?.connectionId])
+  useWorkerEvents(fileUploadPanel, 'file-consumer', 'File watcher', setFileEvents)
+  useWorkerEvents(httpProducerPanel, 'http-producer', 'HTTP producer', setHttpProducerEvents)
+  useWorkerEvents(dbProducerPanel, 'db-producer', 'Database producer', setDbProducerEvents)
+  useWorkerEvents(converterPanel, 'data-converter', 'Converter', setConverterEvents)
+  useWorkerEvents(filterPanel, 'data-filter', 'Filter', setFilterEvents)
 
   // Validate pipeline on every change to nodes/edges
   const validationResult: ValidationResult = useMemo(() => {
