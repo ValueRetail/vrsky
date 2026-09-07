@@ -11,6 +11,14 @@ A consumer node exposes an inbound **webhook ingress**. After deploy, the connec
 
 The editor's Webhook (HTTP) source panel shows the URL for the environment you are in, once the pipeline is deployed. When developing locally you can also start a cloudflared quick tunnel from that panel to get a temporary public URL; it points at your machine and dies with the tunnel, so it is for testing a sender, not for handing out.
 
+!!! warning "`sslip.io` hosts can be blocked by ISP DNS filters"
+
+    While the public host is a `sslip.io` address, some ISP filters (Telenor's
+    Nettvern among them) resolve it to a block page. A sender behind one cannot
+    deliver, and sees only a TLS certificate error — nothing that points at DNS.
+    See [Troubleshooting](../operator/troubleshooting.md) for how to confirm it.
+    A real DNS name removes the problem.
+
 You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.
 
 Config reference:
