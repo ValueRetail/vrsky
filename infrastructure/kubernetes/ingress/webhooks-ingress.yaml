@@ -1,0 +1,91 @@
+# Public webhook routing for the connectors that receive inbound HTTP.
+#
+# WHY THIS FILE EXISTS: the equivalent Ingress was applied by hand to the live
+# cluster on 2026-08-10 and never committed, so the retail webhook URLs in
+# docs/connectors/*.md worked in prod but could not be rebuilt from the repo —
+# recreating the cluster would have silently dropped every webhook route. This
+# is that object, reconstructed, plus the generic /webhook/ route that was
+# missing entirely.
+#
+# BEFORE APPLYING: diff this against the live object, which is authoritative
+# until this file matches it —
+#
+#   kubectl get ingress vrsky-webhooks -n vrsky-platform -o yaml
+#
+# and reconcile any annotations that differ (the live one may carry settings not
+# reconstructed here). Then commit the reconciled version so the two agree.
+#
+# Each connector serves the FULL path it is routed on (sitoo-consumer registers
+# "/sitoo/events/", not "/events/"), so no rewrite-target annotation is wanted:
+# adding one would strip the prefix and 404 every delivery.
+#
+# TLS: deliberately no `tls:` block. ingress-nginx keys certificates by host
+# across all Ingresses, and the `vrsky` Ingress in the vrsky-ui namespace
+# already terminates TLS for this host with the cert-manager-issued `vrsky-tls`.
+# Declaring TLS here too would make cert-manager issue a SECOND certificate for
+# the same hostname — redundant, and it spends a Let's Encrypt duplicate-cert
+# quota for nothing. The tradeoff to know: this Ingress depends on that one for
+# HTTPS, so deleting the UI Ingress would take webhook TLS with it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrsky-webhooks
+  namespace: vrsky-platform
+  labels:
+    app: vrsky
+    component: webhooks
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Webhook bodies are small; this bounds what an unauthenticated caller can
+    # push at a connector before it is ever parsed.
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+spec:
+  ingressClassName: nginx
+  rules:
+    # Host is the sslip.io address of the ingress LoadBalancer. It survives
+    # `az aks stop`/`start` (verified 2026-09-07), so it is stable — but swap
+    # this, and the host on the vrsky Ingress in vrsky-ui, when the real DNS
+    # name lands. cert-manager reissues automatically.
+    - host: 20.251.107.2.sslip.io
+      http:
+        paths:
+          # --- retail connectors (these routes already exist in the cluster) ---
+          # Public URL pattern: https://<host>/<connector>/events/<connectionID>
+          - path: /sitoo/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-sitoo-consumer
+                port:
+                  number: 9260
+          - path: /frontsystems/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-front-systems-consumer
+                port:
+                  number: 9270
+          - path: /brightpearl/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-brightpearl-consumer
+                port:
+                  number: 9280
+
+          # --- generic Webhook (HTTP) source — NEW ---
+          # Without this route the "Webhook (HTTP)" source type had no durable
+          # public endpoint in prod: the only mechanism in the connector is a
+          # cloudflared quick tunnel (*.trycloudflare.com), whose URL changes on
+          # every restart and which Cloudflare documents as a testing tier. The
+          # type validated, deployed, and ran, but nothing external could reach
+          # it — the #205 shape, one layer further out.
+          #
+          # Public URL pattern: https://<host>/webhook/<connectionID>
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-webhook-consumer
+                port:
+                  number: 9100

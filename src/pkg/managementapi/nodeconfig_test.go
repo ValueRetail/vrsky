@@ -361,3 +361,66 @@ func builtConnectorImages(src string) map[string]bool {
 	}
 	return out
 }
+
+// The webhook Ingress routes public traffic to connector Services by name and
+// port. A typo in either is a 503 at the edge for an inbound webhook — silent
+// from the platform's side, since nothing inside ever sees the request. The
+// Ingress lived only in the live cluster until it was committed, so nothing had
+// ever checked it against the services it targets.
+func TestWebhookIngressTargetsRealServices(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "infrastructure", "kubernetes")
+	ing, err := os.ReadFile(filepath.Join(root, "ingress", "webhooks-ingress.yaml"))
+	if err != nil {
+		t.Skipf("webhook ingress not available (%v) — guard skipped", err)
+	}
+	svc, err := os.ReadFile(filepath.Join(root, "connectors", "connectors.yaml"))
+	if err != nil {
+		t.Skipf("connector manifest not available (%v) — guard skipped", err)
+	}
+
+	backends := ingressBackends(string(ing))
+	if len(backends) == 0 {
+		t.Fatal("parsed no backends from webhooks-ingress.yaml — its shape changed; update this test")
+	}
+
+	services := connectorServicePorts(string(svc))
+	for name, port := range backends {
+		got, ok := services[name]
+		if !ok {
+			t.Errorf("webhook ingress routes to Service %q, which deploy-connectors-azure.sh does not create — "+
+				"inbound webhooks to it would 503", name)
+			continue
+		}
+		if got != port {
+			t.Errorf("webhook ingress sends %q to port %s but its Service listens on %s", name, port, got)
+		}
+	}
+}
+
+// ingressBackends maps backend service name → port for every path in the
+// webhook Ingress.
+func ingressBackends(src string) map[string]string {
+	re := regexp.MustCompile(`(?s)name: (vrsky-[a-z0-9-]+)\s+port:\s+number: (\d+)`)
+	out := map[string]string{}
+	for _, m := range re.FindAllStringSubmatch(src, -1) {
+		out[m[1]] = m[2]
+	}
+	return out
+}
+
+// connectorServicePorts maps Service name → port from the generated connector
+// manifest, reading only `kind: Service` documents.
+func connectorServicePorts(src string) map[string]string {
+	out := map[string]string{}
+	for _, doc := range strings.Split(src, "\n---") {
+		if !strings.Contains(doc, "kind: Service") {
+			continue
+		}
+		name := regexp.MustCompile(`name: (vrsky-[a-z0-9-]+)`).FindStringSubmatch(doc)
+		port := regexp.MustCompile(`\n    port: (\d+)`).FindStringSubmatch(doc)
+		if name != nil && port != nil {
+			out[name[1]] = port[1]
+		}
+	}
+	return out
+}
