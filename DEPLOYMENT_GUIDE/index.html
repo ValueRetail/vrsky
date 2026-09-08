@@ -3913,6 +3913,17 @@ kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class
 <span class="c1"># Access: http://localhost:8080</span>
 </code></pre></div>
 <h3 id="deploying-to-k3s-production-oslo">Deploying to K3s Production (Oslo)<a class="headerlink" href="#deploying-to-k3s-production-oslo" title="Permanent link">&para;</a></h3>
+<div class="admonition danger">
+<p class="admonition-title">Not the AKS cluster (<code>vrsky-prod</code>)</p>
+<p>On AKS, use <code>infrastructure/azure/deploy-core-azure.sh</code>. Do <strong>not</strong>
+<code>kubectl apply -f infrastructure/kubernetes/ui/</code> there: those manifests are
+shared with the local k3d path and name <code>ghcr.io</code> images AKS cannot pull, so
+an apply produces <code>ImagePullBackOff</code>. The AKS deployments are also pinned by
+digest, which means <code>kubectl rollout restart</code> changes no image and silently
+redeploys the running one.</p>
+<p>The script resolves each digest from ACR, validates it, rolls out, and then
+re-reads the cluster to confirm what landed. Run <code>build-push-acr.sh</code> first.</p>
+</div>
 <p>Same manifests work for production K3s cluster:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Set kubeconfig to production</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">KUBECONFIG</span><span class="o">=</span>~/.kube/vrsky-production.yaml
@@ -3925,7 +3936,9 @@ kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class=
 </code></pre></div>
 <h3 id="blue-green-deployment-optional">Blue-Green Deployment (Optional)<a class="headerlink" href="#blue-green-deployment-optional" title="Permanent link">&para;</a></h3>
 <p>For zero-downtime updates:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Update image in deployment</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Update image in deployment.</span>
+<span class="c1"># On AKS this is what deploy-core-azure.sh does for you, with the digest read</span>
+<span class="c1"># from ACR rather than typed — hand-copying it has gone wrong more than once.</span>
 kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:v1.2.3<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-n<span class="w"> </span>vrsky-ui
