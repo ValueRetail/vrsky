@@ -15,10 +15,16 @@ import (
 )
 
 // NATSAutoscaler monitors per-tenant NATS instances and scales them (#19):
-// scrape each instance's load, provision a new instance when one crosses a
-// capacity trigger, alert at 80%, and decommission empty extra instances.
-// Placement of connections onto the least-loaded instance happens at deploy
-// time (see Handler.placeConnection); this loop reacts to the resulting load.
+// provision a new instance when one crosses a capacity trigger, alert at 80%,
+// and decommission empty extra instances. Placement of connections onto the
+// least-loaded instance happens at deploy time (see Handler.placeConnection).
+//
+// What it reacts to today: the COUNT of connections placed on an instance, read
+// from Postgres. That number is real. The other input — the scraped message
+// rate — is structurally zero, because a placed connection's traffic still
+// flows over the platform NATS rather than the instance it was placed on
+// (#209). So the count trigger works and the msg-rate trigger cannot fire.
+// Both are kept; the second becomes live the day routing does.
 //
 // Gated by a Postgres advisory lock (#138) so exactly one management-api
 // replica runs the control loop cluster-wide. Inert unless a K8s provisioner is
@@ -59,6 +65,9 @@ var (
 	natsInstIntegrations = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "vrsky_nats_instance_integrations", Help: "Connections placed on a tenant NATS instance.",
 	}, []string{"tenant_id", "instance_number"})
+	// NOT PUBLISHED while #209 is open — see publishScrapedMetrics below. They
+	// stay declared so restoring them is one constant, and so the names remain
+	// reserved rather than being reinvented differently later.
 	natsInstConnections = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "vrsky_nats_instance_connections", Help: "Client connections on a tenant NATS instance.",
 	}, []string{"tenant_id", "instance_number"})
@@ -69,6 +78,23 @@ var (
 		Name: "vrsky_nats_instance_capacity_pct", Help: "Instance load as a percent of its scale-up trigger.",
 	}, []string{"tenant_id", "instance_number"})
 )
+
+// publishScrapedMetrics gates the two gauges above on whether a tenant NATS
+// instance actually carries that tenant's traffic. It does not yet (#209): the
+// standing connector services dial the platform NATS from their own pod env, so
+// a placed connection's data never reaches the instance it is placed on.
+//
+// The scrape itself is honest — the instance really does have zero client
+// connections and zero messages a second. The inference an operator draws from
+// a graph of it is not: a flat zero beside fifty placed connections reads as
+// "this tenant is idle" when it means "this dial plan was never wired".
+//
+// A zero time series is a quiet lie; a missing one is a loud question. So these
+// stay unpublished until routing lands, at which point this becomes true and
+// the two Set calls come back. vrsky_nats_instance_integrations and
+// vrsky_nats_instance_capacity_pct are unaffected — both derive from the
+// placement count in Postgres, which is real today.
+const publishScrapedMetrics = false
 
 // NewNATSAutoscaler builds an autoscaler. k8s may be nil (scale actions become
 // no-ops, e.g. compose); db may be nil (no cross-replica gating).
@@ -206,8 +232,10 @@ func (a *NATSAutoscaler) reconcileTenant(ctx context.Context, tenantID string, i
 
 		numLabel := fmt.Sprintf("%d", inst.InstanceNumber)
 		natsInstIntegrations.WithLabelValues(tenantID, numLabel).Set(float64(integrations))
-		natsInstConnections.WithLabelValues(tenantID, numLabel).Set(float64(m.Connections))
-		natsInstMsgRate.WithLabelValues(tenantID, numLabel).Set(float64(m.MsgRate))
+		if publishScrapedMetrics {
+			natsInstConnections.WithLabelValues(tenantID, numLabel).Set(float64(m.Connections))
+			natsInstMsgRate.WithLabelValues(tenantID, numLabel).Set(float64(m.MsgRate))
+		}
 
 		pct := a.capacityPct(integrations, m.MsgRate)
 		natsInstCapacityPct.WithLabelValues(tenantID, numLabel).Set(pct)
@@ -249,6 +277,12 @@ func (a *NATSAutoscaler) capacityPct(integrations int, msgRate int64) float64 {
 // triggered reports whether an instance has crossed a scale-up threshold. The
 // msg-rate trigger must be sustained for sustainWindow to avoid flapping on a
 // burst; the integration-count trigger fires immediately.
+//
+// Only the count trigger can fire today. msgRate comes from a scrape of an
+// instance that carries no traffic (#209), so it is always 0 and the sustain
+// path below is unreachable until connections are routed to their placed
+// instance. Kept rather than deleted: the logic is right, its input is not yet
+// connected.
 func (a *NATSAutoscaler) triggered(instID string, integrations int, msgRate int64) bool {
 	if integrations >= a.maxIntegrations {
 		return true

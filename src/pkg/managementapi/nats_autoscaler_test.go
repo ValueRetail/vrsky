@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestAutoscaler_Triggered(t *testing.T) {
@@ -70,5 +73,49 @@ func TestAutoscaler_ReconcileRecordsMetrics(t *testing.T) {
 
 	if repo.metricUpdates["n1"] != 7 {
 		t.Fatalf("expected integration count 7 recorded for n1, got %d", repo.metricUpdates["n1"])
+	}
+}
+
+// The scraped gauges are deliberately not published while #209 is open: a
+// tenant NATS instance carries none of its tenant's traffic, so a graph of
+// them reads as "idle tenant" rather than "unwired routing". See
+// publishScrapedMetrics.
+//
+// This asserts the absence, because the whole point is that an operator should
+// find no series rather than a flat zero. It is expected to be deleted along
+// with the constant when connections are actually routed to their placed
+// instance.
+func TestAutoscaler_ScrapedGaugesAreNotPublished(t *testing.T) {
+	if publishScrapedMetrics {
+		t.Skip("scraped metrics are published again — #209 presumably landed; delete this test with the constant")
+	}
+
+	repo := newNATSInstRepo()
+	repo.instances = []*NATSInstance{
+		{ID: "n1", TenantID: "t-metrics", InstanceNumber: 1, DNSName: "nats-t-1", Status: "active"},
+	}
+	repo.connCounts = map[string]int{"n1": 7}
+
+	a := NewNATSAutoscaler(repo, nil, nil, nil)
+	// Non-zero on purpose: if the gating regressed, these values would show up
+	// and the assertions below would catch a real number, not a zero.
+	a.scrape = func(_ context.Context, _ *NATSInstance) (instanceMetrics, error) {
+		return instanceMetrics{Connections: 12, MemoryMB: 64, MsgRate: 5}, nil
+	}
+	a.runOnce(context.Background())
+
+	for name, g := range map[string]*prometheus.GaugeVec{
+		"vrsky_nats_instance_connections": natsInstConnections,
+		"vrsky_nats_instance_msg_rate":    natsInstMsgRate,
+	} {
+		if n := testutil.CollectAndCount(g); n != 0 {
+			t.Errorf("%s emitted %d series; it must emit none until a placed connection's traffic actually reaches its instance (#209)", name, n)
+		}
+	}
+
+	// The placement-derived gauges are real and must keep working — this change
+	// was about not publishing a number that cannot move, not about going quiet.
+	if n := testutil.CollectAndCount(natsInstIntegrations); n == 0 {
+		t.Error("vrsky_nats_instance_integrations emitted no series; the placement count is real and should still be published")
 	}
 }
