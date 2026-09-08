@@ -512,3 +512,64 @@ func TestUIDeployRewritesMatchManifest(t *testing.T) {
 			policyLine[1])
 	}
 }
+
+// deploy-core-azure.sh rolls the core images onto AKS by digest. It carries its
+// own table of which four they are, and that table is only correct as long as
+// build-push-acr.sh's build_core publishes exactly those images.
+//
+// Drift either way is silent in a way that only shows up in prod. A service in
+// build_core but not the deploy table is built on every release and never
+// deployed — the shape of the 2026-09-07 stale-UI incident, where an image
+// existed in ACR while the cluster ran an older one. A service in the deploy
+// table but not build_core asks ACR for a tag that was never pushed; the
+// script's digest guard catches that one, but only at deploy time.
+//
+// Same relationship as TestConnectorImagesAreBuilt, for the core group.
+func TestCoreServicesAreBuilt(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	deploySrc, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-core-azure.sh"))
+	if err != nil {
+		t.Skipf("core deploy script not available (%v) — drift guard skipped", err)
+	}
+	buildSrc, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "build-push-acr.sh"))
+	if err != nil {
+		t.Skipf("build script not available (%v) — drift guard skipped", err)
+	}
+
+	// The CORE table: first field of each non-empty line.
+	deployed := map[string]bool{}
+	if m := regexp.MustCompile(`(?s)\nCORE="\n(.*?)\n"`).FindStringSubmatch(string(deploySrc)); m != nil {
+		for _, line := range strings.Split(m[1], "\n") {
+			if f := strings.Fields(line); len(f) > 0 {
+				deployed[f[0]] = true
+			}
+		}
+	}
+	if len(deployed) == 0 {
+		t.Fatal("parsed no services from deploy-core-azure.sh's CORE table — it changed shape; update this test")
+	}
+
+	// build_core's `build vrsky/<name>:latest ...` lines.
+	built := map[string]bool{}
+	if m := regexp.MustCompile(`(?s)build_core\(\) \{(.*?)\n\}`).FindStringSubmatch(string(buildSrc)); m != nil {
+		for _, b := range regexp.MustCompile(`build\s+vrsky/([a-z0-9-]+):latest`).FindAllStringSubmatch(m[1], -1) {
+			built[b[1]] = true
+		}
+	}
+	if len(built) == 0 {
+		t.Fatal("parsed no images from build_core in build-push-acr.sh — it changed shape; update this test")
+	}
+
+	for name := range deployed {
+		if !built[name] {
+			t.Errorf("deploy-core-azure.sh deploys %q, which build_core never pushes — "+
+				"the deploy would fail asking ACR for a tag that does not exist", name)
+		}
+	}
+	for name := range built {
+		if !deployed[name] {
+			t.Errorf("build_core pushes %q, which deploy-core-azure.sh never deploys — "+
+				"it would be rebuilt on every release and never reach the cluster", name)
+		}
+	}
+}
