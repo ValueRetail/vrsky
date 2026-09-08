@@ -1,8 +1,31 @@
 # VRSky NATS Architecture Decision
 
 **Date**: January 27, 2026  
-**Status**: Approved  
+**Status**: Approved — **partially implemented**, see the note below  
 **Decision Type**: Architecture Design Record (ADR)
+
+!!! warning "Per-tenant NATS instances are provisioned but not routed to (#209)"
+
+    Everything in this document about the **platform** NATS is live. The
+    **tenant-scoped** half is not, and the gap is invisible unless you look for
+    it: instances are provisioned, connections are placed onto them in the
+    database, and the autoscaler meters those placements — but no data reaches
+    them. The services that move data are standing per-node-type deployments
+    (ADR 0004) that dial the platform NATS from their own pod environment.
+
+    So a connection "placed on" a dedicated instance still moves its traffic
+    over the shared one. Nothing is broken today, because prod runs a single
+    platform NATS. It becomes wrong the moment a tenant is told they have a
+    dedicated instance.
+
+    The "Worker Connection Strategy" section below describes per-connection
+    worker pods that **no longer exist** — #201 and #205 replaced them. Read it
+    as the original design, not as current behaviour.
+
+    Before building any of this, [#209](https://github.com/ValueRetail/vrsky/issues/209)
+    needs a product answer: is a dedicated instance sold as *performance
+    isolation* or as *data isolation*? They have different implementations, and
+    only one of them can be honestly claimed by a shared-broker design.
 
 ---
 
@@ -206,6 +229,14 @@ When a new NATS instance is provisioned:
    ```
 
 ### Worker Connection Strategy
+
+!!! danger "Not implemented — describes deleted per-connection workers"
+
+    The per-connection worker pods this section describes were removed in #201
+    and #205. Nothing in the running system executes this strategy; the standing
+    connector services dial one NATS URL from their pod environment. Kept as a
+    record of the intended design, because it is one of the candidate answers to
+    #209.
 
 **Workers connect to ALL tenant NATS instances** for resilience:
 

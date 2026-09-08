@@ -24,10 +24,25 @@ func (h *Handler) natsInstanceStore() (NATSInstanceStore, bool) {
 	return s, ok
 }
 
-// placeConnection pins a connection to the least-loaded active NATS instance
-// for its tenant (#19), so its workers connect to the right instance. No-op
-// when the tenant has no tracked instances (single-instance / compose) or the
-// connection is already placed.
+// placeConnection records a connection against the least-loaded active NATS
+// instance for its tenant (#19). No-op when the tenant has no tracked instances
+// (single-instance / compose) or the connection is already placed.
+//
+// WHAT THIS DOES AND DOES NOT DO. It writes a row. It does not change where the
+// connection's data flows.
+//
+// This comment used to say "so its workers connect to the right instance",
+// which was true when the orchestrator stamped NATS_URLS onto a per-connection
+// worker Deployment. #201 and #205 replaced those pods with standing connector
+// services, and a standing service serves every tenant from one process — it
+// dials the NATS_URL in its own pod env, which deploy-connectors-azure.sh
+// points at the platform NATS. So a connection placed on a dedicated instance
+// still moves its data over the shared one.
+//
+// The record is not useless: it is a real count, and it is what the autoscaler
+// scales and meters on. It is only a claim about ROUTING that no longer holds.
+// Do not let it be read as isolation — see #209 for the four ways to make it
+// true and the product question that picks between them.
 func (h *Handler) placeConnection(ctx context.Context, tenantID, connectionID string) {
 	store, ok := h.natsInstanceStore()
 	if !ok {

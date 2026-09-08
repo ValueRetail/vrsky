@@ -20,9 +20,12 @@ ceiling and is **gone** — see below.
   every connection of that type, routing by node config. Because they are **pull**
   durables, replicas of a service share the work without coordination, so the
   destination side scales by replica count rather than by connection count.
-- **Multi-tenancy** — **per-tenant NATS instances** (`nats_instances`, migration
-  000018), tenant-scoped queries throughout (`lint:tenant-ok`), enforced **quotas**
-  (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily usage metering.
+- **Multi-tenancy** — tenant-scoped queries throughout (`lint:tenant-ok`),
+  enforced **quotas** (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily
+  usage metering. **Per-tenant NATS instances** (`nats_instances`, migration
+  000018) are provisioned and metered, but connections placed on them still move
+  their data over the platform NATS — they are a capacity/metering unit today,
+  not an isolation boundary (#209).
 - **Stateless control plane** — UI / filter / management-api at 2 replicas + PDB;
   horizontally scalable, HA today.
 - **Independent connectors** — adding an integration type scales linearly.
@@ -78,7 +81,9 @@ Postgres, MinIO, NATS all run in-cluster. For scale:
 - Storage → **Azure Blob** (the cloud-storage connector already speaks S3/Azure/GCS).
 - Postgres → managed (see #1c).
 - NATS is 3-pod HA, but per-tenant instances add pod count — consider **shared NATS
-  instances for small tenants**, dedicated for large (density vs isolation).
+  instances for small tenants**, dedicated for large (density vs isolation). Note
+  the isolation half of that tradeoff does not exist yet (#209): a dedicated
+  instance currently costs pods without moving any traffic off the shared one.
 
 ### 4. Node capacity + Azure quota
 Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
