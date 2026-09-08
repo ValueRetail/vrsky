@@ -84,5 +84,8 @@ case "$GROUP" in
 esac
 
 echo ""
+echo "Next: infrastructure/azure/deploy-core-azure.sh   (resolves these digests"
+echo "      from ACR and rolls them out — do not copy digests by hand)"
+echo ""
 echo "Done. Images in $REG:"
 echo "  az acr repository list -n $REG -o table"

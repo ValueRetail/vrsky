@@ -326,6 +326,18 @@ kubectl port-forward -n vrsky-ui svc/vrsky-ui 8080:80
 
 ### Deploying to K3s Production (Oslo)
 
+!!! danger "Not the AKS cluster (`vrsky-prod`)"
+
+    On AKS, use `infrastructure/azure/deploy-core-azure.sh`. Do **not**
+    `kubectl apply -f infrastructure/kubernetes/ui/` there: those manifests are
+    shared with the local k3d path and name `ghcr.io` images AKS cannot pull, so
+    an apply produces `ImagePullBackOff`. The AKS deployments are also pinned by
+    digest, which means `kubectl rollout restart` changes no image and silently
+    redeploys the running one.
+
+    The script resolves each digest from ACR, validates it, rolls out, and then
+    re-reads the cluster to confirm what landed. Run `build-push-acr.sh` first.
+
 Same manifests work for production K3s cluster:
 
 ```bash
@@ -344,7 +356,9 @@ kubectl rollout status deployment/vrsky-ui -n vrsky-ui
 For zero-downtime updates:
 
 ```bash
-# Update image in deployment
+# Update image in deployment.
+# On AKS this is what deploy-core-azure.sh does for you, with the digest read
+# from ACR rather than typed — hand-copying it has gone wrong more than once.
 kubectl set image deployment/vrsky-ui \
   ui=ghcr.io/ValueRetail/vrsky/ui:v1.2.3 \
   -n vrsky-ui
