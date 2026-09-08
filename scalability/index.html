@@ -2173,9 +2173,12 @@ ceiling and is <strong>gone</strong> — see below.</p>
   every connection of that type, routing by node config. Because they are <strong>pull</strong>
   durables, replicas of a service share the work without coordination, so the
   destination side scales by replica count rather than by connection count.</li>
-<li><strong>Multi-tenancy</strong> — <strong>per-tenant NATS instances</strong> (<code>nats_instances</code>, migration
-  000018), tenant-scoped queries throughout (<code>lint:tenant-ok</code>), enforced <strong>quotas</strong>
-  (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily usage metering.</li>
+<li><strong>Multi-tenancy</strong> — tenant-scoped queries throughout (<code>lint:tenant-ok</code>),
+  enforced <strong>quotas</strong> (default 50 msg/s, 10 integrations, 1 GiB/tenant) + daily
+  usage metering. <strong>Per-tenant NATS instances</strong> (<code>nats_instances</code>, migration
+  000018) are provisioned and metered, but connections placed on them still move
+  their data over the platform NATS — they are a capacity/metering unit today,
+  not an isolation boundary (#209).</li>
 <li><strong>Stateless control plane</strong> — UI / filter / management-api at 2 replicas + PDB;
   horizontally scalable, HA today.</li>
 <li><strong>Independent connectors</strong> — adding an integration type scales linearly.</li>
@@ -2224,7 +2227,9 @@ one replica until they get leader election and a shared event bus respectively.<
 - Storage → <strong>Azure Blob</strong> (the cloud-storage connector already speaks S3/Azure/GCS).
 - Postgres → managed (see #1c).
 - NATS is 3-pod HA, but per-tenant instances add pod count — consider <strong>shared NATS
-  instances for small tenants</strong>, dedicated for large (density vs isolation).</p>
+  instances for small tenants</strong>, dedicated for large (density vs isolation). Note
+  the isolation half of that tradeoff does not exist yet (#209): a dedicated
+  instance currently costs pods without moving any traffic off the shared one.</p>
 <h3 id="4-node-capacity-azure-quota">4. Node capacity + Azure quota<a class="headerlink" href="#4-node-capacity-azure-quota" title="Permanent link">&para;</a></h3>
 <p>Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
 needs the <strong>cluster autoscaler</strong> + quota headroom.</p>
