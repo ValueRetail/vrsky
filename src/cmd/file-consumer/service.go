@@ -16,6 +16,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/tenantpath"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
@@ -256,13 +257,18 @@ func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 		return
 	}
 
-	// Get watch directory from node config, fall back to {baseDir}/{connectionId}
+	// Get watch directory from node config, fall back to {connectionId} inside
+	// the tenant's own root.
 	watchDir := s.extractWatchDir(conn)
 	if watchDir == "" {
-		watchDir = filepath.Join(s.baseDir, cmd.ConnectionID)
+		watchDir = cmd.ConnectionID
 	}
 
-	// Expand ~ to host home directory
+	// Expand ~ to host home directory. This has to happen BEFORE the tenant
+	// resolve below, or "~" would be taken as a literal directory name inside
+	// the tenant root instead of the home path the user meant — and, expanded,
+	// a home path outside the mounted volume is refused rather than silently
+	// watched.
 	if len(watchDir) > 0 && watchDir[0] == '~' {
 		home := s.hostHome
 		if home == "" {
@@ -272,6 +278,22 @@ func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 			watchDir = filepath.Join(home, watchDir[1:])
 		}
 	}
+
+	// Confine the directory to this tenant's subtree. Until this existed the
+	// configured path was used verbatim, so a tenant could point a file source
+	// at the shared output root and ingest every other tenant's files — the
+	// consumer and producer share one RWX volume in the cluster.
+	//
+	// Refusing here rather than clamping is deliberate: a source silently
+	// watching a different directory than its config names is the failure this
+	// is meant to end, so the connection fails to start and says why.
+	resolved, err := tenantpath.Resolve(s.baseDir, cmd.TenantID, watchDir)
+	if err != nil {
+		s.logger.Error("Refusing to start: watch directory is outside the workspace's own files",
+			"error", err, "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID, "configured", watchDir)
+		return
+	}
+	watchDir = resolved
 
 	if err := os.MkdirAll(watchDir, 0o755); err != nil {
 		s.logger.Error("Failed to create watch directory", "error", err, "dir", watchDir)

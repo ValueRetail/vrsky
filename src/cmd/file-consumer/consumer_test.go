@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"mime/multipart"
 	"net/http/httptest"
 	"os"
@@ -26,7 +25,11 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 		connID = "conn-file-1"
 		tenant = "tenant-x"
 	)
-	watchDir := t.TempDir()
+	// The base is the mounted root; a configured path is resolved inside the
+	// tenant's own subtree of it (pkg/tenantpath). Point the base at a temp dir
+	// and ask for a relative directory, which is what a caller does now.
+	base := t.TempDir()
+	t.Setenv("FILE_CONSUMER_BASE_DIR", base)
 
 	mgmtDB, mock, err := sqlmock.New()
 	if err != nil {
@@ -35,7 +38,7 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 	defer mgmtDB.Close()
 	mock.MatchExpectationsInOrder(false)
 
-	nodes := fmt.Sprintf(`[{"id":"c1","type":"consumer","config":{"type":"file","file":{"path":%q}}}]`, watchDir)
+	nodes := `[{"id":"c1","type":"consumer","config":{"type":"file","file":{"path":"inbox"}}}]`
 	mock.ExpectQuery("SELECT id, tenant_id, name, nodes, edges FROM connections").
 		WithArgs(connID, tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
@@ -99,7 +102,12 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 		connID = "conn-file-watch"
 		tenant = "tenant-w"
 	)
-	watchDir := t.TempDir()
+	// The base is the mounted root; a configured path is resolved inside the
+	// tenant's own subtree of it (pkg/tenantpath). Point the base at a temp dir
+	// and ask for a relative directory, which is what a caller does now.
+	base := t.TempDir()
+	t.Setenv("FILE_CONSUMER_BASE_DIR", base)
+	watchDir := filepath.Join(base, tenant, "inbox")
 
 	mgmtDB, mock, err := sqlmock.New()
 	if err != nil {
@@ -108,7 +116,7 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 	defer mgmtDB.Close()
 	mock.MatchExpectationsInOrder(false)
 
-	nodes := fmt.Sprintf(`[{"id":"c1","type":"consumer","config":{"type":"file","file":{"path":%q}}}]`, watchDir)
+	nodes := `[{"id":"c1","type":"consumer","config":{"type":"file","file":{"path":"inbox"}}}]`
 	mock.ExpectQuery("SELECT id, tenant_id, name, nodes, edges FROM connections").
 		WithArgs(connID, tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).

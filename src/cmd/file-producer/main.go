@@ -24,6 +24,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/tenantpath"
 )
 
 // fileProducer writes pipeline envelopes to the local filesystem. It is a
@@ -179,12 +180,11 @@ func (p *fileProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 
 	var transient error
 	for _, config := range p.eligibleConfigs(configs, lastProcessedBy) {
-		outputPath := config.OutputPath
-		if outputPath == "" {
-			outputPath = p.defaultOutputDir
-		}
-		if config.FolderName != "" {
-			outputPath = filepath.Join(outputPath, config.FolderName)
+		outputPath, perr := p.resolveOutputPath(config)
+		if perr != nil {
+			p.logger.Error("dropping: output path is outside the workspace's own files",
+				"error", perr, "envelope_id", env.ID, "connection_id", config.ID, "tenant_id", config.TenantID)
+			continue
 		}
 
 		if werr := p.writeFile(env, outputPath, config.FilePattern, nil); werr != nil {
@@ -220,8 +220,12 @@ func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID st
 	p.configCacheMu.RUnlock()
 
 	var nodesJSON, edgesJSON []byte
-	var connName string
-	err := p.db.QueryRowContext(ctx, `SELECT name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&connName, &nodesJSON, &edgesJSON)
+	var connName, tenantID string
+	// tenant_id comes from the connection row rather than the envelope: it
+	// decides which directory this connection's files land in (see
+	// resolveOutputPath), so it has to come from the record, not from a message
+	// that has travelled through the pipeline.
+	err := p.db.QueryRowContext(ctx, `SELECT tenant_id::text, name, nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&tenantID, &connName, &nodesJSON, &edgesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Unknown connection — not ours to write. Cache empty so we don't
@@ -297,6 +301,7 @@ func (p *fileProducer) getConnectionConfigs(ctx context.Context, connectionID st
 
 		configs = append(configs, &ConnectionConfig{
 			ID:             connectionID,
+			TenantID:       tenantID,
 			OutputPath:     expandHomePath(path),
 			FilePattern:    nodeConfig.File.FilePattern,
 			PredecessorID:  predID,
@@ -354,12 +359,11 @@ func (p *fileProducer) DeliverStream(ctx context.Context, env *envelope.Envelope
 	}
 
 	config := eligible[0]
-	outputPath := config.OutputPath
-	if outputPath == "" {
-		outputPath = p.defaultOutputDir
-	}
-	if config.FolderName != "" {
-		outputPath = filepath.Join(outputPath, config.FolderName)
+	outputPath, perr := p.resolveOutputPath(config)
+	if perr != nil {
+		p.logger.Error("dropping: output path is outside the workspace's own files",
+			"error", perr, "envelope_id", env.ID, "connection_id", config.ID, "tenant_id", config.TenantID)
+		return nil
 	}
 
 	if werr := p.writeFile(env, outputPath, config.FilePattern, body); werr != nil {
@@ -377,6 +381,33 @@ func (p *fileProducer) DeliverStream(ctx context.Context, env *envelope.Envelope
 
 // eligibleConfigs drops the output configs whose predecessor predicate doesn't
 // match this envelope. Shared by the buffered and streaming paths.
+// resolveOutputPath decides where one connection's files are written, confined
+// to its own tenant's subtree.
+//
+// Before this, OutputPath and FolderName were joined and used as-is under a
+// shared root with no tenant component. Two tenants who both left the path
+// default — or both typed the mounted root, which is what the UI asks for —
+// wrote into the same directory on the same RWX volume. generateFilename
+// preserves metadata.filename, which a file→file pipeline always carries, so
+// two tenants processing "orders.csv" produced the same path and the last
+// writer silently won.
+//
+// FolderName is folded in before resolving rather than joined after, so a
+// traversal in it is contained too; it is user-settable and was never checked.
+func (p *fileProducer) resolveOutputPath(config *ConnectionConfig) (string, error) {
+	configured := config.OutputPath
+	if config.FolderName != "" {
+		configured = filepath.Join(configured, config.FolderName)
+	}
+	resolved, err := tenantpath.Resolve(p.defaultOutputDir, config.TenantID, configured)
+	if err != nil {
+		// Wrapped as errPathNotAllowed so both call sites keep treating a bad
+		// path as a permanent misconfiguration rather than burning retries.
+		return "", fmt.Errorf("%w: %v", errPathNotAllowed, err)
+	}
+	return resolved, nil
+}
+
 func (p *fileProducer) eligibleConfigs(configs []*ConnectionConfig, lastProcessedBy string) []*ConnectionConfig {
 	out := make([]*ConnectionConfig, 0, len(configs))
 	for _, config := range configs {

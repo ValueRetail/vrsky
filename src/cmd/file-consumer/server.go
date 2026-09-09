@@ -406,6 +406,20 @@ func pickSampleFile(dir string) (string, []byte, error) {
 
 // isSamplePathAllowed mirrors the file-producer's path allowlist: any path
 // under the configured BaseDir or under HOST_HOME is permitted.
+// isSamplePathAllowed confines sample reads to a mounted root.
+//
+// STILL NOT TENANT-SCOPED. The watch and output paths are now confined to the
+// requesting tenant's own subtree (pkg/tenantpath), but this endpoint cannot
+// be: it takes a bare directory from the caller and carries no tenant or
+// connection identity to check it against. Anything under the shared base is
+// therefore readable through it, including another tenant's files.
+//
+// It is not reachable from outside the cluster — the worker aux ports are not
+// published, and #224 moved the builder's other worker calls behind the
+// management API for exactly this reason. Closing this one means the same
+// treatment: take a connection ID, resolve the tenant from it, and proxy it
+// with an ownership check, which changes the endpoint's contract and its UI
+// caller. Tracked as the remaining piece of this work.
 func (s *fileConsumer) isSamplePathAllowed(path string) bool {
 	abs, err := filepath.Abs(path)
 	if err != nil {
