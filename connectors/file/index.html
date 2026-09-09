@@ -2189,7 +2189,8 @@
 <p>Config reference:</p>
 <ul>
 <li><code>type</code> — <code>"file"</code>.</li>
-<li><code>file.path</code> — output directory. If empty, defaults to <code>/data/output</code>.</li>
+<li><code>file.path</code> — output directory, relative to your workspace's own area of the
+  mounted volume. If empty, files go to the top of that area.</li>
 </ul>
 <p>File naming and serialization options are configured via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
@@ -2203,9 +2204,20 @@
 <ul>
 <li><strong>Uploads.</strong> Source files arrive through the file-consumer ingress (locally port <code>9200</code>).</li>
 <li><strong>CSV columns.</strong> For <code>format: "csv"</code>, the header row defines the column names (#81).</li>
-<li><strong>Default path.</strong> An empty <code>file.path</code> on the producer falls back to <code>/data/output</code>.</li>
+<li><strong>Default path.</strong> An empty <code>file.path</code> on the producer writes to the top of your workspace's own directory.</li>
 <li>
-<p><strong>No SSE panel.</strong> The file-producer has no live SSE panel in the editor. To watch output, tail the worker logs:</p>
+<p><strong>Paths are confined to your workspace.</strong> Both the source's watch directory and
+  the destination's output directory resolve inside a per-workspace subtree of the
+  mounted volume (<code>&lt;mount&gt;/&lt;workspace-id&gt;/…</code>). Writing a path you can see, like
+  <code>/data/output</code>, is understood as your workspace's copy of it — the config keeps
+  working and the files land in your own area. A path genuinely outside the
+  mounted volume is refused and the connection will not start, rather than being
+  quietly relocated.</p>
+<p>This matters because the source and destination connectors share one volume
+across all workspaces. Before this, two workspaces writing a file with the
+same name overwrote each other, and a source pointed at the shared output
+root would ingest other workspaces' files.
+- <strong>No SSE panel.</strong> The file-producer has no live SSE panel in the editor. To watch output, tail the worker logs:</p>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>file-producer
 </code></pre></div>
 </li>
