@@ -932,6 +932,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// an auth and tenant check in front of them. See worker_events_proxy.go.
 	mux.Handle("GET /api/v1/connections/{id}/workers/{worker}/events", viewer(http.HandlerFunc(h.ProxyWorkerEvents)))
 
+	// Schema discovery for the mapping UI. Editor rather than viewer: it makes
+	// the platform open an outbound connection to a customer system using
+	// config supplied in the request. See schema_discovery_proxy.go.
+	mux.Handle("POST /api/v1/schema-discovery/{source}", editor(http.HandlerFunc(h.DiscoverSchema)))
+
 	// Sample data for filter preview
 	mux.Handle("GET /api/v1/connections/{id}/sample-data", viewer(http.HandlerFunc(h.GetSampleData)))
 	mux.Handle("GET /api/v1/sample-data/source", viewer(http.HandlerFunc(h.GetSourceSampleData)))

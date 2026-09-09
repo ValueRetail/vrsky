@@ -244,3 +244,18 @@ func readRepoFile(parts ...string) (string, error) {
 	b, err := os.ReadFile(p)
 	return string(b), err
 }
+
+// splitTestServer returns an httptest server's host and port, for pointing an
+// allowlist entry at it.
+func splitTestServer(t *testing.T, srv *httptest.Server) (string, int) {
+	t.Helper()
+	host, portStr, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse test server URL %q: %v", srv.URL, err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	return host, port
+}

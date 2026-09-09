@@ -34,6 +34,17 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
   validates reachability/credentials before you deploy.
 - **OAuth** — HTTP, API, and Salesforce connectors can authenticate via an OAuth
   grant (`oauth_grant_id`); set providers up under Settings → OAuth providers.
+- **Schema discovery** — "Discover fields" in the mapping UI goes through
+  `POST /api/v1/schema-discovery/{source}`, which authenticates the request and
+  forwards it to the connector that owns that source type. The workspace is
+  taken from the session, so a connector always resolves stored secrets for the
+  caller's own workspace.
+
+    Connectors still serve `POST /sample-data/` (some `/schema/`) on their
+    auxiliary port, and that is what the API forwards to — but those ports are
+    not published outside the cluster and should not be called directly from a
+    browser. The builder did exactly that until #228, which is why the feature
+    worked only in local compose.
 
 New connectors are built on the [connector SDK](../sdk/README.md) — see
 [Build your first connector](../sdk/tutorial/first-connector.md).

@@ -12,27 +12,28 @@ interface DBColumn {
   nullable?: boolean
 }
 
-// postJSON POSTs to a worker aux endpoint and parses JSON, surfacing a readable
-// error for non-2xx / non-JSON responses (e.g. a proxy HTML error page) instead
-// of an opaque SyntaxError.
+// postJSON sends a discovery request through the management API, which
+// authenticates it and forwards it to the connector that owns that source type.
+//
+// These used to be bare fetches at http://localhost:<worker-port> — thirteen of
+// them. That worked in compose and nowhere else, so "Discover fields" was dead
+// in every deployment; and the bodies carry credentials (Kafka's password and
+// client key, RabbitMQ's URL, the API source's auth_value, SFTP's and SAP's
+// whole config) which were being posted to a port with no authentication at
+// all. Going through apiClient means the session cookie, bearer token and
+// workspace header are attached the same way as every other API call.
+//
+// The server sets tenant_id from the session and ignores any sent here, so a
+// browser cannot ask a connector to resolve another workspace's secrets.
 async function postJSON(url: string, body: unknown): Promise<Record<string, unknown>> {
-  let resp: Response
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  } catch {
-    throw new Error('Could not reach the connector — is the worker running?')
-  }
-  if (!resp.ok) {
-    throw new Error(`Connector responded ${resp.status}`)
-  }
-  try {
-    return await resp.json()
-  } catch {
-    throw new Error('Connector returned a non-JSON response')
+    const resp = await apiClient.post(url, body)
+    return (resp.data ?? {}) as Record<string, unknown>
+  } catch (e) {
+    // The connectors answer logical failures with 200 + {ok:false}, which the
+    // callers below already handle. Reaching here means transport, auth, or a
+    // connector that is not running.
+    throw new Error(e instanceof Error ? e.message : 'Could not reach the connector')
   }
 }
 
@@ -52,7 +53,7 @@ export async function discoverSchema(
     case 'database': {
       const dc = (consumerConfig.database as Record<string, unknown>) || {}
       if (!dc.host || !dc.table) throw new Error('Set the database host and table on the input first')
-      const data = await postJSON('http://localhost:9300/schema/', {
+      const data = await postJSON(`/api/v1/schema-discovery/database`, {
         host: dc.host, port: dc.port || 5432, user: dc.user, password: dc.password,
         database: dc.database, sslmode: dc.sslmode, table: dc.table,
       })
@@ -64,7 +65,7 @@ export async function discoverSchema(
     case 'file': {
       const fc = (consumerConfig.file as Record<string, unknown>) || {}
       if (!fc.path) throw new Error('Set a watch directory on the file input first')
-      const data = await postJSON('http://localhost:9200/sample-data/', { path: fc.path })
+      const data = await postJSON(`/api/v1/schema-discovery/file`, { path: fc.path })
       if (!data.ok) throw new Error((data.error as string) || 'No files in the watch directory')
       const columns = data.columns as string[] | undefined
       if (Array.isArray(columns) && columns.length > 0) {
@@ -77,7 +78,7 @@ export async function discoverSchema(
       const api = (consumerConfig.api as { base_url?: string; endpoints?: Array<Record<string, unknown>> }) || {}
       const ep = api.endpoints?.[0]
       if (!api.base_url || !ep) throw new Error('Set the API base URL and an endpoint first')
-      const data = await postJSON('http://localhost:9800/sample-data/', {
+      const data = await postJSON(`/api/v1/schema-discovery/api`, {
         base_url: api.base_url, path: (ep.path as string) || '/', params: (ep.params as string) || '',
         auth_type: (ep.auth_type as string) || 'none', auth_value: (ep.auth_value as string) || '',
       })
@@ -100,8 +101,7 @@ export async function discoverSchema(
       if (!sf.instance_url || !sf.oauth_grant_id) throw new Error('Set the Salesforce instance URL and connect an account first')
       if (!sf.soql) throw new Error('Enter a SOQL query (its FROM clause names the object to describe)')
       if (!opts?.tenantId) throw new Error('No active tenant')
-      const data = await postJSON('http://localhost:9250/schema/', {
-        tenant_id: opts.tenantId,
+      const data = await postJSON(`/api/v1/schema-discovery/salesforce`, {
         instance_url: sf.instance_url, oauth_grant_id: sf.oauth_grant_id,
         api_version: sf.api_version, soql: sf.soql,
       })
@@ -113,7 +113,7 @@ export async function discoverSchema(
     case 'kafka': {
       const kc = (consumerConfig.kafka as Record<string, unknown>) || {}
       if (!kc.brokers || !kc.topic) throw new Error('Set the Kafka brokers and topic on the input first')
-      const data = await postJSON('http://localhost:9220/sample-data/', {
+      const data = await postJSON(`/api/v1/schema-discovery/kafka`, {
         brokers: kc.brokers, topic: kc.topic, consumer_group: kc.consumer_group,
         auth_type: kc.auth_type, username: kc.username, password: kc.password,
         ca_cert: kc.ca_cert, client_cert: kc.client_cert, client_key: kc.client_key,
@@ -125,7 +125,7 @@ export async function discoverSchema(
     case 'rabbitmq': {
       const rc = (consumerConfig.rabbitmq as Record<string, unknown>) || {}
       if (!rc.url || !rc.queue) throw new Error('Set the RabbitMQ URL and queue on the input first')
-      const data = await postJSON('http://localhost:9230/sample-data/', {
+      const data = await postJSON(`/api/v1/schema-discovery/rabbitmq`, {
         url: rc.url, username: rc.username, password: rc.password, queue: rc.queue,
       })
       if (!data.ok) throw new Error((data.error as string) || 'No messages on the queue to sample yet')
@@ -136,7 +136,7 @@ export async function discoverSchema(
       const sap = (consumerConfig.sap_s4hana as Record<string, unknown>) || {}
       if (!sap.api_base_url && !sap.host) throw new Error('Set the SAP host or API base URL first')
       if (!sap.entity_set) throw new Error('Set the entity set first')
-      const data = await postJSON('http://localhost:9290/sample-data/', { ...sap, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/sap_s4hana`, { ...sap })
       if (!data.ok) throw new Error((data.error as string) || 'Failed to fetch a sample from SAP')
       return inferSchema(data.data)
     }
@@ -144,7 +144,7 @@ export async function discoverSchema(
     case 'sftp': {
       const sftp = (consumerConfig.sftp as Record<string, unknown>) || {}
       if (!sftp.host) throw new Error('Set the SFTP host first')
-      const data = await postJSON('http://localhost:9210/sample-data/', { ...sftp, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/sftp`, { ...sftp })
       if (!data.ok) throw new Error((data.error as string) || 'No files in the remote directory to sample yet')
       return inferSchema(data.data)
     }
@@ -152,7 +152,7 @@ export async function discoverSchema(
     case 'cloud_storage': {
       const cs = (consumerConfig.cloud_storage as Record<string, unknown>) || {}
       if (!cs.bucket) throw new Error('Set the cloud storage bucket first')
-      const data = await postJSON('http://localhost:9240/sample-data/', { ...cs, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/cloud_storage`, { ...cs })
       if (!data.ok) throw new Error((data.error as string) || 'No objects under the prefix to sample yet')
       return inferSchema(data.data)
     }
@@ -160,7 +160,7 @@ export async function discoverSchema(
     case 'sitoo': {
       const sc = (consumerConfig.sitoo as Record<string, unknown>) || {}
       if (!sc.api_id || !sc.account_id || !sc.site_id) throw new Error('Set the Sitoo API ID, account ID and site ID first')
-      const data = await postJSON('http://localhost:9260/sample-data/', { ...sc, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/sitoo`, { ...sc })
       if (!data.ok) throw new Error((data.error as string) || 'No Sitoo data to sample yet')
       return inferSchema(data.data)
     }
@@ -168,7 +168,7 @@ export async function discoverSchema(
     case 'business_central': {
       const bc = (consumerConfig.business_central as Record<string, unknown>) || {}
       if (!bc.client_id || (!bc.client_secret && !bc.client_secret_secret_id)) throw new Error('Set the Business Central client ID and secret first')
-      const data = await postJSON('http://localhost:9310/sample-data/', { ...bc, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/business_central`, { ...bc })
       if (!data.ok) throw new Error((data.error as string) || 'No Business Central data to sample yet')
       return inferSchema(data.data)
     }
@@ -176,7 +176,7 @@ export async function discoverSchema(
     case 'visma': {
       const vc = (consumerConfig.visma as Record<string, unknown>) || {}
       if (!vc.client_id || !vc.base_url || !vc.resource) throw new Error('Set the Visma client ID, base URL and resource first')
-      const data = await postJSON('http://localhost:9320/sample-data/', { ...vc, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/visma`, { ...vc })
       if (!data.ok) throw new Error((data.error as string) || 'No Visma data to sample yet')
       return inferSchema(data.data)
     }
@@ -184,7 +184,7 @@ export async function discoverSchema(
     case 'brightpearl': {
       const bp = (consumerConfig.brightpearl as Record<string, unknown>) || {}
       if (!bp.app_ref || (!bp.staff_token && !bp.staff_token_secret_id) || !bp.resource) throw new Error('Set the Brightpearl app ref, staff token and resource first')
-      const data = await postJSON('http://localhost:9280/sample-data/', { ...bp, tenant_id: opts?.tenantId })
+      const data = await postJSON(`/api/v1/schema-discovery/brightpearl`, { ...bp })
       if (!data.ok) throw new Error((data.error as string) || 'No Brightpearl data to sample yet')
       return inferSchema(data.data)
     }

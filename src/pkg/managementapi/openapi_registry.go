@@ -44,6 +44,7 @@ var apiRoutes = []apiRoute{
 	{"GET /api/v1/connections/{id}/sample-data", "get", "/api/v1/connections/{id}/sample-data", "Metrics", "Last payload seen by a deployed connection", nil, nil},
 	{"GET /api/v1/connections/{id}/workers/{worker}/events", "get", "/api/v1/connections/{id}/workers/{worker}/events", "Metrics", "Server-sent stream of a worker's live events for a connection (worker is one of file-consumer, http-producer, db-producer, data-converter, data-filter)", nil, nil},
 	{"GET /api/v1/sample-data/source", "get", "/api/v1/sample-data/source", "Metrics", "Fetch sample data from a source config", nil, nil},
+	{"POST /api/v1/schema-discovery/{source}", "post", "/api/v1/schema-discovery/{source}", "Metrics", "Discover a source's field schema (proxies the owning connector; source is the node config type, e.g. kafka, sftp)", nil, nil},
 
 	// --- Test data generation ---
 	{"POST /api/v1/connections/{id}/test-message", "post", "/api/v1/connections/{id}/test-message", "Test data", "Inject a single test message", nil, nil},
