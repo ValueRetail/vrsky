@@ -96,7 +96,12 @@ func TestSAP_EndToEnd_RecordReachesTheDestination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect nats at %s: %v", natsURL, err)
 	}
-	defer nc.Close()
+	// Registered FIRST so it runs LAST: t.Cleanup is LIFO, and the stop command
+	// below has to go out before the connection closes. `defer nc.Close()` here
+	// would close it before any cleanup ran — which it did in the first version
+	// of this test, leaving the pipeline polling the vendor every 2s forever
+	// after the test "passed".
+	t.Cleanup(func() { nc.Close() })
 
 	// This is the only thing the test does to the platform: the same command
 	// the management API publishes when someone clicks Deploy.
@@ -111,10 +116,18 @@ func TestSAP_EndToEnd_RecordReachesTheDestination(t *testing.T) {
 	if err := nc.Flush(); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
+	// Stop the poller when the test ends. Without this the connector keeps
+	// fetching and writing indefinitely — harmless in CI, where everything is
+	// torn down, and decidedly not harmless against a real vendor API.
 	t.Cleanup(func() {
 		stop, _ := json.Marshal(map[string]string{"connection_id": e2eConnection, "tenant_id": e2eTenant})
-		_ = nc.Publish(fmt.Sprintf("vrsky.commands.%s.connection.stop", e2eTenant), stop)
-		_ = nc.Flush()
+		if err := nc.Publish(fmt.Sprintf("vrsky.commands.%s.connection.stop", e2eTenant), stop); err != nil {
+			t.Errorf("could not stop the connection (%v); it is still polling", err)
+			return
+		}
+		if err := nc.Flush(); err != nil {
+			t.Errorf("could not flush the stop command (%v); the connection may still be polling", err)
+		}
 	})
 
 	// The consumer polls, publishes onto NATS, the producer picks it up and
