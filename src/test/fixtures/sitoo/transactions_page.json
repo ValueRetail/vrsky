@@ -1,0 +1,30 @@
+{
+  "totalcount": 2,
+  "items": [
+    {
+      "transactionid": 90210,
+      "receiptnumber": "S1-2026-000412",
+      "datecreated": "2026-09-09T08:14:22Z",
+      "siteid": 2,
+      "currency": "NOK",
+      "total": "1249.00",
+      "totaltax": "249.80",
+      "items": [
+        { "itemid": 55031, "sku": "VR-TSHIRT-M-BLK", "quantity": 2, "priceeach": "499.50" },
+        { "itemid": 55118, "sku": "VR-CAP-OS-RED", "quantity": 1, "priceeach": "250.00" }
+      ]
+    },
+    {
+      "transactionid": 90211,
+      "receiptnumber": "S1-2026-000413",
+      "datecreated": "2026-09-09T08:19:03Z",
+      "siteid": 2,
+      "currency": "NOK",
+      "total": "199.00",
+      "totaltax": "39.80",
+      "items": [
+        { "itemid": 55204, "sku": "VR-SOCKS-42-GRY", "quantity": 1, "priceeach": "199.00" }
+      ]
+    }
+  ]
+}
