@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ValueRetail/vrsky/test/contract"
 )
 
 // The Sitoo consumer and producer are separate binaries that never call each
@@ -25,30 +26,8 @@ import (
 // A consumer-side change that alters the envelope shows up here as a golden diff
 // and, if the producer can no longer send it, as a failure over there.
 
-var updateGolden = flag.Bool("update", false, "rewrite the contract golden file from this run")
-
-const (
-	fixtureDir = "../../test/fixtures/sitoo"
-	goldenName = "envelopes.golden.json"
-)
-
-// contractEnvelope is the subset of an envelope that crosses the wire and
-// matters to the producer. Volatile fields (ID, timestamps) are deliberately
-// excluded: pinning them would make the golden file churn on every run and say
-// nothing about the contract.
-type contractEnvelope struct {
-	Mode          string          `json:"mode"` // how the consumer produced it
-	TenantID      string          `json:"tenant_id"`
-	IntegrationID string          `json:"integration_id"`
-	ContentType   string          `json:"content_type"`
-	Source        string          `json:"source"`
-	StepHistory   []string        `json:"step_history"`
-	Metadata      map[string]any  `json:"metadata"`
-	Payload       json.RawMessage `json:"payload"`
-}
-
 func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
-	page, err := os.ReadFile(filepath.Join(fixtureDir, "transactions_page.json"))
+	page, err := os.ReadFile(filepath.Join(contract.Dir, "sitoo", "transactions_page.json"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -87,22 +66,13 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 	}
 
 	mu.Lock()
-	envs := make([]contractEnvelope, 0, len(*got))
+	envs := make([]contract.Envelope, 0, len(*got))
 	for i, env := range *got {
 		mode := "poll"
 		if i == len(*got)-1 {
 			mode = "webhook"
 		}
-		envs = append(envs, contractEnvelope{
-			Mode:          mode,
-			TenantID:      env.TenantID,
-			IntegrationID: env.IntegrationID,
-			ContentType:   env.ContentType,
-			Source:        env.Source,
-			StepHistory:   env.StepHistory,
-			Metadata:      env.Metadata,
-			Payload:       json.RawMessage(env.Payload),
-		})
+		envs = append(envs, contract.From(mode, env))
 	}
 	mu.Unlock()
 
@@ -110,20 +80,7 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 		t.Fatalf("captured %d envelopes, want 2 (one poll page, one webhook)", len(envs))
 	}
 
-	// Invariants the producer depends on. sitooProducer.Deliver drops a message
-	// permanently when the payload is not valid JSON, and routes on these two
-	// ids — so a consumer that stopped setting either would silently produce
-	// undeliverable traffic.
-	for _, e := range envs {
-		if !json.Valid(e.Payload) {
-			t.Errorf("%s payload is not valid JSON; the producer drops it as Permanent", e.Mode)
-		}
-		if e.TenantID == "" || e.IntegrationID == "" {
-			t.Errorf("%s envelope missing routing ids (tenant=%q integration=%q); the producer cannot "+
-				"look up a config without them and returns nil, dropping the record silently",
-				e.Mode, e.TenantID, e.IntegrationID)
-		}
-	}
+	contract.AssertRoutable(t, envs)
 
 	// The two paths do NOT emit the same shape, and that is the finding this
 	// test exists to record rather than hide: polling marshals the page's items
@@ -142,36 +99,5 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 		t.Errorf("webhook payload is not a JSON object: %v", err)
 	}
 
-	writeOrCompareGolden(t, envs)
-}
-
-func writeOrCompareGolden(t *testing.T, envs []contractEnvelope) {
-	t.Helper()
-	path := filepath.Join(fixtureDir, goldenName)
-
-	got, err := json.MarshalIndent(envs, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal golden: %v", err)
-	}
-	got = append(got, '\n')
-
-	if *updateGolden {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
-			t.Fatalf("write golden: %v", err)
-		}
-		t.Logf("wrote %s", path)
-		return
-	}
-
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read golden (%v) — regenerate with: go test ./cmd/sitoo-consumer/ -run TestSitooContract -update", err)
-	}
-	if string(got) != string(want) {
-		t.Errorf("the envelopes this consumer publishes no longer match %s.\n\n"+
-			"That file is what cmd/sitoo-producer's contract test replays, so this is a change to what "+
-			"the two services agree on — not just a test fixture. Check the producer still handles the "+
-			"new shape, then regenerate:\n"+
-			"  go test ./cmd/sitoo-consumer/ -run TestSitooContract -update\n\ngot:\n%s", path, got)
-	}
+	contract.Golden(t, "sitoo", envs)
 }

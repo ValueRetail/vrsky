@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/test/contract"
 )
 
 // The other half of the consumer→producer contract. See the header of
@@ -25,39 +24,10 @@ import (
 // isolation against payloads their own tests invented — which is the shape of
 // an integration that passes everywhere and fails in production.
 
-const goldenPath = "../../test/fixtures/sitoo/envelopes.golden.json"
-
-type contractEnvelope struct {
-	Mode          string          `json:"mode"`
-	TenantID      string          `json:"tenant_id"`
-	IntegrationID string          `json:"integration_id"`
-	ContentType   string          `json:"content_type"`
-	Source        string          `json:"source"`
-	StepHistory   []string        `json:"step_history"`
-	Metadata      map[string]any  `json:"metadata"`
-	Payload       json.RawMessage `json:"payload"`
-}
-
-func loadContractEnvelopes(t *testing.T) []contractEnvelope {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Clean(goldenPath))
-	if err != nil {
-		t.Fatalf("read %s (%v) — regenerate with: go test ./cmd/sitoo-consumer/ -run TestSitooContract -update", goldenPath, err)
-	}
-	var envs []contractEnvelope
-	if err := json.Unmarshal(raw, &envs); err != nil {
-		t.Fatalf("parse golden: %v", err)
-	}
-	if len(envs) == 0 {
-		t.Fatal("golden file is empty")
-	}
-	return envs
-}
-
 // TestSitooContract_ProducerSendsWhatTheConsumerPublished replays every envelope
 // the consumer emits and checks the resulting Sitoo request.
 func TestSitooContract_ProducerSendsWhatTheConsumerPublished(t *testing.T) {
-	for _, ce := range loadContractEnvelopes(t) {
+	for _, ce := range contract.Load(t, "sitoo") {
 		t.Run(ce.Mode, func(t *testing.T) {
 			var gotBody []byte
 			var gotPath, gotAuth, gotContentType string
@@ -126,7 +96,7 @@ func TestSitooContract_ProducerSendsWhatTheConsumerPublished(t *testing.T) {
 // meets it in a test rather than in a partner's error log.
 func TestSitooContract_PollAndWebhookSendDifferentShapes(t *testing.T) {
 	byMode := map[string]json.RawMessage{}
-	for _, ce := range loadContractEnvelopes(t) {
+	for _, ce := range contract.Load(t, "sitoo") {
 		byMode[ce.Mode] = ce.Payload
 	}
 

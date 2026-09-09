@@ -1,0 +1,49 @@
+[
+  {
+    "mode": "poll-array",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-visma",
+    "content_type": "application/json",
+    "source": "visma-consumer",
+    "step_history": [
+      "visma-consumer"
+    ],
+    "metadata": {
+      "record_count": 2,
+      "resource": "customer"
+    },
+    "payload": [
+      {
+        "customerNumber": "10001",
+        "name": "Value Retail AS",
+        "currencyId": "NOK"
+      },
+      {
+        "customerNumber": "10002",
+        "name": "Bicester Village Ltd",
+        "currencyId": "GBP"
+      }
+    ]
+  },
+  {
+    "mode": "poll-object",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-visma",
+    "content_type": "application/json",
+    "source": "visma-consumer",
+    "step_history": [
+      "visma-consumer"
+    ],
+    "metadata": {
+      "record_count": 1,
+      "resource": "customer"
+    },
+    "payload": [
+      {
+        "customerNumber": "10003",
+        "name": "La Vallee Village",
+        "currencyId": "EUR"
+      }
+    ]
+  }
+]
