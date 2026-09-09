@@ -200,6 +200,12 @@ spec:
       containers:
       - name: $name
         image: $ACR/$name:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "$NATS"
@@ -323,6 +329,23 @@ echo ">>> validating $MANIFEST"
 kubectl apply --dry-run=client -f "$MANIFEST" >/dev/null
 echo ">>> applying"
 kubectl apply -f "$MANIFEST"
+
+# Apply alone does NOT pick up a rebuilt image.
+#
+# The manifest pins :latest, so after a rebuild the Deployment spec is byte for
+# byte what the cluster already has. kubectl reports "unchanged", no new
+# ReplicaSet is created, no pod restarts, and the rollout status below returns
+# instantly — a completely successful-looking run that ships nothing. Re-running
+# this script after build-push-acr.sh was silently a no-op until this restart
+# was added.
+#
+# With imagePullPolicy: Always above, the restart is what makes the new image
+# reach the nodes.
+echo ">>> restarting to pick up rebuilt images"
+while read -r name role port; do
+  [ -z "$name" ] && continue
+  kubectl rollout restart deploy/vrsky-"$name" -n $NS >/dev/null
+done <<< "$ALL"
 
 echo ">>> waiting for rollouts"
 while read -r name role port; do

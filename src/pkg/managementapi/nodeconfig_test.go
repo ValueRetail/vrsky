@@ -573,3 +573,47 @@ func TestCoreServicesAreBuilt(t *testing.T) {
 		}
 	}
 }
+
+// A connector deploy has to actually replace the running image.
+//
+// deploy-connectors-azure.sh pins :latest, so after a rebuild the Deployment
+// spec is byte for byte what the cluster already has: kubectl reports
+// "unchanged", no ReplicaSet is created, nothing restarts, and the rollout
+// status that follows returns instantly. The run looks completely successful
+// and ships nothing — the same failure that redeployed a stale UI bundle on
+// 2026-09-07, in the connector path.
+//
+// Two things have to hold together for a deploy to land, and neither is
+// sufficient alone: every container pulls on start, and the script restarts
+// them. This checks both, on the generated manifest rather than the template,
+// so a service added to the table without the policy is caught.
+func TestConnectorDeployReplacesRunningImage(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+
+	manifest, err := os.ReadFile(filepath.Join(root, "infrastructure", "kubernetes", "connectors", "connectors.yaml"))
+	if err != nil {
+		t.Skipf("generated connector manifest not available (%v) — deploy guard skipped", err)
+	}
+	script, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-connectors-azure.sh"))
+	if err != nil {
+		t.Skipf("connector deploy script not available (%v) — deploy guard skipped", err)
+	}
+
+	images := regexp.MustCompile(`(?m)^\s*image:\s*\S+$`).FindAllString(string(manifest), -1)
+	policies := regexp.MustCompile(`(?m)^\s*imagePullPolicy:\s*Always\s*$`).FindAllString(string(manifest), -1)
+	if len(images) == 0 {
+		t.Fatal("no image: lines in the generated connector manifest — regenerate it with GENERATE_ONLY=1")
+	}
+	if len(policies) != len(images) {
+		t.Errorf("%d containers but only %d carry imagePullPolicy: Always — one of them would keep serving "+
+			"whatever :latest its node already cached", len(images), len(policies))
+	}
+
+	// Kubernetes infers Always from a :latest tag, so the policy alone is not
+	// what this is really about; the restart is. Without it the apply is a
+	// no-op and no pod ever pulls.
+	if !regexp.MustCompile(`kubectl rollout restart deploy/`).Match(script) {
+		t.Error("deploy-connectors-azure.sh never restarts a deployment; `kubectl apply` of an unchanged " +
+			":latest spec changes nothing, so a rebuilt image would never reach the cluster")
+	}
+}
