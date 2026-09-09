@@ -5,22 +5,39 @@
 //
 //   - GET with "X-CSRF-Token: Fetch"  → returns a CSRF token + session cookie
 //   - other GET                        → OData v2 page of sample sales orders,
-//                                        paginated via a relative __next link
+//     paginated via a relative __next link
 //   - POST/PATCH                       → requires the CSRF token, returns 201
+//   - GET /__test/received             → what has been POSTed to it so far
+//   - DELETE /__test/received          → forget it
+//
+// The two /__test routes exist so an automated end-to-end can assert that a
+// record actually arrived, rather than a human reading the log. Everything the
+// pipeline writes lands there; see test/integration/sap_e2e_test.go.
 //
 // NOT for production — it validates nothing and returns canned data.
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"sync"
 )
+
+// received holds the bodies POSTed to this mock, for the end-to-end test to
+// assert against. Unbounded is fine: the process is a test fixture with a
+// lifetime measured in minutes.
+var received struct {
+	mu     sync.Mutex
+	bodies []json.RawMessage
+}
 
 func main() {
 	addr := ":" + env("PORT", "8099")
+	http.HandleFunc("/__test/received", handleReceived)
 	http.HandleFunc("/", handle)
 	log.Printf("mock-sap listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
@@ -31,6 +48,27 @@ func env(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// handleReceived reports, or clears, what the pipeline has written here.
+func handleReceived(w http.ResponseWriter, r *http.Request) {
+	received.mu.Lock()
+	defer received.mu.Unlock()
+
+	switch r.Method {
+	case http.MethodDelete:
+		received.bodies = nil
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		out := received.bodies
+		if out == nil {
+			out = []json.RawMessage{}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func handle(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +107,11 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		log.Printf("%s accepted %d bytes: %s", r.Method, len(body), string(body))
+		if json.Valid(body) {
+			received.mu.Lock()
+			received.bodies = append(received.bodies, json.RawMessage(body))
+			received.mu.Unlock()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, `{"d":{"SalesOrder":"6001"}}`)

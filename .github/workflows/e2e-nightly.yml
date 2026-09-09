@@ -1,0 +1,108 @@
+name: End-to-end (nightly)
+
+# Proves a record travels the whole platform:
+#
+#   mock-sap -> sap-s4hana-consumer -> NATS -> sap-s4hana-producer -> mock-sap
+#
+# with the real binaries, the real bus and the real management database. Only
+# SAP itself is fake (cmd/mock-sap), so nothing inside VRSky is stubbed.
+#
+# WHY NIGHTLY AND NOT PER-PR. Several processes starting up and talking over a
+# message bus is the classic source of a flaky test, and a false alarm that
+# blocks a merge teaches everyone to ignore the signal — which is worse than
+# having no test. This runs on a schedule so a flake costs a morning's glance
+# instead. Promote it to pull_request once it has a stable track record; the
+# test itself needs no change, only this trigger.
+#
+# Run it on demand from the Actions tab (workflow_dispatch) whenever a change
+# touches the connectors, the SDK or the envelope.
+
+on:
+  schedule:
+    # 03:15 UTC daily — after any evening merges, before the working day.
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  sap-e2e:
+    name: SAP round trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # Authenticated pulls where the secrets exist: anonymous Docker Hub pulls
+      # from shared runner IPs are rate-limited. Same pattern as integration.yml.
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      # management-api is here for one reason: it runs the migrations on
+      # startup, so it is what creates the connections table the test seeds.
+      - name: Start the platform
+        run: |
+          docker compose up -d --build \
+            nats postgres-management management-api \
+            mock-sap sap-s4hana-consumer sap-s4hana-producer
+
+      - name: Wait for the platform to be ready
+        run: |
+          # Wait on real reachability rather than a fixed sleep, from inside
+          # vrsky-network so services resolve by name.
+          wait_tcp() {
+            local hostport="$1" name="$2" tries=60
+            for i in $(seq 1 "$tries"); do
+              if docker run --rm --network vrsky-network busybox \
+                   sh -c "nc -z -w2 ${hostport/:/ }" >/dev/null 2>&1; then
+                echo "$name ready ($hostport)"; return 0
+              fi
+              echo "waiting for $name ($hostport)… [$i/$tries]"; sleep 2
+            done
+            echo "ERROR: $name ($hostport) never became ready"; return 1
+          }
+          wait_tcp nats:4222              nats
+          wait_tcp postgres-management:5432 postgres
+          wait_tcp mock-sap:8099          mock-sap
+          # The test itself waits for the migrated schema; the connectors only
+          # need to have subscribed, which they do within a second of starting.
+          sleep 5
+
+      - name: Run the end-to-end
+        run: |
+          docker run --rm --network vrsky-network \
+            -v "$PWD/src":/src -w /src \
+            -e SAP_E2E_TEST=1 \
+            -e E2E_NATS_URL=nats://nats:4222 \
+            -e E2E_DB_URL="postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable" \
+            -e E2E_MOCK_SAP_URL=http://mock-sap:8099 \
+            -e GOFLAGS=-buildvcs=false \
+            golang:1.22 \
+            go test -tags=integration -count=1 -v -timeout 10m ./test/integration/ -run TestSAP_EndToEnd
+
+      # The failure mode this test exists to catch is silent: a connector that
+      # cannot parse its config logs at Debug and simply never starts polling.
+      # The logs are the only place that shows up, so always collect them.
+      - name: Dump platform logs on failure
+        if: failure()
+        run: |
+          echo "=== sap-s4hana-consumer ==="
+          docker compose logs --tail=200 sap-s4hana-consumer || true
+          echo "=== sap-s4hana-producer ==="
+          docker compose logs --tail=200 sap-s4hana-producer || true
+          echo "=== mock-sap ==="
+          docker compose logs --tail=200 mock-sap || true
+          echo "=== management-api (migrations) ==="
+          docker compose logs --tail=100 management-api || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
