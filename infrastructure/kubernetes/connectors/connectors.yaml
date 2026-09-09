@@ -621,6 +621,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-sitoo-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: sitoo-producer
         image: vrskyprodacr.azurecr.io/vrsky/sitoo-producer:latest
@@ -710,6 +722,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-front-systems-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: front-systems-producer
         image: vrskyprodacr.azurecr.io/vrsky/front-systems-producer:latest
@@ -799,6 +823,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-business-central-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: business-central-producer
         image: vrskyprodacr.azurecr.io/vrsky/business-central-producer:latest
@@ -888,6 +924,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-visma-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: visma-producer
         image: vrskyprodacr.azurecr.io/vrsky/visma-producer:latest
@@ -977,6 +1025,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-brightpearl-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: brightpearl-producer
         image: vrskyprodacr.azurecr.io/vrsky/brightpearl-producer:latest
@@ -1066,6 +1126,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-sap-s4hana-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: sap-s4hana-producer
         image: vrskyprodacr.azurecr.io/vrsky/sap-s4hana-producer:latest
@@ -2453,6 +2525,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-cloud-storage-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: cloud-storage-producer
         image: vrskyprodacr.azurecr.io/vrsky/cloud-storage-producer:latest
@@ -2542,6 +2626,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-sftp-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: sftp-producer
         image: vrskyprodacr.azurecr.io/vrsky/sftp-producer:latest
@@ -2631,6 +2727,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-kafka-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: kafka-producer
         image: vrskyprodacr.azurecr.io/vrsky/kafka-producer:latest
@@ -2720,6 +2828,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-rabbitmq-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: rabbitmq-producer
         image: vrskyprodacr.azurecr.io/vrsky/rabbitmq-producer:latest
@@ -2809,6 +2929,18 @@ spec:
         tier: connector
         role: producer
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-salesforce-producer
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: salesforce-producer
         image: vrskyprodacr.azurecr.io/vrsky/salesforce-producer:latest
