@@ -65,7 +65,10 @@ Atom/XML by default.
 ```
 
 **Live schema preview** — the consumer serves `POST /sample-data/` on its
-auxiliary HTTP port (9290 in dev compose), so the pipeline builder can show the
+auxiliary HTTP port (9290 in dev compose). The builder reaches it through
+`POST /api/v1/schema-discovery/sap_s4hana` rather than calling the port
+directly, so the request is authenticated and the workspace comes from the
+session. The endpoint exists so the pipeline builder can show the
 real record shape *before* the connection is deployed. See
 [schema discovery](index.md#conventions).
 

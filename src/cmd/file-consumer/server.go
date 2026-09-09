@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/tenantpath"
 	"github.com/google/uuid"
 )
 
@@ -286,19 +287,21 @@ func (s *fileConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
-		var dirPath string
+		var dirPath, tenantID string
 		switch r.Method {
 		case http.MethodGet:
 			dirPath = r.URL.Query().Get("path")
+			tenantID = r.URL.Query().Get("tenant_id")
 		case http.MethodPost:
 			var body struct {
-				Path string `json:"path"`
+				Path     string `json:"path"`
+				TenantID string `json:"tenant_id"`
 			}
 			if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
 				writeSampleErr(w, "Invalid request body")
 				return
 			}
-			dirPath = body.Path
+			dirPath, tenantID = body.Path, body.TenantID
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -308,6 +311,28 @@ func (s *fileConsumer) handleSampleData() http.HandlerFunc {
 			writeSampleErr(w, "path is required")
 			return
 		}
+
+		// Confine the read to the requesting workspace's own files.
+		//
+		// This endpoint used to take a bare directory and check it only against
+		// the mounted roots, so anything under the shared volume was readable
+		// through it — including another workspace's files (left unfixed in
+		// #227 for want of an identity to check against). It can be closed now
+		// because the request arrives through the management API, which sets
+		// tenant_id from the session; a browser cannot name a workspace it does
+		// not belong to.
+		//
+		// A request without a tenant is refused rather than falling back to the
+		// old behaviour: the fallback IS the hole.
+		resolved, err := tenantpath.Resolve(s.baseDir, tenantID, dirPath)
+		if err != nil {
+			s.logger.Warn("Sample data request blocked", "path", dirPath, "tenant_id", tenantID, "error", err)
+			writeSampleErr(w, "path not allowed")
+			return
+		}
+		dirPath = resolved
+
+		// Belt and braces: the mounted-root check still runs.
 		if !s.isSamplePathAllowed(dirPath) {
 			s.logger.Warn("Sample data request blocked", "path", dirPath)
 			writeSampleErr(w, "path not allowed")
@@ -408,18 +433,12 @@ func pickSampleFile(dir string) (string, []byte, error) {
 // under the configured BaseDir or under HOST_HOME is permitted.
 // isSamplePathAllowed confines sample reads to a mounted root.
 //
-// STILL NOT TENANT-SCOPED. The watch and output paths are now confined to the
-// requesting tenant's own subtree (pkg/tenantpath), but this endpoint cannot
-// be: it takes a bare directory from the caller and carries no tenant or
-// connection identity to check it against. Anything under the shared base is
-// therefore readable through it, including another tenant's files.
-//
-// It is not reachable from outside the cluster — the worker aux ports are not
-// published, and #224 moved the builder's other worker calls behind the
-// management API for exactly this reason. Closing this one means the same
-// treatment: take a connection ID, resolve the tenant from it, and proxy it
-// with an ownership check, which changes the endpoint's contract and its UI
-// caller. Tracked as the remaining piece of this work.
+// It is the second of two checks now, not the only one: handleSampleData first
+// resolves the requested directory into the requesting workspace's own subtree
+// (pkg/tenantpath). This one then keeps that result inside a directory the
+// process is meant to read at all — a different question, and still worth
+// asking, since a tenant root under an unmounted base would pass the first
+// check and fail this one.
 func (s *fileConsumer) isSamplePathAllowed(path string) bool {
 	abs, err := filepath.Abs(path)
 	if err != nil {
