@@ -36,6 +36,12 @@ spec:
       containers:
       - name: sitoo-consumer
         image: vrskyprodacr.azurecr.io/vrsky/sitoo-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -128,6 +134,12 @@ spec:
       containers:
       - name: front-systems-consumer
         image: vrskyprodacr.azurecr.io/vrsky/front-systems-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -220,6 +232,12 @@ spec:
       containers:
       - name: brightpearl-consumer
         image: vrskyprodacr.azurecr.io/vrsky/brightpearl-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -312,6 +330,12 @@ spec:
       containers:
       - name: business-central-consumer
         image: vrskyprodacr.azurecr.io/vrsky/business-central-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -404,6 +428,12 @@ spec:
       containers:
       - name: visma-consumer
         image: vrskyprodacr.azurecr.io/vrsky/visma-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -496,6 +526,12 @@ spec:
       containers:
       - name: sap-s4hana-consumer
         image: vrskyprodacr.azurecr.io/vrsky/sap-s4hana-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -588,6 +624,12 @@ spec:
       containers:
       - name: sitoo-producer
         image: vrskyprodacr.azurecr.io/vrsky/sitoo-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -671,6 +713,12 @@ spec:
       containers:
       - name: front-systems-producer
         image: vrskyprodacr.azurecr.io/vrsky/front-systems-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -754,6 +802,12 @@ spec:
       containers:
       - name: business-central-producer
         image: vrskyprodacr.azurecr.io/vrsky/business-central-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -837,6 +891,12 @@ spec:
       containers:
       - name: visma-producer
         image: vrskyprodacr.azurecr.io/vrsky/visma-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -920,6 +980,12 @@ spec:
       containers:
       - name: brightpearl-producer
         image: vrskyprodacr.azurecr.io/vrsky/brightpearl-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1003,6 +1069,12 @@ spec:
       containers:
       - name: sap-s4hana-producer
         image: vrskyprodacr.azurecr.io/vrsky/sap-s4hana-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1086,6 +1158,12 @@ spec:
       containers:
       - name: api-consumer
         image: vrskyprodacr.azurecr.io/vrsky/api-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1186,6 +1264,12 @@ spec:
       containers:
       - name: webhook-consumer
         image: vrskyprodacr.azurecr.io/vrsky/webhook-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1278,6 +1362,12 @@ spec:
       containers:
       - name: file-consumer
         image: vrskyprodacr.azurecr.io/vrsky/file-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1379,6 +1469,12 @@ spec:
       containers:
       - name: db-consumer
         image: vrskyprodacr.azurecr.io/vrsky/db-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1471,6 +1567,12 @@ spec:
       containers:
       - name: cloud-storage-consumer
         image: vrskyprodacr.azurecr.io/vrsky/cloud-storage-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1563,6 +1665,12 @@ spec:
       containers:
       - name: sftp-consumer
         image: vrskyprodacr.azurecr.io/vrsky/sftp-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1655,6 +1763,12 @@ spec:
       containers:
       - name: kafka-consumer
         image: vrskyprodacr.azurecr.io/vrsky/kafka-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1747,6 +1861,12 @@ spec:
       containers:
       - name: rabbitmq-consumer
         image: vrskyprodacr.azurecr.io/vrsky/rabbitmq-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1839,6 +1959,12 @@ spec:
       containers:
       - name: salesforce-consumer
         image: vrskyprodacr.azurecr.io/vrsky/salesforce-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -1939,6 +2065,12 @@ spec:
       containers:
       - name: tenant-consumer
         image: vrskyprodacr.azurecr.io/vrsky/tenant-consumer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2011,6 +2143,12 @@ spec:
       containers:
       - name: http-producer
         image: vrskyprodacr.azurecr.io/vrsky/http-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2111,6 +2249,12 @@ spec:
       containers:
       - name: db-producer
         image: vrskyprodacr.azurecr.io/vrsky/db-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2203,6 +2347,12 @@ spec:
       containers:
       - name: file-producer
         image: vrskyprodacr.azurecr.io/vrsky/file-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2306,6 +2456,12 @@ spec:
       containers:
       - name: cloud-storage-producer
         image: vrskyprodacr.azurecr.io/vrsky/cloud-storage-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2389,6 +2545,12 @@ spec:
       containers:
       - name: sftp-producer
         image: vrskyprodacr.azurecr.io/vrsky/sftp-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2472,6 +2634,12 @@ spec:
       containers:
       - name: kafka-producer
         image: vrskyprodacr.azurecr.io/vrsky/kafka-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2555,6 +2723,12 @@ spec:
       containers:
       - name: rabbitmq-producer
         image: vrskyprodacr.azurecr.io/vrsky/rabbitmq-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
@@ -2638,6 +2812,12 @@ spec:
       containers:
       - name: salesforce-producer
         image: vrskyprodacr.azurecr.io/vrsky/salesforce-producer:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
         env:
         - name: NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
