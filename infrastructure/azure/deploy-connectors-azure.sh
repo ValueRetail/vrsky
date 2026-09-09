@@ -166,12 +166,39 @@ EOF
 }
 
 emit() {  # $1=name  $2=role  $3=port ("-" for none)
-  local name="$1" role="$2" port="$3" replicas=1 scaled=""
+  local name="$1" role="$2" port="$3" replicas=1 scaled="" affinity=""
   [ "$port" = "-" ] && port=""
   # Pure pull-durable subscriber (producer, no HTTP surface) → safe to scale.
   if [ "$role" = "producer" ] && [ -z "$port" ]; then
     replicas=2
     scaled=yes
+    # Keep the two replicas off one node, or the HA they exist for is
+    # imaginary. The PodDisruptionBudget below only covers VOLUNTARY
+    # disruption — a drain, an upgrade — and does nothing about a node
+    # failing, which is the case two replicas are meant to survive.
+    #
+    # This is not hypothetical: the 2026-09-09 rollout restarted every
+    # connector at once and Kubernetes packed most of the new pods onto the
+    # node that had room, leaving several pairs co-located.
+    #
+    # PREFERRED, not required, and deliberately so. The pool is two nodes; a
+    # hard rule would leave the second replica Pending whenever one node is
+    # cordoned — during exactly the node upgrade that HA is supposed to ride
+    # out — and would stall the rollout as well. Preferred spreads when it
+    # can and degrades to co-location rather than to nothing. Matches the
+    # shape already used by infrastructure/kubernetes/ui/deployment.yaml.
+    affinity="      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vrsky-$name
+              topologyKey: kubernetes.io/hostname"
   fi
 
   cat <<EOF
@@ -197,7 +224,8 @@ spec:
         tier: connector
         role: $role
     spec:
-      containers:
+${affinity:+$affinity
+}      containers:
       - name: $name
         image: $ACR/$name:latest
         # Explicit, though Kubernetes would infer Always from the :latest tag.

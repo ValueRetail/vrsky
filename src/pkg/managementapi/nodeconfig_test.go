@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func edgeNode(id, nodeType, config string) *Node {
@@ -615,5 +617,94 @@ func TestConnectorDeployReplacesRunningImage(t *testing.T) {
 	if !regexp.MustCompile(`kubectl rollout restart deploy/`).Match(script) {
 		t.Error("deploy-connectors-azure.sh never restarts a deployment; `kubectl apply` of an unchanged " +
 			":latest spec changes nothing, so a rebuilt image would never reach the cluster")
+	}
+}
+
+// A two-replica connector must not be able to land both replicas on one node.
+//
+// The replica count and the PodDisruptionBudget together look like HA, and are
+// not: a PDB constrains VOLUNTARY disruption — a drain, an upgrade — and does
+// nothing about a node failing, which is the case the second replica exists
+// for. Without anti-affinity the scheduler is free to co-locate the pair, and
+// on 2026-09-09 it did: restarting every connector at once packed most of the
+// new pods onto whichever node had room.
+//
+// The selector is checked as well as the presence, because an anti-affinity
+// that names a DIFFERENT deployment is the quiet failure here — it parses,
+// applies, schedules, and spreads nothing.
+func TestScaledConnectorsSpreadAcrossNodes(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "infrastructure", "kubernetes", "connectors", "connectors.yaml"))
+	if err != nil {
+		t.Skipf("generated connector manifest not available (%v) — HA guard skipped", err)
+	}
+
+	type deployment struct {
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+		Spec struct {
+			Replicas int `yaml:"replicas"`
+			Template struct {
+				Spec struct {
+					Affinity struct {
+						PodAntiAffinity struct {
+							Preferred []struct {
+								PodAffinityTerm struct {
+									TopologyKey   string `yaml:"topologyKey"`
+									LabelSelector struct {
+										MatchExpressions []struct {
+											Key    string   `yaml:"key"`
+											Values []string `yaml:"values"`
+										} `yaml:"matchExpressions"`
+									} `yaml:"labelSelector"`
+								} `yaml:"podAffinityTerm"`
+							} `yaml:"preferredDuringSchedulingIgnoredDuringExecution"`
+						} `yaml:"podAntiAffinity"`
+					} `yaml:"affinity"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+		Kind string `yaml:"kind"`
+	}
+
+	var scaled int
+	for _, doc := range strings.Split(string(raw), "\n---\n") {
+		var d deployment
+		if err := yaml.Unmarshal([]byte(doc), &d); err != nil {
+			continue // services, PDBs and the PVC parse into a zero value or fail; skip
+		}
+		if d.Kind != "Deployment" || d.Spec.Replicas < 2 {
+			continue
+		}
+		scaled++
+
+		terms := d.Spec.Template.Spec.Affinity.PodAntiAffinity.Preferred
+		if len(terms) == 0 {
+			t.Errorf("%s runs %d replicas with no podAntiAffinity — both can be scheduled onto one node, "+
+				"and the PodDisruptionBudget will not help when that node fails",
+				d.Metadata.Name, d.Spec.Replicas)
+			continue
+		}
+		term := terms[0].PodAffinityTerm
+		if term.TopologyKey != "kubernetes.io/hostname" {
+			t.Errorf("%s spreads over %q, not nodes", d.Metadata.Name, term.TopologyKey)
+		}
+
+		var selects string
+		for _, e := range term.LabelSelector.MatchExpressions {
+			if e.Key == "app" && len(e.Values) > 0 {
+				selects = e.Values[0]
+			}
+		}
+		if selects != d.Metadata.Name {
+			t.Errorf("%s's anti-affinity selects app=%q — it must select its own pods, or it spreads "+
+				"this deployment away from a different one and does nothing for its own replicas",
+				d.Metadata.Name, selects)
+		}
+	}
+
+	if scaled == 0 {
+		t.Fatal("found no multi-replica deployments in the generated manifest — regenerate it with GENERATE_ONLY=1")
 	}
 }
