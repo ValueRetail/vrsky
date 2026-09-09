@@ -1,0 +1,30 @@
+[
+  {
+    "mode": "poll",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-bc",
+    "content_type": "application/json",
+    "source": "business-central-consumer",
+    "step_history": [
+      "business-central-consumer"
+    ],
+    "metadata": {
+      "entity": "items",
+      "record_count": 2
+    },
+    "payload": [
+      {
+        "id": "9f1e-1",
+        "number": "1896-S",
+        "displayName": "ATHENS Desk",
+        "unitPrice": 1000.8
+      },
+      {
+        "id": "9f1e-2",
+        "number": "1900-S",
+        "displayName": "PARIS Guest Chair",
+        "unitPrice": 193.7
+      }
+    ]
+  }
+]

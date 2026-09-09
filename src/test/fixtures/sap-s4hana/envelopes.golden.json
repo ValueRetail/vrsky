@@ -1,0 +1,56 @@
+[
+  {
+    "mode": "poll-odata-v2",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-sap",
+    "content_type": "application/json",
+    "source": "sap-s4hana-consumer",
+    "step_history": [
+      "sap-s4hana-consumer"
+    ],
+    "metadata": {
+      "entity_set": "A_SalesOrder",
+      "record_count": 2,
+      "service": ""
+    },
+    "payload": [
+      {
+        "SalesOrder": "4500001",
+        "SoldToParty": "17",
+        "TotalNetAmount": "1249.00"
+      },
+      {
+        "SalesOrder": "4500002",
+        "SoldToParty": "17",
+        "TotalNetAmount": "199.00"
+      }
+    ]
+  },
+  {
+    "mode": "poll-odata-v4",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-sap",
+    "content_type": "application/json",
+    "source": "sap-s4hana-consumer",
+    "step_history": [
+      "sap-s4hana-consumer"
+    ],
+    "metadata": {
+      "entity_set": "A_Product",
+      "record_count": 2,
+      "service": ""
+    },
+    "payload": [
+      {
+        "Product": "VR-TSHIRT-M-BLK",
+        "ProductType": "FERT",
+        "BaseUnit": "PC"
+      },
+      {
+        "Product": "VR-CAP-OS-RED",
+        "ProductType": "FERT",
+        "BaseUnit": "PC"
+      }
+    ]
+  }
+]

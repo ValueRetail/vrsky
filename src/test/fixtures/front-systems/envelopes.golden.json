@@ -1,0 +1,23 @@
+[
+  {
+    "mode": "webhook",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-fs",
+    "content_type": "application/json",
+    "source": "front-systems-consumer",
+    "step_history": [
+      "front-systems-consumer"
+    ],
+    "metadata": {
+      "event_type": "SaleCreated",
+      "mode": "webhook"
+    },
+    "payload": {
+      "event": "SaleCreated",
+      "saleId": 8842,
+      "storeId": 17,
+      "totalAmount": 1249.00,
+      "currency": "NOK"
+    }
+  }
+]

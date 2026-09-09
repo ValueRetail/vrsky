@@ -1,0 +1,49 @@
+[
+  {
+    "mode": "poll",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-bp",
+    "content_type": "application/json",
+    "source": "brightpearl-consumer",
+    "step_history": [
+      "brightpearl-consumer"
+    ],
+    "metadata": {
+      "resource": "/order-service/order-search"
+    },
+    "payload": {
+      "results": [
+        [
+          45001,
+          "2026-09-09T08:14:22Z",
+          "SO-4501",
+          "1249.00"
+        ],
+        [
+          45002,
+          "2026-09-09T08:19:03Z",
+          "SO-4502",
+          "199.00"
+        ]
+      ]
+    }
+  },
+  {
+    "mode": "webhook",
+    "tenant_id": "tenant-vr",
+    "integration_id": "conn-bp",
+    "content_type": "application/json",
+    "source": "brightpearl-consumer",
+    "step_history": [
+      "brightpearl-consumer"
+    ],
+    "metadata": {
+      "mode": "webhook"
+    },
+    "payload": {
+      "lifecycleEvent": "order.created",
+      "resourceType": "order",
+      "id": "45001"
+    }
+  }
+]
