@@ -32,8 +32,8 @@ func TestGetConnectionConfigs_NoFileNode(t *testing.T) {
 	mock.MatchExpectationsInOrder(false)
 	mock.ExpectQuery("FROM connections WHERE id").
 		WithArgs(connID).
-		WillReturnRows(sqlmock.NewRows([]string{"name", "nodes", "edges"}).
-			AddRow("Webhook HTTP", []byte(nodes), []byte(`[]`)))
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "name", "nodes", "edges"}).
+			AddRow("tenant-1", "Webhook HTTP", []byte(nodes), []byte(`[]`)))
 
 	p := &fileProducer{
 		db:               db,
@@ -78,8 +78,8 @@ func TestFileProducer_RoundTrip(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		mock.ExpectQuery("FROM connections WHERE id").
 			WithArgs(connID).
-			WillReturnRows(sqlmock.NewRows([]string{"name", "nodes", "edges"}).
-				AddRow("Round Trip", []byte(nodes), []byte(`[]`)))
+			WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "name", "nodes", "edges"}).
+				AddRow("tenant-1", "Round Trip", []byte(nodes), []byte(`[]`)))
 	}
 
 	p := &fileProducer{}
@@ -93,8 +93,9 @@ func TestFileProducer_RoundTrip(t *testing.T) {
 	env.Payload = []byte(`{"hello":"world"}`)
 	h.Publish(t, env)
 
-	// The folder feature writes under <outDir>/<sanitized connection name>/.
-	wantPath := filepath.Join(outDir, "Round Trip", "rt-env-1.json")
+	// The folder feature writes under the connection's sanitized name, inside
+	// the tenant's own subtree of the output root (pkg/tenantpath).
+	wantPath := filepath.Join(outDir, "tenant-1", "Round Trip", "rt-env-1.json")
 	harness.Eventually(t, 5*time.Second, "file written to "+wantPath, func() bool {
 		_, err := os.Stat(wantPath)
 		return err == nil
