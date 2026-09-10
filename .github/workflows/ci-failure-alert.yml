@@ -1,0 +1,113 @@
+name: CI failure alert
+
+# Opens a GitHub issue when a workflow goes red on main, and closes it when the
+# same workflow goes green again.
+#
+# WHY THIS EXISTS. A failure on main is invisible in a way a failure on a PR is
+# not. Nothing blocks, nothing turns red where anyone is looking, and the only
+# signal is an email that competes with every other GitHub email. Two pushes to
+# main on 2026-09-09 failed to publish their images (runs 34349712198 and
+# 34351200525) and neither was noticed until someone went looking days later —
+# both branch builds had passed, so the PRs themselves said nothing.
+#
+# An issue is the right medium here precisely because it is stateful: it stays
+# open while the problem is real, collects a comment per repeat failure instead
+# of a new issue, and closes itself once main is green. That is what keeps the
+# signal worth reading. A notification that fires forever after the fix is how
+# people learn to ignore a channel.
+#
+# NOTE: workflow_run only ever runs the copy of this file on the default branch,
+# so changes here do nothing until they are merged.
+
+on:
+  workflow_run:
+    workflows:
+      - "Build and Push Docker Images"
+      - "End-to-end (nightly)"
+      - "Integration Tests"
+      - "DR Restore Drill"
+      - "docs"
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  alert:
+    name: Open or close the CI failure issue
+    runs-on: ubuntu-latest
+    # main only: a pull_request run's failure is already visible on the PR, and
+    # filing an issue for it would be noise. Cancelled and skipped are not
+    # outcomes worth telling anyone about.
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      contains(fromJSON('["failure", "success"]'), github.event.workflow_run.conclusion)
+
+    steps:
+      - name: File, update or resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+            const label = 'ci-failure';
+            const title = `CI red on main: ${run.name}`;
+
+            // Keyed by workflow name so each workflow gets at most one open
+            // issue, however many times it fails.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: label, per_page: 100,
+            });
+            const existing = open.find(i => i.title === title);
+
+            const sha = run.head_sha.slice(0, 8);
+            const where = `[run ${run.id}](${run.html_url}) · \`${sha}\` · ${run.event}`;
+
+            if (run.conclusion === 'success') {
+              if (!existing) return;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: `**${run.name} is green again on main.** ${where}\n\nClosing.`,
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, state: 'closed',
+              });
+              core.notice(`Closed #${existing.number}: ${run.name} recovered`);
+              return;
+            }
+
+            const body = [
+              `**${run.name} failed on main.**`,
+              '',
+              where,
+              '',
+              'A failure on main blocks nothing and shows up nowhere anyone is looking,',
+              'which is why this issue exists. It closes by itself when the same workflow',
+              'next succeeds on main — so if it is open, main is still red.',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: `Failed again. ${where}`,
+              });
+              core.notice(`Commented on #${existing.number}: ${run.name} failed again`);
+              return;
+            }
+
+            // The label may not exist yet on a fresh repo; creating an issue
+            // with an unknown label is rejected, so make sure of it first.
+            try {
+              await github.rest.issues.createLabel({
+                owner, repo, name: label, color: 'B60205',
+                description: 'A workflow is failing on main',
+              });
+            } catch (e) {
+              if (e.status !== 422) throw e; // 422 = already exists
+            }
+
+            const issue = await github.rest.issues.create({
+              owner, repo, title, body, labels: [label],
+            });
+            core.notice(`Opened #${issue.data.number}: ${run.name} failed on main`);
