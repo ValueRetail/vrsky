@@ -135,9 +135,13 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      - name: Run tests
+      # test:coverage, not test: vitest.config.ts declares 80/75/80/80
+      # thresholds, and until now nothing ran them. The numbers were config, not
+      # a gate — the suite sat at 78% statements for as long as anyone had
+      # looked. Same shape as the gofmt check added in #236.
+      - name: Run tests with coverage thresholds
         working-directory: ui
-        run: npm run test
+        run: npm run test:coverage
 
       - name: Build UI
         working-directory: ui
