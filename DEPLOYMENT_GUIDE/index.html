@@ -3834,22 +3834,20 @@ make<span class="w"> </span>docker-push-converter
 <td>ghcr.io/ValueRetail/vrsky/file-producer</td>
 </tr>
 <tr>
-<td>postgres-consumer</td>
-<td>src/cmd/postgres-consumer</td>
-<td>ghcr.io/ValueRetail/vrsky/postgres-consumer</td>
-</tr>
-<tr>
-<td>postgres-producer</td>
-<td>src/cmd/postgres-producer</td>
-<td>ghcr.io/ValueRetail/vrsky/postgres-producer</td>
-</tr>
-<tr>
 <td>ui</td>
 <td>ui</td>
 <td>ghcr.io/ValueRetail/vrsky/ui</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition note">
+<p class="admonition-title">postgres-consumer / postgres-producer are not built here</p>
+<p>They are CDC workers configured from <code>POSTGRES_INPUT_*</code> environment
+variables, predating the connection-config model, and <code>postgres</code> is not a
+node type — no tenant can build a pipeline that uses them. They remain as a
+load-harness fixture (<code>tests/load/</code>), and <code>docker-compose</code> builds them
+locally from source, so no published image is needed.</p>
+</div>
 <h3 id="image-tags">Image Tags<a class="headerlink" href="#image-tags" title="Permanent link">&para;</a></h3>
 <p>Each build creates <strong>multiple tags</strong>:</p>
 <div class="highlight"><pre><span></span><code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:latest        # Always latest from main
