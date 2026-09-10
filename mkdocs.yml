@@ -56,6 +56,7 @@ nav:
       - Install: operator/install.md
       - Upgrade: operator/upgrade.md
       - Backup & restore: operator/backup.md
+      - Cost-parking the cluster: operator/cost-parking.md
       - Monitoring: operator/monitoring.md
       - Troubleshooting: operator/troubleshooting.md
       - Encryption-at-rest checklist: operator/encryption-at-rest.md

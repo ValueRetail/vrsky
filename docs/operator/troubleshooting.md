@@ -13,6 +13,23 @@ docker compose up -d --build        # -d = background
 docker compose logs -f management-api   # follow one service on demand
 ```
 
+## The production URL does not respond at all
+
+Before treating this as an outage, check whether the cluster is simply parked:
+
+```bash
+az aks show -g vrsky-prod -n vrsky-prod --query powerState.code -o tsv
+```
+
+`Stopped` means someone deallocated the nodes to save money, which is the
+normal state between pilots. Start it with `az aks start -g vrsky-prod -n
+vrsky-prod` and give it several minutes. See
+[Cost-parking the cluster](cost-parking.md).
+
+A parked cluster is indistinguishable from an outage from the outside: the IP
+still resolves (it is static), nothing answers on it, and no alert fires
+because nothing crashed.
+
 ## A pipeline deploys but no data flows
 
 1. Confirm it's **running** (Settings/Connections, or the connection status).
