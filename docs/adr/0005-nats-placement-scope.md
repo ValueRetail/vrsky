@@ -188,6 +188,9 @@ would leave exactly the trap #209 was filed about.
    `ErrTenantNATSNotRoutable` unless `VRSKY_ALLOW_TENANT_NATS=1`.
 4. [x] Name the data plane in the API: `data_plane: "platform-nats"` on the
    nats-instances payload, beside the `urls` that read like routing.
-5. [ ] Re-scope #19 and close #209 against this ADR (issue admin).
+5. [x] Re-scope #19 and close #209 against this ADR. #209 closed COMPLETED by
+   #242 with the outcome recorded on it; the narrowed scope and the JetStream
+   prerequisite are on #19, and the "discovery returns URLs nothing routes to"
+   constraint is on #21.
 6. [x] The JetStream prerequisite is recorded above and in the guard's own
    comment — the place someone lands when they try to provision one.
