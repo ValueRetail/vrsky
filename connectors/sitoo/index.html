@@ -1483,6 +1483,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#events-are-dereferenced-not-forwarded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Events are dereferenced, not forwarded
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2207,6 +2218,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#events-are-dereferenced-not-forwarded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Events are dereferenced, not forwarded
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2282,6 +2304,10 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <li><code>poll_interval_seconds</code> — poll cadence. Set <code>0</code> (or omit) for <strong>webhook-only</strong>.</li>
 <li><code>page_size</code> — Sitoo <code>num</code> (default <code>1000</code>; 1000–5000 is optimal).</li>
 <li><code>base_url</code> — optional override (default <code>https://api.mysitoo.com/v2</code>).</li>
+<li><code>webhook_raw_event</code> — forward SPI event bodies verbatim instead of
+  dereferencing them. See below; leave unset unless you mean it.</li>
+<li><code>webhook_id_field</code> — override the event field holding the resource id. The
+  default follows Sitoo's naming (<code>transactions</code> → <code>transactionid</code>).</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitoo"</span><span class="p">,</span>
@@ -2302,9 +2328,24 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <p>Point Sitoo's SPI Events at the connector's auxiliary HTTP endpoint:</p>
 <div class="highlight"><pre><span></span><code>POST /sitoo/events/{connectionID}
 </code></pre></div>
-<p>served on <code>WORKER_HTTP_PORT</code> (9260 in compose). Each event body is published as a
-message routed to the owning tenant/connection. Configure the connection with
+<p>served on <code>WORKER_HTTP_PORT</code> (9260 in compose). Configure the connection with
 <code>poll_interval_seconds: 0</code> if you want webhook-only (no polling).</p>
+<h3 id="events-are-dereferenced-not-forwarded">Events are dereferenced, not forwarded<a class="headerlink" href="#events-are-dereferenced-not-forwarded" title="Permanent link">&para;</a></h3>
+<p>An SPI event is a <strong>notification</strong>, not a resource — it carries
+<code>{eventid, eventtype, &lt;resource&gt;id}</code> and nothing else. The connector fetches the
+resource the event names and publishes it in the same shape the poll path uses:
+a JSON array of resource objects, with <code>dereferenced: true</code> in the envelope
+metadata.</p>
+<p>That matters because it is what makes the two modes interchangeable. Forwarding
+the event verbatim meant a webhook-fed pipeline delivered an event object where
+a poll-fed one delivered an array of transactions — and a <code>sitoo</code> destination
+POSTs whichever it receives to the same collection endpoint, so only one of them
+was a write it could make sense of.</p>
+<p>One extra GET per event is the cost. If your destination genuinely wants the
+event rather than the resource — a filter keyed on <code>eventtype</code>, or an HTTP
+producer pointed at something event-shaped — set <code>webhook_raw_event: true</code>.
+A <code>sitoo</code> producer refuses event notifications outright rather than POSTing
+them, so do not set it on a pipeline whose destination is Sitoo.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A <code>sitoo</code> producer node writes each incoming message into a Sitoo REST resource
 (e.g. updating warehouse stock, prices, or products) with HTTP Basic auth —
