@@ -201,9 +201,14 @@ The workflow builds these services in parallel:
 | data-converter | src/cmd/data-converter | ghcr.io/ValueRetail/vrsky/data-converter |
 | file-consumer | src/cmd/file-consumer | ghcr.io/ValueRetail/vrsky/file-consumer |
 | file-producer | src/cmd/file-producer | ghcr.io/ValueRetail/vrsky/file-producer |
-| postgres-consumer | src/cmd/postgres-consumer | ghcr.io/ValueRetail/vrsky/postgres-consumer |
-| postgres-producer | src/cmd/postgres-producer | ghcr.io/ValueRetail/vrsky/postgres-producer |
 | ui | ui | ghcr.io/ValueRetail/vrsky/ui |
+
+!!! note "postgres-consumer / postgres-producer are not built here"
+    They are CDC workers configured from `POSTGRES_INPUT_*` environment
+    variables, predating the connection-config model, and `postgres` is not a
+    node type — no tenant can build a pipeline that uses them. They remain as a
+    load-harness fixture (`tests/load/`), and `docker-compose` builds them
+    locally from source, so no published image is needed.
 
 ### Image Tags
 
