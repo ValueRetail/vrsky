@@ -364,42 +364,77 @@ func TestSlowHandlerNoRedelivery(t *testing.T) {
 }
 
 // TestRaisedAckWaitRebinds covers #139 acceptance #1: a durable created at one
-// AckWait can be re-subscribed with a higher AckWait without the #99 crash-loop
-// — reconcileAckWait updates the consumer in place so the bind succeeds and the
-// new ack-wait is in effect.
+// AckWait can be re-subscribed with a higher AckWait without the #99
+// crash-loop — reconcileAckWait updates the consumer in place so the bind
+// succeeds and the new ack-wait is in effect.
+//
+// The durable is created with AddConsumer rather than by subscribing and then
+// stopping. Subscriber.Stop drains, and draining a pull subscription that
+// created its own durable DELETES that durable — measured at ~50ms. The
+// earlier version of this test did exactly that, so by the time it
+// "re-subscribed the SAME durable" there was nothing left to reconcile:
+// PullSubscribe created a fresh consumer at the raised AckWait and the
+// assertion passed without reconcileAckWait ever running.
+//
+// It also raced. The ConsumerInfo call checking the initial AckWait ran against
+// a consumer being deleted underneath it; locally the read won, and on a
+// slower CI runner it lost — "ConsumerInfo: nats: consumer not found" — which
+// is the only reason any of this was noticed.
 func TestRaisedAckWaitRebinds(t *testing.T) {
 	_, js, cleanup := startServer(t)
 	defer cleanup()
 
 	const durable = "test-ackwait-rebind"
 
-	// First bind: default schedule → effective AckWait = DefaultBackoff[0] (1s).
-	sub1, err := Subscribe(js, SubscriberOpts{DurableName: durable}, func(context.Context, *nats.Msg) error { return nil })
-	if err != nil {
-		t.Fatalf("first Subscribe: %v", err)
+	// Subscribe creates the stream on its way past; here nothing has yet, so
+	// make it first.
+	if err := EnsureStreams(js); err != nil {
+		t.Fatalf("EnsureStreams: %v", err)
 	}
-	sub1.Stop()
-	if ci, err := js.ConsumerInfo(MainStreamName, durable); err != nil {
+
+	// Create the durable directly, at the default effective AckWait, so it
+	// outlives any subscription and there is something to reconcile.
+	if _, err := js.AddConsumer(MainStreamName, &nats.ConsumerConfig{
+		Durable:   durable,
+		AckPolicy: nats.AckExplicitPolicy,
+		AckWait:   DefaultBackoff[0],
+		BackOff:   DefaultBackoff,
+		// Everything except AckWait must match what Subscribe requests, or the
+		// bind fails on that field instead and never reaches the reconcile.
+		// Note reconcileAckWait only reconciles AckWait and BackOff — a durable
+		// differing in MaxAckPending or MaxDeliver still cannot be bound.
+		MaxAckPending: 32,
+		MaxDeliver:    MaxDeliveryAttempts,
+		FilterSubject: MainSubjectAll,
+	}); err != nil {
+		t.Fatalf("AddConsumer: %v", err)
+	}
+
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
 		t.Fatalf("ConsumerInfo: %v", err)
-	} else if ci.Config.AckWait != DefaultBackoff[0] {
+	}
+	if ci.Config.AckWait != DefaultBackoff[0] {
 		t.Fatalf("initial AckWait = %v, want %v", ci.Config.AckWait, DefaultBackoff[0])
 	}
 
-	// Re-bind the SAME durable with a raised AckWait. Pre-#139 this errored with
-	// an ack-wait mismatch; now it reconciles and binds.
+	// Bind the SAME, still-existing durable with a raised AckWait. Pre-#139
+	// this errored with an ack-wait mismatch; reconcileAckWait now updates it
+	// in place and the bind succeeds.
 	const raised = 30 * time.Second
-	sub2, err := Subscribe(js, SubscriberOpts{DurableName: durable, AckWait: raised}, func(context.Context, *nats.Msg) error { return nil })
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: durable, AckWait: raised}, func(context.Context, *nats.Msg) error { return nil })
 	if err != nil {
 		t.Fatalf("re-Subscribe with raised AckWait: %v", err)
 	}
-	defer sub2.Stop()
+	defer sub.Stop()
 
-	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	ci, err = js.ConsumerInfo(MainStreamName, durable)
 	if err != nil {
 		t.Fatalf("ConsumerInfo after raise: %v", err)
 	}
 	if ci.Config.AckWait != raised {
-		t.Fatalf("AckWait after raise = %v, want %v", ci.Config.AckWait, raised)
+		t.Fatalf("AckWait after raise = %v, want %v — reconcileAckWait did not update the existing consumer",
+			ci.Config.AckWait, raised)
 	}
 }
 
