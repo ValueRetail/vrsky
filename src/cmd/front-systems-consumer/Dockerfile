@@ -4,7 +4,16 @@ FROM golang:1.22-alpine AS builder
 WORKDIR /app
 
 COPY src/go.mod src/go.sum ./
-RUN go mod download
+# proxy.golang.org intermittently resets an HTTP/2 stream mid-download, failing
+# the whole image build over a module that has nothing wrong with it. Two of the
+# four pushes to main on 2026-09-09 died this way (Actions runs 34349712198 and
+# 34351200525), on a different module each time. Retry before giving up.
+RUN for i in 1 2 3; do \
+      go mod download && break; \
+      echo "go mod download failed (attempt $i/3)"; \
+      if [ "$i" = 3 ]; then exit 1; fi; \
+      sleep 5; \
+    done
 
 COPY src/ ./
 

@@ -708,3 +708,70 @@ func TestScaledConnectorsSpreadAcrossNodes(t *testing.T) {
 		t.Fatal("found no multi-replica deployments in the generated manifest — regenerate it with GENERATE_ONLY=1")
 	}
 }
+
+// Every connector Dockerfile must retry `go mod download`.
+//
+// proxy.golang.org resets an HTTP/2 stream mid-download often enough to matter:
+// two of the four pushes to main on 2026-09-09 failed there, on a different
+// module each time (Actions runs 34349712198 and 34351200525). A bare
+// `RUN go mod download` turns that into a failed image build, so the merge that
+// triggered it never publishes its image — and because the branch build passed,
+// nothing on the PR says so.
+//
+// The retry is easy to lose: these 37 Dockerfiles are near-copies, and a new
+// connector is made by copying one of them. This fails the moment a bare
+// download reappears.
+func TestDockerfilesRetryModuleDownload(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	paths, err := filepath.Glob(filepath.Join(root, "src", "cmd", "*", "Dockerfile"))
+	if err != nil || len(paths) == 0 {
+		t.Skipf("no connector Dockerfiles found (%v) — retry guard skipped", err)
+	}
+
+	var unguarded []string
+	for _, p := range paths {
+		body, err := os.ReadFile(p) //nolint:gosec // paths come from Glob over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		run, ok := runInstructionContaining(string(body), "go mod download")
+		if !ok {
+			continue // a Dockerfile that vendors deps another way is fine
+		}
+		// Guarded if the RUN that downloads also loops. Looking for a loop
+		// rather than for this exact snippet leaves the retry free to be
+		// rewritten — with a cache mount, a different backoff — while still
+		// catching the thing that must not come back: one unprotected attempt.
+		if !strings.Contains(run, "for ") && !strings.Contains(run, "until ") && !strings.Contains(run, "while ") {
+			unguarded = append(unguarded, filepath.Base(filepath.Dir(p)))
+		}
+	}
+
+	if len(unguarded) > 0 {
+		sort.Strings(unguarded)
+		t.Errorf("these Dockerfiles download modules without retrying: %s\n\n"+
+			"A single reset stream from proxy.golang.org fails the whole build, and on a push to main "+
+			"that means the image is never published. Copy the retry loop from any sibling, e.g. "+
+			"src/cmd/sitoo-consumer/Dockerfile.", strings.Join(unguarded, ", "))
+	}
+}
+
+// runInstructionContaining returns the full RUN instruction whose body contains
+// needle, joining the backslash continuations that make up a multi-line one.
+func runInstructionContaining(dockerfile, needle string) (string, bool) {
+	lines := strings.Split(dockerfile, "\n")
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(strings.TrimSpace(lines[i]), "RUN ") {
+			continue
+		}
+		instr := lines[i]
+		for strings.HasSuffix(strings.TrimRight(instr, " \t"), "\\") && i+1 < len(lines) {
+			i++
+			instr += "\n" + lines[i]
+		}
+		if strings.Contains(instr, needle) {
+			return instr, true
+		}
+	}
+	return "", false
+}
