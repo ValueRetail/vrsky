@@ -85,7 +85,7 @@ jobs:
             -e E2E_DB_URL="postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable" \
             -e E2E_MOCK_SAP_URL=http://mock-sap:8099 \
             -e GOFLAGS=-buildvcs=false \
-            golang:1.22 \
+            golang:1.26 \
             go test -tags=integration -count=1 -v -timeout 10m ./test/integration/ -run TestSAP_EndToEnd
 
       # The failure mode this test exists to catch is silent: a connector that

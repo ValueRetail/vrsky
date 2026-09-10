@@ -27,6 +27,7 @@ on:
       - "Integration Tests"
       - "DR Restore Drill"
       - "docs"
+      - "Vulnerability scan"
     types: [completed]
 
 permissions:

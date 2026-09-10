@@ -1,0 +1,102 @@
+# golangci-lint configuration.
+#
+# There was none until now. golangci-lint ran on defaults, which is how the
+# repo went without a gofmt check (gofmt is not in the default set — see #236)
+# and how the effective standard was whatever a pinned binary happened to do.
+#
+# Pinning it here means the standard is a decision rather than a side effect of
+# a version number.
+#
+# THE v1 -> v2 MIGRATION. v1.64.8 could not target Go 1.26 (it was itself built
+# with 1.24), so the toolchain bump forced v2. v2's defaults report 68 findings
+# on this codebase that v1's did not. None of them are bugs: unchecked
+# `defer x.Close()`, staticcheck's QF* quickfix suggestions, and a new vet
+# analyzer about the deprecated reflect.Ptr alias. They are worth doing and are
+# not worth doing inside a security upgrade, so this config keeps the bar where
+# it was and the cleanup is tracked separately.
+
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+
+  settings:
+    errcheck:
+      # Deferred cleanup and diagnostic writes. An error from Close on a
+      # read path, or from Fprintf to a ResponseWriter whose client has gone,
+      # is not actionable — and 50 `_ =` prefixes would obscure the handful of
+      # places where an unchecked error IS worth seeing.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (io.ReadCloser).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Setenv
+        - os.Unsetenv
+
+    staticcheck:
+      # QF* are quickfix/refactoring suggestions ("could use a tagged switch",
+      # "could apply De Morgan's law"). Useful, not correctness. ST1000 wants a
+      # package comment on every package, which this repo has never had.
+      # golangci-lint's own default set, plus the QF* exclusions. Writing
+      # bare "all" here is a trap: it re-enables the ST* style checks that the
+      # default deliberately leaves off, which took this from 15 findings to 45.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1001
+        - -QF1003
+        - -QF1011
+        - -QF1012
+
+    govet:
+      disable:
+        # New in Go 1.26's vet. It flags reflect.Ptr in favour of
+        # reflect.Pointer — a rename worth doing, not worth failing a build on.
+        - inline
+
+  exclusions:
+    rules:
+      # Tests exercise error paths deliberately and set env vars constantly.
+      - path: _test\.go
+        linters: [errcheck]
+
+      # Close on third-party concrete types (kafka.Conn, sftp.File, amqp
+      # channels...). errcheck matches on the static type, so an interface
+      # entry in exclude-functions above cannot reach them, and enumerating
+      # every vendor type would rot on the next dependency bump.
+      - linters: [errcheck]
+        text: "Error return value of `[^`]*\\.Close` is not checked"
+
+      # SA1019 deprecations are listed ONE BY ONE, deliberately. A blanket
+      # "-SA1019" would hide the next deprecation too, and one of these is a
+      # security notice — exactly the thing worth still seeing. Anything not
+      # named here still fails.
+      #
+      # option.WithCredentialsJSON: deprecated because passing credentials as
+      # a JSON blob is itself the risk. Replacing it means changing how the
+      # cloud-storage connector takes GCS credentials, which is a connector
+      # change and not a security-upgrade change.
+      - linters: [staticcheck]
+        text: "SA1019: google.golang.org/api/option.WithCredentialsJSON is deprecated"
+
+      # pubsub apiv1 -> v2 is a library migration for the GCS event-driven
+      # ingestion path (#106). Mechanical, but it touches a connector that has
+      # never run against real GCS.
+      - linters: [staticcheck]
+        text: "SA1019: cloud.google.com/go/pubsub/apiv1/pubsubpb"
+
+issues:
+  # Report everything found rather than the default per-linter cap of 3, so the
+  # count in CI is the real count.
+  max-issues-per-linter: 0
+  max-same-issues: 0

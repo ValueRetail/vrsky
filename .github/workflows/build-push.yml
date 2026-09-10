@@ -159,7 +159,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
           cache-dependency-path: src/go.sum
 
       # golangci-lint runs here without a config file, and gofmt is not in its
@@ -185,13 +185,20 @@ jobs:
         working-directory: src
         run: go test -v -race -cover ./...
 
+      # v2, and the action must move to v8 with it. v1.64.8 was itself built
+      # with Go 1.24 and refused to target 1.26 ("the Go language version used
+      # to build golangci-lint is lower than the targeted Go version"), so the
+      # toolchain bump forced this. Settings now live in src/.golangci.yml
+      # rather than being whatever the pinned binary defaulted to.
+      #
+      # `cache: true` is gone: the action never accepted that input and logged
+      # "Unexpected input(s) 'cache'" on every run. It caches by default.
       - name: Run Go linter
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.64.8
+          version: v2.13.2
           working-directory: src
           args: --timeout=5m
-          cache: true
 
       # #94: fail the build if a management-API route is served without an
       # OpenAPI registry entry (keeps /openapi.json complete).
