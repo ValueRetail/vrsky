@@ -34,10 +34,23 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 
 	// --- Poll path: the consumer fetches a page and publishes it. ---
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// The single-resource URL the webhook path dereferences an event to.
+		// Same fixture data, one record — so a comparison against the poll page
+		// is a comparison of shape, not of content.
+		if strings.HasSuffix(r.URL.Path, "/transactions/90210") {
+			var coll struct {
+				Items []json.RawMessage `json:"items"`
+			}
+			_ = json.Unmarshal(page, &coll)
+			_, _ = w.Write(coll.Items[0])
+			return
+		}
+
 		// One page only: answer the first request with the fixture and every
 		// later one with an empty collection, so pagination terminates.
 		if r.URL.Query().Get("start") == "0" || r.URL.Query().Get("start") == "" {
-			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(page)
 			return
 		}
@@ -56,6 +69,7 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 
 	// --- Webhook path: Sitoo POSTs an SPI event to the aux port. ---
 	c.resolveTenant = func(connID string) (string, error) { return "tenant-vr", nil }
+	c.loadConfig = func(context.Context, string, string) (*SitooConfig, error) { return cfg, nil }
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/sitoo/events/conn-sitoo",
 		strings.NewReader(`{"eventid":"evt-77","eventtype":"transaction.created","transactionid":90210}`))
@@ -82,10 +96,14 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 
 	contract.AssertRoutable(t, envs)
 
-	// The two paths do NOT emit the same shape, and that is the finding this
-	// test exists to record rather than hide: polling marshals the page's items
-	// into a JSON ARRAY, while the webhook forwards Sitoo's event body verbatim,
-	// which is an OBJECT. The producer POSTs whichever it gets, unchanged.
+	// Both paths emit the same shape: a JSON array of resource objects.
+	//
+	// They did not until the webhook path started dereferencing events. Polling
+	// marshals a page's items into an array; the webhook used to forward Sitoo's
+	// event notification verbatim, which is an object — so the producer POSTed
+	// two materially different bodies to the same collection endpoint, and only
+	// one of them was a collection write. That asymmetry was pinned here as a
+	// known gap; this is the assertion that it is closed.
 	var pollPayload []json.RawMessage
 	if err := json.Unmarshal(envs[0].Payload, &pollPayload); err != nil {
 		t.Errorf("poll payload is not a JSON array (%v) — the producer would POST a non-collection "+
@@ -94,9 +112,16 @@ func TestSitooContract_EnvelopesTheProducerMustAccept(t *testing.T) {
 	if len(pollPayload) != 2 {
 		t.Errorf("poll payload carries %d records, want the fixture's 2", len(pollPayload))
 	}
-	var webhookPayload map[string]any
+	var webhookPayload []json.RawMessage
 	if err := json.Unmarshal(envs[1].Payload, &webhookPayload); err != nil {
-		t.Errorf("webhook payload is not a JSON object: %v", err)
+		t.Errorf("webhook payload is not a JSON array (%v) — the event was not dereferenced, so a "+
+			"Sitoo destination would receive an event notification instead of a resource", err)
+	}
+	if len(webhookPayload) != 1 {
+		t.Errorf("webhook payload carries %d records, want 1 (the dereferenced resource)", len(webhookPayload))
+	}
+	if envs[1].Metadata["dereferenced"] != true {
+		t.Errorf("webhook envelope is not marked dereferenced: %v", envs[1].Metadata)
 	}
 
 	contract.Golden(t, "sitoo", envs)

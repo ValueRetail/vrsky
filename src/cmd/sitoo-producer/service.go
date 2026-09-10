@@ -103,6 +103,25 @@ func (p *sitooProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 		return sdk.Permanent(errors.New("payload is not valid JSON"))
 	}
 
+	// An SPI event notification is not a resource, and this endpoint is a
+	// collection. Before the consumer dereferenced events, a webhook-fed
+	// pipeline delivered {eventid, eventtype, transactionid} here and it was
+	// POSTed as though it were a transaction — accepted or rejected by Sitoo on
+	// their terms, with nothing on our side saying anything was wrong.
+	//
+	// The consumer no longer emits these, so reaching here means either
+	// sitoo.webhook_raw_event is set on a pipeline whose destination is Sitoo
+	// (a misconfiguration this cannot fix by retrying), or an event arrived
+	// from somewhere else. Either way, say so.
+	if isEventNotification(env.Payload) {
+		p.logger.Error("dropping: payload is an SPI event notification, not a resource",
+			"envelope_id", env.ID, "connection_id", env.IntegrationID)
+		return sdk.Permanent(errors.New(
+			"payload is a Sitoo SPI event notification, not a resource — a Sitoo destination expects " +
+				"the resource itself. Unset sitoo.webhook_raw_event on the source so events are " +
+				"dereferenced before delivery"))
+	}
+
 	return p.write(ctx, cfg, env.Payload)
 }
 
@@ -244,4 +263,26 @@ func (p *sitooProducer) ServesConnection(ctx context.Context, tenantID, connecti
 	}
 	_, err := p.getSitooConfig(ctx, connectionID, tenantID)
 	return err == nil
+}
+
+// isEventNotification reports whether payload looks like a Sitoo SPI event
+// rather than a resource.
+//
+// Deliberately narrow: a JSON OBJECT carrying an "eventtype" key. A resource
+// payload from the poll path is an array, and a single resource object has no
+// eventtype — so this cannot swallow real data. Anything it is unsure about is
+// left alone and sent.
+func isEventNotification(payload []byte) bool {
+	trimmed := bytes.TrimSpace(payload)
+	// A fast path, not the guard: unmarshalling an array into a map fails
+	// below regardless, so a collection is rejected either way.
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return false
+	}
+	_, ok := obj["eventtype"]
+	return ok
 }

@@ -31,6 +31,10 @@ paging through all results, and emits each page as a JSON-array message.
 - `poll_interval_seconds` — poll cadence. Set `0` (or omit) for **webhook-only**.
 - `page_size` — Sitoo `num` (default `1000`; 1000–5000 is optimal).
 - `base_url` — optional override (default `https://api.mysitoo.com/v2`).
+- `webhook_raw_event` — forward SPI event bodies verbatim instead of
+  dereferencing them. See below; leave unset unless you mean it.
+- `webhook_id_field` — override the event field holding the resource id. The
+  default follows Sitoo's naming (`transactions` → `transactionid`).
 
 ```json
 {
@@ -58,9 +62,28 @@ Point Sitoo's SPI Events at the connector's auxiliary HTTP endpoint:
 POST /sitoo/events/{connectionID}
 ```
 
-served on `WORKER_HTTP_PORT` (9260 in compose). Each event body is published as a
-message routed to the owning tenant/connection. Configure the connection with
+served on `WORKER_HTTP_PORT` (9260 in compose). Configure the connection with
 `poll_interval_seconds: 0` if you want webhook-only (no polling).
+
+### Events are dereferenced, not forwarded
+
+An SPI event is a **notification**, not a resource — it carries
+`{eventid, eventtype, <resource>id}` and nothing else. The connector fetches the
+resource the event names and publishes it in the same shape the poll path uses:
+a JSON array of resource objects, with `dereferenced: true` in the envelope
+metadata.
+
+That matters because it is what makes the two modes interchangeable. Forwarding
+the event verbatim meant a webhook-fed pipeline delivered an event object where
+a poll-fed one delivered an array of transactions — and a `sitoo` destination
+POSTs whichever it receives to the same collection endpoint, so only one of them
+was a write it could make sense of.
+
+One extra GET per event is the cost. If your destination genuinely wants the
+event rather than the resource — a filter keyed on `eventtype`, or an HTTP
+producer pointed at something event-shaped — set `webhook_raw_event: true`.
+A `sitoo` producer refuses event notifications outright rather than POSTing
+them, so do not set it on a pipeline whose destination is Sitoo.
 
 ## As a destination (producer)
 

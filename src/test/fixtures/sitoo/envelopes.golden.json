@@ -65,13 +65,36 @@
       "sitoo-consumer"
     ],
     "metadata": {
+      "dereferenced": true,
       "event_type": "transaction.created",
-      "mode": "webhook"
+      "mode": "webhook",
+      "record_count": 1,
+      "resource": "transactions"
     },
-    "payload": {
-      "eventid": "evt-77",
-      "eventtype": "transaction.created",
-      "transactionid": 90210
-    }
+    "payload": [
+      {
+        "transactionid": 90210,
+        "receiptnumber": "S1-2026-000412",
+        "datecreated": "2026-09-09T08:14:22Z",
+        "siteid": 2,
+        "currency": "NOK",
+        "total": "1249.00",
+        "totaltax": "249.80",
+        "items": [
+          {
+            "itemid": 55031,
+            "sku": "VR-TSHIRT-M-BLK",
+            "quantity": 2,
+            "priceeach": "499.50"
+          },
+          {
+            "itemid": 55118,
+            "sku": "VR-CAP-OS-RED",
+            "quantity": 1,
+            "priceeach": "250.00"
+          }
+        ]
+      }
+    ]
   }
 ]
