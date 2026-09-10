@@ -855,6 +855,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cost-parking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost-parking the cluster
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../monitoring/" class="md-nav__link">
         
   
@@ -947,6 +975,17 @@
     <span class="md-ellipsis">
       
         The terminal floods after docker compose up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-production-url-does-not-respond-at-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The production URL does not respond at all
       
     </span>
   </a>
@@ -2173,6 +2212,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-production-url-does-not-respond-at-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The production URL does not respond at all
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2264,6 +2314,17 @@
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build<span class="w">        </span><span class="c1"># -d = background</span>
 docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>management-api<span class="w">   </span><span class="c1"># follow one service on demand</span>
 </code></pre></div>
+<h2 id="the-production-url-does-not-respond-at-all">The production URL does not respond at all<a class="headerlink" href="#the-production-url-does-not-respond-at-all" title="Permanent link">&para;</a></h2>
+<p>Before treating this as an outage, check whether the cluster is simply parked:</p>
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>powerState.code<span class="w"> </span>-o<span class="w"> </span>tsv
+</code></pre></div>
+<p><code>Stopped</code> means someone deallocated the nodes to save money, which is the
+normal state between pilots. Start it with <code>az aks start -g vrsky-prod -n
+vrsky-prod</code> and give it several minutes. See
+<a href="../cost-parking/">Cost-parking the cluster</a>.</p>
+<p>A parked cluster is indistinguishable from an outage from the outside: the IP
+still resolves (it is static), nothing answers on it, and no alert fires
+because nothing crashed.</p>
 <h2 id="a-pipeline-deploys-but-no-data-flows">A pipeline deploys but no data flows<a class="headerlink" href="#a-pipeline-deploys-but-no-data-flows" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Confirm it's <strong>running</strong> (Settings/Connections, or the connection status).</li>
