@@ -324,19 +324,14 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 			logger.Printf("WARNING: ORCHESTRATOR_MODE=k8s but no K8s client is available; per-connection orchestrator disabled")
 		} else {
 			orchConfig := orchestratorConfigFromEnv(config)
-			// Point per-connection workers at the connection's placed NATS
-			// instance (#19) when one exists; otherwise the static config NATS
-			// URL above. The pkg/runtime workers the orchestrator deploys can't
-			// self-discover, so this resolution happens at deploy time.
-			natsResolver := func(ctx context.Context, tenantID, connID string) (string, bool) {
-				inst, err := repo.GetConnectionInstance(ctx, tenantID, connID)
-				if err != nil || inst == nil {
-					return "", false
-				}
-				return inst.NATSURL(), true
-			}
+			// No per-connection NATS URL resolution here any more (ADR 0005).
+			// It resolved a connection's placed tenant instance and stamped it
+			// on the worker Deployments the orchestrator no longer creates, so
+			// nothing read the value; and a tenant instance could not have
+			// served the data anyway — they are provisioned without JetStream.
+			// Placement is accounting, not routing.
 			restHandler.SetOrchestratorFactory(orchestrator.NewOrchestratorFactory(
-				k8sClient, orchConfig, validator, orchestrator.WithNATSURLResolver(natsResolver)))
+				k8sClient, orchConfig, validator))
 			logger.Printf("K8s orchestrator enabled (namespace=%s) — validates connection graphs and cleans up legacy per-connection workers; node kinds are served by standing services (ADR 0004)",
 				orchConfig.Namespace)
 			// Safety net: periodically delete worker Deployments/HPAs whose

@@ -12,10 +12,25 @@ import (
 
 // natsInstancesResponse is the discovery payload: the full instance records
 // plus a convenience comma-join-ready list of client URLs.
+//
+// DataPlane is the honest part. The urls field reads like something to dial,
+// and until ADR 0005 nothing in the payload said otherwise — a caller could
+// reasonably conclude a placed connection's data flows through the instance it
+// names. It does not: tenant instances run core NATS with no JetStream, and the
+// standing connector services dial the platform NATS from their own pod env.
+// Naming the data plane in the response is what stops the next caller drawing
+// the same wrong conclusion from the same field.
 type natsInstancesResponse struct {
 	Instances []*NATSInstance `json:"instances"`
 	URLs      []string        `json:"urls"`
+	// DataPlane names where tenant data actually flows — always
+	// "platform-nats" under ADR 0005. Placement is accounting, not routing.
+	DataPlane string `json:"data_plane"`
 }
+
+// dataPlanePlatformNATS is the only value DataPlane takes while ADR 0005
+// stands. It becomes per-instance the day tenant instances can carry data.
+const dataPlanePlatformNATS = "platform-nats"
 
 // natsInstanceStore returns the NATSInstanceStore backing this handler, or false
 // if the repository doesn't support it (e.g. a narrow test mock).
@@ -79,7 +94,7 @@ func (h *Handler) HandleListNATSInstances(w http.ResponseWriter, r *http.Request
 	store, ok := h.natsInstanceStore()
 	if !ok {
 		// No discovery backend → empty set; callers fall back to NATS_URL.
-		_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: natsInstancesResponse{Instances: []*NATSInstance{}, URLs: []string{}}})
+		_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: natsInstancesResponse{Instances: []*NATSInstance{}, URLs: []string{}, DataPlane: dataPlanePlatformNATS}})
 		return
 	}
 	// A worker passes ?connection_id= to resolve the single instance its
@@ -90,6 +105,7 @@ func (h *Handler) HandleListNATSInstances(w http.ResponseWriter, r *http.Request
 		if inst, err := store.GetConnectionInstance(r.Context(), tenantID, connID); err == nil {
 			_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: natsInstancesResponse{
 				Instances: []*NATSInstance{inst}, URLs: []string{inst.NATSURL()},
+				DataPlane: dataPlanePlatformNATS,
 			}})
 			return
 		}
@@ -104,5 +120,5 @@ func (h *Handler) HandleListNATSInstances(w http.ResponseWriter, r *http.Request
 	for _, n := range instances {
 		urls = append(urls, n.NATSURL())
 	}
-	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: natsInstancesResponse{Instances: instances, URLs: urls}})
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: natsInstancesResponse{Instances: instances, URLs: urls, DataPlane: dataPlanePlatformNATS}})
 }

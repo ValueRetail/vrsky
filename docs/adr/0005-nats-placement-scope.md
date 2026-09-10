@@ -1,6 +1,6 @@
 # ADR 0005 — Tenant NATS placement governs instance lifecycle, not data routing
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-10)
 - **Date:** 2026-09-10
 - **Deciders:** Ludvik
 - **Relates to:** [#209](https://github.com/ValueRetail/vrsky/issues/209),
@@ -180,9 +180,14 @@ would leave exactly the trap #209 was filed about.
 
 ## Action items
 
-1. [ ] Accept or reject this ADR (Ludvik).
-2. [ ] Remove or demote the dead resolver path; keep the tests as a record with a pointer here.
-3. [ ] Add the guard: provisioning a tenant instance must fail loudly, or be labelled unmistakably, while the data plane cannot use it.
-4. [ ] Note in the API/UI instance view that placement is accounting, not routing.
-5. [ ] Re-scope #19 and close #209 against this ADR.
-6. [ ] If accepted, add the JetStream prerequisite to whatever issue succeeds #19, so the next person does not rediscover it.
+1. [x] Accept or reject this ADR — **accepted 2026-09-10**.
+2. [x] Remove the dead resolver path. `NATSURLResolver`, `WithNATSURLResolver`,
+   `FactoryOption` and `configForConn` are gone; the adapter holds one config.
+   `adapter_nats_url_test.go` keeps the history and points here.
+3. [x] Guard provisioning. `ProvisionNATSInstance` refuses with
+   `ErrTenantNATSNotRoutable` unless `VRSKY_ALLOW_TENANT_NATS=1`.
+4. [x] Name the data plane in the API: `data_plane: "platform-nats"` on the
+   nats-instances payload, beside the `urls` that read like routing.
+5. [ ] Re-scope #19 and close #209 against this ADR (issue admin).
+6. [x] The JetStream prerequisite is recorded above and in the guard's own
+   comment — the place someone lands when they try to provision one.
