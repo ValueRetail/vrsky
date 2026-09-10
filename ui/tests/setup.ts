@@ -6,6 +6,7 @@ import '@testing-library/jest-dom/vitest'
 afterEach(() => {
   cleanup()
   memoryStorage.clear()
+  memorySessionStorage.clear()
 })
 
 // localStorage polyfill.
@@ -30,11 +31,19 @@ class MemoryStorage implements Storage {
 }
 
 const memoryStorage = new MemoryStorage()
+const memorySessionStorage = new MemoryStorage()
 for (const target of [globalThis, window] as const) {
   Object.defineProperty(target, 'localStorage', {
     configurable: true,
     writable: true,
     value: memoryStorage,
+  })
+  // sessionStorage is shadowed the same way, and authService keeps the session
+  // token in it.
+  Object.defineProperty(target, 'sessionStorage', {
+    configurable: true,
+    writable: true,
+    value: memorySessionStorage,
   })
 }
 
