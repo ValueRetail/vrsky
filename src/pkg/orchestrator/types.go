@@ -40,28 +40,24 @@ type ExecutionGraph struct {
 }
 
 // OrchestratorConfig contains configuration for the orchestrator.
+//
+// Namespace is all that is left. NATSURLs and NATSAccount were removed with
+// ADR 0005: both were stamped onto per-connection worker pods, which ADR 0004
+// stopped deploying, so nothing read either one. The same pass already removed
+// WORKER_IMAGE_REGISTRY/VERSION and PAYLOAD_STORE_* for that reason — these two
+// survived it only because #19's URL resolver made NATSURLs look consumed.
+//
+// Connectors get their NATS URL from their own pod env, set by
+// infrastructure/azure/deploy-connectors-azure.sh.
 type OrchestratorConfig struct {
-	// Namespace is the K8s namespace per-connection resources live in
+	// Namespace is the K8s namespace per-connection resources live in. Still
+	// read: the orphaned-worker sweep lists Deployments and HPAs in it.
 	Namespace string
-
-	// NATSURLs is the NATS server URL a connection is placed on (#19).
-	//
-	// NOTE: currently inert. Its only consumer was the NATS_URLS env stamped on
-	// per-connection worker pods, which are no longer deployed; the standing
-	// connector services dial the NATS_URL in their own env. Tracked in #209.
-	NATSURLs string
-
-	// NATSAccount is the NATS account for tenant isolation
-	NATSAccount string
 }
 
 // DefaultConfig returns the default orchestrator configuration.
 func DefaultConfig() *OrchestratorConfig {
-	return &OrchestratorConfig{
-		Namespace:   "vrsky",
-		NATSURLs:    "nats://nats:4222",
-		NATSAccount: "",
-	}
+	return &OrchestratorConfig{Namespace: "vrsky"}
 }
 
 // OrchestratorError represents orchestrator-specific errors.

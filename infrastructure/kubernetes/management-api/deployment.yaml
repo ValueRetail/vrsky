@@ -82,17 +82,17 @@ spec:
               key: encryption_key
         - name: MGMT_API_NATS_URL
           value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
-        # #157: run the per-connection orchestrator so starting a graph
-        # connection deploys a Deployment + HPA per node (enables #135
-        # worker autoscaling). Workers land in this namespace and connect to
-        # the platform NATS above (WORKER_NATS_URL unset → MGMT_API_NATS_URL).
+        # #157: this once ran the per-connection orchestrator, deploying a
+        # Deployment + HPA per node.
         #
         # ORCHESTRATOR_MODE=k8s no longer deploys anything: it validates each
         # connection's graph on start and cleans up per-connection workers left
         # by versions before #201/#205 (ADR 0004). Node kinds are run by the
         # standing connector and transform services, which carry their own
         # PAYLOAD_STORE_* env — see infrastructure/azure/deploy-connectors-azure.sh.
-        # That is why no PAYLOAD_STORE_* / WORKER_IMAGE_* settings appear here.
+        # That is why no PAYLOAD_STORE_* / WORKER_IMAGE_* settings appear here,
+        # and none for WORKER_NATS_URL / NATS_ACCOUNT either: ADR 0005 removed
+        # both, since nothing read them once the worker pods were gone.
         - name: ORCHESTRATOR_MODE
           value: "k8s"
         - name: ORCHESTRATOR_NAMESPACE
