@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -59,10 +60,41 @@ func (p *K8sNATSProvisioner) ProvisionNATS(ctx context.Context, tenantSlug strin
 	return p.ProvisionNATSInstance(ctx, tenantSlug, 1, onProgress)
 }
 
+// allowTenantNATSEnv opts back in to provisioning tenant NATS instances.
+//
+// ADR 0005 narrowed #19: placement is accounting, not routing. An instance
+// provisioned here CANNOT carry tenant data — the Deployment below runs plain
+// core NATS (no --jetstream, no persistent volume), while the whole data plane
+// is JetStream: the VRSKY_DATA stream, a pull durable per connector, the DLQ,
+// and #70's at-least-once guarantee. The standing connector services dial the
+// platform NATS from their own pod env regardless.
+//
+// So provisioning one produces a running, healthy, monitored server that no
+// tenant traffic will ever reach. That is precisely the failure #209 was filed
+// about: placement that LOOKS like it succeeded. Refusing is the difference
+// between a documented caveat and something that cannot happen by accident.
+//
+// Set VRSKY_ALLOW_TENANT_NATS=1 to proceed anyway — for the work that makes
+// tenant instances JetStream-capable, which is the first step of options A, B
+// and C in ADR 0005.
+const allowTenantNATSEnv = "VRSKY_ALLOW_TENANT_NATS"
+
+// ErrTenantNATSNotRoutable is returned when provisioning is refused because the
+// data plane cannot use the instance. See ADR 0005.
+var ErrTenantNATSNotRoutable = fmt.Errorf(
+	"refusing to provision a tenant NATS instance: it would run core NATS with no JetStream, " +
+		"so no tenant data can flow through it (ADR 0005 — placement is accounting, not routing). " +
+		"Set " + allowTenantNATSEnv + "=1 to override, e.g. while making tenant instances JetStream-capable")
+
 // ProvisionNATSInstance creates a Deployment, Service, and NetworkPolicy for
 // instance n of a tenant's NATS (#19 autoscaling provisions n>1). onProgress is
 // called with (percent, stepDescription) as provisioning progresses.
+//
+// Refuses unless VRSKY_ALLOW_TENANT_NATS=1 — see allowTenantNATSEnv above.
 func (p *K8sNATSProvisioner) ProvisionNATSInstance(ctx context.Context, tenantSlug string, n int, onProgress func(int, string)) (string, error) {
+	if os.Getenv(allowTenantNATSEnv) != "1" {
+		return "", ErrTenantNATSNotRoutable
+	}
 	name := natsResourceNameN(tenantSlug, n)
 	numStr := fmt.Sprintf("%d", n)
 	labels := map[string]string{
