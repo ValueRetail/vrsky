@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -140,4 +142,101 @@ func workflowTriggers(t *testing.T, body []byte) triggers {
 		}
 	}
 	return out
+}
+
+// Every Dockerfile and CI workflow must build with a Go at least as new as
+// go.mod requires.
+//
+// This exists because of a specific mistake. Bumping the toolchain to 1.26, I
+// replaced the literal string "golang:1.22" everywhere, grepped for it, found
+// none left, and called it done. Five Dockerfiles were on golang:1.24 and had
+// never contained "1.22" — so they kept an older Go against a go.mod now
+// requiring 1.26, and `go mod download` refused outright.
+//
+// The verification was the flaw, not the edit: grepping for the OLD value
+// proves it is gone, not that the NEW one is present everywhere. This asserts
+// the property instead of the absence of a string.
+//
+// A newer Go than go.mod requires is fine — Go is forward compatible. An older
+// one is a hard build failure, and it fails in the image build, which is the
+// slowest place to find out.
+func TestBuildToolchainsSatisfyGoMod(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+
+	gomod, err := os.ReadFile(filepath.Join(root, "src", "go.mod"))
+	if err != nil {
+		t.Skipf("go.mod not readable (%v)", err)
+	}
+	m := regexp.MustCompile(`(?m)^go (\d+)\.(\d+)`).FindStringSubmatch(string(gomod))
+	if m == nil {
+		t.Fatal("no `go X.Y` directive in go.mod")
+	}
+	wantMajor, wantMinor := atoi(t, m[1]), atoi(t, m[2])
+	want := fmt.Sprintf("%d.%d", wantMajor, wantMinor)
+
+	// (file, version) pairs found across the repo.
+	type ref struct {
+		where   string
+		version string
+		major   int
+		minor   int
+	}
+	var refs []ref
+
+	add := func(where, v string) {
+		p := strings.SplitN(v, ".", 3)
+		if len(p) < 2 {
+			t.Errorf("%s: unparseable Go version %q", where, v)
+			return
+		}
+		refs = append(refs, ref{where, v, atoi(t, p[0]), atoi(t, p[1])})
+	}
+
+	dockerfiles, _ := filepath.Glob(filepath.Join(root, "src", "cmd", "*", "Dockerfile"))
+	fromGolang := regexp.MustCompile(`FROM golang:(\d+\.\d+)`)
+	for _, p := range dockerfiles {
+		body, err := os.ReadFile(p) //nolint:gosec // paths come from Glob over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		for _, mm := range fromGolang.FindAllStringSubmatch(string(body), -1) {
+			add(filepath.Join("cmd", filepath.Base(filepath.Dir(p)), "Dockerfile"), mm[1])
+		}
+	}
+
+	workflows, _ := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	setupGo := regexp.MustCompile(`go-version:\s*'?(\d+\.\d+)'?`)
+	inContainer := regexp.MustCompile(`golang:(\d+\.\d+)`)
+	for _, p := range workflows {
+		body, err := os.ReadFile(p) //nolint:gosec // paths come from Glob over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		for _, re := range []*regexp.Regexp{setupGo, inContainer} {
+			for _, mm := range re.FindAllStringSubmatch(string(body), -1) {
+				add(filepath.Base(p), mm[1])
+			}
+		}
+	}
+
+	if len(refs) == 0 {
+		t.Fatal("found no Go toolchain references — the Dockerfile/workflow format changed; update this test")
+	}
+
+	for _, r := range refs {
+		if r.major < wantMajor || (r.major == wantMajor && r.minor < wantMinor) {
+			t.Errorf("%s builds with Go %s but go.mod requires %s — `go mod download` refuses outright, "+
+				"and it fails inside the image build, which is the slowest place to find out",
+				r.where, r.version, want)
+		}
+	}
+}
+
+func atoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatalf("not a number: %q", s)
+	}
+	return n
 }
