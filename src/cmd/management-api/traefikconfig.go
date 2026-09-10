@@ -83,7 +83,9 @@ func writeTenantGatewayConfig(dir string, plans map[string]string) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	// Best-effort: on the success path the rename has already moved it, so
+	// this fails with ENOENT and there is nothing to do about it.
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
