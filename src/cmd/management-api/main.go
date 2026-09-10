@@ -323,7 +323,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 		if k8sClient == nil {
 			logger.Printf("WARNING: ORCHESTRATOR_MODE=k8s but no K8s client is available; per-connection orchestrator disabled")
 		} else {
-			orchConfig := orchestratorConfigFromEnv(config)
+			orchConfig := orchestratorConfigFromEnv()
 			// No per-connection NATS URL resolution here any more (ADR 0005).
 			// It resolved a connection's placed tenant instance and stamped it
 			// on the worker Deployments the orchestrator no longer creates, so
@@ -567,19 +567,16 @@ func runOrphanedWorkerGC(ctx context.Context, k8sClient kubernetes.Interface, na
 // reached per-connection worker pods, which are no longer deployed (ADR 0004).
 // The standing connector services carry their own PAYLOAD_STORE_* env, set by
 // infrastructure/azure/deploy-connectors-azure.sh.
-func orchestratorConfigFromEnv(config *Config) *orchestrator.OrchestratorConfig {
+//
+// WORKER_NATS_URL and NATS_ACCOUNT went the same way with ADR 0005. They were
+// read, stored on the config, and never used by anything — an operator could
+// set either and change nothing. Connectors dial the NATS_URL in their own pod
+// env. ORCHESTRATOR_NAMESPACE is the only one left that does something: the
+// orphaned-worker sweep lists Deployments and HPAs in that namespace.
+func orchestratorConfigFromEnv() *orchestrator.OrchestratorConfig {
 	c := orchestrator.DefaultConfig()
-	if config != nil && config.NATSUrl != "" {
-		c.NATSURLs = config.NATSUrl
-	}
-	if v := os.Getenv("WORKER_NATS_URL"); v != "" {
-		c.NATSURLs = v
-	}
 	if v := os.Getenv("ORCHESTRATOR_NAMESPACE"); v != "" {
 		c.Namespace = v
-	}
-	if v := os.Getenv("NATS_ACCOUNT"); v != "" {
-		c.NATSAccount = v
 	}
 	return c
 }

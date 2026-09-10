@@ -21,12 +21,13 @@ import (
 // ADR 0005 removed the path rather than wiring it through, because a tenant
 // instance could not have served the data in any case: they are provisioned as
 // plain core NATS, and the data plane is JetStream throughout. Placement is
-// accounting, not routing.
+// accounting, not routing. The NATSURLs field itself went with it, so there is
+// no longer any NATS setting on the orchestrator config to vary.
 //
-// The test kept below is the one that still means something: the adapter uses
-// the static config, for every connection, with nothing in between. If a future
-// change reintroduces per-connection NATS selection, it should fail here first
-// and send the reader to ADR 0005.
+// What is left worth asserting is the shape that made the old bug possible: the
+// adapter holding one config and handing it to every connection unchanged. A
+// per-connection clone reappearing here is the signal that something is being
+// varied per connection again, and the reader should start at ADR 0005.
 
 func resolverTestConn() *managementapi.Connection {
 	nodes := []*managementapi.Node{
@@ -37,23 +38,19 @@ func resolverTestConn() *managementapi.Connection {
 	return createTestConnection("tenant-acme", "conn-123", nodes, edges)
 }
 
-// Every connection gets the static config NATS URL — there is no per-connection
-// override left to take.
-func TestAdapter_UsesStaticNATSURLForEveryConnection(t *testing.T) {
+// One config, shared, unmutated — for every connection.
+func TestAdapter_HoldsOneConfigForEveryConnection(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.NATSURLs = "nats://platform:4222"
+	cfg.Namespace = "vrsky-platform"
 
 	adapter := NewPipelineOrchestratorAdapter(fake.NewSimpleClientset(), cfg, nil)
 
-	// Whatever the connection, the adapter's config is the one it was built
-	// with — same pointer, not a per-connection clone.
-	assert.Equal(t, "nats://platform:4222", adapter.config.NATSURLs)
 	assert.Same(t, cfg, adapter.config,
 		"the adapter must hold the config it was given; a clone per connection would mean "+
-			"something is varying NATS per connection again (see ADR 0005)")
+			"something is varying orchestrator config per connection again (see ADR 0005)")
 
-	// And starting a pipeline does not mutate it.
 	_ = adapter.StartPipeline(context.Background(), resolverTestConn())
-	assert.Equal(t, "nats://platform:4222", adapter.config.NATSURLs,
-		"the shared base config must not be mutated")
+
+	assert.Same(t, cfg, adapter.config, "starting a pipeline must not swap the config")
+	assert.Equal(t, "vrsky-platform", adapter.config.Namespace, "nor mutate it")
 }

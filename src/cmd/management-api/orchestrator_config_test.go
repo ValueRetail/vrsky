@@ -6,56 +6,55 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/orchestrator"
 )
 
-// TestOrchestratorConfigFromEnv_Defaults verifies that with no overrides the
-// config matches orchestrator.DefaultConfig, except the NATS URL which defaults
-// to the management-api's own (the in-cluster platform NATS).
-func TestOrchestratorConfigFromEnv_Defaults(t *testing.T) {
-	for _, k := range []string{"WORKER_NATS_URL", "ORCHESTRATOR_NAMESPACE", "NATS_ACCOUNT"} {
-		t.Setenv(k, "")
-	}
-	def := orchestrator.DefaultConfig()
+// What this used to check, and why it does not.
+//
+// orchestratorConfigFromEnv once assembled a NATS URL and account alongside the
+// namespace, from WORKER_NATS_URL / NATS_ACCOUNT and the management-api's own
+// config. ADR 0005 removed both: they were stamped onto per-connection worker
+// pods, which ADR 0004 stopped deploying, so nothing read either one — an
+// operator could set them and change nothing.
+//
+// Namespace is the only field left, and it is genuinely read: the
+// orphaned-worker sweep lists Deployments and HPAs in it. If a field is ever
+// added back here, it needs a consumer before it needs a test.
 
-	got := orchestratorConfigFromEnv(&Config{NATSUrl: "nats://platform:4222"})
+// The default namespace, with no override.
+func TestOrchestratorConfigFromEnv_Default(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_NAMESPACE", "")
 
-	if got.NATSURLs != "nats://platform:4222" {
-		t.Errorf("NATSURLs = %q, want the management-api NATS URL %q", got.NATSURLs, "nats://platform:4222")
-	}
-	if got.Namespace != def.Namespace {
-		t.Errorf("Namespace = %q, want default %q", got.Namespace, def.Namespace)
-	}
-	if got.NATSAccount != def.NATSAccount {
-		t.Errorf("NATSAccount = %q, want default %q", got.NATSAccount, def.NATSAccount)
+	got := orchestratorConfigFromEnv()
+
+	if want := orchestrator.DefaultConfig().Namespace; got.Namespace != want {
+		t.Errorf("Namespace = %q, want default %q", got.Namespace, want)
 	}
 }
 
-// TestOrchestratorConfigFromEnv_Overrides verifies every env override is applied
-// and that WORKER_NATS_URL wins over the management-api NATS URL.
-func TestOrchestratorConfigFromEnv_Overrides(t *testing.T) {
-	t.Setenv("WORKER_NATS_URL", "nats://workers:4222")
+// ORCHESTRATOR_NAMESPACE overrides it — the one env var here that still does
+// something.
+func TestOrchestratorConfigFromEnv_NamespaceOverride(t *testing.T) {
 	t.Setenv("ORCHESTRATOR_NAMESPACE", "vrsky-platform")
-	t.Setenv("NATS_ACCOUNT", "TENANT_A")
 
-	got := orchestratorConfigFromEnv(&Config{NATSUrl: "nats://platform:4222"})
+	got := orchestratorConfigFromEnv()
 
-	if got.NATSURLs != "nats://workers:4222" {
-		t.Errorf("NATSURLs = %q, want WORKER_NATS_URL override", got.NATSURLs)
-	}
 	if got.Namespace != "vrsky-platform" {
 		t.Errorf("Namespace = %q, want vrsky-platform", got.Namespace)
 	}
-	if got.NATSAccount != "TENANT_A" {
-		t.Errorf("NATSAccount = %q, want TENANT_A", got.NATSAccount)
-	}
 }
 
-// TestOrchestratorConfigFromEnv_NilConfig ensures a nil *Config doesn't panic
-// and leaves the default NATS URL in place.
-func TestOrchestratorConfigFromEnv_NilConfig(t *testing.T) {
-	for _, k := range []string{"WORKER_NATS_URL", "ORCHESTRATOR_NAMESPACE", "NATS_ACCOUNT"} {
-		t.Setenv(k, "")
-	}
-	got := orchestratorConfigFromEnv(nil)
-	if got.NATSURLs != orchestrator.DefaultConfig().NATSURLs {
-		t.Errorf("NATSURLs = %q, want default when config is nil", got.NATSURLs)
+// The env vars ADR 0005 removed must not quietly come back. Setting them
+// changes nothing; a future edit that made either take effect again would be
+// reintroducing config with no consumer, which is what this cleanup was.
+func TestOrchestratorConfigFromEnv_RemovedVarsHaveNoEffect(t *testing.T) {
+	t.Setenv("ORCHESTRATOR_NAMESPACE", "")
+	base := orchestratorConfigFromEnv()
+
+	t.Setenv("WORKER_NATS_URL", "nats://somewhere-else:4222")
+	t.Setenv("NATS_ACCOUNT", "TENANT_A")
+
+	got := orchestratorConfigFromEnv()
+
+	if *got != *base {
+		t.Errorf("WORKER_NATS_URL/NATS_ACCOUNT changed the orchestrator config (%+v vs %+v) — "+
+			"they were removed in ADR 0005 because nothing consumed them", *got, *base)
 	}
 }

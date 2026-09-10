@@ -77,8 +77,9 @@ func TestIsValidNodeType(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
+	// Namespace is the only field: ADR 0005 removed NATSURLs and NATSAccount,
+	// which nothing read once the per-connection worker pods were gone.
 	assert.Equal(t, "vrsky", config.Namespace)
-	assert.Equal(t, "nats://nats:4222", config.NATSURLs)
 }
 
 func TestOrchestratorError(t *testing.T) {
