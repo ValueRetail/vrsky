@@ -7,6 +7,53 @@ Each section below is one GitHub issue. Copy the heading as the title, the body 
 
 ---
 
+## Status — all four phases delivered (last checked 2026-09-10)
+
+**Every one of the 30 issues below is closed.** This document is now a record of
+what was agreed and built, not a to-do list. Read the specs for the reasoning
+behind a design; do not read an unchecked box as outstanding work.
+
+| Phase | Items | Issues | State |
+|-------|-------|--------|-------|
+| 1 — Trust foundation | P1-1 … P1-9 | [#66](https://github.com/ValueRetail/vrsky/issues/66)–[#74](https://github.com/ValueRetail/vrsky/issues/74) | Closed |
+| 2 — Connector reach | P2-1 … P2-9 | [#75](https://github.com/ValueRetail/vrsky/issues/75)–[#83](https://github.com/ValueRetail/vrsky/issues/83) | Closed |
+| 3 — Operational maturity | P3-1 … P3-8 | [#84](https://github.com/ValueRetail/vrsky/issues/84)–[#91](https://github.com/ValueRetail/vrsky/issues/91) | Closed |
+| 4 — Commercial | P4-1 … P4-4 | [#92](https://github.com/ValueRetail/vrsky/issues/92)–[#95](https://github.com/ValueRetail/vrsky/issues/95) | Closed |
+
+The mapping is positional and exact: P*n*-*k* is issue `base(n) + k - 1`, with
+bases 66 / 75 / 84 / 92.
+
+### Built beyond this plan
+
+- **Six retail connectors** — Sitoo, Brightpearl, Business Central, Front
+  Systems, Visma.net, SAP S/4HANA — each with consumer→producer contract tests
+  (`src/test/contract`, goldens in `src/test/fixtures`) and, for SAP, a runtime
+  end-to-end (`src/test/integration/sap_e2e_test.go`) that runs nightly.
+- **Standing connector services** (ADR 0004) replaced the per-connection worker
+  pods this plan assumed. Several specs below describe the old model.
+- **Deployed to AKS** (`vrsky-prod`, Norway East), currently cost-parked — see
+  [Cost-parking the cluster](docs/operator/cost-parking.md).
+
+### What is actually open
+
+- [#209](https://github.com/ValueRetail/vrsky/issues/209) — NATS tenant
+  placement does not reach the standing connector services. A product decision:
+  performance versus data isolation.
+- [#10](https://github.com/ValueRetail/vrsky/issues/10) Marketplace and
+  [#11](https://github.com/ValueRetail/vrsky/issues/11) Storage-as-a-Service —
+  deferred to Phase 5+, as recorded below.
+- **#19 / #21** (per-tenant NATS, service discovery) — still parked pending a
+  customer hitting the shared-NATS ceiling.
+
+### The gap this plan cannot close
+
+No connector has ever run against a live vendor API. Contract tests and the SAP
+end-to-end prove the platform's own seams; they say nothing about whether a
+vendor behaves as its documentation claims. That needs sandbox credentials, and
+it is the largest remaining unknown in the system.
+
+---
+
 ## Cross-reference: existing issues to close after the new ones are created
 
 All remaining content from these issues has been folded into the new Phase 1–4 specs below. You can close each cleanly once the corresponding new issues are open.
@@ -31,6 +78,8 @@ Deferred (revisit when scaling beyond shared NATS): #19, #21.
 ---
 
 # PHASE 1 — Trust foundation (4–6 weeks)
+
+**Status: complete.** Issues #66–#74, all closed.
 
 Goal: pass an enterprise security review. Without this, no B2B deal closes.
 
@@ -385,6 +434,8 @@ Issue #4 (Multi-Tenant Isolation & Authentication) defined per-tenant quotas, th
 
 # PHASE 2 — Connector reach (6–8 weeks)
 
+**Status: complete.** Issues #75–#83, all closed. Six retail connectors were built beyond this scope.
+
 Goal: cover the integration surface customers actually ask for.
 
 ---
@@ -659,6 +710,8 @@ Issue #18 (Connector SDK & Essential Connectors) called for a formal `pkg/sdk/` 
 
 # PHASE 3 — Operational maturity (4–6 weeks)
 
+**Status: complete.** Issues #84–#91, all closed.
+
 Goal: pass an SRE review. Customers can rely on this in production.
 
 ---
@@ -903,6 +956,8 @@ Issue #8 specified Loki for centralized log aggregation. Today logs are scattere
 ---
 
 # PHASE 4 — Commercial (in parallel with first pilots)
+
+**Status: complete.** Issues #92–#95, all closed — metering, onboarding wizard, docs set, and the /status + /status.json page.
 
 Goal: be sellable, billable, and onboardable.
 
