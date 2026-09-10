@@ -52,13 +52,18 @@ jobs:
           # Backend services. No producer/consumer/filter/converter entries:
           # those are the legacy per-connection worker images the orchestrator
           # stopped spawning in #201/#205 — nothing pulls them.
+          #
+          # postgres-consumer/postgres-producer are absent for a related reason:
+          # they are CDC workers configured entirely from POSTGRES_INPUT_* env
+          # vars, predating the connection-config model. "postgres" is not a node
+          # type, so no tenant can build a pipeline that uses them. They survive
+          # as a load-harness fixture (tests/load/) and docker-compose builds
+          # them locally from source, so nothing anywhere pulls these images.
           - { name: "management-api", path: "src/cmd/management-api" }
           - { name: "data-filter", path: "src/cmd/data-filter" }
           - { name: "data-converter", path: "src/cmd/data-converter" }
           - { name: "file-consumer", path: "src/cmd/file-consumer" }
           - { name: "file-producer", path: "src/cmd/file-producer" }
-          - { name: "postgres-consumer", path: "src/cmd/postgres-consumer" }
-          - { name: "postgres-producer", path: "src/cmd/postgres-producer" }
           # Frontend
           - { name: "ui", path: "ui", dockerfile: "ui/Dockerfile" }
 
