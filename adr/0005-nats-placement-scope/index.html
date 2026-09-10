@@ -2089,7 +2089,7 @@
 
 <h1 id="adr-0005-tenant-nats-placement-governs-instance-lifecycle-not-data-routing">ADR 0005 — Tenant NATS placement governs instance lifecycle, not data routing<a class="headerlink" href="#adr-0005-tenant-nats-placement-governs-instance-lifecycle-not-data-routing" title="Permanent link">&para;</a></h1>
 <ul>
-<li><strong>Status:</strong> Proposed</li>
+<li><strong>Status:</strong> Accepted (2026-09-10)</li>
 <li><strong>Date:</strong> 2026-09-10</li>
 <li><strong>Deciders:</strong> Ludvik</li>
 <li><strong>Relates to:</strong> <a href="https://github.com/ValueRetail/vrsky/issues/209">#209</a>,
@@ -2363,12 +2363,17 @@ would leave exactly the trap #209 was filed about.</p>
   NATS becomes the next ceiling, re-evaluate — C is then the natural answer.</p>
 <h2 id="action-items">Action items<a class="headerlink" href="#action-items" title="Permanent link">&para;</a></h2>
 <ol>
-<li>[ ] Accept or reject this ADR (Ludvik).</li>
-<li>[ ] Remove or demote the dead resolver path; keep the tests as a record with a pointer here.</li>
-<li>[ ] Add the guard: provisioning a tenant instance must fail loudly, or be labelled unmistakably, while the data plane cannot use it.</li>
-<li>[ ] Note in the API/UI instance view that placement is accounting, not routing.</li>
-<li>[ ] Re-scope #19 and close #209 against this ADR.</li>
-<li>[ ] If accepted, add the JetStream prerequisite to whatever issue succeeds #19, so the next person does not rediscover it.</li>
+<li>[x] Accept or reject this ADR — <strong>accepted 2026-09-10</strong>.</li>
+<li>[x] Remove the dead resolver path. <code>NATSURLResolver</code>, <code>WithNATSURLResolver</code>,
+   <code>FactoryOption</code> and <code>configForConn</code> are gone; the adapter holds one config.
+   <code>adapter_nats_url_test.go</code> keeps the history and points here.</li>
+<li>[x] Guard provisioning. <code>ProvisionNATSInstance</code> refuses with
+   <code>ErrTenantNATSNotRoutable</code> unless <code>VRSKY_ALLOW_TENANT_NATS=1</code>.</li>
+<li>[x] Name the data plane in the API: <code>data_plane: "platform-nats"</code> on the
+   nats-instances payload, beside the <code>urls</code> that read like routing.</li>
+<li>[ ] Re-scope #19 and close #209 against this ADR (issue admin).</li>
+<li>[x] The JetStream prerequisite is recorded above and in the guard's own
+   comment — the place someone lands when they try to provision one.</li>
 </ol>
 
 
