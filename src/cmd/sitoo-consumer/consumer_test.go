@@ -114,6 +114,14 @@ func TestGet_RetriesOn429(t *testing.T) {
 // TestWebhook_PublishesBody verifies the SPI-Event webhook path resolves the
 // tenant, publishes the body, and 202s — and 404s an unknown connection.
 func TestWebhook_PublishesBody(t *testing.T) {
+	// The event is dereferenced against Sitoo, so the path needs somewhere to
+	// fetch the resource from.
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"transactionid":90210,"total":"1249.00"}`))
+	}))
+	defer api.Close()
+
 	c, got, mu := newTestConsumer()
 	c.resolveTenant = func(connID string) (string, error) {
 		if connID == "conn-9" {
@@ -121,11 +129,16 @@ func TestWebhook_PublishesBody(t *testing.T) {
 		}
 		return "", fmt.Errorf("unknown")
 	}
+	c.loadConfig = func(context.Context, string, string) (*SitooConfig, error) {
+		return &SitooConfig{AccountID: 1, SiteID: 2, APIID: "x", APIPassword: "y",
+			BaseURL: api.URL, Resource: "transactions"}, nil
+	}
 	h := c.handleWebhook()
 
 	// Valid connection → 202 + published.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/sitoo/events/conn-9", strings.NewReader(`{"event":"transaction.created"}`))
+	req := httptest.NewRequest(http.MethodPost, "/sitoo/events/conn-9",
+		strings.NewReader(`{"eventid":"evt-1","eventtype":"transaction.created","transactionid":90210}`))
 	h(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rec.Code)
@@ -183,5 +196,68 @@ func TestSampleData_Sitoo(t *testing.T) {
 	}
 	if !resp.OK || len(resp.Data) != 2 {
 		t.Fatalf("want ok+2 records, got ok=%v n=%d err=%q", resp.OK, len(resp.Data), resp.Error)
+	}
+}
+
+// An event carrying nothing to dereference is acked, not retried, and publishes
+// nothing.
+//
+// Sitoo sends event kinds a given connection's resource has no id for. Answering
+// 5xx would have Sitoo redeliver forever over a field that will never appear;
+// publishing the raw event would put an event notification into a pipeline whose
+// destination expects resources. So: 202, log, drop.
+func TestWebhook_EventWithNothingToDereference(t *testing.T) {
+	c, got, mu := newTestConsumer()
+	c.resolveTenant = func(string) (string, error) { return "tenant-9", nil }
+	c.loadConfig = func(context.Context, string, string) (*SitooConfig, error) {
+		return &SitooConfig{AccountID: 1, SiteID: 2, APIID: "x", APIPassword: "y", Resource: "transactions"}, nil
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sitoo/events/conn-9",
+		strings.NewReader(`{"eventid":"evt-2","eventtype":"heartbeat"}`))
+	c.handleWebhook()(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d, want 202 — a 5xx would have Sitoo redeliver an event that can never "+
+			"be dereferenced", rec.Code)
+	}
+	mu.Lock()
+	n := len(*got)
+	mu.Unlock()
+	if n != 0 {
+		t.Errorf("published %d envelopes, want 0 — an event with no resource id must not reach a "+
+			"pipeline whose destination expects resources", n)
+	}
+}
+
+// A transient failure fetching the resource asks Sitoo to redeliver, rather than
+// dropping the record.
+func TestWebhook_FetchFailureIsRetriable(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer api.Close()
+
+	c, got, mu := newTestConsumer()
+	c.resolveTenant = func(string) (string, error) { return "tenant-9", nil }
+	c.loadConfig = func(context.Context, string, string) (*SitooConfig, error) {
+		return &SitooConfig{AccountID: 1, SiteID: 2, APIID: "x", APIPassword: "y",
+			BaseURL: api.URL, Resource: "transactions"}, nil
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sitoo/events/conn-9",
+		strings.NewReader(`{"eventtype":"transaction.created","transactionid":90210}`))
+	c.handleWebhook()(rec, req)
+
+	if rec.Code < 500 {
+		t.Errorf("status = %d, want 5xx so Sitoo redelivers; a 2xx here loses the record", rec.Code)
+	}
+	mu.Lock()
+	n := len(*got)
+	mu.Unlock()
+	if n != 0 {
+		t.Errorf("published %d envelopes on a failed fetch, want 0", n)
 	}
 }

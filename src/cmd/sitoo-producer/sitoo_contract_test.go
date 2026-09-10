@@ -80,50 +80,67 @@ func TestSitooContract_ProducerSendsWhatTheConsumerPublished(t *testing.T) {
 	}
 }
 
-// TestSitooContract_PollAndWebhookSendDifferentShapes records a real asymmetry
-// rather than papering over it.
+// TestSitooContract_BothModesSendACollection is the assertion that the poll and
+// webhook paths agree.
 //
-// The consumer's poll path marshals a page's items into a JSON ARRAY; its
-// webhook path forwards Sitoo's event body verbatim, which is an OBJECT. The
-// producer POSTs whichever it receives, unchanged, to the same collection
-// endpoint. So a poll-fed pipeline and a webhook-fed pipeline send Sitoo
-// materially different bodies, and only one of them looks like a collection
-// write.
-//
-// This is not a bug in either binary — each does what it says. It is a gap in
-// what the pipeline promises, and it will surface the first time someone points
-// a Sitoo webhook at a Sitoo destination. Pinning it here means the next person
-// meets it in a test rather than in a partner's error log.
-func TestSitooContract_PollAndWebhookSendDifferentShapes(t *testing.T) {
-	byMode := map[string]json.RawMessage{}
+// They did not. The consumer's poll path marshalled a page's items into a JSON
+// ARRAY; its webhook path forwarded Sitoo's event body verbatim, which is an
+// OBJECT. The producer POSTs whichever it receives, unchanged, to the same
+// collection endpoint — so a poll-fed and a webhook-fed pipeline sent Sitoo
+// materially different bodies and only one of them was a collection write. This
+// test used to pin that gap; the consumer now dereferences the event to the
+// resource it names, so it pins the fix instead.
+func TestSitooContract_BothModesSendACollection(t *testing.T) {
 	for _, ce := range contract.Load(t, "sitoo") {
-		byMode[ce.Mode] = ce.Payload
+		var arr []json.RawMessage
+		if err := json.Unmarshal(ce.Payload, &arr); err != nil {
+			t.Errorf("%s payload is not a JSON array (%v) — a Sitoo destination is a collection "+
+				"endpoint, so anything else is not a write it can make sense of", ce.Mode, err)
+			continue
+		}
+		if len(arr) == 0 {
+			t.Errorf("%s payload is an empty array", ce.Mode)
+		}
+		// Every element must be a resource, not an event notification. The
+		// producer refuses those now (isEventNotification), so one slipping
+		// into the golden would be a silent drop at runtime.
+		for i, item := range arr {
+			var obj map[string]any
+			if err := json.Unmarshal(item, &obj); err != nil {
+				t.Errorf("%s payload[%d] is not an object: %v", ce.Mode, i, err)
+				continue
+			}
+			if _, isEvent := obj["eventtype"]; isEvent {
+				t.Errorf("%s payload[%d] is an event notification, not a resource — the producer "+
+					"drops these as Permanent", ce.Mode, i)
+			}
+		}
 	}
+}
 
-	poll, ok := byMode["poll"]
-	if !ok {
-		t.Fatal("golden file has no poll envelope")
-	}
-	webhook, ok := byMode["webhook"]
-	if !ok {
-		t.Fatal("golden file has no webhook envelope")
-	}
+// TestSitooContract_ProducerRefusesEventNotifications covers the safety net.
+//
+// The consumer no longer emits raw events, so this fires only when
+// sitoo.webhook_raw_event is set on a pipeline whose destination is Sitoo, or
+// when an event arrives from elsewhere. Before it existed, that body was POSTed
+// to a collection endpoint and whatever Sitoo made of it was the end of it.
+func TestSitooContract_ProducerRefusesEventNotifications(t *testing.T) {
+	event := []byte(`{"eventid":"evt-77","eventtype":"transaction.created","transactionid":90210}`)
 
-	var arr []json.RawMessage
-	if err := json.Unmarshal(poll, &arr); err != nil {
-		t.Errorf("poll payload is no longer a JSON array (%v) — if the consumer changed, the producer "+
-			"is now POSTing something else entirely to a Sitoo collection endpoint", err)
+	if !isEventNotification(event) {
+		t.Error("an SPI event body was not recognised as one; the producer would POST it as a resource")
 	}
-
-	var obj map[string]any
-	if err := json.Unmarshal(webhook, &obj); err != nil {
-		t.Errorf("webhook payload is no longer a JSON object: %v", err)
+	// A collection must never be mistaken for an event — that would drop real data.
+	if isEventNotification([]byte(`[{"transactionid":90210}]`)) {
+		t.Error("a JSON array was classified as an event notification")
 	}
-	// The webhook body is Sitoo's event notification, not a resource. Sending it
-	// to a write endpoint is what the current wiring does; asserting it keeps
-	// the fact visible.
-	if _, isEvent := obj["eventtype"]; !isEvent {
-		t.Logf("webhook payload has no eventtype field; the fixture may no longer represent a Sitoo SPI event")
+	// Nor a single resource object that merely has other fields.
+	if isEventNotification([]byte(`{"transactionid":90210,"total":"1249.00"}`)) {
+		t.Error("a resource object was classified as an event notification")
+	}
+	// Nor anything unparseable — left alone and sent, rather than dropped.
+	if isEventNotification([]byte(`not json`)) {
+		t.Error("invalid JSON was classified as an event notification")
 	}
 }
 

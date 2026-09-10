@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -130,15 +131,35 @@ func (s *sitooConsumer) handleWebhook() http.HandlerFunc {
 			return
 		}
 
+		// An SPI event is a NOTIFICATION, not a resource: it carries
+		// {eventid, eventtype, <resource>id} and nothing else. Forwarding it
+		// verbatim is what made a webhook-fed pipeline send a downstream Sitoo
+		// destination an event object where the poll path sends an array of
+		// transactions — two materially different bodies to the same collection
+		// endpoint, only one of which is a collection write.
+		//
+		// So dereference it: fetch the resource the event names and publish it
+		// in the poll path's shape. Poll and webhook then produce the same
+		// envelope, which is what everything downstream already assumes.
+		payload, meta, status, err := s.dereferenceEvent(r.Context(), connID, tenantID, body, r.Header.Get("X-Sitoo-Event"))
+		if err != nil {
+			// 5xx asks Sitoo to redeliver; 202 acks an event there is nothing
+			// to fetch for, so it is not retried forever.
+			s.logger.Warn("Sitoo webhook not dereferenced",
+				"connection_id", connID, "status", status, "error", err)
+			http.Error(w, err.Error(), status)
+			return
+		}
+
 		env := envelope.New()
 		env.TenantID = tenantID
 		env.IntegrationID = connID
 		env.ContentType = firstNonEmpty(r.Header.Get("Content-Type"), "application/json")
 		env.Source = "sitoo-consumer"
-		env.Payload = body
-		env.PayloadSize = int64(len(body))
+		env.Payload = payload
+		env.PayloadSize = int64(len(payload))
 		env.StepHistory = []string{"sitoo-consumer"}
-		env.Metadata = map[string]interface{}{"mode": "webhook", "event_type": r.Header.Get("X-Sitoo-Event")}
+		env.Metadata = meta
 
 		if err := s.publish(r.Context(), env); err != nil {
 			s.logger.Error("publish Sitoo webhook failed", "connection_id", connID, "error", err)
@@ -157,4 +178,85 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// dereferenceEvent turns an SPI event notification into the same payload shape
+// the poller publishes: a JSON array of resource objects.
+//
+// Returns (payload, metadata, httpStatus, error). On error the status is what
+// to answer Sitoo with — 5xx to have the event redelivered, 202 to ack an event
+// there is nothing useful to fetch for.
+//
+// Set sitoo.webhook_raw_event to forward the event body untouched instead. That
+// is the pre-#243 behaviour and it is only correct when the destination expects
+// events rather than resources — a filter or an HTTP producer pointed at
+// something event-shaped, not a Sitoo collection endpoint.
+func (s *sitooConsumer) dereferenceEvent(
+	ctx context.Context, connID, tenantID string, body []byte, eventHeader string,
+) ([]byte, map[string]interface{}, int, error) {
+	rawMeta := func(evType string) map[string]interface{} {
+		return map[string]interface{}{"mode": "webhook", "event_type": evType, "dereferenced": false}
+	}
+
+	var ev map[string]json.RawMessage
+	if err := json.Unmarshal(body, &ev); err != nil {
+		// Not an object: nothing to dereference, and nothing gained by asking
+		// Sitoo to send it again.
+		return body, rawMeta(eventHeader), http.StatusAccepted, nil
+	}
+	eventType := eventHeader
+	if eventType == "" {
+		if raw, ok := ev["eventtype"]; ok {
+			_ = json.Unmarshal(raw, &eventType)
+		}
+	}
+
+	load := s.loadConfig
+	if load == nil {
+		load = s.getSitooConfig
+	}
+	cfg, err := load(ctx, connID, tenantID)
+	if err != nil {
+		// The connection exists (the tenant resolved) but its config does not
+		// load — transient far more often than not, so let Sitoo redeliver.
+		return nil, nil, http.StatusServiceUnavailable, fmt.Errorf("load config: %w", err)
+	}
+	if cfg.WebhookRawEvent {
+		return body, rawMeta(eventType), 0, nil
+	}
+
+	idField := cfg.eventIDField()
+	raw, ok := ev[idField]
+	if !ok {
+		// An event kind this connection's resource has no id for — e.g. a
+		// heartbeat. Ack it; retrying will not make the field appear.
+		return nil, nil, http.StatusAccepted, fmt.Errorf("event has no %q field to dereference", idField)
+	}
+	id := strings.Trim(string(raw), `"`)
+	if id == "" {
+		return nil, nil, http.StatusAccepted, fmt.Errorf("event %q field is empty", idField)
+	}
+
+	resourceBody, err := s.get(ctx, cfg, cfg.resourceURL(id))
+	if err != nil {
+		// The fetch failed — rate limit, network, a resource not yet readable.
+		// All worth a redelivery.
+		return nil, nil, http.StatusBadGateway, fmt.Errorf("fetch %s %s: %w", cfg.effectiveResource(), id, err)
+	}
+	if !json.Valid(resourceBody) {
+		return nil, nil, http.StatusBadGateway, fmt.Errorf("fetch %s %s: response is not JSON", cfg.effectiveResource(), id)
+	}
+
+	// One element, so the shape matches a poll page of one.
+	payload, err := json.Marshal([]json.RawMessage{json.RawMessage(resourceBody)})
+	if err != nil {
+		return nil, nil, http.StatusInternalServerError, fmt.Errorf("wrap resource: %w", err)
+	}
+	return payload, map[string]interface{}{
+		"mode":         "webhook",
+		"event_type":   eventType,
+		"resource":     cfg.effectiveResource(),
+		"record_count": 1,
+		"dereferenced": true,
+	}, 0, nil
 }

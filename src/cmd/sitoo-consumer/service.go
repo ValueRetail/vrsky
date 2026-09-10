@@ -43,6 +43,11 @@ type sitooConsumer struct {
 
 	httpClient *http.Client
 
+	// loadConfig loads a connection's Sitoo config. A field for the same reason
+	// as resolveTenant below: the webhook path needs it, and a test driving
+	// handleWebhook has no database.
+	loadConfig func(ctx context.Context, connectionID, tenantID string) (*SitooConfig, error)
+
 	// resolveTenant maps a connection id to its owning tenant (webhook routing).
 	// Defaulted in Configure to the DB lookup; tests inject a stub.
 	resolveTenant func(connID string) (string, error)
@@ -66,6 +71,33 @@ type SitooConfig struct {
 	Resource            string `json:"resource"`     // e.g. transactions, warehouseitems, products
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 	PageSize            int    `json:"page_size"` // Sitoo `num`; default 1000
+
+	// WebhookRawEvent forwards an SPI event body verbatim instead of fetching
+	// the resource it refers to. Off by default — see dereferenceEvent.
+	WebhookRawEvent bool `json:"webhook_raw_event"`
+	// WebhookIDField overrides the event field holding the resource id. Empty
+	// means the convention below: "transactions" -> "transactionid".
+	WebhookIDField string `json:"webhook_id_field"`
+}
+
+// eventIDField is the event field expected to carry the resource id.
+//
+// Sitoo names these by singular resource — a transactions event carries
+// "transactionid" — so the convention is resource minus its trailing "s", plus
+// "id". It is a convention, not something the API guarantees, which is why
+// WebhookIDField exists to override it without a code change.
+func (c *SitooConfig) eventIDField() string {
+	if c.WebhookIDField != "" {
+		return c.WebhookIDField
+	}
+	return strings.TrimSuffix(c.effectiveResource(), "s") + "id"
+}
+
+// resourceURL builds the single-resource URL for an id, mirroring the
+// collection URL the poller uses.
+func (c *SitooConfig) resourceURL(id string) string {
+	return fmt.Sprintf("%s/accounts/%d/sites/%d/%s/%s",
+		c.effectiveBaseURL(), c.AccountID, c.SiteID, c.effectiveResource(), id)
 }
 
 type nodeConfig struct {
@@ -105,6 +137,9 @@ func (s *sitooConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 
 	if s.resolveTenant == nil {
 		s.resolveTenant = s.getConnectionTenant
+	}
+	if s.loadConfig == nil {
+		s.loadConfig = s.getSitooConfig
 	}
 
 	// Real-time SPI Events (webhook mode): Sitoo POSTs event notifications to
@@ -389,6 +424,11 @@ func (c *SitooConfig) effectiveResource() string {
 // against the secrets vault, and extracts its Sitoo consumer node config.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (s *sitooConsumer) getSitooConfig(ctx context.Context, connectionID, tenantID string) (*SitooConfig, error) {
+	if s.db == nil {
+		// Configure always wires this, so a nil db means a partially built
+		// consumer — an error rather than a segfault in an HTTP handler.
+		return nil, errors.New("no database configured")
+	}
 	var nodesJSON json.RawMessage
 	err := s.db.QueryRow(
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
