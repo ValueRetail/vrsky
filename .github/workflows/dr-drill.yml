@@ -72,7 +72,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
           cache-dependency-path: src/go.sum
 
       - name: Install postgres client + build vrsky-cli

@@ -1,0 +1,106 @@
+name: Vulnerability scan
+
+# Runs govulncheck over the Go modules and npm audit over the UI's production
+# dependencies.
+#
+# WHY THIS EXISTS. Nothing in CI had ever scanned dependencies — no Dependabot,
+# no govulncheck, no npm audit, no CodeQL — and by 2026-09-10 that had
+# accumulated into 46 vulnerabilities govulncheck could see the code calling,
+# across 11 modules and the Go standard library, plus a toolchain (1.22) that
+# had been out of security support for two releases. None of it was hidden.
+# Nobody had looked, because nothing looked automatically.
+#
+# WHY govulncheck AND NOT `go list -m -u`. govulncheck reports only
+# vulnerabilities on paths the code actually CALLS, so it does not drown a
+# reader in advisories for functions no binary reaches. That is what makes it
+# worth failing a build over.
+#
+# WHY npm audit IS --omit=dev. The UI's production dependencies ship to users;
+# its dev tooling (vitest, vite, postcss) does not. Dev advisories are real for
+# supply-chain and developer-machine risk but they are not a reason to block a
+# merge, and treating them as one is how a scan gets ignored. The scheduled run
+# below reports them without gating.
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'ui/package*.json', '.github/workflows/vuln-scan.yml']
+  pull_request:
+    paths: ['src/**', 'ui/package*.json', '.github/workflows/vuln-scan.yml']
+  schedule:
+    # 04:15 UTC daily — an hour after the e2e nightly, so a red morning has one
+    # cause per workflow rather than two at once. A vulnerability disclosed
+    # today affects code that has not changed, which is exactly the case a
+    # push-triggered scan never catches.
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: src/go.sum
+
+      # govulncheck has no suppression of its own, so the accepted set lives in
+      # src/.govulncheck-allow with a reason per entry. Anything not in that
+      # file fails this job. Two vulnerabilities are currently accepted: both
+      # are unfixable in the pgx v4 line and reachable only through the
+      # postgres CDC worker, which no pipeline can use and prod does not run.
+      - name: Scan Go modules and the standard library
+        working-directory: src
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./... > report.txt 2>&1 || true
+          cat report.txt
+
+          found=$(grep -oE '^Vulnerability #[0-9]+: GO-[0-9]{4}-[0-9]+' report.txt \
+                    | grep -oE 'GO-[0-9]{4}-[0-9]+' | sort -u)
+          allowed=$(grep -oE '^GO-[0-9]{4}-[0-9]+' .govulncheck-allow | sort -u)
+          unexpected=$(comm -23 <(echo "$found") <(echo "$allowed"))
+
+          if [ -n "$unexpected" ]; then
+            echo "::error::vulnerabilities not in src/.govulncheck-allow:"
+            echo "$unexpected" | sed 's/^/  /'
+            echo
+            echo "Fix them, or add each to src/.govulncheck-allow with the reason it cannot be."
+            exit 1
+          fi
+
+          # A stale entry is its own problem: it reads as a live risk that has
+          # in fact been fixed, and the next person trusts it.
+          stale=$(comm -13 <(echo "$found") <(echo "$allowed"))
+          if [ -n "$stale" ]; then
+            echo "::warning::these are allowed but no longer reported — delete them from src/.govulncheck-allow:"
+            echo "$stale" | sed 's/^/  /'
+          fi
+
+          echo "govulncheck: no unexpected vulnerabilities"
+
+  npm:
+    name: npm audit (production deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Audit production dependencies
+        working-directory: ui
+        run: npm audit --omit=dev --audit-level=high
+
+      # Dev tooling is reported, never gating — see the header.
+      - name: Report dev-dependency advisories
+        working-directory: ui
+        if: always()
+        run: npm audit || true

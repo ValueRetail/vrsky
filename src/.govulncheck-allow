@@ -1,0 +1,26 @@
+# Vulnerabilities govulncheck reports that this repo knowingly ships with.
+#
+# One ID per line, with the reason. Anything NOT listed here fails the
+# Vulnerability scan workflow, so this file is the whole difference between a
+# gate and a warning nobody reads. Adding an entry is a decision; removing one
+# is what happens when a fix ships.
+#
+# Every entry must record: what it is, why it cannot be fixed, and what would
+# let it be deleted.
+
+# --- github.com/jackc/pgx/v4 and pgproto3/v2 -------------------------------
+#
+# Both are denial-of-service issues with NO FIX in the v4 line (govulncheck
+# reports "Fixed in: N/A"); pgx v4 is in maintenance and v5 is the current
+# major. Reachable only through pkg/io/postgres_input.go — the PostgreSQL CDC
+# consumer, which is configured entirely from POSTGRES_INPUT_* environment
+# variables, is not a node type in the management API, and cannot be reached
+# from any pipeline a tenant can build (see #239). It runs in docker-compose as
+# a load-harness fixture and is not deployed to production at all:
+# deploy-connectors-azure.sh does not mention it.
+#
+# Removed by either migrating pgx v4 -> v5, or resolving what the postgres CDC
+# worker is for. The second is the open question; the first is a day's work
+# that only matters if the answer is "keep it".
+GO-2026-5004
+GO-2026-4518

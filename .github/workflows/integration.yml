@@ -109,7 +109,7 @@ jobs:
             -e KAFKA_TEST_BROKER=kafka-test:9092 \
             -e RABBITMQ_TEST_URL=amqp://guest:guest@rabbitmq-test:5672/ \
             -e GOFLAGS=-buildvcs=false \
-            golang:1.22 \
+            golang:1.26 \
             go test -tags=integration -count=1 -v \
               ./pkg/objectstore/... \
               ./cmd/sftp-consumer/... \

@@ -1,5 +1,5 @@
 # Mock SAP S/4HANA OData server for local testing (not for production).
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 COPY src/go.mod src/go.sum ./
