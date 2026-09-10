@@ -44,12 +44,12 @@ type sapProducer struct {
 
 // SAPProducerConfig is the per-node configuration (config.sap_s4hana).
 type SAPProducerConfig struct {
-	Host         string `json:"host"`
-	APIBaseURL   string `json:"api_base_url"`
-	Service      string `json:"service"`     // e.g. API_SALES_ORDER_SRV
-	EntitySet    string `json:"entity_set"`  // write target, e.g. A_SalesOrder
-	SAPClient    string `json:"sap_client"`  // optional mandt
-	Method       string `json:"method"`      // POST (default) or PATCH
+	Host       string `json:"host"`
+	APIBaseURL string `json:"api_base_url"`
+	Service    string `json:"service"`    // e.g. API_SALES_ORDER_SRV
+	EntitySet  string `json:"entity_set"` // write target, e.g. A_SalesOrder
+	SAPClient  string `json:"sap_client"` // optional mandt
+	Method     string `json:"method"`     // POST (default) or PATCH
 
 	AuthType     string `json:"auth_type"`     // basic (default) | oauth2
 	Username     string `json:"username"`      // basic
@@ -335,7 +335,6 @@ func (p *sapProducer) getConfig(ctx context.Context, connectionID, tenantID stri
 	}
 	return nil, errors.New("no sap_s4hana producer node found")
 }
-
 
 // ServesConnection reports whether this connection has a SAP destination —
 // mirroring Deliver's own "no config -> not ours" semantics — so the SDK can

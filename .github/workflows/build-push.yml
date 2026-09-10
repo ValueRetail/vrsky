@@ -153,6 +153,25 @@ jobs:
           go-version: '1.22'
           cache-dependency-path: src/go.sum
 
+      # golangci-lint runs here without a config file, and gofmt is not in its
+      # default linter set (errcheck, gosimple, govet, ineffassign, staticcheck,
+      # unused). So nothing was checking formatting at all, which is how
+      # cmd/sap-s4hana-producer/service.go sat unformatted on main until #236.
+      # Cheap, and first, so a formatting nit fails in seconds rather than after
+      # the race-enabled test run.
+      - name: Check gofmt
+        working-directory: src
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-clean:"
+            echo "$unformatted" | sed 's/^/  /'
+            echo
+            echo "Fix with:  gofmt -w $(echo $unformatted | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "all files are gofmt-clean"
+
       - name: Run Go tests
         working-directory: src
         run: go test -v -race -cover ./...
