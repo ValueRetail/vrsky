@@ -15,17 +15,24 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
+    // No baseUrl: TypeScript 6 deprecates it and 7 removes it. Without it,
+    // `paths` resolve relative to this file, hence the ./ prefixes. Works
+    // identically on the pinned 5.9 — so this is the migration done early,
+    // before the warning an editor on TS 6 already shows becomes a build error.
+    //
+    // vite.config.ts and vitest.config.ts carry the same aliases for the
+    // bundler; only "@/" is imported anywhere in src (72 uses), the rest are
+    // declared and unused.
     "paths": {
-      "@/*": ["src/*"],
-      "@components/*": ["src/components/*"],
-      "@pages/*": ["src/pages/*"],
-      "@services/*": ["src/services/*"],
-      "@store/*": ["src/store/*"],
-      "@hooks/*": ["src/hooks/*"],
-      "@types/*": ["src/types/*"],
-      "@utils/*": ["src/utils/*"],
-      "@config/*": ["src/config/*"]
+      "@/*": ["./src/*"],
+      "@components/*": ["./src/components/*"],
+      "@pages/*": ["./src/pages/*"],
+      "@services/*": ["./src/services/*"],
+      "@store/*": ["./src/store/*"],
+      "@hooks/*": ["./src/hooks/*"],
+      "@types/*": ["./src/types/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@config/*": ["./src/config/*"]
     },
 
     /* Linting */
