@@ -585,37 +585,73 @@ func TestBindsToDurableCreatedTheOldWay(t *testing.T) {
 // its first version reconciled AckWait alone. These pin the three ways that
 // went wrong.
 
-// TestFilterChangeRecreatesConsumer: a durable whose filter changed is
-// recreated rather than bound to. Binding failed with ErrSubjectMismatch and
-// left the connector stuck until someone deleted the consumer by hand — the
-// tenant-consumer bridge hits this whenever its source connection is edited.
-func TestFilterChangeRecreatesConsumer(t *testing.T) {
+// TestFilterChangeKeepsPosition: a durable whose filter changed is updated
+// in place and keeps its stream position.
+//
+// Two wrong versions preceded this. The first bound to the old filter and
+// failed with ErrSubjectMismatch — connector stuck until someone deleted the
+// consumer by hand. The second deleted and recreated the consumer, on the
+// mistaken reasoning that the position "refers to messages the new filter may
+// not match"; the position is a stream sequence, filter-independent, and
+// recreating at DeliverAll replayed up to 72h for a routine edit — the same
+// duplicate class #250 fixed. The tenant-consumer bridge hits this whenever a
+// second shared connection widens its topic from pipeline.<A> to pipeline.>.
+//
+// So: publish under the old filter, consume it, widen the filter, publish
+// once more, and assert that ONLY the new message arrives.
+func TestFilterChangeKeepsPosition(t *testing.T) {
 	_, js, cleanup := startServer(t)
 	defer cleanup()
+	if err := EnsureStreams(js); err != nil {
+		t.Fatalf("EnsureStreams: %v", err)
+	}
 	const durable = "test-filter-change"
-
-	sub1, err := Subscribe(js, SubscriberOpts{DurableName: durable, FilterSubject: "vrsky.data.tenant-a.>"},
-		func(context.Context, *nats.Msg) error { return nil })
-	if err != nil {
-		t.Fatalf("first Subscribe: %v", err)
+	pubTo := func(subj string, n int) {
+		t.Helper()
+		for i := 0; i < n; i++ {
+			if _, err := js.Publish(subj, []byte(fmt.Sprintf("%s-%d", subj, i))); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+		}
 	}
-	sub1.Stop()
-
-	// Same durable, different filter. Must not error, must not be stuck.
-	sub2, err := Subscribe(js, SubscriberOpts{DurableName: durable, FilterSubject: "vrsky.data.tenant-b.>"},
-		func(context.Context, *nats.Msg) error { return nil })
-	if err != nil {
-		t.Fatalf("Subscribe after filter change: %v — the connector would be stuck until the consumer "+
-			"is deleted by hand", err)
+	consume := func(filter string) int32 {
+		t.Helper()
+		var got int32
+		sub, err := Subscribe(js, SubscriberOpts{DurableName: durable, FilterSubject: filter},
+			func(context.Context, *nats.Msg) error { atomic.AddInt32(&got, 1); return nil })
+		if err != nil {
+			t.Fatalf("Subscribe(%s): %v — the connector would be stuck", filter, err)
+		}
+		time.Sleep(3 * time.Second)
+		sub.Stop()
+		return atomic.LoadInt32(&got)
 	}
-	defer sub2.Stop()
+
+	// Narrow filter, 3 messages, all consumed.
+	pubTo("vrsky.data.tenant-a.x", 3)
+	if n := consume("vrsky.data.tenant-a.>"); n != 3 {
+		t.Fatalf("under the narrow filter delivered %d, want 3", n)
+	}
+
+	// Widen the filter to everything. One new message. The 3 already consumed
+	// under tenant-a also match the wide filter — a recreated consumer would
+	// deliver them again.
+	pubTo("vrsky.data.tenant-b.y", 1)
+	n := consume(MainSubjectAll)
 
 	ci, err := js.ConsumerInfo(MainStreamName, durable)
 	if err != nil {
 		t.Fatalf("ConsumerInfo: %v", err)
 	}
-	if ci.Config.FilterSubject != "vrsky.data.tenant-b.>" {
-		t.Fatalf("filter = %q after change, want the new one", ci.Config.FilterSubject)
+	if ci.Config.FilterSubject != MainSubjectAll {
+		t.Fatalf("filter = %q after change, want %q", ci.Config.FilterSubject, MainSubjectAll)
+	}
+	if n == 4 {
+		t.Fatalf("widened filter delivered 4 — the 3 already-consumed messages came back, so the " +
+			"consumer was recreated at DeliverAll instead of updated in place")
+	}
+	if n != 1 {
+		t.Fatalf("widened filter delivered %d, want exactly the 1 published after the change", n)
 	}
 }
 
@@ -634,7 +670,11 @@ func TestNonAckWaitFieldsReconcile(t *testing.T) {
 		t.Fatalf("first Subscribe: %v", err)
 	}
 	sub1.Stop()
-	if ci, _ := js.ConsumerInfo(MainStreamName, durable); ci.Config.MaxAckPending != 8 {
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("setup ConsumerInfo: %v", err)
+	}
+	if ci.Config.MaxAckPending != 8 {
 		t.Fatalf("setup: MaxAckPending = %d, want 8", ci.Config.MaxAckPending)
 	}
 
@@ -646,7 +686,7 @@ func TestNonAckWaitFieldsReconcile(t *testing.T) {
 	}
 	defer sub2.Stop()
 
-	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	ci, err = js.ConsumerInfo(MainStreamName, durable)
 	if err != nil {
 		t.Fatalf("ConsumerInfo: %v", err)
 	}
@@ -716,7 +756,10 @@ func TestLegacyDurableGetsInactiveThreshold(t *testing.T) {
 	}
 	defer sub.Stop()
 
-	ci, _ := js.ConsumerInfo(MainStreamName, durable)
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("ConsumerInfo: %v", err)
+	}
 	if ci.Config.InactiveThreshold != ConsumerInactiveThreshold {
 		t.Fatalf("legacy durable still has InactiveThreshold=%v after reconcile, want %v",
 			ci.Config.InactiveThreshold, ConsumerInactiveThreshold)

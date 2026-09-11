@@ -182,7 +182,8 @@ func consumerConfig(opts SubscriberOpts) *nats.ConsumerConfig {
 const ConsumerInactiveThreshold = 7 * 24 * time.Hour
 
 // ensureConsumer makes the durable match consumerConfig(opts) — created if
-// absent, updated in place if it differs, recreated if its filter changed.
+// absent, updated in place if it differs. Nothing here ever deletes a
+// consumer; deletion is what loses the position.
 //
 // Two histories meet here. #99: JetStream stores AckWait = BackOff[0], so a
 // re-subscribe requesting a different AckWait crash-looped on the mismatch.
@@ -212,27 +213,23 @@ func ensureConsumer(js nats.JetStreamContext, opts SubscriberOpts) error {
 	}
 	have := ci.Config
 
-	// A different filter is a different consumer. The old position refers to
-	// messages the new filter may not even match, so carrying it over would
-	// be wrong rather than merely stale — recreate. This is the one case that
-	// intentionally starts over, and it is logged as such.
-	if have.FilterSubject != want.FilterSubject {
-		opts.Logger.Warn("durable filter changed; recreating consumer (position reset)",
-			"durable", opts.DurableName,
-			"old_filter", have.FilterSubject, "new_filter", want.FilterSubject)
-		if err := js.DeleteConsumer(MainStreamName, opts.DurableName); err != nil {
-			return fmt.Errorf("delete consumer for filter change: %w", err)
-		}
-		_, err := js.AddConsumer(MainStreamName, want)
-		return err
-	}
-
-	// Everything else updates in place, keeping the position.
+	// Everything updates in place, keeping the position — the filter
+	// included. The first version of this deleted and recreated the consumer
+	// on a filter change, reasoning that the old position "refers to messages
+	// the new filter may not match". That was wrong: the position is a stream
+	// sequence, independent of any filter, and a consumer at sequence N with a
+	// new filter simply continues from N delivering only what matches. Since
+	// nats-server 2.10 the server updates FilterSubject in place with the
+	// position intact. Recreating instead put the consumer at DeliverAll —
+	// the same up-to-72h replay #250 exists to prevent — for a routine edit
+	// like widening a tenant-consumer bridge from one shared connection to
+	// several.
 	changed := consumerDrift(have, *want)
 	if len(changed) == 0 {
 		return nil
 	}
 	cfg := have
+	cfg.FilterSubject = want.FilterSubject
 	cfg.AckWait = want.AckWait
 	cfg.BackOff = want.BackOff
 	cfg.MaxAckPending = want.MaxAckPending
@@ -250,6 +247,9 @@ func ensureConsumer(js nats.JetStreamContext, opts SubscriberOpts) error {
 // what we want. Named rather than boolean so the log line says what moved.
 func consumerDrift(have, want nats.ConsumerConfig) []string {
 	var out []string
+	if have.FilterSubject != want.FilterSubject {
+		out = append(out, "filter_subject")
+	}
 	if have.AckWait != want.AckWait {
 		out = append(out, "ack_wait")
 	}
