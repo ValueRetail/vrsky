@@ -449,3 +449,131 @@ func waitFor(t *testing.T, ok func() bool, max time.Duration) {
 	}
 	t.Fatalf("condition not met within %v", max)
 }
+
+// --- durable survives Stop ---------------------------------------------------
+//
+// Before the bind change, Subscriber.Stop drained a subscription that owned its
+// durable, which deleted the durable; the next Subscribe recreated it at
+// DeliverAll and replayed everything still in the stream — up to MainRetention
+// (72h). The three tests below pin the fix from three sides.
+
+func publishN(t *testing.T, js nats.JetStreamContext, tag string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := js.Publish("vrsky.data.restart", []byte(fmt.Sprintf("%s-%d", tag, i))); err != nil {
+			t.Fatalf("publish %s-%d: %v", tag, i, err)
+		}
+	}
+}
+
+// consumeUntilQuiet subscribes, drains whatever is available, stops, and
+// returns how many messages the handler saw.
+func consumeUntilQuiet(t *testing.T, js nats.JetStreamContext, durable string) int32 {
+	t.Helper()
+	var got int32
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: durable},
+		func(context.Context, *nats.Msg) error { atomic.AddInt32(&got, 1); return nil })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	// The fetch loop waits up to 2s per empty fetch; give it a couple of
+	// rounds so "quiet" means quiet rather than "not started yet".
+	time.Sleep(3 * time.Second)
+	sub.Stop()
+	return atomic.LoadInt32(&got)
+}
+
+// TestStopPreservesDurable: the consumer is still there after Stop.
+func TestStopPreservesDurable(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+
+	const durable = "test-stop-preserves"
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: durable}, func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	sub.Stop()
+
+	// Poll rather than check once: the old behaviour deleted it ~50ms after
+	// Stop, so a single immediate read could pass for the wrong reason.
+	time.Sleep(500 * time.Millisecond)
+	if _, err := js.ConsumerInfo(MainStreamName, durable); err != nil {
+		t.Fatalf("durable %q gone after Stop (%v) — the next start would replay the stream from the beginning", durable, err)
+	}
+}
+
+// TestRestartDeliversOnlyNewMessages: the inverse of the probe that found the
+// bug. Publish, consume, stop, publish more, resubscribe — only the new ones
+// arrive.
+func TestRestartDeliversOnlyNewMessages(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	if err := EnsureStreams(js); err != nil {
+		t.Fatalf("EnsureStreams: %v", err)
+	}
+	const durable = "test-restart-only-new"
+
+	publishN(t, js, "first", 3)
+	if n := consumeUntilQuiet(t, js, durable); n != 3 {
+		t.Fatalf("first run delivered %d, want 3", n)
+	}
+
+	publishN(t, js, "second", 2)
+	n := consumeUntilQuiet(t, js, durable)
+
+	if n == 5 {
+		t.Fatalf("second run delivered all 5 — the durable was deleted on Stop and recreated at DeliverAll; " +
+			"a graceful restart is replaying the retained stream")
+	}
+	if n != 2 {
+		t.Fatalf("second run delivered %d, want exactly the 2 published while stopped", n)
+	}
+}
+
+// TestBindsToDurableCreatedTheOldWay: a consumer left behind by the previous
+// code — created by PullSubscribe rather than AddConsumer — is an ordinary
+// existing durable to the new code. It must bind, and keep its position.
+//
+// This is the prod migration path: every deployed connector has one of these.
+func TestBindsToDurableCreatedTheOldWay(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	if err := EnsureStreams(js); err != nil {
+		t.Fatalf("EnsureStreams: %v", err)
+	}
+	const durable = "test-legacy-durable"
+
+	// Create it the way the old Subscribe did — PullSubscribe owning the
+	// consumer — and consume 3 so it has a position. Do NOT drain: that is
+	// what deleted it. Just let the subscription go.
+	publishN(t, js, "old", 3)
+	legacy, err := js.PullSubscribe(MainSubjectAll, durable,
+		nats.ManualAck(),
+		nats.AckWait(DefaultBackoff[0]),
+		nats.MaxAckPending(32),
+		nats.MaxDeliver(MaxDeliveryAttempts),
+		nats.BackOff(DefaultBackoff),
+	)
+	if err != nil {
+		t.Fatalf("legacy PullSubscribe: %v", err)
+	}
+	msgs, err := legacy.Fetch(3, nats.MaxWait(3*time.Second))
+	if err != nil {
+		t.Fatalf("legacy fetch: %v", err)
+	}
+	for _, m := range msgs {
+		_ = m.Ack()
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("legacy consumed %d, want 3", len(msgs))
+	}
+	// Abandon it without Drain/Unsubscribe, as a crashed process would.
+
+	// New code takes over the same durable.
+	publishN(t, js, "new", 2)
+	n := consumeUntilQuiet(t, js, durable)
+	if n != 2 {
+		t.Fatalf("new Subscribe on a legacy durable delivered %d, want 2 — position was lost or the bind failed", n)
+	}
+}

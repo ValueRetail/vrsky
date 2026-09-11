@@ -121,23 +121,22 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	if err := EnsureStreams(js); err != nil {
 		return nil, err
 	}
-	// If a durable already exists with a different ack-wait (e.g. AckWait was
-	// just raised, or a pre-#139 consumer is stored at 1s), update it in place
-	// so the PullSubscribe below binds cleanly instead of erroring on the
-	// mismatch (#99). Best-effort: a missing consumer is created fresh by
-	// PullSubscribe; a transient error here surfaces on the bind attempt.
-	if err := reconcileAckWait(js, opts); err != nil {
-		opts.Logger.Warn("could not reconcile consumer ack wait before bind",
-			"durable", opts.DurableName, "error", err)
+	// The consumer is created (or reconciled) explicitly and the subscription
+	// BINDS to it, rather than letting PullSubscribe own it. The difference is
+	// what happens on Stop: a subscription that created its own durable deletes
+	// it when drained, and a recreated consumer starts from DeliverAll — so
+	// every graceful restart replayed everything still in the stream, up to
+	// MainRetention. Measured: gone 50ms after Stop; 5 of 5 redelivered where
+	// 2 were new. A bound subscription leaves the consumer, and its position,
+	// where they are.
+	if err := ensureConsumer(js, opts); err != nil {
+		return nil, fmt.Errorf("ensure consumer %s: %w", opts.DurableName, err)
 	}
 	pub := NewPublisher(js)
 
-	sub, err := js.PullSubscribe(opts.FilterSubject, opts.DurableName,
+	sub, err := js.PullSubscribe(opts.FilterSubject, "",
+		nats.Bind(MainStreamName, opts.DurableName),
 		nats.ManualAck(),
-		nats.AckWait(opts.AckWait),
-		nats.MaxAckPending(opts.MaxAckPending),
-		nats.MaxDeliver(MaxDeliveryAttempts),
-		nats.BackOff(opts.Backoff),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("PullSubscribe %s: %w", opts.FilterSubject, err)
@@ -155,33 +154,70 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 	return s, nil
 }
 
-// reconcileAckWait updates an already-existing durable's AckWait/BackOff to the
-// requested values so a re-subscribe binds cleanly. It is a no-op when the
-// consumer doesn't exist yet (PullSubscribe will create it) or already matches.
-func reconcileAckWait(js nats.JetStreamContext, opts SubscriberOpts) error {
+// consumerConfig is the consumer this subscriber wants, in full.
+func consumerConfig(opts SubscriberOpts) *nats.ConsumerConfig {
+	return &nats.ConsumerConfig{
+		Durable:       opts.DurableName,
+		AckPolicy:     nats.AckExplicitPolicy,
+		AckWait:       opts.AckWait,
+		BackOff:       opts.Backoff,
+		MaxAckPending: opts.MaxAckPending,
+		MaxDeliver:    MaxDeliveryAttempts,
+		FilterSubject: opts.FilterSubject,
+	}
+}
+
+// ensureConsumer creates the durable if it does not exist, and otherwise
+// updates it in place to the requested AckWait/BackOff.
+//
+// Two histories meet here. #99: JetStream stores AckWait = BackOff[0], so a
+// re-subscribe requesting a different AckWait crash-looped on the mismatch.
+// #139: AckWait became tunable, and an existing durable is reconciled to the
+// raised value rather than erroring. Both used to be handled around
+// PullSubscribe's own config validation; now that the subscription binds
+// instead of owning the consumer, there is no client-side validation to trip
+// — but the reconcile still matters, because a bind to a consumer at the old
+// AckWait would silently keep the old AckWait in effect.
+//
+// A durable created by an earlier version of this code (PullSubscribe-owned)
+// is just an existing consumer here: it is reconciled and bound to, with its
+// position intact.
+func ensureConsumer(js nats.JetStreamContext, opts SubscriberOpts) error {
+	want := consumerConfig(opts)
+
 	ci, err := js.ConsumerInfo(MainStreamName, opts.DurableName)
 	if err != nil {
-		// Not found / transient: nothing to reconcile. PullSubscribe creates
-		// the consumer, or surfaces a real error on bind.
-		return nil //nolint:nilerr // intentional: absence is not an error here
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			return err
+		}
+		if _, err := js.AddConsumer(MainStreamName, want); err != nil {
+			return err
+		}
+		return nil
 	}
-	if ci.Config.AckWait == opts.AckWait {
+
+	if ci.Config.AckWait == want.AckWait {
 		return nil
 	}
 	cfg := ci.Config
-	cfg.AckWait = opts.AckWait
-	cfg.BackOff = opts.Backoff
+	cfg.AckWait = want.AckWait
+	cfg.BackOff = want.BackOff
 	if _, err := js.UpdateConsumer(MainStreamName, &cfg); err != nil {
 		return err
 	}
 	opts.Logger.Info("reconciled durable ack wait",
 		"durable", opts.DurableName,
-		"old_ack_wait", ci.Config.AckWait, "new_ack_wait", opts.AckWait)
+		"old_ack_wait", ci.Config.AckWait, "new_ack_wait", want.AckWait)
 	return nil
 }
 
-// Stop signals the dispatch loop to exit and waits for it to finish. The
-// JetStream consumer itself is durable and stays registered server-side.
+// Stop signals the dispatch loop to exit and waits for it to finish.
+//
+// The durable consumer survives this. That sentence was in the previous
+// version of this comment too, and it was false: the subscription owned the
+// consumer, so draining it deleted the durable and the next start replayed
+// the stream. The subscription now binds to a consumer it does not own, and
+// draining a bound subscription leaves the consumer alone — see Subscribe.
 func (s *Subscriber) Stop() {
 	close(s.stopCh)
 	<-s.doneCh
