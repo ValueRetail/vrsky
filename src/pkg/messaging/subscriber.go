@@ -164,11 +164,25 @@ func consumerConfig(opts SubscriberOpts) *nats.ConsumerConfig {
 		MaxAckPending: opts.MaxAckPending,
 		MaxDeliver:    MaxDeliveryAttempts,
 		FilterSubject: opts.FilterSubject,
+		// Durables now survive Stop, so nothing deletes one whose owner has
+		// gone for good — a tenant-consumer bridge per connection, say, after
+		// the connection is deleted. JetStream removes a consumer nobody has
+		// bound to for this long. It is deliberately much longer than any
+		// restart or outage: a consumer removed this way is recreated at
+		// DeliverAll on return, which is the replay this package exists to
+		// avoid, so the threshold must only ever fire for the abandoned.
+		InactiveThreshold: ConsumerInactiveThreshold,
 	}
 }
 
-// ensureConsumer creates the durable if it does not exist, and otherwise
-// updates it in place to the requested AckWait/BackOff.
+// ConsumerInactiveThreshold is how long an unbound durable lives before
+// JetStream reaps it. A week: long past any plausible outage, so a connector
+// that comes back keeps its position, while consumers whose owner was deleted
+// do not accumulate forever.
+const ConsumerInactiveThreshold = 7 * 24 * time.Hour
+
+// ensureConsumer makes the durable match consumerConfig(opts) — created if
+// absent, updated in place if it differs, recreated if its filter changed.
 //
 // Two histories meet here. #99: JetStream stores AckWait = BackOff[0], so a
 // re-subscribe requesting a different AckWait crash-looped on the mismatch.
@@ -176,8 +190,11 @@ func consumerConfig(opts SubscriberOpts) *nats.ConsumerConfig {
 // raised value rather than erroring. Both used to be handled around
 // PullSubscribe's own config validation; now that the subscription binds
 // instead of owning the consumer, there is no client-side validation to trip
-// — but the reconcile still matters, because a bind to a consumer at the old
-// AckWait would silently keep the old AckWait in effect.
+// — so EVERY field has to be reconciled here, not just AckWait. The first
+// version of this reconciled AckWait alone, which meant a changed
+// MaxAckPending or MaxDeliver was silently ignored on every restart, and a
+// changed FilterSubject failed the bind outright with the consumer stuck
+// until someone deleted it by hand. Deleting on Stop had been masking both.
 //
 // A durable created by an earlier version of this code (PullSubscribe-owned)
 // is just an existing consumer here: it is reconciled and bound to, with its
@@ -190,25 +207,77 @@ func ensureConsumer(js nats.JetStreamContext, opts SubscriberOpts) error {
 		if !errors.Is(err, nats.ErrConsumerNotFound) {
 			return err
 		}
-		if _, err := js.AddConsumer(MainStreamName, want); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if ci.Config.AckWait == want.AckWait {
-		return nil
-	}
-	cfg := ci.Config
-	cfg.AckWait = want.AckWait
-	cfg.BackOff = want.BackOff
-	if _, err := js.UpdateConsumer(MainStreamName, &cfg); err != nil {
+		_, err := js.AddConsumer(MainStreamName, want)
 		return err
 	}
-	opts.Logger.Info("reconciled durable ack wait",
-		"durable", opts.DurableName,
-		"old_ack_wait", ci.Config.AckWait, "new_ack_wait", want.AckWait)
+	have := ci.Config
+
+	// A different filter is a different consumer. The old position refers to
+	// messages the new filter may not even match, so carrying it over would
+	// be wrong rather than merely stale — recreate. This is the one case that
+	// intentionally starts over, and it is logged as such.
+	if have.FilterSubject != want.FilterSubject {
+		opts.Logger.Warn("durable filter changed; recreating consumer (position reset)",
+			"durable", opts.DurableName,
+			"old_filter", have.FilterSubject, "new_filter", want.FilterSubject)
+		if err := js.DeleteConsumer(MainStreamName, opts.DurableName); err != nil {
+			return fmt.Errorf("delete consumer for filter change: %w", err)
+		}
+		_, err := js.AddConsumer(MainStreamName, want)
+		return err
+	}
+
+	// Everything else updates in place, keeping the position.
+	changed := consumerDrift(have, *want)
+	if len(changed) == 0 {
+		return nil
+	}
+	cfg := have
+	cfg.AckWait = want.AckWait
+	cfg.BackOff = want.BackOff
+	cfg.MaxAckPending = want.MaxAckPending
+	cfg.MaxDeliver = want.MaxDeliver
+	cfg.InactiveThreshold = want.InactiveThreshold
+	if _, err := js.UpdateConsumer(MainStreamName, &cfg); err != nil {
+		return fmt.Errorf("update consumer: %w", err)
+	}
+	opts.Logger.Info("reconciled durable consumer config",
+		"durable", opts.DurableName, "changed", changed)
 	return nil
+}
+
+// consumerDrift names the fields on which an existing consumer differs from
+// what we want. Named rather than boolean so the log line says what moved.
+func consumerDrift(have, want nats.ConsumerConfig) []string {
+	var out []string
+	if have.AckWait != want.AckWait {
+		out = append(out, "ack_wait")
+	}
+	if !equalDurations(have.BackOff, want.BackOff) {
+		out = append(out, "backoff")
+	}
+	if have.MaxAckPending != want.MaxAckPending {
+		out = append(out, "max_ack_pending")
+	}
+	if have.MaxDeliver != want.MaxDeliver {
+		out = append(out, "max_deliver")
+	}
+	if have.InactiveThreshold != want.InactiveThreshold {
+		out = append(out, "inactive_threshold")
+	}
+	return out
+}
+
+func equalDurations(a, b []time.Duration) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Stop signals the dispatch loop to exit and waits for it to finish.
