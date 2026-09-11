@@ -577,3 +577,148 @@ func TestBindsToDurableCreatedTheOldWay(t *testing.T) {
 		t.Fatalf("new Subscribe on a legacy durable delivered %d, want 2 — position was lost or the bind failed", n)
 	}
 }
+
+// --- every field reconciles, not just AckWait -------------------------------
+//
+// The bind change made durables survive Stop, which meant ensureConsumer had
+// to reconcile config that PullSubscribe's own validation used to catch — and
+// its first version reconciled AckWait alone. These pin the three ways that
+// went wrong.
+
+// TestFilterChangeRecreatesConsumer: a durable whose filter changed is
+// recreated rather than bound to. Binding failed with ErrSubjectMismatch and
+// left the connector stuck until someone deleted the consumer by hand — the
+// tenant-consumer bridge hits this whenever its source connection is edited.
+func TestFilterChangeRecreatesConsumer(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	const durable = "test-filter-change"
+
+	sub1, err := Subscribe(js, SubscriberOpts{DurableName: durable, FilterSubject: "vrsky.data.tenant-a.>"},
+		func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("first Subscribe: %v", err)
+	}
+	sub1.Stop()
+
+	// Same durable, different filter. Must not error, must not be stuck.
+	sub2, err := Subscribe(js, SubscriberOpts{DurableName: durable, FilterSubject: "vrsky.data.tenant-b.>"},
+		func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("Subscribe after filter change: %v — the connector would be stuck until the consumer "+
+			"is deleted by hand", err)
+	}
+	defer sub2.Stop()
+
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("ConsumerInfo: %v", err)
+	}
+	if ci.Config.FilterSubject != "vrsky.data.tenant-b.>" {
+		t.Fatalf("filter = %q after change, want the new one", ci.Config.FilterSubject)
+	}
+}
+
+// TestNonAckWaitFieldsReconcile: MaxAckPending, MaxDeliver and the full
+// BackOff schedule update in place on an existing durable. Before, only
+// AckWait did; a changed MaxAckPending was silently ignored on every restart,
+// where PullSubscribe used to at least error.
+func TestNonAckWaitFieldsReconcile(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	const durable = "test-fields-reconcile"
+
+	sub1, err := Subscribe(js, SubscriberOpts{DurableName: durable, MaxAckPending: 8},
+		func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("first Subscribe: %v", err)
+	}
+	sub1.Stop()
+	if ci, _ := js.ConsumerInfo(MainStreamName, durable); ci.Config.MaxAckPending != 8 {
+		t.Fatalf("setup: MaxAckPending = %d, want 8", ci.Config.MaxAckPending)
+	}
+
+	// Same durable, raised MaxAckPending. Must take effect on the consumer.
+	sub2, err := Subscribe(js, SubscriberOpts{DurableName: durable, MaxAckPending: 64},
+		func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("re-Subscribe: %v", err)
+	}
+	defer sub2.Stop()
+
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("ConsumerInfo: %v", err)
+	}
+	if ci.Config.MaxAckPending != 64 {
+		t.Fatalf("MaxAckPending = %d after change, want 64 — the new value was silently ignored",
+			ci.Config.MaxAckPending)
+	}
+	if ci.Config.MaxDeliver != MaxDeliveryAttempts {
+		t.Fatalf("MaxDeliver = %d, want %d", ci.Config.MaxDeliver, MaxDeliveryAttempts)
+	}
+}
+
+// TestConsumersHaveInactiveThreshold: a durable nobody binds to is reaped
+// eventually. Without this, per-connection bridge durables outlive the
+// connections that owned them, forever.
+func TestConsumersHaveInactiveThreshold(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	const durable = "test-inactive-threshold"
+
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: durable}, func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer sub.Stop()
+
+	ci, err := js.ConsumerInfo(MainStreamName, durable)
+	if err != nil {
+		t.Fatalf("ConsumerInfo: %v", err)
+	}
+	if ci.Config.InactiveThreshold != ConsumerInactiveThreshold {
+		t.Fatalf("InactiveThreshold = %v, want %v — an abandoned durable would never be cleaned up",
+			ci.Config.InactiveThreshold, ConsumerInactiveThreshold)
+	}
+	// And it must be long enough that no ordinary restart trips it: a
+	// consumer reaped for inactivity is recreated at DeliverAll, which is
+	// exactly the replay the bind change exists to prevent.
+	if ConsumerInactiveThreshold < MainRetention {
+		t.Fatalf("InactiveThreshold (%v) is shorter than MainRetention (%v): a connector down that long "+
+			"would lose its consumer and replay the whole stream on return", ConsumerInactiveThreshold, MainRetention)
+	}
+}
+
+// TestLegacyDurableGetsInactiveThreshold: a durable created by the old code
+// has no InactiveThreshold. The reconcile must add one, or every pre-existing
+// prod consumer stays exempt from cleanup.
+func TestLegacyDurableGetsInactiveThreshold(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+	if err := EnsureStreams(js); err != nil {
+		t.Fatalf("EnsureStreams: %v", err)
+	}
+	const durable = "test-legacy-threshold"
+
+	// The old code's consumer: no InactiveThreshold.
+	if _, err := js.AddConsumer(MainStreamName, &nats.ConsumerConfig{
+		Durable: durable, AckPolicy: nats.AckExplicitPolicy,
+		AckWait: DefaultBackoff[0], BackOff: DefaultBackoff,
+		MaxAckPending: 32, MaxDeliver: MaxDeliveryAttempts, FilterSubject: MainSubjectAll,
+	}); err != nil {
+		t.Fatalf("AddConsumer: %v", err)
+	}
+
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: durable}, func(context.Context, *nats.Msg) error { return nil })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer sub.Stop()
+
+	ci, _ := js.ConsumerInfo(MainStreamName, durable)
+	if ci.Config.InactiveThreshold != ConsumerInactiveThreshold {
+		t.Fatalf("legacy durable still has InactiveThreshold=%v after reconcile, want %v",
+			ci.Config.InactiveThreshold, ConsumerInactiveThreshold)
+	}
+}
