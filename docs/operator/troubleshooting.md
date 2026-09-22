@@ -30,6 +30,24 @@ A parked cluster is indistinguishable from an outage from the outside: the IP
 still resolves (it is static), nothing answers on it, and no alert fires
 because nothing crashed.
 
+## MinIO or KES stuck in `ImagePullBackOff` after a cluster start
+
+Docker Hub stopped serving the `minio/minio`, `minio/mc` and `minio/kes`
+repositories in September 2026 (`pull access denied … repository does not
+exist`). The manifests now pull the same tags from `quay.io/minio/*`. A node
+that still has the old image cached keeps running; one that has to re-pull —
+typically after `az aks start` lands a pod on a fresh node — cannot. Check
+with:
+
+```bash
+kubectl -n vrsky-storage describe pod -l app=minio | grep -A3 "Failed to pull"
+```
+
+Apply the current manifests
+(`infrastructure/kubernetes/minio/`, `infrastructure/kubernetes/encryption/`)
+and the pod pulls from quay.io. If a compose or CI job hits the same error,
+`docker-compose.yml` and the DR drill were moved in the same change.
+
 ## A pipeline deploys but no data flows
 
 1. Confirm it's **running** (Settings/Connections, or the connection status).

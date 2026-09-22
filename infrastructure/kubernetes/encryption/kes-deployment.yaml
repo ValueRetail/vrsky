@@ -75,7 +75,7 @@ spec:
     spec:
       containers:
         - name: kes
-          image: minio/kes:2024-09-11T07-22-50Z
+          image: quay.io/minio/kes:2024-09-11T07-22-50Z
           args: ["server", "--config", "/etc/kes/config/kes-server.yaml"]
           ports:
             - containerPort: 7373
