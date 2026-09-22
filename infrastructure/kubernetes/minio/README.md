@@ -174,7 +174,7 @@ mc rm vrsky-local/vrsky-objects/temp/test.txt
 
 ```bash
 # Run mc client from pod
-kubectl run -it --rm mc-test --image=minio/mc --restart=Never -n vrsky-storage -- /bin/sh
+kubectl run -it --rm mc-test --image=quay.io/minio/mc --restart=Never -n vrsky-storage -- /bin/sh
 
 # Inside pod:
 mc alias set vrsky http://minio.vrsky-storage.svc.cluster.local:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
@@ -186,7 +186,7 @@ mc stat vrsky/vrsky-objects
 
 ```bash
 # Check lifecycle rules
-kubectl run -it --rm mc-test --image=minio/mc --restart=Never -n vrsky-storage -- \
+kubectl run -it --rm mc-test --image=quay.io/minio/mc --restart=Never -n vrsky-storage -- \
   sh -c 'mc alias set vrsky http://minio.vrsky-storage.svc.cluster.local:9000 vrsky-minio-access changeme-minio-secret-key-min-32-chars && mc ilm ls vrsky/vrsky-objects'
 ```
 
@@ -238,7 +238,7 @@ curl http://localhost:9000/minio/v2/metrics/cluster
 
 ```bash
 # Get server info via mc
-kubectl run -it --rm mc-test --image=minio/mc --restart=Never -n vrsky-storage -- \
+kubectl run -it --rm mc-test --image=quay.io/minio/mc --restart=Never -n vrsky-storage -- \
   sh -c 'mc alias set vrsky http://minio.vrsky-storage.svc.cluster.local:9000 vrsky-minio-access changeme-minio-secret-key-min-32-chars && mc admin info vrsky'
 ```
 
@@ -307,7 +307,7 @@ kubectl port-forward -n vrsky-storage svc/minio 9001:9001
 kubectl logs -n vrsky-storage job/minio-setup
 
 # Manually create bucket
-kubectl run -it --rm mc-test --image=minio/mc --restart=Never -n vrsky-storage -- \
+kubectl run -it --rm mc-test --image=quay.io/minio/mc --restart=Never -n vrsky-storage -- \
   sh -c 'mc alias set vrsky http://minio.vrsky-storage.svc.cluster.local:9000 vrsky-minio-access changeme-minio-secret-key-min-32-chars && mc mb vrsky/vrsky-objects'
 ```
 
