@@ -26,6 +26,10 @@ docker compose up -d --build  # start the stack (detached)
 cd ui && npm install && npm run dev   # UI at http://localhost:5173
 ```
 
+On a small machine (8 GB), `make up-core` starts only the ten services a
+pipeline needs instead of the full 68-container stack; `make down-core` stops
+them again.
+
 Then follow the [first-pipeline tutorial](docs/tutorials/first-pipeline.md). See
 the [install guide](docs/operator/install.md) for production (Kubernetes).
 
