@@ -993,6 +993,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO or KES stuck in ImagePullBackOff after a cluster start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2223,6 +2234,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MinIO or KES stuck in ImagePullBackOff after a cluster start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2325,6 +2347,19 @@ vrsky-prod</code> and give it several minutes. See
 <p>A parked cluster is indistinguishable from an outage from the outside: the IP
 still resolves (it is static), nothing answers on it, and no alert fires
 because nothing crashed.</p>
+<h2 id="minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start">MinIO or KES stuck in <code>ImagePullBackOff</code> after a cluster start<a class="headerlink" href="#minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start" title="Permanent link">&para;</a></h2>
+<p>Docker Hub stopped serving the <code>minio/minio</code>, <code>minio/mc</code> and <code>minio/kes</code>
+repositories in September 2026 (<code>pull access denied … repository does not
+exist</code>). The manifests now pull the same tags from <code>quay.io/minio/*</code>. A node
+that still has the old image cached keeps running; one that has to re-pull —
+typically after <code>az aks start</code> lands a pod on a fresh node — cannot. Check
+with:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-storage<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>minio<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A3<span class="w"> </span><span class="s2">"Failed to pull"</span>
+</code></pre></div>
+<p>Apply the current manifests
+(<code>infrastructure/kubernetes/minio/</code>, <code>infrastructure/kubernetes/encryption/</code>)
+and the pod pulls from quay.io. If a compose or CI job hits the same error,
+<code>docker-compose.yml</code> and the DR drill were moved in the same change.</p>
 <h2 id="a-pipeline-deploys-but-no-data-flows">A pipeline deploys but no data flows<a class="headerlink" href="#a-pipeline-deploys-but-no-data-flows" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Confirm it's <strong>running</strong> (Settings/Connections, or the connection status).</li>
