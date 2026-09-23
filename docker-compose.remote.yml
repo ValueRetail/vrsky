@@ -1,0 +1,32 @@
+# Reach this stack from another machine.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d ...
+#
+# or `make up-core-remote`, which is the same thing.
+#
+# The base compose file binds every port to 127.0.0.1 on purpose: a dev stack
+# holding real credentials should not appear on a network because someone
+# started it. This override is the opt-in, and the -f is the gate.
+#
+# Set VRSKY_BIND to the address you want to answer on. On a machine running
+# Tailscale that is its tailnet address (100.x.y.z) — then only devices in
+# your tailnet can reach it, wherever they are, and no firewall rule or LAN
+# assumption is involved. Leaving it unset answers on EVERY interface, which
+# on a shared or public network means everyone on it.
+#
+#   VRSKY_BIND=100.101.102.103 make up-core-remote
+#
+# What is published here is the webhook ingress only — the door a sender
+# outside this machine needs. The management API stays on loopback: the UI's
+# dev server proxies /api from where it runs, so a browser elsewhere reaches
+# it through the UI without the API being exposed itself.
+
+services:
+  webhook-consumer:
+    # !override replaces the base file's list instead of appending to it.
+    # Without it both bindings survive, and 0.0.0.0:9100 collides with the
+    # base file's 127.0.0.1:9100 — the stack fails to start with "address
+    # already in use", naming a port nothing else is using.
+    ports: !override
+      - "${VRSKY_BIND:-0.0.0.0}:9100:9100"
+      - "${VRSKY_BIND:-0.0.0.0}:9101:9101"
