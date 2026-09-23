@@ -2228,6 +2228,12 @@ permission), grant it access to the BC environment, and configure:</p>
   what a running pipeline delivers, so it is the connection owner's decision.</li>
 <li><code>cursor_field</code> — the field the watermark is read from (default
   <code>lastModifiedDateTime</code>). A custom API page may name it something else.</li>
+<li><code>page_size</code> — ask BC to page the response, sent as
+  <code>Prefer: odata.maxpagesize</code>. Unset leaves BC on its own default, which
+  returns most entities whole — 80 CRONUS items came back in a single page.
+  Note that <code>$top</code> is not a substitute: it caps the result set rather than
+  paging it, and produces no <code>@odata.nextLink</code>. BC may cap what you ask for
+  and reports what it applied in <code>Preference-Applied</code>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"business_central"</span><span class="p">,</span>
