@@ -34,6 +34,11 @@ export type EventWorker =
   | 'data-converter'
   | 'data-filter'
 
+/** A stream ending is routine, so the first reconnect is nearly immediate;
+ *  repeated failures back off so a dead far end is not hammered. */
+const RECONNECT_MIN_MS = 500
+const RECONNECT_MAX_MS = 30_000
+
 export interface WorkerEventsHandlers {
   /** One decoded `data:` payload. Malformed JSON is skipped, not surfaced. */
   onEvent: (event: unknown) => void
@@ -66,61 +71,93 @@ export function subscribeWorkerEvents(
   const token = getSessionToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  ;(async () => {
-    try {
-      const resp = await fetch(url, {
-        headers,
-        credentials: 'include',
-        signal: controller.signal,
-      })
-      if (!resp.ok || !resp.body) {
-        onError?.(`Live events unavailable (${resp.status})`)
-        return
+  /** Sleep that gives up as soon as the caller unsubscribes. */
+  const pause = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const t = setTimeout(done, ms)
+      function done() {
+        clearTimeout(t)
+        controller.signal.removeEventListener('abort', done)
+        resolve()
       }
+      controller.signal.addEventListener('abort', done, { once: true })
+    })
 
-      const reader = resp.body.getReader()
-      const decoder = new TextDecoder()
-      // SSE frames are separated by a blank line and can be split across
-      // chunks, so partial text has to survive between reads.
-      let buffer = ''
+  /** Read one connection to completion. Returns whether it is worth retrying:
+   *  a stream that simply ended is, a rejected request is not. */
+  const readStream = async (): Promise<boolean> => {
+    const resp = await fetch(url, {
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    })
+    if (!resp.ok || !resp.body) {
+      onError?.(`Live events unavailable (${resp.status})`)
+      return false
+    }
 
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done || stopped) break
-        buffer += decoder.decode(value, { stream: true })
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    // SSE frames are separated by a blank line and can be split across
+    // chunks, so partial text has to survive between reads.
+    let buffer = ''
 
-        let sep: number
-        while ((sep = buffer.indexOf('\n\n')) !== -1) {
-          const frame = buffer.slice(0, sep)
-          buffer = buffer.slice(sep + 2)
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done || stopped) break
+      buffer += decoder.decode(value, { stream: true })
 
-          // We only consume `data:` lines. The proxy also emits
-          // `event: error` frames; their data carries the message.
-          const data = frame
-            .split('\n')
-            .filter((l) => l.startsWith('data:'))
-            .map((l) => l.slice(5).trim())
-            .join('\n')
-          if (!data) continue
+      let sep: number
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, sep)
+        buffer = buffer.slice(sep + 2)
 
-          try {
-            const parsed = JSON.parse(data)
-            if (frame.includes('event: error')) {
-              onError?.(
-                typeof parsed?.error === 'string' ? parsed.error : 'Live event stream ended',
-              )
-              continue
-            }
-            onEvent(parsed)
-          } catch {
-            /* a frame we can't parse is not worth interrupting the stream for */
+        // We only consume `data:` lines. The proxy also emits
+        // `event: error` frames; their data carries the message.
+        const data = frame
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trim())
+          .join('\n')
+        if (!data) continue
+
+        try {
+          const parsed = JSON.parse(data)
+          if (frame.includes('event: error')) {
+            onError?.(
+              typeof parsed?.error === 'string' ? parsed.error : 'Live event stream ended',
+            )
+            continue
           }
+          onEvent(parsed)
+        } catch {
+          /* a frame we can't parse is not worth interrupting the stream for */
         }
       }
-    } catch (e) {
-      // An aborted fetch is the caller unsubscribing, not a failure.
-      if (controller.signal.aborted) return
-      onError?.(e instanceof Error ? e.message : 'Live event stream failed')
+    }
+    return true
+  }
+
+  ;(async () => {
+    // A stream that ends is not a stream that failed. The proxy times out, a
+    // worker restarts, a redeploy cycles the pod — and the pipeline keeps
+    // running throughout. Reading to `done` and returning left the panel
+    // silent forever, which is indistinguishable from a pipeline with no
+    // traffic: exactly the confusion this file exists to remove.
+    for (let attempt = 0; !stopped; ) {
+      try {
+        if (!(await readStream())) return
+        attempt = 0
+      } catch (e) {
+        // An aborted fetch is the caller unsubscribing, not a failure.
+        if (controller.signal.aborted) return
+        onError?.(e instanceof Error ? e.message : 'Live event stream failed')
+        attempt++
+      }
+      if (stopped) return
+      // Backoff applies to a far end that is refusing, not to the ordinary
+      // case of a stream reaching its natural end — that reconnects at once.
+      await pause(attempt === 0 ? RECONNECT_MIN_MS : Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * 2 ** attempt))
     }
   })()
 
