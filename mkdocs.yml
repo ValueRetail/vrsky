@@ -54,6 +54,7 @@ nav:
       - Troubleshooting: guide/troubleshooting.md
   - Operator guide:
       - Install: operator/install.md
+      - Running on Windows: operator/windows.md
       - Upgrade: operator/upgrade.md
       - Backup & restore: operator/backup.md
       - Cost-parking the cluster: operator/cost-parking.md
