@@ -45,6 +45,7 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
+        - vrsky.valueretail.no
         - 20.251.107.2.sslip.io
       secretName: vrsky-tls
   rules:
@@ -52,12 +53,26 @@ spec:
     # LoadBalancer address without a DNS record. It survives `az aks
     # stop`/`start` (verified 2026-09-07).
     #
-    # KNOWN LIMITATION: some ISP DNS filters block sslip.io and answer with
-    # their own block page — Telenor's Nettvern does, which makes the site
-    # unreachable from those networks with a TLS error that points nowhere near
-    # the real cause. See docs/operator/troubleshooting.md. A real DNS name is
-    # the fix; swap the host here and on the vrsky-webhooks Ingress together,
-    # and cert-manager reissues on its own.
+    # vrsky.valueretail.no is the name to hand out: an A record on Cloudflare
+    # (DNS-only, not proxied) pointing at this ingress. It exists because some
+    # ISP DNS filters block sslip.io and answer with their own block page —
+    # Telenor's Nettvern does — which made the site unreachable from those
+    # networks with a TLS error pointing nowhere near the real cause.
+    #
+    # sslip.io is kept alongside it so URLs already handed out keep working.
+    # Note the coupling that creates: the certificate covers BOTH names, so
+    # renewal needs both to validate. Drop the sslip.io host once nothing
+    # depends on it, here and on the vrsky-webhooks Ingress together.
+    - host: vrsky.valueretail.no
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-ui
+                port:
+                  number: 80
     - host: 20.251.107.2.sslip.io
       http:
         paths:

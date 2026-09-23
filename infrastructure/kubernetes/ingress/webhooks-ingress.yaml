@@ -50,6 +50,54 @@ spec:
     # `az aks stop`/`start` (verified 2026-09-07), so it is stable — but swap
     # this, and the host on the vrsky Ingress in vrsky-ui, when the real DNS
     # name lands. cert-manager reissues automatically.
+    # Both hosts route the same paths. vrsky.valueretail.no is the name to
+    # hand a partner; sslip.io stays so URLs already given out keep working,
+    # and because some ISP DNS filters (Telenor's Nettvern) block it, which is
+    # why the real name exists at all. TLS for both is owned by the vrsky
+    # Ingress in vrsky-ui — this one deliberately declares no tls: block.
+    - host: vrsky.valueretail.no
+      http:
+        paths:
+          # --- retail connectors (these routes already exist in the cluster) ---
+          # Public URL pattern: https://<host>/<connector>/events/<connectionID>
+          - path: /sitoo/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-sitoo-consumer
+                port:
+                  number: 9260
+          - path: /frontsystems/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-front-systems-consumer
+                port:
+                  number: 9270
+          - path: /brightpearl/events
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-brightpearl-consumer
+                port:
+                  number: 9280
+
+          # --- generic Webhook (HTTP) source — NEW ---
+          # Without this route the "Webhook (HTTP)" source type had no durable
+          # public endpoint in prod: the only mechanism in the connector is a
+          # cloudflared quick tunnel (*.trycloudflare.com), whose URL changes on
+          # every restart and which Cloudflare documents as a testing tier. The
+          # type validated, deployed, and ran, but nothing external could reach
+          # it — the #205 shape, one layer further out.
+          #
+          # Public URL pattern: https://<host>/webhook/<connectionID>
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-webhook-consumer
+                port:
+                  number: 9100
     - host: 20.251.107.2.sslip.io
       http:
         paths:

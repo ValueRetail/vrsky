@@ -6,18 +6,19 @@ The HTTP connector (`config.type: "http"`) ingests inbound webhooks as a source 
 
 A consumer node exposes an inbound **webhook ingress**. After deploy, the connection accepts POST requests at `<webhook-ingress>/webhook/{connectionId}`:
 
-- **Deployed** — the same host that serves the UI, e.g. `https://20.251.107.2.sslip.io/webhook/{connectionId}`. The `/webhook` route is served by the `vrsky-webhooks` Ingress (`infrastructure/kubernetes/ingress/webhooks-ingress.yaml`). This URL is stable for as long as the pipeline is deployed and is the one to give a partner.
+- **Deployed** — the same host that serves the UI, e.g. `https://vrsky.valueretail.no/webhook/{connectionId}`. The older `https://20.251.107.2.sslip.io/...` form still routes, but hand out the real name: see the warning below. The `/webhook` route is served by the `vrsky-webhooks` Ingress (`infrastructure/kubernetes/ingress/webhooks-ingress.yaml`). This URL is stable for as long as the pipeline is deployed and is the one to give a partner.
 - **Local compose** — `http://localhost:9100/webhook/{connectionId}`.
 
 The editor's Webhook (HTTP) source panel shows the URL for the environment you are in, once the pipeline is deployed. When developing locally you can also start a cloudflared quick tunnel from that panel to get a temporary public URL; it points at your machine and dies with the tunnel, so it is for testing a sender, not for handing out.
 
-!!! warning "`sslip.io` hosts can be blocked by ISP DNS filters"
+!!! warning "Use the real hostname, not `sslip.io`"
 
-    While the public host is a `sslip.io` address, some ISP filters (Telenor's
-    Nettvern among them) resolve it to a block page. A sender behind one cannot
-    deliver, and sees only a TLS certificate error — nothing that points at DNS.
-    See [Troubleshooting](../operator/troubleshooting.md) for how to confirm it.
-    A real DNS name removes the problem.
+    `vrsky.valueretail.no` is the name to give a partner. The `sslip.io` host
+    still routes and is kept so URLs already handed out keep working, but some
+    ISP filters (Telenor's Nettvern among them) resolve `sslip.io` to a block
+    page: a sender behind one cannot deliver, and sees only a TLS certificate
+    error — nothing that points at DNS. See
+    [Troubleshooting](../operator/troubleshooting.md).
 
 You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.
 

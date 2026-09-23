@@ -116,7 +116,17 @@ cluster:
 curl -s --resolve 20.251.107.2.sslip.io:443:20.251.107.2 https://20.251.107.2.sslip.io/ | head -c 200
 ```
 
-**Fixes**, in order of preference:
+**The fix: use the real name.** `vrsky.valueretail.no` has existed since
+2026-09-23 — an A record on Cloudflare, DNS-only, pointing at the same ingress.
+It is not wildcard DNS, so no filter treats it specially, and it is the only
+fix that helps **partners**: a sender behind an affected resolver cannot reach
+a `sslip.io` webhook URL at all, and sees only a TLS error with nothing
+pointing at DNS.
+
+The `sslip.io` host still routes, so URLs handed out earlier keep working. If
+you are looking at this page, the answer is almost always to stop using it.
+
+Two stopgaps, if you are on an affected network and cannot change the URL:
 
 1. Point the machine's DNS at a public resolver (1.1.1.1 or 8.8.8.8), or turn
    off the ISP filter on the subscription.
@@ -126,10 +136,6 @@ curl -s --resolve 20.251.107.2.sslip.io:443:20.251.107.2 https://20.251.107.2.ss
    ```bash
    echo "20.251.107.2 20.251.107.2.sslip.io" | sudo tee -a /etc/hosts
    ```
-3. Use the real DNS name once it exists. This removes the whole class of
-   problem and is the only fix that helps **partners** — a sender behind an
-   affected resolver cannot reach a `sslip.io` webhook URL at all, and sees
-   only a TLS error with nothing pointing at DNS.
 
 Two things worth knowing. First, the failure is asymmetric: it is invisible
 from inside the cluster, where every check passes, so it is easy to spend a
