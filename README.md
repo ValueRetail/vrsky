@@ -28,7 +28,8 @@ cd ui && npm install && npm run dev   # UI at http://localhost:5173
 
 On a small machine (8 GB), `make up-core` starts only the ten services a
 pipeline needs instead of the full 68-container stack; `make down-core` stops
-them again.
+them again. On Windows, see
+[Running VRSky on a Windows machine](docs/operator/windows.md).
 
 Then follow the [first-pipeline tutorial](docs/tutorials/first-pipeline.md). See
 the [install guide](docs/operator/install.md) for production (Kubernetes).

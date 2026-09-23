@@ -1,0 +1,14 @@
+# Everything in this repo ultimately executes inside a Linux container, so the
+# working tree is normalised to LF on every platform.
+#
+# Git for Windows checks files out with CRLF by default. A shell script whose
+# shebang ends in \r fails with "no such file or directory" — naming a file
+# that is plainly there, which is a confusing afternoon rather than an obvious
+# error. src/cmd/management-api/entrypoint.sh is copied into an Alpine image
+# and is the one that bites first.
+* text=auto eol=lf
+
+# Windows-only artefacts keep their own convention.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
