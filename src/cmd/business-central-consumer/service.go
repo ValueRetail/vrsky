@@ -433,6 +433,25 @@ func (cfg *BCConfig) effectiveTokenURL() string {
 	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", cfg.AADTenantID)
 }
 
+// normalise strips surrounding whitespace from the fields that end up in a
+// URL or a header.
+//
+// A GUID pasted out of the Azure portal arrives with a trailing space more
+// often than not, and the tenant id goes straight into the API path: Entra
+// accepted it, Business Central answered `400 RequestDataInvalid`, and
+// nothing in that message points at a space you cannot see. The client secret
+// is deliberately left alone — it is opaque, and trimming a credential is a
+// guess about its contents rather than about its shape.
+func (cfg *BCConfig) normalise() {
+	for _, f := range []*string{
+		&cfg.AADTenantID, &cfg.Environment, &cfg.CompanyID, &cfg.ClientID,
+		&cfg.Entity, &cfg.Filter, &cfg.CursorField,
+		&cfg.APIBaseURL, &cfg.TokenURL, &cfg.Scope,
+	} {
+		*f = strings.TrimSpace(*f)
+	}
+}
+
 func (cfg *BCConfig) effectiveCursorField() string {
 	if cfg.CursorField != "" {
 		return cfg.CursorField
@@ -512,6 +531,7 @@ func (c *bcConsumer) getConfig(ctx context.Context, connectionID, tenantID strin
 		}
 		if nc.Type == "business_central" && nc.BusinessCentral != nil {
 			nc.BusinessCentral.NodeID = n.ID
+			nc.BusinessCentral.normalise()
 			return nc.BusinessCentral, nil
 		}
 	}

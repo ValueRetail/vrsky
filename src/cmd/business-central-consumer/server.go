@@ -60,6 +60,9 @@ func (c *bcConsumer) handleSampleData() http.HandlerFunc {
 			writeErr("invalid Business Central config: " + err.Error())
 			return
 		}
+		// The preview runs on config typed into the editor a moment ago, so it
+		// is the likeliest place for a pasted stray space to appear.
+		cfg.normalise()
 		if cfg.ClientID == "" || cfg.ClientSecret == "" {
 			writeErr("set the client ID and client secret first")
 			return

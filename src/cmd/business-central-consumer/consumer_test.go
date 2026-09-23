@@ -508,3 +508,45 @@ func TestNoPageSizeSendsNoPreferHeader(t *testing.T) {
 		t.Errorf("sent Prefer=%q with no page_size configured", prefer)
 	}
 }
+
+// TestPastedWhitespaceDoesNotReachTheURL — a GUID copied out of the Azure
+// portal arrives with a trailing space more often than not, and the tenant id
+// goes straight into the API path. Entra accepted it; Business Central
+// answered `400 RequestDataInvalid`, which says nothing about a space you
+// cannot see. Cost an afternoon on 2026-09-23.
+func TestPastedWhitespaceDoesNotReachTheURL(t *testing.T) {
+	cfg := &BCConfig{
+		AADTenantID: "  093542aa-492d-4505-8c37-80d4b0eeaef0  ",
+		Environment: " Production\n",
+		CompanyID:   "\tbb45ab19-8ea5-f111-90e5-70a8a5790457 ",
+		ClientID:    " 6e1daad1-f3dc-4d76-ab50-8ee8c9b62e40 ",
+		Entity:      " items ",
+		Filter:      "  status eq 'Open'  ",
+		CursorField: " lastModifiedDateTime ",
+	}
+	cfg.normalise()
+
+	got := cfg.entityURL("")
+	want := "https://api.businesscentral.dynamics.com/v2.0/093542aa-492d-4505-8c37-80d4b0eeaef0/" +
+		"Production/api/v2.0/companies(bb45ab19-8ea5-f111-90e5-70a8a5790457)/items?" +
+		"$filter=status+eq+%27Open%27"
+	if got != want {
+		t.Errorf("entityURL = %q\nwant %q", got, want)
+	}
+	if want := "https://login.microsoftonline.com/093542aa-492d-4505-8c37-80d4b0eeaef0/oauth2/v2.0/token"; cfg.effectiveTokenURL() != want {
+		t.Errorf("tokenURL = %q, want %q", cfg.effectiveTokenURL(), want)
+	}
+	if cfg.effectiveCursorField() != "lastModifiedDateTime" {
+		t.Errorf("cursorField = %q", cfg.effectiveCursorField())
+	}
+}
+
+// The client secret is opaque: trimming a credential guesses about its
+// contents rather than its shape, so it is passed through untouched.
+func TestClientSecretIsNotTrimmed(t *testing.T) {
+	cfg := &BCConfig{ClientSecret: " s3cret "}
+	cfg.normalise()
+	if cfg.ClientSecret != " s3cret " {
+		t.Errorf("ClientSecret = %q, want it untouched", cfg.ClientSecret)
+	}
+}
