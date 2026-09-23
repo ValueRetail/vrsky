@@ -3537,7 +3537,25 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
       <SecretInput label="Client secret" placeholder="Entra app client secret" field="client_secret" config={c} defaultSecretName="bc-client-secret" onChange={(patch) => update(patch)} />
       <StyledInput label="Entity" placeholder={nodeType === 'input' ? 'items / customers / salesOrders' : 'items'} value={(c.entity as string) || ''} onChange={(v) => update({ entity: v })} />
       {nodeType === 'input' && (
-        <StyledInput label="OData $filter (optional)" placeholder="lastModifiedDateTime gt 2026-01-01T00:00:00Z" value={(c.filter as string) || ''} onChange={(v) => update({ filter: v })} />
+        <>
+          <StyledInput label="OData $filter (optional)" placeholder="lastModifiedDateTime gt 2026-01-01T00:00:00Z" value={(c.filter as string) || ''} onChange={(v) => update({ filter: v })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#374151' }}>
+            <input
+              type="checkbox"
+              checked={Boolean(c.incremental)}
+              onChange={(e) => update({ incremental: e.target.checked })}
+            />
+            Only fetch what changed since the last poll
+          </label>
+          {Boolean(c.incremental) && (
+            <StyledInput
+              label="Cursor field"
+              placeholder="lastModifiedDateTime"
+              value={(c.cursor_field as string) || ''}
+              onChange={(v) => update({ cursor_field: v })}
+            />
+          )}
+        </>
       )}
       <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />
     </div>

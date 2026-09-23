@@ -56,13 +56,15 @@ info:
 	@$(MAKE) -C src info
 
 # The smallest compose set that runs a pipeline end to end: control plane,
-# NATS, the generic webhook/http/file connectors, filter + converter, and the
-# Business Central pair. Fits a laptop with 8 GB; the full stack is 68
-# containers and does not. `make up-core` on a clean clone is the same as
+# NATS, the generic webhook/http/file connectors, filter + converter, the
+# Business Central pair, and httpbin — the sink a first pipeline points its
+# HTTP destination at, without which every delivery 404s on DNS and lands in
+# the DLQ. Fits a laptop with 8 GB; the full stack is 68 containers and does
+# not. `make up-core` on a clean clone is the same as
 # `docker compose up -d --build <list>`.
 CORE_SERVICES := nats postgres-management management-api \
 	webhook-consumer http-producer file-producer data-filter data-converter \
-	business-central-consumer business-central-producer
+	business-central-consumer business-central-producer httpbin
 
 up-core:
 	docker compose up -d --build $(CORE_SERVICES)
