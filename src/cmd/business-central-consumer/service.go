@@ -73,6 +73,13 @@ type BCConfig struct {
 	Incremental bool   `json:"incremental"`
 	CursorField string `json:"cursor_field"`
 
+	// PageSize asks Business Central to page the response, via
+	// `Prefer: odata.maxpagesize`. Server-driven paging is the only thing that
+	// makes BC emit @odata.nextLink — $top caps the result set instead of
+	// paging it. Unset leaves BC on its own default, which returns most
+	// entities whole.
+	PageSize int `json:"page_size"`
+
 	// NodeID keys the watermark. It comes from the connection's node, not from
 	// the node's own config, so it is never carried in the stored JSON.
 	NodeID string `json:"-"`
@@ -251,7 +258,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	var watermark cursorTracker
 	for next != "" {
 		page++
-		body, err := c.get(ctx, tok, next)
+		body, err := c.get(ctx, tok, next, cfg.PageSize)
 		if err != nil {
 			return err
 		}
@@ -357,7 +364,7 @@ func (c *bcConsumer) saveCursor(ctx context.Context, tenantID, connID, nodeID, c
 	}
 }
 
-func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL string) ([]byte, error) {
+func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL string, pageSize int) ([]byte, error) {
 	access, err := tok.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire token: %w", err)
@@ -368,6 +375,12 @@ func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL strin
 	}
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Accept", "application/json")
+	if pageSize > 0 {
+		// A request, not a command: BC may cap it, and says what it applied in
+		// the Preference-Applied response header. Whatever it settles on, a
+		// page smaller than the result set is what produces @odata.nextLink.
+		req.Header.Set("Prefer", fmt.Sprintf("odata.maxpagesize=%d", pageSize))
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err

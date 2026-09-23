@@ -3555,6 +3555,12 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
               onChange={(v) => update({ cursor_field: v })}
             />
           )}
+          <StyledInput
+            label="Page size (optional)"
+            placeholder="BC default"
+            value={c.page_size ? String(c.page_size) : ''}
+            onChange={(v) => update({ page_size: v ? Number(v) : undefined })}
+          />
         </>
       )}
       <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />
