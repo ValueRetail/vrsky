@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -20,8 +21,9 @@ func newTestConsumer() (*bcConsumer, *[]*envelope.Envelope, *sync.Mutex) {
 	var mu sync.Mutex
 	var got []*envelope.Envelope
 	c := &bcConsumer{
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		httpClient: http.DefaultClient,
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient:  http.DefaultClient,
+		checkpoints: checkpoint.NewInMemoryStore(),
 		publish: func(_ context.Context, env *envelope.Envelope) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -91,7 +93,7 @@ func TestFetchAndPublish_ODataPaginationWithBearer(t *testing.T) {
 // TestEntityURL builds the API v2.0 company-scoped URL with an optional $filter.
 func TestEntityURL(t *testing.T) {
 	cfg := &BCConfig{APIBaseURL: "https://host/api/v2.0", CompanyID: "GUID", Entity: "salesOrders", Filter: "status eq 'Open'"}
-	got := cfg.entityURL()
+	got := cfg.entityURL("")
 	want := "https://host/api/v2.0/companies(GUID)/salesOrders?$filter=status+eq+%27Open%27"
 	if got != want {
 		t.Errorf("entityURL = %q\nwant %q", got, want)
@@ -132,5 +134,280 @@ func TestSampleData_BC(t *testing.T) {
 	}
 	if len(resp.Data) != 2 {
 		t.Fatalf("want 2 records, got %d: %s", len(resp.Data), w.Body.String())
+	}
+}
+
+// --- incremental polling (watermark) ---------------------------------------
+
+// bcTestServer stands in for Business Central: it records the $filter of every
+// request and answers each one from the supplied page bodies in order.
+func bcTestServer(t *testing.T, pages ...string) (*httptest.Server, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	var filters []string
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		filters = append(filters, r.URL.Query().Get("$filter"))
+		body := `{"value":[]}`
+		if n < len(pages) {
+			body = pages[n]
+		}
+		n++
+		mu.Unlock()
+		fmt.Fprint(w, body)
+	}))
+	return srv, &filters
+}
+
+func bcTestToken(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"access_token":"tok","expires_in":3600}`)
+	}))
+}
+
+func recordsIn(t *testing.T, envs []*envelope.Envelope) int {
+	t.Helper()
+	total := 0
+	for _, env := range envs {
+		var recs []map[string]any
+		if err := json.Unmarshal(env.Payload, &recs); err != nil {
+			t.Fatalf("payload: %v", err)
+		}
+		total += len(recs)
+	}
+	return total
+}
+
+// TestIncrementalSecondPollFetchesOnlyWhatChanged is the point of the feature:
+// a restart or a second tick must not replay the whole entity. It asserts what
+// was delivered, not merely that a filter string was built.
+func TestIncrementalSecondPollFetchesOnlyWhatChanged(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	apiSrv, filters := bcTestServer(t,
+		`{"value":[{"number":"A","lastModifiedDateTime":"2026-01-01T10:00:00Z"},`+
+			`{"number":"B","lastModifiedDateTime":"2026-01-02T10:00:00Z"}]}`,
+		`{"value":[{"number":"C","lastModifiedDateTime":"2026-01-03T10:00:00Z"}]}`,
+	)
+	defer apiSrv.Close()
+
+	c, got, mu := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL,
+		Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+
+	if len(*filters) != 2 {
+		t.Fatalf("made %d requests, want 2", len(*filters))
+	}
+	if (*filters)[0] != "" {
+		t.Errorf("first poll sent $filter=%q, want none — there is no watermark yet", (*filters)[0])
+	}
+	if want := "lastModifiedDateTime gt 2026-01-02T10:00:00Z"; (*filters)[1] != want {
+		t.Errorf("second poll $filter = %q, want %q", (*filters)[1], want)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if n := recordsIn(t, *got); n != 3 {
+		t.Errorf("delivered %d records across both polls, want 3 (2 then 1) — "+
+			"the second poll replayed records the first already delivered", n)
+	}
+}
+
+// TestIncrementalIsOffByDefault — an existing connection keeps re-reading the
+// whole entity until its owner opts in. Turning this on silently would change
+// what a running pipeline delivers.
+func TestIncrementalIsOffByDefault(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	page := `{"value":[{"number":"A","lastModifiedDateTime":"2026-01-01T10:00:00Z"}]}`
+	apiSrv, filters := bcTestServer(t, page, page)
+	defer apiSrv.Close()
+
+	c, got, mu := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+	for i, f := range *filters {
+		if f != "" {
+			t.Errorf("poll %d sent $filter=%q with incremental off", i+1, f)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := recordsIn(t, *got); n != 2 {
+		t.Errorf("delivered %d records, want 2 (the same record twice)", n)
+	}
+}
+
+// TestWatermarkHoldsWhenAPageFails — a fetch that dies after page 1 must not
+// bank the records it did read. Resuming early would skip everything on the
+// pages it never got to.
+func TestWatermarkHoldsWhenAPageFails(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+
+	var mu sync.Mutex
+	var filters []string
+	call := 0
+	var apiURL string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if r.URL.Query().Get("page") == "" {
+			filters = append(filters, r.URL.Query().Get("$filter"))
+		}
+		call++
+		n := call
+		mu.Unlock()
+
+		switch {
+		case r.URL.Query().Get("page") == "2":
+			http.Error(w, "boom", http.StatusInternalServerError)
+		case n <= 2: // first poll: page 1 then the failing page 2
+			fmt.Fprintf(w, `{"value":[{"number":"A","lastModifiedDateTime":"2026-01-01T10:00:00Z"}],`+
+				`"@odata.nextLink":"%s?page=2"}`, apiURL)
+		default: // second poll, single page
+			fmt.Fprint(w, `{"value":[{"number":"B","lastModifiedDateTime":"2026-01-02T10:00:00Z"}]}`)
+		}
+	}))
+	defer apiSrv.Close()
+	apiURL = apiSrv.URL + "/companies(GUID)/items"
+
+	c, _, _ := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL,
+		Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err == nil {
+		t.Fatal("first poll: want the page-2 failure to surface, got nil")
+	}
+	if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(filters) != 2 {
+		t.Fatalf("made %d first-page requests, want 2", len(filters))
+	}
+	if filters[1] != "" {
+		t.Errorf("second poll resumed from %q after a failed fetch; want a full re-read", filters[1])
+	}
+}
+
+// TestWatermarkComparesInstantsNotText — "…:00.5Z" sorts before "…:00Z" as a
+// string while being the later instant. Picking the watermark by string order
+// would park it in the past and redeliver everything after it, every poll.
+func TestWatermarkComparesInstantsNotText(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	apiSrv, filters := bcTestServer(t,
+		`{"value":[{"number":"A","lastModifiedDateTime":"2026-01-01T10:00:00.500Z"},`+
+			`{"number":"B","lastModifiedDateTime":"2026-01-01T10:00:00Z"}]}`,
+		`{"value":[]}`,
+	)
+	defer apiSrv.Close()
+
+	c, _, _ := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL,
+		Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+	if want := "lastModifiedDateTime gt 2026-01-01T10:00:00.500Z"; (*filters)[1] != want {
+		t.Errorf("watermark = %q, want %q", (*filters)[1], want)
+	}
+}
+
+// TestWatermarkSkipsRecordsWithoutAUsableTimestamp — an entity with no
+// lastModifiedDateTime (or a custom API page naming it something else) must
+// keep polling rather than build a filter out of a missing field.
+func TestWatermarkSkipsRecordsWithoutAUsableTimestamp(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	apiSrv, filters := bcTestServer(t,
+		`{"value":[{"number":"A"},{"number":"B","lastModifiedDateTime":"not-a-time"}]}`,
+		`{"value":[]}`,
+	)
+	defer apiSrv.Close()
+
+	c, got, mu := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL,
+		Incremental: true, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	for i := 0; i < 2; i++ {
+		if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+			t.Fatalf("poll %d: %v", i+1, err)
+		}
+	}
+	if (*filters)[1] != "" {
+		t.Errorf("second poll $filter = %q, want none — nothing gave a usable watermark", (*filters)[1])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := recordsIn(t, *got); n != 2 {
+		t.Errorf("delivered %d records, want 2 — records without a timestamp must still flow", n)
+	}
+}
+
+// TestEntityURLCursorDoesNotEscapeTheConfiguredFilter — `a or b` plus a cursor
+// must not bind as `a or (b and cursor)`, which would re-read everything
+// matching `a` on every poll.
+func TestEntityURLCursorDoesNotEscapeTheConfiguredFilter(t *testing.T) {
+	cfg := &BCConfig{
+		APIBaseURL: "https://host/api/v2.0", CompanyID: "GUID", Entity: "salesOrders",
+		Filter: "status eq 'Open' or status eq 'Draft'", Incremental: true,
+	}
+	got := cfg.filterWithCursor("2026-01-02T10:00:00Z")
+	want := "(status eq 'Open' or status eq 'Draft') and lastModifiedDateTime gt 2026-01-02T10:00:00Z"
+	if got != want {
+		t.Errorf("filterWithCursor = %q\nwant %q", got, want)
+	}
+}
+
+// TestCursorFieldIsConfigurable — a custom API page may name its watermark
+// something other than BC's standard field.
+func TestCursorFieldIsConfigurable(t *testing.T) {
+	cfg := &BCConfig{Filter: "", CursorField: "systemModifiedAt", Incremental: true}
+	if got, want := cfg.filterWithCursor("2026-01-02T10:00:00Z"), "systemModifiedAt gt 2026-01-02T10:00:00Z"; got != want {
+		t.Errorf("filterWithCursor = %q, want %q", got, want)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
@@ -28,6 +29,10 @@ const (
 	defaultAPIHost     = "https://api.businesscentral.dynamics.com"
 	defaultEnvironment = "Production"
 	defaultEntity      = "items"
+
+	// BC's own last-modified field on the v2.0 API entities. Overridable
+	// because a custom API page may expose a differently named one.
+	defaultCursorField = "lastModifiedDateTime"
 )
 
 // bcConsumer polls a Business Central OData entity per active connection and
@@ -36,10 +41,11 @@ const (
 type bcConsumer struct {
 	sdk.BaseConsumer
 
-	db      *sql.DB
-	nc      *nats.Conn
-	publish sdk.PublishFunc
-	logger  *slog.Logger
+	db          *sql.DB
+	nc          *nats.Conn
+	publish     sdk.PublishFunc
+	logger      *slog.Logger
+	checkpoints checkpoint.Store
 
 	httpClient *http.Client
 
@@ -60,6 +66,16 @@ type BCConfig struct {
 	ClientSecret string `json:"client_secret"` // from client_secret_secret_id
 	Entity       string `json:"entity"`        // e.g. items, customers, salesOrders
 	Filter       string `json:"filter"`        // optional OData $filter
+
+	// Incremental polling: remember the newest CursorField value published and
+	// ask only for what changed since. Off by default — turning it on changes
+	// what a running pipeline delivers, which is the connection owner's call.
+	Incremental bool   `json:"incremental"`
+	CursorField string `json:"cursor_field"`
+
+	// NodeID keys the watermark. It comes from the connection's node, not from
+	// the node's own config, so it is never carried in the stored JSON.
+	NodeID string `json:"-"`
 
 	// Optional overrides (default to the BC cloud endpoints; set for on-prem or tests).
 	APIBaseURL string `json:"api_base_url"`
@@ -92,6 +108,9 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	c.db = res.DB
 	c.nc = res.NATS
 	c.logger = res.Logger
+	if c.checkpoints == nil {
+		c.checkpoints = checkpoint.NewPostgresStore(res.DB)
+	}
 	c.active = make(map[string]context.CancelFunc)
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{Timeout: 60 * time.Second}
@@ -222,8 +241,14 @@ type odataPage struct {
 // fetchAndPublish GETs the OData entity, follows @odata.nextLink, and publishes
 // each page's records as one JSON-array envelope.
 func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, cfg *BCConfig, tok *oauthcc.Client, logger *slog.Logger) error {
-	next := cfg.entityURL()
+	cursor := ""
+	if cfg.Incremental {
+		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
+	}
+
+	next := cfg.entityURL(cursor)
 	page, total := 0, 0
+	var watermark cursorTracker
 	for next != "" {
 		page++
 		body, err := c.get(ctx, tok, next)
@@ -235,6 +260,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			return fmt.Errorf("parse OData page: %w", err)
 		}
 		if len(p.Value) > 0 {
+			if cfg.Incremental {
+				watermark.observe(p.Value, cfg.effectiveCursorField())
+			}
 			if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
 				return fmt.Errorf("publish records: %w", err)
 			}
@@ -242,8 +270,91 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		}
 		next = p.NextLink
 	}
-	logger.Info("Business Central fetch complete", "entity", cfg.effectiveEntity(), "records", total, "pages", page)
+
+	// Advance only once every page has landed. A fetch that dies halfway
+	// resumes from the old watermark — the records it already published arrive
+	// twice, which the pipeline is built for, rather than being skipped, which
+	// it is not.
+	if cfg.Incremental && watermark.raw != "" {
+		c.saveCursor(ctx, tenantID, connID, cfg.NodeID, watermark.raw, int64(total), logger)
+	}
+
+	logger.Info("Business Central fetch complete",
+		"entity", cfg.effectiveEntity(), "records", total, "pages", page,
+		"incremental", cfg.Incremental, "since", cursor)
 	return nil
+}
+
+// cursorTracker keeps the newest cursor-field value seen in a fetch.
+//
+// The raw string is kept beside the parsed time because that string came from
+// Business Central, so it is by construction a datetime literal BC accepts
+// back in a $filter. Comparison goes through the parsed time: "…:00.5Z" sorts
+// before "…:00Z" as text while being the later instant.
+type cursorTracker struct {
+	newest time.Time
+	raw    string
+}
+
+func (t *cursorTracker) observe(records []json.RawMessage, field string) {
+	for _, rec := range records {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(rec, &fields); err != nil {
+			continue
+		}
+		raw, ok := fields[field]
+		if !ok {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			continue
+		}
+		if parsed.After(t.newest) {
+			t.newest, t.raw = parsed, s
+		}
+	}
+}
+
+// loadCursor returns the stored watermark, or "" for a first run. A store that
+// cannot be read is logged and treated as a first run: a full re-read is
+// noisy, whereas refusing to poll is an outage.
+func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) string {
+	if c.checkpoints == nil || nodeID == "" {
+		return ""
+	}
+	cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
+	if err != nil {
+		logger.Error("read Business Central watermark; polling from the start", "error", err)
+		return ""
+	}
+	if cp == nil {
+		return ""
+	}
+	return cp.LastProcessedMessageID
+}
+
+func (c *bcConsumer) saveCursor(ctx context.Context, tenantID, connID, nodeID, cursor string, count int64, logger *slog.Logger) {
+	if c.checkpoints == nil || nodeID == "" {
+		return
+	}
+	err := c.checkpoints.Save(ctx, &checkpoint.Checkpoint{
+		TenantID:               tenantID,
+		ConnectionID:           connID,
+		NodeID:                 nodeID,
+		LastProcessedMessageID: cursor,
+		LastProcessedAt:        time.Now().UTC(),
+		MessageCount:           count,
+	})
+	if err != nil {
+		// The records are already published; failing to remember how far we got
+		// costs a repeat next poll, not data.
+		logger.Error("save Business Central watermark", "error", err, "cursor", cursor)
+	}
 }
 
 func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL string) ([]byte, error) {
@@ -309,8 +420,37 @@ func (cfg *BCConfig) effectiveTokenURL() string {
 	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", cfg.AADTenantID)
 }
 
-// entityURL builds the first-page API v2.0 URL, scoped to the company.
-func (cfg *BCConfig) entityURL() string {
+func (cfg *BCConfig) effectiveCursorField() string {
+	if cfg.CursorField != "" {
+		return cfg.CursorField
+	}
+	return defaultCursorField
+}
+
+// filterWithCursor composes the configured $filter with the incremental
+// watermark. The configured filter is parenthesised so an `or` inside it
+// cannot swallow the cursor clause: `a or b and cursor` binds as
+// `a or (b and cursor)`, which would re-read everything matching `a`.
+//
+// `gt` rather than `ge`: the watermark is the newest value already published,
+// so `ge` would redeliver it on every poll forever. The cost is a record
+// written in the same instant as the watermark but after the fetch read it —
+// BC timestamps to the millisecond, so that is a narrow window, and it is the
+// standard trade for a timestamp watermark.
+func (cfg *BCConfig) filterWithCursor(cursor string) string {
+	if cursor == "" {
+		return cfg.Filter
+	}
+	clause := fmt.Sprintf("%s gt %s", cfg.effectiveCursorField(), cursor)
+	if cfg.Filter == "" {
+		return clause
+	}
+	return fmt.Sprintf("(%s) and %s", cfg.Filter, clause)
+}
+
+// entityURL builds the first-page API v2.0 URL, scoped to the company. A
+// non-empty cursor narrows it to what changed since the last complete fetch.
+func (cfg *BCConfig) entityURL(cursor string) string {
 	host := cfg.APIBaseURL
 	if host == "" {
 		env := cfg.Environment
@@ -321,8 +461,8 @@ func (cfg *BCConfig) entityURL() string {
 	}
 	host = strings.TrimRight(host, "/")
 	u := fmt.Sprintf("%s/companies(%s)/%s", host, cfg.CompanyID, cfg.effectiveEntity())
-	if cfg.Filter != "" {
-		u += "?$filter=" + url.QueryEscape(cfg.Filter)
+	if filter := cfg.filterWithCursor(cursor); filter != "" {
+		u += "?$filter=" + url.QueryEscape(filter)
 	}
 	return u
 }
@@ -358,6 +498,7 @@ func (c *bcConsumer) getConfig(ctx context.Context, connectionID, tenantID strin
 			continue
 		}
 		if nc.Type == "business_central" && nc.BusinessCentral != nil {
+			nc.BusinessCentral.NodeID = n.ID
 			return nc.BusinessCentral, nil
 		}
 	}
