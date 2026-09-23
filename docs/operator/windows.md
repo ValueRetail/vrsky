@@ -7,6 +7,32 @@ run end to end. Production still means Kubernetes; see
 The whole platform runs in Linux containers, so Windows only has to host
 Docker. What follows is the short list of places where that is not quite true.
 
+!!! warning "Check the machine can run Docker at all first"
+
+    Three things stop it, and the first two are common on locked-down or
+    older corporate builds:
+
+    - **Windows 10 LTSC 2019 (version 1809, build 17763)** — WSL2 needs
+      18362 or higher, and WSL1 cannot run Docker. Docker Desktop's own
+      minimum is build 19045, which LTSC 2021 (19044) never reaches either,
+      because LTSC takes no feature updates.
+    - **`Virtualization Enabled In Firmware: No`** — VT-x is off in the BIOS.
+      Nothing virtualised runs until that changes: not Hyper-V, not
+      VirtualBox, not WSL2. Check with
+      `systeminfo | findstr /i "hyper-v virtualization"`.
+    - **No local administrator** — `net localgroup administrators` lists who
+      is. Enabling Windows features needs it.
+
+    Where Hyper-V *is* available (Enterprise edition, virtualisation on in
+    firmware, admin rights), a Hyper-V VM running Ubuntu Server with Docker
+    Engine is the way, and the rest of this page applies inside that VM.
+
+    Where it is not, **do not fight the machine**: run the stack on a Mac or
+    Linux box and let the Windows PC reach it over the network. See
+    [Reaching a local stack from another machine](remote-access.md). That is
+    also closer to the real shape — VRSky is a platform reached over a
+    network, not something installed beside a till.
+
 !!! note "This has not been run on Windows yet"
 
     Every step below is derived from the compose stack and the two portability

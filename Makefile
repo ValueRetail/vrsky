@@ -1,4 +1,4 @@
-.PHONY: help build docker-build docker-push clean test run lint fmt vet mod-tidy mod-verify build-consumer docker-build-consumer docker-push-consumer run-consumer e2e-test up-core down-core
+.PHONY: help build docker-build docker-push clean test run lint fmt vet mod-tidy mod-verify build-consumer docker-build-consumer docker-push-consumer run-consumer e2e-test up-core up-core-remote down-core
 
 # Delegate all targets to src folder
 help:
@@ -68,6 +68,12 @@ CORE_SERVICES := nats postgres-management management-api \
 
 up-core:
 	docker compose up -d --build $(CORE_SERVICES)
+
+# The same set, with the webhook ingress reachable from other machines.
+# VRSKY_BIND picks the address — a Tailscale 100.x address keeps it to your
+# tailnet; unset answers on every interface. See docker-compose.remote.yml.
+up-core-remote:
+	docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d --build $(CORE_SERVICES)
 
 down-core:
 	docker compose stop $(CORE_SERVICES)
