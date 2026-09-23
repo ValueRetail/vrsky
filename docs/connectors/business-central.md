@@ -26,8 +26,13 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
 `@odata.nextLink` pagination, and emits each page as a JSON-array message.
 
 - `entity` — the entity to poll (default `items`; e.g. `customers`, `salesOrders`).
-- `filter` — optional OData `$filter` (e.g. `lastModifiedDateTime gt 2026-01-01T00:00:00Z`).
+- `filter` — optional OData `$filter` (e.g. `status eq 'Open'`).
 - `poll_interval_seconds` — poll cadence.
+- `incremental` — when `true`, remember the newest `cursor_field` value published
+  and ask only for what changed since. Off by default: switching it on changes
+  what a running pipeline delivers, so it is the connection owner's decision.
+- `cursor_field` — the field the watermark is read from (default
+  `lastModifiedDateTime`). A custom API page may name it something else.
 
 ```json
 {
@@ -40,6 +45,7 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
     "client_secret_secret_id": "<secret-uuid>",
     "entity": "salesOrders",
     "filter": "status eq 'Open'",
+    "incremental": true,
     "poll_interval_seconds": 300
   }
 }
@@ -78,8 +84,20 @@ poison and go to the DLQ.
 - **LS Central** — the standard BC entities work as-is; LS Retail-specific data
   (e.g. the LS eCommerce API for Commerce) can be reached by pointing `entity` /
   `api_base_url` at those endpoints.
-- **Incremental polling** — use `filter` on `lastModifiedDateTime` with a cursor
-  for high-volume entities (cursor persistence is a follow-up).
+- **Incremental polling** — set `incremental: true`. The watermark is stored per
+  connection node in `connection_node_checkpoints` and survives restarts, so a
+  connector that stops and starts does not re-read the entity from the
+  beginning. It is composed with any configured `filter` rather than replacing
+  it: `(your filter) and lastModifiedDateTime gt <watermark>`.
+
+    The watermark only advances once **every** page of a fetch has been
+    published. A fetch that fails halfway resumes from the previous watermark,
+    so its records arrive twice rather than being skipped — the same
+    at-least-once bargain the rest of the pipeline makes.
+
+    The comparison is `gt`, so a record written in the same millisecond as the
+    watermark but after the fetch read it is not picked up. `ge` would redeliver
+    the watermark record on every poll instead.
 - **UI source-type wiring** — config is API-settable today.
 
 The same OAuth2 client-credentials pattern (via `pkg/oauthcc`) is reused by the
