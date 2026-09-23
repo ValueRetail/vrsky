@@ -2221,8 +2221,13 @@ permission), grant it access to the BC environment, and configure:</p>
 <code>@odata.nextLink</code> pagination, and emits each page as a JSON-array message.</p>
 <ul>
 <li><code>entity</code> — the entity to poll (default <code>items</code>; e.g. <code>customers</code>, <code>salesOrders</code>).</li>
-<li><code>filter</code> — optional OData <code>$filter</code> (e.g. <code>lastModifiedDateTime gt 2026-01-01T00:00:00Z</code>).</li>
+<li><code>filter</code> — optional OData <code>$filter</code> (e.g. <code>status eq 'Open'</code>).</li>
 <li><code>poll_interval_seconds</code> — poll cadence.</li>
+<li><code>incremental</code> — when <code>true</code>, remember the newest <code>cursor_field</code> value published
+  and ask only for what changed since. Off by default: switching it on changes
+  what a running pipeline delivers, so it is the connection owner's decision.</li>
+<li><code>cursor_field</code> — the field the watermark is read from (default
+  <code>lastModifiedDateTime</code>). A custom API page may name it something else.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"business_central"</span><span class="p">,</span>
@@ -2234,6 +2239,7 @@ permission), grant it access to the BC environment, and configure:</p>
 <span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"entity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"salesOrders"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"filter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"status eq 'Open'"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"incremental"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
@@ -2267,9 +2273,21 @@ poison and go to the DLQ.</p>
 <li><strong>LS Central</strong> — the standard BC entities work as-is; LS Retail-specific data
   (e.g. the LS eCommerce API for Commerce) can be reached by pointing <code>entity</code> /
   <code>api_base_url</code> at those endpoints.</li>
-<li><strong>Incremental polling</strong> — use <code>filter</code> on <code>lastModifiedDateTime</code> with a cursor
-  for high-volume entities (cursor persistence is a follow-up).</li>
-<li><strong>UI source-type wiring</strong> — config is API-settable today.</li>
+<li>
+<p><strong>Incremental polling</strong> — set <code>incremental: true</code>. The watermark is stored per
+  connection node in <code>connection_node_checkpoints</code> and survives restarts, so a
+  connector that stops and starts does not re-read the entity from the
+  beginning. It is composed with any configured <code>filter</code> rather than replacing
+  it: <code>(your filter) and lastModifiedDateTime gt &lt;watermark&gt;</code>.</p>
+<p>The watermark only advances once <strong>every</strong> page of a fetch has been
+published. A fetch that fails halfway resumes from the previous watermark,
+so its records arrive twice rather than being skipped — the same
+at-least-once bargain the rest of the pipeline makes.</p>
+<p>The comparison is <code>gt</code>, so a record written in the same millisecond as the
+watermark but after the fetch read it is not picked up. <code>ge</code> would redeliver
+the watermark record on every poll instead.
+- <strong>UI source-type wiring</strong> — config is API-settable today.</p>
+</li>
 </ul>
 <p>The same OAuth2 client-credentials pattern (via <code>pkg/oauthcc</code>) is reused by the
 Visma.net connector.</p>
