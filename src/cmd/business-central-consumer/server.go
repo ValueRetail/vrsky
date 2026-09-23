@@ -70,7 +70,7 @@ func (c *bcConsumer) handleSampleData() http.HandlerFunc {
 		}
 
 		tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
-		body, err := c.get(r.Context(), tok, cfg.entityURL(""))
+		body, err := c.get(r.Context(), tok, cfg.entityURL(""), cfg.PageSize)
 		if err != nil {
 			writeErr(err.Error())
 			return

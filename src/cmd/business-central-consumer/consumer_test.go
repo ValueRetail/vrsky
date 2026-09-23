@@ -411,3 +411,100 @@ func TestCursorFieldIsConfigurable(t *testing.T) {
 		t.Errorf("filterWithCursor = %q, want %q", got, want)
 	}
 }
+
+// --- server-driven paging -------------------------------------------------
+
+// TestPageSizeAsksBusinessCentralToPage is the reason page_size exists: BC
+// returns most entities whole, so @odata.nextLink — and therefore the
+// pagination path — never runs. `Prefer: odata.maxpagesize` is what makes it.
+func TestPageSizeAsksBusinessCentralToPage(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+
+	var mu sync.Mutex
+	var prefers []string
+	var apiURL string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		prefers = append(prefers, r.Header.Get("Prefer"))
+		mu.Unlock()
+
+		// Page only when asked to, exactly as BC does.
+		if r.Header.Get("Prefer") != "odata.maxpagesize=2" {
+			fmt.Fprint(w, `{"value":[{"number":"A"},{"number":"B"},{"number":"C"}]}`)
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `{"value":[{"number":"C"}]}`)
+			return
+		}
+		fmt.Fprintf(w, `{"value":[{"number":"A"},{"number":"B"}],"@odata.nextLink":"%s?page=2"}`, apiURL)
+	}))
+	defer apiSrv.Close()
+	apiURL = apiSrv.URL + "/companies(GUID)/items"
+
+	c, got, mu2 := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL,
+		PageSize: 2, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+
+	if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+		t.Fatalf("fetchAndPublish: %v", err)
+	}
+
+	mu.Lock()
+	seen := append([]string(nil), prefers...)
+	mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("made %d requests, want 2 — the nextLink page was not followed", len(seen))
+	}
+	for i, p := range seen {
+		if p != "odata.maxpagesize=2" {
+			t.Errorf("request %d sent Prefer=%q, want odata.maxpagesize=2 — "+
+				"the header must be on the nextLink request too, or page 2 comes back whole", i+1, p)
+		}
+	}
+
+	mu2.Lock()
+	defer mu2.Unlock()
+	if n := recordsIn(t, *got); n != 3 {
+		t.Errorf("delivered %d records across the pages, want 3", n)
+	}
+}
+
+// TestNoPageSizeSendsNoPreferHeader — an unset page size must leave BC on its
+// own default rather than inventing one.
+func TestNoPageSizeSendsNoPreferHeader(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+
+	var mu sync.Mutex
+	var prefer string
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		prefer = r.Header.Get("Prefer")
+		mu.Unlock()
+		fmt.Fprint(w, `{"value":[{"number":"A"}]}`)
+	}))
+	defer apiSrv.Close()
+
+	c, _, _ := newTestConsumer()
+	cfg := &BCConfig{
+		AADTenantID: "aad", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
+		Entity: "items", APIBaseURL: apiSrv.URL, TokenURL: tokenSrv.URL, NodeID: "src",
+	}
+	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).
+		WithHTTPClient(http.DefaultClient)
+	if err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger); err != nil {
+		t.Fatalf("fetchAndPublish: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if prefer != "" {
+		t.Errorf("sent Prefer=%q with no page_size configured", prefer)
+	}
+}

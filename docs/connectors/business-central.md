@@ -33,6 +33,12 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
   what a running pipeline delivers, so it is the connection owner's decision.
 - `cursor_field` — the field the watermark is read from (default
   `lastModifiedDateTime`). A custom API page may name it something else.
+- `page_size` — ask BC to page the response, sent as
+  `Prefer: odata.maxpagesize`. Unset leaves BC on its own default, which
+  returns most entities whole — 80 CRONUS items came back in a single page.
+  Note that `$top` is not a substitute: it caps the result set rather than
+  paging it, and produces no `@odata.nextLink`. BC may cap what you ask for
+  and reports what it applied in `Preference-Applied`.
 
 ```json
 {
