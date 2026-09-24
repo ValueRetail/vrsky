@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../front-systems/">
+        <link rel="prev" href="../windows/">
       
       
-        <link rel="next" href="../visma/">
+        <link rel="next" href="../remote-access/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Dynamics 365 Business Central - VRSky Documentation</title>
+        <title>Remote agent - VRSky Documentation</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#microsoft-dynamics-365-business-central" class="md-skip">
+        <a href="#remote-agent" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Dynamics 365 Business Central
+              Remote agent
             
           </span>
         </div>
@@ -714,8 +714,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -726,11 +728,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -751,7 +753,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -769,7 +771,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/install/" class="md-nav__link">
+      <a href="../install/" class="md-nav__link">
         
   
   
@@ -797,7 +799,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/windows/" class="md-nav__link">
+      <a href="../windows/" class="md-nav__link">
         
   
   
@@ -822,10 +824,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../operator/remote-agent/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote agent
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -841,6 +870,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-get-the-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Get the agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-write-the-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Write the config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-register-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Register it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-try-it-in-a-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Try it in a window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-run-it-as-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Run it as a service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-against-a-local-stack-over-tailscale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing against a local stack over Tailscale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -853,7 +990,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/remote-access/" class="md-nav__link">
+      <a href="../remote-access/" class="md-nav__link">
         
   
   
@@ -881,7 +1018,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/upgrade/" class="md-nav__link">
+      <a href="../upgrade/" class="md-nav__link">
         
   
   
@@ -909,7 +1046,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/backup/" class="md-nav__link">
+      <a href="../backup/" class="md-nav__link">
         
   
   
@@ -937,7 +1074,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/cost-parking/" class="md-nav__link">
+      <a href="../cost-parking/" class="md-nav__link">
         
   
   
@@ -965,7 +1102,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/monitoring/" class="md-nav__link">
+      <a href="../monitoring/" class="md-nav__link">
         
   
   
@@ -993,7 +1130,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/troubleshooting/" class="md-nav__link">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   
@@ -1021,7 +1158,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -1137,8 +1274,6 @@
       
   
   
-    
-  
   
   
     
@@ -1151,11 +1286,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -1176,7 +1311,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1194,7 +1329,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../connectors/" class="md-nav__link">
         
   
   
@@ -1222,7 +1357,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../http/" class="md-nav__link">
+      <a href="../../connectors/http/" class="md-nav__link">
         
   
   
@@ -1250,7 +1385,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../connectors/api/" class="md-nav__link">
         
   
   
@@ -1278,7 +1413,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../database/" class="md-nav__link">
+      <a href="../../connectors/database/" class="md-nav__link">
         
   
   
@@ -1306,7 +1441,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../file/" class="md-nav__link">
+      <a href="../../connectors/file/" class="md-nav__link">
         
   
   
@@ -1334,7 +1469,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sftp/" class="md-nav__link">
+      <a href="../../connectors/sftp/" class="md-nav__link">
         
   
   
@@ -1362,7 +1497,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../cloud-storage/" class="md-nav__link">
+      <a href="../../connectors/cloud-storage/" class="md-nav__link">
         
   
   
@@ -1390,7 +1525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../kafka/" class="md-nav__link">
+      <a href="../../connectors/kafka/" class="md-nav__link">
         
   
   
@@ -1418,7 +1553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rabbitmq/" class="md-nav__link">
+      <a href="../../connectors/rabbitmq/" class="md-nav__link">
         
   
   
@@ -1446,7 +1581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../salesforce/" class="md-nav__link">
+      <a href="../../connectors/salesforce/" class="md-nav__link">
         
   
   
@@ -1474,7 +1609,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sitoo/" class="md-nav__link">
+      <a href="../../connectors/sitoo/" class="md-nav__link">
         
   
   
@@ -1502,7 +1637,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../front-systems/" class="md-nav__link">
+      <a href="../../connectors/front-systems/" class="md-nav__link">
         
   
   
@@ -1527,37 +1662,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Dynamics 365 Business Central
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../connectors/business-central/" class="md-nav__link">
         
   
   
@@ -1573,59 +1681,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#as-a-source-consumer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        As a source (consumer)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#as-a-destination-producer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        As a destination (producer)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes-roadmap" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes &amp; roadmap
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1638,7 +1693,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../visma/" class="md-nav__link">
+      <a href="../../connectors/visma/" class="md-nav__link">
         
   
   
@@ -1666,7 +1721,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sap-s4hana/" class="md-nav__link">
+      <a href="../../connectors/sap-s4hana/" class="md-nav__link">
         
   
   
@@ -1694,7 +1749,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../brightpearl/" class="md-nav__link">
+      <a href="../../connectors/brightpearl/" class="md-nav__link">
         
   
   
@@ -1722,7 +1777,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../tenant/" class="md-nav__link">
+      <a href="../../connectors/tenant/" class="md-nav__link">
         
   
   
@@ -1750,7 +1805,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../filters-converters/" class="md-nav__link">
+      <a href="../../connectors/filters-converters/" class="md-nav__link">
         
   
   
@@ -2230,10 +2285,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#as-a-source-consumer" class="md-nav__link">
+  <a href="#1-get-the-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        As a source (consumer)
+        1. Get the agent
       
     </span>
   </a>
@@ -2241,10 +2296,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#as-a-destination-producer" class="md-nav__link">
+  <a href="#2-write-the-config" class="md-nav__link">
     <span class="md-ellipsis">
       
-        As a destination (producer)
+        2. Write the config
       
     </span>
   </a>
@@ -2252,10 +2307,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#notes-roadmap" class="md-nav__link">
+  <a href="#3-register-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notes &amp; roadmap
+        3. Register it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-try-it-in-a-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Try it in a window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-run-it-as-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Run it as a service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-against-a-local-stack-over-tailscale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing against a local stack over Tailscale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
       
     </span>
   </a>
@@ -2279,108 +2389,171 @@
 
 
 
-<h1 id="microsoft-dynamics-365-business-central">Microsoft Dynamics 365 Business Central<a class="headerlink" href="#microsoft-dynamics-365-business-central" title="Permanent link">&para;</a></h1>
-<p>The Business Central connector (<code>business_central</code>) integrates with <a href="https://learn.microsoft.com/dynamics365/business-central/dev-itpro/api-reference/v2.0/">Microsoft
-Dynamics 365 Business Central</a>
-— and, because <strong>LS Central / LS Retail runs on Business Central</strong>, it also
-covers LS Retail deployments. It uses the OData v4 REST <strong>API v2.0</strong> (items,
-customers, salesOrders, inventory, and ~55 other entities).</p>
-<blockquote>
-<p><strong>Authentication — OAuth 2.0 client-credentials (Microsoft Entra ID).</strong>
-Unattended integration uses the <code>client_credentials</code> grant against Entra ID.
-Register an Entra app (with the <code>API.ReadWrite.All</code> Business Central
-permission), grant it access to the BC environment, and configure:</p>
+<h1 id="remote-agent">Remote agent<a class="headerlink" href="#remote-agent" title="Permanent link">&para;</a></h1>
+<p>The remote agent is a small program that runs on another machine — a till, a
+warehouse PC, a customer's server — and connects that machine's folders to
+VRSky pipelines:</p>
 <ul>
-<li><code>aad_tenant_id</code> — your Entra tenant (GUID or domain).</li>
-<li><code>client_id</code> — the app registration id.</li>
-<li><code>client_secret_secret_id</code> — a secrets-vault reference to the client secret.</li>
-<li><code>company_id</code> — the BC company GUID (API v2.0 scopes entities by company).</li>
-<li><code>environment</code> — e.g. <code>Production</code> (default).</li>
+<li>a <strong>read</strong> folder: files that appear in it are sent into a pipeline, then
+  moved to <code>processed/</code> (or deleted);</li>
+<li>a <strong>write</strong> folder: files a pipeline produces are written into it.</li>
 </ul>
-<p>The connector fetches and caches a bearer token for scope
-<code>https://api.businesscentral.dynamics.com/.default</code>.</p>
-</blockquote>
-<h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
-<p>A consumer node polls one OData entity on <code>poll_interval_seconds</code>, following
-<code>@odata.nextLink</code> pagination, and emits each page as a JSON-array message.</p>
-<ul>
-<li><code>entity</code> — the entity to poll (default <code>items</code>; e.g. <code>customers</code>, <code>salesOrders</code>).</li>
-<li><code>filter</code> — optional OData <code>$filter</code> (e.g. <code>status eq 'Open'</code>).</li>
-<li><code>poll_interval_seconds</code> — poll cadence.</li>
-<li><code>incremental</code> — when <code>true</code>, remember the newest <code>cursor_field</code> value published
-  and ask only for what changed since. Off by default: switching it on changes
-  what a running pipeline delivers, so it is the connection owner's decision.</li>
-<li><code>cursor_field</code> — the field the watermark is read from (default
-  <code>lastModifiedDateTime</code>). A custom API page may name it something else.</li>
-<li><code>page_size</code> — ask BC to page the response, sent as
-  <code>Prefer: odata.maxpagesize</code>. Unset leaves BC on its own default, which
-  returns most entities whole — 80 CRONUS items came back in a single page.
-  Note that <code>$top</code> is not a substitute: it caps the result set rather than
-  paging it, and produces no <code>@odata.nextLink</code>. BC may cap what you ask for
-  and reports what it applied in <code>Preference-Applied</code>.</li>
-</ul>
+<p>It is one <code>.exe</code> with no dependencies. It needs <strong>no Docker, no WSL, no
+virtualisation</strong>, so it runs on machines that cannot run VRSky itself — such as
+Windows 10 LTSC 2019. It only ever connects <strong>out</strong> to VRSky over HTTPS, so no
+firewall port has to be opened on the machine.</p>
+<div class="admonition info">
+<p class="admonition-title">What VRSky can and cannot do on the machine</p>
+<p>The agent's own config file lists the folders VRSky may use. VRSky only
+ever refers to them by name — it never sees or sends a path — and it can do
+exactly two things: take new files from a read folder, and write files into
+a write folder. There is no way for VRSky to run a program, read any other
+folder, or write outside the ones listed.</p>
+</div>
+<h2 id="1-get-the-agent">1. Get the agent<a class="headerlink" href="#1-get-the-agent" title="Permanent link">&para;</a></h2>
+<p>Download <code>vrsky-agent-windows-amd64.exe</code> from the latest successful <strong>Build
+remote agent binaries</strong> run in GitHub Actions (the run's <em>Artifacts</em>), or build
+it yourself with <code>make -C src build-agent</code>.</p>
+<p>Copy it to the machine, for example to <code>C:\Program Files\VRSky\vrsky-agent.exe</code>.</p>
+<h2 id="2-write-the-config">2. Write the config<a class="headerlink" href="#2-write-the-config" title="Permanent link">&para;</a></h2>
+<p>Create <code>C:\ProgramData\VRSky\agent\config.json</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"business_central"</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">"business_central"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"aad_tenant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;tenant-guid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Production"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"company_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;company-guid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-id&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"entity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"salesOrders"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"filter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"status eq 'Open'"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"incremental"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
+<span class="w">  </span><span class="nt">"agent_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"LAGER-SERVER-01"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"directories"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"superpos-out"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"D:\\SuperPOS\\export"</span><span class="p">,</span><span class="w"> </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"read"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"superpos-in"</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"D:\\SuperPOS\\import"</span><span class="p">,</span><span class="w"> </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"write"</span><span class="w"> </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
-<h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
-<p>A producer node writes each message to a BC entity (create with <code>POST</code>, update
-with <code>PATCH</code> — updates send <code>If-Match: *</code>).</p>
 <ul>
-<li><code>entity</code> — write target (default <code>items</code>; e.g. <code>salesOrders</code>).</li>
-<li><code>method</code> — <code>POST</code> (default) or <code>PATCH</code>.</li>
+<li>The <strong>names</strong> (<code>superpos-out</code>, <code>superpos-in</code>) are what you pick in the
+  pipeline editor. Letters, digits, <code>-</code> and <code>_</code>.</li>
+<li><strong>Paths</strong> must be absolute, must exist, and write folders must be writable.
+  Backslashes are doubled in JSON.</li>
+<li>Optional: <code>poll_interval_seconds</code> (default 5), <code>log</code> (<code>file</code>,
+  <code>max_size_mb</code> 20, <code>max_files</code> 5), <code>data_dir</code> (default
+  <code>C:\ProgramData\VRSky\agent</code>).</li>
 </ul>
+<p>Check it:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">check</span>
+</code></pre></div>
+<p>It prints the folders exactly as VRSky will see them — names and directions,
+no paths.</p>
+<h2 id="3-register-it">3. Register it<a class="headerlink" href="#3-register-it" title="Permanent link">&para;</a></h2>
+<p>In VRSky, open <strong>Settings → Remote agents → Generate registration token</strong>. It
+shows a command; run it on the machine within an hour:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">register</span> <span class="p">-</span><span class="n">-url</span> <span class="n">https</span><span class="p">://</span><span class="n">vrsky</span><span class="p">.</span><span class="n">valueretail</span><span class="p">.</span><span class="n">no</span> <span class="p">-</span><span class="n">-token</span> <span class="n">vrsky_reg_</span><span class="err">…</span>
+</code></pre></div>
+<p>The token works once. Registration stores the agent's credential in
+<code>C:\ProgramData\VRSky\agent\credential.json</code>, readable only by Administrators
+and the SYSTEM account. The agent now appears under Settings → Remote agents.</p>
+<h2 id="4-try-it-in-a-window">4. Try it in a window<a class="headerlink" href="#4-try-it-in-a-window" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">run</span>
+</code></pre></div>
+<p>It logs to the window. In VRSky, build a pipeline with <strong>Remote Agent</strong> as
+input or output, pick this agent and a folder, and deploy. Drop a file into the
+read folder and watch it go. Ctrl-C stops the agent.</p>
+<h2 id="5-run-it-as-a-service">5. Run it as a service<a class="headerlink" href="#5-run-it-as-a-service" title="Permanent link">&para;</a></h2>
+<p>From a PowerShell opened with <strong>Run as administrator</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">install</span>
+<span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="nb">start</span>
+<span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">status</span>
+</code></pre></div>
+<p>The <strong>VRSky Agent</strong> service starts automatically at boot (after the network is
+up) and is restarted by Windows if it fails. It runs as LocalSystem.</p>
+<ul>
+<li>Logs: <code>C:\ProgramData\VRSky\agent\logs\agent.log</code> (rotated at 20 MB, five
+  kept).</li>
+<li>Warnings and errors also go to <strong>Event Viewer → Windows Logs → Application</strong>,
+  source <strong>VRSkyAgent</strong>.</li>
+<li><code>stop</code>, <code>uninstall</code> do what they say. Uninstalling leaves the config,
+  credential and logs in place.</li>
+</ul>
+<p>On Linux, <code>install</code> writes a systemd unit (<code>vrsky-agent.service</code>) instead.</p>
+<h2 id="how-it-behaves">How it behaves<a class="headerlink" href="#how-it-behaves" title="Permanent link">&para;</a></h2>
+<p><strong>Read folders.</strong> A file is taken once its size and time have been unchanged
+for two scans in a row (5 s apart by default) — the program writing it must be
+finished. That is a heuristic, not a lock: a program that pauses mid-write for
+longer than that can have a partial file picked up. Where you control the
+writing program, have it write to a temporary name ending in <code>.tmp</code> or <code>.part</code>
+and rename it when done; the agent never takes those, nor hidden files.</p>
+<p>Files already in a read folder when the agent starts <strong>are</strong> picked up — a file
+still there has not been processed. After sending, the file is moved into
+<code>processed/</code> inside the folder (a name already there gets a timestamp suffix),
+or deleted if every pipeline watching the folder asked for that. A file VRSky
+refuses outright (too large, an unusable name) goes to <code>rejected/</code>, with a
+<code>.reason.txt</code> beside it, instead of being retried forever.</p>
+<p>If the agent restarts between sending a file and moving it, it remembers, and
+does not send it again.</p>
+<p><strong>Write folders.</strong> A delivered file is written under a temporary name in the
+same folder, checked against the checksum VRSky sent, and only then renamed to
+its real name. Whatever reads that folder never sees a half-written file. A file
+of the same name is replaced.</p>
+<p><strong>While the agent is offline</strong> — machine off, network down — files for it wait
+in VRSky and are written when it reconnects. That waiting has limits: <strong>up to
+72 hours, and 24 hours for files over 256 KB</strong>. Past that they are lost. Files
+waiting for a read folder simply wait on the machine.</p>
+<p><strong>Revoking.</strong> Revoking the agent in Settings → Remote agents cuts it off on its
+next request. It stops, writes the reason to its log and the Event Log, and
+refuses to start again until the machine is registered anew (delete
+<code>credential.json</code>, then <code>register</code> with a new token).</p>
+<h2 id="testing-against-a-local-stack-over-tailscale">Testing against a local stack over Tailscale<a class="headerlink" href="#testing-against-a-local-stack-over-tailscale" title="Permanent link">&para;</a></h2>
+<p>To try the agent against VRSky running on a laptop (see
+<a href="../remote-access/">Reaching a local stack remotely</a>), start the stack with
+<code>make up-core-remote</code> — it publishes the agent gateway on port 9330 — and point
+the agent at the laptop's Tailscale address over plain HTTP:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"business_central"</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">"business_central"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"aad_tenant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;tenant-guid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"company_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;company-guid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-id&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"entity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"items"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
-<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="nt">"server_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://100.x.y.z:9330"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"allow_insecure_http"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"directories"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">…</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
-<p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>503</code>/<code>5xx</code>/network errors retry; <code>4xx</code> bad-data and <code>401</code>/<code>403</code> auth are
-poison and go to the DLQ.</p>
-<h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>On-prem / sandbox</strong> — set <code>api_base_url</code>, <code>token_url</code>, and <code>scope</code> overrides
-  for on-prem Business Central or a non-default Entra authority.</li>
-<li><strong>LS Central</strong> — the standard BC entities work as-is; LS Retail-specific data
-  (e.g. the LS eCommerce API for Commerce) can be reached by pointing <code>entity</code> /
-  <code>api_base_url</code> at those endpoints.</li>
-<li>
-<p><strong>Incremental polling</strong> — set <code>incremental: true</code>. The watermark is stored per
-  connection node in <code>connection_node_checkpoints</code> and survives restarts, so a
-  connector that stops and starts does not re-read the entity from the
-  beginning. It is composed with any configured <code>filter</code> rather than replacing
-  it: <code>(your filter) and lastModifiedDateTime gt &lt;watermark&gt;</code>.</p>
-<p>The watermark only advances once <strong>every</strong> page of a fetch has been
-published. A fetch that fails halfway resumes from the previous watermark,
-so its records arrive twice rather than being skipped — the same
-at-least-once bargain the rest of the pipeline makes.</p>
-<p>The comparison is <code>gt</code>, so a record written in the same millisecond as the
-watermark but after the fetch read it is not picked up. <code>ge</code> would redeliver
-the watermark record on every poll instead.
-- <strong>UI source-type wiring</strong> — config is API-settable today.</p>
-</li>
-</ul>
-<p>The same OAuth2 client-credentials pattern (via <code>pkg/oauthcc</code>) is reused by the
-Visma.net connector.</p>
+<p><code>allow_insecure_http</code> is required for any <code>http://</code> address other than
+localhost, because the credential then crosses the network unencrypted. Use it
+only on a private network like a tailnet, never for production.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>access denied — run this … as administrator</code></td>
+<td><code>install</code>, <code>start</code>, <code>stop</code> need an elevated prompt.</td>
+</tr>
+<tr>
+<td><code>this agent is not registered</code></td>
+<td>Run <code>register</code> first; check <code>data_dir</code> if you changed it.</td>
+</tr>
+<tr>
+<td><code>registration token is unknown, already used, or expired</code></td>
+<td>Tokens are single-use and last an hour. Generate a new one.</td>
+</tr>
+<tr>
+<td><code>an agent called … already exists</code></td>
+<td>Pass <code>--name</code> with another name, or revoke the old agent first.</td>
+</tr>
+<tr>
+<td>Agent shows <strong>Offline</strong> in VRSky</td>
+<td>The service is not running, or cannot reach VRSky. Check <code>status</code> and the log.</td>
+</tr>
+<tr>
+<td>Pipeline refuses to start: <em>no folder named …</em></td>
+<td>The folder name in the pipeline is not in the agent's config, or has the wrong direction. Fix the config and restart the agent, which re-announces its folders.</td>
+</tr>
+<tr>
+<td>A file never leaves a read folder</td>
+<td>Still changing, still open in another program, or named <code>*.tmp</code> / <code>*.part</code> / starting with <code>.</code>. The log says which.</td>
+</tr>
+<tr>
+<td><code>VRSky does not recognise this agent's credential</code></td>
+<td>The agent was removed on the VRSky side (not revoked). Register again.</td>
+</tr>
+</tbody>
+</table>
 
 
 
