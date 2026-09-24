@@ -10,8 +10,9 @@ import { listDLQ } from '../services/dlqService'
 import { materializeSecrets } from '../utils/secrets'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
-import apiClient from '../services/api'
+import apiClient, { getActiveTenantId } from '../services/api'
 import * as authService from '../services/authService'
+import { getSessionToken } from '../services/authService'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
@@ -24,10 +25,16 @@ import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
 import type { Node, Edge } from '../types/pipeline'
 
-// Auth header for the file-producer /files API. Empty unless a token is
-// configured (see config.fileProducerToken), in which case the server requires it.
-const fileProducerHeaders = (): HeadersInit =>
-  config.fileProducerToken ? { Authorization: `Bearer ${config.fileProducerToken}` } : {}
+/** Headers for the file endpoints, which are proxied by the management API.
+ *  Identical to every other API call: the workspace comes from X-Tenant-ID and
+ *  the session from the bearer token, so the API can check this workspace owns
+ *  the connection before it talks to a worker. */
+const fileApiHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = { 'X-Tenant-ID': getActiveTenantId() }
+  const token = getSessionToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
 
 export default function PipelineBuilder() {
   const navigate = useNavigate()
@@ -95,7 +102,7 @@ export default function PipelineBuilder() {
   const [filterPanel, setFilterPanel] = useState<{ connectionId: string } | null>(null)
   const [filterEvents, setFilterEvents] = useState<Array<{ type: string; message?: string; time: string; data?: string; rules?: number }>>([])
   const [expandedFilterEvent, setExpandedFilterEvent] = useState<number | null>(null)
-  const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string } | null>(null)
+  const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string; connectionId: string } | null>(null)
   const [fileManagerFiles, setFileManagerFiles] = useState<Array<{ name: string; path: string; isDir: boolean; size: number; modTime: string }>>([])
   const [fileManagerLoading, setFileManagerLoading] = useState(false)
   // Which bottom-panel tab is selected. Empty until the user picks one, in
@@ -596,7 +603,7 @@ export default function PipelineBuilder() {
 
       if (isFileWatcher) {
         setFileUploadPanel({
-          uploadUrl: `${config.fileConsumerUrl}/upload/${connectionId}`,
+          uploadUrl: `${config.apiUrl}/api/v1/connections/${encodeURIComponent(connectionId)}/files/upload`,
           watchDir: `./data/input/${connectionId}`,
           connectionId,
         })
@@ -662,7 +669,7 @@ export default function PipelineBuilder() {
       const isFileProducer = producerNode?.data?.config?.type === 'file' || payloadProducer?.config?.type === 'file'
       if (isFileProducer) {
         const outputPath = (producerNode?.data?.config?.file as any)?.path || (payloadProducer?.config?.file as any)?.path || '/data/output'
-        setFileManagerPanel({ basePath: outputPath, currentPath: outputPath })
+        setFileManagerPanel({ basePath: outputPath, currentPath: outputPath, connectionId })
         setFileManagerFiles([])
         setActiveBottomTab('filemanager')
       } else {
@@ -695,6 +702,8 @@ export default function PipelineBuilder() {
       formData.append('file', file)
       const resp = await fetch(fileUploadPanel.uploadUrl, {
         method: 'POST',
+        headers: fileApiHeaders(),
+        credentials: 'include',
         body: formData,
       })
       uploadCountRef.current++
@@ -712,10 +721,14 @@ export default function PipelineBuilder() {
 
   // File manager helpers
   const fetchFileList = async (dirPath: string) => {
+    const connID = fileManagerPanel?.connectionId
+    if (!connID) return
     setFileManagerLoading(true)
     try {
-      const resp = await fetch(`${config.fileProducerUrl}/files?path=${encodeURIComponent(dirPath)}`, {
-        headers: fileProducerHeaders(),
+      const resp = await fetch(
+        `${config.apiUrl}/api/v1/connections/${encodeURIComponent(connID)}/files?path=${encodeURIComponent(dirPath)}`, {
+        headers: fileApiHeaders(),
+        credentials: 'include',
       })
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}))
@@ -738,9 +751,13 @@ export default function PipelineBuilder() {
     const name = targetPath.split('/').pop() || targetPath
     if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return
     try {
-      const resp = await fetch(`${config.fileProducerUrl}/files?path=${encodeURIComponent(targetPath)}`, {
+      const connID = fileManagerPanel?.connectionId
+      if (!connID) return
+      const resp = await fetch(
+        `${config.apiUrl}/api/v1/connections/${encodeURIComponent(connID)}/files?path=${encodeURIComponent(targetPath)}`, {
         method: 'DELETE',
-        headers: fileProducerHeaders(),
+        headers: fileApiHeaders(),
+        credentials: 'include',
       })
       if (resp.ok) {
         showSuccessNotification('Deleted', `Deleted ${name}`)

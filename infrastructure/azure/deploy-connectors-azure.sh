@@ -38,6 +38,23 @@ MGMT="http://vrsky-management-api.vrsky-platform.svc.cluster.local:8080"
 # (watch) and file-producer (write) both need to see the same tree.
 FILES_PVC="${FILES_PVC:-vrsky-files}"
 FILES_CLASS="${FILES_CLASS:-azurefile-csi}"
+
+# Shared bearer tokens for the two file workers' HTTP surfaces: file-producer's
+# /files (list + delete) and file-consumer's /upload. Neither endpoint has a
+# tenant check reachable without a connection id, so the management API's proxy
+# is the boundary and these tokens are what keep anything else on the cluster
+# network off them. Generated here, once, rather than left to a manual step —
+# an unset token means "allow all", which is exactly how they shipped.
+ensure_file_api_secret() {
+  if kubectl -n "$NS" get secret worker-file-api >/dev/null 2>&1; then
+    return
+  fi
+  echo "==> creating worker-file-api token secret"
+  [ -n "${DRY_RUN:-}" ] && return
+  kubectl -n "$NS" create secret generic worker-file-api \
+    --from-literal=producer_token="$(openssl rand -hex 32)" \
+    --from-literal=consumer_token="$(openssl rand -hex 32)"
+}
 FILES_SIZE="${FILES_SIZE:-50Gi}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$REPO_ROOT"
 OUT="infrastructure/kubernetes/connectors"; mkdir -p "$OUT"
@@ -108,6 +125,11 @@ EOF
       cat <<EOF
         - name: FILE_CONSUMER_BASE_DIR
           value: "/data/input"
+        - name: FILE_CONSUMER_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: worker-file-api
+              key: consumer_token
 EOF
       ;;
     file-producer)
@@ -116,6 +138,11 @@ EOF
           value: "/data/output"
         - name: FILE_PRODUCER_HTTP_PORT
           value: "9900"
+        - name: FILE_PRODUCER_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: worker-file-api
+              key: producer_token
 EOF
       ;;
   esac
@@ -352,6 +379,10 @@ if [ -n "${GENERATE_ONLY:-}" ]; then
   echo ">>> generated $MANIFEST (GENERATE_ONLY set — not applying)"
   exit 0
 fi
+
+# Before applying: the file connectors mount worker-file-api, so a missing
+# secret would leave them stuck in CreateContainerConfigError.
+ensure_file_api_secret
 
 echo ">>> validating $MANIFEST"
 kubectl apply --dry-run=client -f "$MANIFEST" >/dev/null

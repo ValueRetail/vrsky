@@ -47,7 +47,6 @@ export const config = {
   logLevel: (getEnv('VITE_LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error'),
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
-  fileProducerUrl: getEnv('VITE_FILE_PRODUCER_URL', 'http://localhost:9900'),
   // Public base URL of the webhook-consumer ingress. The onboarding wizard
   // (#93), the pipeline builder's deploy summary, and the Webhook (HTTP)
   // source panel all surface `${webhookIngressUrl}/webhook/{id}` — this is the
@@ -56,26 +55,17 @@ export const config = {
   // fixed. Set VITE_WEBHOOK_INGRESS_URL only when webhooks enter on a
   // different host than the UI.
   webhookIngressUrl: getEnv('VITE_WEBHOOK_INGRESS_URL', defaultWebhookBase()),
-  // The five per-worker SSE URLs that used to live here are gone: those
-  // streams now go through the management API on this origin
-  // (services/workerEvents.ts), which authenticates and checks workspace
-  // ownership. Pointing a browser at a worker's aux port only ever worked in
-  // local compose, and failed silently everywhere else.
-  //
-  // These two remain because they are not streams and were not converted:
-  // file-consumer's POST /upload/{id} and file-producer's /files browser.
-  // They have the same limitation as before — a browser off the compose
-  // network cannot reach them, so those panels are still local-only. Routing
-  // them through the API is the same job as the streams, one verb at a time.
-  fileConsumerUrl: getEnv('VITE_FILE_CONSUMER_URL', 'http://localhost:9200'),
+  // No worker URLs live here any more. The five per-worker SSE streams went
+  // first (services/workerEvents.ts); the file manager's list/delete and the
+  // file-consumer upload followed. All of them now go through the management
+  // API on this origin, which authenticates the caller and checks workspace
+  // ownership — the worker endpoints have no tenant check of their own, so
+  // that proxy is the boundary, and their ports must stay unpublished.
+  // Pointing a browser at a worker's aux port only ever worked in local
+  // compose and failed silently everywhere else.
   // Where the "Help & Docs" sidebar link points (the published mkdocs site).
   // Override per deployment; defaults to the GitHub Pages build.
   docsUrl: getEnv('VITE_DOCS_URL', 'https://valueretail.github.io/vrsky/'),
-  // Optional bearer token for the file-producer's /files API. Empty in local
-  // dev (the server leaves auth disabled); set in deployments that enable
-  // FILE_PRODUCER_AUTH_TOKEN on the file-producer. Read directly because an
-  // empty value is valid here (getEnv would reject it).
-  fileProducerToken: (import.meta.env.VITE_FILE_PRODUCER_TOKEN as string | undefined) ?? '',
 }
 
 // Validate configuration on load

@@ -138,7 +138,13 @@ func (p *fileProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	// the SDK needing to know about it.
 	allowedOrigin := getEnv("FILE_PRODUCER_ALLOWED_ORIGIN", "http://localhost:5173")
 	authToken := os.Getenv("FILE_PRODUCER_AUTH_TOKEN")
-	p.RegisterHTTPHandler("/files", filesHandler(p.allowedRoots, authToken, allowedOrigin, p.logger))
+	if authToken == "" {
+		// Not fatal: compose has no token and the endpoint is not published
+		// there. Said out loud because "unauthenticated" was previously the
+		// silent default in production too.
+		p.logger.Warn("FILE_PRODUCER_AUTH_TOKEN is not set: the /files endpoint accepts any caller that can reach this port")
+	}
+	p.RegisterHTTPHandler("/files", p.filesHandler(authToken, allowedOrigin))
 
 	// Subscribe to connection start/stop commands so a redeploy evicts this
 	// connection's cached config immediately (#141). nil in some tests/harness.
@@ -584,7 +590,23 @@ func sanitizeForFilename(s string) string {
 
 // filesHandler returns the /files handler: CORS-restricted to the UI origin
 // and (optionally) bearer-token gated, dispatching GET (list) / DELETE.
-func filesHandler(allowedRoots []string, authToken, allowedOrigin string, logger *slog.Logger) http.HandlerFunc {
+//
+// Every request names a connection_id, and the directory it may touch is
+// derived from that connection's tenant — never from the path the caller sent.
+// Before this, both verbs took an absolute path checked only against
+// allowedRoots, so "/data/output/<someone-else>/…" passed: a cross-tenant read
+// AND delete on the shared RWX volume, on an endpoint that is unauthenticated
+// whenever FILE_PRODUCER_AUTH_TOKEN is unset (which is the default, and was the
+// case in production). The write path had already been confined by tenantpath;
+// the read path had not, so the UI could not even see its own output.
+//
+// This endpoint is reached through the management API's proxy, which proves the
+// caller's session owns the connection. The lookup below independently proves
+// where that connection's files live. Splitting it that way is deliberate: a
+// trusted X-Tenant-ID header would collapse both checks into one that anything
+// reaching this port could forge. The worker ports MUST NOT be exposed through
+// an ingress — see docs/connectors/file.md.
+func (p *fileProducer) filesHandler(authToken, allowedOrigin string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 		if r.Header.Get("Origin") == allowedOrigin {
@@ -600,15 +622,85 @@ func filesHandler(allowedRoots []string, authToken, allowedOrigin string, logger
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Resolve the caller's path into the owning tenant's subtree before any
+		// filesystem call. Both verbs go through this, so neither can name a
+		// directory the connection does not own.
+		resolved, ok := p.resolveRequestPath(w, r)
+		if !ok {
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
-			handleListFiles(w, r, allowedRoots, logger)
+			handleListFiles(w, resolved, p.logger)
 		case http.MethodDelete:
-			handleDeleteFiles(w, r, allowedRoots, logger)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			handleDeleteFiles(w, resolved, p.logger)
 		}
 	}
+}
+
+// requestPath is a caller's path already confined to its tenant's subtree.
+type requestPath struct {
+	abs        string // absolute path on disk
+	tenantRoot string // the tenant's own root; abs is at or below it
+}
+
+// resolveRequestPath maps the request's connection_id + path onto an absolute
+// path inside that connection's tenant root, writing the error response itself
+// and reporting whether the caller should continue.
+func (p *fileProducer) resolveRequestPath(w http.ResponseWriter, r *http.Request) (requestPath, bool) {
+	connectionID := strings.TrimSpace(r.URL.Query().Get("connection_id"))
+	if connectionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "connection_id query parameter required"})
+		return requestPath{}, false
+	}
+
+	tenantID, err := p.tenantForConnection(r.Context(), connectionID)
+	if err != nil {
+		// One response for "no such connection" and "not a UUID" alike: a
+		// distinct answer for a well-formed ID would confirm which connection
+		// IDs exist.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "connection not found"})
+		return requestPath{}, false
+	}
+
+	root, err := tenantpath.Root(p.defaultOutputDir, tenantID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot resolve tenant directory"})
+		return requestPath{}, false
+	}
+	// An empty path means the tenant's own root — the natural landing view for
+	// the file manager, and what the UI opens with.
+	abs, err := tenantpath.Resolve(p.defaultOutputDir, tenantID, r.URL.Query().Get("path"))
+	if err != nil {
+		p.logger.Warn("Refused file request outside the tenant's directory",
+			"connection_id", connectionID, "tenant_id", tenantID,
+			"path", r.URL.Query().Get("path"), "error", err)
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path is outside this connection's directory"})
+		return requestPath{}, false
+	}
+	return requestPath{abs: abs, tenantRoot: root}, true
+}
+
+// tenantForConnection returns the tenant that owns a connection.
+//
+// lint:tenant-ok — this IS the tenant lookup that scopes the file API; there is
+// no tenant to scope the query by until it returns.
+func (p *fileProducer) tenantForConnection(ctx context.Context, connectionID string) (string, error) {
+	if p.db == nil {
+		return "", errors.New("no database")
+	}
+	var tenantID string
+	err := p.db.QueryRowContext(ctx,
+		`SELECT tenant_id::text FROM connections WHERE id::text = $1`, connectionID).Scan(&tenantID)
+	if err != nil {
+		return "", err
+	}
+	return tenantID, nil
 }
 
 // authorizedFileRequest reports whether a /files request is permitted. When no
@@ -677,16 +769,8 @@ type fileEntry struct {
 	ModTime string `json:"modTime"`
 }
 
-func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []string, logger *slog.Logger) {
-	dirPath := r.URL.Query().Get("path")
-	if dirPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
-		return
-	}
-	if !isPathAllowed(dirPath, allowedRoots) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
-		return
-	}
+func handleListFiles(w http.ResponseWriter, rp requestPath, logger *slog.Logger) {
+	dirPath := rp.abs
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -713,23 +797,15 @@ func handleListFiles(w http.ResponseWriter, r *http.Request, allowedRoots []stri
 	writeJSON(w, http.StatusOK, map[string]interface{}{"files": files, "path": dirPath})
 }
 
-func handleDeleteFiles(w http.ResponseWriter, r *http.Request, allowedRoots []string, logger *slog.Logger) {
-	targetPath := r.URL.Query().Get("path")
-	if targetPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query parameter required"})
+func handleDeleteFiles(w http.ResponseWriter, rp requestPath, logger *slog.Logger) {
+	targetPath := rp.abs
+	// Refuse to delete the tenant's own root. Everything below it is fair game
+	// for an editor, but one call that empties a whole tenant is not something
+	// the file manager should be able to do by accident — and with an empty
+	// path resolving to the root, that call is one missing parameter away.
+	if filepath.Clean(targetPath) == filepath.Clean(rp.tenantRoot) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot delete the root output directory"})
 		return
-	}
-	if !isPathAllowed(targetPath, allowedRoots) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not allowed"})
-		return
-	}
-	absTarget, _ := filepath.Abs(targetPath)
-	for _, root := range allowedRoots {
-		absRoot, _ := filepath.Abs(root)
-		if absTarget == absRoot {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot delete root output directory"})
-			return
-		}
 	}
 	info, err := os.Stat(targetPath)
 	if err != nil {

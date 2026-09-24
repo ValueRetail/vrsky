@@ -59,6 +59,34 @@ and the pod pulls from quay.io. If a compose or CI job hits the same error,
 
 > `file-producer` has no live UI panel — tail `docker compose logs -f file-producer`.
 
+## The File Output panel says "Load failed", or shows no files
+
+The panel and the upload box go through the management API
+(`/api/v1/connections/{id}/files`). Before that they addressed the worker's own
+port from the browser, using a URL baked into the bundle at build time — which
+worked in compose and nowhere else, because those ports are not routable from a
+browser and `VITE_*` values never reach a static nginx bundle. If you see this
+on a deployment, check the UI image is current.
+
+If the panel loads but lists nothing while the pipeline reports writes, compare
+the two paths: output lands in `<mount>/<workspace-id>/<your path>`, so a
+listing of the bare mount root is a different directory. The panel adds the
+workspace segment for you; a `kubectl exec ... ls` does not.
+
+```bash
+kubectl -n vrsky-platform logs deploy/vrsky-file-producer | grep "file written"
+kubectl -n vrsky-platform exec deploy/vrsky-file-producer -- ls -R /data/output/<workspace-id>
+```
+
+A `dropping: output path is outside the workspace's own files` line means the
+configured directory is outside the mounted volume entirely — fix the path on
+the node rather than widening the mount.
+
+> Do **not** give `file-producer:9900` or `file-consumer:9200` an ingress to
+> "fix" a panel that cannot reach a worker. Those endpoints have no tenant check
+> of their own; publishing them exposes every workspace's files. See
+> [Files](../connectors/file.md).
+
 ## Usage page shows 0 messages right after a test
 
 The usage rollup reads Prometheus `increase()` and runs hourly; a quick burst

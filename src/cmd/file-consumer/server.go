@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -86,10 +87,15 @@ func parseDelimitedSample(payload []byte, delim rune) ([]string, map[string]stri
 // publishes its contents into the pipeline.
 func (s *fileConsumer) handleUpload() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// CORS
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// CORS, restricted to the configured UI origin. It was "*", which on an
+		// endpoint that injects data into a pipeline let any page on the
+		// internet post to it from a visitor's browser.
+		w.Header().Set("Vary", "Origin")
+		if r.Header.Get("Origin") == s.uploadOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", s.uploadOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -98,6 +104,11 @@ func (s *fileConsumer) handleUpload() http.HandlerFunc {
 
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if !authorizedUpload(r, s.uploadToken) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -469,4 +480,20 @@ func (s *fileConsumer) isSamplePathAllowed(path string) bool {
 func writeSampleErr(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": msg})
+}
+
+// authorizedUpload reports whether an /upload request is permitted. When no
+// token is configured the endpoint stays open (local-dev default, where the
+// port is not published); when set, the request must present a matching bearer
+// token. Mirrors authorizedFileRequest in file-producer.
+func authorizedUpload(r *http.Request, token string) bool {
+	if token == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	got := r.Header.Get("Authorization")
+	if !strings.HasPrefix(got, prefix) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(got, prefix)), []byte(token)) == 1
 }
