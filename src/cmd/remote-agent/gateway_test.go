@@ -51,6 +51,10 @@ type testEnv struct {
 	mu        sync.Mutex
 	published []*envelope.Envelope
 	streamed  []*envelope.Envelope
+
+	// versions is each credential's last watch-set version, sent back on
+	// the next poll the way an agent does.
+	versions map[string]string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -64,7 +68,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	mock.MatchExpectationsInOrder(false)
 	t.Cleanup(func() { _ = db.Close() })
 
-	e := &testEnv{mock: mock, nc: nc, js: js}
+	e := &testEnv{mock: mock, nc: nc, js: js, versions: map[string]string{}}
 	g := newGateway()
 	g.db = db
 	g.nc = nc
@@ -174,16 +178,33 @@ func (e *testEnv) do(t *testing.T, method, path, cred string, body []byte) *http
 	return resp
 }
 
+// poll behaves like an agent's poll loop: it sends back the watch-set version
+// it last saw, and polls again when a poll returned only because that version
+// changed. Without this, a first poll — which by design answers at once, since
+// the agent has no version yet — can return before a message has reached the
+// gateway, and a test asking for "wait up to 5 s for a delivery" gets none.
 func (e *testEnv) poll(t *testing.T, cred string, wait int) agentproto.WorkResponse {
 	t.Helper()
-	resp := e.do(t, http.MethodGet, "/agent/v1/work?wait="+itoa(wait), cred, nil)
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("poll: %d %s", resp.StatusCode, b)
+	deadline := time.Now().Add(time.Duration(wait) * time.Second)
+	for {
+		left := int(time.Until(deadline).Round(time.Second) / time.Second)
+		if left < 0 {
+			left = 0
+		}
+		path := "/agent/v1/work?wait=" + itoa(left) + "&watches=" + e.versions[cred]
+		resp := e.do(t, http.MethodGet, path, cred, nil)
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("poll: %d %s", resp.StatusCode, b)
+		}
+		var w agentproto.WorkResponse
+		_ = json.NewDecoder(resp.Body).Decode(&w)
+		changed := w.WatchesVersion != e.versions[cred]
+		e.versions[cred] = w.WatchesVersion
+		if len(w.Deliveries) > 0 || !changed || left == 0 {
+			return w
+		}
 	}
-	var w agentproto.WorkResponse
-	_ = json.NewDecoder(resp.Body).Decode(&w)
-	return w
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -680,6 +701,35 @@ func TestWork_NewWatchWakesAPollingAgent(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the poll was not woken by the new watch")
+	}
+}
+
+// The protocol case CI tripped over: a message that reaches the gateway AFTER
+// the agent started polling. An agent's first poll carries no watch-set
+// version, so it answers at once — with the version and possibly nothing
+// else. The agent's next poll, carrying that version, must then hold and
+// receive the late delivery rather than return empty.
+func TestWork_PollHoldsForALateDelivery(t *testing.T) {
+	e := newTestEnv(t)
+	e.startOutputPipeline(t, "conn-late")
+
+	first := e.do(t, http.MethodGet, "/agent/v1/work?wait=5", credA, nil)
+	var w1 agentproto.WorkResponse
+	_ = json.NewDecoder(first.Body).Decode(&w1)
+	if len(w1.Deliveries) != 0 || w1.WatchesVersion == "" {
+		t.Fatalf("first poll: want an immediate answer carrying a version and no work, got %+v", w1)
+	}
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		e.publishTo(t, tenant1, "conn-late", `{"late":true}`)
+	}()
+	start := time.Now()
+	second := e.do(t, http.MethodGet, "/agent/v1/work?wait=5&watches="+w1.WatchesVersion, credA, nil)
+	var w2 agentproto.WorkResponse
+	_ = json.NewDecoder(second.Body).Decode(&w2)
+	if len(w2.Deliveries) != 1 {
+		t.Fatalf("second poll returned %d deliveries after %v; want it to hold for the late one", len(w2.Deliveries), time.Since(start))
 	}
 }
 
