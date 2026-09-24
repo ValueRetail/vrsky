@@ -42,6 +42,12 @@ var apiRoutes = []apiRoute{
 	{"DELETE /api/v1/connections/{id}/files", "delete", "/api/v1/connections/{id}/files", "Connections", "Delete a produced file or directory", nil, nil},
 	{"POST /api/v1/connections/{id}/files/upload", "post", "/api/v1/connections/{id}/files/upload", "Connections", "Upload a file into a running file-source connection (multipart/form-data, field \"file\")", nil, nil},
 
+	// --- Remote agents (#266) ---
+	{"POST /api/v1/agents/registration-tokens", "post", "/api/v1/agents/registration-tokens", "Remote agents", "Mint a one-time registration token for a new agent (admin; the raw token is returned only here)", nil, tof(AgentRegistrationToken{})},
+	{"GET /api/v1/agents", "get", "/api/v1/agents", "Remote agents", "List the workspace's agents, with online status", nil, nil},
+	{"PATCH /api/v1/agents/{id}", "patch", "/api/v1/agents/{id}", "Remote agents", "Rename an agent", nil, tof(Agent{})},
+	{"DELETE /api/v1/agents/{id}", "delete", "/api/v1/agents/{id}", "Remote agents", "Revoke an agent; its credential stops working on its next request", nil, nil},
+
 	// --- Metrics & sample data ---
 	{"GET /api/v1/connections/{id}/metrics", "get", "/api/v1/connections/{id}/metrics", "Metrics", "Point-in-time pipeline metrics for a connection (from Prometheus)", nil, nil},
 	{"GET /api/v1/connections/{id}/metrics/stream", "get", "/api/v1/connections/{id}/metrics/stream", "Metrics", "Server-sent stream of live pipeline metrics", nil, nil},

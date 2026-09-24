@@ -942,6 +942,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/connections/{id}/files", editor(http.HandlerFunc(h.ProxyDeleteFile)))
 	mux.Handle("POST /api/v1/connections/{id}/files/upload", editor(http.HandlerFunc(h.ProxyUploadFile)))
 
+	// Remote agents (#266): mint one-time registration tokens, and list /
+	// rename / revoke the agents they produced. Minting and revoking are admin:
+	// a token creates a credential that can write files into this workspace's
+	// pipelines, and revoke cuts a running machine off. Renaming is cosmetic.
+	// See agents_handler.go.
+	mux.Handle("POST /api/v1/agents/registration-tokens", adminMW(http.HandlerFunc(h.CreateAgentRegistrationToken)))
+	mux.Handle("GET /api/v1/agents", viewer(http.HandlerFunc(h.ListAgents)))
+	mux.Handle("PATCH /api/v1/agents/{id}", editor(http.HandlerFunc(h.RenameAgent)))
+	mux.Handle("DELETE /api/v1/agents/{id}", adminMW(http.HandlerFunc(h.RevokeAgent)))
+
 	// Schema discovery for the mapping UI. Editor rather than viewer: it makes
 	// the platform open an outbound connection to a customer system using
 	// config supplied in the request. See schema_discovery_proxy.go.

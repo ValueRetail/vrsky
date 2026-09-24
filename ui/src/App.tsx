@@ -21,6 +21,7 @@ import TenantConnectionsPage from './pages/TenantConnectionsPage'
 import ApiKeyPage from './pages/ApiKeyPage'
 import AuditPage from './pages/AuditPage'
 import UsersPage from './pages/UsersPage'
+import AgentsPage from './pages/AgentsPage'
 import InviteAcceptPage from './pages/InviteAcceptPage'
 import UsagePage from './pages/UsagePage'
 import OAuthProvidersPage from './pages/OAuthProvidersPage'
@@ -105,6 +106,7 @@ function App() {
             <Route path="/settings/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
             <Route path="/settings/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
+            <Route path="/settings/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/settings/usage" element={<ProtectedRoute><UsagePage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Route>
