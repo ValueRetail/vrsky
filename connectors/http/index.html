@@ -2256,17 +2256,18 @@
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node exposes an inbound <strong>webhook ingress</strong>. After deploy, the connection accepts POST requests at <code>&lt;webhook-ingress&gt;/webhook/{connectionId}</code>:</p>
 <ul>
-<li><strong>Deployed</strong> — the same host that serves the UI, e.g. <code>https://20.251.107.2.sslip.io/webhook/{connectionId}</code>. The <code>/webhook</code> route is served by the <code>vrsky-webhooks</code> Ingress (<code>infrastructure/kubernetes/ingress/webhooks-ingress.yaml</code>). This URL is stable for as long as the pipeline is deployed and is the one to give a partner.</li>
+<li><strong>Deployed</strong> — the same host that serves the UI, e.g. <code>https://vrsky.valueretail.no/webhook/{connectionId}</code>. The older <code>https://20.251.107.2.sslip.io/...</code> form still routes, but hand out the real name: see the warning below. The <code>/webhook</code> route is served by the <code>vrsky-webhooks</code> Ingress (<code>infrastructure/kubernetes/ingress/webhooks-ingress.yaml</code>). This URL is stable for as long as the pipeline is deployed and is the one to give a partner.</li>
 <li><strong>Local compose</strong> — <code>http://localhost:9100/webhook/{connectionId}</code>.</li>
 </ul>
 <p>The editor's Webhook (HTTP) source panel shows the URL for the environment you are in, once the pipeline is deployed. When developing locally you can also start a cloudflared quick tunnel from that panel to get a temporary public URL; it points at your machine and dies with the tunnel, so it is for testing a sender, not for handing out.</p>
 <div class="admonition warning">
-<p class="admonition-title"><code>sslip.io</code> hosts can be blocked by ISP DNS filters</p>
-<p>While the public host is a <code>sslip.io</code> address, some ISP filters (Telenor's
-Nettvern among them) resolve it to a block page. A sender behind one cannot
-deliver, and sees only a TLS certificate error — nothing that points at DNS.
-See <a href="../../operator/troubleshooting/">Troubleshooting</a> for how to confirm it.
-A real DNS name removes the problem.</p>
+<p class="admonition-title">Use the real hostname, not <code>sslip.io</code></p>
+<p><code>vrsky.valueretail.no</code> is the name to give a partner. The <code>sslip.io</code> host
+still routes and is kept so URLs already handed out keep working, but some
+ISP filters (Telenor's Nettvern among them) resolve <code>sslip.io</code> to a block
+page: a sender behind one cannot deliver, and sees only a TLS certificate
+error — nothing that points at DNS. See
+<a href="../../operator/troubleshooting/">Troubleshooting</a>.</p>
 </div>
 <p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.</p>
 <p>Config reference:</p>

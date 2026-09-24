@@ -2466,7 +2466,15 @@ the page, nothing is wrong server-side and you can stop investigating the
 cluster:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>--resolve<span class="w"> </span><span class="m">20</span>.251.107.2.sslip.io:443:20.251.107.2<span class="w"> </span>https://20.251.107.2.sslip.io/<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-c<span class="w"> </span><span class="m">200</span>
 </code></pre></div>
-<p><strong>Fixes</strong>, in order of preference:</p>
+<p><strong>The fix: use the real name.</strong> <code>vrsky.valueretail.no</code> has existed since
+2026-09-23 — an A record on Cloudflare, DNS-only, pointing at the same ingress.
+It is not wildcard DNS, so no filter treats it specially, and it is the only
+fix that helps <strong>partners</strong>: a sender behind an affected resolver cannot reach
+a <code>sslip.io</code> webhook URL at all, and sees only a TLS error with nothing
+pointing at DNS.</p>
+<p>The <code>sslip.io</code> host still routes, so URLs handed out earlier keep working. If
+you are looking at this page, the answer is almost always to stop using it.</p>
+<p>Two stopgaps, if you are on an affected network and cannot change the URL:</p>
 <ol>
 <li>Point the machine's DNS at a public resolver (1.1.1.1 or 8.8.8.8), or turn
    off the ISP filter on the subscription.</li>
@@ -2475,10 +2483,6 @@ cluster:</p>
    you update the line:
    <div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s2">"20.251.107.2 20.251.107.2.sslip.io"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>-a<span class="w"> </span>/etc/hosts
 </code></pre></div></li>
-<li>Use the real DNS name once it exists. This removes the whole class of
-   problem and is the only fix that helps <strong>partners</strong> — a sender behind an
-   affected resolver cannot reach a <code>sslip.io</code> webhook URL at all, and sees
-   only a TLS error with nothing pointing at DNS.</li>
 </ol>
 <p>Two things worth knowing. First, the failure is asymmetric: it is invisible
 from inside the cluster, where every check passes, so it is easy to spend a
