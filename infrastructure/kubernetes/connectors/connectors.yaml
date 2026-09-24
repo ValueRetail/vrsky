@@ -1478,17 +1478,13 @@ spec:
               key: secretkey
         - name: FILE_CONSUMER_BASE_DIR
           value: "/data/input"
-        - name: WORKER_HTTP_PORT
-          value: "9200"
-        # /upload publishes caller-supplied bytes into a running pipeline, so
-        # an open one is an injection primitive. Reached only through the
-        # management API's proxy; this token enforces that. Do NOT publish
-        # port 9200 through an ingress.
         - name: FILE_CONSUMER_AUTH_TOKEN
           valueFrom:
             secretKeyRef:
               name: worker-file-api
               key: consumer_token
+        - name: WORKER_HTTP_PORT
+          value: "9200"
         ports:
         - name: http
           containerPort: 9200
@@ -2474,17 +2470,13 @@ spec:
           value: "/data/output"
         - name: FILE_PRODUCER_HTTP_PORT
           value: "9900"
-        - name: WORKER_HTTP_PORT
-          value: "9900"
-        # The /files endpoint is reached only through the management API's
-        # proxy, which checks the caller's session owns the connection. This
-        # token is what stops anything else on the cluster network from
-        # reaching past it. Do NOT publish port 9900 through an ingress.
         - name: FILE_PRODUCER_AUTH_TOKEN
           valueFrom:
             secretKeyRef:
               name: worker-file-api
               key: producer_token
+        - name: WORKER_HTTP_PORT
+          value: "9900"
         ports:
         - name: http
           containerPort: 9900
