@@ -89,6 +89,18 @@ var nodeConfigRules = map[nodeKind]nodeConfigRule{
 	// file.path may be empty: file-producer falls back to its mounted default
 	// output dir. Its *format* is checked by validateFileProducerPath (#142).
 	{"producer", "file"}: {"file-producer", nil},
+	// Remote agents (#266): one gateway service serves both directions. These
+	// check presence only; that the agent belongs to this workspace and has
+	// the named folder in the right mode is checked at start — early in
+	// StartConnection, and authoritatively in the gateway.
+	{"consumer", "remote_agent"}: {"remote-agent", []configRequirement{
+		{"remote_agent.agent_id", "choose the remote agent to watch"},
+		{"remote_agent.directory", "choose the folder on the agent to watch"},
+	}},
+	{"producer", "remote_agent"}: {"remote-agent", []configRequirement{
+		{"remote_agent.agent_id", "choose the remote agent to write to"},
+		{"remote_agent.directory", "choose the folder on the agent to write into"},
+	}},
 	{"producer", "database"}: {"db-producer", []configRequirement{{
 		"database.host", "the target database host is required",
 	}}},

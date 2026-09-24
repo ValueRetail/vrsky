@@ -205,3 +205,11 @@ jobs:
       - name: Lint OpenAPI annotations
         working-directory: src
         run: go run ./cmd/lint-openapi
+
+      # Fail the build if a query touches a tenant-scoped table without a
+      # tenant_id filter (or an explained lint:tenant-ok). Covers the
+      # management API and the remote-agent gateway, whose queries decide which
+      # workspace an agent and its files belong to (#266).
+      - name: Lint tenant filters
+        working-directory: src
+        run: make lint-tenant

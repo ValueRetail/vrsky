@@ -64,7 +64,7 @@ info:
 # `docker compose up -d --build <list>`.
 CORE_SERVICES := nats postgres-management management-api \
 	webhook-consumer http-producer file-producer data-filter data-converter \
-	business-central-consumer business-central-producer httpbin
+	business-central-consumer business-central-producer remote-agent httpbin
 
 up-core:
 	docker compose up -d --build $(CORE_SERVICES)

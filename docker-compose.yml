@@ -498,6 +498,35 @@ services:
       - vrsky-network
     restart: unless-stopped
 
+  # Remote agent gateway (#266) - agents on other machines dial in over HTTP(S)
+  # to upload files into pipelines and to receive files from them.
+  remote-agent:
+    build:
+      context: .
+      dockerfile: src/cmd/remote-agent/Dockerfile
+    container_name: vrsky-remote-agent
+    environment:
+      NATS_URL: "nats://nats:4222"
+      DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
+      LOG_LEVEL: "info"
+      # Serves /agent/v1/* (the agent protocol) and /events/ (builder panel).
+      WORKER_HTTP_PORT: "9330"
+      # No payload store in compose, so every upload travels inline and must
+      # fit NATS's default 1 MB max_payload once base64-encoded in the
+      # envelope. A cap below that turns an oversized file into a clear 413
+      # for the agent instead of a publish that fails on every retry.
+      AGENT_UPLOAD_MAX_BYTES: "700000"
+    ports:
+      - "127.0.0.1:9330:9330"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres-management:
+        condition: service_healthy
+    networks:
+      - vrsky-network
+    restart: unless-stopped
+
   # Webhook Consumer - receives inbound HTTP webhooks and publishes to NATS
   webhook-consumer:
     build:

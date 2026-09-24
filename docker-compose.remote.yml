@@ -16,8 +16,8 @@
 #
 #   VRSKY_BIND=100.101.102.103 make up-core-remote
 #
-# What is published here is the webhook ingress only — the door a sender
-# outside this machine needs. The management API stays on loopback: the UI's
+# What is published here is the webhook ingress and the remote-agent gateway —
+# the doors a sender, or an agent on another machine, needs. The management API stays on loopback: the UI's
 # dev server proxies /api from where it runs, so a browser elsewhere reaches
 # it through the UI without the API being exposed itself.
 
@@ -30,3 +30,10 @@ services:
     ports: !override
       - "${VRSKY_BIND:-0.0.0.0}:9100:9100"
       - "${VRSKY_BIND:-0.0.0.0}:9101:9101"
+
+  # The gateway a remote agent on another machine registers with and polls.
+  # Only /agent/v1/* is meant for it; every request is authenticated by the
+  # agent's credential (or a one-time registration token).
+  remote-agent:
+    ports: !override
+      - "${VRSKY_BIND:-0.0.0.0}:9330:9330"

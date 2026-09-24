@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useId, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +22,8 @@ import { discoverSchema, type SchemaField } from './schemaDiscovery'
 import { projectSchemaThroughFilter } from './schema'
 import { onKeyActivate, treeNodeKeyDown } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
+import { StyledInput, StyledSelect } from './StyledFields'
+import RemoteAgentConfigEditor from './RemoteAgentConfigEditor'
 import { config as appConfig } from '../../config/env'
 
 // The cloudflared quick tunnel is a LOCAL DEVELOPMENT affordance: it gives a
@@ -118,126 +120,6 @@ const NODE_COLORS: Record<string, { bg: string; hoverBg: string; text: string }>
   producer: { bg: '#86efac', hoverBg: '#6de095', text: '#1e5c3a' },
 }
 
-// Reusable styled input component
-function StyledInput({
-  label,
-  placeholder,
-  value,
-  onChange,
-  type = 'text',
-}: {
-  label: string
-  placeholder?: string
-  value: string
-  onChange: (value: string) => void
-  type?: string
-}) {
-  const [focused, setFocused] = useState(false)
-  const id = useId()
-
-  return (
-    <div style={{ marginBottom: '16px' }}>
-      <label
-        htmlFor={id}
-        style={{
-          display: 'block',
-          fontSize: '12px',
-          fontWeight: 600,
-          color: '#374151',
-          marginBottom: '6px',
-          textTransform: 'uppercase',
-          letterSpacing: '0.025em',
-        }}
-      >
-        {label}
-      </label>
-      <input
-        id={id}
-        type={type}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          width: '100%',
-          padding: '10px 12px',
-          border: focused ? '1px solid #3b82f6' : '1px solid #d1d5db',
-          borderRadius: '6px',
-          backgroundColor: '#ffffff',
-          color: '#1f2937',
-          fontSize: '13px',
-          outline: 'none',
-          transition: 'all 150ms ease',
-          boxShadow: focused ? '0 0 0 3px rgba(59, 130, 246, 0.1)' : 'none',
-          boxSizing: 'border-box',
-        }}
-      />
-    </div>
-  )
-}
-
-// Reusable styled select component
-function StyledSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string }[]
-}) {
-  const [focused, setFocused] = useState(false)
-  const id = useId()
-
-  return (
-    <div style={{ marginBottom: '16px' }}>
-      <label
-        htmlFor={id}
-        style={{
-          display: 'block',
-          fontSize: '12px',
-          fontWeight: 600,
-          color: '#374151',
-          marginBottom: '6px',
-          textTransform: 'uppercase',
-          letterSpacing: '0.025em',
-        }}
-      >
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          width: '100%',
-          padding: '10px 12px',
-          border: focused ? '1px solid #3b82f6' : '1px solid #d1d5db',
-          borderRadius: '6px',
-          backgroundColor: '#ffffff',
-          color: '#1f2937',
-          fontSize: '13px',
-          outline: 'none',
-          transition: 'all 150ms ease',
-          boxShadow: focused ? '0 0 0 3px rgba(59, 130, 246, 0.1)' : 'none',
-          boxSizing: 'border-box',
-          cursor: 'pointer',
-        }}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
-}
 
 // Styled button component with hover effects
 function StyledButton({
@@ -3733,6 +3615,7 @@ export default function PropertyEditor({
                 { value: 'file', label: 'File Watcher' },
                 { value: 'database', label: 'Database CDC' },
                 { value: 'tenant', label: 'Tenant Input' },
+                { value: 'remote_agent', label: 'Remote Agent' },
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
                 { value: 'kafka', label: 'Kafka' },
@@ -3980,6 +3863,9 @@ export default function PropertyEditor({
             {config.type === 'business_central' && (
               <BusinessCentralConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
+            {config.type === 'remote_agent' && (
+              <RemoteAgentConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
             {config.type === 'visma' && (
               <VismaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
@@ -4003,6 +3889,7 @@ export default function PropertyEditor({
                 { value: '', label: 'Select destination type...' },
                 { value: 'http', label: 'Webhook (HTTP)' },
                 { value: 'file', label: 'File Output' },
+                { value: 'remote_agent', label: 'Remote Agent' },
                 { value: 'database', label: 'Database' },
                 { value: 'salesforce', label: 'Salesforce' },
                 { value: 'sftp', label: 'SFTP' },
@@ -4175,6 +4062,9 @@ export default function PropertyEditor({
             )}
             {config.type === 'business_central' && (
               <BusinessCentralConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
+            )}
+            {config.type === 'remote_agent' && (
+              <RemoteAgentConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />
             )}
             {config.type === 'visma' && (
               <VismaConfigEditor config={config} setConfig={setConfig} nodeType={nodeType} />

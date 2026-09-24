@@ -1,0 +1,67 @@
+# Public route for VRSky remote agents (#266): /agent → the remote-agent gateway.
+#
+# A remote agent is a small binary on a customer machine that dials OUT to this
+# URL over HTTPS. This is the ONLY public surface of the remote-agent service:
+# its /events/ stream (for the pipeline builder) stays internal, reached through
+# the management API's worker-events proxy. Do not add paths here.
+#
+# Separate from vrsky-webhooks because the agent traffic needs different edge
+# behaviour from partner webhooks:
+#
+#   proxy-body-size "0"          — no limit at the edge. Agents upload whole
+#                                  files; the gateway enforces its own cap
+#                                  (AGENT_UPLOAD_MAX_BYTES, default 2 GiB) and
+#                                  answers 413 itself, which the agent reports.
+#   proxy-request-buffering off  — stream uploads straight through instead of
+#                                  spooling each one to nginx's disk first.
+#   proxy-buffering off          — likewise for delivery bodies going out.
+#   proxy-read/send-timeout 300  — the work poll is held up to 25 s, and large
+#                                  bodies take longer than the 60 s default.
+#
+# Every request is authenticated by the gateway (a per-agent credential, or a
+# one-time registration token for /agent/v1/register); nothing here is open.
+#
+# TLS: no `tls:` block, for the same reason as webhooks-ingress.yaml — the
+# `vrsky` Ingress in vrsky-ui owns the certificate for both hosts, and a second
+# declaration would issue a duplicate one.
+#
+# Not applied by deploy-core-azure.sh (which only sets images). Apply by hand:
+#   kubectl apply -f infrastructure/kubernetes/ingress/agent-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vrsky-agent
+  namespace: vrsky-platform
+  labels:
+    app: vrsky
+    component: remote-agent
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: vrsky.valueretail.no
+      http:
+        paths:
+          - path: /agent
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-remote-agent
+                port:
+                  number: 9330
+    - host: 20.251.107.2.sslip.io
+      http:
+        paths:
+          - path: /agent
+            pathType: Prefix
+            backend:
+              service:
+                name: vrsky-remote-agent
+                port:
+                  number: 9330
