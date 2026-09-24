@@ -932,6 +932,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// an auth and tenant check in front of them. See worker_events_proxy.go.
 	mux.Handle("GET /api/v1/connections/{id}/workers/{worker}/events", viewer(http.HandlerFunc(h.ProxyWorkerEvents)))
 
+	// The builder's file manager and upload panel. Same reason as the streams
+	// above: the workers serve these unauthenticated, with no tenant check of
+	// their own, and their ports are not reachable from a browser. Delete is
+	// editor rather than admin — it removes produced output a pipeline can
+	// regenerate, not a pipeline. Upload is editor because it pushes real data
+	// through one, matching test-message. See files_proxy.go.
+	mux.Handle("GET /api/v1/connections/{id}/files", viewer(http.HandlerFunc(h.ProxyListFiles)))
+	mux.Handle("DELETE /api/v1/connections/{id}/files", editor(http.HandlerFunc(h.ProxyDeleteFile)))
+	mux.Handle("POST /api/v1/connections/{id}/files/upload", editor(http.HandlerFunc(h.ProxyUploadFile)))
+
 	// Schema discovery for the mapping UI. Editor rather than viewer: it makes
 	// the platform open an outbound connection to a customer system using
 	// config supplied in the request. See schema_discovery_proxy.go.

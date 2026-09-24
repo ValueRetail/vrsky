@@ -45,6 +45,9 @@ type fileConsumer struct {
 	baseDir  string // FILE_CONSUMER_BASE_DIR; default watch root when a node has no path
 	hostHome string // HOST_HOME; used to expand a leading ~ in node paths
 
+	uploadToken  string // FILE_CONSUMER_AUTH_TOKEN; empty leaves /upload open (compose default)
+	uploadOrigin string // FILE_CONSUMER_ALLOWED_ORIGIN; the only origin given CORS access
+
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
 
@@ -155,6 +158,19 @@ func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.eventSubs = make(map[string][]chan FileEvent)
 	s.baseDir = getEnv("FILE_CONSUMER_BASE_DIR", "/data/input")
 	s.hostHome = os.Getenv("HOST_HOME")
+
+	// /upload publishes caller-supplied bytes into a running pipeline, so an
+	// open one is an injection primitive: it took any connection ID that
+	// happened to be active, with no authentication and Access-Control-Allow-
+	// Origin: *. The tenant check lives in the management API's proxy, which
+	// knows the caller's session; this token is what stops anything else on
+	// the cluster network from reaching past it. The port MUST NOT be exposed
+	// through an ingress.
+	s.uploadOrigin = getEnv("FILE_CONSUMER_ALLOWED_ORIGIN", "http://localhost:5173")
+	s.uploadToken = os.Getenv("FILE_CONSUMER_AUTH_TOKEN")
+	if s.uploadToken == "" {
+		s.logger.Warn("FILE_CONSUMER_AUTH_TOKEN is not set: /upload accepts any caller that can reach this port")
+	}
 
 	s.RegisterHTTPHandler("/upload/", s.handleUpload())
 	s.RegisterHTTPHandler("/events/", s.handleEvents())

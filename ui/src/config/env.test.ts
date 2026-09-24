@@ -69,11 +69,13 @@ describe('defaults', () => {
     expect(config.apiUrl).toBe('')
   })
 
-  it('fileProducerToken tolerates an empty value', async () => {
-    // Read directly rather than through getEnv, because "" is valid here and
-    // getEnv would reject it.
-    const { config } = await loadConfig({ VITE_FILE_PRODUCER_TOKEN: '' })
-    expect(config.fileProducerToken).toBe('')
+  it('exposes no worker URLs: file endpoints are proxied by the API', async () => {
+    // The worker aux ports have no tenant check of their own, so the browser
+    // must not be able to address one. Guards against a VITE_FILE_*_URL
+    // creeping back in the next time a panel needs a worker.
+    const { config } = await loadConfig({})
+    const keys = Object.keys(config)
+    expect(keys.filter((k) => /^file(Producer|Consumer)/.test(k))).toEqual([])
   })
 
   it('applies the documented defaults when nothing is set', async () => {

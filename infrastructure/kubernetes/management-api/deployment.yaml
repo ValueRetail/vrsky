@@ -104,6 +104,20 @@ spec:
         # on the allowlist in that file are ever substituted in.
         - name: WORKER_ADDR_TEMPLATE
           value: "http://vrsky-%s.vrsky-platform.svc.cluster.local:%d"
+        # Presented to the file-producer's /files and the file-consumer's
+        # /upload, which this API proxies (files_proxy.go). Those endpoints
+        # have no tenant check reachable without a connection id, so this API
+        # is the boundary and the token keeps anything else off them.
+        - name: FILE_PRODUCER_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: worker-file-api
+              key: producer_token
+        - name: FILE_CONSUMER_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: worker-file-api
+              key: consumer_token
         - name: MGMT_API_LISTEN
           value: ":3000"
         - name: MGMT_API_METRICS_LISTEN

@@ -45,7 +45,7 @@ File naming and serialization options are configured via the in-app pipeline edi
 
 ## Notes
 
-- **Uploads.** Source files arrive through the file-consumer ingress (locally port `9200`).
+- **Uploads.** The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.
 - **CSV columns.** For `format: "csv"`, the header row defines the column names (#81).
 - **Default path.** An empty `file.path` on the producer writes to the top of your workspace's own directory.
 - **Paths are confined to your workspace.** Both the source's watch directory and
@@ -60,6 +60,28 @@ File naming and serialization options are configured via the in-app pipeline edi
     across all workspaces. Before this, two workspaces writing a file with the
     same name overwrote each other, and a source pointed at the shared output
     root would ingest other workspaces' files.
+- **Browsing output.** The editor's **File Output** panel lists and deletes what
+  a pipeline produced. It goes through the management API
+  (`/api/v1/connections/{id}/files`), which checks the session owns the
+  connection; the file-producer then resolves the directory from that
+  connection's workspace. So the panel only ever shows your own files, and the
+  path you typed is understood as your workspace's copy of it — the same rule as
+  writing.
+
+    !!! danger "The worker ports must not be published"
+
+        `file-producer:9900` and `file-consumer:9200` serve `/files` and
+        `/upload`. Neither has a tenant check reachable without a connection ID,
+        and both treat an unset `FILE_PRODUCER_AUTH_TOKEN` /
+        `FILE_CONSUMER_AUTH_TOKEN` as "allow any caller". The management API's
+        proxy is the security boundary, and the tokens are what keep anything
+        else on the cluster network off them.
+
+        Giving either port an ingress — the obvious-looking fix when a panel
+        cannot reach a worker — puts a cross-workspace file browser, delete
+        endpoint and pipeline-injection endpoint on the internet. Route the new
+        verb through the management API instead, as `/files` and `/upload` are.
+
 - **No SSE panel.** The file-producer has no live SSE panel in the editor. To watch output, tail the worker logs:
 
     ```bash
