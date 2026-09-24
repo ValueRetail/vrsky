@@ -1,8 +1,10 @@
 package managementapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -192,4 +194,53 @@ func (h *Handler) RevokeAgent(w http.ResponseWriter, r *http.Request) {
 	SetAuditAction(ctx, "agent.revoke")
 	SetAuditDetail(ctx, "agent_id", agentID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkRemoteAgentNodes reports, for each remote_agent node, anything that
+// would stop the gateway from running it: an agent that is not one of this
+// workspace's live agents, or a folder it has not reported in the needed mode.
+// Returns nothing when the repository has no AgentStore (narrow test mocks).
+func (h *Handler) checkRemoteAgentNodes(ctx context.Context, tenantID string, nodes []*Node) []string {
+	store, ok := h.agentStore()
+	if !ok {
+		return nil
+	}
+	var problems []string
+	for _, n := range nodes {
+		var cfg struct {
+			Type        string `json:"type"`
+			RemoteAgent struct {
+				AgentID   string `json:"agent_id"`
+				Directory string `json:"directory"`
+			} `json:"remote_agent"`
+		}
+		if json.Unmarshal(n.Config, &cfg) != nil || cfg.Type != "remote_agent" {
+			continue
+		}
+		mode := "write"
+		if n.Type == "consumer" {
+			mode = "read"
+		}
+		agent, err := store.GetAgent(ctx, tenantID, strings.TrimSpace(cfg.RemoteAgent.AgentID))
+		if err != nil || agent.RevokedAt != nil {
+			problems = append(problems, fmt.Sprintf(
+				"node %s: the chosen remote agent is not registered in this workspace, or has been revoked", n.ID))
+			continue
+		}
+		found := false
+		for _, d := range agent.Directories {
+			if d.Name == cfg.RemoteAgent.Directory {
+				found = true
+				if d.Mode != mode {
+					problems = append(problems, fmt.Sprintf(
+						"node %s: folder %q on %s is %s-only", n.ID, d.Name, agent.Name, d.Mode))
+				}
+			}
+		}
+		if !found {
+			problems = append(problems, fmt.Sprintf(
+				"node %s: %s has no folder named %q", n.ID, agent.Name, cfg.RemoteAgent.Directory))
+		}
+	}
+	return problems
 }

@@ -540,6 +540,16 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		// Remote agent nodes name an agent by ID. Check here that it is one of
+		// this workspace's live agents with the chosen folder, so the user gets
+		// the reason immediately rather than a pipeline that goes to "error".
+		// The remote-agent gateway repeats this check and its copy is the one
+		// the tenant boundary rests on; this one is for the message.
+		if problems := h.checkRemoteAgentNodes(ctx, tenantID, conn.Nodes); len(problems) > 0 {
+			_ = writeError(w, http.StatusBadRequest, "NodeConfigError",
+				"pipeline is not fully configured", map[string]interface{}{"errors": problems})
+			return
+		}
 	}
 
 	// Pin the connection to a tenant NATS instance for discovery/placement (#19)

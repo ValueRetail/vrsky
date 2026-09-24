@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -326,5 +327,69 @@ func TestAgentRepo_NoRowsIsNotFound(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	if _, err := repo.RenameAgent(context.Background(), tenantB, "a1", "x"); err != ErrAgentNotFound {
 		t.Errorf("rename with no matching row: got %v, want ErrAgentNotFound", err)
+	}
+}
+
+// --- StartConnection's early remote-agent check ---
+
+func startWithAgentNode(t *testing.T, repo *agentRBACMock, tenantID, agentID, dir string) *httptest.ResponseRecorder {
+	t.Helper()
+	h := NewHandler(repo, NewValidator())
+	repo.connections["ra-conn"] = &Connection{
+		ID: "ra-conn", TenantID: tenantID, Name: "agent pipeline", Status: "stopped",
+		Nodes: []*Node{
+			{ID: "in", Type: "consumer", Config: json.RawMessage(`{"type":"http"}`)},
+			{ID: "out", Type: "producer", Config: json.RawMessage(
+				`{"type":"remote_agent","remote_agent":{"agent_id":"` + agentID + `","directory":"` + dir + `"}}`)},
+		},
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/connections/ra-conn/start", nil)
+	r = r.WithContext(ContextWithTenantID(context.Background(), tenantID))
+	r.SetPathValue("id", "ra-conn")
+	w := httptest.NewRecorder()
+	h.StartConnection(w, r)
+	return w
+}
+
+// A pipeline in tenant A naming tenant B's agent is refused at start, before
+// anything is deployed, with a reason the user can act on.
+func TestStartConnection_RejectsAgentFromAnotherTenant(t *testing.T) {
+	repo := newAgentRBACMock()
+	repo.agents["agent-B"] = &Agent{ID: "agent-B", TenantID: tenantB, Name: "B's PC",
+		Directories: []AgentDirectory{{Name: "out", Mode: "write"}}}
+
+	w := startWithAgentNode(t, repo, tenantA, "agent-B", "out")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not registered in this workspace") {
+		t.Fatalf("start naming another tenant's agent: %d %s", w.Code, w.Body.String())
+	}
+	if repo.connections["ra-conn"].Status == "running" {
+		t.Error("the connection was marked running")
+	}
+}
+
+func TestStartConnection_RejectsMissingFolderOrWrongMode(t *testing.T) {
+	repo := newAgentRBACMock()
+	repo.agents["agent-A"] = &Agent{ID: "agent-A", TenantID: tenantA, Name: "till",
+		Directories: []AgentDirectory{{Name: "inbox", Mode: "read"}}}
+
+	if w := startWithAgentNode(t, repo, tenantA, "agent-A", "inbox"); !strings.Contains(w.Body.String(), `read-only`) {
+		t.Errorf("writing into a read folder: %d %s", w.Code, w.Body.String())
+	}
+	if w := startWithAgentNode(t, repo, tenantA, "agent-A", "nope"); !strings.Contains(w.Body.String(), `no folder named`) {
+		t.Errorf("unknown folder: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The workspace's own agent with the right folder passes this check. (The
+// request may still fail later for reasons unrelated to agents — no
+// orchestrator in this test — so assert only that no agent problem is raised.)
+func TestStartConnection_AcceptsOwnAgent(t *testing.T) {
+	repo := newAgentRBACMock()
+	repo.agents["agent-A"] = &Agent{ID: "agent-A", TenantID: tenantA, Name: "till",
+		Directories: []AgentDirectory{{Name: "out", Mode: "write"}}}
+
+	w := startWithAgentNode(t, repo, tenantA, "agent-A", "out")
+	if strings.Contains(w.Body.String(), "remote agent") || strings.Contains(w.Body.String(), "folder") {
+		t.Fatalf("own agent refused: %d %s", w.Code, w.Body.String())
 	}
 }

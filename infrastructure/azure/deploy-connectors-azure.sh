@@ -94,6 +94,7 @@ kafka-consumer            consumer 9220
 rabbitmq-consumer         consumer 9230
 salesforce-consumer       consumer 9250
 tenant-consumer           consumer -
+remote-agent              consumer 9330
 http-producer             producer 9400
 db-producer               producer 9500
 file-producer             producer 9900

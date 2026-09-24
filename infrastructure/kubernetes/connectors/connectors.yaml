@@ -2199,6 +2199,104 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: vrsky-remote-agent
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-remote-agent
+    tier: connector
+    role: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vrsky-remote-agent
+  template:
+    metadata:
+      labels:
+        app: vrsky-remote-agent
+        tier: connector
+        role: consumer
+    spec:
+      containers:
+      - name: remote-agent
+        image: vrskyprodacr.azurecr.io/vrsky/remote-agent:latest
+        # Explicit, though Kubernetes would infer Always from the :latest tag.
+        # The inference is a rule people forget, and the whole deploy depends on
+        # it: with IfNotPresent a node that already holds some :latest keeps
+        # serving it, which is how a green rollout redeployed a stale UI bundle
+        # on 2026-09-07 (see deploy-core-azure.sh).
+        imagePullPolicy: Always
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: encryption_key
+        # Claim-check spill store (#187/#201): consumers offload >256KiB
+        # payloads; producers rehydrate/stream them. Prereq: minio-credentials
+        # secret copied into this namespace from vrsky-storage.
+        - name: PAYLOAD_STORE_PROVIDER
+          value: "s3"
+        - name: PAYLOAD_STORE_BUCKET
+          value: "vrsky-objects"
+        - name: PAYLOAD_STORE_ENDPOINT
+          value: "http://minio.vrsky-storage.svc.cluster.local:9000"
+        - name: PAYLOAD_STORE_REGION
+          value: "us-east-1"
+        - name: PAYLOAD_STORE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: accesskey
+        - name: PAYLOAD_STORE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secretkey
+        - name: WORKER_HTTP_PORT
+          value: "9330"
+        ports:
+        - name: http
+          containerPort: 9330
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            # 512Mi, NOT 128Mi: a producer that does not implement the ADR 0001
+            # streaming path buffers an offloaded payload up to the rehydrate
+            # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
+            # OOM-kills the pod before the cap can reject anything.
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-remote-agent
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-remote-agent
+spec:
+  selector:
+    app: vrsky-remote-agent
+  ports:
+  - name: http
+    port: 9330
+    targetPort: 9330
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: vrsky-http-producer
   namespace: vrsky-platform
   labels:

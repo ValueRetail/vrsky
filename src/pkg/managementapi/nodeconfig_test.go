@@ -399,6 +399,39 @@ func TestWebhookIngressTargetsRealServices(t *testing.T) {
 	}
 }
 
+// TestAgentIngressTargetsRealServices is the webhook guard for the remote-agent
+// Ingress: its backend must be a Service the connector deploy creates, on the
+// port it listens on, or every agent gets a 503 at the edge. It also pins the
+// Ingress to /agent alone — the gateway's /events/ stream has no auth of its
+// own and must stay internal.
+func TestAgentIngressTargetsRealServices(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "infrastructure", "kubernetes")
+	ing, err := os.ReadFile(filepath.Join(root, "ingress", "agent-ingress.yaml"))
+	if err != nil {
+		t.Skipf("agent ingress not available (%v) — guard skipped", err)
+	}
+	svc, err := os.ReadFile(filepath.Join(root, "connectors", "connectors.yaml"))
+	if err != nil {
+		t.Skipf("connector manifest not available (%v) — guard skipped", err)
+	}
+	backends := ingressBackends(string(ing))
+	if len(backends) != 1 {
+		t.Fatalf("agent ingress routes to %v; want exactly vrsky-remote-agent", backends)
+	}
+	services := connectorServicePorts(string(svc))
+	for name, port := range backends {
+		if got, ok := services[name]; !ok || got != port {
+			t.Errorf("agent ingress sends %q to port %s, but the deployed Service listens on %q", name, port, got)
+		}
+	}
+	paths := regexp.MustCompile(`path: (\S+)`).FindAllStringSubmatch(string(ing), -1)
+	for _, p := range paths {
+		if p[1] != "/agent" {
+			t.Errorf("agent ingress exposes path %q; only /agent may be public", p[1])
+		}
+	}
+}
+
 // ingressBackends maps backend service name → port for every path in the
 // webhook Ingress.
 func ingressBackends(src string) map[string]string {

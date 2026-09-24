@@ -46,6 +46,8 @@ lint: lint-tenant lint-connector lint-openapi ## Run all linters (golangci-lint 
 lint-tenant: ## Check that every tenant-scoped query filters by tenant_id (#74)
 	@echo "$(BLUE)Running tenant-filter lint...$(NC)"
 	@$(GO) run ./cmd/lint-tenant-filter
+	@# The remote-agent gateway queries agents and connections directly (#266).
+	@LINT_ROOT=cmd/remote-agent $(GO) run ./cmd/lint-tenant-filter
 
 lint-connector: ## Check that every SDK connector calls sdk.Run* and doesn't bypass the SDK (#98)
 	@echo "$(BLUE)Running connector lint...$(NC)"
