@@ -1071,6 +1071,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The File Output panel says "Load failed", or shows no files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#usage-page-shows-0-messages-right-after-a-test" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2312,6 +2323,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The File Output panel says "Load failed", or shows no files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#usage-page-shows-0-messages-right-after-a-test" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2427,6 +2449,29 @@ and the pod pulls from quay.io. If a compose or CI job hits the same error,
 </ol>
 <blockquote>
 <p><code>file-producer</code> has no live UI panel — tail <code>docker compose logs -f file-producer</code>.</p>
+</blockquote>
+<h2 id="the-file-output-panel-says-load-failed-or-shows-no-files">The File Output panel says "Load failed", or shows no files<a class="headerlink" href="#the-file-output-panel-says-load-failed-or-shows-no-files" title="Permanent link">&para;</a></h2>
+<p>The panel and the upload box go through the management API
+(<code>/api/v1/connections/{id}/files</code>). Before that they addressed the worker's own
+port from the browser, using a URL baked into the bundle at build time — which
+worked in compose and nowhere else, because those ports are not routable from a
+browser and <code>VITE_*</code> values never reach a static nginx bundle. If you see this
+on a deployment, check the UI image is current.</p>
+<p>If the panel loads but lists nothing while the pipeline reports writes, compare
+the two paths: output lands in <code>&lt;mount&gt;/&lt;workspace-id&gt;/&lt;your path&gt;</code>, so a
+listing of the bare mount root is a different directory. The panel adds the
+workspace segment for you; a <code>kubectl exec ... ls</code> does not.</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>logs<span class="w"> </span>deploy/vrsky-file-producer<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">"file written"</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>deploy/vrsky-file-producer<span class="w"> </span>--<span class="w"> </span>ls<span class="w"> </span>-R<span class="w"> </span>/data/output/&lt;workspace-id&gt;
+</code></pre></div>
+<p>A <code>dropping: output path is outside the workspace's own files</code> line means the
+configured directory is outside the mounted volume entirely — fix the path on
+the node rather than widening the mount.</p>
+<blockquote>
+<p>Do <strong>not</strong> give <code>file-producer:9900</code> or <code>file-consumer:9200</code> an ingress to
+"fix" a panel that cannot reach a worker. Those endpoints have no tenant check
+of their own; publishing them exposes every workspace's files. See
+<a href="../../connectors/file/">Files</a>.</p>
 </blockquote>
 <h2 id="usage-page-shows-0-messages-right-after-a-test">Usage page shows 0 messages right after a test<a class="headerlink" href="#usage-page-shows-0-messages-right-after-a-test" title="Permanent link">&para;</a></h2>
 <p>The usage rollup reads Prometheus <code>increase()</code> and runs hourly; a quick burst

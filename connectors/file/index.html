@@ -2286,7 +2286,7 @@
 </code></pre></div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Uploads.</strong> Source files arrive through the file-consumer ingress (locally port <code>9200</code>).</li>
+<li><strong>Uploads.</strong> The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.</li>
 <li><strong>CSV columns.</strong> For <code>format: "csv"</code>, the header row defines the column names (#81).</li>
 <li><strong>Default path.</strong> An empty <code>file.path</code> on the producer writes to the top of your workspace's own directory.</li>
 <li>
@@ -2301,7 +2301,29 @@
 across all workspaces. Before this, two workspaces writing a file with the
 same name overwrote each other, and a source pointed at the shared output
 root would ingest other workspaces' files.
-- <strong>No SSE panel.</strong> The file-producer has no live SSE panel in the editor. To watch output, tail the worker logs:</p>
+- <strong>Browsing output.</strong> The editor's <strong>File Output</strong> panel lists and deletes what
+  a pipeline produced. It goes through the management API
+  (<code>/api/v1/connections/{id}/files</code>), which checks the session owns the
+  connection; the file-producer then resolves the directory from that
+  connection's workspace. So the panel only ever shows your own files, and the
+  path you typed is understood as your workspace's copy of it — the same rule as
+  writing.</p>
+<div class="admonition danger">
+<p class="admonition-title">The worker ports must not be published</p>
+<p><code>file-producer:9900</code> and <code>file-consumer:9200</code> serve <code>/files</code> and
+<code>/upload</code>. Neither has a tenant check reachable without a connection ID,
+and both treat an unset <code>FILE_PRODUCER_AUTH_TOKEN</code> /
+<code>FILE_CONSUMER_AUTH_TOKEN</code> as "allow any caller". The management API's
+proxy is the security boundary, and the tokens are what keep anything
+else on the cluster network off them.</p>
+<p>Giving either port an ingress — the obvious-looking fix when a panel
+cannot reach a worker — puts a cross-workspace file browser, delete
+endpoint and pipeline-injection endpoint on the internet. Route the new
+verb through the management API instead, as <code>/files</code> and <code>/upload</code> are.</p>
+</div>
+</li>
+<li>
+<p><strong>No SSE panel.</strong> The file-producer has no live SSE panel in the editor. To watch output, tail the worker logs:</p>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>file-producer
 </code></pre></div>
 </li>
