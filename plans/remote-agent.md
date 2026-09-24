@@ -7,8 +7,11 @@ in below: **HTTPS to a gateway service** (not NATS-over-WebSocket) and
 **JetStream per-connection durables** for offline delivery (not a Postgres
 outbox).
 
-Deferred, decide during PR3: Linux packaging beyond a systemd unit; whether
-`register` should also `install` in one step.
+Decided during PR3: `register` and `install` stay separate steps (so an agent
+can be tried in a console first); Linux gets a systemd unit only. What happens
+to a file after upload (`move` | `delete`) is chosen on the pipeline node only,
+not also in the agent config — one place, no disagreement; when several
+pipelines watch one folder, the file is deleted only if every one asked for it.
 
 ## Context
 
@@ -336,7 +339,7 @@ polling (no fsnotify). Log rotation by size in stdlib.
   "poll_interval_seconds": 5,
   "log": { "file": "C:\\ProgramData\\VRSky\\agent\\logs\\agent.log", "max_size_mb": 20, "max_files": 5 },
   "directories": {
-    "superpos-out": { "path": "D:\\SuperPOS\\export", "mode": "read",  "after": "move" },
+    "superpos-out": { "path": "D:\\SuperPOS\\export", "mode": "read" },
     "superpos-in":  { "path": "D:\\SuperPOS\\import", "mode": "write" }
   }
 }

@@ -30,6 +30,15 @@ build: ## Build every command to ./bin
 	@$(GO) build -o $(BIN_DIR)/ ./cmd/...
 	@echo "$(GREEN)✓ Binaries built into $(BIN_DIR)$(NC)"
 
+AGENT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+AGENT_LDFLAGS = -s -w -X github.com/ValueRetail/vrsky/pkg/agent.Version=$(AGENT_VERSION)
+
+build-agent: ## Cross-compile the remote agent (#266) for Windows, Linux and macOS into ./bin
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/vrsky-agent-windows-amd64.exe ./cmd/vrsky-agent
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/vrsky-agent-linux-amd64 ./cmd/vrsky-agent
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 $(GO) build -trimpath -ldflags "$(AGENT_LDFLAGS)" -o bin/vrsky-agent-darwin-arm64 ./cmd/vrsky-agent
+
 test: ## Run Go tests
 	@echo "$(BLUE)Running tests...$(NC)"
 	@$(GO) test -v ./...
