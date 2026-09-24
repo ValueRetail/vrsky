@@ -47,6 +47,7 @@ var workerEventSources = map[string]workerEventSource{
 	"db-producer":    {"db-producer", 9500},
 	"data-converter": {"data-converter", 9600},
 	"data-filter":    {"data-filter", 9700},
+	"remote-agent":   {"remote-agent", 9330},
 }
 
 // workerAddrTemplateEnv names the printf template used to reach a worker,
