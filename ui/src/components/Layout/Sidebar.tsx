@@ -136,6 +136,16 @@ export default function Sidebar() {
             Members
           </Link>
           <Link
+            to="/settings/agents"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/agents')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Remote agents
+          </Link>
+          <Link
             to="/settings/usage"
             className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
               isActive('/settings/usage')

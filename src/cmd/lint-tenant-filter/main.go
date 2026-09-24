@@ -54,6 +54,8 @@ var tenantScopedTables = []string{
 	"usage_daily",
 	"tenant_invites",
 	"nats_instances",
+	"agents",
+	"agent_registration_tokens",
 }
 
 // sqlStmt extracts the backtick-quoted SQL string that follows a
@@ -157,8 +159,13 @@ func checkFile(path string) ([]string, error) {
 		}
 
 		// Does the SQL filter by tenant_id? Accept WHERE tenant_id, AND
-		// tenant_id, JOIN ... ON ... .tenant_id forms.
-		if regexp.MustCompile(`(?i)tenant_id\s*=`).MatchString(stmt) {
+		// tenant_id, JOIN ... ON ... .tenant_id forms — and a type cast
+		// before the comparison, "tenant_id::text = $2", which is how a
+		// UUID column is compared against connections' legacy VARCHAR
+		// tenant_id. Without the cast form, every correctly scoped query of
+		// that shape was reported as unscoped, which trained people to
+		// ignore this lint.
+		if regexp.MustCompile(`(?i)tenant_id(?:::\w+)?\s*=`).MatchString(stmt) {
 			continue
 		}
 
