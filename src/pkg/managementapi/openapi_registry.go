@@ -37,6 +37,11 @@ var apiRoutes = []apiRoute{
 	{"POST /api/v1/connections/{id}/stop", "post", "/api/v1/connections/{id}/stop", "Connections", "Stop a connection", nil, tof(Connection{})},
 	{"POST /api/v1/connections/test", "post", "/api/v1/connections/test", "Connections", "Test a connector config without deploying", nil, nil},
 
+	// --- Produced files (proxied to the file workers; see files_proxy.go) ---
+	{"GET /api/v1/connections/{id}/files", "get", "/api/v1/connections/{id}/files", "Connections", "List the files a connection produced (path is resolved inside the workspace's own directory)", nil, nil},
+	{"DELETE /api/v1/connections/{id}/files", "delete", "/api/v1/connections/{id}/files", "Connections", "Delete a produced file or directory", nil, nil},
+	{"POST /api/v1/connections/{id}/files/upload", "post", "/api/v1/connections/{id}/files/upload", "Connections", "Upload a file into a running file-source connection (multipart/form-data, field \"file\")", nil, nil},
+
 	// --- Metrics & sample data ---
 	{"GET /api/v1/connections/{id}/metrics", "get", "/api/v1/connections/{id}/metrics", "Metrics", "Point-in-time pipeline metrics for a connection (from Prometheus)", nil, nil},
 	{"GET /api/v1/connections/{id}/metrics/stream", "get", "/api/v1/connections/{id}/metrics/stream", "Metrics", "Server-sent stream of live pipeline metrics", nil, nil},
