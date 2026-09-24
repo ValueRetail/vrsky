@@ -213,3 +213,52 @@ jobs:
       - name: Lint tenant filters
         working-directory: src
         run: make lint-tenant
+
+  # The remote agent (#266) runs on customer Windows machines. The Windows-only
+  # code — the credential's ACL, atomic rename over a locked file, the service
+  # install/start/stop, the Event Log — cannot be exercised on Linux, so it is
+  # tested here on a real Windows runner. VRSKY_AGENT_SERVICE_TEST enables the
+  # test that installs and starts a real service; the runner is disposable.
+  agent-windows:
+    name: Remote agent on Windows
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: src/go.sum
+      - name: Test the agent (including a real service install)
+        working-directory: src
+        env:
+          VRSKY_AGENT_SERVICE_TEST: "1"
+        run: go test -count=1 -v ./pkg/agent/... ./pkg/agentproto/... ./cmd/vrsky-agent/...
+
+  # Downloadable agent binaries for every push and PR (Actions → the run →
+  # Artifacts). Releases attaching them to tags are a follow-up.
+  agent-binaries:
+    name: Build remote agent binaries
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # git describe for the version string
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: src/go.sum
+      - name: Build
+        working-directory: src
+        run: make build-agent
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrsky-agent
+          path: src/bin/vrsky-agent-*
+          if-no-files-found: error

@@ -33,6 +33,11 @@ Docker. What follows is the short list of places where that is not quite true.
     also closer to the real shape — VRSky is a platform reached over a
     network, not something installed beside a till.
 
+    If what you need on the Windows machine is its **folders** — a till that
+    writes sales files, a system that picks up orders — you do not need VRSky
+    on it at all. Install the [remote agent](remote-agent.md) there instead: one
+    `.exe`, no Docker or virtualisation, outbound HTTPS only.
+
 !!! note "This has not been run on Windows yet"
 
     Every step below is derived from the compose stack and the two portability

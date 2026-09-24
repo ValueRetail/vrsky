@@ -55,6 +55,7 @@ nav:
   - Operator guide:
       - Install: operator/install.md
       - Running on Windows: operator/windows.md
+      - Remote agent: operator/remote-agent.md
       - Reaching a stack remotely: operator/remote-access.md
       - Upgrade: operator/upgrade.md
       - Backup & restore: operator/backup.md
