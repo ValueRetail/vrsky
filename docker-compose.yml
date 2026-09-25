@@ -1116,7 +1116,7 @@ services:
   # In-network S3 API at http://minio-test:9000 (minioadmin/minioadmin); web
   # console on 9001. Set the node's endpoint to http://minio-test:9000.
   minio-test:
-    image: quay.io/minio/minio:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: vrsky-minio-test
     command: server /data --console-address ":9001"
     environment:
@@ -1133,7 +1133,7 @@ services:
 
   # One-shot: wait for MinIO, then create the test bucket "vrsky-bucket".
   minio-init:
-    image: quay.io/minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     container_name: vrsky-minio-init
     depends_on:
       - minio-test

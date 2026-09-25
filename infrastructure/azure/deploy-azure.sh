@@ -9,6 +9,7 @@
 #   3. wire an `acr-pull` imagePullSecret onto the vrsky-platform namespace so
 #      every pod — incl. orchestrator-spawned workers — can pull from ACR
 #   4. point the orchestrator at ACR for per-connection worker images
+#   5. run MinIO from its ACR copy (minio-images-acr.sh), not Docker Hub
 #
 # FIRST bring-up = Path A: in-cluster Postgres/MinIO + the committed
 # secret.example.yaml DEV credentials. Ingress is skipped, so nothing is
@@ -36,7 +37,8 @@ ACR_PASS="$(az acr credential show -n "$REG" --query 'passwords[0].value' -o tsv
 
 # --- 2. namespace + acr-pull secret + default-SA patch ----------------------
 # vrsky-platform holds filter, management-api, and the orchestrator's workers.
-# (Postgres/MinIO/NATS use public upstream images, so they need no pull secret.)
+# (Postgres/NATS use public upstream images, so they need no pull secret.
+# MinIO does not: see 2b.)
 kubectl create namespace vrsky-platform --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret docker-registry acr-pull \
   --docker-server="$ACR_LOGIN" --docker-username="$ACR_USER" --docker-password="$ACR_PASS" \
@@ -44,16 +46,29 @@ kubectl create secret docker-registry acr-pull \
 kubectl patch serviceaccount default -n vrsky-platform \
   -p '{"imagePullSecrets":[{"name":"acr-pull"}]}'
 
+# --- 2b. MinIO from ACR -------------------------------------------------------
+# MinIO's upstream images were deleted (Docker Hub 2026-09-11, quay.io
+# 2026-09-24). The manifests name the pinned pgsty fork; prod runs an ACR copy
+# of it, imported here, so a vanished upstream cannot block a pod start.
+infrastructure/azure/minio-images-acr.sh
+kubectl create namespace vrsky-storage --dry-run=client -o yaml | kubectl apply -f -
+kubectl create secret docker-registry acr-pull \
+  --docker-server="$ACR_LOGIN" --docker-username="$ACR_USER" --docker-password="$ACR_PASS" \
+  -n vrsky-storage --dry-run=client -o yaml | kubectl apply -f -
+kubectl patch serviceaccount default -n vrsky-storage \
+  -p '{"imagePullSecrets":[{"name":"acr-pull"}]}'
+
 # --- 3. image + storage-class rewrite on a throwaway copy of the manifests ---
 WORK="$(mktemp -d)/kubernetes"
 mkdir -p "$WORK"
 cp -R infrastructure/kubernetes/. "$WORK/"
 # perl -pi (not BSD `sed -i`, which mis-parses multi-file in-place edits on macOS)
-grep -rlE 'ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/|storageClassName:[[:space:]]*local-path' \
+grep -rlE 'ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/|pgsty/(minio|mc):|storageClassName:[[:space:]]*local-path' \
      "$WORK" --include='*.yaml' | while IFS= read -r f; do
   perl -pi -e '
     s{(?:ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/)}{'"$IMAGE_REGISTRY"'/}g;
     s{(storageClassName:\s*)local-path}{${1}'"$STORAGE_CLASS"'}g;
+    s{\bpgsty/(minio|mc):}{'"$ACR_LOGIN"'/minio/$1:}g;
   ' "$f"
 done
 

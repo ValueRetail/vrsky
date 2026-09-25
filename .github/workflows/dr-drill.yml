@@ -81,18 +81,19 @@ jobs:
           cd src && go build -o /usr/local/bin/vrsky-cli ./cmd/vrsky-cli
 
       - name: Start MinIO + create bucket
-        # The official minio image needs the `server` command, which GitHub
-        # service containers can't supply — so run it as a step. (Bitnami's
-        # auto-starting image dropped its `latest` tag.)
+        # The minio image needs the `server` command, which GitHub service
+        # containers can't supply — so run it as a step. pgsty/* is the pinned
+        # community fork; MinIO's own images were deleted (docs/operator/
+        # troubleshooting.md).
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; break; fi
             echo "waiting for minio… [$i/30]"; sleep 2
           done
-          docker run --rm --network host --entrypoint sh quay.io/minio/mc:latest -c \
+          docker run --rm --network host --entrypoint sh pgsty/mc:RELEASE.2026-09-16T00-00-00Z -c \
             "until mc alias set local http://localhost:9000 minioadmin minioadmin; do sleep 1; done; mc mb -p local/dr-drill"
 
       - name: Seed the source database
