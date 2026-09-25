@@ -93,7 +93,7 @@ spec:
               app: minio
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
           args:
             - server
             - http://minio-{0...3}.minio-headless.vrsky-storage.svc.cluster.local/data

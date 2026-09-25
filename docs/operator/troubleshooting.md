@@ -32,21 +32,33 @@ because nothing crashed.
 
 ## MinIO or KES stuck in `ImagePullBackOff` after a cluster start
 
-Docker Hub stopped serving the `minio/minio`, `minio/mc` and `minio/kes`
-repositories in September 2026 (`pull access denied … repository does not
-exist`). The manifests now pull the same tags from `quay.io/minio/*`. A node
-that still has the old image cached keeps running; one that has to re-pull —
-typically after `az aks start` lands a pod on a fresh node — cannot. Check
-with:
+MinIO's own images are gone. Docker Hub deleted `minio/minio`, `minio/mc` and
+`minio/kes` on 2026-09-11 (`pull access denied … repository does not exist`),
+and on 2026-09-24 `quay.io/minio/minio` and `quay.io/minio/mc` started
+returning `401 UNAUTHORIZED` for every tag. A node that still has an old image
+cached keeps running; one that has to re-pull cannot. On AKS that is every
+node after `az aks start`: the pool uses ephemeral OS disks, so nothing stays
+cached. Check with:
 
 ```bash
 kubectl -n vrsky-storage describe pod -l app=minio | grep -A3 "Failed to pull"
 ```
 
-Apply the current manifests
-(`infrastructure/kubernetes/minio/`, `infrastructure/kubernetes/encryption/`)
-and the pod pulls from quay.io. If a compose or CI job hits the same error,
-`docker-compose.yml` and the DR drill were moved in the same change.
+The manifests, `docker-compose.yml` and the DR drill now use the pinned
+community fork `pgsty/minio` and `pgsty/mc`. Prod runs a copy of those tags in
+ACR, so an upstream deletion cannot stop it starting:
+
+```bash
+infrastructure/azure/minio-images-acr.sh             # import into ACR (works while the cluster is stopped)
+infrastructure/azure/minio-images-acr.sh --repoint   # once the cluster is up: point MinIO at the ACR copy
+```
+
+`deploy-azure.sh` does both on a fresh bring-up. To move to a newer release,
+bump the `pgsty/*` tags in `infrastructure/kubernetes/minio/` and run the
+script again.
+
+KES (`quay.io/minio/kes`, `infrastructure/kubernetes/encryption/`) still pulls
+from quay.io; if it starts failing the same way, it needs the same treatment.
 
 ## A pipeline deploys but no data flows
 

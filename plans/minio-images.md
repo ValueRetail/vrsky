@@ -1,12 +1,9 @@
 # MinIO images gone from quay.io — replacement plan
 
-## Open questions
+## Decisions (2026-09-25)
 
-1. **Where does prod pull from?**
-   - (a) Straight from Docker Hub `pgsty/*`: simplest.
-   - (b) A copy imported into `vrskyprodacr`: survives the next upstream deletion. Needs a pull secret or ACR attach for `vrsky-storage`, which is not verified.
-   - Recommendation: **(b)**.
-2. **Which PR?** A separate PR from `main`, not #273 (one PR per chunk). #273's uncommitted watcher-test fix stays on its own branch.
+1. **Prod pulls the ACR copy** in `vrskyprodacr` (`minio/minio`, `minio/mc`), not Docker Hub.
+2. **Own PR from `main`.**
 
 ## What happened (verified 2026-09-24)
 
@@ -60,15 +57,16 @@
 
 ## Prod steps (you run these)
 
+The steps became a script, `infrastructure/azure/minio-images-acr.sh`, so a later redeploy can't slip back to Docker Hub. It reads the tags from the manifests.
+
 ```bash
-# 1. Copy into ACR (works while the cluster is stopped)
-az acr import -n vrskyprodacr --source docker.io/pgsty/minio:RELEASE.2026-08-04T00-00-00Z --image minio/minio:RELEASE.2026-08-04T00-00-00Z
-az acr import -n vrskyprodacr --source docker.io/pgsty/mc:RELEASE.2026-09-16T00-00-00Z --image minio/mc:RELEASE.2026-09-16T00-00-00Z
-# 2. Start the cluster, then repoint (plus a pull secret in vrsky-storage if ACR isn't attached)
-kubectl -n vrsky-storage set image deploy/minio minio=vrskyprodacr.azurecr.io/minio/minio:RELEASE.2026-08-04T00-00-00Z
+infrastructure/azure/minio-images-acr.sh             # 1. import both tags into ACR (works while the cluster is stopped)
+az aks start -g <rg> -n vrsky-prod                   # 2. start the cluster
+infrastructure/azure/minio-images-acr.sh --repoint   # 3. acr-pull secret in vrsky-storage + set image + rollout
 ```
 
-- Before step 2, I'll check how `vrsky-storage` authenticates to ACR: is ACR attached to AKS, or is there an `acr-pull` secret? If neither, add a secret plus `imagePullSecrets`.
+- `vrsky-storage` had no ACR credentials, because MinIO used public images. `--repoint` adds the same `acr-pull` secret as `vrsky-platform` and patches the default service account.
+- `deploy-azure.sh` now runs the import, adds that secret, and rewrites `pgsty/(minio|mc):` to the ACR copy on its throwaway manifest copy.
 
 ## Risks
 
