@@ -33,6 +33,7 @@ export type EventWorker =
   | 'db-producer'
   | 'data-converter'
   | 'data-filter'
+  | 'remote-agent'
 
 /** A stream ending is routine, so the first reconnect is nearly immediate;
  *  repeated failures back off so a dead far end is not hammered. */

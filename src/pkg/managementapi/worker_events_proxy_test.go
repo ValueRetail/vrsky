@@ -103,6 +103,49 @@ func TestProxyWorkerEvents_StreamsForOwnedConnection(t *testing.T) {
 	}
 }
 
+// TestProxyWorkerEvents_RemoteAgentAllowlisted: the builder's Remote Agent tab
+// streams from the remote-agent gateway on its port 9330 (#266). The address
+// template is pointed at a test server with the service and port in the path,
+// so the request that arrives shows exactly which service and port the
+// allowlist entry resolves to.
+func TestProxyWorkerEvents_RemoteAgentAllowlisted(t *testing.T) {
+	const (
+		tenant = "tenant-a"
+		connID = "22222222-2222-2222-2222-222222222222"
+	)
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"delivered\",\"filename\":\"orders.csv\"}\n\n"))
+	}))
+	defer upstream.Close()
+	t.Setenv(workerAddrTemplateEnv, upstream.URL+"/%s/%d")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT id::text FROM connections").
+		WithArgs(connID, tenant).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(connID))
+
+	h := &Handler{db: db}
+	rec := httptest.NewRecorder()
+	h.ProxyWorkerEvents(rec, newProxyRequest(t, tenant, connID, "remote-agent"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if want := "/remote-agent/9330/events/" + connID; gotPath != want {
+		t.Errorf("upstream path = %q, want %q", gotPath, want)
+	}
+	if !strings.Contains(rec.Body.String(), `"filename":"orders.csv"`) {
+		t.Errorf("gateway frames did not reach the client, got: %q", rec.Body.String())
+	}
+}
+
 // TestProxyWorkerEvents_RefusesForeignConnection is the security case.
 //
 // The worker endpoints have no auth and no tenant check of their own, so this

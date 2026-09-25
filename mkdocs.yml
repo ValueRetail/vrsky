@@ -83,6 +83,7 @@ nav:
       - Visma.net: connectors/visma.md
       - SAP S/4HANA: connectors/sap-s4hana.md
       - Brightpearl (OMS): connectors/brightpearl.md
+      - Remote Agent: connectors/remote-agent.md
       - Tenant-to-tenant: connectors/tenant.md
       - Filters & converters: connectors/filters-converters.md
   - Security:

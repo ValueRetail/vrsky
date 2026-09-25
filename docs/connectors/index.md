@@ -21,6 +21,7 @@ set by `config.type` on the node. Sources are **consumers**, destinations are
 | [Visma.net](visma.md) | ✓ | ✓ | `visma` |
 | [SAP S/4HANA](sap-s4hana.md) | ✓ | ✓ | `sap_s4hana` |
 | [Brightpearl (OMS)](brightpearl.md) | ✓ (poll + webhook) | ✓ | `brightpearl` |
+| [Remote Agent](remote-agent.md) | ✓ | ✓ | `remote_agent` |
 | [Tenant-to-tenant](tenant.md) | ✓ | — | `tenant` |
 | [Filters & converters](filters-converters.md) | — | — | `filter` / `converter` |
 

@@ -20,6 +20,8 @@ import TenantSelector from '../components/Tenants/TenantSelector'
 import { getNodeLabel, renumberNodesAfterDeletion } from '../utils/nodeNumbering'
 import { config } from '../config/env'
 import { subscribeWorkerEvents, type EventWorker } from '../services/workerEvents'
+import RemoteAgentPanel from '../components/Pipeline/RemoteAgentPanel'
+import { remoteAgentDetail, remoteAgentEnds, type RemoteAgentEnd } from '../components/Pipeline/remoteAgentEnds'
 import { validatePipelineConnections, type ValidationResult } from '../utils/validation'
 import { useNodeDrag } from '../hooks/useNodeDrag'
 import { useConnectionDrawing } from '../hooks/useConnectionDrawing'
@@ -105,6 +107,7 @@ export default function PipelineBuilder() {
   const [fileManagerPanel, setFileManagerPanel] = useState<{ basePath: string; currentPath: string; connectionId: string } | null>(null)
   const [fileManagerFiles, setFileManagerFiles] = useState<Array<{ name: string; path: string; isDir: boolean; size: number; modTime: string }>>([])
   const [fileManagerLoading, setFileManagerLoading] = useState(false)
+  const [remoteAgentPanel, setRemoteAgentPanel] = useState<{ connectionId: string; ends: RemoteAgentEnd[] } | null>(null)
   // Which bottom-panel tab is selected. Empty until the user picks one, in
   // which case the render falls back to the last available tab. Kept in state
   // (not derived from the DOM) so re-renders don't reset the user's choice.
@@ -584,12 +587,14 @@ export default function PipelineBuilder() {
       let producerDetail = ''
       if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as any)?.path || ''
       if (consumerType === 'http') consumerDetail = `${config.webhookIngressUrl}/webhook/${connectionId}`
+      if (consumerType === 'remote_agent') consumerDetail = remoteAgentDetail(consumerNode?.data?.config)
       if (consumerType === 'database') {
         const dc = (consumerNode?.data?.config?.database as any) || {}
         consumerDetail = `${dc.host || ''}:${dc.port || 5432}/${dc.database || ''} → ${dc.table || dc.query || ''}`
       }
       if (producerType === 'file') producerDetail = (producerNode?.data?.config?.file as any)?.path || ''
       if (producerType === 'http') producerDetail = (producerNode?.data?.config?.http as any)?.url || ''
+      if (producerType === 'remote_agent') producerDetail = remoteAgentDetail(producerNode?.data?.config)
       if (producerType === 'database') {
         const dp = (producerNode?.data?.config?.database as any) || {}
         producerDetail = `${dp.host || ''}:${dp.port || 5432}/${dp.database || ''} → ${dp.table || ''}`
@@ -674,6 +679,15 @@ export default function PipelineBuilder() {
         setActiveBottomTab('filemanager')
       } else {
         setFileManagerPanel(null)
+      }
+
+      // Show the remote agent panel if either end is a remote agent
+      const agentEnds = remoteAgentEnds(consumerNode?.data?.config, producerNode?.data?.config || payloadProducer?.config)
+      if (agentEnds.length > 0) {
+        setRemoteAgentPanel({ connectionId, ends: agentEnds })
+        setActiveBottomTab('agent')
+      } else {
+        setRemoteAgentPanel(null)
       }
 
       // Keep canvas visible - just close property editor and reset deploy state
@@ -1252,6 +1266,7 @@ export default function PipelineBuilder() {
         if (httpProducerPanel) tabs.push({ id: 'http', label: 'HTTP Output', color: '#7c3aed' })
         if (dbProducerPanel) tabs.push({ id: 'dbout', label: 'Database Output', color: '#ea580c' })
         if (fileManagerPanel) tabs.push({ id: 'filemanager', label: 'File Output', color: '#059669' })
+        if (remoteAgentPanel) tabs.push({ id: 'agent', label: 'Remote Agent', color: '#0891b2' })
         // Failed Messages tab — only when the deployed pipeline actually has
         // DLQ entries. Hides cleanly during normal operation (#74 feedback).
         if (activeCanvas?.deployedConnectionId && dlqCount > 0) {
@@ -1299,7 +1314,7 @@ export default function PipelineBuilder() {
               ))}
               <div style={{ flex: 1 }} />
               <button
-                onClick={() => { setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setFileManagerPanel(null); setDeploymentInfo(null) }}
+                onClick={() => { setFileUploadPanel(null); setHttpProducerPanel(null); setDbProducerPanel(null); setConverterPanel(null); setFilterPanel(null); setFileManagerPanel(null); setRemoteAgentPanel(null); setDeploymentInfo(null) }}
                 style={{ padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '16px' }}
               >×</button>
             </div>
@@ -1493,6 +1508,16 @@ export default function PipelineBuilder() {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* Remote agent tab */}
+              {remoteAgentPanel && (
+                <RemoteAgentPanel
+                  connectionId={remoteAgentPanel.connectionId}
+                  ends={remoteAgentPanel.ends}
+                  visible={activeId === 'agent'}
+                  onError={(message) => showErrorNotification('Remote agent events', message)}
+                />
               )}
 
               {/* File manager tab */}
