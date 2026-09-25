@@ -146,19 +146,32 @@ func TestWatcher_DoesNotReingestAfterRestart(t *testing.T) {
 	_ = os.WriteFile(f, []byte(`{"c":1}`), 0o644)
 	makeOld(t, f)
 
+	// The blocker is itself a file in the inbox, and the watcher may take it
+	// too once it is older than the scan interval (slow CI). Count only c.json.
+	uploadsOfC := func() int {
+		up, _, _ := g.snapshot()
+		n := 0
+		for _, u := range up {
+			if u.Filename == "c.json" {
+				n++
+			}
+		}
+		return n
+	}
+
 	w := newTestWatcher(t, g, c, map[string]string{"conn-1": agentproto.AfterMove})
 	w.scan(context.Background())
 	w.scan(context.Background())
-	if up, _, _ := g.snapshot(); len(up) != 1 {
-		t.Fatalf("setup: %d uploads", len(up))
+	if n := uploadsOfC(); n != 1 {
+		t.Fatalf("setup: %d uploads", n)
 	}
 
 	restarted := newTestWatcher(t, g, c, map[string]string{"conn-1": agentproto.AfterMove})
 	restarted.scan(context.Background())
 	restarted.scan(context.Background())
 	restarted.scan(context.Background())
-	if up, _, _ := g.snapshot(); len(up) != 1 {
-		t.Fatalf("after a restart the file was uploaded again: %d uploads", len(up))
+	if n := uploadsOfC(); n != 1 {
+		t.Fatalf("after a restart the file was uploaded again: %d uploads", n)
 	}
 
 	_ = os.Remove(filepath.Join(in, "processed")) // the obstacle clears
@@ -166,8 +179,8 @@ func TestWatcher_DoesNotReingestAfterRestart(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(in, "processed", "c.json")); err != nil {
 		t.Fatalf("the file was not cleared once possible: %v", err)
 	}
-	if up, _, _ := g.snapshot(); len(up) != 1 {
-		t.Fatalf("clearing it uploaded it again: %d uploads", len(up))
+	if n := uploadsOfC(); n != 1 {
+		t.Fatalf("clearing it uploaded it again: %d uploads", n)
 	}
 }
 
