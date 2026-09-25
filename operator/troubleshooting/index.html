@@ -2482,18 +2482,26 @@ vrsky-prod</code> and give it several minutes. See
 still resolves (it is static), nothing answers on it, and no alert fires
 because nothing crashed.</p>
 <h2 id="minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start">MinIO or KES stuck in <code>ImagePullBackOff</code> after a cluster start<a class="headerlink" href="#minio-or-kes-stuck-in-imagepullbackoff-after-a-cluster-start" title="Permanent link">&para;</a></h2>
-<p>Docker Hub stopped serving the <code>minio/minio</code>, <code>minio/mc</code> and <code>minio/kes</code>
-repositories in September 2026 (<code>pull access denied … repository does not
-exist</code>). The manifests now pull the same tags from <code>quay.io/minio/*</code>. A node
-that still has the old image cached keeps running; one that has to re-pull —
-typically after <code>az aks start</code> lands a pod on a fresh node — cannot. Check
-with:</p>
+<p>MinIO's own images are gone. Docker Hub deleted <code>minio/minio</code>, <code>minio/mc</code> and
+<code>minio/kes</code> on 2026-09-11 (<code>pull access denied … repository does not exist</code>),
+and on 2026-09-24 <code>quay.io/minio/minio</code> and <code>quay.io/minio/mc</code> started
+returning <code>401 UNAUTHORIZED</code> for every tag. A node that still has an old image
+cached keeps running; one that has to re-pull cannot. On AKS that is every
+node after <code>az aks start</code>: the pool uses ephemeral OS disks, so nothing stays
+cached. Check with:</p>
 <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-storage<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>minio<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A3<span class="w"> </span><span class="s2">"Failed to pull"</span>
 </code></pre></div>
-<p>Apply the current manifests
-(<code>infrastructure/kubernetes/minio/</code>, <code>infrastructure/kubernetes/encryption/</code>)
-and the pod pulls from quay.io. If a compose or CI job hits the same error,
-<code>docker-compose.yml</code> and the DR drill were moved in the same change.</p>
+<p>The manifests, <code>docker-compose.yml</code> and the DR drill now use the pinned
+community fork <code>pgsty/minio</code> and <code>pgsty/mc</code>. Prod runs a copy of those tags in
+ACR, so an upstream deletion cannot stop it starting:</p>
+<div class="highlight"><pre><span></span><code>infrastructure/azure/minio-images-acr.sh<span class="w">             </span><span class="c1"># import into ACR (works while the cluster is stopped)</span>
+infrastructure/azure/minio-images-acr.sh<span class="w"> </span>--repoint<span class="w">   </span><span class="c1"># once the cluster is up: point MinIO at the ACR copy</span>
+</code></pre></div>
+<p><code>deploy-azure.sh</code> does both on a fresh bring-up. To move to a newer release,
+bump the <code>pgsty/*</code> tags in <code>infrastructure/kubernetes/minio/</code> and run the
+script again.</p>
+<p>KES (<code>quay.io/minio/kes</code>, <code>infrastructure/kubernetes/encryption/</code>) still pulls
+from quay.io; if it starts failing the same way, it needs the same treatment.</p>
 <h2 id="a-pipeline-deploys-but-no-data-flows">A pipeline deploys but no data flows<a class="headerlink" href="#a-pipeline-deploys-but-no-data-flows" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Confirm it's <strong>running</strong> (Settings/Connections, or the connection status).</li>
