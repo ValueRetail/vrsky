@@ -60,6 +60,14 @@ export function subscribeWorkerEvents(
 ): () => void {
   const controller = new AbortController()
   let stopped = false
+  // One notification per outage, not one per retry: the same message is not
+  // repeated until events flow again or the message changes.
+  let lastError: string | undefined
+  const report = (message: string) => {
+    if (message === lastError) return
+    lastError = message
+    onError?.(message)
+  }
 
   const url =
     `${config.apiUrl}/api/v1/connections/${encodeURIComponent(connectionId)}` +
@@ -84,18 +92,21 @@ export function subscribeWorkerEvents(
       controller.signal.addEventListener('abort', done, { once: true })
     })
 
-  /** Read one connection to completion. Returns whether it is worth retrying:
-   *  a stream that simply ended is, a rejected request is not. */
-  const readStream = async (): Promise<boolean> => {
+  /** Read one connection to completion. `ended` is the routine case (a proxy
+   *  timeout, a pod restart) and reconnects at once; `failed` means the proxy
+   *  said the worker is unreachable, so the next attempt backs off; `refused`
+   *  is a rejected request, which is not retried. */
+  const readStream = async (): Promise<'ended' | 'failed' | 'refused'> => {
     const resp = await fetch(url, {
       headers,
       credentials: 'include',
       signal: controller.signal,
     })
     if (!resp.ok || !resp.body) {
-      onError?.(`Live events unavailable (${resp.status})`)
-      return false
+      report(`Live events unavailable (${resp.status})`)
+      return 'refused'
     }
+    let failed = false
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
@@ -125,18 +136,18 @@ export function subscribeWorkerEvents(
         try {
           const parsed = JSON.parse(data)
           if (frame.includes('event: error')) {
-            onError?.(
-              typeof parsed?.error === 'string' ? parsed.error : 'Live event stream ended',
-            )
+            failed = true
+            report(typeof parsed?.error === 'string' ? parsed.error : 'Live event stream ended')
             continue
           }
+          lastError = undefined
           onEvent(parsed)
         } catch {
           /* a frame we can't parse is not worth interrupting the stream for */
         }
       }
     }
-    return true
+    return failed ? 'failed' : 'ended'
   }
 
   ;(async () => {
@@ -147,12 +158,13 @@ export function subscribeWorkerEvents(
     // traffic: exactly the confusion this file exists to remove.
     for (let attempt = 0; !stopped; ) {
       try {
-        if (!(await readStream())) return
-        attempt = 0
+        const outcome = await readStream()
+        if (outcome === 'refused') return
+        attempt = outcome === 'failed' ? attempt + 1 : 0
       } catch (e) {
         // An aborted fetch is the caller unsubscribing, not a failure.
         if (controller.signal.aborted) return
-        onError?.(e instanceof Error ? e.message : 'Live event stream failed')
+        report(e instanceof Error ? e.message : 'Live event stream failed')
         attempt++
       }
       if (stopped) return

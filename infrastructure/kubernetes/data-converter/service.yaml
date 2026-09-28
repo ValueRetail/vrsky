@@ -1,0 +1,25 @@
+# Service for data-converter's auxiliary HTTP port: the live-event stream the
+# pipeline builder's panel reads through the management API's worker-events
+# proxy (pkg/managementapi/worker_events_proxy.go). Without it the proxy's
+# address vrsky-data-converter.vrsky-platform.svc.cluster.local resolved to nothing
+# and every panel said "cannot reach the data-converter service".
+#
+# HEADLESS on purpose (clusterIP: None): each replica keeps its own event hub,
+# so the name must resolve to every pod, not to one VIP that would show the
+# panel half the events. The proxy opens one stream per resolved address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vrsky-data-converter
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-data-converter
+    component: transform
+spec:
+  clusterIP: None
+  selector:
+    app: vrsky-data-converter
+  ports:
+    - name: http
+      port: 9600
+      targetPort: 9600

@@ -1,11 +1,15 @@
 package managementapi
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -121,36 +125,59 @@ func (h *Handler) ProxyWorkerEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream := fmt.Sprintf(workerAddrTemplate(), src.service, src.port) +
-		"/events/" + url.PathEscape(connID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
+	upstreams, err := workerUpstreams(ctx, src)
 	if err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "BadUpstream", err.Error(), nil)
 		return
 	}
-	req.Header.Set("Accept", "text/event-stream")
+	path := "/events/" + url.PathEscape(connID)
 
 	// No client timeout: an SSE stream is meant to stay open. The request
 	// context ends it when the browser disconnects or the server shuts down.
 	// http.DefaultClient would be wrong here for the opposite reason — it also
 	// has no timeout, but shares state with every other caller in the process.
-	resp, err := (&http.Client{}).Do(req)
-	if err != nil {
-		// The panel's own error handling is a silent retry, so say something
+	client := &http.Client{}
+	frames := make(chan string)
+	ended := make(chan error, len(upstreams))
+	opened := 0
+	badStatus := false
+	var lastErr error
+	for i, base := range upstreams {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		if err != nil {
+			_ = writeError(w, http.StatusInternalServerError, "BadUpstream", err.Error(), nil)
+			return
+		}
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("%s returned %d", worker, resp.StatusCode)
+			badStatus = true
+			continue
+		}
+		opened++
+		// Every replica greets with its own "connected" frame; the panel
+		// needs one.
+		go forwardFrames(ctx, resp.Body, i > 0, frames, ended)
+	}
+
+	if opened == 0 {
+		if badStatus {
+			_ = writeError(w, http.StatusBadGateway, "UpstreamError", lastErr.Error(), nil)
+			return
+		}
+		// The panel's own error handling is a retry, so say something
 		// useful in the stream itself rather than closing without explanation.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
 			"cannot reach the "+worker+" service")
 		flusher.Flush()
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		_ = writeError(w, http.StatusBadGateway, "UpstreamError",
-			fmt.Sprintf("%s returned %d", worker, resp.StatusCode), nil)
 		return
 	}
 
@@ -171,67 +198,116 @@ func (h *Handler) ProxyWorkerEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-
-	// Copy and flush per chunk. io.Copy alone would buffer, which for a stream
-	// whose entire purpose is liveness defeats the feature without failing.
-	// Reads happen in their own goroutine so an idle upstream does not stop
-	// the heartbeat.
-	type chunk struct {
-		data []byte
-		err  error
+	if opened < len(upstreams) {
+		// Partial: the panel will miss what the unreachable replicas handle.
+		fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
+			fmt.Sprintf("cannot reach %d of %d %s instances: %s",
+				len(upstreams)-opened, len(upstreams), worker, sanitizeStreamErr(lastErr)))
+		flusher.Flush()
 	}
-	chunks := make(chan chunk)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := resp.Body.Read(buf)
-			c := chunk{data: append([]byte(nil), buf[:n]...), err: err}
-			select {
-			case chunks <- c:
-			case <-ctx.Done():
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
 
+	// Whole frames only, from any replica, plus a heartbeat on an idle
+	// stream: every proxy in front of this API (the UI's nginx, ingress-nginx)
+	// closes an upstream that has been silent for 60 s, and a pipeline with
+	// no traffic is silent for much longer than that.
 	tick := time.NewTicker(sseHeartbeat)
 	defer tick.Stop()
-	// A heartbeat must not land inside a frame the upstream split across two
-	// reads, so it is only sent between frames.
-	betweenFrames := true
-	for {
+	for opened > 0 {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if !betweenFrames {
-				continue
-			}
 			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
-		case c := <-chunks:
-			if len(c.data) > 0 {
-				if _, writeErr := w.Write(c.data); writeErr != nil {
-					return // client went away
-				}
-				flusher.Flush()
-				betweenFrames = strings.HasSuffix(string(c.data), "\n\n")
+		case f := <-frames:
+			if _, err := io.WriteString(w, f); err != nil {
+				return // client went away
 			}
-			if c.err != nil {
-				if c.err != io.EOF {
-					// Upstream died mid-stream. EventSource will reconnect; this
-					// line is what makes the reason visible if anyone looks.
-					fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
-						"stream from "+worker+" ended: "+sanitizeStreamErr(c.err))
-					flusher.Flush()
-				}
+			flusher.Flush()
+		case err := <-ended:
+			opened--
+			if err != io.EOF {
+				// A replica died mid-stream. EventSource reconnects once all
+				// are gone; this line is what makes the reason visible.
+				fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
+					"stream from "+worker+" ended: "+sanitizeStreamErr(err))
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// workerUpstreams returns one base URL per instance of a worker.
+//
+// The transforms run two replicas, each with its own in-memory event hub, so
+// their Services are headless and the name resolves to every pod; the panel
+// must hear all of them or it shows half the traffic. A single-instance worker
+// or a compose container resolves to one address, and a ClusterIP Service to
+// its VIP — both are the one-upstream case. A var so tests can stand two
+// servers in for one worker.
+var workerUpstreams = func(ctx context.Context, src workerEventSource) ([]string, error) {
+	base := fmt.Sprintf(workerAddrTemplate(), src.service, src.port)
+	u, err := url.Parse(base)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, u.Hostname())
+	if err != nil || len(addrs) <= 1 {
+		// One instance — or a lookup failure, which the dial then reports
+		// in the words the panel already knows.
+		return []string{base}, nil
+	}
+	urls := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		v := *u
+		v.Host = net.JoinHostPort(a.IP.String(), u.Port())
+		urls = append(urls, v.String())
+	}
+	sort.Strings(urls)
+	return urls, nil
+}
+
+// forwardFrames reads one upstream and hands over complete SSE frames, so a
+// heartbeat or another replica's frame never lands inside one. dropHello
+// skips the "connected" greeting the first replica already supplied.
+func forwardFrames(ctx context.Context, body io.ReadCloser, dropHello bool, frames chan<- string, ended chan<- error) {
+	defer body.Close()
+	r := bufio.NewReader(body)
+	var frame strings.Builder
+	flush := func() bool {
+		if frame.Len() == 0 {
+			return true
+		}
+		f := frame.String()
+		frame.Reset()
+		if !strings.HasSuffix(f, "\n\n") {
+			f = strings.TrimRight(f, "\n") + "\n\n"
+		}
+		if dropHello && strings.Contains(f, `"type":"connected"`) {
+			return true
+		}
+		select {
+		case frames <- f:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for {
+		line, err := r.ReadString('\n')
+		if line != "" {
+			frame.WriteString(line)
+		}
+		if line == "\n" || err != nil {
+			if !flush() {
 				return
 			}
+		}
+		if err != nil {
+			ended <- err
+			return
 		}
 	}
 }

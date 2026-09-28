@@ -2,11 +2,13 @@ package managementapi
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -301,4 +303,43 @@ func splitTestServer(t *testing.T, srv *httptest.Server) (string, int) {
 		t.Fatalf("parse test server port: %v", err)
 	}
 	return host, port
+}
+
+// TestWorkerEventSourcesHaveKubernetesServices pins every allowlisted worker
+// to a Service manifest named vrsky-<worker> on its port. The proxy's
+// address is vrsky-<worker>.vrsky-platform.svc.cluster.local:<port>; without
+// the Service that name resolves to nothing and the panel says "cannot reach
+// the <worker> service" — which is what data-converter and data-filter did in
+// prod (2026-09-28): they are core services, deployed from their own
+// directories, and nobody had written a Service for their event port.
+func TestWorkerEventSourcesHaveKubernetesServices(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "infrastructure", "kubernetes")
+	var docs []string
+	add := func(path string) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return
+		}
+		docs = append(docs, strings.Split(string(raw), "\n---")...)
+	}
+	add(filepath.Join(root, "connectors", "connectors.yaml"))
+	for name := range workerEventSources {
+		add(filepath.Join(root, name, "service.yaml"))
+	}
+	for name, src := range workerEventSources {
+		port := regexp.MustCompile(fmt.Sprintf(`(?m)^\s+port:\s*%d\s*$`, src.port))
+		found := false
+		for _, d := range docs {
+			if strings.Contains(d, "kind: Service") &&
+				strings.Contains(d, "name: vrsky-"+src.service+"\n") &&
+				port.MatchString(d) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("worker %q is proxied at vrsky-%s:%d but no Service manifest publishes that (connectors.yaml or infrastructure/kubernetes/%s/service.yaml)",
+				name, src.service, src.port, name)
+		}
+	}
 }

@@ -189,9 +189,11 @@ deploy_filter() {
 	# vrsky.data.*.pipeline.*, claim-check + record streaming (ADR 0002).
 	cd "$SCRIPT_DIR/data-filter"
 	kubectl apply -f deployment.yaml
+	kubectl apply -f service.yaml
 	kubectl apply -f pdb.yaml
 	cd "$SCRIPT_DIR/data-converter"
 	kubectl apply -f deployment.yaml
+	kubectl apply -f service.yaml
 	kubectl apply -f pdb.yaml
 
 	print_success "Transform manifests applied"

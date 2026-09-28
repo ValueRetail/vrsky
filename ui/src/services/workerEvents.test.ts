@@ -90,4 +90,45 @@ describe('subscribeWorkerEvents', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('403'))
   })
+
+  // In prod (2026-09-28) the proxy answered every connection with an error
+  // frame and closed. That counted as a routine end, so the panel reconnected
+  // twice a second and raised a notification each time — a wall of "cannot
+  // reach the data-converter service".
+  it('backs off and notifies once while the proxy keeps reporting the worker unreachable', async () => {
+    const errorFrame = 'event: error\ndata: {"error":"cannot reach the data-converter service"}\n\n'
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(streamOf(errorFrame)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const onError = vi.fn()
+    const stop = subscribeWorkerEvents('conn-1', 'data-converter', { onEvent: vi.fn(), onError })
+    await settle(10_000)
+    stop()
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith('cannot reach the data-converter service')
+    // Doubling from 1 s: 1, 2, 4, 8 — a handful of attempts in ten seconds, not twenty.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
+    expect(fetchMock.mock.calls.length).toBeLessThan(8)
+  })
+
+  it('reports the same outage again once events have flowed in between', async () => {
+    const errorFrame = 'event: error\ndata: {"error":"cannot reach the data-converter service"}\n\n'
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamOf(errorFrame))
+      .mockResolvedValueOnce(streamOf(event({ type: 'converted' })))
+      .mockResolvedValueOnce(streamOf(errorFrame))
+      .mockResolvedValue(streamOf())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const onError = vi.fn()
+    const onEvent = vi.fn()
+    const stop = subscribeWorkerEvents('conn-1', 'data-converter', { onEvent, onError })
+    await settle(10_000)
+    stop()
+
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledTimes(2)
+  })
 })
