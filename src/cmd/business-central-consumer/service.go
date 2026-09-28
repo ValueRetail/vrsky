@@ -97,8 +97,8 @@ type BCConfig struct {
 
 	PollIntervalSeconds int `json:"poll_interval_seconds"`
 
-	// Pictures makes the node publish one message per record picture (image
-	// bytes) instead of the records. See pictures.go.
+	// Pictures makes the node also publish one message per record picture
+	// (the image file), after the records it belongs to. See pictures.go.
 	Pictures bool `json:"pictures"`
 
 	// pictureSeen is this poller's record id → picture id of what it last
@@ -300,6 +300,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			if cfg.Incremental {
 				watermark.observe(p.Value, cfg.effectiveCursorField())
 			}
+			if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
+				return fmt.Errorf("publish records: %w", err)
+			}
 			if cfg.Pictures {
 				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, logger)
 				pics.sent += n.sent
@@ -308,8 +311,6 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 				if err != nil {
 					return fmt.Errorf("publish pictures: %w", err)
 				}
-			} else if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
-				return fmt.Errorf("publish records: %w", err)
 			}
 			total += len(p.Value)
 		}
@@ -540,18 +541,10 @@ func (cfg *BCConfig) companyURL() string {
 
 // entityURL builds the first-page API v2.0 URL, scoped to the company. A
 // non-empty cursor narrows it to what changed since the last complete fetch.
-// In pictures mode only the fields needed to find the pictures are selected.
 func (cfg *BCConfig) entityURL(cursor string) string {
 	u := fmt.Sprintf("%s/%s", cfg.companyURL(), cfg.effectiveEntity())
-	var q []string
 	if filter := cfg.filterWithCursor(cursor); filter != "" {
-		q = append(q, "$filter="+url.QueryEscape(filter))
-	}
-	if cfg.Pictures {
-		q = append(q, "$select="+url.QueryEscape(cfg.pictureSelect()))
-	}
-	if len(q) > 0 {
-		u += "?" + strings.Join(q, "&")
+		u += "?$filter=" + url.QueryEscape(filter)
 	}
 	return u
 }

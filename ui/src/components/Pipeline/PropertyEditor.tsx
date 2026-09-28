@@ -3454,12 +3454,13 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
                   checked={Boolean(c.pictures)}
                   onChange={(e) => update({ pictures: e.target.checked || undefined })}
                 />
-                Send pictures instead of records
+                Also send pictures
               </label>
               {Boolean(c.pictures) && (
                 <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
-                  One message per picture (the image file). A file or remote-agent destination writes it as{' '}
-                  <code>&lt;number&gt;.jpg</code>. Only items, customers, vendors, employees and contacts have pictures.
+                  The records go out as before. Each new or changed picture follows as its own file, which a file or
+                  remote-agent destination writes as <code>&lt;number&gt;.jpg</code>; converters and filters pass it
+                  through untouched. Only items, customers, vendors, employees and contacts have pictures.
                 </div>
               )}
             </div>

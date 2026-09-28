@@ -496,6 +496,13 @@ func writeStream(path string, body io.Reader) error {
 
 // generateFilename creates a filename from the envelope and pattern.
 func (p *fileProducer) generateFilename(env *envelope.Envelope, pattern string) string {
+	// A media file that carries a name keeps it, pattern or not: the pattern
+	// names the records, and a catalogue's pictures travel beside them
+	// matched by their own names (1896-S.jpg, #281). Same rule as
+	// agentproto.GenerateFilename.
+	if fn, ok := env.Metadata["filename"].(string); ok && fn != "" && envelope.IsMedia(env.ContentType) {
+		return sanitizeForFilename(fn)
+	}
 	if pattern == "" {
 		ext := deriveExtension(env.ContentType)
 		if env.Metadata != nil {

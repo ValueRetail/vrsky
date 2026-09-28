@@ -110,13 +110,27 @@ func fetch(t *testing.T, c *bcConsumer, cfg *BCConfig) error {
 
 var jpeg = []byte("\xff\xd8\xff\xe0 fake jpeg bytes")
 
-// The feature: one message per picture, the image as the payload, the record's
-// identity and a filename beside it — and no JSON page of records.
-func TestPictures_OneEnvelopePerPicture(t *testing.T) {
+// split separates the record pages from the pictures a fetch published.
+func split(envs []*envelope.Envelope) (pages, pictures []*envelope.Envelope) {
+	for _, e := range envs {
+		if strings.HasPrefix(e.ContentType, "image/") {
+			pictures = append(pictures, e)
+		} else {
+			pages = append(pages, e)
+		}
+	}
+	return pages, pictures
+}
+
+// The feature: the records go out as always — every field, so the CSV the
+// converter makes is unchanged — and each picture follows as its own message,
+// the image as the payload, the record's identity and a file name beside it.
+func TestPictures_RecordsAndPictures(t *testing.T) {
 	tokenSrv := bcTestToken(t)
 	defer tokenSrv.Close()
 	f := newFakeBC(t,
-		`[{"id":"i1","number":"1896-S","displayName":"ATHENS Desk"},{"id":"i2","number":"1900-S","displayName":"PARIS Chair"}]`,
+		`[{"id":"i1","number":"1896-S","displayName":"ATHENS Desk","unitPrice":1000.8},`+
+			`{"id":"i2","number":"1900-S","displayName":"PARIS Chair","unitPrice":193.7}]`,
 		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", content: jpeg}})
 	c, got, mu := newTestConsumer()
 
@@ -125,10 +139,20 @@ func TestPictures_OneEnvelopePerPicture(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(*got) != 1 {
-		t.Fatalf("published %d envelopes, want 1 (one picture; i2 has none; no record page)", len(*got))
+	pages, pics := split(*got)
+	if len(pages) != 1 || recordsIn(t, pages) != 2 {
+		t.Fatalf("record pages %d, want 1 page with both records", len(pages))
 	}
-	env := (*got)[0]
+	if !strings.Contains(string(pages[0].Payload), `"unitPrice":193.7`) {
+		t.Errorf("records lost fields: %s", pages[0].Payload)
+	}
+	if len(pics) != 1 {
+		t.Fatalf("published %d pictures, want 1 (i2 has none)", len(pics))
+	}
+	if (*got)[0] != pages[0] {
+		t.Error("the picture was published before the records it belongs to")
+	}
+	env := pics[0]
 	if env.ContentType != "image/jpeg" || !bytes.Equal(env.Payload, jpeg) || env.PayloadSize != int64(len(jpeg)) {
 		t.Errorf("payload = %q (%s, %d bytes), want the picture bytes as image/jpeg", env.Payload, env.ContentType, env.PayloadSize)
 	}
@@ -146,28 +170,38 @@ func TestPictures_OneEnvelopePerPicture(t *testing.T) {
 	}
 }
 
-// Only what is needed to find the pictures is asked for; records mode is
-// unchanged.
-func TestPictures_SelectsOnlyIdentityFields(t *testing.T) {
+// Turning pictures on must not change a single byte of the records, nor the
+// request that fetches them: the till's importer reads that CSV as it is.
+func TestPictures_RecordsAreUnchanged(t *testing.T) {
 	tokenSrv := bcTestToken(t)
 	defer tokenSrv.Close()
-	f := newFakeBC(t, `[]`, nil)
-	c, _, _ := newTestConsumer()
+	f := newFakeBC(t, `[{"id":"i1","number":"1896-S","displayName":"ATHENS Desk","unitPrice":1000.8}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", content: jpeg}})
 
-	cfg := picturesConfig(f, tokenSrv.URL)
-	if err := fetch(t, c, cfg); err != nil {
-		t.Fatal(err)
+	run := func(pictures bool) (string, string) {
+		c, got, mu := newTestConsumer()
+		cfg := picturesConfig(f, tokenSrv.URL)
+		cfg.Pictures = pictures
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		pages, _ := split(*got)
+		if len(pages) != 1 {
+			t.Fatalf("pictures=%v: %d record pages", pictures, len(pages))
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return string(pages[0].Payload), f.pageQuery
 	}
-	if want := "$select=" + "id%2Cnumber%2CdisplayName%2ClastModifiedDateTime"; !strings.Contains(f.pageQuery, want) {
-		t.Errorf("pictures page query = %q, want it to contain %q", f.pageQuery, want)
+	offPayload, offQuery := run(false)
+	onPayload, onQuery := run(true)
+	if onPayload != offPayload {
+		t.Errorf("records differ with pictures on:\n on: %s\noff: %s", onPayload, offPayload)
 	}
-
-	cfg.Pictures = false
-	if err := fetch(t, c, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(f.pageQuery, "$select") {
-		t.Errorf("records mode sent a $select (%q) — it must publish whole records", f.pageQuery)
+	if onQuery != offQuery {
+		t.Errorf("page request differs with pictures on: %q vs %q", onQuery, offQuery)
 	}
 }
 
@@ -208,8 +242,8 @@ func TestPictures_UnchangedPictureIsNotResent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := len(*got); n != 1 {
-		t.Fatalf("two polls of an unchanged picture published %d envelopes, want 1", n)
+	if _, pics := split(*got); len(pics) != 1 {
+		t.Fatalf("two polls of an unchanged picture published %d pictures, want 1", len(pics))
 	}
 	if n := f.contentRequests(); n != 1 {
 		t.Errorf("content downloaded %d times, want 1", n)
@@ -223,8 +257,8 @@ func TestPictures_UnchangedPictureIsNotResent(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(*got) != 2 || string((*got)[1].Payload) != "png-2" {
-		t.Errorf("replaced picture not sent: %d envelopes", len(*got))
+	if _, pics := split(*got); len(pics) != 2 || string(pics[1].Payload) != "png-2" {
+		t.Errorf("replaced picture not sent: %d pictures", len(pics))
 	}
 }
 
@@ -242,8 +276,8 @@ func TestPictures_ContentFailureHoldsTheWatermark(t *testing.T) {
 	if err := fetch(t, c, cfg); err == nil {
 		t.Fatal("a 500 on the picture content did not fail the fetch")
 	}
-	if len(*got) != 0 {
-		t.Errorf("published %d envelopes from a failed download", len(*got))
+	if _, pics := split(*got); len(pics) != 0 {
+		t.Errorf("published %d pictures from a failed download", len(pics))
 	}
 	if cursor := c.loadCursor(context.Background(), "tenant-1", "conn-1", "n1", c.logger); cursor != "" {
 		t.Errorf("watermark advanced to %q past a picture that was never delivered", cursor)
@@ -262,8 +296,8 @@ func TestPictures_MediaLinkHostIsReplacedByTheAPIHost(t *testing.T) {
 	if err := fetch(t, c, picturesConfig(f, tokenSrv.URL)); err != nil {
 		t.Fatalf("fetch: %v (the content request went to the unreachable media-link host?)", err)
 	}
-	if len(*got) != 1 || f.contentRequests() != 1 {
-		t.Errorf("envelopes %d, content requests to the API host %d; want 1 and 1", len(*got), f.contentRequests())
+	if _, pics := split(*got); len(pics) != 1 || f.contentRequests() != 1 {
+		t.Errorf("pictures %d, content requests to the API host %d; want 1 and 1", len(pics), f.contentRequests())
 	}
 }
 
@@ -301,8 +335,8 @@ func TestPictures_LargeContentGoesThroughTheClaimCheck(t *testing.T) {
 	if len(streamed) != 1 || streamed[0].Metadata["number"] != "BIG" || !bytes.Equal(streamedBytes[0], big) {
 		t.Errorf("the 2 KiB picture was not streamed whole (streamed %d)", len(streamed))
 	}
-	if len(*inline) != 1 || (*inline)[0].Metadata["number"] != "SMALL" || !bytes.Equal((*inline)[0].Payload, jpeg) {
-		t.Errorf("the small picture was not published inline (inline %d)", len(*inline))
+	if _, pics := split(*inline); len(pics) != 1 || pics[0].Metadata["number"] != "SMALL" || !bytes.Equal(pics[0].Payload, jpeg) {
+		t.Errorf("the small picture was not published inline (inline pictures %d)", len(pics))
 	}
 }
 
@@ -326,14 +360,18 @@ func TestPictures_FilenameIsSafe(t *testing.T) {
 	}
 }
 
-// The "show data structure" preview has nothing to show for a pictures node;
-// it must say so instead of previewing the identity fields it selects.
-func TestPictures_PreviewExplainsThereIsNoRecordStructure(t *testing.T) {
+// The "show data structure" preview shows the records for a node with
+// pictures on, as for any other: the records are what a converter maps.
+func TestPictures_PreviewShowsTheRecords(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"1896-S","unitPrice":1000.8}]`, nil)
 	c, _, _ := newTestConsumer()
-	body := `{"aad_tenant_id":"aad","company_id":"C1","client_id":"cid","client_secret":"sec","entity":"items","pictures":true}`
+	body := fmt.Sprintf(`{"client_id":"cid","client_secret":"sec","company_id":"C1","entity":"items","pictures":true,`+
+		`"api_base_url":%q,"token_url":%q}`, f.srv.URL, tokenSrv.URL)
 	rec := httptest.NewRecorder()
 	c.handleSampleData()(rec, httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body)))
-	if !strings.Contains(rec.Body.String(), `"ok":false`) || !strings.Contains(rec.Body.String(), "sends pictures") {
-		t.Errorf("preview for a pictures node = %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"ok":true`) || !strings.Contains(rec.Body.String(), `"unitPrice":1000.8`) {
+		t.Errorf("preview for a node with pictures on = %s", rec.Body.String())
 	}
 }

@@ -1,5 +1,72 @@
 # Business Central connector: pictures
 
+## Revision 2 (2026-09-28) — records AND pictures on one pipeline
+
+Supersedes decision 4 below ("pictures *instead of* records"). PR #282 is
+held and reworked on the same branch.
+
+**Requirements (Bifrost, the till's catalogue importer):**
+
+| Requirement | Why |
+|---|---|
+| CSV records unchanged (same converter, same columns) | the watcher and importer stay as they are |
+| One file per picture, named `<item number>.<ext>` (`1896-S.jpg`), ext from the content type | matched by article number, the catalogue key |
+| Written into the same agent folder (`catalogue-in`) | the watcher ignores non-CSV; an image ingester picks up `*.jpg`/`*.png` |
+| Only when the picture exists or changed | 80 images every 15 minutes is waste |
+| Original size | Bifrost downsizes for the 64 px tile itself |
+
+**What that needs, found by reading the code:**
+
+1. **BC consumer.** The switch becomes **"Also send pictures"**
+   (`pictures: true`): the record pages are published exactly as today — no
+   `$select`, all fields — and, after each page, one message per picture of
+   that page's records, only when the picture is new or its id changed
+   (per-poller seen-map, as built). "Pictures only" mode is dropped (YAGNI;
+   nobody asked for it).
+2. **data-converter drops pictures today.** An image cannot be parsed, so
+   `processEntry` emits "Payload parse failed" and acks — the picture is
+   gone. Fix: a message whose content type is a media type (`image/*`, and
+   `application/octet-stream`, `application/pdf`, `audio/*`, `video/*`) is
+   **passed through unchanged**: fresh envelope id, `_last_processed_by` set
+   to the converter node (so the next node accepts it), no `_converted`, the
+   claim-check ref kept as is (no rehydrate, no re-offload), a "passed
+   through" event for the panel.
+3. **data-filter drops them the same way.** Same pass-through. A filter rule
+   cannot be evaluated on an image; documented: a filter on records does not
+   filter their pictures.
+4. **Destination naming.** With a `filename_pattern` set (likely, for the
+   CSV), the remote agent and file-producer name *every* message by the
+   pattern, so pictures would become `catalogue-<ts>.jpg`. Fix: a **media**
+   message that carries a `filename` keeps it, pattern or not; the pattern
+   keeps naming the records. In `agentproto.GenerateFilename` (remote agent)
+   and file-producer's `generateFilename`.
+
+**Failure semantics.** A picture that fails to download fails the fetch, so
+the incremental watermark holds: the next poll re-sends that page's records
+(Bifrost's import is keyed by article number, so a repeat is harmless) and
+retries the picture. Picture changes on an unchanged item are only seen if
+BC bumps the item's `lastModifiedDateTime` (assumption A) — with
+`incremental` off, every poll checks every item's picture id (one small
+request per item, no download when unchanged).
+
+**Tests added/changed:** BC: records + pictures both published, records
+unchanged byte-for-byte vs pictures off, no `$select`. Converter and filter:
+an image passes through with bytes/ref/filename intact and `_last_processed_by`
+set, a JSON message still converts. Naming: pattern + media with filename →
+filename; pattern + CSV → pattern. An end-to-end check over the local stack:
+BC-shaped JSON + an image through converter (JSON→CSV) into file-producer.
+
+**Built (2026-09-28), deviations:** the local end-to-end over the compose
+stack was not run (it needs a logged-in session to create the pipeline); the
+hops are covered by unit tests on real JetStream and real servers, and the
+end-to-end is the prod check with the till PC. The shared media rule lives in
+`envelope.IsMedia` (image/audio/video/PDF; not `application/octet-stream`).
+
+**Rollout grows:** data-converter and data-filter (core), remote-agent and
+file-producer (connectors) are rebuilt along with business-central-consumer.
+
+---
+
 ## Decisions (2026-09-28, with Ludvik)
 
 1. **BC → pipeline only.** The consumer downloads pictures; uploading into BC

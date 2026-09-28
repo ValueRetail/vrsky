@@ -264,7 +264,9 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	// not converter logic: NAK so the message is retried (transient store blip)
 	// or lands in the DLQ instead of being silently dropped as invalid JSON.
 	overCap := env.PayloadRef != "" && s.rehydrateMax > 0 && env.PayloadSize > s.rehydrateMax && s.spill != nil
-	if !overCap {
+	// A media file (a picture beside the records, #281) is passed through
+	// untouched, so there is nothing to rehydrate: its ref travels as is.
+	if !overCap && !envelope.IsMedia(env.ContentType) {
 		if err := claimcheck.Rehydrate(ctx, s.spill, &env, s.rehydrateMax); err != nil {
 			s.emitEvent(env.IntegrationID, ConvertEvent{Type: "error", Message: "Payload rehydrate failed: " + err.Error(), Time: now()})
 			return fmt.Errorf("rehydrate: %w", err)
@@ -319,6 +321,11 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 // caller NAKs those; transform-logic failures emit a UI event and ack, exactly
 // as before.
 func (s *ConverterService) processEntry(ctx context.Context, connectionID, subject string, origEnv *envelope.Envelope, entry *ConverterEntry) error {
+	// A media file cannot be parsed into records. It used to fail here with
+	// "Payload parse failed" and be acked — dropped. It now goes on, unchanged.
+	if envelope.IsMedia(origEnv.ContentType) {
+		return s.passThrough(ctx, connectionID, origEnv, entry.NodeID)
+	}
 	converterCfg := entry.Config
 	hasMapping := len(converterCfg.Mappings) > 0
 	hasFormat := converterCfg.OutputFormat != ""
@@ -1117,4 +1124,36 @@ func initNATS(natsURL string, logger *slog.Logger) (*nats.Conn, error) {
 		nats.ReconnectHandler(func(nc *nats.Conn) { logger.Info("NATS reconnected") }),
 	}
 	return nats.Connect(natsURL, opts...)
+}
+
+// passThrough republishes a media file (an image, audio, video or PDF) as it
+// arrived: same payload or claim-check ref, same content type and file name.
+// Only the routing changes — a fresh envelope id, and this node as the one
+// that last processed it, so the next node in the pipeline accepts it. There
+// is no _converted mark: nothing was converted, and the destinations use that
+// mark to re-extension a file name.
+func (s *ConverterService) passThrough(ctx context.Context, connectionID string, origEnv *envelope.Envelope, nodeID string) error {
+	env := *origEnv
+	env.ID = uuid.New().String()
+	env.Metadata = make(map[string]interface{}, len(origEnv.Metadata)+2)
+	for k, v := range origEnv.Metadata {
+		env.Metadata[k] = v
+	}
+	env.Metadata["_last_processed_by"] = nodeID
+	env.Metadata["_source_envelope_id"] = origEnv.ID
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		return nil
+	}
+	if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, data); err != nil {
+		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
+		return fmt.Errorf("publish: %w", err)
+	}
+	name, _ := env.Metadata["filename"].(string)
+	if name == "" {
+		name = env.ContentType
+	}
+	s.emitEvent(connectionID, ConvertEvent{Type: "info", Message: "Passed through unchanged: " + name, Time: now()})
+	return nil
 }

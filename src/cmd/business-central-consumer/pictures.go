@@ -18,12 +18,13 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
 
-// Pictures mode (#281): a consumer node with `pictures: true` polls its entity
-// as usual — same filter, incremental watermark and paging — but publishes one
-// message per record PICTURE instead of the records. The payload is the image
-// bytes with BC's content type; the metadata carries the record's identity and
-// a filename, which is what the file and remote-agent destinations name the
-// file by. Business Central API v2.0 exposes pictures on these entities only.
+// Pictures (#281): a consumer node with `pictures: true` publishes its records
+// exactly as without it, and after each page one message per picture of that
+// page's records — the image file, with BC's content type, the record's
+// identity and a file name in the metadata. The file and remote-agent
+// destinations write it under that name; the transforms pass it through.
+// Only a picture that is new, or whose id changed, is downloaded and sent.
+// Business Central API v2.0 exposes pictures on these entities only.
 var pictureEntities = map[string]bool{
 	"items": true, "customers": true, "vendors": true, "employees": true, "contacts": true,
 }
@@ -43,18 +44,6 @@ func (cfg *BCConfig) validatePictures() error {
 			cfg.effectiveEntity())
 	}
 	return nil
-}
-
-// pictureSelect is the $select for pictures mode: the records are not
-// published, only used to find their pictures, so ask for their identity and
-// the watermark field. All five picture entities expose number and
-// displayName in API v2.0.
-func (cfg *BCConfig) pictureSelect() string {
-	fields := []string{"id", "number", "displayName"}
-	if cf := cfg.effectiveCursorField(); cf != "id" && cf != "number" && cf != "displayName" {
-		fields = append(fields, cf)
-	}
-	return strings.Join(fields, ",")
 }
 
 type pictureRecord struct {

@@ -56,7 +56,9 @@ Config reference:
   [file connector](file.md): `{id}`, `{timestamp}` (`20060102-150405`),
   `{extension}` (from the content type) and `{source}`. Without a pattern the
   incoming `filename` is kept (with a new extension if a converter changed the
-  format), else `<id>.<extension>`.
+  format), else `<id>.<extension>`. A media file (image, audio, video, PDF)
+  that carries a `filename` always keeps it, pattern or not — so a pattern for
+  the records does not rename the pictures that travel with them.
 
 ```json
 {

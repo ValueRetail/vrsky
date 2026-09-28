@@ -32,7 +32,10 @@ Config reference:
 - `file.path` — output directory, relative to your workspace's own area of the
   mounted volume. If empty, files go to the top of that area.
 
-File naming and serialization options are configured via the in-app pipeline editor (Property panel).
+File naming and serialization options are configured via the in-app pipeline editor (Property panel). A media file (image, audio, video, PDF) that carries a `filename` in its
+metadata is always written under that name, even when a filename pattern is
+set — the pattern names the records, and pictures travelling with them keep
+their own names (see [Business Central → Pictures](business-central.md#pictures)).
 
 ```json
 {

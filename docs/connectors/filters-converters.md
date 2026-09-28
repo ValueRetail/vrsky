@@ -54,3 +54,15 @@ functions, see [`docs/converter/`](../converter/).
   producer steps.
 - Filters and converters do not connect to external systems, so they have no
   credentials and no test-connection endpoint.
+
+## Media files pass through
+
+A message whose content is a media file — an image, audio, video or PDF — is
+not records, so filters and converters pass it on **unchanged**: same bytes
+(or claim-check reference), same content type, same `filename`. This is what
+lets one pipeline carry a catalogue's records and their pictures (see
+[Business Central → Pictures](business-central.md#pictures)). A filter's rules
+do not apply to them. `application/octet-stream` is not treated as media: file
+and agent uploads use it for anything unrecognised, CSV included, and those
+are still parsed.
+
