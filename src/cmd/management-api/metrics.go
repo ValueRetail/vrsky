@@ -55,6 +55,10 @@ func (r *statusRecorder) WriteHeader(code int) {
 // (metrics/ws) failed with 500 "streaming not supported" — the metrics
 // middleware is always in the chain, and on GET requests the audit middleware
 // passes this recorder straight through to the handler.
+// Unwrap lets http.ResponseController reach the connection, e.g. to lift the
+// server's WriteTimeout for a long-lived stream (worker events proxy).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

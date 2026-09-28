@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // Live-event streams for the pipeline builder's test panels.
@@ -66,6 +67,12 @@ func workerAddrTemplate() string {
 	}
 	return "http://%s:%d"
 }
+
+// sseHeartbeat is how often an idle stream carries an SSE comment. Every
+// proxy in front of this API (the UI's nginx, ingress-nginx) closes an
+// upstream that has been silent for 60 s; a pipeline with no traffic is
+// silent for much longer than that. A var so tests can shorten it.
+var sseHeartbeat = 25 * time.Second
 
 // ProxyWorkerEvents streams a worker's SSE event feed for one connection,
 // after checking that the connection belongs to the caller's tenant.
@@ -147,6 +154,15 @@ func (h *Handler) ProxyWorkerEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The server's WriteTimeout (30 s) covers the whole response, and a live
+	// stream is meant to outlive it. Past the deadline every write fails, but
+	// the handler only notices on the next upstream event and the connection
+	// stays open meanwhile, so the browser sat on a dead stream: it showed the
+	// first frame and nothing after, and never reconnected. Clearing the
+	// deadline needs every ResponseWriter wrapper in the chain to Unwrap; if
+	// one does not, this fails and the stream behaves as before.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -158,24 +174,64 @@ func (h *Handler) ProxyWorkerEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Copy and flush per chunk. io.Copy alone would buffer, which for a stream
 	// whose entire purpose is liveness defeats the feature without failing.
-	buf := make([]byte, 4096)
+	// Reads happen in their own goroutine so an idle upstream does not stop
+	// the heartbeat.
+	type chunk struct {
+		data []byte
+		err  error
+	}
+	chunks := make(chan chunk)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := resp.Body.Read(buf)
+			c := chunk{data: append([]byte(nil), buf[:n]...), err: err}
+			select {
+			case chunks <- c:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	tick := time.NewTicker(sseHeartbeat)
+	defer tick.Stop()
+	// A heartbeat must not land inside a frame the upstream split across two
+	// reads, so it is only sent between frames.
+	betweenFrames := true
 	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return // client went away
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if !betweenFrames {
+				continue
+			}
+			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+				return
 			}
 			flusher.Flush()
-		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				// Upstream died mid-stream. EventSource will reconnect; this
-				// line is what makes the reason visible if anyone looks.
-				fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
-					"stream from "+worker+" ended: "+sanitizeStreamErr(readErr))
+		case c := <-chunks:
+			if len(c.data) > 0 {
+				if _, writeErr := w.Write(c.data); writeErr != nil {
+					return // client went away
+				}
 				flusher.Flush()
+				betweenFrames = strings.HasSuffix(string(c.data), "\n\n")
 			}
-			return
+			if c.err != nil {
+				if c.err != io.EOF {
+					// Upstream died mid-stream. EventSource will reconnect; this
+					// line is what makes the reason visible if anyone looks.
+					fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n",
+						"stream from "+worker+" ended: "+sanitizeStreamErr(c.err))
+					flusher.Flush()
+				}
+				return
+			}
 		}
 	}
 }
