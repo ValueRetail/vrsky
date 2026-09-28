@@ -1088,6 +1088,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A builder panel says "cannot reach the data-converter service"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2368,6 +2379,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A builder panel says "cannot reach the data-converter service"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2502,6 +2524,22 @@ bump the <code>pgsty/*</code> tags in <code>infrastructure/kubernetes/minio/</co
 script again.</p>
 <p>KES (<code>quay.io/minio/kes</code>, <code>infrastructure/kubernetes/encryption/</code>) still pulls
 from quay.io; if it starts failing the same way, it needs the same treatment.</p>
+<h2 id="a-builder-panel-says-cannot-reach-the-data-converter-service">A builder panel says "cannot reach the data-converter service"<a class="headerlink" href="#a-builder-panel-says-cannot-reach-the-data-converter-service" title="Permanent link">&para;</a></h2>
+<p>The builder's live panels (Converter, Filter, File Watcher, …) are served by
+the management API, which proxies each worker's event stream at
+<code>vrsky-&lt;worker&gt;.vrsky-platform.svc.cluster.local:&lt;port&gt;</code>. That name needs a
+Kubernetes Service. The transforms did not have one until 2026-09-28 — they
+are core services deployed from their own directories, unlike the connectors,
+whose Services <code>deploy-connectors-azure.sh</code> generates — so every Converter and
+Filter panel in prod failed this way while the pipelines themselves ran fine.</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>get<span class="w"> </span>svc<span class="w"> </span>vrsky-data-converter<span class="w"> </span>vrsky-data-filter
+</code></pre></div>
+<p>If either is missing, apply <code>infrastructure/kubernetes/&lt;worker&gt;/service.yaml</code>
+(<code>deploy-azure.sh</code> and <code>deploy-vrsky-platform.sh</code> do). The Services are
+headless on purpose: each replica keeps its own event hub, and the proxy opens
+one stream per pod so the panel sees all the traffic, not half. A test,
+<code>TestWorkerEventSourcesHaveKubernetesServices</code>, now fails if a proxied worker
+has no Service manifest.</p>
 <h2 id="a-pipeline-deploys-but-no-data-flows">A pipeline deploys but no data flows<a class="headerlink" href="#a-pipeline-deploys-but-no-data-flows" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Confirm it's <strong>running</strong> (Settings/Connections, or the connection status).</li>
