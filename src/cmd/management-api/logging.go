@@ -35,6 +35,10 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 // Flush and Hijack forward to the underlying ResponseWriter so the logging
 // wrapper (outermost of the three status-capturing wrappers) does not hide
 // http.Flusher / http.Hijacker from streaming and WebSocket endpoints.
+// Unwrap lets http.ResponseController reach the connection, e.g. to lift the
+// server's WriteTimeout for a long-lived stream (worker events proxy).
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
 func (rw *responseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
