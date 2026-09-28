@@ -10,6 +10,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
 )
@@ -85,8 +85,11 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	// Notepad on older Windows (e.g. 10 LTSC 2019) saves "UTF-8" with a byte
+	// order mark, which encoding/json rejects as an invalid character.
+	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	var c Config
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields() // a typo in a key should not silently do nothing
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
