@@ -59,6 +59,21 @@ func TestConfig_LoadsValidAndFillsDefaults(t *testing.T) {
 	}
 }
 
+// A config saved by Notepad on older Windows starts with a UTF-8 byte order
+// mark; it must load like any other.
+func TestConfig_LoadsWithUTF8BOM(t *testing.T) {
+	c := testConfig(t)
+	body, _ := json.Marshal(map[string]any{"directories": map[string]any{
+		"inbox": map[string]any{"path": c.Directories["inbox"].Path, "mode": "read"}}})
+	got, err := LoadConfig(writeConfig(t, "\xef\xbb\xbf"+string(body)))
+	if err != nil {
+		t.Fatalf("config with a BOM: %v", err)
+	}
+	if got.Directories["inbox"].Path != c.Directories["inbox"].Path {
+		t.Errorf("inbox = %+v, want path %s", got.Directories["inbox"], c.Directories["inbox"].Path)
+	}
+}
+
 func TestConfig_RejectsRelativePathsAndBadNames(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a-file")
