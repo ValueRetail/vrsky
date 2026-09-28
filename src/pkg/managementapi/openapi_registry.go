@@ -47,6 +47,10 @@ var apiRoutes = []apiRoute{
 	{"GET /api/v1/agents", "get", "/api/v1/agents", "Remote agents", "List the workspace's agents, with online status", nil, nil},
 	{"PATCH /api/v1/agents/{id}", "patch", "/api/v1/agents/{id}", "Remote agents", "Rename an agent", nil, tof(Agent{})},
 	{"DELETE /api/v1/agents/{id}", "delete", "/api/v1/agents/{id}", "Remote agents", "Revoke an agent; its credential stops working on its next request", nil, nil},
+	{"GET /api/v1/agents/release", "get", "/api/v1/agents/release", "Remote agents", "Version and SHA-256 of the downloadable Windows agent (public)", nil, tof(AgentRelease{})},
+	{"GET /api/v1/agents/download/windows-amd64", "get", "/api/v1/agents/download/windows-amd64", "Remote agents", "Download vrsky-agent.exe for Windows x64 (public; X-Checksum-Sha256 header)", nil, nil},
+	{"GET /api/v1/agents/install.ps1", "get", "/api/v1/agents/install.ps1", "Remote agents", "PowerShell script that installs or upgrades the agent on a Windows machine (public)", nil, nil},
+	{"GET /api/v1/agents/uninstall.ps1", "get", "/api/v1/agents/uninstall.ps1", "Remote agents", "PowerShell script that removes the agent from a Windows machine (public)", nil, nil},
 
 	// --- Metrics & sample data ---
 	{"GET /api/v1/connections/{id}/metrics", "get", "/api/v1/connections/{id}/metrics", "Metrics", "Point-in-time pipeline metrics for a connection (from Prometheus)", nil, nil},

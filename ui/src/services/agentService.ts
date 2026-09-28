@@ -67,7 +67,38 @@ export async function revokeAgent(id: string): Promise<void> {
   await apiClient.delete(`/api/v1/agents/${encodeURIComponent(id)}`)
 }
 
-/** The command a user runs on the machine to register it. */
+/** The command a user runs on a machine that already has the agent installed. */
 export function registerCommand(origin: string, token: string): string {
   return `vrsky-agent register --url ${origin} --token ${token}`
+}
+
+/** The agent build this server offers for download (public route). */
+export interface AgentRelease {
+  platform: string
+  version: string
+  sha256: string
+  size_bytes: number
+  filename: string
+}
+
+export async function getAgentRelease(): Promise<AgentRelease> {
+  const resp = await apiClient.get<Envelope<AgentRelease>>('/api/v1/agents/release')
+  return resp.data.data
+}
+
+export function agentDownloadUrl(origin: string): string {
+  return `${origin}/api/v1/agents/download/windows-amd64`
+}
+
+/**
+ * The one command that sets up a Windows machine: fetches install.ps1 from
+ * this server and runs it with the token. Windows PowerShell 5.1 syntax; the
+ * script block form passes arguments and needs no execution-policy change.
+ */
+export function installCommand(origin: string, token: string): string {
+  return `& ([scriptblock]::Create((irm ${origin}/api/v1/agents/install.ps1))) -Url ${origin} -Token ${token}`
+}
+
+export function uninstallCommand(origin: string): string {
+  return `& ([scriptblock]::Create((irm ${origin}/api/v1/agents/uninstall.ps1)))`
 }

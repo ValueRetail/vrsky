@@ -67,8 +67,14 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 			// The OAuth callback is also exempt: it's a top-level browser redirect
 			// from the provider, so it can't carry the X-Tenant-ID header — it
 			// derives the tenant from the signed state cookie set at StartOAuth.
+			// The agent download and its install scripts are fetched by a
+			// Windows machine with no login (pkg/managementapi/agent_release.go).
 			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") ||
 				strings.HasPrefix(r.URL.Path, "/api/v1/tenants") ||
+				strings.HasPrefix(r.URL.Path, "/api/v1/agents/download/") ||
+				r.URL.Path == "/api/v1/agents/release" ||
+				r.URL.Path == "/api/v1/agents/install.ps1" ||
+				r.URL.Path == "/api/v1/agents/uninstall.ps1" ||
 				r.URL.Path == "/api/v1/oauth/callback" ||
 				r.URL.Path == "/api/v1/alerts/webhook" ||
 				r.URL.Path == "/metrics" ||

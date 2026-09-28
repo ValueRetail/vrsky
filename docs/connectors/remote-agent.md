@@ -3,8 +3,8 @@
 The Remote Agent connector (`config.type: "remote_agent"`) connects a folder on
 another machine — a till, a warehouse PC, a customer's server — to a pipeline.
 The machine runs the small `vrsky-agent` program, which connects **out** to
-VRSky over HTTPS; no firewall port is opened on it. Installing and registering
-the agent is covered in the operator guide:
+VRSky over HTTPS; no firewall port is opened on it. Setting a machine up is one
+PowerShell command from Settings → Remote agents; see the operator guide:
 [Remote agent](../operator/remote-agent.md).
 
 The agent's own config file lists its folders by **name** and direction (`read`

@@ -23,6 +23,7 @@ vi.mock('@/services/agentService', async (orig) => ({
   createRegistrationToken: (n?: string) => createRegistrationToken(n),
   renameAgent: vi.fn(),
   revokeAgent: vi.fn(),
+  getAgentRelease: () => Promise.resolve({ platform: 'windows-amd64', version: 'test', sha256: '', size_bytes: 1, filename: 'vrsky-agent.exe' }),
 }))
 
 import AgentsPage from './AgentsPage'
