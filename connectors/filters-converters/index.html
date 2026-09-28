@@ -1790,6 +1790,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#media-files-pass-through" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Media files pass through
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2290,6 +2301,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#media-files-pass-through" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Media files pass through
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2349,6 +2371,15 @@ functions, see <a href="../converter/"><code>docs/converter/</code></a>.</p>
 <li>Filters and converters do not connect to external systems, so they have no
   credentials and no test-connection endpoint.</li>
 </ul>
+<h2 id="media-files-pass-through">Media files pass through<a class="headerlink" href="#media-files-pass-through" title="Permanent link">&para;</a></h2>
+<p>A message whose content is a media file — an image, audio, video or PDF — is
+not records, so filters and converters pass it on <strong>unchanged</strong>: same bytes
+(or claim-check reference), same content type, same <code>filename</code>. This is what
+lets one pipeline carry a catalogue's records and their pictures (see
+<a href="../business-central/#pictures">Business Central → Pictures</a>). A filter's rules
+do not apply to them. <code>application/octet-stream</code> is not treated as media: file
+and agent uploads use it for anything unrecognised, CSV included, and those
+are still parsed.</p>
 
 
 

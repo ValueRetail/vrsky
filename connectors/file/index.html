@@ -2332,7 +2332,10 @@
 <li><code>file.path</code> — output directory, relative to your workspace's own area of the
   mounted volume. If empty, files go to the top of that area.</li>
 </ul>
-<p>File naming and serialization options are configured via the in-app pipeline editor (Property panel).</p>
+<p>File naming and serialization options are configured via the in-app pipeline editor (Property panel). A media file (image, audio, video, PDF) that carries a <code>filename</code> in its
+metadata is always written under that name, even when a filename pattern is
+set — the pattern names the records, and pictures travelling with them keep
+their own names (see <a href="../business-central/#pictures">Business Central → Pictures</a>).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>

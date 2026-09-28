@@ -2377,7 +2377,9 @@ replaced.</p>
   <a href="../file/">file connector</a>: <code>{id}</code>, <code>{timestamp}</code> (<code>20060102-150405</code>),
   <code>{extension}</code> (from the content type) and <code>{source}</code>. Without a pattern the
   incoming <code>filename</code> is kept (with a new extension if a converter changed the
-  format), else <code>&lt;id&gt;.&lt;extension&gt;</code>.</li>
+  format), else <code>&lt;id&gt;.&lt;extension&gt;</code>. A media file (image, audio, video, PDF)
+  that carries a <code>filename</code> always keeps it, pattern or not — so a pattern for
+  the records does not rename the pictures that travel with them.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"remote_agent"</span><span class="p">,</span>

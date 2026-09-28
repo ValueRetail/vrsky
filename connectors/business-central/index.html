@@ -1598,6 +1598,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pictures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pictures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2266,6 +2283,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pictures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pictures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2359,6 +2393,88 @@ permission), grant it access to the BC environment, and configure:</p>
 <span class="w">    </span><span class="nt">"filter"</span><span class="p">:</span><span class="w"> </span><span class="s2">"status eq 'Open'"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"incremental"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="pictures">Pictures<a class="headerlink" href="#pictures" title="Permanent link">&para;</a></h3>
+<p>Set <code>pictures: true</code> on a source node (<strong>Also send pictures</strong> in the editor)
+to send the records' pictures along with them. The records go out exactly as
+without it — every field, same request, so a converter after the node makes
+the same CSV as before — and after each page, one message per picture of that
+page's records, carrying the image file. Business Central has pictures on
+<code>items</code>, <code>customers</code>, <code>vendors</code>, <code>employees</code> and <code>contacts</code>; any other entity
+is refused when the pipeline starts.</p>
+<p>Only a picture that is <strong>new or changed</strong> is downloaded and sent: the node
+checks each record's picture id and skips one it has already sent. After the
+connector restarts, the first poll sends each picture once more.</p>
+<p>Each picture message has BC's content type (<code>image/jpeg</code>, <code>image/png</code> …),
+the original image bytes, and this metadata:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filename</code></td>
+<td><code>&lt;number&gt;.&lt;ext&gt;</code>, e.g. <code>1896-S.jpg</code>; the record id when there is no usable number</td>
+</tr>
+<tr>
+<td><code>number</code>, <code>display_name</code></td>
+<td>from the record, when it has them</td>
+</tr>
+<tr>
+<td><code>record_id</code>, <code>picture_id</code></td>
+<td>BC's ids</td>
+</tr>
+<tr>
+<td><code>width</code>, <code>height</code></td>
+<td>in pixels, from BC</td>
+</tr>
+<tr>
+<td><code>entity</code></td>
+<td>e.g. <code>items</code></td>
+</tr>
+</tbody>
+</table>
+<p>Along the pipeline:</p>
+<ul>
+<li><strong>Converters and filters pass pictures through untouched</strong> — every media
+  file does (images, audio, video, PDF). A filter on the records does not
+  filter their pictures.</li>
+<li><strong>The file and remote-agent destinations write each picture under its
+  <code>filename</code></strong>, even when a filename pattern is set: the pattern names the
+  records, the pictures keep their own names. So <strong>BC items (pictures on) →
+  converter (CSV) → Remote Agent</strong> puts <code>catalogue-….csv</code> and <code>1896-S.jpg</code>,
+  <code>1900-S.jpg</code> … side by side in the agent's folder.</li>
+<li>Pictures over 256 KB travel through the claim-check like any large payload.</li>
+</ul>
+<p>Notes:</p>
+<ul>
+<li><strong>Picture changes on an unchanged item.</strong> With <code>incremental</code>, the node only
+  looks at records whose <code>lastModifiedDateTime</code> moved; replacing a picture in
+  BC is expected to move it, but that is BC's behaviour, not something VRSky
+  controls. Without <code>incremental</code>, every poll checks every record's picture id
+  — one small request per record, no download unless it changed.</li>
+<li><strong>A failed picture download</strong> fails that poll: the incremental watermark
+  holds, so the next poll sends that page's records again and retries the
+  picture.</li>
+<li><strong>Request cost.</strong> The first poll of a large catalogue is about two extra
+  requests per record (picture details, then the image); after that, one
+  small request per record polled.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"business_central"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"business_central"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"aad_tenant_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;tenant-guid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"company_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;company-guid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-id&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"client_secret_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"entity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"items"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"pictures"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">900</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
