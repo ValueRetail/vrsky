@@ -21,15 +21,68 @@ firewall port has to be opened on the machine.
     a write folder. There is no way for VRSky to run a program, read any other
     folder, or write outside the ones listed.
 
-## 1. Get the agent
+## Quick install (one command)
 
-Download `vrsky-agent-windows-amd64.exe` from the latest successful **Build
-remote agent binaries** run in GitHub Actions (the run's *Artifacts*), or build
-it yourself with `make -C src build-agent`.
+In VRSky, open **Settings → Remote agents → Generate registration token**. It
+shows one PowerShell command. On the machine, open PowerShell with **Run as
+administrator** and paste it. It looks like:
 
-Copy it to the machine, for example to `C:\Program Files\VRSky\vrsky-agent.exe`.
+```powershell
+& ([scriptblock]::Create((irm https://vrsky.valueretail.no/api/v1/agents/install.ps1))) -Url https://vrsky.valueretail.no -Token vrsky_reg_…
+```
 
-## 2. Write the config
+It downloads the agent from VRSky (and checks its checksum), asks which two
+folders to use, registers the machine, installs the **VRSky Agent** service and
+starts it. The machine then shows as online under Settings → Remote agents.
+
+- The folders it asks for: one VRSky **reads** new files from (default
+  `C:\VRSky\inbox`), one VRSky **writes** files into (default
+  `C:\VRSky\outbox`). They are named `inbox` and `outbox` in the pipeline
+  editor. Their paths stay in the config file on the machine; VRSky never sees
+  them.
+- The token works once and expires after an hour. Generate a new one if it
+  fails.
+- No internet access beyond VRSky's own address is needed.
+
+Options, added after the command: `-Name` (default: the computer name),
+`-Inbox`/`-Outbox` (skip the questions), `-ExePath` (use a local `.exe` instead
+of downloading), `-NoService` (configure and register only).
+
+### Upgrading
+
+Run the same command again — without `-Token`, if the machine is already
+registered. It replaces the agent with the version this VRSky offers,
+restarting the service, and keeps the config and registration. Settings →
+Remote agents shows each agent's version.
+
+### Uninstalling
+
+```powershell
+& ([scriptblock]::Create((irm https://vrsky.valueretail.no/api/v1/agents/uninstall.ps1)))
+```
+
+Stops and removes the service and deletes the agent. The config, credential
+and logs in `C:\ProgramData\VRSky\agent` are kept so reinstalling needs no
+new token; add `-Purge` to delete them too. Then revoke the agent under
+Settings → Remote agents.
+
+## Manual install
+
+The same thing, step by step, for when the quick install cannot be used.
+
+### 1. Get the agent
+
+Download it from VRSky: Settings → Remote agents → Generate registration token
+→ *Other ways* → **Download vrsky-agent.exe**, or from
+`https://vrsky.valueretail.no/api/v1/agents/download/windows-amd64`. It is
+also published by every **Build and Push Docker Images** run in GitHub Actions
+(the run's *Artifacts*, `vrsky-agent`), or built with `make -C src build-agent`.
+
+Copy it to `C:\Program Files\VRSky\vrsky-agent.exe`. Run
+`Unblock-File "C:\Program Files\VRSky\vrsky-agent.exe"` once if Windows marks
+it as downloaded.
+
+### 2. Write the config
 
 Create `C:\ProgramData\VRSky\agent\config.json`:
 
@@ -60,10 +113,11 @@ Check it:
 It prints the folders exactly as VRSky will see them — names and directions,
 no paths.
 
-## 3. Register it
+### 3. Register it
 
-In VRSky, open **Settings → Remote agents → Generate registration token**. It
-shows a command; run it on the machine within an hour:
+In VRSky, open **Settings → Remote agents → Generate registration token**, then
+*Other ways*. Run the register command it shows within an hour, with the full
+path to the agent in front:
 
 ```powershell
 & "C:\Program Files\VRSky\vrsky-agent.exe" register --url https://vrsky.valueretail.no --token vrsky_reg_…
@@ -73,7 +127,7 @@ The token works once. Registration stores the agent's credential in
 `C:\ProgramData\VRSky\agent\credential.json`, readable only by Administrators
 and the SYSTEM account. The agent now appears under Settings → Remote agents.
 
-## 4. Try it in a window
+### 4. Try it in a window
 
 ```powershell
 & "C:\Program Files\VRSky\vrsky-agent.exe" run
@@ -83,7 +137,7 @@ It logs to the window. In VRSky, build a pipeline with **Remote Agent** as
 input or output, pick this agent and a folder, and deploy. Drop a file into the
 read folder and watch it go. Ctrl-C stops the agent.
 
-## 5. Run it as a service
+### 5. Run it as a service
 
 From a PowerShell opened with **Run as administrator**:
 
@@ -163,6 +217,9 @@ only on a private network like a tailnet, never for production.
 | Symptom | Cause |
 |---|---|
 | `access denied — run this … as administrator` | `install`, `start`, `stop` need an elevated prompt. |
+| Quick install: `Run this in a PowerShell opened with 'Run as administrator'` | The prompt must start with `C:\Windows\system32`. Right-click PowerShell → Run as administrator. |
+| Quick install: `The download is corrupt (checksum mismatch)` | A proxy or antivirus altered the download. Run the command again; if it persists, use `-ExePath` with a copy from the Download link. |
+| Quick install: `-Token must be the vrsky_reg_… token` | The pasted line contained more than the token after `-Token` (usually the whole command twice). Paste the command from Settings once. |
 | `this agent is not registered` | Run `register` first; check `data_dir` if you changed it. |
 | `registration token is unknown, already used, or expired` | Tokens are single-use and last an hour. Generate a new one. |
 | `an agent called … already exists` | Pass `--name` with another name, or revoke the old agent first. |

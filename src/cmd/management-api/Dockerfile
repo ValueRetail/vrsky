@@ -6,6 +6,7 @@ RUN apk add --no-cache git
 
 COPY src/go.mod src/go.sum ./
 COPY src/cmd/management-api/ ./cmd/management-api/
+COPY src/cmd/vrsky-agent/ ./cmd/vrsky-agent/
 COPY src/pkg/ ./pkg/
 COPY src/internal/ ./internal/
 
@@ -24,6 +25,18 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o management-api \
     ./cmd/management-api
+
+# The Windows remote agent, served for download by this API
+# (pkg/managementapi/agent_release.go) so Settings → Remote agents always
+# offers a build from the same commit as the server. build-push-acr.sh passes
+# the git describe as AGENT_VERSION; a plain `docker compose build` says dev.
+ARG AGENT_VERSION=dev
+RUN mkdir -p agent && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath \
+    -ldflags="-w -s -X github.com/ValueRetail/vrsky/pkg/agent.Version=${AGENT_VERSION}" \
+    -o agent/vrsky-agent-windows-amd64.exe \
+    ./cmd/vrsky-agent && \
+    printf '%s\n' "${AGENT_VERSION}" > agent/version.txt
 
 FROM alpine:3.18
 
@@ -56,6 +69,9 @@ COPY src/cmd/management-api/entrypoint.sh ./
 
 # Copy the compiled binary
 COPY --from=builder /build/management-api .
+
+# The downloadable Windows agent (AGENT_RELEASE_DIR defaults to /app/agent).
+COPY --from=builder /build/agent ./agent/
 
 RUN chmod +x ./management-api ./entrypoint.sh
 

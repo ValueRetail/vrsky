@@ -12,8 +12,9 @@
 
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
+import InstallCommand, { UninstallCommand } from '@/components/Agents/InstallCommand'
 import {
-  listAgents, createRegistrationToken, renameAgent, revokeAgent, registerCommand,
+  listAgents, createRegistrationToken, renameAgent, revokeAgent,
   type Agent, type AgentRegistrationToken,
 } from '@/services/agentService'
 
@@ -138,8 +139,6 @@ export default function AgentsPage() {
     }
   }
 
-  const command = newToken ? registerCommand(window.location.origin, newToken.token) : ''
-
   return (
     <div style={{ padding: '20px', maxWidth: '1100px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '6px' }}>Remote agents</h1>
@@ -157,24 +156,7 @@ export default function AgentsPage() {
 
       {newToken && (
         <div style={{ padding: '12px', background: '#fefce8', border: '1px solid #fde68a', color: '#713f12', fontSize: '12px', borderRadius: '6px', marginBottom: '16px' }}>
-          <div style={{ fontWeight: 600, marginBottom: '6px' }}>
-            Run this on the machine within the next hour. It will not be shown again.
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <code style={{ flex: '1 1 420px', padding: '6px 8px', background: '#fff', border: '1px solid #fde68a', borderRadius: '4px', wordBreak: 'break-all' }}>
-              {command}
-            </code>
-            <button
-              onClick={() => navigator.clipboard?.writeText(command)}
-              style={{ ...button, background: '#2563eb', color: '#fff', border: 'none' }}
-            >
-              Copy
-            </button>
-            <button onClick={() => setNewToken(null)} style={button}>Done</button>
-          </div>
-          <div style={{ marginTop: '6px', color: '#92400e' }}>
-            The token works once. Anyone who has it can register a machine in this workspace until it is used or expires.
-          </div>
+          <InstallCommand origin={window.location.origin} token={newToken.token} onDone={() => setNewToken(null)} />
         </div>
       )}
 
@@ -303,6 +285,7 @@ export default function AgentsPage() {
           </tbody>
         </table>
       </div>
+      <UninstallCommand origin={window.location.origin} />
     </div>
   )
 }

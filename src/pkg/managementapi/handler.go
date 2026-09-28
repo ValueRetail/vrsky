@@ -961,6 +961,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/agents", viewer(http.HandlerFunc(h.ListAgents)))
 	mux.Handle("PATCH /api/v1/agents/{id}", editor(http.HandlerFunc(h.RenameAgent)))
 	mux.Handle("DELETE /api/v1/agents/{id}", adminMW(http.HandlerFunc(h.RevokeAgent)))
+	// The downloadable agent and its install scripts. PUBLIC on purpose: the
+	// machine being set up has no login. See agent_release.go.
+	mux.HandleFunc("GET /api/v1/agents/release", h.GetAgentRelease)
+	mux.HandleFunc("GET /api/v1/agents/download/windows-amd64", h.DownloadAgent)
+	mux.HandleFunc("GET /api/v1/agents/install.ps1", h.ServeAgentInstallScript)
+	mux.HandleFunc("GET /api/v1/agents/uninstall.ps1", h.ServeAgentUninstallScript)
 
 	// Schema discovery for the mapping UI. Editor rather than viewer: it makes
 	// the platform open an outbound connection to a customer system using

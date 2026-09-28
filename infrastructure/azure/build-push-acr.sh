@@ -31,16 +31,20 @@ GROUP="${1:-all}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# build <acr-repo:tag> <dockerfile>
+# build <acr-repo:tag> <dockerfile> [extra az acr build args…]
 build() {
   local tag="$1" dockerfile="$2"
+  shift 2
   echo ""
-  echo ">>> az acr build  $tag   (-f $dockerfile)"
-  az acr build --registry "$REG" --image "$tag" --file "$dockerfile" .
+  echo ">>> az acr build  $tag   (-f $dockerfile) $*"
+  az acr build --registry "$REG" --image "$tag" --file "$dockerfile" "$@" .
 }
 
 build_core() {
-  build vrsky/management-api:latest src/cmd/management-api/Dockerfile
+  # management-api also ships the downloadable Windows agent; stamp it with
+  # the commit so Settings → Remote agents shows which build it offers.
+  build vrsky/management-api:latest src/cmd/management-api/Dockerfile \
+    --build-arg "AGENT_VERSION=$(git describe --always --dirty 2>/dev/null || echo dev)"
   build vrsky/ui:latest             ui/Dockerfile
   # The pipeline transforms are the SHARED data-filter/data-converter services
   # (#201) — the same binaries dev/TEST runs, with the claim-check + record

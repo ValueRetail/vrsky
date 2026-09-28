@@ -236,6 +236,33 @@ jobs:
         env:
           VRSKY_AGENT_SERVICE_TEST: "1"
         run: go test -count=1 -v ./pkg/agent/... ./pkg/agentproto/... ./cmd/vrsky-agent/...
+      # The one-line installer Settings shows (pkg/managementapi/agent_install.ps1),
+      # run offline: a local .exe instead of a download, no token, no service.
+      # Proves the script parses under Windows PowerShell 5.1 on a real Windows,
+      # writes a config the agent accepts, and that uninstall -Purge leaves
+      # nothing behind. Registration and the service are covered by the Go
+      # test above and by a manual run against a real VRSky.
+      - name: Install script — offline install, check, uninstall
+        shell: powershell
+        working-directory: src
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go build -o bin\vrsky-agent-windows-amd64.exe .\cmd\vrsky-agent
+          $install = [scriptblock]::Create((Get-Content -Raw pkg\managementapi\agent_install.ps1))
+          & $install -Url https://vrsky.example -ExePath bin\vrsky-agent-windows-amd64.exe `
+            -Inbox C:\VRSkyTest\inbox -Outbox C:\VRSkyTest\outbox -NoService
+          if (-not (Test-Path 'C:\Program Files\VRSky\vrsky-agent.exe')) { throw 'agent not installed' }
+          $cfg = Get-Content -Raw 'C:\ProgramData\VRSky\agent\config.json' | ConvertFrom-Json
+          if ($cfg.directories.inbox.path -ne 'C:\VRSkyTest\inbox' -or $cfg.directories.outbox.mode -ne 'write') { throw "unexpected config: $cfg" }
+          $check = & 'C:\Program Files\VRSky\vrsky-agent.exe' check | Out-String
+          if ($check -notmatch 'Not registered yet') { throw "unexpected check output: $check" }
+          # A second run must keep the config (upgrade path) and not ask questions.
+          & $install -Url https://vrsky.example -ExePath bin\vrsky-agent-windows-amd64.exe -NoService
+          if ((Get-Content -Raw 'C:\ProgramData\VRSky\agent\config.json') -notmatch 'VRSkyTest') { throw 'config was overwritten on re-run' }
+          $uninstall = [scriptblock]::Create((Get-Content -Raw pkg\managementapi\agent_uninstall.ps1))
+          & $uninstall -Purge
+          if (Test-Path 'C:\Program Files\VRSky\vrsky-agent.exe') { throw 'agent still present after uninstall' }
+          if (Test-Path 'C:\ProgramData\VRSky\agent') { throw 'data dir still present after -Purge' }
 
   # Downloadable agent binaries for every push and PR (Actions → the run →
   # Artifacts). Releases attaching them to tags are a follow-up.
