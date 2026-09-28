@@ -113,6 +113,9 @@ SKIP_MONITORING=true SKIP_INGRESS=true bash "$WORK/deploy-vrsky-platform.sh" <<<
 # --- 4b. HA: PodDisruptionBudget so a node drain keeps a filter replica up ----
 kubectl apply -f infrastructure/kubernetes/data-filter/pdb.yaml
 kubectl apply -f infrastructure/kubernetes/data-converter/pdb.yaml
+# Headless Services for the transforms' live-event streams (see service.yaml).
+kubectl apply -f infrastructure/kubernetes/data-filter/service.yaml
+kubectl apply -f infrastructure/kubernetes/data-converter/service.yaml
 
 cat <<EOF
 

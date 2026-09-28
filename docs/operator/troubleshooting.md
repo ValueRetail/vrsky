@@ -60,6 +60,27 @@ script again.
 KES (`quay.io/minio/kes`, `infrastructure/kubernetes/encryption/`) still pulls
 from quay.io; if it starts failing the same way, it needs the same treatment.
 
+## A builder panel says "cannot reach the data-converter service"
+
+The builder's live panels (Converter, Filter, File Watcher, …) are served by
+the management API, which proxies each worker's event stream at
+`vrsky-<worker>.vrsky-platform.svc.cluster.local:<port>`. That name needs a
+Kubernetes Service. The transforms did not have one until 2026-09-28 — they
+are core services deployed from their own directories, unlike the connectors,
+whose Services `deploy-connectors-azure.sh` generates — so every Converter and
+Filter panel in prod failed this way while the pipelines themselves ran fine.
+
+```bash
+kubectl -n vrsky-platform get svc vrsky-data-converter vrsky-data-filter
+```
+
+If either is missing, apply `infrastructure/kubernetes/<worker>/service.yaml`
+(`deploy-azure.sh` and `deploy-vrsky-platform.sh` do). The Services are
+headless on purpose: each replica keeps its own event hub, and the proxy opens
+one stream per pod so the panel sees all the traffic, not half. A test,
+`TestWorkerEventSourcesHaveKubernetesServices`, now fails if a proxied worker
+has no Service manifest.
+
 ## A pipeline deploys but no data flows
 
 1. Confirm it's **running** (Settings/Connections, or the connection status).

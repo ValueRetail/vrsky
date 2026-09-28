@@ -3,6 +3,7 @@ package managementapi
 import (
 	"bufio"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,11 +111,84 @@ func TestProxyWorkerEvents_HeartbeatBetweenFramesOnly(t *testing.T) {
 		<-r.Context().Done()
 	}, 0)
 
-	got := readUntil(t, url, ": ping\n\n", 5*time.Second)
+	// Frames are forwarded whole, so the heartbeat sent during the pause
+	// comes first and the frame follows intact.
+	got := readUntil(t, url, `"delivered"}`+"\n\n", 5*time.Second)
 	if !strings.Contains(got, `data: {"type":"delivered"}`+"\n\n") {
-		t.Errorf("a heartbeat was written inside a split frame; stream was:\n%q", got)
+		t.Errorf("the split frame did not arrive intact; stream was:\n%q", got)
 	}
 	if !strings.Contains(got, ": ping\n\n") {
 		t.Errorf("no heartbeat on an idle stream; stream was:\n%q", got)
+	}
+}
+
+// serveProxyReplicas is serveProxy with several upstreams standing in for the
+// replicas of one worker, the way a headless Service resolves to every pod.
+func serveProxyReplicas(t *testing.T, upstreams ...http.HandlerFunc) string {
+	t.Helper()
+	var urls []string
+	for _, h := range upstreams {
+		up := httptest.NewServer(h)
+		t.Cleanup(up.Close)
+		urls = append(urls, up.URL)
+	}
+	orig := workerUpstreams
+	workerUpstreams = func(context.Context, workerEventSource) ([]string, error) { return urls, nil }
+	t.Cleanup(func() { workerUpstreams = orig })
+	return serveProxy(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }, 0)
+}
+
+func sseReplica(hello, frame string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(hello + frame))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}
+}
+
+// The transforms run two replicas, each with its own event hub, and the
+// pipeline's messages are split between them. The panel must hear both — one
+// stream would show half the traffic and look like a pipeline dropping data.
+func TestProxyWorkerEvents_FansInAcrossReplicas(t *testing.T) {
+	hello := "data: {\"type\":\"connected\"}\n\n"
+	url := serveProxyReplicas(t,
+		sseReplica(hello, "data: {\"type\":\"converted\",\"from\":\"a\"}\n\n"),
+		sseReplica(hello, "data: {\"type\":\"converted\",\"from\":\"b\"}\n\n"),
+	)
+	got := readUntil(t, url, "NEVER", 1500*time.Millisecond)
+	for _, want := range []string{`"from":"a"`, `"from":"b"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("frames from one replica are missing (%s); stream was:\n%q", want, got)
+		}
+	}
+	if n := strings.Count(got, `"type":"connected"`); n != 1 {
+		t.Errorf("%d connected frames, want exactly 1 — each replica greets, the panel needs one", n)
+	}
+}
+
+// One replica down must not hide the other: its frames still flow, and the
+// stream says what is missing.
+func TestProxyWorkerEvents_ReportsAnUnreachableReplica(t *testing.T) {
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadURL := "http://" + dead.Addr().String()
+	dead.Close() // nothing listens there any more
+
+	live := httptest.NewServer(sseReplica("", "data: {\"type\":\"converted\",\"from\":\"live\"}\n\n"))
+	t.Cleanup(live.Close)
+	orig := workerUpstreams
+	workerUpstreams = func(context.Context, workerEventSource) ([]string, error) { return []string{deadURL, live.URL}, nil }
+	t.Cleanup(func() { workerUpstreams = orig })
+	url := serveProxy(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }, 0)
+
+	got := readUntil(t, url, `"from":"live"`, 5*time.Second)
+	if !strings.Contains(got, `"from":"live"`) {
+		t.Fatalf("the live replica's frame never arrived; stream was:\n%q", got)
+	}
+	if !strings.Contains(got, "cannot reach 1 of 2 data-filter instances") {
+		t.Errorf("the missing replica was not reported; stream was:\n%q", got)
 	}
 }
