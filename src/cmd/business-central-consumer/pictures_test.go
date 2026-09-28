@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nats-io/nats.go"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -373,5 +375,111 @@ func TestPictures_PreviewShowsTheRecords(t *testing.T) {
 	c.handleSampleData()(rec, httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body)))
 	if !strings.Contains(rec.Body.String(), `"ok":true`) || !strings.Contains(rec.Body.String(), `"unitPrice":1000.8`) {
 		t.Errorf("preview for a node with pictures on = %s", rec.Body.String())
+	}
+}
+
+// --- Resend everything ---
+
+// A resend makes the next poll send everything: records regardless of the
+// incremental watermark, pictures regardless of what was already sent. The
+// poll after that is incremental again.
+func TestResend_NextPollSendsEverythingOnce(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"1896-S","lastModifiedDateTime":"2026-09-28T10:00:00Z"}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", content: jpeg}})
+	c, got, mu := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+	cfg.Incremental, cfg.NodeID = true, "n1"
+
+	if err := fetch(t, c, cfg); err != nil { // first poll: everything, watermark saved
+		t.Fatal(err)
+	}
+	if err := fetch(t, c, cfg); err != nil { // second: incremental, picture unchanged
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	q := f.pageQuery
+	f.mu.Unlock()
+	if !strings.Contains(q, "lastModifiedDateTime") {
+		t.Fatalf("second poll was not incremental: %q", q)
+	}
+	mu.Lock()
+	_, pics := split(*got)
+	before := len(pics)
+	mu.Unlock()
+	if before != 1 {
+		t.Fatalf("pictures before resend = %d, want 1", before)
+	}
+
+	cfg.resendAll = true
+	if err := fetch(t, c, cfg); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	q = f.pageQuery
+	f.mu.Unlock()
+	if strings.Contains(q, "lastModifiedDateTime") {
+		t.Errorf("the resend poll still carried the watermark: %q", q)
+	}
+	mu.Lock()
+	_, pics = split(*got)
+	after := len(pics)
+	mu.Unlock()
+	if after != 2 {
+		t.Errorf("pictures after resend = %d, want 2 (the unchanged picture sent again)", after)
+	}
+	if cfg.resendAll {
+		t.Error("resendAll still set after a complete fetch; every poll would resend")
+	}
+
+	if err := fetch(t, c, cfg); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	q = f.pageQuery
+	f.mu.Unlock()
+	if !strings.Contains(q, "lastModifiedDateTime") {
+		t.Errorf("the poll after a resend was not incremental again: %q", q)
+	}
+}
+
+// A resend that fails halfway is not done: the flag stays, so the next poll
+// resends again rather than quietly going back to incremental.
+func TestResend_FailedFetchKeepsTheFlag(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"1896-S"}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", contentStatus: http.StatusInternalServerError}})
+	c, _, _ := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+	cfg.resendAll = true
+	if err := fetch(t, c, cfg); err == nil {
+		t.Fatal("a 500 on the picture did not fail the fetch")
+	}
+	if !cfg.resendAll {
+		t.Error("resendAll cleared by a failed fetch")
+	}
+}
+
+// The command reaches the poller of the named connection only.
+func TestResendCommand_ReachesTheNamedPollerOnly(t *testing.T) {
+	c, _, _ := newTestConsumer()
+	c.active = map[string]*poller{
+		"conn-a": {cancel: func() {}, resend: make(chan struct{}, 1)},
+		"conn-b": {cancel: func() {}, resend: make(chan struct{}, 1)},
+	}
+	c.handleResendCommand(&nats.Msg{Data: []byte(`{"connection_id":"conn-a","tenant_id":"t1"}`)})
+	c.handleResendCommand(&nats.Msg{Data: []byte(`{"connection_id":"conn-a","tenant_id":"t1"}`)}) // a second one queues nothing extra
+	c.handleResendCommand(&nats.Msg{Data: []byte(`{"connection_id":"unknown","tenant_id":"t1"}`)})
+	select {
+	case <-c.active["conn-a"].resend:
+	default:
+		t.Fatal("conn-a's poller was not asked to resend")
+	}
+	select {
+	case <-c.active["conn-b"].resend:
+		t.Fatal("conn-b's poller was asked to resend")
+	default:
 	}
 }

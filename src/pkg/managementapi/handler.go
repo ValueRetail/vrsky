@@ -928,6 +928,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Control operations
 	mux.Handle("POST /api/v1/connections/{id}/start", editor(http.HandlerFunc(h.StartConnection)))
 	mux.Handle("POST /api/v1/connections/{id}/stop", editor(http.HandlerFunc(h.StopConnection)))
+	mux.Handle("POST /api/v1/connections/{id}/resend", editor(http.HandlerFunc(h.ResendConnection)))
 
 	// Test a draft connector config without persisting it (#82).
 	mux.Handle("POST /api/v1/connections/test", editor(http.HandlerFunc(h.TestConnection)))
@@ -959,7 +960,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// See agents_handler.go.
 	mux.Handle("POST /api/v1/agents/registration-tokens", adminMW(http.HandlerFunc(h.CreateAgentRegistrationToken)))
 	mux.Handle("GET /api/v1/agents", viewer(http.HandlerFunc(h.ListAgents)))
-	mux.Handle("PATCH /api/v1/agents/{id}", editor(http.HandlerFunc(h.RenameAgent)))
+	mux.Handle("GET /api/v1/agents/groups", viewer(http.HandlerFunc(h.ListAgentGroups)))
+	mux.Handle("PATCH /api/v1/agents/{id}", editor(http.HandlerFunc(h.UpdateAgent)))
 	mux.Handle("DELETE /api/v1/agents/{id}", adminMW(http.HandlerFunc(h.RevokeAgent)))
 	// The downloadable agent and its install scripts. PUBLIC on purpose: the
 	// machine being set up has no login. See agent_release.go.
@@ -1163,4 +1165,55 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// Tenant data ingestion endpoint (API key auth, not session auth)
 	apiKeyMW := TenantAPIKeyMiddleware(h.repo)
 	mux.HandleFunc("POST /api/v1/tenant/{tenant_id}/data", apiKeyMW(http.HandlerFunc(h.HandleTenantDataIngestion)).ServeHTTP)
+}
+
+// ResendConnection asks a running pipeline's source to send everything again
+// — for a till that just joined a group, or after a folder was emptied. A
+// source that supports it (Business Central: all records and, with pictures
+// on, all pictures) does so on its next poll; other sources ignore the
+// command. The pipeline itself is untouched.
+//
+// POST /api/v1/connections/{id}/resend
+func (h *Handler) ResendConnection(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+	connID := strings.TrimSpace(r.PathValue("id"))
+	if connID == "" {
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		return
+	}
+	conn, err := h.repo.GetConnection(ctx, connID)
+	if err != nil {
+		if _, ok := err.(*NotFoundError); ok {
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		} else {
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+		}
+		return
+	}
+	if conn.TenantID != tenantID {
+		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		return
+	}
+	if conn.Status != "running" {
+		_ = writeError(w, http.StatusConflict, "NotRunning", "the pipeline is not running; deploy it first", nil)
+		return
+	}
+	if h.publisher == nil {
+		_ = writeError(w, http.StatusServiceUnavailable, "CommandsUnavailable", "the command bus is not configured", nil)
+		return
+	}
+	if err := h.publisher.PublishConnectionResend(ctx, connID, tenantID); err != nil {
+		_ = writeError(w, http.StatusServiceUnavailable, "PublishFailed", err.Error(), nil)
+		return
+	}
+	SetAuditAction(ctx, "connection.resend")
+	SetAuditDetail(ctx, "connection_id", connID)
+	_ = writeJSON(w, http.StatusAccepted, SuccessResponse{Data: map[string]any{
+		"connection_id": connID, "requested_at": time.Now().UTC(),
+	}})
 }

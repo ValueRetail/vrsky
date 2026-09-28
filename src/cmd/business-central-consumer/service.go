@@ -55,11 +55,17 @@ type bcConsumer struct {
 
 	httpClient *http.Client
 
-	active map[string]context.CancelFunc
+	active map[string]*poller
 	mu     sync.RWMutex
 
-	startSub *nats.Subscription
-	stopSub  *nats.Subscription
+	startSub, stopSub, resendSub *nats.Subscription
+}
+
+// poller is one running connection: how to stop it, and how to ask it for an
+// immediate full poll.
+type poller struct {
+	cancel context.CancelFunc
+	resend chan struct{} // capacity 1
 }
 
 // BCConfig is the per-node configuration (config.business_central). client_secret
@@ -104,6 +110,11 @@ type BCConfig struct {
 	// pictureSeen is this poller's record id → picture id of what it last
 	// published, so an unchanged picture is not downloaded again.
 	pictureSeen map[string]string
+
+	// resendAll makes the next fetch ignore the incremental watermark and the
+	// seen pictures, so everything goes out again — for a till that just
+	// joined the pipeline's group. Cleared once that fetch completes.
+	resendAll bool
 }
 
 type nodeConfig struct {
@@ -133,7 +144,7 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	if c.checkpoints == nil {
 		c.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
-	c.active = make(map[string]context.CancelFunc)
+	c.active = make(map[string]*poller)
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
@@ -163,6 +174,11 @@ func (c *bcConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 		return fmt.Errorf("subscribe stop commands: %w", err)
 	}
 	c.stopSub = stopSub
+	resendSub, err := c.nc.Subscribe("vrsky.commands.*.connection.resend", c.handleResendCommand)
+	if err != nil {
+		return fmt.Errorf("subscribe resend commands: %w", err)
+	}
+	c.resendSub = resendSub
 
 	c.logger.Info("Subscribed to NATS command topics")
 	<-ctx.Done()
@@ -176,11 +192,14 @@ func (c *bcConsumer) Stop(ctx context.Context) error {
 	if c.stopSub != nil {
 		_ = c.stopSub.Unsubscribe()
 	}
-	c.mu.Lock()
-	for _, cancel := range c.active {
-		cancel()
+	if c.resendSub != nil {
+		_ = c.resendSub.Unsubscribe()
 	}
-	c.active = make(map[string]context.CancelFunc)
+	c.mu.Lock()
+	for _, p := range c.active {
+		p.cancel()
+	}
+	c.active = make(map[string]*poller)
 	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -222,12 +241,34 @@ func (c *bcConsumer) handleStartCommand(msg *nats.Msg) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	p := &poller{cancel: cancel, resend: make(chan struct{}, 1)}
 	c.mu.Lock()
-	c.active[cmd.ConnectionID] = cancel
+	c.active[cmd.ConnectionID] = p
 	c.mu.Unlock()
 
 	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds, "pictures", cfg.Pictures)
-	go c.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
+	go c.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg, p.resend)
+}
+
+// handleResendCommand asks a running poller to send everything again on an
+// immediate poll: records regardless of the incremental watermark, pictures
+// regardless of what it already sent. A connection this service does not run
+// is ignored, as is a tenant mismatch.
+func (c *bcConsumer) handleResendCommand(msg *nats.Msg) {
+	var cmd commandMessage
+	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
+		return
+	}
+	c.mu.RLock()
+	p := c.active[cmd.ConnectionID]
+	c.mu.RUnlock()
+	if p == nil {
+		return
+	}
+	select {
+	case p.resend <- struct{}{}:
+	default: // one is already queued
+	}
 }
 
 func (c *bcConsumer) handleStopCommand(msg *nats.Msg) {
@@ -236,14 +277,14 @@ func (c *bcConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	c.mu.Lock()
-	if cancel, ok := c.active[cmd.ConnectionID]; ok {
-		cancel()
+	if p, ok := c.active[cmd.ConnectionID]; ok {
+		p.cancel()
 		delete(c.active, cmd.ConnectionID)
 	}
 	c.mu.Unlock()
 }
 
-func (c *bcConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg *BCConfig) {
+func (c *bcConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg *BCConfig, resend <-chan struct{}) {
 	logger := c.logger.With("connection_id", connID)
 	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
 
@@ -260,6 +301,10 @@ func (c *bcConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			poll()
+		case <-resend:
+			logger.Info("Resend requested: next poll sends everything")
+			cfg.resendAll = true
 			poll()
 		}
 	}
@@ -278,8 +323,11 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		return err
 	}
 	cursor := ""
-	if cfg.Incremental {
+	if cfg.Incremental && !cfg.resendAll {
 		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
+	}
+	if cfg.resendAll {
+		cfg.pictureSeen = map[string]string{}
 	}
 
 	next := cfg.entityURL(cursor)
@@ -316,6 +364,10 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		}
 		next = p.NextLink
 	}
+
+	// A resend is complete only once everything has gone out; a fetch that
+	// fails halfway keeps the flag, so the next poll resends again.
+	cfg.resendAll = false
 
 	// Advance only once every page has landed. A fetch that dies halfway
 	// resumes from the old watermark — the records it already published arrive

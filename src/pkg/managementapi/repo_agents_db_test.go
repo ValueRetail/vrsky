@@ -51,7 +51,7 @@ func TestAgentRepoDB_TenantScopingAndLifecycle(t *testing.T) {
 	})
 
 	// A token stores only its hash.
-	tok, err := repo.CreateAgentRegistrationToken(ctx, tA, "LAGER-01", owner)
+	tok, err := repo.CreateAgentRegistrationToken(ctx, tA, "LAGER-01", nil, owner)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}

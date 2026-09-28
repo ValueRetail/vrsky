@@ -26,6 +26,8 @@ export interface Agent {
   arch: string
   agent_version: string
   directories: AgentDirectory[]
+  /** Groups this agent is in (all-tills, store-oslo, …); a node can target a group. */
+  groups: string[]
   last_seen_at?: string | null
   online: boolean
   registered_at: string
@@ -38,7 +40,16 @@ export interface AgentRegistrationToken {
   tenant_id: string
   token: string
   suggested_name?: string
+  /** Joined by the agent that registers with this token (unless it passes --groups). */
+  suggested_groups?: string[]
   expires_at: string
+}
+
+/** One group name across the workspace's live agents. */
+export interface AgentGroup {
+  name: string
+  members: number
+  online: number
 }
 
 interface Envelope<T> {
@@ -50,17 +61,44 @@ export async function listAgents(): Promise<Agent[]> {
   return resp.data.data ?? []
 }
 
-export async function createRegistrationToken(suggestedName?: string): Promise<AgentRegistrationToken> {
-  const resp = await apiClient.post<Envelope<AgentRegistrationToken>>(
-    '/api/v1/agents/registration-tokens',
-    suggestedName ? { suggested_name: suggestedName } : {},
-  )
+export async function createRegistrationToken(suggestedName?: string, groups?: string[]): Promise<AgentRegistrationToken> {
+  const body: Record<string, unknown> = {}
+  if (suggestedName) body.suggested_name = suggestedName
+  if (groups && groups.length > 0) body.suggested_groups = groups
+  const resp = await apiClient.post<Envelope<AgentRegistrationToken>>('/api/v1/agents/registration-tokens', body)
+  return resp.data.data
+}
+
+/** PATCH: a field left out is left alone; `groups: []` clears the groups. */
+export async function updateAgent(id: string, patch: { name?: string; groups?: string[] }): Promise<Agent> {
+  const resp = await apiClient.patch<Envelope<Agent>>(`/api/v1/agents/${encodeURIComponent(id)}`, patch)
   return resp.data.data
 }
 
 export async function renameAgent(id: string, name: string): Promise<Agent> {
-  const resp = await apiClient.patch<Envelope<Agent>>(`/api/v1/agents/${encodeURIComponent(id)}`, { name })
-  return resp.data.data
+  return updateAgent(id, { name })
+}
+
+export async function listAgentGroups(): Promise<AgentGroup[]> {
+  const resp = await apiClient.get<Envelope<AgentGroup[]>>('/api/v1/agents/groups')
+  return resp.data.data ?? []
+}
+
+/** "all-tills, store-oslo" → ["all-tills", "store-oslo"]; blanks and repeats dropped. */
+export function parseGroups(text: string): string[] {
+  const out: string[] = []
+  for (const g of text.split(/[,\s]+/)) {
+    const t = g.trim()
+    if (t && !out.includes(t)) out.push(t)
+  }
+  return out
+}
+
+/** Ask a running pipeline's source to send everything again (e.g. to seed a
+ *  till that just joined a group). Sources that support it, such as Business
+ *  Central, do so on their next poll. */
+export async function resendConnection(connectionId: string): Promise<void> {
+  await apiClient.post(`/api/v1/connections/${encodeURIComponent(connectionId)}/resend`, {})
 }
 
 export async function revokeAgent(id: string): Promise<void> {

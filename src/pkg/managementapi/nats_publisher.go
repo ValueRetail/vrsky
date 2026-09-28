@@ -102,6 +102,18 @@ func (p *NATSPublisher) PublishConnectionStop(ctx context.Context, connID, tenan
 	return p.publishCommand(ctx, tenantID, "stop", cmd)
 }
 
+// PublishConnectionResend asks a running pipeline's source to send everything
+// again. Subject: vrsky.commands.{tenantID}.connection.resend
+func (p *NATSPublisher) PublishConnectionResend(ctx context.Context, connID, tenantID string) error {
+	cmd := ConnectionCommand{
+		Type:         "resend",
+		ConnectionID: connID,
+		TenantID:     tenantID,
+		Timestamp:    time.Now().UTC(),
+	}
+	return p.publishCommand(ctx, tenantID, "resend", cmd)
+}
+
 // PublishConnectionDelete publishes a connection deletion command
 // Subject: vrsky.commands.{tenantID}.connection.delete
 func (p *NATSPublisher) PublishConnectionDelete(ctx context.Context, connID, tenantID string) error {

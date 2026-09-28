@@ -105,6 +105,10 @@ type RegisterRequest struct {
 	Arch              string      `json:"arch"`
 	Version           string      `json:"version"`
 	Directories       []Directory `json:"directories"`
+	// Groups this agent joins on registration. Optional: a registration
+	// token can carry groups too, and these take precedence when given.
+	// Group names follow DirectoryName.
+	Groups []string `json:"groups,omitempty"`
 }
 
 // RegisterResponse carries the long-lived credential. It is returned exactly

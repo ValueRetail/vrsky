@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -144,6 +146,9 @@ func (e *testEnv) expectStart(connID, tenantID string, nodes, edges []any, agent
 		ra, ok := n.(map[string]any)["config"].(map[string]any)["remote_agent"].(map[string]any)
 		if !ok {
 			continue // not a remote_agent node; the gateway looks up no agent for it
+		}
+		if ra["target"] == "group" {
+			continue // members are looked up as a set; see expectMembers
 		}
 		agentID := ra["agent_id"].(string)
 		q := e.mock.ExpectQuery(`SELECT directories FROM agents\s+WHERE id::text = \$1 AND tenant_id::text = \$2 AND revoked_at IS NULL`).
@@ -746,9 +751,11 @@ func TestRegister_ConsumesTokenAtomicallyAndCreatesAgentInTokensTenant(t *testin
 	mock.ExpectBegin()
 	mock.ExpectQuery(`UPDATE agent_registration_tokens SET used_at = NOW\(\)\s+WHERE token_hash = \$1 AND used_at IS NULL AND expires_at > NOW\(\)`).
 		WithArgs(auth.HashToken(token)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "suggested", "created_by"}).AddRow("tok-1", tenant1, "LAGER-01", ""))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "suggested", "created_by", "suggested_groups"}).
+			AddRow("tok-1", tenant1, "LAGER-01", "", []byte(`{all-tills,store-oslo}`)))
+	var boundGroups driver.Value
 	mock.ExpectQuery(`INSERT INTO agents`).
-		WithArgs(tenant1, "LAGER-01", "host", "windows", "amd64", "0.1.0", sqlmock.AnyArg(), sqlmock.AnyArg(), nil).
+		WithArgs(tenant1, "LAGER-01", "host", "windows", "amd64", "0.1.0", sqlmock.AnyArg(), sqlmock.AnyArg(), nil, capture{&boundGroups}).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(agentA))
 	mock.ExpectExec(`UPDATE agent_registration_tokens SET used_by_agent`).WithArgs(agentA, "tok-1", tenant1).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -766,8 +773,69 @@ func TestRegister_ConsumesTokenAtomicallyAndCreatesAgentInTokensTenant(t *testin
 	if out.AgentID != agentA || !strings.HasPrefix(out.Credential, agentproto.CredentialPrefix) || out.Name != "LAGER-01" {
 		t.Errorf("response = %+v", out)
 	}
+	// The token's groups are what the new agent joins when it names none.
+	// pq quotes array elements on the wire.
+	if got := fmt.Sprint(boundGroups); got != `{"all-tills","store-oslo"}` {
+		t.Errorf("groups written = %v, want the token's all-tills and store-oslo", boundGroups)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)
+	}
+}
+
+// capture is a sqlmock matcher that records the value bound to an argument.
+type capture struct{ got *driver.Value }
+
+func (c capture) Match(v driver.Value) bool { *c.got = v; return true }
+
+// --groups on the machine overrides the token's; an unusable name is refused
+// before the token is spent (the transaction rolls back).
+func TestRegister_OwnGroupsOverrideTheTokensAndAreValidated(t *testing.T) {
+	newReg := func(t *testing.T) (*gateway, sqlmock.Sqlmock) {
+		db, mock, _ := sqlmock.New()
+		t.Cleanup(func() { _ = db.Close() })
+		g := newGateway()
+		g.db = db
+		g.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		return g, mock
+	}
+	token := agentproto.RegTokenPrefix + "abc"
+	tokenRow := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "tenant_id", "suggested", "created_by", "suggested_groups"}).
+			AddRow("tok-1", tenant1, "", "", []byte(`{all-tills}`))
+	}
+
+	g, mock := newReg(t)
+	var bound driver.Value
+	mock.ExpectBegin()
+	mock.ExpectQuery(`UPDATE agent_registration_tokens SET used_at`).WillReturnRows(tokenRow())
+	mock.ExpectQuery(`INSERT INTO agents`).
+		WithArgs(tenant1, "host", "host", "", "", "", sqlmock.AnyArg(), sqlmock.AnyArg(), nil, capture{&bound}).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(agentA))
+	mock.ExpectExec(`UPDATE agent_registration_tokens SET used_by_agent`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	rec := httptest.NewRecorder()
+	g.agentRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/agent/v1/register", bytes.NewReader(mustJSON(
+		agentproto.RegisterRequest{RegistrationToken: token, Hostname: "host", Groups: []string{" store-oslo ", "store-oslo", "b"}}))))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("register: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := fmt.Sprint(bound); got != `{"b","store-oslo"}` {
+		t.Errorf("groups written = %v, want the request's, trimmed, de-duplicated and sorted: b, store-oslo", bound)
+	}
+
+	g, mock = newReg(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`UPDATE agent_registration_tokens SET used_at`).WillReturnRows(tokenRow())
+	mock.ExpectRollback()
+	rec = httptest.NewRecorder()
+	g.agentRoutes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/agent/v1/register", bytes.NewReader(mustJSON(
+		agentproto.RegisterRequest{RegistrationToken: token, Hostname: "host", Groups: []string{"all tills"}}))))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "all tills") || !strings.Contains(rec.Body.String(), "use letters") {
+		t.Fatalf("bad group name: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("the token must not be consumed for a refused request: %v", err)
 	}
 }
 

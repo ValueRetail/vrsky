@@ -52,8 +52,29 @@ type SubscriberOpts struct {
 	// at 250ms. Must be < AckWait or redelivery can fire between heartbeats.
 	HeartbeatInterval time.Duration
 
+	// DeliverPolicy sets where a NEWLY CREATED consumer starts. The zero
+	// value is JetStream's default, DeliverAll: everything still in the
+	// stream, which is the replay a restarted worker relies on. A consumer
+	// created for something that joined late — an agent added to a group
+	// while its pipeline runs — wants nats.DeliverNewPolicy instead, or it
+	// would receive up to MainRetention of history. It is fixed at creation
+	// and ignored for an existing consumer.
+	DeliverPolicy nats.DeliverPolicy
+
 	// Logger receives structured warnings on NAK/redelivery/DLQ events.
 	Logger *slog.Logger
+}
+
+// DeleteConsumer removes a durable for good. Callers use it when the owner is
+// gone for good too — a revoked agent's per-member consumer — so nothing keeps
+// holding messages for it until the inactive threshold. A missing consumer is
+// not an error.
+func DeleteConsumer(js nats.JetStreamContext, durable string) error {
+	err := js.DeleteConsumer(MainStreamName, durable)
+	if errors.Is(err, nats.ErrConsumerNotFound) {
+		return nil
+	}
+	return err
 }
 
 // Subscriber owns a single durable JetStream consumer on the main stream.
@@ -164,6 +185,7 @@ func consumerConfig(opts SubscriberOpts) *nats.ConsumerConfig {
 		MaxAckPending: opts.MaxAckPending,
 		MaxDeliver:    MaxDeliveryAttempts,
 		FilterSubject: opts.FilterSubject,
+		DeliverPolicy: opts.DeliverPolicy,
 		// Durables now survive Stop, so nothing deletes one whose owner has
 		// gone for good — a tenant-consumer bridge per connection, say, after
 		// the connection is deleted. JetStream removes a consumer nobody has

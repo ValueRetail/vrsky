@@ -72,6 +72,47 @@ Config reference:
 }
 ```
 
+## Groups: one node, many tills
+
+Put agents in **groups** (Settings → Remote agents → the Groups cell, at
+install time with `-Groups all-tills,store-oslo`, or by API) and point a node
+at the group instead of one agent:
+
+```json
+{
+  "type": "remote_agent",
+  "remote_agent": { "target": "group", "group": "all-tills", "directory": "catalogue-in" }
+}
+```
+
+- **As a destination**, every agent in the group receives every message into
+  its folder of that name. Each agent has its own delivery queue: a till that
+  is off or slow never holds up the others, and each keeps the usual offline
+  hold (72 h, 24 h for files over 256 KB), retries and Failed Messages
+  handling — per till.
+- **As a source**, files from every member's folder of that name go into the
+  pipeline, each message carrying the agent's id in its metadata.
+- **Adding a till** = put it in the group. It starts receiving from that
+  moment on (nothing older is replayed). To give it the full catalogue, use
+  **Resend everything** on the pipeline (below), or redeploy the source.
+- **A member without the folder** is skipped and named once in the Remote
+  Agent tab. The pipeline refuses to start only if *no* member has the folder.
+- **Revoking** a till stops its deliveries and drops its queue. Taking a till
+  out of the group keeps its queue for a while, so putting it back lets it
+  catch up.
+- Group names: letters, digits, `-` and `_`. A group name only ever means
+  this workspace's agents.
+
+### Resend everything
+
+**Resend everything** in the Remote Agent tab (or `POST
+/api/v1/connections/{id}/resend`) asks the pipeline's source to send its data
+again on its next poll. Business Central does: all records regardless of the
+incremental watermark, and all pictures regardless of what it already sent.
+Other sources ignore it. Every destination receives the resend, so a till that
+already has the catalogue gets it once more — harmless for an importer keyed
+by article number.
+
 ## Watching it
 
 After deploy, the builder's **Remote Agent** tab shows the agent and folder for

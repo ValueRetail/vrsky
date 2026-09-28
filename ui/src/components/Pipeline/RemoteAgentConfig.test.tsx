@@ -10,19 +10,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 const listAgents = vi.fn()
-vi.mock('../../services/agentService', () => ({ listAgents: () => listAgents() }))
+const listAgentGroups = vi.fn()
+vi.mock('../../services/agentService', () => ({
+  listAgents: () => listAgents(),
+  listAgentGroups: () => listAgentGroups(),
+}))
 
 import { useState } from 'react'
 import RemoteAgentConfigEditor from './RemoteAgentConfigEditor'
 
 const agents = [
   { id: 'a1', tenant_id: 't1', name: 'LAGER-01', hostname: 'lager', os: 'windows', arch: 'amd64', agent_version: '0.1.0',
-    registered_at: '', online: true,
+    registered_at: '', online: true, groups: ['all-tills'],
     directories: [{ name: 'superpos-out', mode: 'read' }, { name: 'superpos-in', mode: 'write' }] },
   { id: 'a2', tenant_id: 't1', name: 'TILL-02', hostname: 'till', os: 'windows', arch: 'amd64', agent_version: '0.1.0',
-    registered_at: '', online: false, directories: [{ name: 'drop', mode: 'write' }] },
+    registered_at: '', online: false, groups: ['all-tills', 'store-oslo'], directories: [{ name: 'drop', mode: 'write' }] },
   { id: 'a3', tenant_id: 't1', name: 'OLD-PC', hostname: 'old', os: 'windows', arch: 'amd64', agent_version: '0.1.0',
-    registered_at: '', online: false, revoked_at: '2026-09-01T00:00:00Z', directories: [] },
+    registered_at: '', online: false, revoked_at: '2026-09-01T00:00:00Z', groups: ['all-tills'], directories: [] },
 ]
 
 // Renders the block the way PropertyEditor does: it owns the config state and
@@ -51,6 +55,11 @@ const optionLabels = (select: HTMLElement) =>
 beforeEach(() => {
   listAgents.mockReset()
   listAgents.mockImplementation(() => Promise.resolve(agents))
+  listAgentGroups.mockReset()
+  listAgentGroups.mockImplementation(() => Promise.resolve([
+    { name: 'all-tills', members: 2, online: 1 },
+    { name: 'store-oslo', members: 1, online: 0 },
+  ]))
 })
 
 describe('Remote Agent node editor', () => {
@@ -107,5 +116,69 @@ describe('Remote Agent node editor', () => {
   it('flags a saved agent that is no longer registered', async () => {
     renderNode('output', { agent_id: 'deleted', agent_name: 'GONE-PC', directory: 'x' })
     expect(await screen.findByText(/GONE-PC\) is no longer registered/)).toBeInTheDocument()
+  })
+
+  // Groups: one node, many tills.
+  it('can target a group: offers the groups with counts, and the folders its members report', async () => {
+    const onChange = renderNode('output')
+    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'group' } })
+    const group = await screen.findByLabelText('Group')
+    expect(optionLabels(group)).toEqual([
+      'Select a group...', 'all-tills · 2 agents · 1 online', 'store-oslo · 1 agent · 0 online',
+    ])
+    fireEvent.change(group, { target: { value: 'all-tills' } })
+    const folder = await screen.findByLabelText('Folder to write into')
+    // Every member's write folders, marked when not every member has one.
+    expect(optionLabels(folder)).toEqual([
+      'Select a folder...', 'drop · only 1 of 2 agents have it', 'superpos-in · only 1 of 2 agents have it',
+    ])
+    fireEvent.change(folder, { target: { value: 'superpos-in' } })
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(3))
+    const saved = onChange.mock.calls[2][0].remote_agent as Record<string, unknown>
+    expect(saved).toMatchObject({ target: 'group', group: 'all-tills', directory: 'superpos-in' })
+    expect(saved.agent_id).toBeUndefined()
+    // The offline member is named, and the others are said not to wait for it.
+    expect(screen.getByText(/TILL-02 is offline/)).toBeInTheDocument()
+    expect(screen.getByText(/the others are not held up/)).toBeInTheDocument()
+  })
+
+  it('an input from a group offers the members\' read folders and the after option', async () => {
+    renderNode('input', { target: 'group', group: 'all-tills' })
+    const folder = await screen.findByLabelText('Folder to watch')
+    expect(optionLabels(folder)).toEqual(['Select a folder...', 'superpos-out · only 1 of 2 agents have it'])
+    expect(optionLabels(screen.getByLabelText('After a file is taken'))).toEqual(['Move it into processed/', 'Delete it'])
+    expect(screen.queryByLabelText('Agent')).toBeNull()
+  })
+
+  it('warns when a saved group has no agents any more, and offers groups from the agents when the list fails', async () => {
+    listAgentGroups.mockImplementation(() => Promise.reject(new Error('down')))
+    renderNode('output', { target: 'group', group: 'ghost', directory: 'x' })
+    expect(await screen.findByText(/No agent is in group "ghost" any more/)).toBeInTheDocument()
+    // The agents themselves carry their groups, so the select still works.
+    expect(optionLabels(screen.getByLabelText('Group'))).toEqual([
+      'Select a group...', 'all-tills · 2 agents · 1 online', 'store-oslo · 1 agent · 0 online',
+    ])
+  })
+
+  it('switching a node from an agent to a group drops the agent', async () => {
+    const onChange = renderNode('output', { agent_id: 'a1', agent_name: 'LAGER-01', directory: 'superpos-in' })
+    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'group' } })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    const saved = onChange.mock.calls[0][0].remote_agent as Record<string, unknown>
+    expect(saved.target).toBe('group')
+    expect(saved.agent_id).toBeUndefined()
+    expect(saved.agent_name).toBeUndefined()
+    expect(saved.directory).toBe('')
+  })
+
+  it('switching back to one agent drops the group', async () => {
+    const onChange = renderNode('output', { target: 'group', group: 'all-tills', directory: 'superpos-in' })
+    fireEvent.change(await screen.findByLabelText('Send to'), { target: { value: 'agent' } })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    const saved = onChange.mock.calls[0][0].remote_agent as Record<string, unknown>
+    expect(saved.target).toBeUndefined()
+    expect(saved.group).toBeUndefined()
+    expect(saved.directory).toBe('')
   })
 })

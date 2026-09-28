@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -19,14 +22,50 @@ import (
 // maxAgentNameLen matches agents.name VARCHAR(255), counted in characters.
 const maxAgentNameLen = 255
 
+// Group names follow the folder-name rule: short, no spaces, no path
+// characters, so they are safe in a durable name and in a log line.
+var groupNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+const maxAgentGroups = 32
+
+// validGroupNames trims, validates, de-duplicates and sorts a list of group
+// names. The empty list is valid (no groups).
+func validGroupNames(raw []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, g := range raw {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		if !groupNameRe.MatchString(g) {
+			return nil, fmt.Errorf("group %q: use letters, digits, - and _ (1-64 characters), e.g. all-tills", g)
+		}
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	if len(out) > maxAgentGroups {
+		return nil, fmt.Errorf("an agent can be in at most %d groups", maxAgentGroups)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 type createAgentTokenRequest struct {
 	// SuggestedName pre-fills the agent's name when it registers. Optional: the
 	// agent can pass its own, and falls back to its hostname.
 	SuggestedName string `json:"suggested_name"`
+	// SuggestedGroups are joined by the agent that registers with the token.
+	SuggestedGroups []string `json:"suggested_groups"`
 }
 
-type renameAgentRequest struct {
-	Name string `json:"name"`
+// updateAgentRequest is a PATCH: a field left out is left alone. Groups is a
+// pointer so "groups": [] (leave every group) differs from not sending it.
+type updateAgentRequest struct {
+	Name   string    `json:"name"`
+	Groups *[]string `json:"groups"`
 }
 
 func (h *Handler) agentStore() (AgentStore, bool) {
@@ -85,11 +124,17 @@ func (h *Handler) CreateAgentRegistrationToken(w http.ResponseWriter, r *http.Re
 		suggested = name
 	}
 
+	groups, gerr := validGroupNames(req.SuggestedGroups)
+	if gerr != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidGroup", gerr.Error(), nil)
+		return
+	}
+
 	createdBy := ""
 	if u := GetUserFromContext(ctx); u != nil {
 		createdBy = u.ID
 	}
-	tok, err := store.CreateAgentRegistrationToken(ctx, tenantID, suggested, createdBy)
+	tok, err := store.CreateAgentRegistrationToken(ctx, tenantID, suggested, groups, createdBy)
 	if err != nil {
 		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", err.Error(), nil)
 		return
@@ -122,10 +167,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: agents})
 }
 
-// RenameAgent renames a live agent.
+// UpdateAgent renames a live agent and/or replaces its groups.
 //
 // PATCH /api/v1/agents/{id}
-func (h *Handler) RenameAgent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	store, ok := h.agentStore()
 	if !ok {
@@ -137,17 +182,38 @@ func (h *Handler) RenameAgent(w http.ResponseWriter, r *http.Request) {
 		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
 		return
 	}
-	var req renameAgentRequest
+	var req updateAgentRequest
 	if !decodeOptionalJSON(w, r, &req) {
 		return
 	}
-	name, ok := validAgentName(req.Name)
-	if !ok {
-		_ = writeError(w, http.StatusBadRequest, "InvalidName", "name must be 1-255 characters", nil)
+	if strings.TrimSpace(req.Name) == "" && req.Groups == nil {
+		_ = writeError(w, http.StatusBadRequest, "NothingToUpdate", "send a name and/or groups", nil)
 		return
 	}
-
-	agent, err := store.RenameAgent(ctx, tenantID, r.PathValue("id"), name)
+	var agent *Agent
+	if req.Groups != nil {
+		groups, gerr := validGroupNames(*req.Groups)
+		if gerr != nil {
+			_ = writeError(w, http.StatusBadRequest, "InvalidGroup", gerr.Error(), nil)
+			return
+		}
+		agent, err = store.SetAgentGroups(ctx, tenantID, r.PathValue("id"), groups)
+		if err == nil {
+			SetAuditAction(ctx, "agent.groups")
+			SetAuditDetail(ctx, "groups", groups)
+		}
+	}
+	if err == nil && strings.TrimSpace(req.Name) != "" {
+		name, ok := validAgentName(req.Name)
+		if !ok {
+			_ = writeError(w, http.StatusBadRequest, "InvalidName", "name must be 1-255 characters", nil)
+			return
+		}
+		agent, err = store.RenameAgent(ctx, tenantID, r.PathValue("id"), name)
+		if err == nil {
+			SetAuditAction(ctx, "agent.rename")
+		}
+	}
 	switch {
 	case errors.Is(err, ErrAgentNotFound):
 		// Same answer for "no such agent", "another tenant's agent" and
@@ -161,9 +227,31 @@ func (h *Handler) RenameAgent(w http.ResponseWriter, r *http.Request) {
 		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", err.Error(), nil)
 		return
 	}
-	SetAuditAction(ctx, "agent.rename")
 	SetAuditDetail(ctx, "agent_id", agent.ID)
 	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: agent})
+}
+
+// ListAgentGroups lists the workspace's agent groups with member counts.
+//
+// GET /api/v1/agents/groups
+func (h *Handler) ListAgentGroups(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	store, ok := h.agentStore()
+	if !ok {
+		_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: []*AgentGroup{}})
+		return
+	}
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+	groups, err := store.ListAgentGroups(ctx, tenantID)
+	if err != nil {
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", err.Error(), nil)
+		return
+	}
+	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: groups})
 }
 
 // RevokeAgent revokes an agent. Its credential stops working on its next
@@ -210,7 +298,9 @@ func (h *Handler) checkRemoteAgentNodes(ctx context.Context, tenantID string, no
 		var cfg struct {
 			Type        string `json:"type"`
 			RemoteAgent struct {
+				Target    string `json:"target"`
 				AgentID   string `json:"agent_id"`
+				Group     string `json:"group"`
 				Directory string `json:"directory"`
 			} `json:"remote_agent"`
 		}
@@ -220,6 +310,36 @@ func (h *Handler) checkRemoteAgentNodes(ctx context.Context, tenantID string, no
 		mode := "write"
 		if n.Type == "consumer" {
 			mode = "read"
+		}
+		if cfg.RemoteAgent.Target == "group" {
+			// A group needs at least one live member with the folder. Members
+			// without it are skipped by the gateway and named in the panel;
+			// they are not a reason to refuse the deploy.
+			group := strings.TrimSpace(cfg.RemoteAgent.Group)
+			agents, err := store.ListAgents(ctx, tenantID)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("node %s: could not list agents: %v", n.ID, err))
+				continue
+			}
+			members, usable := 0, 0
+			for _, a := range agents {
+				if a.RevokedAt != nil || !slices.Contains(a.Groups, group) {
+					continue
+				}
+				members++
+				for _, d := range a.Directories {
+					if d.Name == cfg.RemoteAgent.Directory && d.Mode == mode {
+						usable++
+					}
+				}
+			}
+			switch {
+			case members == 0:
+				problems = append(problems, fmt.Sprintf("node %s: no agent in this workspace is in group %q", n.ID, group))
+			case usable == 0:
+				problems = append(problems, fmt.Sprintf("node %s: no agent in group %q has a %s folder named %q", n.ID, group, mode, cfg.RemoteAgent.Directory))
+			}
+			continue
 		}
 		agent, err := store.GetAgent(ctx, tenantID, strings.TrimSpace(cfg.RemoteAgent.AgentID))
 		if err != nil || agent.RevokedAt != nil {

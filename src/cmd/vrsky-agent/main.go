@@ -4,7 +4,7 @@
 // named in its config file, uploads new files from read folders into pipelines
 // and writes files VRSky sends into write folders.
 //
-//	vrsky-agent register --url https://vrsky.example --token vrsky_reg_… [--name NAME]
+//	vrsky-agent register --url https://vrsky.example --token vrsky_reg_… [--name NAME] [--groups a,b]
 //	vrsky-agent run                  run in this console (Ctrl-C to stop)
 //	vrsky-agent install              install as a service (Windows service / systemd)
 //	vrsky-agent start | stop | status | uninstall
@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +36,7 @@ import (
 const usage = `vrsky-agent — connects this machine's folders to VRSky pipelines.
 
 Usage:
-  vrsky-agent register --url <VRSky URL> --token <registration token> [--name <name>]
+  vrsky-agent register --url <VRSky URL> --token <registration token> [--name <name>] [--groups a,b]
   vrsky-agent run          Run in this console (Ctrl-C to stop)
   vrsky-agent install      Install as a service that starts at boot (needs admin)
   vrsky-agent start        Start the service
@@ -76,10 +77,11 @@ func runCommand(args []string, asService bool) error {
 		serverURL := fs.String("url", "", "VRSky address, e.g. https://vrsky.valueretail.no")
 		token := fs.String("token", "", "one-time registration token from Settings → Remote agents")
 		name := fs.String("name", "", "name for this agent in VRSky (default: from config, else the hostname)")
+		groups := fs.String("groups", "", "comma-separated groups to join, e.g. all-tills,store-oslo (default: the token's)")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
-		return register(*configPath, *serverURL, *token, *name)
+		return register(*configPath, *serverURL, *token, *name, splitList(*groups))
 	case "run":
 		if err := fs.Parse(rest); err != nil {
 			return err
@@ -131,7 +133,18 @@ func runCommand(args []string, asService bool) error {
 	}
 }
 
-func register(configPath, serverURL, token, name string) error {
+// splitList splits a comma-separated flag value, dropping blanks.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func register(configPath, serverURL, token, name string, groups []string) error {
 	cfg, err := agent.LoadConfig(configPath)
 	if err != nil {
 		return err
@@ -166,7 +179,7 @@ func register(configPath, serverURL, token, name string) error {
 	resp, err := client.Register(ctx, agentproto.RegisterRequest{
 		RegistrationToken: token, Name: name, Hostname: host,
 		OS: runtime.GOOS, Arch: runtime.GOARCH, Version: agent.Version,
-		Directories: cfg.Announced(),
+		Directories: cfg.Announced(), Groups: groups,
 	})
 	if err != nil {
 		return fmt.Errorf("registration failed: %w", err)
