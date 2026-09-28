@@ -1724,6 +1724,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#groups-one-node-many-tills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Groups: one node, many tills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Groups: one node, many tills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resend-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resend everything
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2291,6 +2319,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#groups-one-node-many-tills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Groups: one node, many tills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Groups: one node, many tills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resend-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resend everything
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2391,6 +2447,42 @@ replaced.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h2 id="groups-one-node-many-tills">Groups: one node, many tills<a class="headerlink" href="#groups-one-node-many-tills" title="Permanent link">&para;</a></h2>
+<p>Put agents in <strong>groups</strong> (Settings → Remote agents → the Groups cell, at
+install time with <code>-Groups all-tills,store-oslo</code>, or by API) and point a node
+at the group instead of one agent:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"remote_agent"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"remote_agent"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"group"</span><span class="p">,</span><span class="w"> </span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"all-tills"</span><span class="p">,</span><span class="w"> </span><span class="nt">"directory"</span><span class="p">:</span><span class="w"> </span><span class="s2">"catalogue-in"</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong>As a destination</strong>, every agent in the group receives every message into
+  its folder of that name. Each agent has its own delivery queue: a till that
+  is off or slow never holds up the others, and each keeps the usual offline
+  hold (72 h, 24 h for files over 256 KB), retries and Failed Messages
+  handling — per till.</li>
+<li><strong>As a source</strong>, files from every member's folder of that name go into the
+  pipeline, each message carrying the agent's id in its metadata.</li>
+<li><strong>Adding a till</strong> = put it in the group. It starts receiving from that
+  moment on (nothing older is replayed). To give it the full catalogue, use
+  <strong>Resend everything</strong> on the pipeline (below), or redeploy the source.</li>
+<li><strong>A member without the folder</strong> is skipped and named once in the Remote
+  Agent tab. The pipeline refuses to start only if <em>no</em> member has the folder.</li>
+<li><strong>Revoking</strong> a till stops its deliveries and drops its queue. Taking a till
+  out of the group keeps its queue for a while, so putting it back lets it
+  catch up.</li>
+<li>Group names: letters, digits, <code>-</code> and <code>_</code>. A group name only ever means
+  this workspace's agents.</li>
+</ul>
+<h3 id="resend-everything">Resend everything<a class="headerlink" href="#resend-everything" title="Permanent link">&para;</a></h3>
+<p><strong>Resend everything</strong> in the Remote Agent tab (or <code>POST
+/api/v1/connections/{id}/resend</code>) asks the pipeline's source to send its data
+again on its next poll. Business Central does: all records regardless of the
+incremental watermark, and all pictures regardless of what it already sent.
+Other sources ignore it. Every destination receives the resend, so a till that
+already has the catalogue gets it once more — harmless for an importer keyed
+by article number.</p>
 <h2 id="watching-it">Watching it<a class="headerlink" href="#watching-it" title="Permanent link">&para;</a></h2>
 <p>After deploy, the builder's <strong>Remote Agent</strong> tab shows the agent and folder for
 each end, whether the agent is online (refreshed every 15 s), and live events:

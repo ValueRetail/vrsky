@@ -998,6 +998,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-it-behaves" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2480,6 +2491,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-it-behaves" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2570,8 +2592,10 @@ starts it. The machine then shows as online under Settings → Remote agents.</p
 <li>No internet access beyond VRSky's own address is needed.</li>
 </ul>
 <p>Options, added after the command: <code>-Name</code> (default: the computer name),
-<code>-Inbox</code>/<code>-Outbox</code> (skip the questions), <code>-ExePath</code> (use a local <code>.exe</code> instead
-of downloading), <code>-NoService</code> (configure and register only).</p>
+<code>-Groups all-tills,store-oslo</code> (which groups to join — default: the groups
+the token was generated with), <code>-Inbox</code>/<code>-Outbox</code> (skip the questions),
+<code>-ExePath</code> (use a local <code>.exe</code> instead of downloading), <code>-NoService</code>
+(configure and register only).</p>
 <h3 id="upgrading">Upgrading<a class="headerlink" href="#upgrading" title="Permanent link">&para;</a></h3>
 <p>Run the same command again — without <code>-Token</code>, if the machine is already
 registered. It replaces the agent with the version this VRSky offers,
@@ -2623,9 +2647,10 @@ no paths.</p>
 <p>In VRSky, open <strong>Settings → Remote agents → Generate registration token</strong>, then
 <em>Other ways</em>. Run the register command it shows within an hour, with the full
 path to the agent in front:</p>
-<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">register</span> <span class="p">-</span><span class="n">-url</span> <span class="n">https</span><span class="p">://</span><span class="n">vrsky</span><span class="p">.</span><span class="n">valueretail</span><span class="p">.</span><span class="n">no</span> <span class="p">-</span><span class="n">-token</span> <span class="n">vrsky_reg_</span><span class="err">…</span>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">register</span> <span class="p">-</span><span class="n">-url</span> <span class="n">https</span><span class="p">://</span><span class="n">vrsky</span><span class="p">.</span><span class="n">valueretail</span><span class="p">.</span><span class="n">no</span> <span class="p">-</span><span class="n">-token</span> <span class="n">vrsky_reg_</span><span class="err">…</span> <span class="p">-</span><span class="n">-groups</span> <span class="n">all-tills</span>
 </code></pre></div>
-<p>The token works once. Registration stores the agent's credential in
+<p><code>--groups</code> is optional: without it the agent joins the groups the token was
+generated with. The token works once. Registration stores the agent's credential in
 <code>C:\ProgramData\VRSky\agent\credential.json</code>, readable only by Administrators
 and the SYSTEM account. The agent now appears under Settings → Remote agents.</p>
 <h3 id="4-try-it-in-a-window">4. Try it in a window<a class="headerlink" href="#4-try-it-in-a-window" title="Permanent link">&para;</a></h3>
@@ -2651,6 +2676,13 @@ up) and is restarted by Windows if it fails. It runs as LocalSystem.</p>
   credential and logs in place.</li>
 </ul>
 <p>On Linux, <code>install</code> writes a systemd unit (<code>vrsky-agent.service</code>) instead.</p>
+<h2 id="groups">Groups<a class="headerlink" href="#groups" title="Permanent link">&para;</a></h2>
+<p>Settings → Remote agents shows each agent's <strong>groups</strong> (<code>all-tills</code>,
+<code>store-oslo</code>, …) and lets an editor change them. A pipeline node can target a
+group instead of one agent, so a hundred tills need one output node, not a
+hundred — see <a href="../../connectors/remote-agent/#groups-one-node-many-tills">the connector page</a>.
+Groups are set when a token is generated, at install with <code>-Groups</code>, or later
+in Settings; the agent itself never needs to know its groups.</p>
 <h2 id="how-it-behaves">How it behaves<a class="headerlink" href="#how-it-behaves" title="Permanent link">&para;</a></h2>
 <p><strong>Read folders.</strong> A file is taken once its size and time have been unchanged
 for two scans in a row (5 s apart by default) — the program writing it must be
