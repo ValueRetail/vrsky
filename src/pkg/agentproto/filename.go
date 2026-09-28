@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 // GenerateFilename names a delivered file. It follows file-producer's rules so
 // a pipeline behaves the same whichever of the two it ends in:
 //
+//   - a media file (image, audio, video, PDF) with a metadata filename keeps
+//     it, pattern or not;
 //   - with a pattern, substitute {id}, {timestamp} (20060102-150405),
 //     {extension} (from the content type) and {source};
 //   - without one, keep the incoming metadata filename — re-extensioned if a
@@ -17,6 +21,12 @@ import (
 // The result is sanitised but not validated; callers run ValidFilename on it,
 // since a pattern can still produce something unusable (e.g. "{source}/..").
 func GenerateFilename(pattern, id, contentType, source, metaFilename string, converted bool, createdAt time.Time) string {
+	// A media file that carries a name keeps it, pattern or not. The pattern
+	// names the records; a catalogue pipeline carries its pictures beside
+	// them, and those are matched by their own names (1896-S.jpg, #281).
+	if metaFilename != "" && envelope.IsMedia(contentType) {
+		return sanitizeFilename(metaFilename)
+	}
 	ext := DeriveExtension(contentType)
 	if pattern == "" {
 		if metaFilename != "" {

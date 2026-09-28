@@ -3443,6 +3443,28 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
             value={c.page_size ? String(c.page_size) : ''}
             onChange={(v) => update({ page_size: v ? Number(v) : undefined })}
           />
+          {/* Pictures (#281): shown for the entities BC has pictures on, and
+              kept visible while on so it can be switched off again. */}
+          {(Boolean(c.pictures) ||
+            ['items', 'customers', 'vendors', 'employees', 'contacts'].includes(((c.entity as string) || 'items').trim())) && (
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#374151' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(c.pictures)}
+                  onChange={(e) => update({ pictures: e.target.checked || undefined })}
+                />
+                Also send pictures
+              </label>
+              {Boolean(c.pictures) && (
+                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                  The records go out as before. Each new or changed picture follows as its own file, which a file or
+                  remote-agent destination writes as <code>&lt;number&gt;.jpg</code>; converters and filters pass it
+                  through untouched. Only items, customers, vendors, employees and contacts have pictures.
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
       <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />

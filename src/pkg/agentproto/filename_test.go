@@ -22,6 +22,14 @@ func TestGenerateFilename_MatchesFileProducer(t *testing.T) {
 		{"pattern tokens", "{source}-{timestamp}-{id}.{extension}", "text/csv", "watch:x", "", false,
 			"watch_x-20260924-101500-env-1.csv"},
 		{"unknown type is bin", "", "application/pdf", "", "", false, "env-1.bin"},
+		// #281: a picture beside the records keeps its own name under the
+		// records' pattern; the records still get the pattern.
+		{"media keeps its name under a pattern", "catalogue-{timestamp}.{extension}", "image/jpeg", "", "1896-S.jpg", false,
+			"1896-S.jpg"},
+		{"records still get the pattern", "catalogue-{timestamp}.{extension}", "text/csv", "", "items.json", true,
+			"catalogue-20260924-101500.csv"},
+		{"media name is sanitised", "catalogue-{id}", "image/png", "", `A/B.png`, false, "A_B.png"},
+		{"media without a name follows the pattern", "pic-{id}", "image/png", "", "", false, "pic-env-1"},
 	}
 	for _, c := range cases {
 		got := GenerateFilename(c.pattern, "env-1", c.ct, c.source, c.meta, c.converted, at)
