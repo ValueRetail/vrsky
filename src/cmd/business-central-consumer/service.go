@@ -41,11 +41,17 @@ const (
 type bcConsumer struct {
 	sdk.BaseConsumer
 
-	db          *sql.DB
-	nc          *nats.Conn
-	publish     sdk.PublishFunc
-	logger      *slog.Logger
-	checkpoints checkpoint.Store
+	db      *sql.DB
+	nc      *nats.Conn
+	publish sdk.PublishFunc
+	logger  *slog.Logger
+
+	// Set when the SDK runs this connector with a payload store (RunStream):
+	// pictures larger than inlineMax are streamed into it instead of read
+	// into memory.
+	publishStream sdk.PublishStreamFunc
+	inlineMax     int
+	checkpoints   checkpoint.Store
 
 	httpClient *http.Client
 
@@ -90,6 +96,14 @@ type BCConfig struct {
 	Scope      string `json:"scope"`
 
 	PollIntervalSeconds int `json:"poll_interval_seconds"`
+
+	// Pictures makes the node publish one message per record picture (image
+	// bytes) instead of the records. See pictures.go.
+	Pictures bool `json:"pictures"`
+
+	// pictureSeen is this poller's record id → picture id of what it last
+	// published, so an unchanged picture is not downloaded again.
+	pictureSeen map[string]string
 }
 
 type nodeConfig struct {
@@ -115,6 +129,7 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	c.db = res.DB
 	c.nc = res.NATS
 	c.logger = res.Logger
+	c.inlineMax = res.InlineMaxBytes()
 	if c.checkpoints == nil {
 		c.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
@@ -126,6 +141,13 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
 	res.Health.SetReady(true)
 	return nil
+}
+
+// RunStream is Run with a way to stream large payloads (pictures) into the
+// payload store. The SDK calls it instead of Run when a store is configured.
+func (c *bcConsumer) RunStream(ctx context.Context, publish sdk.PublishFunc, publishStream sdk.PublishStreamFunc) error {
+	c.publishStream = publishStream
+	return c.Run(ctx, publish)
 }
 
 func (c *bcConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
@@ -194,13 +216,17 @@ func (c *bcConsumer) handleStartCommand(msg *nats.Msg) {
 		logger.Error("Business Central consumer needs poll_interval_seconds > 0")
 		return
 	}
+	if err := cfg.validatePictures(); err != nil {
+		logger.Error("Business Central consumer not started", "error", err)
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	c.active[cmd.ConnectionID] = cancel
 	c.mu.Unlock()
 
-	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds)
+	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds, "pictures", cfg.Pictures)
 	go c.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
 }
 
@@ -248,6 +274,9 @@ type odataPage struct {
 // fetchAndPublish GETs the OData entity, follows @odata.nextLink, and publishes
 // each page's records as one JSON-array envelope.
 func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, cfg *BCConfig, tok *oauthcc.Client, logger *slog.Logger) error {
+	if err := cfg.validatePictures(); err != nil {
+		return err
+	}
 	cursor := ""
 	if cfg.Incremental {
 		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
@@ -255,6 +284,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 
 	next := cfg.entityURL(cursor)
 	page, total := 0, 0
+	var pics pictureCounts
 	var watermark cursorTracker
 	for next != "" {
 		page++
@@ -270,7 +300,15 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			if cfg.Incremental {
 				watermark.observe(p.Value, cfg.effectiveCursorField())
 			}
-			if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
+			if cfg.Pictures {
+				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, logger)
+				pics.sent += n.sent
+				pics.none += n.none
+				pics.unchanged += n.unchanged
+				if err != nil {
+					return fmt.Errorf("publish pictures: %w", err)
+				}
+			} else if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
 				return fmt.Errorf("publish records: %w", err)
 			}
 			total += len(p.Value)
@@ -286,6 +324,13 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		c.saveCursor(ctx, tenantID, connID, cfg.NodeID, watermark.raw, int64(total), logger)
 	}
 
+	if cfg.Pictures {
+		logger.Info("Business Central fetch complete",
+			"entity", cfg.effectiveEntity(), "records", total, "pages", page,
+			"pictures_sent", pics.sent, "pictures_unchanged", pics.unchanged, "without_picture", pics.none,
+			"incremental", cfg.Incremental, "since", cursor)
+		return nil
+	}
 	logger.Info("Business Central fetch complete",
 		"entity", cfg.effectiveEntity(), "records", total, "pages", page,
 		"incremental", cfg.Incremental, "since", cursor)
@@ -480,9 +525,8 @@ func (cfg *BCConfig) filterWithCursor(cursor string) string {
 	return fmt.Sprintf("(%s) and %s", cfg.Filter, clause)
 }
 
-// entityURL builds the first-page API v2.0 URL, scoped to the company. A
-// non-empty cursor narrows it to what changed since the last complete fetch.
-func (cfg *BCConfig) entityURL(cursor string) string {
+// companyURL is the API v2.0 root scoped to the company.
+func (cfg *BCConfig) companyURL() string {
 	host := cfg.APIBaseURL
 	if host == "" {
 		env := cfg.Environment
@@ -491,10 +535,23 @@ func (cfg *BCConfig) entityURL(cursor string) string {
 		}
 		host = fmt.Sprintf("%s/v2.0/%s/%s/api/v2.0", defaultAPIHost, cfg.AADTenantID, env)
 	}
-	host = strings.TrimRight(host, "/")
-	u := fmt.Sprintf("%s/companies(%s)/%s", host, cfg.CompanyID, cfg.effectiveEntity())
+	return fmt.Sprintf("%s/companies(%s)", strings.TrimRight(host, "/"), cfg.CompanyID)
+}
+
+// entityURL builds the first-page API v2.0 URL, scoped to the company. A
+// non-empty cursor narrows it to what changed since the last complete fetch.
+// In pictures mode only the fields needed to find the pictures are selected.
+func (cfg *BCConfig) entityURL(cursor string) string {
+	u := fmt.Sprintf("%s/%s", cfg.companyURL(), cfg.effectiveEntity())
+	var q []string
 	if filter := cfg.filterWithCursor(cursor); filter != "" {
-		u += "?$filter=" + url.QueryEscape(filter)
+		q = append(q, "$filter="+url.QueryEscape(filter))
+	}
+	if cfg.Pictures {
+		q = append(q, "$select="+url.QueryEscape(cfg.pictureSelect()))
+	}
+	if len(q) > 0 {
+		u += "?" + strings.Join(q, "&")
 	}
 	return u
 }

@@ -72,6 +72,14 @@ func (c *bcConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
+		// A pictures node publishes images, not records: there is no data
+		// structure for a filter or converter to map. Say so rather than
+		// preview the few identity fields it selects.
+		if cfg.Pictures {
+			writeErr("this node sends pictures (image files), not records, so there is no data structure to preview")
+			return
+		}
+
 		tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
 		body, err := c.get(r.Context(), tok, cfg.entityURL(""), cfg.PageSize)
 		if err != nil {
