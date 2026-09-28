@@ -16,7 +16,8 @@ import (
 // not exposed publicly — only /agent is.
 
 type event struct {
-	Type       string `json:"type"` // connected | ingested | delivered | failed
+	Type       string `json:"type"`            // connected | ingested | delivered | failed | warning
+	Agent      string `json:"agent,omitempty"` // the agent's name, when one is involved
 	Filename   string `json:"filename,omitempty"`
 	EnvelopeID string `json:"envelope_id,omitempty"`
 	Message    string `json:"message,omitempty"`

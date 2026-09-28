@@ -82,3 +82,7 @@ func ValidFilename(name string) error {
 	}
 	return nil
 }
+
+// ValidGroupName reports whether name is usable as an agent group: the same
+// shape as a directory name, so it is safe in a durable name and a log line.
+func ValidGroupName(name string) bool { return directoryName.MatchString(name) }

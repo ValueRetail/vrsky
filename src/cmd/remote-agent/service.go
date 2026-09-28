@@ -32,6 +32,16 @@ import (
 // nodeType is the config.type both directions claim.
 const nodeType = "remote_agent"
 
+// A node targets one agent (the default) or a group of agents.
+const (
+	targetAgent = "agent"
+	targetGroup = "group"
+)
+
+// defaultMembershipRefresh is how often a group session re-reads its members
+// from the database, besides doing so whenever an agent announces itself.
+const defaultMembershipRefresh = 30 * time.Second
+
 // defaultUploadMax bounds one upload. The ingress passes bodies unbuffered and
 // unlimited so large files can stream; this is the limit that actually holds.
 const defaultUploadMax int64 = 2 << 30
@@ -74,18 +84,21 @@ type gateway struct {
 	// window, not a delivery deadline — the dispatch loop heartbeats a
 	// message for as long as it waits for its agent.
 	outputAckWait time.Duration
+	// membershipRefresh is how often group sessions re-read their members.
+	membershipRefresh time.Duration
 
 	now func() time.Time
 }
 
 func newGateway() *gateway {
 	g := &gateway{
-		sessions:      map[string]*connSession{},
-		agents:        map[string]*agentState{},
-		events:        newEventHub(),
-		uploadMax:     defaultUploadMax,
-		outputAckWait: 30 * time.Second,
-		now:           time.Now,
+		sessions:          map[string]*connSession{},
+		agents:            map[string]*agentState{},
+		events:            newEventHub(),
+		uploadMax:         defaultUploadMax,
+		outputAckWait:     30 * time.Second,
+		membershipRefresh: defaultMembershipRefresh,
+		now:               time.Now,
 	}
 	g.lookupAgent = g.dbLookupAgent
 	return g
@@ -94,7 +107,9 @@ func newGateway() *gateway {
 // remoteNode is one remote_agent node of a pipeline.
 type remoteNode struct {
 	NodeID    string
-	AgentID   string
+	Target    string // targetAgent | targetGroup
+	AgentID   string // when Target == targetAgent
+	Group     string // when Target == targetGroup
 	Directory string
 
 	// Input only.
@@ -118,7 +133,16 @@ type connSession struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	sub    *messaging.Subscriber // nil when the pipeline has no remote_agent output
+	sub    *messaging.Subscriber // nil when the pipeline has no single-agent output
+
+	// Group nodes: the live members of this session's groups, and the
+	// per-member output subscriptions (see groups.go). Both guarded by the
+	// gateway's mu; reconcileMu serialises reconciliations of one session.
+	members     map[string]*member
+	memberSubs  map[string]*memberSub
+	dormant     map[string]bool // members that left the group: durable kept, no subscription
+	warned      map[string]bool // member+node already reported as unusable
+	reconcileMu sync.Mutex
 }
 
 // agentState is the gateway's in-memory view of one agent: the deliveries
@@ -127,6 +151,7 @@ type agentState struct {
 	pending       map[string]*delivery // deliveryID → delivery
 	notify        chan struct{}        // capacity 1: "something changed"
 	lastSeenWrite time.Time
+	name          string // as last seen on a poll; for the panel's events
 }
 
 // Configure wires dependencies. Called once by the runner before Run.
@@ -188,6 +213,7 @@ func (s *gateway) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.logger.Info("Subscribed to NATS command topics")
 
 	s.restoreRunning(ctx)
+	go s.membershipLoop(ctx)
 
 	<-ctx.Done()
 	return nil
@@ -310,12 +336,18 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 	}
 
 	for _, n := range inputs {
+		if n.Target == targetGroup {
+			continue
+		}
 		if msg := s.checkAgentNode(ctx, tenantID, n, agentproto.ModeRead); msg != "" {
 			s.markError(ctx, connID, tenantID, msg)
 			return
 		}
 	}
 	for _, n := range outputs {
+		if n.Target == targetGroup {
+			continue
+		}
 		if msg := s.checkAgentNode(ctx, tenantID, n, agentproto.ModeWrite); msg != "" {
 			s.markError(ctx, connID, tenantID, msg)
 			return
@@ -326,8 +358,37 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 	sess := &connSession{
 		connID: connID, tenantID: tenantID, fingerprint: fp,
 		inputs: inputs, outputs: outputs, ctx: sctx, cancel: cancel,
+		members: map[string]*member{}, memberSubs: map[string]*memberSub{}, dormant: map[string]bool{}, warned: map[string]bool{},
 	}
-	if len(outputs) > 0 {
+
+	// Group nodes: resolve the members now, and refuse a node no member can
+	// serve — the same early, readable refusal a single-agent node gets. A
+	// member without the folder is skipped and named, not a reason to refuse.
+	if groups := sess.groupNames(); len(groups) > 0 {
+		members, err := s.liveMembers(ctx, tenantID, groups)
+		if err != nil {
+			cancel()
+			s.markError(ctx, connID, tenantID, "could not look up the group's agents: "+err.Error())
+			return
+		}
+		sess.members = members
+		for _, n := range inputs {
+			if n.Target == targetGroup && !anyMemberTakes(members, n, agentproto.ModeRead) {
+				cancel()
+				s.markError(ctx, connID, tenantID, fmt.Sprintf("node %s: no agent in group %q has a read folder named %q", n.NodeID, n.Group, n.Directory))
+				return
+			}
+		}
+		for _, n := range outputs {
+			if n.Target == targetGroup && !anyMemberTakes(members, n, agentproto.ModeWrite) {
+				cancel()
+				s.markError(ctx, connID, tenantID, fmt.Sprintf("node %s: no agent in group %q has a write folder named %q", n.NodeID, n.Group, n.Directory))
+				return
+			}
+		}
+	}
+
+	if hasSingleAgentOutput(outputs) {
 		sub, err := messaging.Subscribe(s.js, messaging.SubscriberOpts{
 			DurableName:   outputDurable(connID),
 			FilterSubject: messaging.DataSubject(tenantID, connID),
@@ -339,7 +400,7 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 			MaxAckPending: 1,
 			AckWait:       s.outputAckWait,
 			Logger:        logger,
-		}, s.outputHandler(sess))
+		}, s.outputHandler(sess, outputScope{done: sctx.Done()}))
 		if err != nil {
 			cancel()
 			s.markError(ctx, connID, tenantID, "could not subscribe to the pipeline: "+err.Error())
@@ -353,8 +414,20 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 	s.wakeAgentsLocked(sess)
 	s.mu.Unlock()
 
+	// Per-member durables for the group outputs.
+	s.reconcileGroups(ctx, sess)
+
 	s.setStatus(ctx, connID, tenantID, "running")
-	logger.Info("Remote agent pipeline started", "inputs", len(inputs), "outputs", len(outputs))
+	logger.Info("Remote agent pipeline started", "inputs", len(inputs), "outputs", len(outputs), "group_members", len(sess.members))
+}
+
+func hasSingleAgentOutput(outputs []remoteNode) bool {
+	for _, n := range outputs {
+		if n.Target != targetGroup {
+			return true
+		}
+	}
+	return false
 }
 
 // stopConnection ends a pipeline's session, if it has one.
@@ -379,9 +452,19 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) {
 // in-flight message, if any, is NAK'd and waits for the next session.
 // Must not be called with s.mu held: the output handler takes it to dequeue.
 func (s *gateway) endSession(sess *connSession) {
-	sess.cancel()
+	sess.cancel() // also ends every member's context
+	s.mu.Lock()
+	subs := make([]*memberSub, 0, len(sess.memberSubs))
+	for _, ms := range sess.memberSubs {
+		subs = append(subs, ms)
+	}
+	sess.memberSubs = map[string]*memberSub{}
+	s.mu.Unlock()
 	if sess.sub != nil {
 		sess.sub.Stop()
+	}
+	for _, ms := range subs {
+		ms.sub.Stop()
 	}
 }
 
@@ -389,8 +472,23 @@ func (s *gateway) endSession(sess *connSession) {
 // return with the changed watch set. Caller holds s.mu.
 func (s *gateway) wakeAgentsLocked(sess *connSession) {
 	for _, n := range append(append([]remoteNode{}, sess.inputs...), sess.outputs...) {
-		s.agentLocked(n.AgentID).wake()
+		if n.AgentID != "" {
+			s.agentLocked(n.AgentID).wake()
+		}
 	}
+	for id := range sess.members {
+		s.agentLocked(id).wake()
+	}
+}
+
+// agentName is the name an agent last polled with, for the panel's events.
+func (s *gateway) agentName(agentID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a := s.agents[agentID]; a != nil && a.name != "" {
+		return a.name
+	}
+	return agentID
 }
 
 // agentLocked returns the state for an agent, creating it. Caller holds s.mu.
@@ -490,7 +588,9 @@ func parseRemoteNodes(nodesJSON, edgesJSON []byte) (inputs, outputs []remoteNode
 		var cfg struct {
 			Type        string `json:"type"`
 			RemoteAgent struct {
+				Target          string `json:"target"`
 				AgentID         string `json:"agent_id"`
+				Group           string `json:"group"`
 				Directory       string `json:"directory"`
 				After           string `json:"after"`
 				FilenamePattern string `json:"filename_pattern"`
@@ -501,10 +601,14 @@ func parseRemoteNodes(nodesJSON, edgesJSON []byte) (inputs, outputs []remoteNode
 		}
 		rn := remoteNode{
 			NodeID:    n.ID,
+			Target:    targetAgent,
 			AgentID:   strings.TrimSpace(cfg.RemoteAgent.AgentID),
 			Directory: strings.TrimSpace(cfg.RemoteAgent.Directory),
 		}
-		if rn.AgentID == "" || rn.Directory == "" {
+		if cfg.RemoteAgent.Target == targetGroup {
+			rn.Target, rn.AgentID, rn.Group = targetGroup, "", strings.TrimSpace(cfg.RemoteAgent.Group)
+		}
+		if rn.Directory == "" || (rn.Target == targetGroup && rn.Group == "") || (rn.Target == targetAgent && rn.AgentID == "") {
 			continue // presence is enforced at start by the management API
 		}
 		switch n.Type {
@@ -533,10 +637,10 @@ func parseRemoteNodes(nodesJSON, edgesJSON []byte) (inputs, outputs []remoteNode
 func fingerprint(inputs, outputs []remoteNode) string {
 	parts := make([]string, 0, len(inputs)+len(outputs))
 	for _, n := range inputs {
-		parts = append(parts, fmt.Sprintf("in|%s|%s|%s|%s", n.NodeID, n.AgentID, n.Directory, n.After))
+		parts = append(parts, fmt.Sprintf("in|%s|%s|%s|%s|%s|%s", n.NodeID, n.Target, n.AgentID, n.Group, n.Directory, n.After))
 	}
 	for _, n := range outputs {
-		parts = append(parts, fmt.Sprintf("out|%s|%s|%s|%s|%s|%t", n.NodeID, n.AgentID, n.Directory,
+		parts = append(parts, fmt.Sprintf("out|%s|%s|%s|%s|%s|%s|%s|%t", n.NodeID, n.Target, n.AgentID, n.Group, n.Directory,
 			n.FilenamePattern, n.PredecessorID, n.PredIsConsumer))
 	}
 	sort.Strings(parts)

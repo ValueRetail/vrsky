@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/ValueRetail/vrsky/pkg/auth"
 )
 
@@ -67,30 +69,45 @@ type Agent struct {
 	Arch         string           `json:"arch"`
 	AgentVersion string           `json:"agent_version"`
 	Directories  []AgentDirectory `json:"directories"`
-	LastSeenAt   *time.Time       `json:"last_seen_at,omitempty"`
-	Online       bool             `json:"online"`
-	RegisteredAt time.Time        `json:"registered_at"`
-	RevokedAt    *time.Time       `json:"revoked_at,omitempty"`
+	// Groups this agent belongs to (all-tills, store-oslo, …). A pipeline
+	// node can target a group instead of one agent.
+	Groups       []string   `json:"groups"`
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
+	Online       bool       `json:"online"`
+	RegisteredAt time.Time  `json:"registered_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
 }
 
 // AgentRegistrationToken is a freshly minted token. Token carries the raw value
 // and is populated only on the create response; it is never stored or listed.
 type AgentRegistrationToken struct {
-	ID            string    `json:"id"`
-	TenantID      string    `json:"tenant_id"`
-	Token         string    `json:"token,omitempty"`
-	SuggestedName string    `json:"suggested_name,omitempty"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	ID            string `json:"id"`
+	TenantID      string `json:"tenant_id"`
+	Token         string `json:"token,omitempty"`
+	SuggestedName string `json:"suggested_name,omitempty"`
+	// SuggestedGroups are joined by the agent that registers with this token,
+	// unless it names its own with --groups.
+	SuggestedGroups []string  `json:"suggested_groups,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+}
+
+// AgentGroup is one group name as seen across a tenant's live agents.
+type AgentGroup struct {
+	Name    string `json:"name"`
+	Members int    `json:"members"`
+	Online  int    `json:"online"`
 }
 
 // AgentStore is the narrow persistence surface the agent handlers need.
 // Every method takes the tenant and scopes by it; there is deliberately no
 // method that finds an agent without one.
 type AgentStore interface {
-	CreateAgentRegistrationToken(ctx context.Context, tenantID, suggestedName, createdBy string) (*AgentRegistrationToken, error)
+	CreateAgentRegistrationToken(ctx context.Context, tenantID, suggestedName string, suggestedGroups []string, createdBy string) (*AgentRegistrationToken, error)
 	ListAgents(ctx context.Context, tenantID string) ([]*Agent, error)
+	ListAgentGroups(ctx context.Context, tenantID string) ([]*AgentGroup, error)
 	GetAgent(ctx context.Context, tenantID, agentID string) (*Agent, error)
 	RenameAgent(ctx context.Context, tenantID, agentID, name string) (*Agent, error)
+	SetAgentGroups(ctx context.Context, tenantID, agentID string, groups []string) (*Agent, error)
 	RevokeAgent(ctx context.Context, tenantID, agentID string) error
 }
 
@@ -104,7 +121,7 @@ func newAgentRegistrationToken() (string, error) {
 
 // CreateAgentRegistrationToken stores the hash of a new one-time token and
 // returns the raw value, which is not recoverable afterwards.
-func (r *PostgresRepository) CreateAgentRegistrationToken(ctx context.Context, tenantID, suggestedName, createdBy string) (*AgentRegistrationToken, error) {
+func (r *PostgresRepository) CreateAgentRegistrationToken(ctx context.Context, tenantID, suggestedName string, suggestedGroups []string, createdBy string) (*AgentRegistrationToken, error) {
 	raw, err := newAgentRegistrationToken()
 	if err != nil {
 		return nil, err
@@ -116,21 +133,27 @@ func (r *PostgresRepository) CreateAgentRegistrationToken(ctx context.Context, t
 	if s := strings.TrimSpace(suggestedName); s != "" {
 		suggestedArg = s
 	}
+	if suggestedGroups == nil {
+		suggestedGroups = []string{}
+	}
 	tok := &AgentRegistrationToken{Token: raw}
 	var suggested sql.NullString
 	// lint:tenant-ok — INSERT carries tenant_id in the row.
 	err = r.db.QueryRowContext(ctx, `
-		INSERT INTO agent_registration_tokens (tenant_id, token_hash, suggested_name, created_by, expires_at)
-		VALUES ($1, $2, $3, $4, NOW() + ($5 || ' seconds')::interval)
-		RETURNING id, tenant_id::text, suggested_name, expires_at
+		INSERT INTO agent_registration_tokens (tenant_id, token_hash, suggested_name, created_by, expires_at, suggested_groups)
+		VALUES ($1, $2, $3, $4, NOW() + ($5 || ' seconds')::interval, $6)
+		RETURNING id, tenant_id::text, suggested_name, expires_at, suggested_groups
 	`, tenantID, auth.HashToken(raw), suggestedArg, createdByArg,
-		fmt.Sprintf("%d", int(AgentRegistrationTokenTTL.Seconds()))).Scan(
-		&tok.ID, &tok.TenantID, &suggested, &tok.ExpiresAt,
+		fmt.Sprintf("%d", int(AgentRegistrationTokenTTL.Seconds())), pq.Array(suggestedGroups)).Scan(
+		&tok.ID, &tok.TenantID, &suggested, &tok.ExpiresAt, pq.Array(&tok.SuggestedGroups),
 	)
 	if err != nil {
 		return nil, err
 	}
 	tok.SuggestedName = suggested.String
+	if tok.SuggestedGroups == nil {
+		tok.SuggestedGroups = []string{}
+	}
 	return tok, nil
 }
 
@@ -145,8 +168,11 @@ func scanAgent(row rowScanner) (*Agent, error) {
 	a := &Agent{}
 	var dirs []byte
 	if err := row.Scan(&a.ID, &a.TenantID, &a.Name, &a.Hostname, &a.OS, &a.Arch,
-		&a.AgentVersion, &dirs, &a.LastSeenAt, &a.RegisteredAt, &a.RevokedAt, &a.Online); err != nil {
+		&a.AgentVersion, &dirs, pq.Array(&a.Groups), &a.LastSeenAt, &a.RegisteredAt, &a.RevokedAt, &a.Online); err != nil {
 		return nil, err
+	}
+	if a.Groups == nil {
+		a.Groups = []string{}
 	}
 	a.Directories = []AgentDirectory{}
 	if len(dirs) > 0 {
@@ -163,7 +189,7 @@ func onlineWindowArg() string { return fmt.Sprintf("%d", int(AgentOnlineWindow.S
 // shows them greyed out), live ones first.
 func (r *PostgresRepository) ListAgents(ctx context.Context, tenantID string) ([]*Agent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, tenant_id::text, name, hostname, os, arch, agent_version, directories,
+		SELECT id, tenant_id::text, name, hostname, os, arch, agent_version, directories, groups,
 		       last_seen_at, registered_at, revoked_at,
 		       (revoked_at IS NULL AND last_seen_at IS NOT NULL
 		        AND last_seen_at > NOW() - ($2 || ' seconds')::interval) AS online
@@ -190,7 +216,7 @@ func (r *PostgresRepository) ListAgents(ctx context.Context, tenantID string) ([
 // GetAgent fetches one agent scoped to its tenant.
 func (r *PostgresRepository) GetAgent(ctx context.Context, tenantID, agentID string) (*Agent, error) {
 	a, err := scanAgent(r.db.QueryRowContext(ctx, `
-		SELECT id, tenant_id::text, name, hostname, os, arch, agent_version, directories,
+		SELECT id, tenant_id::text, name, hostname, os, arch, agent_version, directories, groups,
 		       last_seen_at, registered_at, revoked_at,
 		       (revoked_at IS NULL AND last_seen_at IS NOT NULL
 		        AND last_seen_at > NOW() - ($2 || ' seconds')::interval) AS online
@@ -220,6 +246,54 @@ func (r *PostgresRepository) RenameAgent(ctx context.Context, tenantID, agentID,
 		return nil, ErrAgentNotFound
 	}
 	return r.GetAgent(ctx, tenantID, agentID)
+}
+
+// SetAgentGroups replaces a live agent's groups. Names are validated by the
+// handler; the store only writes them.
+func (r *PostgresRepository) SetAgentGroups(ctx context.Context, tenantID, agentID string, groups []string) (*Agent, error) {
+	if groups == nil {
+		groups = []string{}
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE agents SET groups = $3
+		WHERE tenant_id = $1 AND id::text = $2 AND revoked_at IS NULL
+	`, tenantID, agentID, pq.Array(groups))
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrAgentNotFound
+	}
+	return r.GetAgent(ctx, tenantID, agentID)
+}
+
+// ListAgentGroups lists the group names the tenant's live agents carry, with
+// how many members each has and how many of them are online.
+func (r *PostgresRepository) ListAgentGroups(ctx context.Context, tenantID string) ([]*AgentGroup, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT g, COUNT(*), COUNT(*) FILTER (WHERE online)
+		FROM (
+			SELECT unnest(groups) AS g,
+			       (last_seen_at IS NOT NULL AND last_seen_at > NOW() - ($2 || ' seconds')::interval) AS online
+			FROM agents
+			WHERE tenant_id = $1 AND revoked_at IS NULL
+		) m
+		GROUP BY g
+		ORDER BY g
+	`, tenantID, onlineWindowArg())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*AgentGroup{}
+	for rows.Next() {
+		g := &AgentGroup{}
+		if err := rows.Scan(&g.Name, &g.Members, &g.Online); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }
 
 // RevokeAgent revokes a live agent. Its next request to the gateway is refused,

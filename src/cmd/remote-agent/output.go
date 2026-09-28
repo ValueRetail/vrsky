@@ -36,15 +36,24 @@ type delivery struct {
 	result   chan error // capacity 1; the agent's ack
 }
 
-// outputHandler returns the durable's handler for one pipeline.
+// outputScope says which of a pipeline's output nodes a durable's handler
+// serves: the pipeline's own durable takes the single-agent nodes; a group
+// member's durable takes the group nodes that member is in and has the folder
+// for — decided per message, since membership moves.
+type outputScope struct {
+	member string          // "" for the pipeline's own durable
+	done   <-chan struct{} // ends a wait: the session, or this member's subscription
+}
+
+// outputHandler returns a durable's handler for one pipeline.
 //
 // It hands the message to each target agent and then waits — for the agents'
-// acknowledgements, or for the session to end. It never returns while an agent
+// acknowledgements, or for the scope to end. It never returns while an agent
 // is merely offline: the dispatch loop keeps the message in progress with
 // heartbeats, so it stays in the stream with its delivery count unchanged
 // until the agent comes back. It returns nil (ack) only once every target
 // confirmed the write.
-func (s *gateway) outputHandler(sess *connSession) messaging.Handler {
+func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.Handler {
 	return func(_ context.Context, m *nats.Msg) error {
 		var env envelope.Envelope
 		if err := json.Unmarshal(m.Data, &env); err != nil {
@@ -52,14 +61,24 @@ func (s *gateway) outputHandler(sess *connSession) messaging.Handler {
 			return nil
 		}
 		last, _ := env.Metadata["_last_processed_by"].(string)
-		var targets []remoteNode
+		type target struct {
+			node    remoteNode
+			agentID string
+		}
+		var targets []target
 		for _, n := range sess.outputs {
-			if eligible(n, last) {
-				targets = append(targets, n)
+			if !eligible(n, last) {
+				continue
+			}
+			switch {
+			case scope.member == "" && n.Target != targetGroup:
+				targets = append(targets, target{n, n.AgentID})
+			case scope.member != "" && n.Target == targetGroup && s.memberTakes(sess, scope.member, n, agentproto.ModeWrite):
+				targets = append(targets, target{n, scope.member})
 			}
 		}
 		if len(targets) == 0 {
-			return nil // a message for another step of this pipeline
+			return nil // a message for another step, or not for this member
 		}
 
 		body, err := s.bodyFor(&env)
@@ -71,13 +90,14 @@ func (s *gateway) outputHandler(sess *connSession) messaging.Handler {
 		_, converted := env.Metadata["_converted"]
 
 		var waiting []*delivery
-		for _, n := range targets {
+		for _, t := range targets {
+			n := t.node
 			name := agentproto.GenerateFilename(n.FilenamePattern, env.ID, env.ContentType, env.Source, metaName, converted, env.CreatedAt)
 			if err := agentproto.ValidFilename(name); err != nil {
 				// Permanent for this node: retrying produces the same name.
 				s.logger.Error("Not delivering: unusable filename", "connection_id", sess.connID,
 					"node_id", n.NodeID, "envelope_id", env.ID, "error", err)
-				s.events.emit(sess.connID, event{Type: "failed", Message: err.Error(), EnvelopeID: env.ID})
+				s.events.emit(sess.connID, event{Type: "failed", Message: err.Error(), EnvelopeID: env.ID, Agent: s.agentName(t.agentID)})
 				continue
 			}
 			d := &delivery{
@@ -91,7 +111,7 @@ func (s *gateway) outputHandler(sess *connSession) messaging.Handler {
 					Size:         body.size,
 					Checksum:     body.checksum,
 				},
-				agentID:    n.AgentID,
+				agentID:    t.agentID,
 				tenantID:   sess.tenantID,
 				inline:     body.inline,
 				payloadRef: body.ref,
@@ -108,14 +128,14 @@ func (s *gateway) outputHandler(sess *connSession) messaging.Handler {
 				if err != nil && firstErr == nil {
 					firstErr = err
 				}
-			case <-sess.ctx.Done():
+			case <-scope.done:
 				s.dequeue(waiting[i:]...)
 				return errSessionEnded
 			}
 		}
 		if firstErr == nil {
 			for _, d := range waiting {
-				s.events.emit(sess.connID, event{Type: "delivered", Filename: d.wire.Filename, EnvelopeID: env.ID})
+				s.events.emit(sess.connID, event{Type: "delivered", Filename: d.wire.Filename, EnvelopeID: env.ID, Agent: s.agentName(d.agentID)})
 			}
 		}
 		return firstErr

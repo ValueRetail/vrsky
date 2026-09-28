@@ -65,6 +65,7 @@ func (s *gateway) collectWork(id agentIdentity) (agentproto.WorkResponse, <-chan
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a := s.agentLocked(id.ID)
+	a.name = id.Name
 
 	resp := agentproto.WorkResponse{Watches: []agentproto.Watch{}, Deliveries: []agentproto.Delivery{}}
 	for _, sess := range s.sessions {
@@ -72,11 +73,12 @@ func (s *gateway) collectWork(id agentIdentity) (agentproto.WorkResponse, <-chan
 			continue // belt and braces: start already refused cross-tenant agents
 		}
 		for _, n := range sess.inputs {
-			if n.AgentID == id.ID {
-				resp.Watches = append(resp.Watches, agentproto.Watch{
-					Op: agentproto.OpWatchDir, ConnectionID: sess.connID, Directory: n.Directory, After: n.After,
-				})
+			if !nodeIsFor(sess, n, id.ID, agentproto.ModeRead) {
+				continue
 			}
+			resp.Watches = append(resp.Watches, agentproto.Watch{
+				Op: agentproto.OpWatchDir, ConnectionID: sess.connID, Directory: n.Directory, After: n.After,
+			})
 		}
 	}
 	sort.Slice(resp.Watches, func(i, j int) bool {
@@ -178,4 +180,14 @@ func (s *gateway) handleAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// nodeIsFor reports whether a node names this agent: directly, or through a
+// group the agent is a current member of with the folder in the needed mode.
+// Caller holds s.mu.
+func nodeIsFor(sess *connSession, n remoteNode, agentID, mode string) bool {
+	if n.Target == targetGroup {
+		return sess.members[agentID].takes(n, mode)
+	}
+	return n.AgentID == agentID
 }

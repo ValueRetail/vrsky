@@ -35,6 +35,7 @@ var apiRoutes = []apiRoute{
 	{"DELETE /api/v1/connections/{id}", "delete", "/api/v1/connections/{id}", "Connections", "Delete a connection", nil, nil},
 	{"POST /api/v1/connections/{id}/start", "post", "/api/v1/connections/{id}/start", "Connections", "Start (deploy) a connection", nil, tof(Connection{})},
 	{"POST /api/v1/connections/{id}/stop", "post", "/api/v1/connections/{id}/stop", "Connections", "Stop a connection", nil, tof(Connection{})},
+	{"POST /api/v1/connections/{id}/resend", "post", "/api/v1/connections/{id}/resend", "Connections", "Ask a running pipeline's source to send everything again (sources that support it, e.g. Business Central, re-send all records and pictures on the next poll)", nil, nil},
 	{"POST /api/v1/connections/test", "post", "/api/v1/connections/test", "Connections", "Test a connector config without deploying", nil, nil},
 
 	// --- Produced files (proxied to the file workers; see files_proxy.go) ---
@@ -45,7 +46,8 @@ var apiRoutes = []apiRoute{
 	// --- Remote agents (#266) ---
 	{"POST /api/v1/agents/registration-tokens", "post", "/api/v1/agents/registration-tokens", "Remote agents", "Mint a one-time registration token for a new agent (admin; the raw token is returned only here)", nil, tof(AgentRegistrationToken{})},
 	{"GET /api/v1/agents", "get", "/api/v1/agents", "Remote agents", "List the workspace's agents, with online status", nil, nil},
-	{"PATCH /api/v1/agents/{id}", "patch", "/api/v1/agents/{id}", "Remote agents", "Rename an agent", nil, tof(Agent{})},
+	{"GET /api/v1/agents/groups", "get", "/api/v1/agents/groups", "Remote agents", "List the workspace's agent groups with member and online counts", nil, nil},
+	{"PATCH /api/v1/agents/{id}", "patch", "/api/v1/agents/{id}", "Remote agents", "Rename an agent and/or replace its groups", tof(updateAgentRequest{}), tof(Agent{})},
 	{"DELETE /api/v1/agents/{id}", "delete", "/api/v1/agents/{id}", "Remote agents", "Revoke an agent; its credential stops working on its next request", nil, nil},
 	{"GET /api/v1/agents/release", "get", "/api/v1/agents/release", "Remote agents", "Version and SHA-256 of the downloadable Windows agent (public)", nil, tof(AgentRelease{})},
 	{"GET /api/v1/agents/download/windows-amd64", "get", "/api/v1/agents/download/windows-amd64", "Remote agents", "Download vrsky-agent.exe for Windows x64 (public; X-Checksum-Sha256 header)", nil, nil},

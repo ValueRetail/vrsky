@@ -22,6 +22,8 @@
 .PARAMETER Token    One-time registration token from Settings -> Remote agents.
                     Not needed when the machine is already registered.
 .PARAMETER Name     This agent's name in VRSky. Default: the computer name.
+.PARAMETER Groups   Comma-separated groups to join (e.g. all-tills,store-oslo).
+                    Default: the groups the registration token was made with.
 .PARAMETER Inbox    Folder VRSky reads new files from. Asked for if not given.
 .PARAMETER Outbox   Folder VRSky writes files into. Asked for if not given.
 .PARAMETER ExePath  Use this local vrsky-agent.exe instead of downloading (USB stick, offline).
@@ -32,6 +34,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Url,
   [string]$Token = '',
   [string]$Name = $env:COMPUTERNAME,
+  [string]$Groups = '',
   [string]$Inbox = '',
   [string]$Outbox = '',
   [string]$ExePath = '',
@@ -145,7 +148,9 @@ if ($check -match 'Not registered yet' -or $check -match 'REVOKED') {
   }
   if ($Token) {
     Step "Registering as '$Name'"
-    & $Exe register --url $Url --token $Token --name $Name
+    $groupArgs = @()
+    if ($Groups) { $groupArgs = @('--groups', $Groups) }
+    & $Exe register --url $Url --token $Token --name $Name @groupArgs
     if ($LASTEXITCODE -ne 0) { Fail "Registration failed (see above). Generate a new token and run the command again." }
   } else {
     $registered = $false

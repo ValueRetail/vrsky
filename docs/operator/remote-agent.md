@@ -45,8 +45,10 @@ starts it. The machine then shows as online under Settings → Remote agents.
 - No internet access beyond VRSky's own address is needed.
 
 Options, added after the command: `-Name` (default: the computer name),
-`-Inbox`/`-Outbox` (skip the questions), `-ExePath` (use a local `.exe` instead
-of downloading), `-NoService` (configure and register only).
+`-Groups all-tills,store-oslo` (which groups to join — default: the groups
+the token was generated with), `-Inbox`/`-Outbox` (skip the questions),
+`-ExePath` (use a local `.exe` instead of downloading), `-NoService`
+(configure and register only).
 
 ### Upgrading
 
@@ -120,10 +122,11 @@ In VRSky, open **Settings → Remote agents → Generate registration token**, t
 path to the agent in front:
 
 ```powershell
-& "C:\Program Files\VRSky\vrsky-agent.exe" register --url https://vrsky.valueretail.no --token vrsky_reg_…
+& "C:\Program Files\VRSky\vrsky-agent.exe" register --url https://vrsky.valueretail.no --token vrsky_reg_… --groups all-tills
 ```
 
-The token works once. Registration stores the agent's credential in
+`--groups` is optional: without it the agent joins the groups the token was
+generated with. The token works once. Registration stores the agent's credential in
 `C:\ProgramData\VRSky\agent\credential.json`, readable only by Administrators
 and the SYSTEM account. The agent now appears under Settings → Remote agents.
 
@@ -158,6 +161,15 @@ up) and is restarted by Windows if it fails. It runs as LocalSystem.
   credential and logs in place.
 
 On Linux, `install` writes a systemd unit (`vrsky-agent.service`) instead.
+
+## Groups
+
+Settings → Remote agents shows each agent's **groups** (`all-tills`,
+`store-oslo`, …) and lets an editor change them. A pipeline node can target a
+group instead of one agent, so a hundred tills need one output node, not a
+hundred — see [the connector page](../connectors/remote-agent.md#groups-one-node-many-tills).
+Groups are set when a token is generated, at install with `-Groups`, or later
+in Settings; the agent itself never needs to know its groups.
 
 ## How it behaves
 

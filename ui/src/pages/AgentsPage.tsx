@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import InstallCommand, { UninstallCommand } from '@/components/Agents/InstallCommand'
 import {
-  listAgents, createRegistrationToken, renameAgent, revokeAgent,
+  listAgents, createRegistrationToken, renameAgent, revokeAgent, updateAgent, parseGroups,
   type Agent, type AgentRegistrationToken,
 } from '@/services/agentService'
 
@@ -65,6 +65,8 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [suggestedName, setSuggestedName] = useState('')
+  const [suggestedGroups, setSuggestedGroups] = useState('')
+  const [editingGroups, setEditingGroups] = useState<{ id: string; text: string } | null>(null)
   const [minting, setMinting] = useState(false)
   const [newToken, setNewToken] = useState<AgentRegistrationToken | null>(null)
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(null)
@@ -98,8 +100,12 @@ export default function AgentsPage() {
     setMinting(true)
     setError(null)
     try {
-      setNewToken(await createRegistrationToken(suggestedName.trim() || undefined))
+      const groups = parseGroups(suggestedGroups)
+      setNewToken(groups.length > 0
+        ? await createRegistrationToken(suggestedName.trim() || undefined, groups)
+        : await createRegistrationToken(suggestedName.trim() || undefined))
       setSuggestedName('')
+      setSuggestedGroups('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create a registration token')
     } finally {
@@ -117,6 +123,21 @@ export default function AgentsPage() {
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Rename failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleSaveGroups = async () => {
+    if (!editingGroups) return
+    setBusy(editingGroups.id)
+    setError(null)
+    try {
+      await updateAgent(editingGroups.id, { groups: parseGroups(editingGroups.text) })
+      setEditingGroups(null)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save groups')
     } finally {
       setBusy(null)
     }
@@ -178,6 +199,18 @@ export default function AgentsPage() {
               style={{ padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}
             />
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 200px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }} htmlFor="ag-groups">
+              Groups for the new agent (optional)
+            </label>
+            <input
+              id="ag-groups"
+              value={suggestedGroups}
+              onChange={(e) => setSuggestedGroups(e.target.value)}
+              placeholder="all-tills, store-oslo"
+              style={{ padding: '6px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+            />
+          </div>
           <button
             type="submit"
             disabled={minting}
@@ -200,17 +233,18 @@ export default function AgentsPage() {
               <th style={headerCell}>Status</th>
               <th style={headerCell}>Machine</th>
               <th style={headerCell}>Folders</th>
+              <th style={headerCell}>Groups</th>
               <th style={headerCell}>Last seen</th>
               <th style={headerCell}></th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td style={cell} colSpan={6}>Loading…</td></tr>
+              <tr><td style={cell} colSpan={7}>Loading…</td></tr>
             )}
             {!loading && agents.length === 0 && (
               <tr>
-                <td style={{ ...cell, color: '#6b7280' }} colSpan={6}>
+                <td style={{ ...cell, color: '#6b7280' }} colSpan={7}>
                   No agents yet.{canAdmin ? ' Generate a registration token above, then run the command it shows on the machine.' : ''}
                 </td>
               </tr>
@@ -259,6 +293,42 @@ export default function AgentsPage() {
                             {d.name} · {d.mode === 'read' ? 'in' : 'out'}
                           </span>
                         ))}
+                      </span>
+                    )}
+                  </td>
+                  <td style={cell}>
+                    {editingGroups?.id === a.id ? (
+                      <span style={{ display: 'flex', gap: '6px' }}>
+                        <input
+                          aria-label={`Groups for ${a.name}`}
+                          value={editingGroups.text}
+                          placeholder="all-tills, store-oslo"
+                          onChange={(e) => setEditingGroups({ id: a.id, text: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveGroups()
+                            if (e.key === 'Escape') setEditingGroups(null)
+                          }}
+                          style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #d1d5db', width: '180px' }}
+                        />
+                        <button onClick={handleSaveGroups} disabled={busy === a.id} style={button}>Save</button>
+                        <button onClick={() => setEditingGroups(null)} style={button}>Cancel</button>
+                      </span>
+                    ) : (
+                      <span style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {(a.groups ?? []).length === 0
+                          ? <span style={{ color: '#9ca3af' }}>—</span>
+                          : (a.groups ?? []).map((g) => (
+                            <span key={g} style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '11px', background: '#f5f3ff', color: '#5b21b6' }}>{g}</span>
+                          ))}
+                        {!revoked && canRename && (
+                          <button
+                            onClick={() => setEditingGroups({ id: a.id, text: (a.groups ?? []).join(', ') })}
+                            aria-label={`Edit groups of ${a.name}`}
+                            style={{ ...button, padding: '1px 6px', fontSize: '11px' }}
+                          >
+                            Edit
+                          </button>
+                        )}
                       </span>
                     )}
                   </td>

@@ -105,7 +105,7 @@ func (s *gateway) watchingSession(id agentIdentity, connID, dir string) *connSes
 		return nil
 	}
 	for _, n := range sess.inputs {
-		if n.AgentID == id.ID && n.Directory == dir {
+		if n.Directory == dir && nodeIsFor(sess, n, id.ID, agentproto.ModeRead) {
 			return sess
 		}
 	}

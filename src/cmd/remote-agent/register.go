@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+
+	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
 	"github.com/ValueRetail/vrsky/pkg/auth"
@@ -55,12 +60,13 @@ func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	var tokenID, tenantID, suggested, createdBy string
+	var tokenGroups []string
 	// lint:tenant-ok — lookup by unique one-time token hash; the tenant is recovered from the row.
 	err = tx.QueryRowContext(ctx, `
 		UPDATE agent_registration_tokens SET used_at = NOW()
 		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
-		RETURNING id::text, tenant_id::text, COALESCE(suggested_name, ''), COALESCE(created_by::text, '')`,
-		auth.HashToken(token)).Scan(&tokenID, &tenantID, &suggested, &createdBy)
+		RETURNING id::text, tenant_id::text, COALESCE(suggested_name, ''), COALESCE(created_by::text, ''), suggested_groups`,
+		auth.HashToken(token)).Scan(&tokenID, &tenantID, &suggested, &createdBy, pq.Array(&tokenGroups))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, http.StatusUnauthorized, agentproto.ErrTokenExpiredOrUsed,
 			"this registration token is unknown, already used, or expired — generate a new one in Settings → Remote agents")
@@ -73,17 +79,29 @@ func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := firstNonEmpty(clip(req.Name, 255), clip(suggested, 255), clip(req.Hostname, 255), "agent")
+	// The machine's own --groups win over the token's; both were typed by
+	// someone with access to this workspace. Validated here too: the token's
+	// were checked when minted, the request's were not.
+	groups := tokenGroups
+	if len(req.Groups) > 0 {
+		groups = req.Groups
+	}
+	groups, badGroup := validGroups(groups)
+	if badGroup != "" {
+		writeErr(w, http.StatusBadRequest, agentproto.ErrBadRequest, badGroup)
+		return
+	}
 	var createdByArg any
 	if createdBy != "" {
 		createdByArg = createdBy
 	}
 	var agentID string
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO agents (tenant_id, name, hostname, os, arch, agent_version, credential_hash, directories, created_by, last_seen_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+		INSERT INTO agents (tenant_id, name, hostname, os, arch, agent_version, credential_hash, directories, created_by, last_seen_at, groups)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
 		RETURNING id::text`,
 		tenantID, name, clip(req.Hostname, 255), clip(req.OS, 32), clip(req.Arch, 32), clip(req.Version, 64),
-		auth.HashToken(credential), dirsJSON, createdByArg).Scan(&agentID)
+		auth.HashToken(credential), dirsJSON, createdByArg, pq.Array(groups)).Scan(&agentID)
 	if err != nil {
 		// The rollback also un-consumes the token, so the user can retry with
 		// --name rather than generate a new one.
@@ -139,6 +157,9 @@ func (s *gateway) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.agentLocked(id.ID).lastSeenWrite = s.now()
 	s.mu.Unlock()
+	// A machine that just (re)announced may have joined a group or gained a
+	// folder: refresh its tenant's group sessions now, not at the next tick.
+	go s.reconcileTenant(context.Background(), id.TenantID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -164,4 +185,30 @@ func isUniqueViolation(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "23505") || strings.Contains(msg, "duplicate key value") ||
 		strings.Contains(msg, "unique constraint")
+}
+
+// validGroups trims, validates, de-duplicates and sorts group names, the same
+// rule as the management API's. Returns a user-facing message when one is
+// unusable.
+func validGroups(raw []string) ([]string, string) {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, g := range raw {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		if !agentproto.ValidGroupName(g) {
+			return nil, fmt.Sprintf("group %q: use letters, digits, - and _ (1-64 characters), e.g. all-tills", g)
+		}
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	if len(out) > 32 {
+		return nil, "an agent can be in at most 32 groups"
+	}
+	sort.Strings(out)
+	return out, ""
 }

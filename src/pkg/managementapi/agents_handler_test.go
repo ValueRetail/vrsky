@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -32,11 +33,11 @@ func newAgentRBACMock() *agentRBACMock {
 	return &agentRBACMock{rbacMock: newRBACMock(), agents: map[string]*Agent{}}
 }
 
-func (m *agentRBACMock) CreateAgentRegistrationToken(_ context.Context, tenantID, suggested, _ string) (*AgentRegistrationToken, error) {
+func (m *agentRBACMock) CreateAgentRegistrationToken(_ context.Context, tenantID, suggested string, groups []string, _ string) (*AgentRegistrationToken, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t := &AgentRegistrationToken{ID: "tok-" + tenantID, TenantID: tenantID, Token: AgentRegistrationTokenPrefix + "raw",
-		SuggestedName: suggested, ExpiresAt: time.Now().Add(AgentRegistrationTokenTTL)}
+		SuggestedName: suggested, SuggestedGroups: groups, ExpiresAt: time.Now().Add(AgentRegistrationTokenTTL)}
 	m.tokens = append(m.tokens, t)
 	return t, nil
 }
@@ -76,6 +77,43 @@ func (m *agentRBACMock) RenameAgent(_ context.Context, tenantID, id, name string
 	}
 	a.Name = name
 	return a, nil
+}
+
+func (m *agentRBACMock) SetAgentGroups(_ context.Context, tenantID, id string, groups []string) (*Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.agents[id]
+	if !ok || a.TenantID != tenantID || a.RevokedAt != nil {
+		return nil, ErrAgentNotFound
+	}
+	a.Groups = groups
+	return a, nil
+}
+
+func (m *agentRBACMock) ListAgentGroups(_ context.Context, tenantID string) ([]*AgentGroup, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	byName := map[string]*AgentGroup{}
+	for _, a := range m.agents {
+		if a.TenantID != tenantID || a.RevokedAt != nil {
+			continue
+		}
+		for _, g := range a.Groups {
+			if byName[g] == nil {
+				byName[g] = &AgentGroup{Name: g}
+			}
+			byName[g].Members++
+			if a.Online {
+				byName[g].Online++
+			}
+		}
+	}
+	out := []*AgentGroup{}
+	for _, g := range byName {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func (m *agentRBACMock) RevokeAgent(_ context.Context, tenantID, id string) error {
@@ -234,15 +272,15 @@ func TestAgentRepo_EveryQueryIsScopedByTenant(t *testing.T) {
 	defer done()
 	ctx := context.Background()
 	cols := []string{"id", "tenant_id", "name", "hostname", "os", "arch", "agent_version",
-		"directories", "last_seen_at", "registered_at", "revoked_at", "online"}
+		"directories", "groups", "last_seen_at", "registered_at", "revoked_at", "online"}
 	row := []driver.Value{"a1", tenantA, "pc", "host", "windows", "amd64", "1.0.0",
-		[]byte(`[{"name":"inbox","mode":"read"}]`), nil, time.Now(), nil, false}
+		[]byte(`[{"name":"inbox","mode":"read"}]`), []byte(`{all-tills}`), nil, time.Now(), nil, false}
 
 	mock.ExpectQuery(`FROM agents\s+WHERE tenant_id = \$1\s+ORDER BY`).
 		WithArgs(tenantA, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows(cols).AddRow(row...))
 	list, err := repo.ListAgents(ctx, tenantA)
-	if err != nil || len(list) != 1 || list[0].Directories[0].Name != "inbox" {
+	if err != nil || len(list) != 1 || list[0].Directories[0].Name != "inbox" || len(list[0].Groups) != 1 || list[0].Groups[0] != "all-tills" {
 		t.Fatalf("ListAgents = %+v, %v", list, err)
 	}
 
@@ -270,6 +308,25 @@ func TestAgentRepo_EveryQueryIsScopedByTenant(t *testing.T) {
 		t.Fatalf("RenameAgent: %v", err)
 	}
 
+	// Groups (one node, many tills): both new queries scope by tenant, and the
+	// group listing counts live agents only.
+	mock.ExpectExec(`UPDATE agents SET groups = \$3\s+WHERE tenant_id = \$1 AND id::text = \$2 AND revoked_at IS NULL`).
+		WithArgs(tenantA, "a1", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`FROM agents\s+WHERE tenant_id = \$1 AND id::text = \$3`).
+		WithArgs(tenantA, sqlmock.AnyArg(), "a1").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow(row...))
+	if _, err := repo.SetAgentGroups(ctx, tenantA, "a1", []string{"all-tills"}); err != nil {
+		t.Fatalf("SetAgentGroups: %v", err)
+	}
+	mock.ExpectQuery(`FROM agents\s+WHERE tenant_id = \$1 AND revoked_at IS NULL\s+\) m\s+GROUP BY g`).
+		WithArgs(tenantA, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"g", "members", "online"}).AddRow("all-tills", 2, 1))
+	groups, err := repo.ListAgentGroups(ctx, tenantA)
+	if err != nil || len(groups) != 1 || groups[0].Name != "all-tills" || groups[0].Members != 2 || groups[0].Online != 1 {
+		t.Fatalf("ListAgentGroups = %+v, %v", groups, err)
+	}
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("sql expectations: %v", err)
 	}
@@ -289,11 +346,11 @@ func TestAgentRepo_StoresOnlyTheTokenHash(t *testing.T) {
 
 	var bound driver.Value
 	mock.ExpectQuery(`INSERT INTO agent_registration_tokens`).
-		WithArgs(tenantA, captureArg{&bound}, nil, nil, sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "suggested_name", "expires_at"}).
-			AddRow("t1", tenantA, nil, time.Now().Add(time.Hour)))
+		WithArgs(tenantA, captureArg{&bound}, nil, nil, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "suggested_name", "expires_at", "suggested_groups"}).
+			AddRow("t1", tenantA, nil, time.Now().Add(time.Hour), []byte(`{}`)))
 
-	tok, err := repo.CreateAgentRegistrationToken(context.Background(), tenantA, "", "")
+	tok, err := repo.CreateAgentRegistrationToken(context.Background(), tenantA, "", nil, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

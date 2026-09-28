@@ -94,11 +94,9 @@ var nodeConfigRules = map[nodeKind]nodeConfigRule{
 	// the named folder in the right mode is checked at start — early in
 	// StartConnection, and authoritatively in the gateway.
 	{"consumer", "remote_agent"}: {"remote-agent", []configRequirement{
-		{"remote_agent.agent_id", "choose the remote agent to watch"},
 		{"remote_agent.directory", "choose the folder on the agent to watch"},
 	}},
 	{"producer", "remote_agent"}: {"remote-agent", []configRequirement{
-		{"remote_agent.agent_id", "choose the remote agent to write to"},
 		{"remote_agent.directory", "choose the folder on the agent to write into"},
 	}},
 	{"producer", "database"}: {"db-producer", []configRequirement{{
@@ -196,7 +194,26 @@ func validateEdgeNodeConfig(node *Node) []string {
 				node.ID, configType, req.path, req.reason, rule.service))
 		}
 	}
+	if configType == "remote_agent" {
+		errs = append(errs, validateRemoteAgentTarget(node, raw)...)
+	}
 	return errs
+}
+
+// validateRemoteAgentTarget: a remote_agent node names either one agent
+// (agent_id) or a group (target "group" + group), never neither.
+func validateRemoteAgentTarget(node *Node, raw map[string]json.RawMessage) []string {
+	var ra map[string]json.RawMessage
+	_ = json.Unmarshal(raw["remote_agent"], &ra)
+	target := stringField(ra, "target")
+	hasAgent, hasGroup := hasNonEmpty(ra, "agent_id"), hasNonEmpty(ra, "group")
+	switch {
+	case target == "group" && !hasGroup:
+		return []string{fmt.Sprintf("node %s (remote_agent): remote_agent.group is required — choose the group of agents (served by remote-agent)", node.ID)}
+	case target != "group" && !hasAgent:
+		return []string{fmt.Sprintf("node %s (remote_agent): remote_agent.agent_id is required — choose the remote agent, or set target to \"group\" and choose a group (served by remote-agent)", node.ID)}
+	}
+	return nil
 }
 
 // validateTransformNodeConfig checks filter/converter nodes for input-format

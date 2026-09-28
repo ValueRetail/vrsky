@@ -17,10 +17,12 @@ vi.mock('@/store/authStore', () => ({
 
 const listAgents = vi.fn()
 const createRegistrationToken = vi.fn()
+const updateAgent = vi.fn()
 vi.mock('@/services/agentService', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   listAgents: () => listAgents(),
-  createRegistrationToken: (n?: string) => createRegistrationToken(n),
+  createRegistrationToken: (...args: unknown[]) => createRegistrationToken(...args),
+  updateAgent: (id: string, patch: unknown) => updateAgent(id, patch),
   renameAgent: vi.fn(),
   revokeAgent: vi.fn(),
   getAgentRelease: () => Promise.resolve({ platform: 'windows-amd64', version: 'test', sha256: '', size_bytes: 1, filename: 'vrsky-agent.exe' }),
@@ -30,13 +32,14 @@ import AgentsPage from './AgentsPage'
 
 const base = {
   tenant_id: 'tenant-1', hostname: 'LAGER-PC', os: 'windows', arch: 'amd64', agent_version: '0.1.0',
-  registered_at: '2026-09-24T08:00:00Z',
+  registered_at: '2026-09-24T08:00:00Z', groups: [] as string[],
 }
 
 beforeEach(() => {
   role = 'admin'
   listAgents.mockReset()
   createRegistrationToken.mockReset()
+  updateAgent.mockReset()
 })
 
 describe('AgentsPage', () => {
@@ -93,5 +96,33 @@ describe('AgentsPage', () => {
     await screen.findByText('till-1')
     expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revoke' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Edit groups/ })).toBeNull()
+  })
+
+  // Groups: one node, many tills.
+  it('shows each agent\'s groups and lets an editor change them', async () => {
+    role = 'editor'
+    listAgents.mockResolvedValue([{ ...base, id: 'a1', name: 'till-1', online: true, directories: [], groups: ['all-tills'] }])
+    updateAgent.mockResolvedValue({})
+    render(<AgentsPage />)
+
+    expect(await screen.findByText('all-tills')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit groups of till-1' }))
+    const input = screen.getByLabelText('Groups for till-1') as HTMLInputElement
+    expect(input.value).toBe('all-tills')
+    fireEvent.change(input, { target: { value: 'all-tills, store-oslo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(updateAgent).toHaveBeenCalledWith('a1', { groups: ['all-tills', 'store-oslo'] }))
+  })
+
+  it('puts a new agent in the groups typed when minting its token', async () => {
+    listAgents.mockResolvedValue([])
+    createRegistrationToken.mockResolvedValue({
+      id: 't1', tenant_id: 'tenant-1', token: 'vrsky_reg_abc123', expires_at: '2026-09-24T10:00:00Z', suggested_groups: ['all-tills'],
+    })
+    render(<AgentsPage />)
+    fireEvent.change(await screen.findByLabelText(/Groups for the new agent/), { target: { value: 'all-tills store-oslo, all-tills' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate registration token' }))
+    await waitFor(() => expect(createRegistrationToken).toHaveBeenCalledWith(undefined, ['all-tills', 'store-oslo']))
   })
 })

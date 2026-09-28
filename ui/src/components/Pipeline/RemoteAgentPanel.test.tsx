@@ -4,10 +4,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 
 const listAgents = vi.fn()
-vi.mock('../../services/agentService', () => ({ listAgents: () => listAgents() }))
+const resendConnection = vi.fn()
+vi.mock('../../services/agentService', () => ({
+  listAgents: () => listAgents(),
+  resendConnection: (id: string) => resendConnection(id),
+}))
 
 type Handlers = { onEvent: (e: unknown) => void; onError?: (m: string) => void }
 const subscribe = vi.fn()
@@ -24,8 +28,10 @@ import { remoteAgentDetail, remoteAgentEnds, type RemoteAgentEnd } from './remot
 
 const agent = (id: string, extra: Record<string, unknown>) => ({
   id, tenant_id: 't1', name: id, hostname: '', os: 'windows', arch: 'amd64', agent_version: '0.1.0',
-  registered_at: '', directories: [], online: false, ...extra,
+  registered_at: '', directories: [], groups: [], online: false, ...extra,
 })
+
+const groupEnd: RemoteAgentEnd = { role: 'destination', agentId: '', agentName: 'all-tills', group: 'all-tills', directory: 'catalogue-in' }
 
 const ends: RemoteAgentEnd[] = [
   { role: 'source', agentId: 'a1', agentName: 'LAGER-01', directory: 'superpos-out' },
@@ -39,6 +45,7 @@ const handlers = (): Handlers => subscribe.mock.calls[subscribe.mock.calls.lengt
 
 beforeEach(() => {
   listAgents.mockReset()
+  resendConnection.mockReset()
   subscribe.mockReset()
   unsubscribe.mockReset()
 })
@@ -64,6 +71,13 @@ describe('remoteAgentEnds / remoteAgentDetail', () => {
   it('ignores a remote-agent node with no agent picked yet', () => {
     expect(remoteAgentEnds({ type: 'remote_agent', remote_agent: {} }, undefined)).toEqual([])
     expect(remoteAgentEnds({ type: 'remote_agent' }, undefined)).toEqual([])
+  })
+
+  it('reads a group end, and needs a group name', () => {
+    expect(remoteAgentEnds({ type: 'remote_agent', remote_agent: { target: 'group', group: 'all-tills', directory: 'in' } }, undefined))
+      .toEqual([{ role: 'source', agentId: '', agentName: 'all-tills', group: 'all-tills', directory: 'in' }])
+    expect(remoteAgentEnds({ type: 'remote_agent', remote_agent: { target: 'group', directory: 'in' } }, undefined)).toEqual([])
+    expect(remoteAgentDetail({ type: 'remote_agent', remote_agent: { target: 'group', group: 'all-tills', directory: 'in' } })).toBe('all-tills:in')
   })
 
   it('falls back to the agent ID when no display name was saved', () => {
@@ -191,5 +205,64 @@ describe('RemoteAgentPanel', () => {
     await flush()
     expect((container.firstChild as HTMLElement).style.display).toBe('none')
     expect(subscribe).toHaveBeenCalled()
+  })
+
+  // Groups: one node, many tills.
+  it('shows a group destination as online/members and names the offline ones', async () => {
+    listAgents.mockImplementation(() => Promise.resolve([
+      agent('TILL-01', { online: true, groups: ['all-tills'] }),
+      agent('TILL-02', { online: false, groups: ['all-tills'] }),
+      agent('OLD', { online: false, groups: ['all-tills'], revoked_at: '2026-09-01T00:00:00Z' }),
+      agent('OTHER', { online: false, groups: ['store-oslo'] }),
+    ]))
+    render(<RemoteAgentPanel connectionId="c1" ends={[groupEnd]} visible />)
+    await waitFor(() => expect(screen.getByTestId('agent-destination').textContent).toContain('1/2 online'))
+    expect(screen.getByTestId('agent-destination').textContent).toContain('group all-tills')
+    expect(screen.getByText(/Offline: TILL-02\./)).toBeTruthy()
+    expect(screen.getByText(/the others are not held up/i)).toBeTruthy()
+  })
+
+  it('describes warnings, and names the agent a file was written to', async () => {
+    listAgents.mockImplementation(() => Promise.resolve([]))
+    render(<RemoteAgentPanel connectionId="c1" ends={[groupEnd]} visible />)
+    await flush()
+    const t = '2026-09-28T10:00:00Z'
+    act(() => {
+      handlers().onEvent({ type: 'delivered', filename: '1896-S.jpg', agent: 'TILL-01', time: t })
+      handlers().onEvent({ type: 'warning', message: 'TILL-02 is in group all-tills but has no write folder named catalogue-in; skipped', time: t })
+    })
+    const rows = screen.getAllByTestId('agent-event').map((r) => r.textContent)
+    expect(rows[0]).toContain('TILL-02 is in group all-tills')
+    expect(rows[1]).toContain('Written 1896-S.jpg → TILL-01')
+  })
+
+  it('Resend everything asks first, then asks the API', async () => {
+    listAgents.mockImplementation(() => Promise.resolve([]))
+    resendConnection.mockImplementation(() => Promise.resolve())
+    const confirm = vi.spyOn(window, 'confirm')
+    render(<RemoteAgentPanel connectionId="c1" ends={[groupEnd]} visible />)
+    await flush()
+
+    confirm.mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Resend everything' }))
+    expect(resendConnection).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Resend everything' }))
+    await waitFor(() => expect(resendConnection).toHaveBeenCalledWith('c1'))
+    expect(await screen.findByText(/Resend requested at/)).toBeTruthy()
+    confirm.mockRestore()
+  })
+
+  it('reports a failed resend through onError', async () => {
+    listAgents.mockImplementation(() => Promise.resolve([]))
+    resendConnection.mockImplementation(() => Promise.reject(new Error('the pipeline is not running')))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onError = vi.fn()
+    render(<RemoteAgentPanel connectionId="c1" ends={[groupEnd]} visible onError={onError} />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Resend everything' }))
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('the pipeline is not running'))
+    vi.restoreAllMocks()
   })
 })
