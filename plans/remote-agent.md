@@ -414,9 +414,10 @@ Gateway event types: `agent_online | agent_offline | delivered | ingested | fail
 Messages for an offline agent wait in `VRSKY_DATA` under that connection's
 durable, which keeps its position across gateway restarts. The stream is bounded
 by `MainRetention = 72h` and `MainMaxBytes = 512 MiB` with `DiscardOld`
-(`pkg/messaging/messaging.go:44,54`), and spilled bodies (> 256 KiB) expire after
-the bucket's 1-day lifecycle. **Effectively: small payloads survive 72 h offline,
-large ones 24 h.** Raising the `spill/` TTL is a follow-up.
+(`pkg/messaging/messaging.go:44,54`). Spilled bodies (> 256 KiB) used to expire
+after the bucket's 1-day lifecycle, so large payloads only survived 24 h offline;
+since 2026-10-01 (`plans/spill-ttl.md`) the rule is 8 days and **every payload
+survives the full 72 h**.
 
 ## Verification
 
