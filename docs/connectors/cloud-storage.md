@@ -55,6 +55,12 @@ Config bullets:
 - Credentials — per-provider.
 - `encryption.mode` — `none`, `sse-s3`, or `sse-kms`.
 - `encryption.kms_key_id` — KMS key when `mode` is `sse-kms`.
+- `key_template` — Go template for the object key, rendered against the
+  record when it is a JSON object plus `{{.timestamp}}` and `{{.uuid}}`
+  (default `{{.uuid}}`). **Pictures and other media** (images, audio,
+  video, PDF) that carry a `filename` ignore the template and are written
+  as `<prefix>/<filename>` — the same rule as the file and remote-agent
+  destinations, so `1896-S.jpg` stays `1896-S.jpg` next to the records.
 
 ```json
 {

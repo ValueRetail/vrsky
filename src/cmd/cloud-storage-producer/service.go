@@ -215,7 +215,14 @@ func (p *cloudProducer) upload(ctx context.Context, cfg *cloudConfig, env *envel
 		return nil
 	}
 
-	key, err := p.renderKey(cfg.KeyTemplate, cfg.Prefix, env)
+	// A media file that carries a name keeps it, template or not — the same
+	// rule as file-producer and the remote agent (#281): the template names
+	// the records, and the pictures travelling beside them are matched by
+	// their own names (1896-S.jpg). The prefix still applies.
+	key, err := joinPrefix(cfg.Prefix, mediaName(env))
+	if key == "" {
+		key, err = p.renderKey(cfg.KeyTemplate, cfg.Prefix, env)
+	}
 	if err != nil {
 		// A bad/mismatched template (e.g. references a field the payload lacks)
 		// shouldn't lose data — fall back to a generated key and warn instead of
@@ -293,15 +300,38 @@ func (p *cloudProducer) renderKey(tmpl, prefix string, env *envelope.Envelope) (
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 
-	key := strings.TrimSpace(buf.String())
+	return joinPrefix(prefix, strings.TrimSpace(buf.String()))
+}
+
+// mediaName is the filename a media envelope (image, audio, video, PDF)
+// carries, reduced to its base name so it can never leave the prefix; "" for
+// anything else, which then takes the key template.
+func mediaName(env *envelope.Envelope) string {
+	if env.Metadata == nil || !envelope.IsMedia(env.ContentType) {
+		return ""
+	}
+	name, _ := env.Metadata["filename"].(string)
+	name = path.Base(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"))
+	if name == "." || name == "/" {
+		return ""
+	}
+	return name
+}
+
+// joinPrefix puts key under prefix and clamps the result: path.Clean resolves
+// any ".." so the key can never escape the bucket root. An empty key gives
+// "" and no error, so a caller can tell "nothing to join" from a bad key.
+func joinPrefix(prefix, key string) (string, error) {
+	if key == "" {
+		return "", nil
+	}
+	raw := key
 	if prefix != "" {
 		key = strings.TrimSuffix(prefix, "/") + "/" + strings.TrimPrefix(key, "/")
 	}
-	// Normalise and clamp: path.Clean resolves any ".." so the key can never
-	// escape the bucket root.
 	key = strings.TrimPrefix(path.Clean("/"+key), "/")
 	if key == "" || key == "." {
-		return "", fmt.Errorf("rendered key %q is empty after normalisation", buf.String())
+		return "", fmt.Errorf("rendered key %q is empty after normalisation", raw)
 	}
 	return key, nil
 }

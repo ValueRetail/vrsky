@@ -73,7 +73,7 @@ grep -rlE 'ghcr\.io/[Vv]alue[Rr]etail/vrsky/|localhost:5000/vrsky/|pgsty/(minio|
 done
 
 # --- 3c. right-size app requests + run core services HA (2 replicas) ---
-# Nodes are now E4bds_v5 (4vCPU/32GB) with ample headroom, so filter runs 2
+# Nodes are now E4ds_v6 (4vCPU/32GB, pool fpool) with ample headroom, so filter runs 2
 # replicas for HA (paired with its PDB, applied in step 4b). Requests stay
 # trimmed for good bin-packing.
 # The manifests are sized for big ServeTheWorld nodes; the filter alone asks for

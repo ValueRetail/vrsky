@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -264,3 +265,113 @@ func TestCloudProducer_TemplateMissingFieldFallback(t *testing.T) {
 
 // Close satisfies objectstore.ObjectStore (added when Close was introduced to release backend clients).
 func (f *fakeStore) Close() error { return nil }
+
+// mediaProducer is a producer wired to a fake store, for driving upload
+// directly: the naming rule is in upload, and the NATS round trip adds
+// nothing to these cases.
+func mediaProducer(fake *fakeStore) *cloudProducer {
+	return &cloudProducer{
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+		now:      func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) },
+	}
+}
+
+func mediaConfig() *cloudConfig {
+	cfg := &cloudConfig{KeyTemplate: "orders/{{.id}}_{{.timestamp}}.json"}
+	cfg.Bucket = "b"
+	cfg.Prefix = "catalogue"
+	return cfg
+}
+
+func pictureEnvelope(name string) *envelope.Envelope {
+	env := envelope.New()
+	env.ID = "env-pic"
+	env.ContentType = "image/jpeg"
+	env.Payload = []byte("\xff\xd8\xff")
+	env.Metadata = map[string]interface{}{"filename": name}
+	return env
+}
+
+func (f *fakeStore) keys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ks []string
+	for k := range f.put {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+// TestCloudProducer_MediaKeepsFilename: a picture travelling beside the
+// records keeps its own name under the prefix — the key template names the
+// records (#281). Bifrost matches pictures by `<number>.<ext>`, so a uuid or
+// the records' template would make them unusable. Inline and streamed alike.
+func TestCloudProducer_MediaKeepsFilename(t *testing.T) {
+	for _, streamed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "inline", true: "streamed"}[streamed], func(t *testing.T) {
+			fake := &fakeStore{}
+			p := mediaProducer(fake)
+			env := pictureEnvelope("1896-S.jpg")
+			var body io.Reader
+			if streamed {
+				body = bytes.NewReader(env.Payload)
+			}
+			if err := p.upload(context.Background(), mediaConfig(), env, body); err != nil {
+				t.Fatalf("upload: %v", err)
+			}
+			if got := fake.keys(); len(got) != 1 || got[0] != "catalogue/1896-S.jpg" {
+				t.Fatalf("keys = %v, want [catalogue/1896-S.jpg]", got)
+			}
+			if ct := fake.putCT["catalogue/1896-S.jpg"]; ct != "image/jpeg" {
+				t.Errorf("content-type = %q, want image/jpeg", ct)
+			}
+		})
+	}
+}
+
+// TestCloudProducer_MediaFilenameCannotEscapePrefix: the name comes from
+// upstream metadata, so it is reduced to a base name before it touches the key.
+func TestCloudProducer_MediaFilenameCannotEscapePrefix(t *testing.T) {
+	for _, name := range []string{"../../x.jpg", `..\..\x.jpg`, "/etc/x.jpg", "sub/dir/x.jpg"} {
+		fake := &fakeStore{}
+		if err := mediaProducer(fake).upload(context.Background(), mediaConfig(), pictureEnvelope(name), nil); err != nil {
+			t.Fatalf("%q: upload: %v", name, err)
+		}
+		if got := fake.keys(); len(got) != 1 || got[0] != "catalogue/x.jpg" {
+			t.Errorf("%q: keys = %v, want [catalogue/x.jpg]", name, got)
+		}
+	}
+}
+
+// TestCloudProducer_NonMediaIgnoresFilename pins today's behaviour for
+// records: a JSON record with a filename in its metadata still takes the key
+// template, and an unnamed picture still gets the generated key.
+func TestCloudProducer_NonMediaIgnoresFilename(t *testing.T) {
+	fake := &fakeStore{}
+	p := mediaProducer(fake)
+
+	env := envelope.New()
+	env.ID = "env-rec"
+	env.ContentType = "application/json"
+	env.Payload = []byte(`{"id":"42"}`)
+	env.Metadata = map[string]interface{}{"filename": "export.json"}
+	if err := p.upload(context.Background(), mediaConfig(), env, nil); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if got := fake.keys(); len(got) != 1 || got[0] != "catalogue/orders/42_20240102T030405Z.json" {
+		t.Fatalf("record keys = %v, want the templated key", got)
+	}
+
+	fake = &fakeStore{}
+	p = mediaProducer(fake)
+	unnamed := pictureEnvelope("")
+	cfg := mediaConfig()
+	cfg.KeyTemplate = "" // default {{.uuid}}
+	if err := p.upload(context.Background(), cfg, unnamed, nil); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if got := fake.keys(); len(got) != 1 || got[0] != "catalogue/env-pic" {
+		t.Fatalf("unnamed picture keys = %v, want [catalogue/env-pic]", got)
+	}
+}
