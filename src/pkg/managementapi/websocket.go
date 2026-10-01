@@ -119,17 +119,13 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Set up SSE headers with WebSocket-like behavior
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Pragma", "no-cache")
-	// CORS headers are managed by CORSMiddleware - don't override here
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		_ = writeError(w, http.StatusInternalServerError, "InternalError", "streaming not supported", nil)
 		return
 	}
+	// CORS headers are managed by CORSMiddleware - don't override here
+	beginSSE(w)
 
 	// Send connection established message
 	connMsg := WebSocketMessage{
@@ -141,8 +137,9 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 		},
 	}
 	data, _ := json.Marshal(connMsg)
-	_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-	flusher.Flush()
+	if err := writeSSEData(w, data); err != nil {
+		return
+	}
 
 	// Send initial metrics state
 	if h.metricsCache != nil {
@@ -153,8 +150,9 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 				Data:      metrics,
 			}
 			data, _ := json.Marshal(msg)
-			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-			flusher.Flush()
+			if err := writeSSEData(w, data); err != nil {
+				return
+			}
 		}
 	}
 
@@ -170,8 +168,9 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 	for {
 		select {
 		case data := <-client.Ch:
-			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-			flusher.Flush()
+			if err := writeSSEData(w, data); err != nil {
+				return
+			}
 
 		case <-heartbeatTicker.C:
 			// Send periodic heartbeat/ping
@@ -181,8 +180,9 @@ func (h *Handler) HandleMetricsWebSocket(w http.ResponseWriter, r *http.Request)
 				Data:      map[string]string{"type": "heartbeat"},
 			}
 			data, _ := json.Marshal(heartbeat)
-			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-			flusher.Flush()
+			if err := writeSSEData(w, data); err != nil {
+				return
+			}
 
 		case <-ctx.Done():
 			client.Close()
