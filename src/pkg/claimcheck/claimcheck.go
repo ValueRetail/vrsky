@@ -194,7 +194,8 @@ func Rehydrate(ctx context.Context, store objectstore.ObjectStore, env *envelope
 	// Permanent semantics ack and silently drop a customer payload, whereas
 	// exhausting the retries routes the envelope to the DLQ, where an operator
 	// can inspect it and replay it. The spilled object outlives the message
-	// (1-day lifecycle TTL), so replay within that window recovers the data.
+	// (messaging.SpillRetention, longer than the DLQ keeps it), so a replay
+	// always finds its data.
 	if maxBytes > 0 && env.PayloadSize > maxBytes {
 		return fmt.Errorf("payload %q is %d bytes, over the %d-byte rehydrate cap (%s): this consumer buffers payloads in memory; use a streaming-capable connector or raise the cap",
 			env.PayloadRef, env.PayloadSize, maxBytes, EnvRehydrateMax)

@@ -43,6 +43,16 @@ const (
 	// is the backstop in case a consumer is offline for a long time.
 	MainRetention = 72 * time.Hour
 
+	// SpillRetention is how long an offloaded payload (claim-check, > 256 KiB)
+	// must stay in the object store: as long as any message that references
+	// it can still be delivered or replayed. A dead-lettered message can be
+	// replayed for DLQRetention, and a delivery for an offline remote agent
+	// waits up to MainRetention, so the object outlives both with a day's
+	// margin. The bucket lifecycle rule for spill/ in
+	// infrastructure/kubernetes/minio/setup-job.yaml is held to this value by
+	// TestSpillLifecycleOutlivesRetention.
+	SpillRetention = DLQRetention + 24*time.Hour
+
 	// MainMaxBytes / MainMaxMsgs bound the *size* of the main stream. The data
 	// stream is an ephemeral transport (docs/NATS_ARCHITECTURE.md) — messages
 	// should be consumed in seconds. Age alone (72h) doesn't stop a runaway

@@ -34,9 +34,12 @@ spec:
               echo "Setting lifecycle policies (expire temp/ and spill/ objects)..."
               # spill/ holds large-payload claim-check offloads (#187). This TTL
               # is how spilled objects are reclaimed (each hop re-offloads under a
-              # fresh id, orphaning the inbound object); 1 day is the S3 lifecycle
-              # minimum granularity and safely outlives the 15-min envelope TTL, so
-              # no in-flight message loses its payload before it's consumed.
+              # fresh id, orphaning the inbound object). It must outlive every
+              # message that can still reference the object: a delivery held for
+              # an offline remote agent (72 h) and a DLQ replay (7 days), hence
+              # 8 days = messaging.SpillRetention. TestSpillLifecycleOutlivesRetention
+              # fails CI if this drifts below the stream retentions. Prod is
+              # updated with `mc ilm rule edit`, not by re-running this Job.
               cat > /tmp/lifecycle.json <<EOF
               {
                 "Rules": [
@@ -57,7 +60,7 @@ spec:
                       "Prefix": "spill/"
                     },
                     "Expiration": {
-                      "Days": 1
+                      "Days": 8
                     }
                   }
                 ]

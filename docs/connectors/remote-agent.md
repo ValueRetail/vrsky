@@ -88,7 +88,7 @@ at the group instead of one agent:
 - **As a destination**, every agent in the group receives every message into
   its folder of that name. Each agent has its own delivery queue: a till that
   is off or slow never holds up the others, and each keeps the usual offline
-  hold (72 h, 24 h for files over 256 KB), retries and Failed Messages
+  hold (72 h, whatever the file size), retries and Failed Messages
   handling — per till.
 - **As a source**, files from every member's folder of that name go into the
   pipeline, each message carrying the agent's id in its metadata.
@@ -126,8 +126,10 @@ files received, files written, and failures.
   Fix the agent's config and restart it — it re-announces its folders — then
   deploy again.
 - **Offline agents.** Messages for an agent that is offline wait in VRSky and
-  are written, in order, when it reconnects. That waiting has limits: **up to
-  72 hours, and 24 hours for files over 256 KB**. Past that they are lost.
+  are written, in order, when it reconnects. That waiting has a limit: **up to
+  72 hours, whatever the file size** (large bodies are kept in the object store
+  for 8 days, longer than any message can wait for them). Past that they are
+  lost.
   Files waiting in a read folder simply wait on the machine.
 - **One file at a time.** Each pipeline delivers to its agent one message at a
   time, in order. While the agent is offline the next message is held, not

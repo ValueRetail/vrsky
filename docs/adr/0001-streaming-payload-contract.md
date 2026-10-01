@@ -137,7 +137,8 @@ this ADR that said "permanent": `sdk.Permanent` **acks and drops** the message
 unacceptable for an integration platform. Retries are cheap here because the
 rejection happens without downloading, and a DLQ'd envelope keeps its
 `PayloadRef` so an operator can inspect it and replay once a streaming-capable
-connector is in place (within the spill object's 1-day TTL).
+connector is in place (the spill object is kept for `messaging.SpillRetention`,
+8 days — longer than the DLQ keeps the envelope).
 
 **Integrity (shipped with the guard):** `Checksum string` (`sha256:<hex>`) on the
 envelope, computed during offload and verified on rehydrate. Empty checksums are
@@ -202,9 +203,11 @@ store and even the edge worker never carries the bytes. Valuable but orthogonal
 - Transforms on huge payloads are constrained by design (per-record streaming
   or explicit passthrough). This is honest: no architecture makes a
   whole-document JSON transform of a 5 GB payload cheap.
-- The 1-day `spill/` TTL bounds end-to-end pipeline latency for offloaded
-  payloads; fine against the 15-minute envelope TTL, but a future "park large
-  files for a day" feature would need its own prefix and rule.
+- The `spill/` TTL (`messaging.SpillRetention`, 8 days; was 1 day until
+  2026-10-01) bounds end-to-end pipeline latency for offloaded payloads. It
+  follows the DLQ retention plus a day, so a replay always finds its body, and
+  it covers the 72 h a delivery can wait for an offline remote agent. A test
+  pins the MinIO lifecycle rule to the constant.
 
 ## Test plan
 
