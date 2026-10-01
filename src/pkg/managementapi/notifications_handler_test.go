@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ValueRetail/vrsky/pkg/notify"
 )
 
 func createTargetForTest(t *testing.T, h *Handler, tenant string, body map[string]interface{}) notificationTargetResponse {
@@ -52,6 +54,8 @@ func TestCreateNotificationTarget_Validation(t *testing.T) {
 	cases := []map[string]interface{}{
 		{"type": "slack", "secret": "https://hooks..."},                          // no name
 		{"name": "x", "type": "slack"},                                           // slack without secret
+		{"name": "x", "type": "teams"},                                           // teams without webhook URL
+		{"name": "x", "type": "teams", "secret": "http://plain.example"},         // teams webhook must be https
 		{"name": "x", "type": "email", "email": "not-an-email"},                  // bad email
 		{"name": "x", "type": "pagerduty"},                                       // pd without routing key
 		{"name": "x", "type": "webhook", "url": "ftp://nope"},                    // non-http url
@@ -297,5 +301,38 @@ func TestAlertsWebhook_NotConfigured(t *testing.T) {
 	handler.AlertsWebhook(w, r)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status=%d, want 503 when token unset", w.Code)
+	}
+}
+
+// TestCreateNotificationTarget_Teams: a Teams target stores the Workflows
+// webhook URL as its secret and builds the Teams notifier — the generic
+// webhook sender would post JSON Teams cannot render.
+func TestCreateNotificationTarget_Teams(t *testing.T) {
+	handler, _ := setupTestHandler()
+	resp := createTargetForTest(t, handler, "tenant-1", map[string]interface{}{
+		"name":     "ops-teams",
+		"type":     "teams",
+		"secret":   "https://prod-00.westeurope.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?sig=supersecret",
+		"platform": true,
+	})
+	if resp.Type != "teams" || !resp.HasSecret {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	list := httptest.NewRequest("GET", "/api/v1/notifications/targets", nil).WithContext(contextWithTenant("tenant-1"))
+	w := httptest.NewRecorder()
+	handler.ListNotificationTargets(w, list)
+	if strings.Contains(w.Body.String(), "supersecret") {
+		t.Errorf("response leaks the webhook URL: %s", w.Body.String())
+	}
+	target, err := handler.repo.GetNotificationTarget(list.Context(), "tenant-1", resp.ID)
+	if err != nil {
+		t.Fatalf("get target: %v", err)
+	}
+	n, err := handler.buildNotifier(list.Context(), target)
+	if err != nil {
+		t.Fatalf("buildNotifier: %v", err)
+	}
+	if _, ok := n.(*notify.Teams); !ok {
+		t.Errorf("notifier = %T, want *notify.Teams", n)
 	}
 }

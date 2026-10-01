@@ -1,7 +1,7 @@
 # promtool unit tests for the VRSky default alert ruleset (#84).
 # Run: docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool \
 #        prom/prometheus:latest test rules /cfg/prometheus-rules-test.yml
-# All 6 default rules are driven to FIRING — the "staged test" acceptance
+# All 9 rules are driven to FIRING — the "staged test" acceptance
 # criterion, deterministic and CI-runnable.
 
 rule_files:
@@ -124,3 +124,79 @@ tests:
             exp_annotations:
               summary: "disk usage above 80% on /"
               description: "Filesystem / (/dev/sda1) is over 80% full."
+
+  # 7. ConnectionInError — a pipeline sits in error; a recovered one resolves.
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_connections{tenant_id="t1",status="error"}'
+        values: '1x15 0x15'
+      - series: 'vrsky_connections{tenant_id="t1",status="running"}'
+        values: '3x30'
+      - series: 'vrsky_connections{tenant_id="t2",status="error"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ConnectionInError
+        exp_alerts:
+          - exp_labels:
+              alertname: ConnectionInError
+              severity: critical
+              tenant_id: t1
+            exp_annotations:
+              summary: "1 pipeline(s) in error for workspace t1"
+              description: "At least one deployed pipeline has been in status error for 10 minutes. Open the builder's pipeline log for the reason, fix the configuration and redeploy."
+      # Under the 10-minute hold: nothing yet.
+      - eval_time: 5m
+        alertname: ConnectionInError
+        exp_alerts: []
+      # Fixed and redeployed: resolved.
+      - eval_time: 28m
+        alertname: ConnectionInError
+        exp_alerts: []
+
+  # 8. RemoteAgentOffline — a till stops polling; another stays online.
+  - interval: 1m
+    input_series:
+      - series: 'vrsky_remote_agent_online{tenant_id="t1",agent_id="a1",agent="POS-PC"}'
+        values: '0x90'
+      - series: 'vrsky_remote_agent_online{tenant_id="t1",agent_id="a2",agent="TILL-2"}'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: RemoteAgentOffline
+        exp_alerts:
+          - exp_labels:
+              alertname: RemoteAgentOffline
+              severity: warning
+              tenant_id: t1
+              agent_id: a1
+              agent: POS-PC
+            exp_annotations:
+              summary: "remote agent POS-PC offline for over 1 hour"
+              description: "Agent POS-PC in workspace t1 has not polled VRSky for an hour. Its pipelines hold data for up to 72 hours. Check the machine, the VRSkyAgent service and its network."
+      # A short outage (under an hour) does not alert.
+      - eval_time: 30m
+        alertname: RemoteAgentOffline
+        exp_alerts: []
+
+  # 9. ConnectorUnavailable — a connector Deployment has no replica.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-business-central-consumer"}'
+        values: '0x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-remote-agent"}'
+        values: '1x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="kube-system",deployment="coredns"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ConnectorUnavailable
+        exp_alerts:
+          - exp_labels:
+              alertname: ConnectorUnavailable
+              severity: critical
+              namespace: vrsky-platform
+              deployment: vrsky-business-central-consumer
+            exp_annotations:
+              summary: "vrsky-business-central-consumer has no running replica"
+              description: "Deployment vrsky-business-central-consumer in vrsky-platform has had 0 available replicas for 10 minutes. Every pipeline using that connector is stalled."

@@ -406,6 +406,11 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 			return slug, nil
 		})
 	natsAutoscaler.Start()
+
+	// Platform gauges for alerting (plans/monitoring-prod.md): connection
+	// status and remote-agent liveness, read from the DB every 30 s and
+	// published on /metrics for ConnectionInError / RemoteAgentOffline.
+	managementapi.NewPlatformGauges(db, slog.Default()).Start(context.Background())
 	// Phase 4D (#95): the public status page reads the same Prometheus client.
 	restHandler.SetPrometheus(promClient)
 

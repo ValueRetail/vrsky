@@ -60,6 +60,50 @@ never reflects whole structs — but the rule is on the caller: e.g. log
 `grant_id`, not the access token; log `email`, not the password. Login and
 secret-access paths follow this.
 
+## Alerts in prod (plans/monitoring-prod.md)
+
+Prod runs kube-prometheus-stack + Grafana in `vrsky-monitoring`, installed with
+`PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`
+(README there has the Secrets to create first). Grafana and Prometheus are
+reachable by port-forward only.
+
+**What fires** — `infrastructure/prometheus-rules.yml` (promtool-tested in CI):
+
+| Alert | Fires when | Severity | Routed to |
+|---|---|---|---|
+| `ConnectionInError` | a pipeline has been in status `error` for 10 min | critical | the workspace |
+| `RemoteAgentOffline` | a registered agent has not polled for 1 h (its data waits 72 h) | warning | the workspace |
+| `DLQGrowing` | messages dead-lettered in the last 10 min | warning | platform |
+| `PipelineDown` | a workspace that was publishing goes silent for 10 min | critical | the workspace |
+| `ConnectorUnavailable` | a `vrsky-*` Deployment has 0 available replicas for 10 min | critical | platform |
+| `MgmtAPIErrorRate`, `DiskUsageHigh`, `CertExpirySoon`, `NATSInstanceApproachingCapacity`, `JetStreamLagHigh` | see the rules file | — | platform / workspace |
+
+`ConnectionInError` and `RemoteAgentOffline` read the management-api gauges
+`vrsky_connections{tenant_id,status}` and
+`vrsky_remote_agent_online{tenant_id,agent_id,agent}` (`platform_gauges.go`,
+refreshed from the DB every 30 s).
+
+**Where they go** — Alertmanager has one receiver, the management-api
+(`POST /api/v1/alerts/webhook`, bearer `ALERTS_WEBHOOK_TOKEN`). It delivers
+each alert to the notification targets of the workspace in the `tenant_id`
+label, or to targets flagged **platform** when there is none. Targets are
+managed in Settings → Notifications: **Microsoft Teams** (Workflows incoming
+webhook, Adaptive Card), Slack, email (needs `SMTP_*`), PagerDuty, webhook.
+
+**Adding Teams**: in the Teams channel → Workflows → "Post to a channel when a
+webhook request is received" → copy the URL. In VRSky: Settings →
+Notifications → type *Microsoft Teams*, paste the URL, tick *platform* if this
+channel should also get infrastructure alerts, **Test**. The URL is a secret
+(anyone with it can post) and is stored encrypted.
+
+**Proving it end to end**: apply a temporary rule
+(`alert: TestAlert`, `expr: vector(1)`, `for: 1m`, `severity: warning`) as a
+`PrometheusRule` in `vrsky-monitoring`; a card arrives within ~3 minutes;
+delete the rule; a *resolved* card follows.
+
+**What this cannot see**: a cluster with no nodes takes Prometheus with it.
+Pair it with an Azure Monitor metric alert on the AKS node count.
+
 ## Kubernetes
 - Metrics: kube-prometheus stack.
 - Traces: `infrastructure/kubernetes/monitoring/otel-tracing.yaml`.

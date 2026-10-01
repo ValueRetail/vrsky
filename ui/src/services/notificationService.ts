@@ -8,7 +8,7 @@
 
 import apiClient from './api'
 
-export type NotificationTargetType = 'slack' | 'email' | 'pagerduty' | 'webhook'
+export type NotificationTargetType = 'slack' | 'teams' | 'email' | 'pagerduty' | 'webhook'
 
 export interface NotificationTarget {
   id: string

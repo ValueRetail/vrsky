@@ -77,6 +77,47 @@ helm install grafana \
 kubectl get pods -n vrsky-monitoring
 ```
 
+## Azure profile (prod)
+
+Prod runs `PROFILE=azure ./install-monitoring.sh`, which layers
+`prometheus-values.azure.yaml` + `grafana-values.azure.yaml` (AKS storage
+class, small requests — the two nodes are nearly fully committed on CPU
+requests), applies `podmonitors.yaml` (management-api `:9090`, every
+`tier=connector` pod on `:8080/metrics`) and wraps
+`infrastructure/prometheus-rules.yml` in a `PrometheusRule`.
+
+Before the first install create two Secrets (values never in git):
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+kubectl -n vrsky-monitoring create secret generic alerts-webhook-token --from-literal=token="$TOKEN"
+kubectl -n vrsky-platform   create secret generic alerts-webhook-token --from-literal=token="$TOKEN"
+kubectl -n vrsky-monitoring create secret generic grafana-admin \
+  --from-literal=admin-user=admin --from-literal=admin-password="$(openssl rand -base64 24)"
+```
+
+and give the management-api the same token (`deploy-core-azure.sh` does not
+apply env changes):
+
+```bash
+kubectl -n vrsky-platform patch deploy vrsky-management-api --type=strategic -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"management-api","env":[{"name":"ALERTS_WEBHOOK_TOKEN","valueFrom":{"secretKeyRef":{"name":"alerts-webhook-token","key":"token"}}}]}]}}}}'
+```
+
+Alertmanager has one receiver, the management-api's `/api/v1/alerts/webhook`;
+it fans each alert out to the owning workspace's notification targets
+(Settings → Notifications: Teams, Slack, email, PagerDuty, webhook). A target
+flagged **platform** also receives the alerts without a `tenant_id`
+(`ConnectorUnavailable`, `DiskUsageHigh`, …). `TestAlertmanagerConfigTargetsRealRoute`
+pins the receiver URL to the handler's route.
+
+With `fullnameOverride: prometheus` the Services are `prometheus-prometheus`
+and `prometheus-alertmanager` (not the chart defaults quoted below).
+
+Not installed in prod: Loki/Promtail, Tempo, the NATS/Postgres/MinIO
+exporters (phase 2). A whole-cluster outage takes Prometheus with it — pair
+this with an Azure Monitor alert on the AKS node count.
+
 ## Accessing Dashboards
 
 ### Grafana

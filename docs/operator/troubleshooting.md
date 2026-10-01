@@ -60,6 +60,30 @@ script again.
 KES (`quay.io/minio/kes`, `infrastructure/kubernetes/encryption/`) still pulls
 from quay.io; if it starts failing the same way, it needs the same treatment.
 
+## No alerts arrive in Teams (or Slack), although something is clearly wrong
+
+Follow the chain from the end:
+
+1. **Does the target work at all?** Settings → Notifications → **Test** on the
+   target. A failure here is the webhook URL (regenerate it in Teams) or, for
+   email, missing `SMTP_*` on the management-api.
+2. **Is the alert firing?** Port-forward Prometheus
+   (`kubectl -n vrsky-monitoring port-forward svc/prometheus-prometheus 19090:9090`)
+   → `/alerts`. Not there: the metric is missing — check `/targets` for the
+   management-api and connector PodMonitors being **up**, and
+   `vrsky_connections` / `vrsky_remote_agent_online` returning series.
+3. **Did Alertmanager deliver?** `kubectl -n vrsky-monitoring logs
+   alertmanager-prometheus-alertmanager-0`. A `401` from the webhook means the
+   `alerts-webhook-token` Secret in `vrsky-monitoring` and the
+   `ALERTS_WEBHOOK_TOKEN` env on the management-api differ. A `503
+   NotConfigured` means the env was never set — `deploy-core-azure.sh` does
+   not apply env; patch the deployment (monitoring README).
+4. **Did the management-api route it to a target?** Its log line
+   `alerts webhook` shows `delivered`/`failed`. `delivered: 0` with no error
+   means no target matched: a tenant alert needs a target **in that
+   workspace**; a platform alert needs a target with **platform** ticked;
+   `min_severity` on the target may filter it.
+
 ## A builder panel says "cannot reach the data-converter service"
 
 The builder's live panels (Converter, Filter, File Watcher, …) are served by

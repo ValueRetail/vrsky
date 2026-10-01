@@ -1,0 +1,102 @@
+# AKS overlay for kube-prometheus-stack (plans/monitoring-prod.md). Applied on
+# top of prometheus-values.yaml by `PROFILE=azure install-monitoring.sh`.
+#
+# Why an overlay: the base values are sized for the k3s lab (longhorn, 1 CPU
+# for Prometheus). Prod runs on two 4-vCPU nodes whose CPU *requests* are
+# already 56 % / 90 % committed, so everything here asks for little and the
+# storage class is the AKS one.
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: "18GB"
+    resources:
+      requests: { cpu: 300m, memory: 1Gi }
+      limits: { cpu: "1", memory: 2Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: managed-csi
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    # PodMonitors (podmonitors.yaml) and the PrometheusRule rendered from
+    # infrastructure/prometheus-rules.yml are plain manifests, not Helm
+    # values, so the operator must pick them up without a release label.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    # The base file's extra scrape jobs target things prod does not have:
+    # a NATS exporter sidecar (NATS has no Prometheus endpoint of its own), a
+    # tenant-NATS namespace, postgres_exporter, and MinIO's metrics endpoint
+    # which needs auth. Dropped here; VRSky services come in via PodMonitors.
+    additionalScrapeConfigs: []
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 200m, memory: 256Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: managed-csi
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+    # Mounted at /etc/alertmanager/secrets/alerts-webhook-token/token; the
+    # Secret is created by the operator (never in git) with the same value as
+    # ALERTS_WEBHOOK_TOKEN on the management-api deployment.
+    secrets:
+      - alerts-webhook-token
+  # ONE receiver: the management-api fans each alert out to the owning
+  # workspace's notification targets (tenant_id label) or to platform-flagged
+  # targets (Settings → Notifications). Watchdog is the operator's own
+  # always-firing heartbeat; nobody wants it in Teams.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: vrsky-management-api
+      group_by: ["alertname", "tenant_id"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+    receivers:
+      - name: "null"
+      - name: vrsky-management-api
+        webhook_configs:
+          - url: http://vrsky-management-api.vrsky-platform.svc.cluster.local:8080/api/v1/alerts/webhook
+            send_resolved: true
+            http_config:
+              authorization:
+                type: Bearer
+                credentials_file: /etc/alertmanager/secrets/alerts-webhook-token/token
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+kube-state-metrics:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 256Mi }
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+
+defaultRules:
+  rules:
+    # Managed control plane: these targets are not scrapeable on AKS and the
+    # rules only ever fire "target down".
+    kubeApiserver: false
+    kubeScheduler: false
+    kubeControllerManager: false
+    kubeProxy: false
