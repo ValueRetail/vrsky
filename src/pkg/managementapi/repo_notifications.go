@@ -51,7 +51,7 @@ type NotificationTarget struct {
 	ID        string
 	TenantID  string
 	Name      string
-	Type      string // slack | email | pagerduty | webhook
+	Type      string // slack | teams | email | pagerduty | webhook
 	Config    NotificationTargetConfig
 	SecretID  string // "" when the type carries no secret
 	Enabled   bool

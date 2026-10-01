@@ -25,7 +25,7 @@ import (
 // notificationTargetRequest is the JSON shape of a create / update request.
 type notificationTargetRequest struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`             // slack | email | pagerduty | webhook
+	Type        string `json:"type"`             // slack | teams | email | pagerduty | webhook
 	Secret      string `json:"secret,omitempty"` // Slack webhook URL / PD routing key / webhook HMAC key; PUT may omit
 	Email       string `json:"email,omitempty"`
 	URL         string `json:"url,omitempty"`
@@ -76,6 +76,13 @@ func validateTargetRequest(req *notificationTargetRequest, create bool) error {
 		if create && req.Secret == "" {
 			return errors.New("slack targets need the incoming-webhook URL (secret)")
 		}
+	case "teams":
+		if create && req.Secret == "" {
+			return errors.New("teams targets need the Workflows webhook URL (secret)")
+		}
+		if req.Secret != "" && !strings.HasPrefix(req.Secret, "https://") {
+			return errors.New("teams webhook URL must start with https://")
+		}
 	case "email":
 		if req.Email == "" || !strings.Contains(req.Email, "@") {
 			return errors.New("email targets need a valid recipient address")
@@ -89,7 +96,7 @@ func validateTargetRequest(req *notificationTargetRequest, create bool) error {
 			return errors.New("webhook targets need an http:// or https:// destination URL")
 		}
 	default:
-		return fmt.Errorf("unknown target type %q (slack | email | pagerduty | webhook)", req.Type)
+		return fmt.Errorf("unknown target type %q (slack | teams | email | pagerduty | webhook)", req.Type)
 	}
 	switch req.MinSeverity {
 	case "", "info", "warning", "critical":
@@ -201,7 +208,7 @@ func (h *Handler) UpdateNotificationTarget(w http.ResponseWriter, r *http.Reques
 	// On a type change the stored secret belonged to the old type and no longer
 	// applies: require a fresh one for types that mandate it (slack/pagerduty),
 	// and drop the stale reference otherwise.
-	if existing.Type != req.Type && req.Secret == "" && (req.Type == "slack" || req.Type == "pagerduty") {
+	if existing.Type != req.Type && req.Secret == "" && (req.Type == "slack" || req.Type == "teams" || req.Type == "pagerduty") {
 		_ = writeError(w, http.StatusBadRequest, "ValidationError",
 			"switching this target to "+req.Type+" requires its secret", nil)
 		return
@@ -417,6 +424,8 @@ func (h *Handler) buildNotifier(ctx context.Context, t *NotificationTarget) (not
 	switch t.Type {
 	case "slack":
 		return &notify.Slack{WebhookURL: secret}, nil
+	case "teams":
+		return &notify.Teams{WebhookURL: secret}, nil
 	case "email":
 		return &notify.Email{SMTP: smtpFromEnv(), To: t.Config.Email}, nil
 	case "pagerduty":

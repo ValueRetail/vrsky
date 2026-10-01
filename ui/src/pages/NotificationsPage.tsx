@@ -6,6 +6,7 @@ import type { NotificationTarget, NotificationTargetType } from '@/services/noti
 
 const TARGET_TYPES: { value: NotificationTargetType; label: string }[] = [
   { value: 'slack', label: 'Slack (incoming webhook)' },
+  { value: 'teams', label: 'Microsoft Teams (Workflows webhook)' },
   { value: 'email', label: 'Email' },
   { value: 'pagerduty', label: 'PagerDuty (Events API v2)' },
   { value: 'webhook', label: 'Webhook (POST JSON)' },
@@ -19,6 +20,7 @@ const labelClass = 'block text-xs font-medium text-neutral-600 mb-1'
 
 const typeBadgeColor: Record<string, string> = {
   slack: 'bg-purple-50 text-purple-700 border-purple-200',
+  teams: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   email: 'bg-blue-50 text-blue-700 border-blue-200',
   pagerduty: 'bg-green-50 text-green-700 border-green-200',
   webhook: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -74,6 +76,10 @@ export default function NotificationsPage() {
     }
     if (type === 'slack' && !secret.trim()) {
       addNotification({ type: 'error', title: 'Missing webhook URL', message: 'Slack targets need the incoming-webhook URL.' })
+      return
+    }
+    if (type === 'teams' && !secret.trim()) {
+      addNotification({ type: 'error', title: 'Missing webhook URL', message: 'Teams targets need the Workflows webhook URL.' })
       return
     }
     if (type === 'email' && !email.trim()) {
@@ -195,6 +201,13 @@ export default function NotificationsPage() {
               <div className="col-span-2">
                 <label className={labelClass} htmlFor="nt-slack-secret">Incoming webhook URL</label>
                 <input id="nt-slack-secret" className={inputClass} type="password" autoComplete="new-password" placeholder="https://hooks.slack.com/services/…" value={secret} onChange={(e) => setSecret(e.target.value)} />
+              </div>
+            )}
+            {type === 'teams' && (
+              <div className="col-span-2">
+                <label className={labelClass} htmlFor="nt-teams-secret">Workflows webhook URL</label>
+                <input id="nt-teams-secret" className={inputClass} type="password" autoComplete="new-password" placeholder="https://….logic.azure.com/workflows/…" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                <p className="mt-1 text-xs text-neutral-500">In Teams: channel → Workflows → "Post to a channel when a webhook request is received". The URL lets anyone post to the channel; it is stored encrypted.</p>
               </div>
             )}
             {type === 'email' && (

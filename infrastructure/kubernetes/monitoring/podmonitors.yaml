@@ -1,0 +1,41 @@
+# Scrape targets for the VRSky services (plans/monitoring-prod.md).
+#
+# PodMonitors rather than annotations: kube-prometheus-stack ignores the
+# prometheus.io/* annotations, and the connector pods expose only their worker
+# port in the Pod spec, so the health server's :8080/metrics is addressed by
+# number. Picked up because the Prometheus values set
+# podMonitorSelectorNilUsesHelmValues: false.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vrsky-management-api
+  namespace: vrsky-monitoring
+spec:
+  namespaceSelector:
+    matchNames: [vrsky-platform]
+  selector:
+    matchLabels:
+      app: vrsky-management-api
+  podMetricsEndpoints:
+    - port: metrics          # named containerPort 9090
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vrsky-connectors
+  namespace: vrsky-monitoring
+spec:
+  namespaceSelector:
+    matchNames: [vrsky-platform]
+  selector:
+    matchLabels:
+      tier: connector
+  podMetricsEndpoints:
+    - targetPort: 8080       # pkg/health server: /metrics, unnamed port
+      path: /metrics
+      interval: 30s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_label_app]
+          targetLabel: connector

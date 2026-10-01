@@ -1,0 +1,35 @@
+# AKS overlay for the Grafana chart (plans/monitoring-prod.md), applied on top
+# of grafana-values.yaml by `PROFILE=azure install-monitoring.sh`.
+adminPassword: ""
+admin:
+  # Created by the operator before install, never in git:
+  #   kubectl -n vrsky-monitoring create secret generic grafana-admin \
+  #     --from-literal=admin-user=admin --from-literal=admin-password=…
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+persistence:
+  storageClassName: managed-csi
+  size: 5Gi
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+# prometheus-values.yaml sets fullnameOverride: prometheus, so the Prometheus
+# Service is prometheus-prometheus, not the chart default the base datasource
+# names. Loki/Tempo are not installed in prod (phase 2); those datasources
+# stay declared and simply show "no data".
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://prometheus-prometheus.vrsky-monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: 30s

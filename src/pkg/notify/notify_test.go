@@ -185,3 +185,75 @@ func TestWebhook_NoSecretNoHeader(t *testing.T) {
 		t.Error("signature header set without a secret")
 	}
 }
+
+// TestTeams_Send: a Teams Workflows webhook renders Adaptive Cards only, so
+// the payload must be a "message" with one adaptive attachment whose headline
+// carries the alert title and severity colour, and the facts name the
+// workspace — that is what lets an operator act from the channel.
+func TestTeams_Send(t *testing.T) {
+	var got map[string]interface{}
+	var ct string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ct = r.Header.Get("Content-Type")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.WriteHeader(http.StatusAccepted) // what Workflows answers
+	}))
+	defer srv.Close()
+
+	s := &Teams{WebhookURL: srv.URL, Client: srv.Client()}
+	if err := s.Send(context.Background(), testAlert()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if got["type"] != "message" {
+		t.Errorf("type = %v, want message", got["type"])
+	}
+	atts, ok := got["attachments"].([]interface{})
+	if !ok || len(atts) != 1 {
+		t.Fatalf("attachments = %v, want 1", got["attachments"])
+	}
+	att := atts[0].(map[string]interface{})
+	if att["contentType"] != "application/vnd.microsoft.card.adaptive" {
+		t.Errorf("contentType = %v", att["contentType"])
+	}
+	card := att["content"].(map[string]interface{})
+	if card["type"] != "AdaptiveCard" {
+		t.Errorf("card type = %v", card["type"])
+	}
+	body := card["body"].([]interface{})
+	head := body[0].(map[string]interface{})
+	if !strings.Contains(head["text"].(string), "[FIRING:critical] PipelineDown") {
+		t.Errorf("headline = %v", head["text"])
+	}
+	if head["color"] != "Attention" {
+		t.Errorf("critical headline color = %v, want Attention", head["color"])
+	}
+	raw, _ := json.Marshal(card)
+	for _, want := range []string{"tenant t1 pipeline stopped producing", `"Workspace"`, `"t1"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("card lacks %s: %s", want, raw)
+		}
+	}
+}
+
+func TestTeams_ResolvedIsGreenAndErrorsSurface(t *testing.T) {
+	a := testAlert()
+	a.Status = "resolved"
+	if c := teamsCard(a)["attachments"].([]map[string]interface{})[0]["content"].(map[string]interface{})["body"].([]map[string]interface{})[0]["color"]; c != "Good" {
+		t.Errorf("resolved color = %v, want Good", c)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad card", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	s := &Teams{WebhookURL: srv.URL, Client: srv.Client()}
+	if err := s.Send(context.Background(), testAlert()); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Errorf("Send with 400 = %v, want an error naming the status", err)
+	}
+	if err := (&Teams{}).Send(context.Background(), testAlert()); err == nil {
+		t.Error("empty URL must be refused")
+	}
+}

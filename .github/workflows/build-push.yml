@@ -156,6 +156,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      # The alert rules are deployed to prod as a PrometheusRule; a syntax
+      # error or a broken expression would otherwise only show up as a rule
+      # that never fires. promtool checks the file and runs its unit tests.
+      - name: Alert rules (promtool)
+        run: |
+          docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
+          docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

@@ -34,8 +34,44 @@ groups:
           summary: "DLQ growing for pipeline {{ $labels.pipeline_id }}"
           description: "Messages moved to the dead-letter queue in the last 10 minutes — a producer is repeatedly failing to deliver."
 
+      # A deployed pipeline is stuck in status "error" (management-api gauge
+      # vrsky_connections, refreshed from the DB every 30 s). tenant_id routes
+      # it to the workspace's own notification targets.
+      - alert: ConnectionInError
+        expr: sum by (tenant_id) (vrsky_connections{status="error"}) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} pipeline(s) in error for workspace {{ $labels.tenant_id }}"
+          description: "At least one deployed pipeline has been in status error for 10 minutes. Open the builder's pipeline log for the reason, fix the configuration and redeploy."
+
+      # A registered remote agent (till) has not polled for an hour. Its
+      # deliveries wait in VRSky for 72 h; after that they are lost.
+      - alert: RemoteAgentOffline
+        expr: vrsky_remote_agent_online == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "remote agent {{ $labels.agent }} offline for over 1 hour"
+          description: "Agent {{ $labels.agent }} in workspace {{ $labels.tenant_id }} has not polled VRSky for an hour. Its pipelines hold data for up to 72 hours. Check the machine, the VRSkyAgent service and its network."
+
   - name: vrsky-platform
     rules:
+      # A VRSky Deployment with no available replica for 10 minutes: a
+      # connector that cannot start (ImagePullBackOff, OOM) or a management
+      # API outage. kube-state-metrics; platform alert (no tenant_id).
+      - alert: ConnectorUnavailable
+        expr: |
+          kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment=~"vrsky-.*"} == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.deployment }} has no running replica"
+          description: "Deployment {{ $labels.deployment }} in vrsky-platform has had 0 available replicas for 10 minutes. Every pipeline using that connector is stalled."
+
       # JetStream consumer backlog (prometheus-nats-exporter -jsz).
       - alert: JetStreamLagHigh
         expr: jetstream_consumer_num_pending > 1000

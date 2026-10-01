@@ -11,6 +11,11 @@
 #   4. point the orchestrator at ACR for per-connection worker images
 #   5. run MinIO from its ACR copy (minio-images-acr.sh), not Docker Hub
 #
+# Monitoring is NOT part of this script (SKIP_MONITORING below): it is a
+# separate, idempotent install —
+#   PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh
+# — see infrastructure/kubernetes/monitoring/README.md ("Azure profile").
+#
 # FIRST bring-up = Path A: in-cluster Postgres/MinIO + the committed
 # secret.example.yaml DEV credentials. Ingress is skipped, so nothing is
 # exposed publicly and this is safe for validation. ROTATE to real secrets
