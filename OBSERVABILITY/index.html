@@ -2132,6 +2132,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#alerts-in-prod-plansmonitoring-prodmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts in prod (plans/monitoring-prod.md)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kubernetes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2369,6 +2380,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#alerts-in-prod-plansmonitoring-prodmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts in prod (plans/monitoring-prod.md)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kubernetes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2503,6 +2525,81 @@ decrypted payloads). <code>pkg/logging</code> only emits the explicit fields you
 never reflects whole structs — but the rule is on the caller: e.g. log
 <code>grant_id</code>, not the access token; log <code>email</code>, not the password. Login and
 secret-access paths follow this.</p>
+<h2 id="alerts-in-prod-plansmonitoring-prodmd">Alerts in prod (plans/monitoring-prod.md)<a class="headerlink" href="#alerts-in-prod-plansmonitoring-prodmd" title="Permanent link">&para;</a></h2>
+<p>Prod runs kube-prometheus-stack + Grafana in <code>vrsky-monitoring</code>, installed with
+<code>PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh</code>
+(README there has the Secrets to create first). Grafana and Prometheus are
+reachable by port-forward only.</p>
+<p><strong>What fires</strong> — <code>infrastructure/prometheus-rules.yml</code> (promtool-tested in CI):</p>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Fires when</th>
+<th>Severity</th>
+<th>Routed to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ConnectionInError</code></td>
+<td>a pipeline has been in status <code>error</code> for 10 min</td>
+<td>critical</td>
+<td>the workspace</td>
+</tr>
+<tr>
+<td><code>RemoteAgentOffline</code></td>
+<td>a registered agent has not polled for 1 h (its data waits 72 h)</td>
+<td>warning</td>
+<td>the workspace</td>
+</tr>
+<tr>
+<td><code>DLQGrowing</code></td>
+<td>messages dead-lettered in the last 10 min</td>
+<td>warning</td>
+<td>platform</td>
+</tr>
+<tr>
+<td><code>PipelineDown</code></td>
+<td>a workspace that was publishing goes silent for 10 min</td>
+<td>critical</td>
+<td>the workspace</td>
+</tr>
+<tr>
+<td><code>ConnectorUnavailable</code></td>
+<td>a <code>vrsky-*</code> Deployment has 0 available replicas for 10 min</td>
+<td>critical</td>
+<td>platform</td>
+</tr>
+<tr>
+<td><code>MgmtAPIErrorRate</code>, <code>DiskUsageHigh</code>, <code>CertExpirySoon</code>, <code>NATSInstanceApproachingCapacity</code>, <code>JetStreamLagHigh</code></td>
+<td>see the rules file</td>
+<td>—</td>
+<td>platform / workspace</td>
+</tr>
+</tbody>
+</table>
+<p><code>ConnectionInError</code> and <code>RemoteAgentOffline</code> read the management-api gauges
+<code>vrsky_connections{tenant_id,status}</code> and
+<code>vrsky_remote_agent_online{tenant_id,agent_id,agent}</code> (<code>platform_gauges.go</code>,
+refreshed from the DB every 30 s).</p>
+<p><strong>Where they go</strong> — Alertmanager has one receiver, the management-api
+(<code>POST /api/v1/alerts/webhook</code>, bearer <code>ALERTS_WEBHOOK_TOKEN</code>). It delivers
+each alert to the notification targets of the workspace in the <code>tenant_id</code>
+label, or to targets flagged <strong>platform</strong> when there is none. Targets are
+managed in Settings → Notifications: <strong>Microsoft Teams</strong> (Workflows incoming
+webhook, Adaptive Card), Slack, email (needs <code>SMTP_*</code>), PagerDuty, webhook.</p>
+<p><strong>Adding Teams</strong>: in the Teams channel → Workflows → "Post to a channel when a
+webhook request is received" → copy the URL. In VRSky: Settings →
+Notifications → type <em>Microsoft Teams</em>, paste the URL, tick <em>platform</em> if this
+channel should also get infrastructure alerts, <strong>Test</strong>. The URL is a secret
+(anyone with it can post) and is stored encrypted.</p>
+<p><strong>Proving it end to end</strong>: apply a temporary rule
+(<code>alert: TestAlert</code>, <code>expr: vector(1)</code>, <code>for: 1m</code>, <code>severity: warning</code>) as a
+<code>PrometheusRule</code> in <code>vrsky-monitoring</code>; a card arrives within ~3 minutes;
+delete the rule; a <em>resolved</em> card follows.</p>
+<p><strong>What this cannot see</strong>: a cluster with no nodes takes Prometheus with it.
+Pair it with an Azure Monitor metric alert on the AKS node count.</p>
 <h2 id="kubernetes">Kubernetes<a class="headerlink" href="#kubernetes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Metrics: kube-prometheus stack.</li>

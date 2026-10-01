@@ -1088,6 +1088,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#no-alerts-arrive-in-teams-or-slack-although-something-is-clearly-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No alerts arrive in Teams (or Slack), although something is clearly wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2379,6 +2390,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#no-alerts-arrive-in-teams-or-slack-although-something-is-clearly-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No alerts arrive in Teams (or Slack), although something is clearly wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2524,6 +2546,29 @@ bump the <code>pgsty/*</code> tags in <code>infrastructure/kubernetes/minio/</co
 script again.</p>
 <p>KES (<code>quay.io/minio/kes</code>, <code>infrastructure/kubernetes/encryption/</code>) still pulls
 from quay.io; if it starts failing the same way, it needs the same treatment.</p>
+<h2 id="no-alerts-arrive-in-teams-or-slack-although-something-is-clearly-wrong">No alerts arrive in Teams (or Slack), although something is clearly wrong<a class="headerlink" href="#no-alerts-arrive-in-teams-or-slack-although-something-is-clearly-wrong" title="Permanent link">&para;</a></h2>
+<p>Follow the chain from the end:</p>
+<ol>
+<li><strong>Does the target work at all?</strong> Settings → Notifications → <strong>Test</strong> on the
+   target. A failure here is the webhook URL (regenerate it in Teams) or, for
+   email, missing <code>SMTP_*</code> on the management-api.</li>
+<li><strong>Is the alert firing?</strong> Port-forward Prometheus
+   (<code>kubectl -n vrsky-monitoring port-forward svc/prometheus-prometheus 19090:9090</code>)
+   → <code>/alerts</code>. Not there: the metric is missing — check <code>/targets</code> for the
+   management-api and connector PodMonitors being <strong>up</strong>, and
+   <code>vrsky_connections</code> / <code>vrsky_remote_agent_online</code> returning series.</li>
+<li><strong>Did Alertmanager deliver?</strong> <code>kubectl -n vrsky-monitoring logs
+   alertmanager-prometheus-alertmanager-0</code>. A <code>401</code> from the webhook means the
+   <code>alerts-webhook-token</code> Secret in <code>vrsky-monitoring</code> and the
+   <code>ALERTS_WEBHOOK_TOKEN</code> env on the management-api differ. A <code>503
+   NotConfigured</code> means the env was never set — <code>deploy-core-azure.sh</code> does
+   not apply env; patch the deployment (monitoring README).</li>
+<li><strong>Did the management-api route it to a target?</strong> Its log line
+   <code>alerts webhook</code> shows <code>delivered</code>/<code>failed</code>. <code>delivered: 0</code> with no error
+   means no target matched: a tenant alert needs a target <strong>in that
+   workspace</strong>; a platform alert needs a target with <strong>platform</strong> ticked;
+   <code>min_severity</code> on the target may filter it.</li>
+</ol>
 <h2 id="a-builder-panel-says-cannot-reach-the-data-converter-service">A builder panel says "cannot reach the data-converter service"<a class="headerlink" href="#a-builder-panel-says-cannot-reach-the-data-converter-service" title="Permanent link">&para;</a></h2>
 <p>The builder's live panels (Converter, Filter, File Watcher, …) are served by
 the management API, which proxies each worker's event stream at
