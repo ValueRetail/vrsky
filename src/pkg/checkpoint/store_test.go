@@ -2,8 +2,11 @@ package checkpoint
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestInMemoryStore_SaveAndGet(t *testing.T) {
@@ -173,5 +176,74 @@ func TestCheckpoint_UpdatedAtIsSet(t *testing.T) {
 	got, _ := store.Get(ctx, "tenant-1", "conn-1", "node-1")
 	if got.UpdatedAt.Before(before) || got.UpdatedAt.After(after) {
 		t.Errorf("UpdatedAt = %v, should be between %v and %v", got.UpdatedAt, before, after)
+	}
+}
+
+// TestInMemoryStore_StateRoundTrip: free-form state is saved and read back
+// beside the watermark (the BC consumer keeps its seen pictures there).
+func TestInMemoryStore_StateRoundTrip(t *testing.T) {
+	store := NewInMemoryStore()
+	ctx := context.Background()
+	if err := store.Save(ctx, &Checkpoint{TenantID: "t", ConnectionID: "c", NodeID: "n",
+		LastProcessedMessageID: "2026-10-01T00:00:00Z", State: json.RawMessage(`{"pictures":{"r1":{"picture_id":"p1","number":"HBB-1000"}}}`)}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cp, err := store.Get(ctx, "t", "c", "n")
+	if err != nil || cp == nil {
+		t.Fatalf("get: %v %v", cp, err)
+	}
+	var got struct {
+		Pictures map[string]struct {
+			Number string `json:"number"`
+		} `json:"pictures"`
+	}
+	if err := json.Unmarshal(cp.State, &got); err != nil {
+		t.Fatalf("state does not parse: %v (%s)", err, cp.State)
+	}
+	if got.Pictures["r1"].Number != "HBB-1000" {
+		t.Errorf("state = %s", cp.State)
+	}
+}
+
+// TestPostgresStore_StateColumn pins the SQL: state must be written on
+// insert AND on the conflict update, else a second save silently keeps the
+// old state, and read back in Get. An empty State is stored as {} because
+// the column is NOT NULL.
+func TestPostgresStore_StateColumn(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := NewPostgresStore(db)
+	ctx := context.Background()
+
+	mock.ExpectExec(`INSERT INTO connection_node_checkpoints[\s\S]*state[\s\S]*DO UPDATE SET[\s\S]*state = EXCLUDED\.state`).
+		WithArgs("t", "c", "n", "cursor", sqlmock.AnyArg(), int64(3), []byte(`{"pictures":{}}`), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.Save(ctx, &Checkpoint{TenantID: "t", ConnectionID: "c", NodeID: "n",
+		LastProcessedMessageID: "cursor", MessageCount: 3, State: json.RawMessage(`{"pictures":{}}`)}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	mock.ExpectExec(`INSERT INTO connection_node_checkpoints`).
+		WithArgs("t", "c", "n", "cursor", sqlmock.AnyArg(), int64(0), []byte(`{}`), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.Save(ctx, &Checkpoint{TenantID: "t", ConnectionID: "c", NodeID: "n", LastProcessedMessageID: "cursor"}); err != nil {
+		t.Fatalf("save without state: %v", err)
+	}
+
+	mock.ExpectQuery(`SELECT tenant_id, connection_id, node_id,[\s\S]*state, updated_at`).
+		WithArgs("t", "c", "n").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "connection_id", "node_id", "last_processed_message_id", "last_processed_at", "message_count", "state", "updated_at"}).
+			AddRow("t", "c", "n", "cursor", time.Now(), int64(3), []byte(`{"pictures":{"r1":{}}}`), time.Now()))
+	cp, err := store.Get(ctx, "t", "c", "n")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if string(cp.State) != `{"pictures":{"r1":{}}}` {
+		t.Errorf("state read back = %s", cp.State)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
 	}
 }

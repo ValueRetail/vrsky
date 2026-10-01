@@ -130,3 +130,21 @@ func TestWrite_AtomicNoPartialVisible(t *testing.T) {
 		t.Errorf("a dropped transfer left %v behind", names)
 	}
 }
+
+// TestWrite_EmptyBodyIsAZeroByteFile: the removed-picture marker
+// (<number>.no-picture) is an empty file. It goes through the same temp
+// name + rename and checksum path as a picture, with the checksum of "".
+func TestWrite_EmptyBodyIsAZeroByteFile(t *testing.T) {
+	c := testConfig(t)
+	path, err := WriteFile(c, "outbox", "HBB-1000.no-picture", "d-9", sum(""), strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("WriteFile(empty): %v", err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Size() != 0 {
+		t.Fatalf("stat %s: %v size=%d, want an existing 0-byte file", path, err, st.Size())
+	}
+	if names := listDir(t, c.Directories["outbox"].Path); len(names) != 1 || names[0] != "HBB-1000.no-picture" {
+		t.Errorf("outbox = %v, want only HBB-1000.no-picture (no .part left behind)", names)
+	}
+}

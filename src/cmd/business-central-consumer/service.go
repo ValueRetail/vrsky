@@ -107,9 +107,12 @@ type BCConfig struct {
 	// (the image file), after the records it belongs to. See pictures.go.
 	Pictures bool `json:"pictures"`
 
-	// pictureSeen is this poller's record id → picture id of what it last
-	// published, so an unchanged picture is not downloaded again.
-	pictureSeen map[string]string
+	// pictureSeen is record id → the picture this node last published for
+	// it, so an unchanged picture is not downloaded again and a removed one
+	// is reported to the till exactly once (a .no-picture marker). It is
+	// persisted in the node's checkpoint state, so a restart or redeploy does
+	// not re-send every picture. nil = not loaded yet.
+	pictureSeen map[string]seenPicture
 
 	// resendAll makes the next fetch ignore the incremental watermark and the
 	// seen pictures, so everything goes out again — for a till that just
@@ -327,13 +330,16 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 	if cfg.resendAll {
-		cfg.pictureSeen = map[string]string{}
+		cfg.pictureSeen = map[string]seenPicture{}
+	} else if cfg.Pictures && cfg.pictureSeen == nil {
+		cfg.pictureSeen = c.loadPictureState(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 
 	next := cfg.entityURL(cursor)
 	page, total := 0, 0
 	var pics pictureCounts
 	var watermark cursorTracker
+	inFeed := map[string]bool{} // record ids this poll carried, for the sweep
 	for next != "" {
 		page++
 		body, err := c.get(ctx, tok, next, cfg.PageSize)
@@ -352,10 +358,8 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 				return fmt.Errorf("publish records: %w", err)
 			}
 			if cfg.Pictures {
-				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, logger)
-				pics.sent += n.sent
-				pics.none += n.none
-				pics.unchanged += n.unchanged
+				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, inFeed, logger)
+				pics.add(n)
 				if err != nil {
 					return fmt.Errorf("publish pictures: %w", err)
 				}
@@ -363,6 +367,17 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			total += len(p.Value)
 		}
 		next = p.NextLink
+	}
+
+	// An incremental feed carries only records BC marked as modified, and
+	// removing or replacing a picture may not do that. Check the pictures we
+	// remember for records this poll did not carry.
+	if cfg.Pictures && cfg.Incremental {
+		n, err := c.sweepPictures(ctx, connID, tenantID, cfg, tok, inFeed, logger)
+		pics.add(n)
+		if err != nil {
+			return fmt.Errorf("sweep pictures: %w", err)
+		}
 	}
 
 	// A resend is complete only once everything has gone out; a fetch that
@@ -373,14 +388,19 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	// resumes from the old watermark — the records it already published arrive
 	// twice, which the pipeline is built for, rather than being skipped, which
 	// it is not.
+	newCursor := ""
 	if cfg.Incremental && watermark.raw != "" {
-		c.saveCursor(ctx, tenantID, connID, cfg.NodeID, watermark.raw, int64(total), logger)
+		newCursor = watermark.raw
+	}
+	if newCursor != "" || cfg.Pictures {
+		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, int64(total), cfg.pictureState(), logger)
 	}
 
 	if cfg.Pictures {
 		logger.Info("Business Central fetch complete",
 			"entity", cfg.effectiveEntity(), "records", total, "pages", page,
 			"pictures_sent", pics.sent, "pictures_unchanged", pics.unchanged, "without_picture", pics.none,
+			"pictures_removed", pics.removed, "pictures_swept", pics.swept,
 			"incremental", cfg.Incremental, "since", cursor)
 		return nil
 	}
@@ -443,9 +463,17 @@ func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID st
 	return cp.LastProcessedMessageID
 }
 
-func (c *bcConsumer) saveCursor(ctx context.Context, tenantID, connID, nodeID, cursor string, count int64, logger *slog.Logger) {
+// saveProgress stores the watermark (when cursor is non-empty; otherwise the
+// stored one is kept) and the node's state in one checkpoint row.
+func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID, cursor string, count int64,
+	state json.RawMessage, logger *slog.Logger) {
 	if c.checkpoints == nil || nodeID == "" {
 		return
+	}
+	if cursor == "" {
+		if cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID); err == nil && cp != nil {
+			cursor = cp.LastProcessedMessageID
+		}
 	}
 	err := c.checkpoints.Save(ctx, &checkpoint.Checkpoint{
 		TenantID:               tenantID,
@@ -454,6 +482,7 @@ func (c *bcConsumer) saveCursor(ctx context.Context, tenantID, connID, nodeID, c
 		LastProcessedMessageID: cursor,
 		LastProcessedAt:        time.Now().UTC(),
 		MessageCount:           count,
+		State:                  state,
 	})
 	if err != nil {
 		// The records are already published; failing to remember how far we got

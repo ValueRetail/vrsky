@@ -483,3 +483,240 @@ func TestResendCommand_ReachesTheNamedPollerOnly(t *testing.T) {
 	default:
 	}
 }
+
+// markers returns the .no-picture messages a fetch published.
+func markers(envs []*envelope.Envelope) []*envelope.Envelope {
+	var out []*envelope.Envelope
+	for _, e := range envs {
+		if e.ContentType == envelope.NoPictureContentType {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (f *fakeBC) setPicture(id string, pic *fakePicture) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if pic == nil {
+		delete(f.pictures, id)
+		return
+	}
+	f.pictures[id] = pic
+}
+
+func (f *fakeBC) setRecords(records string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = records
+}
+
+// TestPictures_RemovedPictureSendsOneMarker — Bifrost's request: when an item
+// keeps existing but its picture is removed, exactly one empty
+// <number>.no-picture goes out, on the poll that notices it and never again;
+// a picture added back later arrives as a picture.
+func TestPictures_RemovedPictureSendsOneMarker(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"HBB-1000","displayName":"Desk"}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", content: jpeg}})
+	c, got, mu := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+
+	for _, empty := range []bool{false, true} { // BC's two ways of saying "no picture"
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatalf("fetch: %v", err)
+		}
+		if empty {
+			f.setPicture("i1", &fakePicture{contentType: ""})
+		} else {
+			f.setPicture("i1", nil)
+		}
+		mu.Lock()
+		*got = nil
+		mu.Unlock()
+
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatalf("fetch after removal: %v", err)
+		}
+		mu.Lock()
+		ms := markers(*got)
+		_, pics := split(*got)
+		mu.Unlock()
+		if len(pics) != 0 || len(ms) != 1 {
+			t.Fatalf("after removal: %d pictures, %d markers; want 0 and 1", len(pics), len(ms))
+		}
+		m := ms[0]
+		if len(m.Payload) != 0 || m.PayloadSize != 0 {
+			t.Errorf("marker must be empty, got %d bytes", len(m.Payload))
+		}
+		if m.Metadata["filename"] != "HBB-1000.no-picture" || m.Metadata["number"] != "HBB-1000" || m.Metadata["record_id"] != "i1" || m.Metadata["marker"] != "no-picture" {
+			t.Errorf("marker metadata = %v", m.Metadata)
+		}
+		if !envelope.IsMedia(m.ContentType) {
+			t.Error("the marker must travel like a picture (IsMedia), or the converter will try to parse it")
+		}
+
+		mu.Lock()
+		*got = nil
+		mu.Unlock()
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatalf("fetch again: %v", err)
+		}
+		mu.Lock()
+		again := len(markers(*got))
+		mu.Unlock()
+		if again != 0 {
+			t.Fatalf("the marker was sent again on the next poll (%d)", again)
+		}
+
+		// Picture back: sent as a picture, and the cycle can repeat.
+		f.setPicture("i1", &fakePicture{id: "p2", contentType: "image/jpeg", content: jpeg})
+		mu.Lock()
+		*got = nil
+		mu.Unlock()
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatalf("fetch with picture back: %v", err)
+		}
+		mu.Lock()
+		_, pics = split(*got)
+		ms = markers(*got)
+		mu.Unlock()
+		if len(pics) != 1 || len(ms) != 0 || pics[0].Metadata["filename"] != "HBB-1000.jpg" {
+			t.Fatalf("picture back: %d pictures %d markers", len(pics), len(ms))
+		}
+	}
+}
+
+// An item with no picture now and none before produces no file, and the
+// marker's base name is built exactly like the picture's.
+func TestPictures_NeverHadAPictureSendsNoMarker(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"HBB-1000"},{"id":"i2","number":"NO PIC/1"}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/png", content: jpeg}})
+	c, got, mu := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+	for i := 0; i < 3; i++ {
+		if err := fetch(t, c, cfg); err != nil {
+			t.Fatalf("fetch %d: %v", i, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := len(markers(*got)); n != 0 {
+		t.Fatalf("%d markers for an item that never had a picture", n)
+	}
+	rec := pictureRecord{ID: "x", Number: "NO PIC/1"}
+	if got, want := markerFilename(rec), strings.TrimSuffix(pictureFilename(rec, "image/png"), ".png")+".no-picture"; got != want {
+		t.Errorf("marker name %q, picture name %q — bases differ", got, pictureFilename(rec, "image/png"))
+	}
+}
+
+// TestPictures_SweepFindsChangesOnRecordsNotInTheFeed: an incremental poll
+// only carries modified records. A picture removed or replaced on an
+// untouched record is found by the sweep — one metadata request per
+// remembered picture, content fetched only for the replaced one.
+func TestPictures_SweepFindsChangesOnRecordsNotInTheFeed(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t,
+		`[{"id":"i1","number":"A-1","lastModifiedDateTime":"2026-10-01T10:00:00Z"},`+
+			`{"id":"i2","number":"A-2","lastModifiedDateTime":"2026-10-01T10:00:00Z"},`+
+			`{"id":"i3","number":"A-3","lastModifiedDateTime":"2026-10-01T10:00:00Z"}]`,
+		map[string]*fakePicture{
+			"i1": {id: "p1", contentType: "image/jpeg", content: jpeg},
+			"i2": {id: "p2", contentType: "image/jpeg", content: jpeg},
+			"i3": {id: "p3", contentType: "image/jpeg", content: jpeg},
+		})
+	c, got, mu := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+	cfg.Incremental = true
+	cfg.NodeID = "bc-node"
+	if err := fetch(t, c, cfg); err != nil {
+		t.Fatalf("first fetch: %v", err)
+	}
+
+	// Nothing modified in BC: the incremental feed is empty. Meanwhile i1
+	// lost its picture and i2 got a new one; i3 is unchanged.
+	f.setRecords(`[]`)
+	f.setPicture("i1", nil)
+	f.setPicture("i2", &fakePicture{id: "p2b", contentType: "image/jpeg", content: jpeg})
+	mu.Lock()
+	*got = nil
+	mu.Unlock()
+	before := f.contentRequests()
+	if err := fetch(t, c, cfg); err != nil {
+		t.Fatalf("incremental fetch: %v", err)
+	}
+	mu.Lock()
+	ms := markers(*got)
+	_, pics := split(*got)
+	mu.Unlock()
+	if len(ms) != 1 || ms[0].Metadata["filename"] != "A-1.no-picture" {
+		t.Fatalf("markers = %d (%v), want one for A-1", len(ms), ms)
+	}
+	if len(pics) != 1 || pics[0].Metadata["filename"] != "A-2.jpg" || pics[0].Metadata["picture_id"] != "p2b" {
+		t.Fatalf("pictures = %d, want the replaced A-2.jpg", len(pics))
+	}
+	if n := f.contentRequests() - before; n != 1 {
+		t.Errorf("content requests during the sweep = %d, want 1 (only the replaced picture is downloaded)", n)
+	}
+
+	// A third poll finds nothing to do.
+	mu.Lock()
+	*got = nil
+	mu.Unlock()
+	if err := fetch(t, c, cfg); err != nil {
+		t.Fatalf("third fetch: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 0 {
+		t.Errorf("third poll published %d messages, want 0", len(*got))
+	}
+}
+
+// TestPictures_SeenPicturesSurviveRestart: the remembered pictures live in
+// the node's checkpoint state, so a new consumer (restart, redeploy) on the
+// same store neither re-sends an unchanged picture nor forgets a deletion.
+func TestPictures_SeenPicturesSurviveRestart(t *testing.T) {
+	tokenSrv := bcTestToken(t)
+	defer tokenSrv.Close()
+	f := newFakeBC(t, `[{"id":"i1","number":"HBB-1000"}]`,
+		map[string]*fakePicture{"i1": {id: "p1", contentType: "image/jpeg", content: jpeg}})
+	c1, _, _ := newTestConsumer()
+	cfg := picturesConfig(f, tokenSrv.URL)
+	cfg.NodeID = "bc-node"
+	if err := fetch(t, c1, cfg); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	// "Restart": a fresh consumer and a fresh config on the same store.
+	c2, got, mu := newTestConsumer()
+	c2.checkpoints = c1.checkpoints
+	cfg2 := picturesConfig(f, tokenSrv.URL)
+	cfg2.NodeID = "bc-node"
+	if err := fetch(t, c2, cfg2); err != nil {
+		t.Fatalf("fetch after restart: %v", err)
+	}
+	mu.Lock()
+	_, pics := split(*got)
+	mu.Unlock()
+	if len(pics) != 0 {
+		t.Fatalf("an unchanged picture was re-sent after a restart (%d)", len(pics))
+	}
+
+	f.setPicture("i1", nil)
+	mu.Lock()
+	*got = nil
+	mu.Unlock()
+	if err := fetch(t, c2, cfg2); err != nil {
+		t.Fatalf("fetch after removal: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := len(markers(*got)); n != 1 {
+		t.Fatalf("markers after a removal following a restart = %d, want 1", n)
+	}
+}

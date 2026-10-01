@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -60,16 +61,77 @@ type pictureInfo struct {
 	ReadLink    string `json:"pictureContent@odata.mediaReadLink"`
 }
 
-type pictureCounts struct{ sent, none, unchanged int }
+type pictureCounts struct{ sent, none, unchanged, removed, swept int }
+
+func (n *pictureCounts) add(m pictureCounts) {
+	n.sent += m.sent
+	n.none += m.none
+	n.unchanged += m.unchanged
+	n.removed += m.removed
+	n.swept += m.swept
+}
+
+// seenPicture is what the node remembers per record: the picture's id (a
+// replaced picture gets a new one) and the record number the file was named
+// after, so a removal can be reported even when the record is not in the
+// feed any more.
+type seenPicture struct {
+	PictureID string `json:"picture_id"`
+	Number    string `json:"number"`
+}
+
+// pictureState is the node's checkpoint state (checkpoint.Checkpoint.State).
+type pictureState struct {
+	Pictures map[string]seenPicture `json:"pictures"`
+}
+
+// pictureState serialises what the node remembers, for the checkpoint row.
+func (cfg *BCConfig) pictureState() json.RawMessage {
+	if cfg.pictureSeen == nil {
+		return nil
+	}
+	b, err := json.Marshal(pictureState{Pictures: cfg.pictureSeen})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// loadPictureState reads the remembered pictures back from the checkpoint
+// row; a missing row or an unreadable store means "nothing remembered",
+// which costs a re-send of every picture, not data.
+func (c *bcConsumer) loadPictureState(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) map[string]seenPicture {
+	seen := map[string]seenPicture{}
+	if c.checkpoints == nil || nodeID == "" {
+		return seen
+	}
+	cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
+	if err != nil {
+		logger.Error("read Business Central picture state; every picture will be sent again", "error", err)
+		return seen
+	}
+	if cp == nil || len(cp.State) == 0 {
+		return seen
+	}
+	var st pictureState
+	if err := json.Unmarshal(cp.State, &st); err != nil {
+		logger.Error("parse Business Central picture state; every picture will be sent again", "error", err)
+		return seen
+	}
+	if st.Pictures != nil {
+		seen = st.Pictures
+	}
+	return seen
+}
 
 // publishPictures fetches and publishes the picture of each record on a page.
 // Any failure other than "this record has no picture" is returned, so the
 // caller does not advance the watermark and the next poll retries.
 func (c *bcConsumer) publishPictures(ctx context.Context, connID, tenantID string, cfg *BCConfig,
-	tok *oauthcc.Client, records []json.RawMessage, logger *slog.Logger) (pictureCounts, error) {
+	tok *oauthcc.Client, records []json.RawMessage, inFeed map[string]bool, logger *slog.Logger) (pictureCounts, error) {
 	var n pictureCounts
 	if cfg.pictureSeen == nil {
-		cfg.pictureSeen = map[string]string{}
+		cfg.pictureSeen = map[string]seenPicture{}
 	}
 	for _, raw := range records {
 		var rec pictureRecord
@@ -77,45 +139,130 @@ func (c *bcConsumer) publishPictures(ctx context.Context, connID, tenantID strin
 			logger.Warn("Business Central record without an id; no picture fetched", "entity", cfg.effectiveEntity())
 			continue
 		}
-		recordURL := fmt.Sprintf("%s/%s(%s)", cfg.companyURL(), cfg.effectiveEntity(), rec.ID)
-
-		body, status, err := c.getStatus(ctx, tok, recordURL+"/picture")
-		if err != nil {
-			return n, fmt.Errorf("picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
+		if inFeed != nil {
+			inFeed[rec.ID] = true
 		}
-		if status == http.StatusNotFound {
-			n.none++
-			continue
+		if err := c.syncPicture(ctx, connID, tenantID, cfg, tok, rec, &n); err != nil {
+			return n, err
 		}
-		var pic pictureInfo
-		if err := json.Unmarshal(body, &pic); err != nil {
-			return n, fmt.Errorf("parse picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
-		}
-		if pic.ContentType == "" {
-			n.none++ // BC answers an empty picture object for a record without one
-			continue
-		}
-		// A replaced picture is a new media object with a new id; an unchanged
-		// one is not downloaded again by this poller.
-		if pic.ID != "" && cfg.pictureSeen[rec.ID] == pic.ID {
-			n.unchanged++
-			continue
-		}
-
-		sent, err := c.publishPicture(ctx, connID, tenantID, cfg, tok, rec, pic, recordURL)
-		if err != nil {
-			return n, fmt.Errorf("picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
-		}
-		if !sent {
-			n.none++
-			continue
-		}
-		if pic.ID != "" {
-			cfg.pictureSeen[rec.ID] = pic.ID
-		}
-		n.sent++
 	}
 	return n, nil
+}
+
+// syncPicture brings the till in line with one record's picture: sends it
+// when new or replaced, sends a .no-picture marker once when a picture the
+// node remembers is gone, and does nothing for a record that has no picture
+// now and had none before.
+func (c *bcConsumer) syncPicture(ctx context.Context, connID, tenantID string, cfg *BCConfig,
+	tok *oauthcc.Client, rec pictureRecord, n *pictureCounts) error {
+	recordURL := fmt.Sprintf("%s/%s(%s)", cfg.companyURL(), cfg.effectiveEntity(), rec.ID)
+
+	body, status, err := c.getStatus(ctx, tok, recordURL+"/picture")
+	if err != nil {
+		return fmt.Errorf("picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
+	}
+	var pic pictureInfo
+	if status != http.StatusNotFound {
+		if err := json.Unmarshal(body, &pic); err != nil {
+			return fmt.Errorf("parse picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
+		}
+	}
+	// 404, or an empty picture object: the record has no picture (now).
+	if status == http.StatusNotFound || pic.ContentType == "" {
+		return c.markRemovedIfSeen(ctx, connID, tenantID, cfg, rec, n)
+	}
+	// A replaced picture is a new media object with a new id; an unchanged
+	// one is not downloaded again.
+	if prev, ok := cfg.pictureSeen[rec.ID]; ok && pic.ID != "" && prev.PictureID == pic.ID {
+		n.unchanged++
+		return nil
+	}
+
+	sent, err := c.publishPicture(ctx, connID, tenantID, cfg, tok, rec, pic, recordURL)
+	if err != nil {
+		return fmt.Errorf("picture of %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
+	}
+	if !sent {
+		// Vanished between the metadata and the content request.
+		return c.markRemovedIfSeen(ctx, connID, tenantID, cfg, rec, n)
+	}
+	cfg.pictureSeen[rec.ID] = seenPicture{PictureID: pic.ID, Number: rec.Number}
+	n.sent++
+	return nil
+}
+
+// markRemovedIfSeen sends the .no-picture marker for a record whose picture
+// the node remembers, and forgets it so the marker goes out once. A record
+// that never had a picture produces nothing.
+func (c *bcConsumer) markRemovedIfSeen(ctx context.Context, connID, tenantID string, cfg *BCConfig,
+	rec pictureRecord, n *pictureCounts) error {
+	prev, ok := cfg.pictureSeen[rec.ID]
+	if !ok {
+		n.none++
+		return nil
+	}
+	if rec.Number == "" {
+		rec.Number = prev.Number
+	}
+	if err := c.publishNoPicture(ctx, connID, tenantID, cfg, rec); err != nil {
+		return fmt.Errorf("no-picture marker for %s %s: %w", cfg.effectiveEntity(), rec.ID, err)
+	}
+	delete(cfg.pictureSeen, rec.ID)
+	n.removed++
+	return nil
+}
+
+// sweepPictures re-checks the pictures the node remembers for records this
+// poll did not carry. An incremental feed only has records BC marked as
+// modified, and a picture removed or replaced on an otherwise untouched
+// record would never be noticed without this. One metadata request per
+// remembered picture; the content is only fetched when it changed.
+func (c *bcConsumer) sweepPictures(ctx context.Context, connID, tenantID string, cfg *BCConfig,
+	tok *oauthcc.Client, inFeed map[string]bool, logger *slog.Logger) (pictureCounts, error) {
+	var n pictureCounts
+	ids := make([]string, 0, len(cfg.pictureSeen))
+	for id := range cfg.pictureSeen {
+		if !inFeed[id] {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids) // deterministic order, and a stable place to resume after an error
+	for _, id := range ids {
+		rec := pictureRecord{ID: id, Number: cfg.pictureSeen[id].Number}
+		n.swept++
+		if err := c.syncPicture(ctx, connID, tenantID, cfg, tok, rec, &n); err != nil {
+			return n, err
+		}
+	}
+	if n.swept > 0 {
+		logger.Debug("Business Central picture sweep", "checked", n.swept, "removed", n.removed, "replaced", n.sent)
+	}
+	return n, nil
+}
+
+// publishNoPicture sends the empty <number>.no-picture file. It travels like
+// a picture (envelope.IsMedia) so the transforms pass it through and the
+// file destinations keep its name next to the picture it replaces.
+func (c *bcConsumer) publishNoPicture(ctx context.Context, connID, tenantID string, cfg *BCConfig, rec pictureRecord) error {
+	env := envelope.New()
+	env.TenantID = tenantID
+	env.IntegrationID = connID
+	env.ContentType = envelope.NoPictureContentType
+	env.Source = "business-central-consumer"
+	env.StepHistory = []string{"business-central-consumer"}
+	env.Payload = []byte{}
+	env.PayloadSize = 0
+	meta := map[string]interface{}{
+		"entity":    cfg.effectiveEntity(),
+		"record_id": rec.ID,
+		"marker":    "no-picture",
+		"filename":  markerFilename(rec),
+	}
+	if rec.Number != "" {
+		meta["number"] = rec.Number
+	}
+	env.Metadata = meta
+	return c.publish(ctx, env)
 }
 
 // publishPicture downloads one picture's content and publishes it. It reports
@@ -217,14 +364,25 @@ func (cfg *BCConfig) pictureContentURL(pic pictureInfo, recordURL string) string
 // the content type. Anything a Windows or remote-agent file name cannot hold
 // is replaced, and a name that is still unusable falls back to the id.
 func pictureFilename(rec pictureRecord, contentType string) string {
-	ext := pictureExt(contentType)
+	return fileBase(rec, pictureExt(contentType)) + "." + pictureExt(contentType)
+}
+
+// markerFilename names the removed-picture marker: the same base as the
+// picture file, so the till matches them on the item number.
+func markerFilename(rec pictureRecord) string {
+	return fileBase(rec, "no-picture") + ".no-picture"
+}
+
+// fileBase is the record number when that makes a usable file name with
+// the given extension, else the record id.
+func fileBase(rec pictureRecord, ext string) string {
 	if rec.Number != "" {
-		name := sanitizeFilename(rec.Number) + "." + ext
-		if agentproto.ValidFilename(name) == nil {
-			return name
+		base := sanitizeFilename(rec.Number)
+		if agentproto.ValidFilename(base+"."+ext) == nil {
+			return base
 		}
 	}
-	return sanitizeFilename(rec.ID) + "." + ext
+	return sanitizeFilename(rec.ID)
 }
 
 func pictureExt(contentType string) string {

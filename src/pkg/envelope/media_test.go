@@ -5,6 +5,7 @@ import "testing"
 func TestIsMedia(t *testing.T) {
 	for ct, want := range map[string]bool{
 		"image/jpeg":                     true,
+		NoPictureContentType:             true, // the removed-picture marker travels like a picture
 		"image/png; charset=binary":      true,
 		"IMAGE/GIF":                      true,
 		"audio/mpeg":                     true,
