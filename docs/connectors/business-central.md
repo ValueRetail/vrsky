@@ -87,9 +87,9 @@ Along the pipeline:
 - **Converters and filters pass pictures through untouched** — every media
   file does (images, audio, video, PDF). A filter on the records does not
   filter their pictures.
-- **The file and remote-agent destinations write each picture under its
-  `filename`**, even when a filename pattern is set: the pattern names the
-  records, the pictures keep their own names. So **BC items (pictures on) →
+- **The file, remote-agent and cloud-storage destinations write each picture
+  under its `filename`**, even when a filename pattern or key template is
+  set: the pattern names the records, the pictures keep their own names. So **BC items (pictures on) →
   converter (CSV) → Remote Agent** puts `catalogue-….csv` and `1896-S.jpg`,
   `1900-S.jpg` … side by side in the agent's folder.
 - Pictures over 256 KB travel through the claim-check like any large payload.

@@ -86,8 +86,10 @@ Postgres, MinIO, NATS all run in-cluster. For scale:
   instance currently costs pods without moving any traffic off the shared one.
 
 ### 4. Node capacity + Azure quota
-Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
-needs the **cluster autoscaler** + quota headroom.
+Currently 2× E4ds_v6 (`fpool`, managed OS disks, ~10% used). The earlier
+E4bds_v5 pool was replaced on 2026-10-01 when Norway East had no capacity for
+that size with ephemeral disks and the cluster came back with no nodes. Real
+scale needs the **cluster autoscaler** + quota headroom.
 
 ## Immediate roadmap
 
