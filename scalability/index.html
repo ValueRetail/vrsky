@@ -2371,8 +2371,10 @@ one replica until they get leader election and a shared event bus respectively.<
   the isolation half of that tradeoff does not exist yet (#209): a dedicated
   instance currently costs pods without moving any traffic off the shared one.</p>
 <h3 id="4-node-capacity-azure-quota">4. Node capacity + Azure quota<a class="headerlink" href="#4-node-capacity-azure-quota" title="Permanent link">&para;</a></h3>
-<p>Currently 2× E4bds_v5 (~8% used), previously EBDSv5-quota-constrained. Real scale
-needs the <strong>cluster autoscaler</strong> + quota headroom.</p>
+<p>Currently 2× E4ds_v6 (<code>fpool</code>, managed OS disks, ~10% used). The earlier
+E4bds_v5 pool was replaced on 2026-10-01 when Norway East had no capacity for
+that size with ephemeral disks and the cluster came back with no nodes. Real
+scale needs the <strong>cluster autoscaler</strong> + quota headroom.</p>
 <h2 id="immediate-roadmap">Immediate roadmap<a class="headerlink" href="#immediate-roadmap" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

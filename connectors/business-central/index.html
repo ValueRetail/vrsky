@@ -2444,9 +2444,9 @@ the original image bytes, and this metadata:</p>
 <li><strong>Converters and filters pass pictures through untouched</strong> — every media
   file does (images, audio, video, PDF). A filter on the records does not
   filter their pictures.</li>
-<li><strong>The file and remote-agent destinations write each picture under its
-  <code>filename</code></strong>, even when a filename pattern is set: the pattern names the
-  records, the pictures keep their own names. So <strong>BC items (pictures on) →
+<li><strong>The file, remote-agent and cloud-storage destinations write each picture
+  under its <code>filename</code></strong>, even when a filename pattern or key template is
+  set: the pattern names the records, the pictures keep their own names. So <strong>BC items (pictures on) →
   converter (CSV) → Remote Agent</strong> puts <code>catalogue-….csv</code> and <code>1896-S.jpg</code>,
   <code>1900-S.jpg</code> … side by side in the agent's folder.</li>
 <li>Pictures over 256 KB travel through the claim-check like any large payload.</li>

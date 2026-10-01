@@ -2372,6 +2372,12 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
 <li>Credentials — per-provider.</li>
 <li><code>encryption.mode</code> — <code>none</code>, <code>sse-s3</code>, or <code>sse-kms</code>.</li>
 <li><code>encryption.kms_key_id</code> — KMS key when <code>mode</code> is <code>sse-kms</code>.</li>
+<li><code>key_template</code> — Go template for the object key, rendered against the
+  record when it is a JSON object plus <code>{{.timestamp}}</code> and <code>{{.uuid}}</code>
+  (default <code>{{.uuid}}</code>). <strong>Pictures and other media</strong> (images, audio,
+  video, PDF) that carry a <code>filename</code> ignore the template and are written
+  as <code>&lt;prefix&gt;/&lt;filename&gt;</code> — the same rule as the file and remote-agent
+  destinations, so <code>1896-S.jpg</code> stays <code>1896-S.jpg</code> next to the records.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cloud_storage"</span><span class="p">,</span>
