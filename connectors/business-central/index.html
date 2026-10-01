@@ -2450,6 +2450,20 @@ the original image bytes, and this metadata:</p>
   converter (CSV) → Remote Agent</strong> puts <code>catalogue-….csv</code> and <code>1896-S.jpg</code>,
   <code>1900-S.jpg</code> … side by side in the agent's folder.</li>
 <li>Pictures over 256 KB travel through the claim-check like any large payload.</li>
+<li><strong>Removed pictures.</strong> When an item keeps existing but its picture is
+  removed in BC, the next poll sends one <strong>empty</strong> file
+  <code>&lt;number&gt;.no-picture</code> (e.g. <code>HBB-1000.no-picture</code>) next to the records —
+  once, not on every poll — so a till can drop the thumbnail. An item that
+  never had a picture produces nothing, and an item that leaves the feed gets
+  no marker (the next full CSV covers it). The node remembers which items had
+  a picture in its checkpoint, so a restart or redeploy does not re-send every
+  picture either.</li>
+<li><strong>Incremental polls and pictures.</strong> An incremental feed carries only items
+  BC marked as modified, which a picture change may not do. After each poll
+  the node therefore re-checks the pictures it remembers for items the poll
+  did not carry (one small metadata request each; the image is only
+  downloaded when it changed). That is fine for a till catalogue of a few
+  hundred pictures; for a very large catalogue, prefer full polls.</li>
 </ul>
 <p>Notes:</p>
 <ul>
