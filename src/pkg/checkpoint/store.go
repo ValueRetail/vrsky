@@ -5,6 +5,7 @@ package checkpoint
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -17,7 +18,18 @@ type Checkpoint struct {
 	LastProcessedMessageID string    `db:"last_processed_message_id"`
 	LastProcessedAt        time.Time `db:"last_processed_at"`
 	MessageCount           int64     `db:"message_count"`
-	UpdatedAt              time.Time `db:"updated_at"`
+	// State is free-form per-node state saved beside the watermark, e.g.
+	// which records had a picture (Business Central). nil/empty means none.
+	State     json.RawMessage `db:"state"`
+	UpdatedAt time.Time       `db:"updated_at"`
+}
+
+// stateOrEmpty is what goes into the NOT NULL jsonb column.
+func stateOrEmpty(state json.RawMessage) []byte {
+	if len(state) == 0 {
+		return []byte("{}")
+	}
+	return state
 }
 
 // Store provides checkpoint persistence operations
@@ -50,13 +62,14 @@ func (s *PostgresStore) Save(ctx context.Context, cp *Checkpoint) error {
 	query := `
 		INSERT INTO connection_node_checkpoints (
 			tenant_id, connection_id, node_id,
-			last_processed_message_id, last_processed_at, message_count, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			last_processed_message_id, last_processed_at, message_count, state, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (tenant_id, connection_id, node_id)
 		DO UPDATE SET
 			last_processed_message_id = EXCLUDED.last_processed_message_id,
 			last_processed_at = EXCLUDED.last_processed_at,
 			message_count = EXCLUDED.message_count,
+			state = EXCLUDED.state,
 			updated_at = EXCLUDED.updated_at
 	`
 
@@ -69,6 +82,7 @@ func (s *PostgresStore) Save(ctx context.Context, cp *Checkpoint) error {
 		cp.LastProcessedMessageID,
 		cp.LastProcessedAt,
 		cp.MessageCount,
+		stateOrEmpty(cp.State),
 		cp.UpdatedAt,
 	)
 
@@ -83,12 +97,13 @@ func (s *PostgresStore) Save(ctx context.Context, cp *Checkpoint) error {
 func (s *PostgresStore) Get(ctx context.Context, tenantID, connectionID, nodeID string) (*Checkpoint, error) {
 	query := `
 		SELECT tenant_id, connection_id, node_id,
-			   last_processed_message_id, last_processed_at, message_count, updated_at
+			   last_processed_message_id, last_processed_at, message_count, state, updated_at
 		FROM connection_node_checkpoints
 		WHERE tenant_id = $1 AND connection_id = $2 AND node_id = $3
 	`
 
 	cp := &Checkpoint{}
+	var state []byte
 	err := s.db.QueryRowContext(ctx, query, tenantID, connectionID, nodeID).Scan(
 		&cp.TenantID,
 		&cp.ConnectionID,
@@ -96,8 +111,10 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, connectionID, nodeID 
 		&cp.LastProcessedMessageID,
 		&cp.LastProcessedAt,
 		&cp.MessageCount,
+		&state,
 		&cp.UpdatedAt,
 	)
+	cp.State = json.RawMessage(state)
 
 	if err == sql.ErrNoRows {
 		return nil, nil // No checkpoint exists yet

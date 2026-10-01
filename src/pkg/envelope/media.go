@@ -16,11 +16,20 @@ import (
 // application/octet-stream is deliberately NOT media: file and agent uploads
 // stamp it on anything they cannot name, CSV included, and the converter
 // sniffs and converts those today.
+//
+// NoPictureContentType counts as media too: it is an empty marker file
+// (<number>.no-picture) that tells a till a record's picture was removed,
+// and it must travel exactly like the picture it replaces.
 func IsMedia(contentType string) bool {
 	mt, _, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		mt = strings.ToLower(strings.TrimSpace(contentType))
 	}
 	return strings.HasPrefix(mt, "image/") || strings.HasPrefix(mt, "audio/") ||
-		strings.HasPrefix(mt, "video/") || mt == "application/pdf"
+		strings.HasPrefix(mt, "video/") || mt == "application/pdf" || mt == NoPictureContentType
 }
+
+// NoPictureContentType marks an empty file named <number>.no-picture: the
+// record still exists but its picture was removed (Business Central pictures,
+// plans/bc-picture-deletions.md).
+const NoPictureContentType = "application/vnd.vrsky.no-picture"
