@@ -181,21 +181,7 @@ func (h *Handler) ProxyWorkerEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The server's WriteTimeout (30 s) covers the whole response, and a live
-	// stream is meant to outlive it. Past the deadline every write fails, but
-	// the handler only notices on the next upstream event and the connection
-	// stays open meanwhile, so the browser sat on a dead stream: it showed the
-	// first frame and nothing after, and never reconnected. Clearing the
-	// deadline needs every ResponseWriter wrapper in the chain to Unwrap; if
-	// one does not, this fails and the stream behaves as before.
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	// The stream passes through a proxy in every deployment; without this,
-	// nginx buffers it and events arrive in batches or not at all.
-	w.Header().Set("X-Accel-Buffering", "no")
+	beginSSE(w)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 	if opened < len(upstreams) {

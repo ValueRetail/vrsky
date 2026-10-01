@@ -69,8 +69,13 @@ func (hub *TenantSSEHub) Unsubscribe(tenantID, clientID string) {
 
 // Broadcast sends a status update to all clients subscribed to a tenant.
 func (hub *TenantSSEHub) Broadcast(tenantID string, update ProvisioningStatusUpdate) {
+	// Copy under the lock: Unsubscribe deletes from the inner map, and ranging
+	// over it unlocked is a concurrent map read and write.
 	hub.mu.RLock()
-	tenantClients := hub.clients[tenantID]
+	tenantClients := make([]*TenantSSEClient, 0, len(hub.clients[tenantID]))
+	for _, client := range hub.clients[tenantID] {
+		tenantClients = append(tenantClients, client)
+	}
 	hub.mu.RUnlock()
 
 	if len(tenantClients) == 0 {
@@ -115,16 +120,12 @@ func (h *Handler) HandleTenantStatusSSE(w http.ResponseWriter, r *http.Request) 
 	defer h.tenantSSEHub.Unsubscribe(tenant.ID, client.ID)
 
 	// SSE headers
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Pragma", "no-cache")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		_ = writeError(w, http.StatusInternalServerError, "InternalError", "streaming not supported", nil)
 		return
 	}
+	// CORS headers are managed by CORSMiddleware - don't override here
+	beginSSE(w)
 
 	// Send initial status from DB
 	initialStatus := ProvisioningStatusUpdate{
@@ -154,8 +155,9 @@ func (h *Handler) HandleTenantStatusSSE(w http.ResponseWriter, r *http.Request) 
 		Data:      initialStatus,
 	}
 	data, _ := json.Marshal(connMsg)
-	_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-	flusher.Flush()
+	if err := writeSSEData(w, data); err != nil {
+		return
+	}
 
 	// Stream updates
 	ctx, cancel := context.WithCancel(r.Context())
@@ -167,8 +169,9 @@ func (h *Handler) HandleTenantStatusSSE(w http.ResponseWriter, r *http.Request) 
 	for {
 		select {
 		case data := <-client.Ch:
-			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-			flusher.Flush()
+			if err := writeSSEData(w, data); err != nil {
+				return
+			}
 
 		case <-heartbeat.C:
 			ping := WebSocketMessage{
@@ -177,8 +180,9 @@ func (h *Handler) HandleTenantStatusSSE(w http.ResponseWriter, r *http.Request) 
 				Data:      map[string]string{"type": "heartbeat"},
 			}
 			data, _ := json.Marshal(ping)
-			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-			flusher.Flush()
+			if err := writeSSEData(w, data); err != nil {
+				return
+			}
 
 		case <-ctx.Done():
 			return
