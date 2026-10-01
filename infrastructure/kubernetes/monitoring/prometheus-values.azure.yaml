@@ -68,6 +68,11 @@ alertmanager:
         - receiver: "null"
           matchers:
             - alertname = "Watchdog"
+        # Informational chart defaults (CPUThrottlingHigh and friends) are for
+        # Grafana, not for a Teams channel.
+        - receiver: "null"
+          matchers:
+            - severity = "info"
     receivers:
       - name: "null"
       - name: vrsky-management-api
@@ -90,13 +95,16 @@ kube-state-metrics:
 prometheus-node-exporter:
   resources:
     requests: { cpu: 25m, memory: 32Mi }
-    limits: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 64Mi }
 
 defaultRules:
   rules:
-    # Managed control plane: these targets are not scrapeable on AKS and the
-    # rules only ever fire "target down".
-    kubeApiserver: false
-    kubeScheduler: false
+    # Managed control plane: scheduler, controller-manager and kube-proxy are
+    # not scrapeable on AKS, so their rules only ever fire "...Down". The
+    # apiserver IS scrapeable and its rules stay on. (Key names are the
+    # chart's; a misspelt key is silently ignored — KubeSchedulerDown fired on
+    # the first install because of that.)
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
     kubeControllerManager: false
     kubeProxy: false

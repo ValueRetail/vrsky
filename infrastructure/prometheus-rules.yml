@@ -38,7 +38,9 @@ groups:
       # vrsky_connections, refreshed from the DB every 30 s). tenant_id routes
       # it to the workspace's own notification targets.
       - alert: ConnectionInError
-        expr: sum by (tenant_id) (vrsky_connections{status="error"}) > 0
+        # max, not sum: every management-api replica publishes the same
+        # gauge, so a sum would count each pipeline once per replica.
+        expr: max by (tenant_id) (vrsky_connections{status="error"}) > 0
         for: 10m
         labels:
           severity: critical

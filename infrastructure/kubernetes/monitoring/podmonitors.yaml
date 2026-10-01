@@ -2,9 +2,16 @@
 #
 # PodMonitors rather than annotations: kube-prometheus-stack ignores the
 # prometheus.io/* annotations, and the connector pods expose only their worker
-# port in the Pod spec, so the health server's :8080/metrics is addressed by
-# number. Picked up because the Prometheus values set
+# port in the Pod spec. port, portNumber and targetPort all generate a
+# "keep" on the DECLARED container ports, so every form found nothing; the
+# endpoint below names no port and rewrites __address__ to <pod IP>:8080
+# instead. Picked up because the Prometheus values set
 # podMonitorSelectorNilUsesHelmValues: false.
+#
+# The management-api serves /metrics on its main listener (:3000, port
+# http-api — main.go mounts promhttp on the API mux). The deployment's
+# MGMT_API_METRICS_LISTEN=:9090 and the 9090 containerPort/Service port are
+# leftovers nothing listens on; scraping them was "connection refused".
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -17,7 +24,7 @@ spec:
     matchLabels:
       app: vrsky-management-api
   podMetricsEndpoints:
-    - port: metrics          # named containerPort 9090
+    - port: http-api         # named containerPort 3000; /metrics is on the API mux
       path: /metrics
       interval: 30s
 ---
@@ -33,9 +40,12 @@ spec:
     matchLabels:
       tier: connector
   podMetricsEndpoints:
-    - targetPort: 8080       # pkg/health server: /metrics, unnamed port
-      path: /metrics
+    - path: /metrics         # pkg/health server on :8080, not a declared container port
       interval: 30s
       relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_ip]
+          regex: (.+)
+          replacement: ${1}:8080
+          targetLabel: __address__
         - sourceLabels: [__meta_kubernetes_pod_label_app]
           targetLabel: connector
