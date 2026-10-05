@@ -6,8 +6,7 @@
 import { useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import ProvisioningSpinner from './ProvisioningSpinner'
-import * as authService from '@/services/authService'
-import { config } from '@/config/env'
+import apiClient from '@/services/api'
 
 interface CreateTenantModalProps {
   isOpen: boolean
@@ -34,24 +33,8 @@ export default function CreateTenantModal({ isOpen, onClose }: CreateTenantModal
 
     setIsSubmitting(true)
     try {
-      const token = authService.getSessionToken()
-      const res = await fetch(`${config.apiUrl}/api/v1/tenants`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: name.trim() }),
-      })
-
-      if (!res.ok) {
-        const data = await res.json()
-        setError(data.message || 'Failed to create workspace')
-        setIsSubmitting(false)
-        return
-      }
-
-      const data = await res.json()
+      const res = await apiClient.post<{ tenant?: { id?: string } }>('/api/v1/tenants', { name: name.trim() })
+      const data = res.data
       const tenantId = data.tenant?.id
       if (tenantId) {
         setProvisioningTenantId(tenantId)

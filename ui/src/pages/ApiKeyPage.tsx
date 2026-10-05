@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import * as tenantDataService from '@/services/tenantDataService'
+import { VRSkyAPIError } from '@/services/api'
 import type { TenantAPIKey } from '@/types/models'
 
 export default function ApiKeyPage() {
@@ -17,9 +18,17 @@ export default function ApiKeyPage() {
     setLoading(true)
     tenantDataService.getApiKey(currentTenant.id)
       .then(setApiKey)
-      .catch(() => setApiKey(null))
+      .catch((e: unknown) => {
+        setApiKey(null)
+        // Only "not found" means there is no key yet. Anything else is a
+        // failure the user should see, not an invitation to generate a key.
+        const status = e instanceof VRSkyAPIError ? e.details?.status : undefined
+        if (status !== 404) {
+          addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to load the API key' })
+        }
+      })
       .finally(() => setLoading(false))
-  }, [currentTenant])
+  }, [currentTenant, addNotification])
 
   const handleRotate = () => {
     if (!currentTenant) {
@@ -38,8 +47,8 @@ export default function ApiKeyPage() {
           setApiKey(result)
           setRawKey(result.raw_key)
           addNotification({ type: 'success', title: 'Key Rotated', message: 'New API key generated. Copy it now — it will not be shown again.' })
-        } catch {
-          addNotification({ type: 'error', title: 'Error', message: 'Failed to rotate API key' })
+        } catch (e) {
+          addNotification({ type: 'error', title: 'Error', message: e instanceof Error && e.message ? `Failed to rotate API key: ${e.message}` : 'Failed to rotate API key' })
         }
       },
     })

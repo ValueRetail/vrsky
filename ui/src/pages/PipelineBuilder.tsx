@@ -13,6 +13,7 @@ import CanvasSelector from '../components/CanvasSelector'
 import apiClient, { getActiveTenantId } from '../services/api'
 import * as authService from '../services/authService'
 import { getSessionToken } from '../services/authService'
+import { reportUnauthorized } from '@/services/sessionExpiry'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
 import { useCanvasPersistence } from '../hooks/useCanvasPersistence'
@@ -721,6 +722,7 @@ export default function PipelineBuilder() {
         body: formData,
       })
       uploadCountRef.current++
+      if (resp.status === 401) void reportUnauthorized()
       if (resp.ok) {
         setFileUploadStatus(`${uploadCountRef.current} file(s) uploaded — last: ${file.name}`)
       } else {
@@ -745,6 +747,7 @@ export default function PipelineBuilder() {
         credentials: 'include',
       })
       if (!resp.ok) {
+        if (resp.status === 401) void reportUnauthorized()
         const data = await resp.json().catch(() => ({}))
         showErrorNotification('File manager', data.error || `Failed to load files (${resp.status})`)
         setFileManagerFiles([])
@@ -777,6 +780,7 @@ export default function PipelineBuilder() {
         showSuccessNotification('Deleted', `Deleted ${name}`)
         if (fileManagerPanel) fetchFileList(fileManagerPanel.currentPath)
       } else {
+        if (resp.status === 401) void reportUnauthorized()
         const data = await resp.json().catch(() => ({}))
         showErrorNotification('Delete failed', data.error || `Delete failed (${resp.status})`)
       }
