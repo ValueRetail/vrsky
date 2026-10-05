@@ -2681,6 +2681,14 @@ path to the agent in front:</p>
 generated with. The token works once. Registration stores the agent's credential in
 <code>C:\ProgramData\VRSky\agent\credential.json</code>, readable only by Administrators
 and the SYSTEM account. The agent now appears under Settings → Remote agents.</p>
+<p><strong>Failed attempts are limited.</strong> After 10 failed registrations from one network
+address (a wrong, used or expired token, or a request VRSky cannot read),
+VRSky answers <code>429 rate_limited</code> to that address and allows one more attempt
+per minute. Successful registrations never count, so bringing many machines
+online from one office is not slowed. The address is the public one, which a
+whole shop usually shares. Whoever runs VRSky can change the 10 with
+<code>AGENT_REGISTER_MAX_FAILURES</code> on the <code>remote-agent</code> service (<code>0</code> turns the
+limit off).</p>
 <h3 id="4-try-it-in-a-window">4. Try it in a window<a class="headerlink" href="#4-try-it-in-a-window" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">"C:\Program Files\VRSky\vrsky-agent.exe"</span> <span class="n">run</span>
 </code></pre></div>
@@ -2784,6 +2792,10 @@ only on a private network like a tailnet, never for production.</p>
 <tr>
 <td><code>registration token is unknown, already used, or expired</code></td>
 <td>Tokens are single-use and last an hour. Generate a new one.</td>
+</tr>
+<tr>
+<td><code>429 rate_limited: too many failed registration attempts from this address</code></td>
+<td>Ten registrations in a row failed from your network. Wait a few minutes (ten for the full allowance), generate a new token, and run the command once. The token you tried while blocked was not used up.</td>
 </tr>
 <tr>
 <td><code>an agent called … already exists</code></td>
