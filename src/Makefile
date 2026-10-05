@@ -1,4 +1,4 @@
-.PHONY: help build docker-build-ui docker-push-ui clean test lint fmt vet
+.PHONY: help build docker-build-ui docker-push-ui clean test test-db lint fmt vet
 
 # Variables
 BIN_DIR=./bin
@@ -43,6 +43,11 @@ test: ## Run Go tests
 	@echo "$(BLUE)Running tests...$(NC)"
 	@$(GO) test -v ./...
 	@echo "$(GREEN)✓ Tests passed$(NC)"
+
+test-db: ## Run the tests that need a real Postgres (set VRSKY_TEST_POSTGRES_URL; see pkg/testdb)
+	@test -n "$(VRSKY_TEST_POSTGRES_URL)" || { echo "set VRSKY_TEST_POSTGRES_URL to a Postgres server the tests may create databases on, e.g. the dev stack's: postgres://postgres:<password>@localhost:5434/postgres?sslmode=disable"; exit 1; }
+	go test -race -count=1 ./pkg/testdb/ ./pkg/managementapi/ ./cmd/remote-agent/ -run 'TestFreshAndEmpty|TestWithAdvisoryLock_MutualExclusion|TestAgentRepoDB|TestGatewayDB|TestDriver_RepositoryBehaviourIsPinned'
+	go test -tags=integration -race -count=1 ./pkg/io/ -run PostgresStateStore
 
 lint: lint-tenant lint-connector lint-openapi ## Run all linters (golangci-lint + tenant-filter + connector + openapi)
 	@echo "$(BLUE)Running linter...$(NC)"

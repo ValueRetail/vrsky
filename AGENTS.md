@@ -110,6 +110,21 @@ go test -short ./...
 go test -tags=integration ./...
 ```
 
+#### Tests that need a real Postgres
+
+Most tests run on sqlmock. A few need a real database — tenant isolation as
+Postgres enforces it, the advisory lock, agent registration under a race, the
+database driver's behaviour, and the `pkg/io` state store. They use
+`src/pkg/testdb`: each creates its own database, applies the migrations, and
+drops it afterwards. Without `VRSKY_TEST_POSTGRES_URL` they skip, so a plain
+`go test ./...` still passes; CI sets it and fails if one is skipped there.
+
+```bash
+# Any Postgres the role may create databases on; the dev stack's works:
+export VRSKY_TEST_POSTGRES_URL="postgres://postgres:<password>@localhost:5434/postgres?sslmode=disable"
+cd src && make test-db
+```
+
 ### Lint and Format Commands
 
 ```bash

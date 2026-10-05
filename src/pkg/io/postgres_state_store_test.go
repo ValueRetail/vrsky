@@ -13,29 +13,21 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/ValueRetail/vrsky/pkg/testdb"
 )
 
 // ============================================================================
 // TEST HELPERS
 // ============================================================================
 
-const (
-	defaultTestPostgresURL = "postgres://postgres:source_password@localhost:5432/source_db?sslmode=disable"
-)
-
-// getTestPostgresURL returns the PostgreSQL connection string for tests
-func getTestPostgresURL() string {
-	if url := os.Getenv("TEST_POSTGRES_URL"); url != "" {
-		return url
-	}
-	return defaultTestPostgresURL
-}
-
 // setupTestDB creates a database connection and ensures the schema exists
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 
-	db, err := sql.Open("pgx", getTestPostgresURL())
+	// A database of this test's own (pkg/testdb: VRSKY_TEST_POSTGRES_URL);
+	// the store's table is created below, so no migrations are needed.
+	db, err := sql.Open("pgx", testdb.Empty(t))
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}

@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
+
+	"github.com/ValueRetail/vrsky/pkg/testdb"
 )
 
 // Agent repository against a real, migrated Postgres. The sqlmock tests prove
@@ -15,16 +16,12 @@ import (
 // what the schema promises — the scoped UPDATEs miss another tenant's row, the
 // partial unique index releases a revoked name, and only the hash is stored.
 //
-//	MGMT_TEST_DB_URL=postgres://postgres:x@127.0.0.1:55432/m?sslmode=disable \
+//	VRSKY_TEST_POSTGRES_URL=postgres://postgres:…@localhost:5432/postgres?sslmode=disable \
 //	  go test ./pkg/managementapi -run TestAgentRepoDB -v
 //
-// Skipped when unset, like the advisory-lock test in dblock_test.go.
+// It runs in a database of its own (pkg/testdb) and is skipped without one.
 func TestAgentRepoDB_TenantScopingAndLifecycle(t *testing.T) {
-	dsn := os.Getenv("MGMT_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set MGMT_TEST_DB_URL (a migrated database) to run the agent repository test")
-	}
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", testdb.Fresh(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -32,8 +29,8 @@ func TestAgentRepoDB_TenantScopingAndLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := &PostgresRepository{db: db}
 
-	// Two tenants, each owned by its own user. Random IDs so reruns against
-	// the same database do not collide; cleaned up by cascade.
+	// Two tenants, each owned by its own user. The database is this test's
+	// alone and is dropped afterwards, so nothing needs cleaning up row by row.
 	var tA, tB, owner string
 	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash, status)
 		VALUES ('agent-test-'||gen_random_uuid()||'@example.com', 'x', 'active') RETURNING id`).Scan(&owner); err != nil {
@@ -45,11 +42,6 @@ func TestAgentRepoDB_TenantScopingAndLifecycle(t *testing.T) {
 			t.Fatalf("seed tenant: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(`DELETE FROM tenants WHERE id IN ($1, $2)`, tA, tB) // lint:tenant-ok — test cleanup
-		_, _ = db.Exec(`DELETE FROM users WHERE id = $1`, owner)
-	})
-
 	// A token stores only its hash.
 	tok, err := repo.CreateAgentRegistrationToken(ctx, tA, "LAGER-01", nil, owner)
 	if err != nil {
@@ -85,11 +77,27 @@ func TestAgentRepoDB_TenantScopingAndLifecycle(t *testing.T) {
 	if err := repo.RevokeAgent(ctx, tB, agentID); !errors.Is(err, ErrAgentNotFound) {
 		t.Errorf("B RevokeAgent(A's): err = %v, want ErrAgentNotFound", err)
 	}
+	// Groups decide which tills a pipeline delivers to: B putting A's agent
+	// into one of B's groups would send B's data to A's machine.
+	// A sets them first, so that "B's call returned not-found" is not taken
+	// for "B's call changed nothing": the row is read back further down.
+	if _, err := repo.SetAgentGroups(ctx, tA, agentID, []string{"all-tills"}); err != nil {
+		t.Fatalf("A SetAgentGroups: %v", err)
+	}
+	if _, err := repo.SetAgentGroups(ctx, tB, agentID, []string{"b-tills"}); !errors.Is(err, ErrAgentNotFound) {
+		t.Errorf("B SetAgentGroups(A's): err = %v, want ErrAgentNotFound", err)
+	}
+	if groups, err := repo.ListAgentGroups(ctx, tB); err != nil || len(groups) != 0 {
+		t.Errorf("B sees groups %+v (err %v), want none — the groups belong to A's agents", groups, err)
+	}
+	if groups, err := repo.ListAgentGroups(ctx, tA); err != nil || len(groups) != 1 || groups[0].Name != "all-tills" || groups[0].Members != 1 {
+		t.Errorf("A's groups = %+v (err %v), want all-tills with 1 member", groups, err)
+	}
 	a, err := repo.GetAgent(ctx, tA, agentID)
 	if err != nil {
 		t.Fatalf("A GetAgent: %v", err)
 	}
-	if a.Name != "LAGER-01" || a.RevokedAt != nil {
+	if a.Name != "LAGER-01" || a.RevokedAt != nil || len(a.Groups) != 1 || a.Groups[0] != "all-tills" {
 		t.Fatalf("A's agent changed by B's calls: %+v", a)
 	}
 	if len(a.Directories) != 1 || a.Directories[0].Name != "inbox" || a.Directories[0].Mode != "read" {

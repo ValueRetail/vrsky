@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 
@@ -18,6 +17,8 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
 	"github.com/ValueRetail/vrsky/pkg/auth"
+
+	"github.com/ValueRetail/vrsky/pkg/testdb"
 )
 
 // The gateway against a real, migrated Postgres: what sqlmock cannot show.
@@ -26,16 +27,12 @@ import (
 // one token cannot both win, and that the tenant condition on the agent lookup
 // really excludes another workspace's agent.
 //
-//	MGMT_TEST_DB_URL=postgres://postgres:x@127.0.0.1:55432/m?sslmode=disable \
+//	VRSKY_TEST_POSTGRES_URL=postgres://postgres:…@localhost:5432/postgres?sslmode=disable \
 //	  go test ./cmd/remote-agent -run TestGatewayDB -v
 //
-// Skipped when unset, like pkg/managementapi's database tests.
+// It runs in a database of its own (pkg/testdb) and is skipped without one.
 func TestGatewayDB_RegistrationAndTenantBoundary(t *testing.T) {
-	dsn := os.Getenv("MGMT_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set MGMT_TEST_DB_URL (a migrated database) to run the gateway database test")
-	}
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", testdb.Fresh(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +54,6 @@ func TestGatewayDB_RegistrationAndTenantBoundary(t *testing.T) {
 			t.Fatalf("seed tenant: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(`DELETE FROM tenants WHERE id IN ($1, $2)`, t1, t2) // lint:tenant-ok — test cleanup
-		_, _ = db.Exec(`DELETE FROM users WHERE id = $1`, owner)
-	})
-
 	mint := func(tenant string) string {
 		raw := agentproto.RegTokenPrefix + "gwtest-" + tenant[:8] + "-" + randHex(t)
 		if _, err := db.ExecContext(ctx, `INSERT INTO agent_registration_tokens (tenant_id, token_hash, expires_at)

@@ -7,12 +7,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +19,7 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
+	"github.com/ValueRetail/vrsky/pkg/testdb"
 )
 
 // The management API reaches Postgres through database/sql and the "pgx"
@@ -33,70 +31,11 @@ import (
 // type, a timestamp's zone, an array, a NULL or an error class shows up as a
 // diff here rather than in production.
 //
-// It needs a Postgres it may create a database on:
-//
-//	MGMT_DRIVER_TEST_DB_URL=postgres://postgres:…@localhost:5432/postgres?sslmode=disable
-//
+// It runs in a database of its own (pkg/testdb: set VRSKY_TEST_POSTGRES_URL)
 // and skips itself without one. Re-record with -update-driver-snapshot.
 var updateDriverSnapshot = flag.Bool("update-driver-snapshot", false, "rewrite testdata/driver_snapshot.json")
 
 const driverSnapshotFile = "testdata/driver_snapshot.json"
-
-// freshDatabase creates an empty database with every migration applied and
-// returns its URL. Migrations go through lib/pq so that the driver under test
-// is not also the thing that built the schema.
-func freshDatabase(t *testing.T) string {
-	t.Helper()
-	adminURL := os.Getenv("MGMT_DRIVER_TEST_DB_URL")
-	if adminURL == "" {
-		t.Skip("MGMT_DRIVER_TEST_DB_URL not set — needs a real Postgres")
-	}
-	admin, err := sql.Open("postgres", adminURL)
-	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
-	}
-	defer admin.Close()
-	name := "mgmt_driver_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	if _, err := admin.Exec(`CREATE DATABASE ` + pq.QuoteIdentifier(name)); err != nil {
-		t.Fatalf("create database: %v", err)
-	}
-	t.Cleanup(func() {
-		a, err := sql.Open("postgres", adminURL)
-		if err != nil {
-			return
-		}
-		defer a.Close()
-		_, _ = a.Exec(`DROP DATABASE IF EXISTS ` + pq.QuoteIdentifier(name) + ` WITH (FORCE)`)
-	})
-
-	u, err := url.Parse(adminURL)
-	if err != nil {
-		t.Fatalf("parse MGMT_DRIVER_TEST_DB_URL: %v", err)
-	}
-	u.Path = "/" + name
-	dbURL := u.String()
-
-	schema, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		t.Fatalf("open schema connection: %v", err)
-	}
-	defer schema.Close()
-	files, err := filepath.Glob(filepath.Join("..", "..", "..", "infrastructure", "migrations", "*.up.sql"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("no migrations found: %v", err)
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if _, err := schema.Exec(string(body)); err != nil {
-			t.Fatalf("apply %s: %v", filepath.Base(f), err)
-		}
-	}
-	return dbURL
-}
 
 var (
 	uuidRe = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
@@ -128,8 +67,8 @@ func normalise(raw []byte) string {
 const driverChildEnv = "MGMT_DRIVER_TEST_CHILD"
 
 func TestDriver_RepositoryBehaviourIsPinned(t *testing.T) {
-	if os.Getenv("MGMT_DRIVER_TEST_DB_URL") == "" {
-		t.Skip("MGMT_DRIVER_TEST_DB_URL not set — needs a real Postgres")
+	if os.Getenv(testdb.EnvVar) == "" {
+		t.Skip(testdb.SkipMessage)
 	}
 
 	// The snapshot records each timestamp's zone, so the local zone has to be
@@ -156,7 +95,7 @@ func TestDriver_RepositoryBehaviourIsPinned(t *testing.T) {
 		t.Fatalf("child process local zone offset = %ds, want +03:00 — TZ was not honoured", offset)
 	}
 
-	dbURL := freshDatabase(t)
+	dbURL := testdb.Fresh(t)
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
