@@ -52,6 +52,9 @@ build_core() {
   # were wired to topics nothing publishes to, and have since been deleted.
   build vrsky/data-filter:latest    src/cmd/data-filter/Dockerfile
   build vrsky/data-converter:latest src/cmd/data-converter/Dockerfile
+  # Diagnoses alerts with Claude and reports to the notification targets
+  # (plans/alert-responder.md).
+  build vrsky/alert-responder:latest src/cmd/alert-responder/Dockerfile
 }
 
 build_connectors() {

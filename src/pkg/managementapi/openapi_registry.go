@@ -36,6 +36,7 @@ var apiRoutes = []apiRoute{
 	{"POST /api/v1/connections/{id}/start", "post", "/api/v1/connections/{id}/start", "Connections", "Start (deploy) a connection", nil, tof(Connection{})},
 	{"POST /api/v1/connections/{id}/stop", "post", "/api/v1/connections/{id}/stop", "Connections", "Stop a connection", nil, tof(Connection{})},
 	{"POST /api/v1/connections/{id}/resend", "post", "/api/v1/connections/{id}/resend", "Connections", "Ask a running pipeline's source to send everything again (sources that support it, e.g. Business Central, re-send all records and pictures on the next poll)", nil, nil},
+	{"GET /api/v1/connections/{id}/events", "get", "/api/v1/connections/{id}/events", "Connections", "A pipeline's most recent lifecycle events (started, stopped, error …), newest first; ?limit= (default 50, max 200)", nil, nil},
 	{"POST /api/v1/connections/test", "post", "/api/v1/connections/test", "Connections", "Test a connector config without deploying", nil, nil},
 
 	// --- Produced files (proxied to the file workers; see files_proxy.go) ---

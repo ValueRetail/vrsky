@@ -15,6 +15,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/notify"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 	"github.com/ValueRetail/vrsky/pkg/promquery"
 )
@@ -24,6 +25,7 @@ type Handler struct {
 	repo              Repository
 	validator         *Validator
 	publisher         *NATSPublisher
+	alertSink         func(ctx context.Context, alert *notify.Alert) // alerts for the alert responder; nil = none
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
@@ -84,6 +86,12 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 // SetDB sets the direct database connection for raw queries
 func (h *Handler) SetDB(db *sql.DB) {
 	h.db = db
+}
+
+// SetAlertSink sets where incoming alerts are handed on for the alert
+// responder (in production: NATSPublisher.PublishAlert).
+func (h *Handler) SetAlertSink(sink func(ctx context.Context, alert *notify.Alert)) {
+	h.alertSink = sink
 }
 
 // SetPublisher sets the NATS publisher for command publishing
@@ -929,6 +937,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/connections/{id}/start", editor(http.HandlerFunc(h.StartConnection)))
 	mux.Handle("POST /api/v1/connections/{id}/stop", editor(http.HandlerFunc(h.StopConnection)))
 	mux.Handle("POST /api/v1/connections/{id}/resend", editor(http.HandlerFunc(h.ResendConnection)))
+	mux.Handle("GET /api/v1/connections/{id}/events", viewer(http.HandlerFunc(h.ListConnectionEvents)))
 
 	// Test a draft connector config without persisting it (#82).
 	mux.Handle("POST /api/v1/connections/test", editor(http.HandlerFunc(h.TestConnection)))
@@ -1216,4 +1225,59 @@ func (h *Handler) ResendConnection(w http.ResponseWriter, r *http.Request) {
 	_ = writeJSON(w, http.StatusAccepted, SuccessResponse{Data: map[string]any{
 		"connection_id": connID, "requested_at": time.Now().UTC(),
 	}})
+}
+
+// ListConnectionEvents returns a pipeline's most recent lifecycle events
+// (started, stopped, error, config_changed …), newest first — what the
+// builder's log shows, for callers that diagnose a pipeline (the alert
+// responder). ?limit= caps the count (default 50, max 200).
+//
+// GET /api/v1/connections/{id}/events
+func (h *Handler) ListConnectionEvents(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID, err := GetTenantIDFromContext(ctx)
+	if err != nil {
+		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+	connID := strings.TrimSpace(r.PathValue("id"))
+	if connID == "" {
+		_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "connection ID is required", nil)
+		return
+	}
+	conn, err := h.repo.GetConnection(ctx, connID)
+	if err != nil {
+		if _, ok := err.(*NotFoundError); ok {
+			_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		} else {
+			_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve connection", nil)
+		}
+		return
+	}
+	// 404, not 403: whether another workspace's pipeline exists is not ours to say.
+	if conn.TenantID != tenantID {
+		_ = writeError(w, http.StatusNotFound, "NotFound", "connection not found", nil)
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			_ = writeError(w, http.StatusBadRequest, "InvalidRequest", "limit must be a positive number", nil)
+			return
+		}
+		limit = min(n, 200)
+	}
+	events, err := h.repo.GetConnectionEvents(ctx, connID)
+	if err != nil {
+		_ = writeError(w, http.StatusInternalServerError, "DatabaseError", "failed to retrieve events", nil)
+		return
+	}
+	if len(events) > limit {
+		events = events[:limit]
+	}
+	if events == nil {
+		events = []*ConnectionEvent{}
+	}
+	_ = writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
 }

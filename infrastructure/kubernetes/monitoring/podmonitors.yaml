@@ -31,6 +31,22 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
+  name: vrsky-alert-responder
+  namespace: vrsky-monitoring
+spec:
+  namespaceSelector:
+    matchNames: [vrsky-platform]
+  selector:
+    matchLabels:
+      app: vrsky-alert-responder
+  podMetricsEndpoints:
+    - port: health           # named containerPort 8080; vrsky_responder_runs_total
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
   name: vrsky-connectors
   namespace: vrsky-monitoring
 spec:

@@ -23,6 +23,12 @@ type Alert struct {
 	StartsAt    time.Time         `json:"starts_at"`
 }
 
+// ResponderReportName is the alertname of a report posted by the alert
+// responder (cmd/alert-responder). It travels the same webhook → targets path
+// as a real alert so the existing cards render it, and it is never handed
+// back to the responder — that would be a loop.
+const ResponderReportName = "ResponderReport"
+
 // Title renders the conventional one-line headline, e.g.
 // "[FIRING:critical] PipelineDown — no messages published for tenant X".
 func (a *Alert) Title() string {

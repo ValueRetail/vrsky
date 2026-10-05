@@ -1,0 +1,78 @@
+# Alert responder (plans/alert-responder.md): diagnoses alerts with Claude and,
+# in act mode, takes a small allowlisted set of actions. One replica: its
+# cooldowns and rate limits live in memory.
+#
+# Needs three Secrets in this namespace, created by the operator (never in
+# git) — see docs/operator/alert-responder.md:
+#   anthropic-api-key            key: api-key
+#   alert-responder-tenant-keys  key: keys   ("<tenant id>=<workspace API key>" per line)
+#   alerts-webhook-token         key: token  (already there for Alertmanager)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vrsky-alert-responder
+  namespace: vrsky-platform
+  labels:
+    app: vrsky-alert-responder
+    tier: core
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # never two responders: each would run the same alert
+  selector:
+    matchLabels:
+      app: vrsky-alert-responder
+  template:
+    metadata:
+      labels:
+        app: vrsky-alert-responder
+        tier: core
+    spec:
+      containers:
+      - name: alert-responder
+        image: vrskyprodacr.azurecr.io/vrsky/alert-responder:latest
+        imagePullPolicy: Always
+        env:
+        - name: NATS_URL
+          value: "nats://nats-platform.vrsky-platform.svc.cluster.local:4222"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: MGMT_API_URL
+          value: "http://vrsky-management-api.vrsky-platform.svc.cluster.local:8080"
+        # observe: diagnose and report only. act: may also redeploy a
+        # pipeline, retry dead-lettered messages and trigger a resend.
+        - name: RESPONDER_MODE
+          value: "observe"
+        - name: RESPONDER_MAX_RUNS_PER_HOUR
+          value: "20"
+        - name: RESPONDER_MAX_TOOL_CALLS
+          value: "25"
+        - name: ALERTS_WEBHOOK_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: alerts-webhook-token
+              key: token
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-api-key
+              key: api-key
+        - name: RESPONDER_TENANT_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: alert-responder-tenant-keys
+              key: keys
+        ports:
+        - name: health
+          containerPort: 8080
+        readinessProbe:
+          httpGet: { path: /readyz, port: 8080 }
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          initialDelaySeconds: 5
+          periodSeconds: 20
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits: { cpu: 250m, memory: 256Mi }

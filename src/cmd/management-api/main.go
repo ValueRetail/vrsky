@@ -27,6 +27,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/logging"
 	"github.com/ValueRetail/vrsky/pkg/managementapi"
+	"github.com/ValueRetail/vrsky/pkg/notify"
 	"github.com/ValueRetail/vrsky/pkg/oauth"
 	"github.com/ValueRetail/vrsky/pkg/orchestrator"
 	"github.com/ValueRetail/vrsky/pkg/promquery"
@@ -282,6 +283,13 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// Initialize handler and register REST routes
 	restHandler := managementapi.NewHandler(repo, validator)
 	restHandler.SetPublisher(publisher)
+	// Every alert the webhook receives is also handed to the alert responder
+	// (cmd/alert-responder) over NATS; best effort, see PublishAlert.
+	restHandler.SetAlertSink(func(ctx context.Context, alert *notify.Alert) {
+		if err := publisher.PublishAlert(ctx, alert); err != nil {
+			slog.Warn("alerts: hand-off to the responder failed", "alert", alert.Name, "error", err)
+		}
+	})
 	restHandler.SetDB(db)
 
 	// JetStream context for DLQ endpoints (#70). Optional — DLQ handlers
