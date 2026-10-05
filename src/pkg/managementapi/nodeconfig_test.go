@@ -789,6 +789,71 @@ func TestDockerfilesRetryModuleDownload(t *testing.T) {
 	}
 }
 
+// The Go Tests job must fetch its modules with retries, and before any test.
+//
+// `go test` downloads modules as it compiles, one attempt each. On 2026-10-05
+// proxy.golang.org dropped one download and 41 packages ended in "setup
+// failed": main went red on a merge that touched no code path (#299). The job
+// now downloads first, in a loop, and runs the tests with GOPROXY=off so a
+// module the download step missed fails every run rather than the unlucky one.
+//
+// Both halves are a few lines of YAML that read as optional. This fails when
+// either goes: the loop, or the test steps' reliance on it.
+func TestGoTestsJobRetriesModuleDownload(t *testing.T) {
+	path := filepath.Join("..", "..", "..", ".github", "workflows", "build-push.yml")
+	body, err := os.ReadFile(path) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Skipf("workflow not found (%v) — retry guard skipped", err)
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &wf); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	job, ok := wf.Jobs["go-tests"]
+	if !ok {
+		t.Fatal("build-push.yml has no go-tests job — if it was renamed, point this test at the new name")
+	}
+
+	download, firstTest, tests := -1, -1, 0
+	for i, step := range job.Steps {
+		switch {
+		case strings.Contains(step.Run, "go mod download"):
+			download = i
+			if !strings.Contains(step.Run, "for ") && !strings.Contains(step.Run, "until ") && !strings.Contains(step.Run, "while ") {
+				t.Errorf("step %q downloads modules without retrying: one dropped stream from "+
+					"proxy.golang.org fails the whole job", step.Name)
+			}
+		case strings.Contains(step.Run, "go test "):
+			tests++
+			if firstTest < 0 {
+				firstTest = i
+			}
+			if step.Env["GOPROXY"] != "off" {
+				t.Errorf("step %q runs go test without GOPROXY=off, so it can download modules itself — "+
+					"unretried, which is the failure the download step exists to prevent", step.Name)
+			}
+		}
+	}
+	if tests == 0 {
+		t.Fatal("found no `go test` step in the go-tests job — this guard no longer checks anything")
+	}
+	if download < 0 {
+		t.Fatal("the go-tests job has no `go mod download` step: modules are fetched by go test, one attempt each")
+	}
+	if download > firstTest {
+		t.Errorf("`go mod download` (step %d) comes after the first `go test` (step %d); it must come first",
+			download+1, firstTest+1)
+	}
+}
+
 // runInstructionContaining returns the full RUN instruction whose body contains
 // needle, joining the backslash continuations that make up a multi-line one.
 func runInstructionContaining(dockerfile, needle string) (string, bool) {
