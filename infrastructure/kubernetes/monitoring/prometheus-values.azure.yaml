@@ -78,7 +78,10 @@ alertmanager:
       - name: vrsky-management-api
         webhook_configs:
           - url: http://vrsky-management-api.vrsky-platform.svc.cluster.local:8080/api/v1/alerts/webhook
-            send_resolved: true
+            # Only what is wrong reaches the channel: no "[RESOLVED]" card
+            # when an alert clears. (The alert responder's own "resolved after
+            # my action" card depends on resolved alerts, so it is off too.)
+            send_resolved: false
             http_config:
               authorization:
                 type: Bearer
