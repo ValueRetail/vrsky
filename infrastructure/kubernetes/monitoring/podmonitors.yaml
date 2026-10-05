@@ -9,9 +9,10 @@
 # podMonitorSelectorNilUsesHelmValues: false.
 #
 # The management-api serves /metrics on its main listener (:3000, port
-# http-api — main.go mounts promhttp on the API mux). The deployment's
-# MGMT_API_METRICS_LISTEN=:9090 and the 9090 containerPort/Service port are
-# leftovers nothing listens on; scraping them was "connection refused".
+# http-api — main.go mounts promhttp on the API mux). It never had a separate
+# metrics listener: the :9090 port and MGMT_API_METRICS_LISTEN env that used
+# to sit in its manifests were read by nothing, and scraping them was
+# "connection refused".
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

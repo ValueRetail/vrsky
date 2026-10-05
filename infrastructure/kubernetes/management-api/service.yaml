@@ -8,9 +8,10 @@ metadata:
     component: management-api
     version: v1
   annotations:
-    # Prometheus service discovery - scrape metrics port
+    # Prometheus service discovery. /metrics is served on the API listener
+    # (pod port 3000); there is no separate metrics port.
     prometheus.io/scrape: "true"
-    prometheus.io/port: "9090"
+    prometheus.io/port: "3000"
     prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
@@ -21,9 +22,5 @@ spec:
     # Application listens on container port 3000; exposed as 8080 within the cluster.
     port: 8080
     targetPort: 3000
-    protocol: TCP
-  - name: metrics
-    port: 9090
-    targetPort: 9090
     protocol: TCP
   sessionAffinity: None
