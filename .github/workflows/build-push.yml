@@ -152,6 +152,24 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
 
+    # A real Postgres for pkg/managementapi's driver test
+    # (TestDriver_RepositoryBehaviourIsPinned). Everything else in that
+    # package runs on sqlmock, which cannot tell one database driver from
+    # another; this is what catches a driver upgrade that changes behaviour.
+    # Throwaway credentials for a database that lives for one job.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -191,6 +209,8 @@ jobs:
 
       - name: Run Go tests
         working-directory: src
+        env:
+          MGMT_DRIVER_TEST_DB_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
         run: go test -v -race -cover ./...
 
       # v2, and the action must move to v8 with it. v1.64.8 was itself built

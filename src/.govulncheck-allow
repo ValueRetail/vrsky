@@ -8,29 +8,6 @@
 # Every entry must record: what it is, why it cannot be fixed, and what would
 # let it be deleted.
 
-# --- github.com/jackc/pgx/v4 and pgproto3/v2 -------------------------------
-#
-# CORRECTED 2026-10-05. An earlier version of this note said both were
-# denial-of-service issues reachable only through the Postgres CDC worker,
-# which prod does not run. Scanning each binary separately shows otherwise:
-#
-#   - cmd/management-api — the core API, in prod — reaches BOTH, because its
-#     database/sql driver is github.com/jackc/pgx/v4/stdlib;
-#   - cmd/postgres-consumer and cmd/postgres-producer reach both through the
-#     pgx v4 pool (not built as product images, not deployed: #239);
-#   - no connector does: they use lib/pq.
-#
-# GO-2026-5004 is SQL injection via placeholder confusion with dollar-quoted
-# string literals in pgx's client-side sanitiser, not a DoS. GO-2026-4518 is a
-# DoS in pgproto3 when reading server messages. Neither has a fix in the v4
-# line ("Fixed in: N/A"); pgx v5 is the fix.
-#
-# Why they are still accepted for the moment: the sanitiser only runs in
-# simple-protocol mode, which the management API does not use (database/sql,
-# default extended protocol, no prefer_simple_protocol, no dollar-quoted SQL),
-# and the pgproto3 issue needs a malicious Postgres server on the other end.
-# That is an assessment, not a proof.
-#
-# Removed by migrating to pgx v5 — plans/pgx-v5.md.
-GO-2026-5004
-GO-2026-4518
+# (No entries. The two pgx v4 advisories that used to be listed here —
+# GO-2026-5004 and GO-2026-4518 — were removed by moving the management API
+# and the pkg/io Postgres workers to pgx v5; see plans/pgx-v5.md.)
