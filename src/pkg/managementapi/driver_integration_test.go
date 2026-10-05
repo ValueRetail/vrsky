@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // the child process needs Etc/GMT-3 wherever the test runs
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -122,15 +124,39 @@ func normalise(raw []byte) string {
 	})
 }
 
-func TestDriver_RepositoryBehaviourIsPinned(t *testing.T) {
-	dbURL := freshDatabase(t)
+// driverChildEnv marks the re-executed copy of the test binary.
+const driverChildEnv = "MGMT_DRIVER_TEST_CHILD"
 
-	// A fixed, non-UTC local zone: a driver that hands back times in Local
-	// and one that hands them back in UTC then differ visibly, and the same
-	// way on every machine.
-	prevLocal := time.Local
-	time.Local = time.FixedZone("TEST", 3*3600)
-	t.Cleanup(func() { time.Local = prevLocal })
+func TestDriver_RepositoryBehaviourIsPinned(t *testing.T) {
+	if os.Getenv("MGMT_DRIVER_TEST_DB_URL") == "" {
+		t.Skip("MGMT_DRIVER_TEST_DB_URL not set — needs a real Postgres")
+	}
+
+	// The snapshot records each timestamp's zone, so the local zone has to be
+	// the same on every machine, and not UTC — otherwise a driver that hands
+	// back times in Local and one that hands them back in UTC look alike.
+	// The zone is process-wide state that other goroutines read (assigning
+	// time.Local here raced with an embedded NATS server left running by
+	// another test), so instead of changing it, the test re-runs itself in a
+	// child process that starts with TZ set.
+	if os.Getenv(driverChildEnv) == "" {
+		args := []string{"-test.run=^TestDriver_RepositoryBehaviourIsPinned$", "-test.count=1"}
+		if *updateDriverSnapshot {
+			args = append(args, "-update-driver-snapshot")
+		}
+		cmd := exec.Command(os.Args[0], args...)
+		cmd.Env = append(os.Environ(), "TZ=Etc/GMT-3", driverChildEnv+"=1") // Etc/GMT-3 is UTC+03:00
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("driver test (child process, TZ=Etc/GMT-3): %v\n%s", err, out)
+		}
+		return
+	}
+	if _, offset := time.Now().Zone(); offset != 3*3600 {
+		t.Fatalf("child process local zone offset = %ds, want +03:00 — TZ was not honoured", offset)
+	}
+
+	dbURL := freshDatabase(t)
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
