@@ -2625,7 +2625,8 @@ channel should also get infrastructure alerts, <strong>Test</strong>. The URL is
 <p><strong>Proving it end to end</strong>: apply a temporary rule
 (<code>alert: TestAlert</code>, <code>expr: vector(1)</code>, <code>for: 1m</code>, <code>severity: warning</code>) as a
 <code>PrometheusRule</code> in <code>vrsky-monitoring</code>; a card arrives within ~3 minutes;
-delete the rule; a <em>resolved</em> card follows.</p>
+delete the rule. Nothing is posted when an alert clears: the channel only
+gets what is wrong (<code>send_resolved: false</code> on the Alertmanager receiver).</p>
 <p><strong>Who answers them</strong>: the <a href="../operator/alert-responder/">alert responder</a>
 receives the same alerts, diagnoses the affected workspace with Claude and
 posts a <code>ResponderReport</code> to the same targets — in <code>act</code> mode after taking
