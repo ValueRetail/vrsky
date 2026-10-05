@@ -130,6 +130,15 @@ generated with. The token works once. Registration stores the agent's credential
 `C:\ProgramData\VRSky\agent\credential.json`, readable only by Administrators
 and the SYSTEM account. The agent now appears under Settings → Remote agents.
 
+**Failed attempts are limited.** After 10 failed registrations from one network
+address (a wrong, used or expired token, or a request VRSky cannot read),
+VRSky answers `429 rate_limited` to that address and allows one more attempt
+per minute. Successful registrations never count, so bringing many machines
+online from one office is not slowed. The address is the public one, which a
+whole shop usually shares. Whoever runs VRSky can change the 10 with
+`AGENT_REGISTER_MAX_FAILURES` on the `remote-agent` service (`0` turns the
+limit off).
+
 ### 4. Try it in a window
 
 ```powershell
@@ -234,6 +243,7 @@ only on a private network like a tailnet, never for production.
 | Quick install: `-Token must be the vrsky_reg_… token` | The pasted line contained more than the token after `-Token` (usually the whole command twice). Paste the command from Settings once. |
 | `this agent is not registered` | Run `register` first; check `data_dir` if you changed it. |
 | `registration token is unknown, already used, or expired` | Tokens are single-use and last an hour. Generate a new one. |
+| `429 rate_limited: too many failed registration attempts from this address` | Ten registrations in a row failed from your network. Wait a few minutes (ten for the full allowance), generate a new token, and run the command once. The token you tried while blocked was not used up. |
 | `an agent called … already exists` | Pass `--name` with another name, or revoke the old agent first. |
 | Agent shows **Offline** in VRSky | The service is not running, or cannot reach VRSky. Check `status` and the log. |
 | Pipeline refuses to start: *no folder named …* | The folder name in the pipeline is not in the agent's config, or has the wrong direction. Fix the config and restart the agent, which re-announces its folders. |

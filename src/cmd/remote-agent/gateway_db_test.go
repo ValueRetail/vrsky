@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -141,6 +143,90 @@ func TestGatewayDB_RegistrationAndTenantBoundary(t *testing.T) {
 	}
 	if _, _, err := g.dbLookupAgent(ctx, auth.HashToken(agentproto.CredentialPrefix+"never-issued")); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("unknown credential: err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// The registration limit against the real statements: only a real database
+// shows that a token found valid is what hands the attempt back, and that a
+// request refused by the limit left its token unused.
+func TestGatewayDB_OnlyFailedRegistrationsCountAgainstTheLimit(t *testing.T) {
+	db, err := sql.Open("postgres", testdb.Fresh(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	now := time.Now()
+	g := newGateway()
+	g.db = db
+	g.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	g.now = func() time.Time { return now }
+
+	var owner, tenant string
+	if err := db.QueryRowContext(ctx, `INSERT INTO users (email, password_hash, status)
+		VALUES ('gw-limit-'||gen_random_uuid()||'@example.com', 'x', 'active') RETURNING id`).Scan(&owner); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `INSERT INTO tenants (name, slug, owner_id)
+		VALUES ('gw-limit', 'gw-limit-'||gen_random_uuid(), $1) RETURNING id`, owner).Scan(&tenant); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	mint := func() string {
+		raw := agentproto.RegTokenPrefix + "gwlimit-" + randHex(t)
+		if _, err := db.ExecContext(ctx, `INSERT INTO agent_registration_tokens (tenant_id, token_hash, expires_at)
+			VALUES ($1, $2, NOW() + interval '1 hour')`, tenant, auth.HashToken(raw)); err != nil {
+			t.Fatalf("mint: %v", err)
+		}
+		return raw
+	}
+	// Every request comes from the same address, as a shop's tills do.
+	register := func(token, name string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(agentproto.RegisterRequest{RegistrationToken: token, Name: name, Hostname: "h"})
+		req := httptest.NewRequest(http.MethodPost, "/agent/v1/register", bytes.NewReader(body))
+		req.Header.Set("X-Real-IP", "203.0.113.9")
+		rec := httptest.NewRecorder()
+		g.agentRoutes().ServeHTTP(rec, req)
+		return rec
+	}
+
+	// --- A rollout: three times the allowance, all genuine, none refused. ---
+	for i := 0; i < 3*defaultRegisterMaxFailures; i++ {
+		if rec := register(mint(), fmt.Sprintf("till-%02d", i)); rec.Code != http.StatusCreated {
+			t.Fatalf("genuine registration %d from one address: want 201, got %d %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+
+	// --- A valid token with a taken name is a mistake, not a failed attempt. ---
+	clash := mint()
+	for i := 0; i < 2*defaultRegisterMaxFailures; i++ {
+		if rec := register(clash, "TILL-00"); rec.Code != http.StatusConflict {
+			t.Fatalf("name clash %d: want 409, got %d %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+
+	// --- After all that the address still has its whole allowance, and no more. ---
+	for i := 0; i < defaultRegisterMaxFailures; i++ {
+		if rec := register(agentproto.RegTokenPrefix+"never-minted", "x"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("failed attempt %d: want 401, got %d %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := register(agentproto.RegTokenPrefix+"never-minted", "x"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt past the allowance: want 429, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// --- While blocked, a valid token is refused too, and is NOT used up. ---
+	if rec := register(clash, "till-late"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("valid token from a blocked address: want 429, got %d %s", rec.Code, rec.Body.String())
+	}
+	now = now.Add(registerRefillEvery)
+	if rec := register(clash, "till-late"); rec.Code != http.StatusCreated {
+		t.Fatalf("the refused token should still work once the block eases: %d %s", rec.Code, rec.Body.String())
+	}
+	var agents int
+	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM agents WHERE tenant_id = $1`, tenant).Scan(&agents)
+	if want := 3*defaultRegisterMaxFailures + 1; agents != want {
+		t.Fatalf("tenant has %d agents, want %d", agents, want)
 	}
 }
 

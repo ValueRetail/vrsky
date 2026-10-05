@@ -86,6 +86,8 @@ type gateway struct {
 	outputAckWait time.Duration
 	// membershipRefresh is how often group sessions re-read their members.
 	membershipRefresh time.Duration
+	// registerLimit bounds failed registration attempts per client address.
+	registerLimit *failureLimiter
 
 	now func() time.Time
 }
@@ -98,6 +100,7 @@ func newGateway() *gateway {
 		uploadMax:         defaultUploadMax,
 		outputAckWait:     30 * time.Second,
 		membershipRefresh: defaultMembershipRefresh,
+		registerLimit:     newFailureLimiter(defaultRegisterMaxFailures),
 		now:               time.Now,
 	}
 	g.lookupAgent = g.dbLookupAgent
@@ -184,6 +187,8 @@ func (s *gateway) Configure(ctx context.Context, res *sdk.Resources) error {
 			s.uploadMax = n
 		}
 	}
+
+	s.registerLimit = newFailureLimiter(registerMaxFailuresFromEnv(s.logger))
 
 	s.RegisterHTTPHandler("/agent/", s.agentRoutes())
 	s.RegisterHTTPHandler("/events/", s.handleEvents())
