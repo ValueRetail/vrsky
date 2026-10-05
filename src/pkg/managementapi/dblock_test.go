@@ -3,11 +3,12 @@ package managementapi
 import (
 	"context"
 	"database/sql"
-	"os"
 	"sync"
 	"testing"
 
 	_ "github.com/lib/pq"
+
+	"github.com/ValueRetail/vrsky/pkg/testdb"
 )
 
 func TestAdvisoryKey_StableAndPositive(t *testing.T) {
@@ -31,14 +32,10 @@ func TestAdvisoryKey_StableAndPositive(t *testing.T) {
 
 // TestWithAdvisoryLock_MutualExclusion verifies that two callers cannot hold the
 // same advisory lock at once, and that releasing (transaction end) lets the next
-// caller acquire it. Requires a real Postgres — set MGMT_TEST_DB_URL to run;
-// skipped otherwise so the unit suite stays DB-free.
+// caller acquire it. Requires a real Postgres (pkg/testdb: set
+// VRSKY_TEST_POSTGRES_URL); skipped otherwise so the unit suite stays DB-free.
 func TestWithAdvisoryLock_MutualExclusion(t *testing.T) {
-	dsn := os.Getenv("MGMT_TEST_DB_URL")
-	if dsn == "" {
-		t.Skip("set MGMT_TEST_DB_URL to run the advisory-lock integration test")
-	}
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", testdb.Empty(t)) // the lock needs a database, not a schema
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -152,11 +152,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
 
-    # A real Postgres for pkg/managementapi's driver test
-    # (TestDriver_RepositoryBehaviourIsPinned). Everything else in that
-    # package runs on sqlmock, which cannot tell one database driver from
-    # another; this is what catches a driver upgrade that changes behaviour.
-    # Throwaway credentials for a database that lives for one job.
+    # A real Postgres for the tests that need one (src/pkg/testdb): tenant
+    # isolation as the database enforces it, the advisory lock, registration
+    # under a race, driver behaviour. Everything else runs on sqlmock, which
+    # checks SQL text and nothing more. Each such test creates and drops its
+    # own database. Throwaway credentials for a server that lives for one job.
     services:
       postgres:
         image: postgres:16-alpine
@@ -210,8 +210,27 @@ jobs:
       - name: Run Go tests
         working-directory: src
         env:
-          MGMT_DRIVER_TEST_DB_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-        run: go test -v -race -cover ./...
+          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+        run: |
+          set -o pipefail
+          go test -v -race -cover ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          # The database tests skip themselves when the variable is missing,
+          # and a skip is invisible: three of them went unrun in CI for
+          # months because nothing set the variable they waited for. Here a
+          # skip can only mean the variable or the service above was lost.
+          if grep -q "VRSKY_TEST_POSTGRES_URL not set" "$RUNNER_TEMP/go-test.log"; then
+            echo "::error::a database test was skipped in CI — VRSKY_TEST_POSTGRES_URL or the postgres service is missing"
+            exit 1
+          fi
+
+      # The Postgres worker's state store (pkg/io), on a real database. These
+      # sit behind the integration build tag, which the main run does not set,
+      # and unlike the tests above they fail rather than skip without one.
+      - name: Run pkg/io state-store tests
+        working-directory: src
+        env:
+          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -tags=integration -race -count=1 ./pkg/io/ -run PostgresStateStore
 
       # v2, and the action must move to v8 with it. v1.64.8 was itself built
       # with Go 1.24 and refused to target 1.26 ("the Go language version used
