@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -287,7 +287,7 @@ func (pi *PostgresInput) connectPostgres() error {
 		pi.database,
 	)
 
-	pool, err := pgxpool.Connect(pi.ctx, connStr)
+	pool, err := pgxpool.New(pi.ctx, connStr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 	}

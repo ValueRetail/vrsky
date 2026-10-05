@@ -51,9 +51,10 @@ jobs:
 
       # govulncheck has no suppression of its own, so the accepted set lives in
       # src/.govulncheck-allow with a reason per entry. Anything not in that
-      # file fails this job. Two vulnerabilities are currently accepted: both
-      # are unfixable in the pgx v4 line and reachable only through the
-      # postgres CDC worker, which no pipeline can use and prod does not run.
+      # file fails this job. Nothing is accepted at present: the two pgx v4
+      # advisories that were (unfixable in v4, and reachable from the
+      # management API's own database driver) went away with the move to
+      # pgx v5.
       - name: Scan Go modules and the standard library
         working-directory: src
         run: |
