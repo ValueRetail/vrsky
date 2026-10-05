@@ -207,9 +207,29 @@ jobs:
           fi
           echo "all files are gofmt-clean"
 
+      # `go test` fetches modules as it compiles, one attempt each. On
+      # 2026-10-05 proxy.golang.org dropped a single download mid-stream and 41
+      # packages ended in "setup failed" before a test had run: main went red
+      # on a merge that changed no code path (#299, run 37309549541). Fetch
+      # everything here instead, with retries — the loop the Dockerfiles use.
+      - name: Download Go modules
+        working-directory: src
+        run: |
+          for i in 1 2 3; do
+            go mod download && exit 0
+            echo "::warning::go mod download failed (attempt $i/3)"
+            [ "$i" = 3 ] || sleep $((i * 10))
+          done
+          echo "::error::go mod download failed three times — proxy.golang.org is likely down"
+          exit 1
+
+      # GOPROXY=off: every module is in the cache by now. If this step ever
+      # needs one that is not, it says so on every run, instead of working
+      # until the day the proxy hiccups.
       - name: Run Go tests
         working-directory: src
         env:
+          GOPROXY: "off"
           VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
         run: |
           set -o pipefail
@@ -229,6 +249,7 @@ jobs:
       - name: Run pkg/io state-store tests
         working-directory: src
         env:
+          GOPROXY: "off"
           VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
         run: go test -tags=integration -race -count=1 ./pkg/io/ -run PostgresStateStore
 
