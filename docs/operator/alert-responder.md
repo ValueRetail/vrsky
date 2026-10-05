@@ -41,7 +41,9 @@ Next — what a person should do now.
 (observe mode · 4 tool calls · ~$0.11)
 ```
 
-If it acted and the alert later clears, a short *resolved* card follows.
+If it acted and the alert later clears, a short *resolved* card follows —
+but only when Alertmanager sends resolved alerts (`send_resolved: true` on
+the receiver). Prod has that off, so the channel only gets what is wrong.
 If a run fails (API outage, timeout) nothing is posted — the plain alert card
 is already there — and the reason is in the pod's log.
 
