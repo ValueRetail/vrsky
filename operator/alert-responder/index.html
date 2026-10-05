@@ -11,6 +11,10 @@
       
       
       
+        <link rel="prev" href="../monitoring/">
+      
+      
+        <link rel="next" href="../troubleshooting/">
       
       
         
@@ -21,7 +25,7 @@
     
     
       
-        <title>ADR 0002 — Large payloads through pipeline transforms (filter / converter) - VRSky Documentation</title>
+        <title>Alert responder - VRSky Documentation</title>
       
     
     
@@ -72,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#adr-0002-large-payloads-through-pipeline-transforms-filter-converter" class="md-skip">
+        <a href="#alert-responder" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              ADR 0002 — Large payloads through pipeline transforms (filter / converter)
+              Alert responder
             
           </span>
         </div>
@@ -710,8 +714,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -722,11 +728,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -747,7 +753,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -765,7 +771,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/install/" class="md-nav__link">
+      <a href="../install/" class="md-nav__link">
         
   
   
@@ -793,7 +799,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/windows/" class="md-nav__link">
+      <a href="../windows/" class="md-nav__link">
         
   
   
@@ -821,7 +827,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/remote-agent/" class="md-nav__link">
+      <a href="../remote-agent/" class="md-nav__link">
         
   
   
@@ -849,7 +855,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/remote-access/" class="md-nav__link">
+      <a href="../remote-access/" class="md-nav__link">
         
   
   
@@ -877,7 +883,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/upgrade/" class="md-nav__link">
+      <a href="../upgrade/" class="md-nav__link">
         
   
   
@@ -905,7 +911,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/backup/" class="md-nav__link">
+      <a href="../backup/" class="md-nav__link">
         
   
   
@@ -933,7 +939,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/cost-parking/" class="md-nav__link">
+      <a href="../cost-parking/" class="md-nav__link">
         
   
   
@@ -961,7 +967,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/monitoring/" class="md-nav__link">
+      <a href="../monitoring/" class="md-nav__link">
         
   
   
@@ -986,10 +992,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../operator/alert-responder/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alert responder
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1005,6 +1038,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-may-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it may do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-it-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting it up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-and-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost and data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1017,7 +1136,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/troubleshooting/" class="md-nav__link">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   
@@ -1045,7 +1164,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operator/encryption-at-rest/" class="md-nav__link">
+      <a href="../encryption-at-rest/" class="md-nav__link">
         
   
   
@@ -2200,10 +2319,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#context-and-a-correction-to-adr-0001" class="md-nav__link">
+  <a href="#what-it-may-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Context — and a correction to ADR 0001
+        What it may do
       
     </span>
   </a>
@@ -2211,10 +2330,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-the-transforms-actually-do-grounded" class="md-nav__link">
+  <a href="#reading-a-report" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What the transforms actually do (grounded)
+        Reading a report
       
     </span>
   </a>
@@ -2222,10 +2341,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#options" class="md-nav__link">
+  <a href="#setting-it-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Options
+        Setting it up
       
     </span>
   </a>
@@ -2233,60 +2352,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
+  <a href="#settings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Decision">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#phase-a-close-the-correctness-gap-small-do-first" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phase A — close the correctness gap (small, do first)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#phase-b-record-streaming-the-multi-gb-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phase B — record streaming (the multi-GB path)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#phase-c-explicit-policy-for-the-un-streamable-remainder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Phase C — explicit policy for the un-streamable remainder
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#consequences" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Consequences
+        Settings
       
     </span>
   </a>
@@ -2294,10 +2363,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#test-plan" class="md-nav__link">
+  <a href="#cost-and-data" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Test plan
+        Cost and data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
       
     </span>
   </a>
@@ -2321,189 +2401,150 @@
 
 
 
-<h1 id="adr-0002-large-payloads-through-pipeline-transforms-filter-converter">ADR 0002 — Large payloads through pipeline transforms (filter / converter)<a class="headerlink" href="#adr-0002-large-payloads-through-pipeline-transforms-filter-converter" title="Permanent link">&para;</a></h1>
-<ul>
-<li><strong>Status:</strong> Accepted (phase A implemented in the same PR)</li>
-<li><strong>Date:</strong> 2026-08-24</li>
-<li><strong>Relates to:</strong> #187, <a href="../0001-streaming-payload-contract/">ADR 0001</a> (phase 2),
-  PRs #189–#197</li>
-</ul>
-<h2 id="context-and-a-correction-to-adr-0001">Context — and a correction to ADR 0001<a class="headerlink" href="#context-and-a-correction-to-adr-0001" title="Permanent link">&para;</a></h2>
-<p>ADR 0001 phase 1 gave the <em>edge</em> connectors streaming. For transforms it
-claimed: <em>"a <code>PayloadRef</code> envelope reaching a plain filter/converter is
-rehydrated under the 128 MiB cap → beyond it, permanent error → DLQ."</em></p>
-<p><strong>That claim assumed the transforms run on the SDK runner. They do not.</strong>
-<code>sdk.RunFilter</code> / <code>sdk.RunConverter</code> have <strong>zero callers</strong> — they are dead code.
-The transforms that actually run are the standalone services <code>cmd/data-filter</code>
-and <code>cmd/data-converter</code>, which predate the SDK runner: they hold their own
-JetStream durables (<code>data-filter</code> / <code>data-converter</code>), <strong>ack unconditionally</strong>
-("failures are deterministic; ack always"), <code>json.Unmarshal(env.Payload)</code>
-directly, and publish outputs through a bare <code>messaging.Publisher</code>.</p>
-<p>So with payload offload active (#189), today's real behavior is:</p>
-<ul>
-<li><strong>Input — silent data loss.</strong> An offloaded envelope arrives with
-  <code>Payload: nil</code> and <code>PayloadRef</code> set. <code>json.Unmarshal(nil)</code> fails, the service
-  emits an "Invalid JSON payload" UI event, and <strong>acks</strong>. The message is gone:
-  no retry, no DLQ, nothing downstream. Every pipeline
-  <code>source → filter/converter → destination</code> <strong>loses any payload over 256 KiB</strong>.</li>
-<li><strong>Output — silent data loss.</strong> A transform output larger than NATS
-  <code>max_payload</code> (1 MB) fails at publish; ack-always drops it. This bites even
-  <em>small</em> inputs: flatten multiplies rows, JSON→XML inflates.</li>
-</ul>
-<p>These are correctness bugs at ordinary sizes (256 KiB – a few MB), independent
-of any multi-GB ambition. Fixing them is phase A; streaming is phase B.</p>
-<h2 id="what-the-transforms-actually-do-grounded">What the transforms actually do (grounded)<a class="headerlink" href="#what-the-transforms-actually-do-grounded" title="Permanent link">&para;</a></h2>
+<h1 id="alert-responder">Alert responder<a class="headerlink" href="#alert-responder" title="Permanent link">&para;</a></h1>
+<p>An AI on-call assistant. When an alert fires, it looks into the affected
+workspace, works out what is wrong, optionally takes one of a few safe
+actions, and posts a report to the same channel the alert went to (Teams,
+Slack, …) a minute or two later.</p>
+<p>It reacts to the alerts VRSky already receives from Prometheus
+(<a href="../monitoring/">Monitoring</a>); it does not read the chat channel.</p>
+<h2 id="what-it-may-do">What it may do<a class="headerlink" href="#what-it-may-do" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Operation</th>
-<th>Scope</th>
+<th>Mode</th>
+<th>Reads</th>
+<th>Changes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Filter rules (<code>equals</code>, <code>contains</code>, <code>gt</code>, …, <code>regex</code>)</td>
-<td><strong>per record</strong></td>
+<td><code>observe</code> (default)</td>
+<td>pipeline status, last error, events, metrics, dead-letter reasons, remote agents</td>
+<td>nothing — the action tools do not exist in this mode; the report says what it <em>would</em> have done</td>
 </tr>
 <tr>
-<td><code>extract_fields</code> (projection)</td>
-<td><strong>per record</strong></td>
-</tr>
-<tr>
-<td>Flatten (unroll <code>flatten_path</code> array into rows)</td>
-<td>array streams; <strong>parent-include fields need document context</strong></td>
-</tr>
-<tr>
-<td>Converter <code>mappings</code> (rename/convert per field)</td>
-<td><strong>per record</strong> (<code>toRows</code> → row-wise)</td>
-</tr>
-<tr>
-<td>Format conversion (JSON → CSV / XML / YAML / text)</td>
-<td><strong>row-wise</strong>; CSV header already comes from the <strong>first row only</strong> (<code>stableKeys</code>)</td>
+<td><code>act</code></td>
+<td>the same</td>
+<td><strong>redeploy a pipeline</strong> (once per pipeline per hour), <strong>retry a dead-lettered message</strong> (20 per pipeline per hour), <strong>resend everything</strong> from the source (once per pipeline per hour)</td>
 </tr>
 </tbody>
 </table>
-<p>Payloads are JSON: either a single object (one record) or an array of records.
-There is <strong>no</strong> genuinely cross-record operation today — no sort, no aggregate,
-no key-union CSV header. That makes record streaming a faithful reimplementation
-of existing semantics, not a semantic change.</p>
-<h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
-<p><strong>A. Migrate the transforms onto <code>sdk.RunFilter</code>/<code>RunConverter</code>.</strong> Cleanest
-long-term — rehydrate, offload, cap, tracing all for free — but the standalone
-services support multiple filter/converter entries per connection (branching),
-which doesn't fit the single-<code>Evaluate</code> contract; they carry SSE event feeds and
-preview endpoints; and their ack policy differs. A live-service rewrite is the
-wrong vehicle for an urgent correctness fix. <strong>Rejected for now</strong>; recorded as
-the preferred eventual direction.</p>
-<p><strong>B. Extract the claim-check helpers into a shared package and wire them into
-the standalone services at their boundaries.</strong> Surgical; small diffs at the two
-choke points each service already has (message entry, publish exit);
-behavior-identical for small payloads. <strong>← chosen for phase A.</strong></p>
-<p><strong>C. Record streaming inside the transforms.</strong> The multi-GB path. <strong>← phase B,
-built on B's plumbing.</strong></p>
-<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
-<h3 id="phase-a-close-the-correctness-gap-small-do-first">Phase A — close the correctness gap (small, do first)<a class="headerlink" href="#phase-a-close-the-correctness-gap-small-do-first" title="Permanent link">&para;</a></h3>
-<ol>
-<li><strong>Extract</strong> the claim-check machinery from <code>pkg/sdk/payloadstore.go</code> into a
-   shared package (<code>pkg/claimcheck</code>): store-from-env, <code>OffloadIfLarge</code>,
-   <code>Rehydrate</code> (with the cap), key/checksum helpers. The SDK delegates to it —
-   no behavior change for connectors.</li>
-<li><strong>data-filter / data-converter</strong>: open the store from <code>PAYLOAD_STORE_*</code> at
-   startup; <code>Rehydrate</code> on message entry; <code>OffloadIfLarge</code> before every publish.</li>
-<li><strong>Error semantics change, deliberately.</strong> Store/rehydrate errors (including
-   over-cap) <strong>return an error from the subscribe handler → NAK → retry → DLQ</strong>.
-   Transient store blips recover via redelivery; over-cap becomes an explicit
-   DLQ entry instead of a vanished message. Transform-logic failures (bad JSON,
-   bad mapping) keep today's ack + UI-event behavior — ack-always narrows to
-   the deterministic failures it was meant for.</li>
-<li><strong>Manifests</strong>: add <code>PAYLOAD_STORE_*</code> to the platform filter/converter
-   deployments (orchestrator-spawned workers already receive it from #189).</li>
-</ol>
-<p>After phase A the pipeline is <em>correct</em> at every size: ≤256 KiB unchanged,
-256 KiB–128 MiB transforms work via rehydrate, &gt;128 MiB is an explicit DLQ
-error pointing at the object.</p>
-<h3 id="phase-b-record-streaming-the-multi-gb-path">Phase B — record streaming (the multi-GB path)<a class="headerlink" href="#phase-b-record-streaming-the-multi-gb-path" title="Permanent link">&para;</a></h3>
-<blockquote>
-<p><strong>Implemented.</strong> Shipped scope: filter (rules + <code>extract_fields</code>) and
-converter (mappings; output <code>""</code>/json, <code>ndjson</code>, <code>csv</code>, <code>tsv</code>) stream; results
-go through a <em>spool</em> that keeps small outputs inline (UI preview intact) and
-spills past the inline threshold. Declining with error → NAK → DLQ: flatten
-(B2), single JSON objects, and <code>xml</code>/<code>text</code>/<code>yaml</code> output — all replayable
-after raising the cap or changing the node. Streamed output is byte-identical
-to the buffered path (shared row encoders + parity tests).</p>
-</blockquote>
-<p>When the input is offloaded <strong>and</strong> over the rehydrate cap, and the payload is a
-<strong>JSON array</strong> (later: NDJSON), the transform streams instead of buffering:</p>
-<div class="highlight"><pre><span></span><code>GetStream(spill object)
-  → json.Decoder token loop (one record at a time)
-  → rules / extract / mappings per record
-  → streaming encoder (JSON array | NDJSON | CSV | XML | YAML | text)
-  → PutStream via io.Pipe to a NEW spill object (TeeReader → size + sha256)
-  → publish the small ref envelope
+<p>It can never delete anything, change a pipeline's configuration, see or
+change credentials, revoke an agent, or touch the cluster. These limits are
+enforced in the service, not requested of the model: each alert gets one run
+per hour, each run at most 25 tool calls and three minutes, and at most 20
+runs happen per hour in total.</p>
+<p>Everything goes through the management API with the workspace's own API key,
+so each action appears in that workspace's <strong>audit log</strong>, and the responder
+can only reach workspaces whose key it was given.</p>
+<p>Alerts about the platform itself (<code>ConnectorUnavailable</code>, <code>DiskUsageHigh</code>, …)
+have no workspace; for those it explains the alert and what to check, with no
+tools.</p>
+<h2 id="reading-a-report">Reading a report<a class="headerlink" href="#reading-a-report" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>[FIRING:critical] ResponderReport — ConnectionInError: Catalogue to tills is
+failing on a rejected Business Central secret; needs a new secret.
+
+Cause — …the decisive error, quoted briefly.
+Action — what it did and the result, or "none" and why.
+Next — what a person should do now.
+(observe mode · 4 tool calls · ~$0.11)
 </code></pre></div>
-<p>Memory is bounded by the largest single record, not the payload. Notes:</p>
-<ul>
-<li><strong>CSV header from the first output row</strong> — exactly today's <code>stableKeys</code>
-  semantics, so streaming changes nothing.</li>
-<li><strong>Flatten</strong> is B2: parent-include fields live outside the array, so the
-  streamer must buffer the (small) non-array document context while streaming
-  the (large) <code>flatten_path</code> array — a token-walking decoder. Ship B without it
-  first; over-cap + flatten falls to the phase-C policy until B2 lands.</li>
-<li><strong>A single JSON object</strong> over the cap has no records to stream — phase-C
-  policy. This is the honest product boundary from ADR 0001: no architecture
-  makes a whole-document transform of one multi-GB JSON object cheap.</li>
-</ul>
-<h3 id="phase-c-explicit-policy-for-the-un-streamable-remainder">Phase C — explicit policy for the un-streamable remainder<a class="headerlink" href="#phase-c-explicit-policy-for-the-un-streamable-remainder" title="Permanent link">&para;</a></h3>
-<p>Per-node config <code>"large_payloads": "error" | "passthrough"</code> (default <code>error</code>):</p>
-<ul>
-<li><strong><code>error</code></strong> — over-cap, un-streamable input → NAK → DLQ with a message naming
-  the node and the cap. Loud and inspectable.</li>
-<li><strong><code>passthrough</code></strong> — forward the ref envelope untouched, skipping this
-  transform. Explicit opt-in only: silently skipping a transform is a
-  correctness decision the user must make, never a default.</li>
-</ul>
-<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
-<p><strong>Positive.</strong> The silent-loss bugs die in phase A — the most important outcome,
-and it needs no streaming at all. Phase B extends the multi-GB path through
-transforms for array data with bounded memory, completing
-<code>source → filter/converter → destination</code> at any size for record-shaped
-payloads. One shared claim-check package instead of SDK-private copies.</p>
-<p><strong>Negative / accepted.</strong> The transforms gain a payload-store dependency (nil
-store degrades to phase-0 behavior, logged). Two processing paths (buffered /
-streamed) in the transforms, mirroring the SDK's own two paths. Flatten and
-single-object payloads stay bounded until B2 / phase C. The ack-policy change
-means some messages that used to vanish now occupy DLQ space — that is the
-point, but DLQ volume becomes a signal worth watching after rollout.</p>
-<p><strong>Deployment note.</strong> Phase A changes live services (filter/converter are
-platform deployments, 2 replicas). Per the standing rule: validate in the TEST
-(docker-compose) environment first, then roll prod images + manifests together.</p>
-<h2 id="test-plan">Test plan<a class="headerlink" href="#test-plan" title="Permanent link">&para;</a></h2>
-<blockquote>
-<p><strong>Validated in the TEST compose env (2026-08-24)</strong> with <code>cmd/spill-e2e</code>, which
-streams a generated JSON array into the real MinIO spill bucket, publishes the
-ref envelope on real NATS, and verifies content + DLQ. Result at <strong>1 GiB</strong>
-(rules keep half, mapping rename, NDJSON out): envelope on the bus <strong>537
-bytes</strong>; filter 8.5 s → 512 MiB spilled; converter 14 s total → 514 MiB NDJSON,
-507,246 lines — exact expected count, mapped field present, DLQ empty.
-Container memory: filter peaked <strong>246.8 MiB</strong>, converter <strong>290.5 MiB</strong> —
-identical to a 192 MiB run's peaks, i.e. flat with payload size (steady-state
-heap + S3 multipart buffers, not proportional buffering).</p>
-<p>Seed row for the e2e connection (id <code>11111111-2222-3333-4444-555555555555</code>,
-tenant <code>e2e-tenant</code>): nodes <code>consumer c1 → filter f1 (keep=="yes") →
-converter cv1 (rename i→index, ndjson)</code>, edges <code>c1→f1→cv1</code>, status running.
-Clean up afterwards: delete the row and
-<code>mc rm -r --force local/vrsky-objects/spill/e2e-tenant</code> (the compose MinIO has
-no lifecycle TTL, unlike prod).</p>
-</blockquote>
-<ul>
-<li>Unit: rehydrate-on-entry (offloaded → transformed → republished), over-cap →
-  NAK not ack, output offload (large flatten result), store-error → NAK.</li>
-<li>Phase B: stream a synthetic multi-hundred-MB array through filter and
-  converter asserting bounded memory and byte-identical output vs the buffered
-  path on the same (smaller) input; CSV first-row header parity.</li>
-<li>E2E in TEST env: consumer → filter → converter → producer at 10 MB (phase A)
-  and ≥1 GB (phase B) before any prod rollout.</li>
-</ul>
+<p>If it acted and the alert later clears, a short <em>resolved</em> card follows.
+If a run fails (API outage, timeout) nothing is posted — the plain alert card
+is already there — and the reason is in the pod's log.</p>
+<h2 id="setting-it-up">Setting it up<a class="headerlink" href="#setting-it-up" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Monitoring must be installed</strong> (alerts have to arrive) and a
+   notification target must exist in the workspace.</li>
+<li>Create the Secrets (values never in git or chat):</li>
+</ol>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>anthropic-api-key<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span>api-key<span class="o">=</span><span class="s2">"&lt;Anthropic API key&gt;"</span>
+<span class="c1"># One line per workspace: &lt;tenant id&gt;=&lt;API key from Settings → API Key&gt;</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>alert-responder-tenant-keys<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">keys</span><span class="o">=</span><span class="s2">"&lt;tenant id&gt;=&lt;workspace API key&gt;"</span>
+</code></pre></div>
+<p><code>alerts-webhook-token</code> already exists from the monitoring install.
+3. Build and apply:</p>
+<div class="highlight"><pre><span></span><code>infrastructure/azure/build-push-acr.sh<span class="w"> </span>core
+infrastructure/azure/deploy-core-azure.sh<span class="w"> </span>management-api
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/alert-responder/deployment.yaml
+</code></pre></div>
+<p>Later upgrades: <code>deploy-core-azure.sh alert-responder</code>.
+4. It starts in <code>observe</code>. To let it act:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span><span class="nb">set</span><span class="w"> </span>env<span class="w"> </span>deploy/vrsky-alert-responder<span class="w"> </span><span class="nv">RESPONDER_MODE</span><span class="o">=</span>act
+</code></pre></div>
+<h2 id="settings">Settings<a class="headerlink" href="#settings" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Env</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPONDER_MODE</code></td>
+<td><code>observe</code></td>
+<td><code>observe</code> or <code>act</code></td>
+</tr>
+<tr>
+<td><code>RESPONDER_TENANT_KEYS</code></td>
+<td>—</td>
+<td><code>&lt;tenant id&gt;=&lt;API key&gt;</code> per line; alerts for other workspaces are skipped</td>
+</tr>
+<tr>
+<td><code>RESPONDER_MAX_RUNS_PER_HOUR</code></td>
+<td>20</td>
+<td>hard cap on runs (and so on cost)</td>
+</tr>
+<tr>
+<td><code>RESPONDER_MAX_TOOL_CALLS</code></td>
+<td>25</td>
+<td>per run</td>
+</tr>
+<tr>
+<td><code>RESPONDER_MODEL</code></td>
+<td><code>claude-opus-5-5</code></td>
+<td>the Claude model</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cost-and-data">Cost and data<a class="headerlink" href="#cost-and-data" title="Permanent link">&para;</a></h2>
+<p>A run is roughly 20 000 input and 2 000 output tokens — about $0.10 — and the
+hourly cap bounds the worst case. What is sent to the model: the alert, and
+what the tools return (pipeline names and configuration with credentials
+redacted, error messages, counters, agent names, and at most a 2 KB sample of
+a dead-lettered message). Credentials are never sent.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No report after an alert</td>
+<td><code>kubectl -n vrsky-platform logs deploy/vrsky-alert-responder</code> — <code>alert not handled</code> gives the reason (handled within the hour, no key for the workspace, hourly cap); <code>responder run failed</code> gives the API error</td>
+</tr>
+<tr>
+<td><code>no API key configured for this workspace</code></td>
+<td>add the workspace to <code>alert-responder-tenant-keys</code> and restart the pod</td>
+</tr>
+<tr>
+<td>Reports arrive but never mention an action</td>
+<td>it is in <code>observe</code> mode</td>
+</tr>
+<tr>
+<td>A tool says <code>HTTP 401</code></td>
+<td>the workspace API key was rotated; update the Secret</td>
+</tr>
+</tbody>
+</table>
 
 
 

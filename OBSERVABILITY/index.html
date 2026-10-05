@@ -993,6 +993,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator/alert-responder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alert responder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../operator/troubleshooting/" class="md-nav__link">
         
   
@@ -2598,6 +2626,10 @@ channel should also get infrastructure alerts, <strong>Test</strong>. The URL is
 (<code>alert: TestAlert</code>, <code>expr: vector(1)</code>, <code>for: 1m</code>, <code>severity: warning</code>) as a
 <code>PrometheusRule</code> in <code>vrsky-monitoring</code>; a card arrives within ~3 minutes;
 delete the rule; a <em>resolved</em> card follows.</p>
+<p><strong>Who answers them</strong>: the <a href="../operator/alert-responder/">alert responder</a>
+receives the same alerts, diagnoses the affected workspace with Claude and
+posts a <code>ResponderReport</code> to the same targets — in <code>act</code> mode after taking
+one of a few safe actions (redeploy, DLQ retry, resend).</p>
 <p><strong>What this cannot see</strong>: a cluster with no nodes takes Prometheus with it.
 Pair it with an Azure Monitor metric alert on the AKS node count.</p>
 <h2 id="kubernetes">Kubernetes<a class="headerlink" href="#kubernetes" title="Permanent link">&para;</a></h2>
