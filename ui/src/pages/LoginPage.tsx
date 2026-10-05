@@ -12,7 +12,7 @@ import { config } from '@/config/env'
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, isAuthenticated, isLoading, error, clearError } = useAuthStore()
+  const { login, isAuthenticated, isLoading, error, clearError, sessionExpired } = useAuthStore()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -108,6 +108,15 @@ export default function LoginPage() {
 
         {/* Login Form */}
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          {/* The session ran out while the app was open */}
+          {sessionExpired && !displayError && (
+            <div role="status" className="rounded-md bg-amber-50 dark:bg-amber-900/20 p-4 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                Your session has expired. Log in again to continue where you left off.
+              </p>
+            </div>
+          )}
+
           {/* Error Message */}
           {displayError && (
             <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">

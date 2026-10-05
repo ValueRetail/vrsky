@@ -24,6 +24,7 @@
 import { config } from '@/config/env'
 import { getActiveTenantId } from '@/services/api'
 import { getSessionToken } from '@/services/authService'
+import { reportUnauthorized } from '@/services/sessionExpiry'
 
 /** Workers that publish a live event stream. Must match the allowlist in
  *  src/pkg/managementapi/worker_events_proxy.go — an unknown name 404s. */
@@ -103,6 +104,7 @@ export function subscribeWorkerEvents(
       signal: controller.signal,
     })
     if (!resp.ok || !resp.body) {
+      if (resp.status === 401) void reportUnauthorized()
       report(`Live events unavailable (${resp.status})`)
       return 'refused'
     }

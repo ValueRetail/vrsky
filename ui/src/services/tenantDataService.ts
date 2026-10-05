@@ -3,8 +3,7 @@
  * API calls for connection requests, data connections, API keys, and audit log
  */
 
-import { config } from '@/config/env'
-import * as authService from '@/services/authService'
+import apiClient from '@/services/api'
 import type {
   DataConnectionRequest,
   TenantDataConnection,
@@ -13,24 +12,20 @@ import type {
   PageInfo,
 } from '@/types/models'
 
-function authHeaders() {
-  const token = authService.getSessionToken()
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-  }
-}
-
-async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${config.apiUrl}${url}`, {
-    headers: authHeaders(),
-    ...options,
+/**
+ * These calls go through the shared API client like every other one: the
+ * session travels as the cookie (and the bearer token when the tab has one),
+ * a failure is a VRSkyAPIError carrying the server's message, and a 401 is
+ * reported to services/sessionExpiry. The options keep the fetch-style shape
+ * the functions below were written against.
+ */
+async function fetchJSON<T>(url: string, options?: { method?: string; body?: string }): Promise<T> {
+  const res = await apiClient.request<T>({
+    url,
+    method: options?.method ?? 'GET',
+    data: options?.body,
   })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.message || `HTTP ${res.status}`)
-  }
-  return res.json()
+  return res.data
 }
 
 // Connection requests

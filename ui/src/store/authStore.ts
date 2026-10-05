@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import type { User, Tenant } from '@/types/models'
 import * as authService from '@/services/authService'
 import { setActiveTenantId } from '@/services/api'
+import { setSessionExpiredHandler } from '@/services/sessionExpiry'
 
 const SELECTED_TENANT_KEY = 'vrsky:selectedTenantId'
 
@@ -19,8 +20,11 @@ interface AuthState {
   isLoading: boolean
   isInitialized: boolean
   error: string | null
+  /** The session ran out while the app was open; the login page says so. */
+  sessionExpired: boolean
 
   // Actions
+  expireSession: () => void
   login: (email: string, password: string) => Promise<boolean>
   register: (email: string, password: string, fullName: string, workspaceName: string) => Promise<{ success: boolean; message?: string }>
   logout: () => Promise<void>
@@ -38,6 +42,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: false,
   isInitialized: false,
   error: null,
+  sessionExpired: false,
+
+  /**
+   * The server no longer accepts the session (see services/sessionExpiry).
+   * Dropping the user is all it takes: ProtectedRoute sends an
+   * unauthenticated visitor to the login page and remembers where they
+   * were. The selected workspace is kept so they come back to the same one.
+   */
+  expireSession: (): void => {
+    authService.clearSessionToken()
+    set({
+      user: null,
+      tenants: [],
+      currentTenant: null,
+      isAuthenticated: false,
+      isInitialized: true,
+      isLoading: false,
+      error: null,
+      sessionExpired: true,
+    })
+  },
 
   /**
    * Login with email and password
@@ -54,6 +79,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isAuthenticated: true,
           isLoading: false,
           error: null,
+          sessionExpired: false,
         })
         // Fetch tenants after login
         await get().checkAuth()
@@ -125,6 +151,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: false,
         isLoading: false,
         error: null,
+        sessionExpired: false,
       })
     }
   },
@@ -221,3 +248,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    */
   clearError: () => set({ error: null }),
 }))
+
+// Any 401 that turns out to be an expired session ends up here.
+setSessionExpiredHandler(() => useAuthStore.getState().expireSession())
