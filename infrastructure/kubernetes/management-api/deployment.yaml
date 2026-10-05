@@ -32,8 +32,10 @@ spec:
         component: management-api
         version: v1
       annotations:
+        # /metrics is served on the API listener itself (main.go mounts
+        # promhttp on the API mux); there is no separate metrics port.
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
+        prometheus.io/port: "3000"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: vrsky-management-api
@@ -120,8 +122,6 @@ spec:
               key: consumer_token
         - name: MGMT_API_LISTEN
           value: ":3000"
-        - name: MGMT_API_METRICS_LISTEN
-          value: ":9090"
         - name: MGMT_API_CORS_ORIGINS
           value: "*"
         - name: POD_NAME
@@ -137,9 +137,6 @@ spec:
         ports:
         - name: http-api
           containerPort: 3000
-          protocol: TCP
-        - name: metrics
-          containerPort: 9090
           protocol: TCP
 
         # Liveness probe - restart if API becomes unresponsive

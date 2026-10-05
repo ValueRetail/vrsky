@@ -8,6 +8,7 @@ import type { User, Tenant } from '@/types/models'
 import * as authService from '@/services/authService'
 import { setActiveTenantId } from '@/services/api'
 import { setSessionExpiredHandler } from '@/services/sessionExpiry'
+import { useUIStore } from '@/store/uiStore'
 
 const SELECTED_TENANT_KEY = 'vrsky:selectedTenantId'
 
@@ -249,5 +250,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   clearError: () => set({ error: null }),
 }))
 
-// Any 401 that turns out to be an expired session ends up here.
-setSessionExpiredHandler(() => useAuthStore.getState().expireSession())
+// Any 401 that turns out to be an expired session ends up here. The request
+// that hit the 401 has usually raised its own error toast by now ("Failed to
+// rotate API key…"); with the user on their way to the login page, which
+// says what happened, those toasts are noise.
+setSessionExpiredHandler(() => {
+  useAuthStore.getState().expireSession()
+  useUIStore.getState().clearNotifications()
+})

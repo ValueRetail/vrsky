@@ -22,6 +22,7 @@ vi.mock('@/services/authService', () => ({
 
 import { useAuthStore } from './authStore'
 import { reportUnauthorized } from '@/services/sessionExpiry'
+import { useUIStore } from '@/store/uiStore'
 
 const user = { id: 'u1', email: 'a@b.c' }
 const tenant = { id: 't1', name: 'WS', status: 'active' }
@@ -57,9 +58,14 @@ describe('authStore session expiry', () => {
     // The store registered itself with services/sessionExpiry on load.
     // What getMe does on its own 401: drop the token, return null.
     getMe.mockImplementation(async () => { hasToken = false; return null })
+    // The request that got the 401 has already raised its own error toast.
+    useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Failed to rotate API key: invalid or expired session' })
+    expect(useUIStore.getState().notifications).toHaveLength(1)
     await reportUnauthorized()
     expect(useAuthStore.getState().sessionExpired).toBe(true)
     expect(useAuthStore.getState().isAuthenticated).toBe(false)
+    // …and the login page explains it better than that toast did.
+    expect(useUIStore.getState().notifications).toHaveLength(0)
   })
 
   it('a successful login clears the notice', async () => {
