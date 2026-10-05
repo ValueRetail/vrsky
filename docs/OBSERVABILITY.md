@@ -101,6 +101,11 @@ channel should also get infrastructure alerts, **Test**. The URL is a secret
 `PrometheusRule` in `vrsky-monitoring`; a card arrives within ~3 minutes;
 delete the rule; a *resolved* card follows.
 
+**Who answers them**: the [alert responder](operator/alert-responder.md)
+receives the same alerts, diagnoses the affected workspace with Claude and
+posts a `ResponderReport` to the same targets — in `act` mode after taking
+one of a few safe actions (redeploy, DLQ retry, resend).
+
 **What this cannot see**: a cluster with no nodes takes Prometheus with it.
 Pair it with an Azure Monitor metric alert on the AKS node count.
 

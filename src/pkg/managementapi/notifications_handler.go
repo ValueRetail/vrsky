@@ -365,6 +365,11 @@ func (h *Handler) AlertsWebhook(w http.ResponseWriter, r *http.Request) {
 		d, f := h.dispatchAlert(ctx, alert)
 		delivered += d
 		failed += f
+		// Hand the alert on to the alert responder — except its own report,
+		// which arrives through this same webhook and must not loop back.
+		if h.alertSink != nil && alert.Name != notify.ResponderReportName {
+			h.alertSink(ctx, alert)
+		}
 	}
 	_ = writeJSON(w, http.StatusOK, map[string]interface{}{"delivered": delivered, "failed": failed})
 }

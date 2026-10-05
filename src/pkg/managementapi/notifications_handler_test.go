@@ -2,7 +2,9 @@ package managementapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -334,5 +336,77 @@ func TestCreateNotificationTarget_Teams(t *testing.T) {
 	}
 	if _, ok := n.(*notify.Teams); !ok {
 		t.Errorf("notifier = %T, want *notify.Teams", n)
+	}
+}
+
+// TestAlertsWebhook_HandsAlertsToTheResponder: every alert the webhook
+// receives goes on to the alert responder with its tenant and severity —
+// except the responder's own ResponderReport, which arrives through this
+// same webhook and would otherwise loop forever.
+func TestAlertsWebhook_HandsAlertsToTheResponder(t *testing.T) {
+	t.Setenv("ALERTS_WEBHOOK_TOKEN", "tok-123")
+	handler, _ := setupTestHandler()
+	var handed []*notify.Alert
+	handler.SetAlertSink(func(_ context.Context, a *notify.Alert) { handed = append(handed, a) })
+
+	post := func(name string) {
+		b, _ := json.Marshal(map[string]interface{}{
+			"status": "firing",
+			"alerts": []map[string]interface{}{{
+				"status":      "firing",
+				"labels":      map[string]string{"alertname": name, "severity": "critical", "tenant_id": "tenant-1"},
+				"annotations": map[string]string{"summary": "s"},
+			}},
+		})
+		r := httptest.NewRequest("POST", "/api/v1/alerts/webhook", bytes.NewReader(b))
+		r.Header.Set("Authorization", "Bearer tok-123")
+		w := httptest.NewRecorder()
+		handler.AlertsWebhook(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+	post("ConnectionInError")
+	post(notify.ResponderReportName)
+
+	if len(handed) != 1 {
+		t.Fatalf("handed on %d alerts, want 1 (the report must not loop back)", len(handed))
+	}
+	if a := handed[0]; a.Name != "ConnectionInError" || a.TenantID != "tenant-1" || a.Severity != "critical" || a.Status != "firing" {
+		t.Errorf("handed alert = %+v", a)
+	}
+	if AlertSubject("tenant-1") != "vrsky.alerts.tenant-1" || AlertSubject("") != "vrsky.alerts.platform" {
+		t.Errorf("alert subjects = %q / %q", AlertSubject("tenant-1"), AlertSubject(""))
+	}
+}
+
+// TestListConnectionEvents: newest-first events of the caller's own pipeline,
+// capped by ?limit=; another workspace's pipeline is a 404, not a hint that
+// it exists.
+func TestListConnectionEvents(t *testing.T) {
+	handler, repo := setupTestHandler()
+	repo.connections["c1"] = &Connection{ID: "c1", TenantID: "tenant-1"}
+	for i := 0; i < 5; i++ {
+		repo.events = append(repo.events, &ConnectionEvent{ID: fmt.Sprintf("e%d", i), ConnectionID: "c1", TenantID: "tenant-1", EventType: "error"})
+	}
+	get := func(tenant, query string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/api/v1/connections/c1/events"+query, nil).WithContext(contextWithTenant(tenant))
+		r.SetPathValue("id", "c1")
+		w := httptest.NewRecorder()
+		handler.ListConnectionEvents(w, r)
+		return w
+	}
+	var out struct {
+		Events []ConnectionEvent `json:"events"`
+	}
+	w := get("tenant-1", "?limit=2")
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Events) != 2 {
+		t.Fatalf("own pipeline, limit 2: status %d body %s", w.Code, w.Body.String())
+	}
+	if w := get("tenant-2", ""); w.Code != http.StatusNotFound {
+		t.Errorf("another workspace's pipeline: status %d, want 404", w.Code)
+	}
+	if w := get("tenant-1", "?limit=abc"); w.Code != http.StatusBadRequest {
+		t.Errorf("bad limit: status %d, want 400", w.Code)
 	}
 }

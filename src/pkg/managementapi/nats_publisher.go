@@ -12,6 +12,8 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+
+	"github.com/ValueRetail/vrsky/pkg/notify"
 )
 
 // NATSPublisher handles publishing commands to NATS for pipeline components
@@ -255,6 +257,30 @@ func (p *NATSPublisher) PublishRaw(_ context.Context, subject string, data []byt
 func (p *NATSPublisher) HealthCheck() error {
 	if !p.nc.IsConnected() {
 		return fmt.Errorf("NATS connection is not active")
+	}
+	return nil
+}
+
+// AlertSubject is where an incoming alert is published for the alert
+// responder: vrsky.alerts.<tenant id>, or vrsky.alerts.platform for an alert
+// without a tenant_id label.
+func AlertSubject(tenantID string) string {
+	if tenantID == "" {
+		return "vrsky.alerts.platform"
+	}
+	return "vrsky.alerts." + tenantID
+}
+
+// PublishAlert hands one alert to the alert responder. Best effort: the
+// notification targets have already been served, and Alertmanager repeats a
+// firing alert, so a lost publish costs a late diagnosis, nothing else.
+func (p *NATSPublisher) PublishAlert(ctx context.Context, alert *notify.Alert) error {
+	data, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("marshal alert: %w", err)
+	}
+	if err := p.nc.Publish(AlertSubject(alert.TenantID), data); err != nil {
+		return fmt.Errorf("publish alert: %w", err)
 	}
 	return nil
 }

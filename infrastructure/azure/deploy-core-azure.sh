@@ -40,13 +40,14 @@ ACR="${REG}.azurecr.io/vrsky"
 TIMEOUT="${TIMEOUT:-180s}"
 DRY_RUN="${DRY_RUN:-}"
 
-# name namespace deployment — the four images build-push-acr.sh's build_core
+# name namespace deployment — the images build-push-acr.sh's build_core
 # publishes. TestCoreServicesAreBuilt pins this list to that function.
 CORE="
 management-api vrsky-platform vrsky-management-api
 ui             vrsky-ui       vrsky-ui
 data-filter    vrsky-platform vrsky-data-filter
 data-converter vrsky-platform vrsky-data-converter
+alert-responder vrsky-platform vrsky-alert-responder
 "
 
 # Note on ${name} rather than $name below: this script runs under bash, but
