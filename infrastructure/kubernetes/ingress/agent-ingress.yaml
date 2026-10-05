@@ -21,6 +21,15 @@
 # Every request is authenticated by the gateway (a per-agent credential, or a
 # one-time registration token for /agent/v1/register); nothing here is open.
 #
+# The gateway limits failed registrations per client address, and takes that
+# address from X-Real-IP, which ingress-nginx sets to the peer it accepted the
+# connection from (the real client, because the controller's Service has
+# externalTrafficPolicy: Local). Two changes would quietly turn that into one
+# shared address for everyone, or into one the client chooses: putting another
+# proxy or a CDN in front of this controller, or enabling use-forwarded-headers
+# in its ConfigMap. Revisit clientAddress in src/cmd/remote-agent/ratelimit.go
+# before doing either.
+#
 # TLS: no `tls:` block, for the same reason as webhooks-ingress.yaml — the
 # `vrsky` Ingress in vrsky-ui owns the certificate for both hosts, and a second
 # declaration would issue a duplicate one.

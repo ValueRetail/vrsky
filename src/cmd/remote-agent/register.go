@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 
@@ -28,6 +31,22 @@ import (
 // TOKEN belongs to, in the same transaction — nothing in the request can name a
 // tenant.
 func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
+	// Spend one attempt before anything is read or looked up; it is handed
+	// back below once the token proves valid. See ratelimit.go.
+	addr := clientAddress(r)
+	if wait, ok, first := s.registerLimit.take(addr, s.now()); !ok {
+		registerLimited.Inc()
+		if first {
+			s.logger.Warn("Registration attempts blocked: too many failures from one address",
+				"address", addr, "retry_after", wait.Round(time.Second).String())
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		writeErr(w, http.StatusTooManyRequests, agentproto.ErrRateLimited,
+			"too many failed registration attempts from this address — wait a few minutes, "+
+				"then try again with a new token from Settings → Remote agents")
+		return
+	}
+
 	var req agentproto.RegisterRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -77,6 +96,10 @@ func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "unavailable", "try again shortly")
 		return
 	}
+	// The token is real, so whatever happens next this was not a failed
+	// attempt: a taken name or a bad group is a mistake by someone entitled
+	// to register here.
+	s.registerLimit.refund(addr, s.now())
 
 	name := firstNonEmpty(clip(req.Name, 255), clip(suggested, 255), clip(req.Hostname, 255), "agent")
 	// The machine's own --groups win over the token's; both were typed by

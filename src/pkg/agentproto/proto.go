@@ -87,6 +87,7 @@ const (
 	ErrNameTaken           = "name_taken"
 	ErrTooLarge            = "too_large"
 	ErrBadRequest          = "bad_request"
+	ErrRateLimited         = "rate_limited"
 )
 
 // Directory is one directory the agent's config defines. Names and modes only:
