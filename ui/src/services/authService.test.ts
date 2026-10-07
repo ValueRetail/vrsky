@@ -180,6 +180,30 @@ describe('login', () => {
   })
 })
 
+// A 429 is the failed-attempt limit (plans/login-rate-limit.md). The form shows
+// the API's own words — which say to wait — rather than a generic failure.
+describe('rate-limited (429)', () => {
+  const limited = 'too many failed sign-in attempts — wait a few minutes and try again'
+
+  it('login shows the server message', async () => {
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(true)
+    client.post.mockRejectedValue(axiosErr(429, { error: 'RateLimited', message: limited }))
+
+    await expect(login({ email: 'a@b.test', password: 'pw' })).resolves.toEqual({ success: false, message: limited })
+    expect(hasSessionToken()).toBe(false)
+  })
+
+  it('register shows the server message', async () => {
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(true)
+    client.post.mockRejectedValue(axiosErr(429, { error: 'RateLimited', message: limited }))
+
+    await expect(register({ email: 'a@b.test', password: 'pw' } as never)).resolves.toEqual({
+      success: false,
+      message: limited,
+    })
+  })
+})
+
 describe('register', () => {
   it('returns the server payload on success', async () => {
     client.post.mockResolvedValue({ data: { success: true, message: 'check your email' } })

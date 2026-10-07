@@ -32,6 +32,7 @@ type Handler struct {
 	db                *sql.DB               // Direct DB access for raw queries (e.g. sample-data)
 	js                nats.JetStreamContext // JetStream context for DLQ endpoints (#70)
 	quotas            *QuotaTracker         // In-process token buckets for per-tenant rate limits (#74)
+	authLimits        *authLimits           // Failed-login and sign-up limits (plans/login-rate-limit.md)
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
@@ -80,6 +81,7 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 		metricsCache:      nil, // Will be set via InitializeWebSocketSupport if needed
 		generatorRegistry: NewTestGeneratorRegistry(),
 		quotas:            NewQuotaTracker(),
+		authLimits:        newAuthLimits(defaultLoginMaxFailures, defaultSignupMaxAttempts),
 	}
 }
 

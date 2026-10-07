@@ -227,100 +227,13 @@ func TestClientAddress_IgnoresForwardedFor(t *testing.T) {
 	}
 }
 
+// The key itself is failurelimit.AddressKey; here only that the handler uses it.
 func TestClientAddress_IPv6IsOnePrefix(t *testing.T) {
-	key := func(realIP string) string {
-		req := httptest.NewRequest(http.MethodPost, "/agent/v1/register", nil)
-		req.Header.Set("X-Real-IP", realIP)
-		return clientAddress(req)
-	}
-	if a, b := key("2001:db8:1:2::1"), key("2001:db8:1:2:ffff:abcd:0:9"); a != b {
-		t.Errorf("two addresses in one /64 are counted apart: %q and %q", a, b)
-	}
-	if a, b := key("2001:db8:1:2::1"), key("2001:db8:1:3::1"); a == b {
-		t.Errorf("two different /64s share a key: %q", a)
-	}
-	if a, b := key("::ffff:203.0.113.9"), key("203.0.113.9"); a != b {
-		t.Errorf("an IPv4-mapped address is counted apart from the IPv4 one: %q and %q", a, b)
-	}
-	if a, b := key("203.0.113.9"), key("203.0.113.10"); a == b {
-		t.Errorf("two IPv4 addresses share a key: %q", a)
-	}
-
 	// Through the handler: the second address of the prefix inherits the block.
 	e := newLimitEnv(t)
 	e.fail(t, "2001:db8:1:2::1", defaultRegisterMaxFailures)
 	if rec := e.register("2001:db8:1:2:ffff:abcd:0:9"); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("another address in the blocked /64: got %d, want 429", rec.Code)
-	}
-}
-
-func TestFailureLimiter_ForgetsIdleAddresses(t *testing.T) {
-	now := time.Unix(1_760_000_000, 0)
-	l := newFailureLimiter(2)
-	l.maxAddrs = 3
-
-	for _, addr := range []string{"a", "b", "c"} {
-		if _, ok, _ := l.take(addr, now); !ok {
-			t.Fatalf("first attempt from %s refused", addr)
-		}
-	}
-	// At the cap, addresses not seen before share one bucket instead of
-	// growing the map: two attempts between them, then refusal.
-	for i, addr := range []string{"d", "e", "f", "g"} {
-		_, ok, _ := l.take(addr, now)
-		if want := i < 2; ok != want {
-			t.Fatalf("attempt from new address %s at the cap: ok = %v, want %v", addr, ok, want)
-		}
-	}
-	if len(l.buckets) != 4 { // a, b, c and the shared one
-		t.Fatalf("limiter tracks %d addresses, want 4 (the cap of 3 plus the shared bucket)", len(l.buckets))
-	}
-	// A known address is still judged on its own.
-	if _, ok, _ := l.take("a", now); !ok {
-		t.Fatal("a tracked address was refused because strangers filled the shared bucket")
-	}
-
-	// Once every allowance has refilled, nothing is remembered.
-	now = now.Add(10 * registerRefillEvery)
-	if _, ok, _ := l.take("z", now); !ok {
-		t.Fatal("a fresh address was refused after the limiter emptied")
-	}
-	if len(l.buckets) != 1 {
-		t.Fatalf("limiter still tracks %d addresses after they all refilled, want only the newcomer", len(l.buckets))
-	}
-}
-
-// A refund returns the attempt take spent and nothing more: however long the
-// genuine request took, an address never holds more than the allowance.
-func TestFailureLimiter_RefundNeverBanksMoreThanTheAllowance(t *testing.T) {
-	now := time.Unix(1_760_000_000, 0)
-	l := newFailureLimiter(2)
-
-	if _, ok, _ := l.take("a", now); !ok {
-		t.Fatal("first attempt refused")
-	}
-	// The request was slow: half of the spent attempt has refilled by the
-	// time it is handed back. A refund for an address the limiter never saw
-	// is nothing at all.
-	now = now.Add(registerRefillEvery / 2)
-	l.refund("a", now)
-	l.refund("never-seen", now)
-
-	for i := 0; i < 2; i++ {
-		if _, ok, _ := l.take("a", now); !ok {
-			t.Fatalf("attempt %d of the allowance refused", i+1)
-		}
-	}
-	// Exactly the allowance was there: the wait for the next attempt is a
-	// whole refill period, not the half a banked surplus would leave.
-	if wait, ok, first := l.take("a", now); ok || !first || wait != registerRefillEvery {
-		t.Fatalf("third attempt: ok=%v first=%v wait=%v, want a first refusal with %v to wait", ok, first, wait, registerRefillEvery)
-	}
-	if _, ok, first := l.take("a", now); ok || first {
-		t.Fatalf("fourth attempt: ok=%v first=%v, want a refusal that is not the first of its block", ok, first)
-	}
-	if _, ok, _ := l.take("never-seen", now); !ok {
-		t.Fatal("an address that was only ever refunded was refused its first attempt")
 	}
 }
 
@@ -345,7 +258,7 @@ func TestRegister_LimitCanBeTurnedOff(t *testing.T) {
 	// 0 means off: every attempt reaches the database, none is refused.
 	t.Setenv("AGENT_REGISTER_MAX_FAILURES", "0")
 	e := newLimitEnv(t)
-	e.g.registerLimit = newFailureLimiter(registerMaxFailuresFromEnv(quiet))
+	e.g.registerLimit = newRegisterLimiter(registerMaxFailuresFromEnv(quiet))
 	e.fail(t, "203.0.113.9", 3*defaultRegisterMaxFailures)
 	if err := e.mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("database: %v", err)
