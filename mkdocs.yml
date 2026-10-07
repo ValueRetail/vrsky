@@ -62,6 +62,7 @@ nav:
       - Cost-parking the cluster: operator/cost-parking.md
       - Monitoring: operator/monitoring.md
       - Alert responder: operator/alert-responder.md
+      - Plans & billing: operator/billing.md
       - Troubleshooting: operator/troubleshooting.md
       - Encryption-at-rest checklist: operator/encryption-at-rest.md
       - Status page & uptime SLA: SLA.md

@@ -23,6 +23,12 @@ func (h *Handler) HandleTenantDataIngestion(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// A suspended target (trial ended, no plan) has no running pipelines to
+	// receive this; refuse rather than publish into the void.
+	if !h.planGate(w, r, targetTenantID) {
+		return
+	}
+
 	// Look up an active data connection between requester and target
 	conn, err := h.repo.GetActiveDataConnection(r.Context(), requestingTenant.ID, targetTenantID)
 	if err != nil {

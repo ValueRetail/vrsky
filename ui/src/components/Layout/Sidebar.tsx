@@ -14,6 +14,7 @@ export default function Sidebar() {
   // OAuth provider management is owner/admin-only (CRUD is admin-gated
   // server-side); hide the entry for everyone else.
   const role = useAuthStore((s) => s.currentTenant?.user_role)
+  const isPlatformOperator = useAuthStore((s) => s.isPlatformOperator)
   const canManageOAuth = role === 'owner' || role === 'admin'
   const runningCount = (connections || []).filter((c) => c.status === 'running').length
   const stoppedCount = (connections || []).filter((c) => c.status === 'stopped').length
@@ -155,7 +156,34 @@ export default function Sidebar() {
           >
             Usage & quotas
           </Link>
+          <Link
+            to="/settings/plan"
+            className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+              isActive('/settings/plan')
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+            }`}
+          >
+            Plan
+          </Link>
         </div>
+
+        {/* Platform (operators only; the server refuses everyone else) */}
+        {isPlatformOperator && (
+          <div className="mt-6 pt-4 border-t border-neutral-200 dark:border-neutral-700">
+            <p className="px-4 py-1 text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Platform</p>
+            <Link
+              to="/platform/tenants"
+              className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all duration-fast ${
+                isActive('/platform/tenants')
+                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold'
+                  : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700/50'
+              }`}
+            >
+              Workspaces
+            </Link>
+          </div>
+        )}
 
         {/* Status Cards */}
         {(connections || []).length > 0 && (

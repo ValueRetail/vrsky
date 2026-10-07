@@ -15,6 +15,9 @@ func (h *Handler) CreateConnectionRequest(w http.ResponseWriter, r *http.Request
 		_ = writeError(w, http.StatusNotFound, "NotFound", "tenant not found", nil)
 		return
 	}
+	if !h.planGate(w, r, tenant.ID) {
+		return
+	}
 
 	var payload CreateConnectionRequestPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {

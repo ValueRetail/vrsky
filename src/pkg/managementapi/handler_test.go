@@ -21,6 +21,9 @@ type MockRepository struct {
 	oidcUsers    []mockOIDCUser
 	quotas       map[string]*TenantQuotas
 	tenantPlans  map[string]string
+	tenants      map[string]*Tenant // billing tests seed these; GetTenantByID reads them when present
+	planRequests []*PlanRequest
+	resumable    map[string]bool                   // connectionID → stopped_by_billing
 	usage        map[string]map[string]*UsageDaily // tenantID → day → row
 }
 
@@ -61,7 +64,7 @@ func (m *MockRepository) GetConnection(ctx context.Context, id string) (*Connect
 func (m *MockRepository) ListConnections(ctx context.Context, tenantID string, filters *ListFilters) ([]*Connection, int64, error) {
 	var results []*Connection
 	for _, conn := range m.connections {
-		if conn.TenantID == tenantID {
+		if conn.TenantID == tenantID && (filters == nil || filters.Status == "" || conn.Status == filters.Status) {
 			results = append(results, conn)
 		}
 	}
@@ -549,7 +552,137 @@ func (m *MockRepository) CreateTenant(ctx context.Context, userID, name, slug st
 }
 
 func (m *MockRepository) GetTenantByID(ctx context.Context, tenantID string) (*Tenant, error) {
+	if t, ok := m.tenants[tenantID]; ok {
+		cp := *t
+		return &cp, nil
+	}
 	return nil, ErrTenantNotFound
+}
+
+// --- BillingStore (plans/paid-plans.md) ---
+
+var mockPlanLimits = []PlanLimits{
+	{PlanName: PlanTrial, MaxMsgPerSec: 25, MaxIntegrations: 2, MaxStorageBytes: 1 << 30, IncludedMessagesPerMonth: 100_000, SortOrder: 1},
+	{PlanName: PlanPaid, MaxMsgPerSec: 200, MaxIntegrations: 20, MaxStorageBytes: 100 << 30, IncludedMessagesPerMonth: 10_000_000, SortOrder: 2},
+	{PlanName: PlanEnterprise, SortOrder: 3},
+}
+
+func (m *MockRepository) GetPlanLimits(ctx context.Context, plan string) (*PlanLimits, error) {
+	for _, p := range mockPlanLimits {
+		if p.PlanName == plan {
+			cp := p
+			return &cp, nil
+		}
+	}
+	return nil, ErrUnknownPlan
+}
+
+func (m *MockRepository) ListPlanLimits(ctx context.Context) ([]PlanLimits, error) {
+	return append([]PlanLimits(nil), mockPlanLimits...), nil
+}
+
+func (m *MockRepository) SetTenantPlan(ctx context.Context, tenantID string, change TenantPlanChange, billingStatus string, handledBy *string) error {
+	limits, err := m.GetPlanLimits(ctx, change.Plan)
+	if err != nil {
+		return err
+	}
+	t, ok := m.tenants[tenantID]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	t.SubscriptionPlan, t.BillingStatus = change.Plan, billingStatus
+	t.TrialEndsAt = nil
+	if billingStatus == BillingTrial {
+		t.TrialEndsAt = change.TrialEndsAt
+	}
+	if change.Note != nil {
+		t.BillingNote = change.Note
+	}
+	_ = m.UpdateTenantQuotas(ctx, &TenantQuotas{TenantID: tenantID, PlanName: change.Plan,
+		MaxMsgPerSec: limits.MaxMsgPerSec, MaxIntegrations: limits.MaxIntegrations, MaxStorageBytes: limits.MaxStorageBytes})
+	now := time.Now()
+	for _, pr := range m.planRequests {
+		if pr.TenantID == tenantID && pr.HandledAt == nil {
+			pr.HandledAt, pr.Outcome = &now, "accepted"
+		}
+	}
+	return nil
+}
+
+func (m *MockRepository) SetTenantBillingStatus(ctx context.Context, tenantID, status string) error {
+	t, ok := m.tenants[tenantID]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	t.BillingStatus = status
+	return nil
+}
+
+func (m *MockRepository) ListExpiredTrials(ctx context.Context, now time.Time) ([]*Tenant, error) {
+	var out []*Tenant
+	for _, t := range m.tenants {
+		if t.BillingStatus == BillingTrial && t.TrialEndsAt != nil && !t.TrialEndsAt.After(now) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (m *MockRepository) ListTenantsForPlatform(ctx context.Context) ([]*PlatformTenant, error) {
+	var out []*PlatformTenant
+	for _, t := range m.tenants {
+		pt := &PlatformTenant{ID: t.ID, Name: t.Name, Slug: t.Slug, Plan: t.SubscriptionPlan, BillingStatus: t.BillingStatus, TrialEndsAt: t.TrialEndsAt}
+		pt.OpenRequest, _ = m.GetOpenPlanRequest(ctx, t.ID)
+		out = append(out, pt)
+	}
+	return out, nil
+}
+
+func (m *MockRepository) CreatePlanRequest(ctx context.Context, req *PlanRequest) error {
+	req.ID = "pr-" + req.TenantID
+	req.CreatedAt = time.Now()
+	m.planRequests = append(m.planRequests, req)
+	return nil
+}
+
+func (m *MockRepository) GetOpenPlanRequest(ctx context.Context, tenantID string) (*PlanRequest, error) {
+	for _, pr := range m.planRequests {
+		if pr.TenantID == tenantID && pr.HandledAt == nil {
+			return pr, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) ListOpenPlanRequests(ctx context.Context) ([]*PlanRequest, error) {
+	var out []*PlanRequest
+	for _, pr := range m.planRequests {
+		if pr.HandledAt == nil {
+			out = append(out, pr)
+		}
+	}
+	return out, nil
+}
+
+func (m *MockRepository) SetConnectionStoppedByBilling(ctx context.Context, tenantID, connectionID string, stopped bool) error {
+	if m.resumable == nil {
+		m.resumable = map[string]bool{}
+	}
+	if c, ok := m.connections[connectionID]; !ok || c.TenantID != tenantID {
+		return nil // the SQL's tenant_id condition: a foreign row is simply not updated
+	}
+	m.resumable[connectionID] = stopped
+	return nil
+}
+
+func (m *MockRepository) ListConnectionsStoppedByBilling(ctx context.Context, tenantID string) ([]*Connection, error) {
+	var out []*Connection
+	for id, flagged := range m.resumable {
+		if c, ok := m.connections[id]; flagged && ok && c.TenantID == tenantID && c.Status == "stopped" {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func (m *MockRepository) GetUserTenants(ctx context.Context, userID string) ([]*TenantResponse, error) {

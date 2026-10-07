@@ -8,6 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import Footer from './Footer'
+import PlanBanner from './PlanBanner'
 
 export default function RootLayout() {
   const { sidebarOpen } = useUIStore()
@@ -15,6 +16,7 @@ export default function RootLayout() {
   return (
     <div className="flex flex-col min-h-screen bg-neutral-50 dark:bg-neutral-900 transition-colors duration-base">
       <Header />
+      <PlanBanner />
       <div className="flex flex-1 overflow-hidden">
         <div
           className={`transition-all duration-300 ease-smooth-in-out ${

@@ -29,6 +29,13 @@ type Alert struct {
 // back to the responder — that would be a loop.
 const ResponderReportName = "ResponderReport"
 
+// Alerts the management API raises itself for the platform operator
+// (plans/paid-plans.md). Tenant-less, so they reach the platform targets.
+const (
+	PlanRequestedName = "PlanRequested"
+	TrialExpiredName  = "TrialExpired"
+)
+
 // Title renders the conventional one-line headline, e.g.
 // "[FIRING:critical] PipelineDown — no messages published for tenant X".
 func (a *Alert) Title() string {

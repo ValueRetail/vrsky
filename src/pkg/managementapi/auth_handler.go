@@ -118,6 +118,9 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		"message": "Registration successful! You can now log in.",
 		"user_id": user.ID,
 	}
+	if tenant != nil && tenant.TrialEndsAt != nil {
+		response["trial_ends_at"] = tenant.TrialEndsAt
+	}
 	if tenant != nil {
 		response["tenant"] = TenantResponse{
 			ID:                  tenant.ID,
@@ -130,6 +133,8 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 			MaxMessagesPerMonth: tenant.MaxMessagesPerMonth,
 			Status:              tenant.Status,
 			NATSSlug:            tenant.NATSSlug,
+			BillingStatus:       tenant.BillingStatus,
+			TrialEndsAt:         tenant.TrialEndsAt,
 			UserRole:            "owner",
 			CreatedAt:           tenant.CreatedAt,
 			UpdatedAt:           tenant.UpdatedAt,
@@ -318,10 +323,11 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = writeJSON(w, http.StatusOK, MeResponse{
-		User:             user.ToResponse(),
-		SessionExpiresAt: session.ExpiresAt,
-		Tenants:          tenants,
-		CurrentTenant:    currentTenant,
+		User:               user.ToResponse(),
+		SessionExpiresAt:   session.ExpiresAt,
+		Tenants:            tenants,
+		CurrentTenant:      currentTenant,
+		IsPlatformOperator: h.isOperator(user),
 	})
 }
 

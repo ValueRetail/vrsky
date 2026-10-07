@@ -12,8 +12,11 @@ type Tenant struct {
 	IsVerified          bool       `json:"is_verified" db:"is_verified"`
 	MaxIntegrations     int        `json:"max_integrations" db:"max_integrations"`
 	MaxMessagesPerMonth int64      `json:"max_messages_per_month" db:"max_messages_per_month"`
-	Status              string     `json:"status" db:"status"`       // provisioning|active|failed|terminating
-	NATSSlug            *string    `json:"nats_slug" db:"nats_slug"` // set when NATS is provisioned
+	Status              string     `json:"status" db:"status"`                 // provisioning|active|failed|terminating
+	NATSSlug            *string    `json:"nats_slug" db:"nats_slug"`           // set when NATS is provisioned
+	BillingStatus       string     `json:"billing_status" db:"billing_status"` // trial|paid|suspended (plans/paid-plans.md)
+	TrialEndsAt         *time.Time `json:"trial_ends_at,omitempty" db:"trial_ends_at"`
+	BillingNote         *string    `json:"-" db:"billing_note"` // the operator's note; platform routes only
 	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
 	DeletedAt           *time.Time `json:"-" db:"deleted_at"`
@@ -32,19 +35,21 @@ type UserTenantRole struct {
 
 // TenantResponse is returned by API endpoints, includes the user's role
 type TenantResponse struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	Slug                string    `json:"slug"`
-	OwnerID             string    `json:"owner_id"`
-	SubscriptionPlan    string    `json:"subscription_plan"`
-	IsVerified          bool      `json:"is_verified"`
-	MaxIntegrations     int       `json:"max_integrations"`
-	MaxMessagesPerMonth int64     `json:"max_messages_per_month"`
-	Status              string    `json:"status"`
-	NATSSlug            *string   `json:"nats_slug,omitempty"`
-	UserRole            string    `json:"user_role"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string     `json:"id"`
+	Name                string     `json:"name"`
+	Slug                string     `json:"slug"`
+	OwnerID             string     `json:"owner_id"`
+	SubscriptionPlan    string     `json:"subscription_plan"`
+	IsVerified          bool       `json:"is_verified"`
+	MaxIntegrations     int        `json:"max_integrations"`
+	MaxMessagesPerMonth int64      `json:"max_messages_per_month"`
+	Status              string     `json:"status"`
+	NATSSlug            *string    `json:"nats_slug,omitempty"`
+	BillingStatus       string     `json:"billing_status"`
+	TrialEndsAt         *time.Time `json:"trial_ends_at,omitempty"`
+	UserRole            string     `json:"user_role"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // CreateTenantRequest is sent by the client to create a new tenant

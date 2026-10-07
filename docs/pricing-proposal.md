@@ -1,8 +1,11 @@
 # VRSky Pricing Proposal
 
-> **Status: proposal for decision.** The *structure* below is grounded in what the
-> platform already meters and enforces. The *price points* are placeholders that
-> need competitor benchmarking + a target-segment decision before launch.
+> **Status: partly decided (2026-10-07).** Sign-up stays open; a workspace gets a
+> 14-day trial, then its pipelines stop until a plan is active. Tiers are
+> **Trial / Paid / Enterprise** with the limits in `plan_limits`; plans are
+> activated by the platform operator after invoicing — no payment integration
+> yet. How it works: `docs/operator/billing.md`; design: `plans/paid-plans.md`.
+> Price points, overage and Stripe remain open, as below.
 
 ## Recommendation in one line
 

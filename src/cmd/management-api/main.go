@@ -292,6 +292,8 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	})
 	restHandler.SetDB(db)
 	restHandler.SetAuthLimits(managementapi.AuthLimitsFromEnv(slog.Default()))
+	// PLATFORM_OPERATORS: who may set plans and quotas (plans/paid-plans.md).
+	restHandler.SetPlatformOperators(managementapi.PlatformOperatorsFromEnv())
 
 	// JetStream context for DLQ endpoints (#70). Optional — DLQ handlers
 	// return 503 if JS is unconfigured. Stream creation is lazy (workers
@@ -393,6 +395,10 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// WithRollupDB gates the hourly rollup to one replica per tick under N
 	// replicas (#138); upserts are idempotent, so this is a contention guard.
 	managementapi.NewUsageRollup(repo, promClient, managementapi.WithRollupDB(db)).Start()
+
+	// Paid plans (plans/paid-plans.md): suspend workspaces whose trial ran
+	// out — hourly, one replica per tick, like the rollup.
+	restHandler.NewBillingSweep(db).Start()
 
 	// Tenant NATS health monitor (#21): probe each instance's monitoring
 	// endpoint and flip active/unhealthy so the discovery API stops handing out
