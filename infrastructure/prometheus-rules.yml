@@ -64,9 +64,14 @@ groups:
       # A VRSky Deployment with no available replica for 10 minutes: a
       # connector that cannot start (ImagePullBackOff, OOM) or a management
       # API outage. kube-state-metrics; platform alert (no tenant_id).
+      # A deployment parked on purpose (spec.replicas 0 — the alert responder
+      # since 2026-10-05) is not unavailable; without the second clause it
+      # fired non-stop and Teams got a reminder every repeat_interval.
       - alert: ConnectorUnavailable
         expr: |
           kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment=~"vrsky-.*"} == 0
+            and on (namespace, deployment)
+          kube_deployment_spec_replicas{namespace="vrsky-platform"} > 0
         for: 10m
         labels:
           severity: critical
