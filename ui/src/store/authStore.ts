@@ -15,6 +15,7 @@ const SELECTED_TENANT_KEY = 'vrsky:selectedTenantId'
 interface AuthState {
   // State
   user: User | null
+  isPlatformOperator: boolean
   tenants: Tenant[]
   currentTenant: Tenant | null
   isAuthenticated: boolean
@@ -37,6 +38,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   // Initial state
   user: null,
+  isPlatformOperator: false,
   tenants: [],
   currentTenant: null,
   isAuthenticated: false,
@@ -55,6 +57,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     authService.clearSessionToken()
     set({
       user: null,
+      isPlatformOperator: false,
       tenants: [],
       currentTenant: null,
       isAuthenticated: false,
@@ -147,6 +150,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.removeItem(SELECTED_TENANT_KEY)
       set({
         user: null,
+        isPlatformOperator: false,
         tenants: [],
         currentTenant: null,
         isAuthenticated: false,
@@ -167,6 +171,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isInitialized: true,
         isAuthenticated: false,
         user: null,
+        isPlatformOperator: false,
         tenants: [],
         currentTenant: null,
       })
@@ -195,6 +200,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         set({
           user: meData.user,
+          isPlatformOperator: meData.is_platform_operator === true,
           tenants,
           currentTenant,
           isAuthenticated: true,
@@ -214,6 +220,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       set({
         user: null,
+        isPlatformOperator: false,
         tenants: [],
         currentTenant: null,
         isAuthenticated: false,

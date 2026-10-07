@@ -33,6 +33,10 @@ type Handler struct {
 	js                nats.JetStreamContext // JetStream context for DLQ endpoints (#70)
 	quotas            *QuotaTracker         // In-process token buckets for per-tenant rate limits (#74)
 	authLimits        *authLimits           // Failed-login and sign-up limits (plans/login-rate-limit.md)
+	platformOperators map[string]bool       // emails allowed on the platform routes (plans/paid-plans.md)
+	// notifyPlatform raises an alert for the operator (plan requested, trial
+	// ended). dispatchAlert in production; tests capture it.
+	notifyPlatform func(ctx context.Context, alert *notify.Alert)
 
 	// K8s integration for graph-based pipelines (Phase 2)
 	orchestratorFactory OrchestratorFactory
@@ -73,7 +77,7 @@ func (h *Handler) SetOAuthRefresher(r *OAuthRefresher) { h.oauthRefresher = r }
 
 // NewHandler creates a new handler
 func NewHandler(repo Repository, validator *Validator) *Handler {
-	return &Handler{
+	h := &Handler{
 		repo:              repo,
 		validator:         validator,
 		publisher:         nil, // Will be set via SetPublisher if needed
@@ -83,6 +87,8 @@ func NewHandler(repo Repository, validator *Validator) *Handler {
 		quotas:            NewQuotaTracker(),
 		authLimits:        newAuthLimits(defaultLoginMaxFailures, defaultSignupMaxAttempts),
 	}
+	h.notifyPlatform = func(ctx context.Context, alert *notify.Alert) { h.dispatchAlert(ctx, alert) }
+	return h
 }
 
 // SetDB sets the direct database connection for raw queries
@@ -168,6 +174,11 @@ func (h *Handler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := GetTenantIDFromContext(ctx)
 	if err != nil {
 		_ = writeError(w, http.StatusBadRequest, "InvalidTenant", err.Error(), nil)
+		return
+	}
+
+	// A suspended workspace (trial ended, no plan) may not add pipelines.
+	if !h.planGate(w, r, tenantID) {
 		return
 	}
 
@@ -524,6 +535,11 @@ func (h *Handler) StartConnection(w http.ResponseWriter, r *http.Request) {
 	// Verify tenant ownership
 	if conn.TenantID != tenantID {
 		_ = writeError(w, http.StatusForbidden, "Forbidden", "not authorized to access this connection", nil)
+		return
+	}
+
+	// A suspended workspace (trial ended, no plan) may not run pipelines.
+	if !h.planGate(w, r, tenantID) {
 		return
 	}
 
@@ -1134,17 +1150,30 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// active instance set for the tenant.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/nats-instances", sessionMW(tenantMW(http.HandlerFunc(h.HandleListNATSInstances))).ServeHTTP)
 
-	// Tenant quotas (#74). Reads = any member; writes = owner.
+	// Tenant quotas (#74). Reads = any member. Writes moved to the platform
+	// operator with paid plans (plans/paid-plans.md): limits are the product
+	// now, so no workspace role may raise its own.
+	operatorMW := h.RequireOperator()
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
-	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(operatorMW(http.HandlerFunc(h.HandleUpdateQuotas))).ServeHTTP)
+
+	// Paid plans (plans/paid-plans.md). What the workspace sees, and the one
+	// thing an owner may do: ask.
+	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/billing", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetBilling))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/tenants/{tenant_id}/plan-requests", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandleCreatePlanRequest)))).ServeHTTP)
+	// The operator's side: every workspace, the inbox, and the one write.
+	mux.HandleFunc("GET /api/v1/platform/tenants", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformListTenants))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/platform/plan-requests", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformListPlanRequests))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/platform/tenants/{tenant_id}/plan", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformSetPlan))).ServeHTTP)
 
 	// Per-tenant usage metering (#92). Any member can read usage + export CSV.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/usage", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetUsage))).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/usage/export", sessionMW(tenantMW(http.HandlerFunc(h.HandleExportUsage))).ServeHTTP)
 
-	// Subscription plan (#90). Owner-only; drives the gateway's per-tenant edge
-	// rate limit (free/pro/enterprise).
-	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/plan", sessionMW(tenantMW(ownerMW(http.HandlerFunc(h.HandlePlanUpdate)))).ServeHTTP)
+	// Subscription plan name only (#90), for the dev-stack gateway's edge rate
+	// limit. Operator-only since paid plans; PUT /platform/tenants/{id}/plan is
+	// the real thing (limits, billing state, requests).
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/plan", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlanUpdate))).ServeHTTP)
 
 	// Tenant provisioning status stream (Phase 2)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/status/stream", sessionMW(tenantMW(http.HandlerFunc(h.HandleTenantStatusSSE))).ServeHTTP)

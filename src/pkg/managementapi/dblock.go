@@ -29,6 +29,8 @@ import (
 const (
 	// advisoryKeyUsageRollup gates UsageRollup.runOnce to one replica per tick.
 	advisoryKeyUsageRollup int64 = 0x7635_0001
+	// advisoryKeyBillingSweep gates BillingSweep.RunOnce the same way.
+	advisoryKeyBillingSweep int64 = 0x7635_0002
 )
 
 // advisoryKey hashes an arbitrary string (e.g. an OAuth grant ID) to a stable

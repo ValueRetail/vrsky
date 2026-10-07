@@ -16,7 +16,7 @@ import (
 // limit takes effect within Traefik's file-watch interval — no restart.
 
 // validPlans are the subscription tiers that map to gateway rate-limit middlewares.
-var validPlans = map[string]bool{"free": true, "pro": true, "enterprise": true}
+var validPlans = map[string]bool{"free": true, "pro": true, "enterprise": true, "trial": true, "paid": true}
 
 type planUpdateRequest struct {
 	Plan string `json:"plan"`

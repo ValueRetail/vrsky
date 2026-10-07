@@ -122,6 +122,14 @@ kubectl set env -n vrsky-platform deploy/vrsky-management-api AUTH_LOGIN_MAX_FAI
 two replicas the effective allowance is up to twice the number, and a deploy
 forgets them.
 
+## Pipelines will not start: `402 PlanRequired`
+
+The workspace's trial has ended and no plan is active (`docs/operator/billing.md`).
+Its pipelines were stopped by the billing sweep and the UI shows a red banner.
+Reading and editing still work. The owner asks for a plan under Settings → Plan;
+you activate it under Platform → Workspaces, which also starts the stopped
+pipelines again. To extend a trial instead, set plan Trial with a new end date.
+
 ## A builder panel says "cannot reach the data-converter service"
 
 The builder's live panels (Converter, Filter, File Watcher, …) are served by

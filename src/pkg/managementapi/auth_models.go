@@ -188,6 +188,8 @@ type MeResponse struct {
 	SessionExpiresAt time.Time         `json:"session_expires_at"`
 	Tenants          []*TenantResponse `json:"tenants"`
 	CurrentTenant    *TenantResponse   `json:"current_tenant"`
+	// IsPlatformOperator: this user may use the platform routes (plans/paid-plans.md).
+	IsPlatformOperator bool `json:"is_platform_operator"`
 }
 
 // MessageResponse is a simple success/error message response

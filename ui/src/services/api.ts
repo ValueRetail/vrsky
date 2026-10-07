@@ -8,6 +8,7 @@ import type { AxiosInstance } from 'axios'
 import { config } from '@/config/env'
 import { getSessionToken } from '@/services/authService'
 import { reportUnauthorized } from '@/services/sessionExpiry'
+import { reportPlanRequired } from '@/services/planRequired'
 import type { APIError } from '@/types/api'
 
 // Dynamic tenant ID — updated by authStore when switching tenants
@@ -92,6 +93,9 @@ apiClient.interceptors.response.use(
     // The request still fails as usual; if the session is gone the user is
     // on the login page a moment later.
     if (status === 401) void reportUnauthorized()
+    // The workspace is suspended (trial ended, no plan): one toast, not one
+    // per failed request, pointing at the page that fixes it.
+    if (status === 402) reportPlanRequired()
     const data = (error.response.data ?? {}) as Record<string, unknown>
     const message = data.message ? String(data.message) : `HTTP Error ${status}`
     const code = data.error ? String(data.error) : `HTTP_${status}`

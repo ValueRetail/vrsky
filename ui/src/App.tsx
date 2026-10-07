@@ -26,6 +26,8 @@ import InviteAcceptPage from './pages/InviteAcceptPage'
 import UsagePage from './pages/UsagePage'
 import OAuthProvidersPage from './pages/OAuthProvidersPage'
 import NotificationsPage from './pages/NotificationsPage'
+import PlanPage from './pages/PlanPage'
+import PlatformTenantsPage from './pages/PlatformTenantsPage'
 import OnboardingWizard from './onboarding/OnboardingWizard'
 
 function App() {
@@ -108,6 +110,8 @@ function App() {
             <Route path="/settings/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
             <Route path="/settings/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/settings/usage" element={<ProtectedRoute><UsagePage /></ProtectedRoute>} />
+            <Route path="/settings/plan" element={<ProtectedRoute><PlanPage /></ProtectedRoute>} />
+            <Route path="/platform/tenants" element={<ProtectedRoute><PlatformTenantsPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

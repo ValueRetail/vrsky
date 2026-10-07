@@ -88,8 +88,56 @@ export interface Tenant {
   max_messages_per_month: number
   status: TenantStatus
   nats_slug?: string
+  billing_status: BillingStatus
+  trial_ends_at?: string
   created_at: string
   updated_at: string
+}
+
+// Paid plans (plans/paid-plans.md).
+export type BillingStatus = 'trial' | 'paid' | 'suspended'
+export type PlanName = 'trial' | 'paid' | 'enterprise'
+
+export interface PlanLimits {
+  plan_name: PlanName
+  max_msg_per_sec: number
+  max_integrations: number
+  max_storage_bytes: number
+  included_messages_per_month: number
+}
+
+export interface PlanRequest {
+  id: string
+  tenant_id: string
+  requested_plan: PlanName
+  message: string
+  created_at: string
+  handled_at?: string
+  outcome?: string
+}
+
+export interface TenantBilling {
+  plan: PlanName
+  billing_status: BillingStatus
+  trial_ends_at?: string
+  limits: PlanLimits | null
+  plans: PlanLimits[]
+  open_request?: PlanRequest
+}
+
+export interface PlatformTenant {
+  id: string
+  name: string
+  slug: string
+  owner_email: string
+  plan: PlanName
+  billing_status: BillingStatus
+  trial_ends_at?: string
+  billing_note: string
+  created_at: string
+  messages_30d: number
+  running_pipelines: number
+  open_request?: PlanRequest
 }
 
 export interface ProvisioningStatus {
@@ -204,6 +252,7 @@ export interface MeResponse {
   session_expires_at: string
   tenants: Tenant[]
   current_tenant: Tenant | null
+  is_platform_operator?: boolean
 }
 
 // ============================================

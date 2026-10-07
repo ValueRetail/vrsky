@@ -35,23 +35,33 @@ func (r *PostgresRepository) CreateTenant(ctx context.Context, userID, name, slu
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A new workspace starts on the trial plan with its clock running
+	// (plans/paid-plans.md); its quota row is the trial tier's limits.
 	var tenant Tenant
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO tenants (name, slug, owner_id, subscription_plan, status, created_at, updated_at)
-		VALUES ($1, $2, $3, 'free', 'active', NOW(), NOW())
+		INSERT INTO tenants (name, slug, owner_id, subscription_plan, status, billing_status, trial_ends_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'trial', 'active', 'trial', NOW() + $4 * interval '1 second', NOW(), NOW())
 		RETURNING id, name, slug, owner_id, subscription_plan, is_verified,
-		          max_integrations, max_messages_per_month, status, nats_slug, created_at, updated_at
-	`, name, slug, userID).Scan(
+		          max_integrations, max_messages_per_month, status, nats_slug,
+		          billing_status, trial_ends_at, billing_note, created_at, updated_at
+	`, name, slug, userID, int64(TrialLength/time.Second)).Scan(
 		&tenant.ID, &tenant.Name, &tenant.Slug, &tenant.OwnerID,
 		&tenant.SubscriptionPlan, &tenant.IsVerified,
 		&tenant.MaxIntegrations, &tenant.MaxMessagesPerMonth,
 		&tenant.Status, &tenant.NATSSlug,
+		&tenant.BillingStatus, &tenant.TrialEndsAt, &tenant.BillingNote,
 		&tenant.CreatedAt, &tenant.UpdatedAt,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "23505") {
 			return nil, ErrSlugAlreadyExists
 		}
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO tenant_quotas (tenant_id, plan_name, max_msg_per_sec, max_integrations, max_storage_bytes)
+		SELECT $1, plan_name, max_msg_per_sec, max_integrations, max_storage_bytes FROM plan_limits WHERE plan_name = 'trial'
+	`, tenant.ID); err != nil {
 		return nil, err
 	}
 
@@ -77,7 +87,8 @@ func (r *PostgresRepository) GetTenantByID(ctx context.Context, tenantID string)
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, name, slug, owner_id, subscription_plan, is_verified,
-		       max_integrations, max_messages_per_month, status, nats_slug, created_at, updated_at
+		       max_integrations, max_messages_per_month, status, nats_slug,
+		       billing_status, trial_ends_at, billing_note, created_at, updated_at
 		FROM tenants
 		WHERE id = $1 AND deleted_at IS NULL
 	`, tenantID).Scan(
@@ -85,6 +96,7 @@ func (r *PostgresRepository) GetTenantByID(ctx context.Context, tenantID string)
 		&t.SubscriptionPlan, &t.IsVerified,
 		&t.MaxIntegrations, &t.MaxMessagesPerMonth,
 		&t.Status, &t.NATSSlug,
+		&t.BillingStatus, &t.TrialEndsAt, &t.BillingNote,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -101,7 +113,8 @@ func (r *PostgresRepository) GetUserTenants(ctx context.Context, userID string) 
 	// lint:tenant-ok — primary-key lookup; tenant ownership verified by caller.
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT t.id, t.name, t.slug, t.owner_id, t.subscription_plan, t.is_verified,
-		       t.max_integrations, t.max_messages_per_month, t.status, t.nats_slug, utr.role,
+		       t.max_integrations, t.max_messages_per_month, t.status, t.nats_slug,
+		       t.billing_status, t.trial_ends_at, utr.role,
 		       t.created_at, t.updated_at
 		FROM tenants t
 		JOIN user_tenant_roles utr ON t.id = utr.tenant_id
@@ -119,7 +132,8 @@ func (r *PostgresRepository) GetUserTenants(ctx context.Context, userID string) 
 		if err := rows.Scan(
 			&tr.ID, &tr.Name, &tr.Slug, &tr.OwnerID,
 			&tr.SubscriptionPlan, &tr.IsVerified,
-			&tr.MaxIntegrations, &tr.MaxMessagesPerMonth, &tr.Status, &tr.NATSSlug, &tr.UserRole,
+			&tr.MaxIntegrations, &tr.MaxMessagesPerMonth, &tr.Status, &tr.NATSSlug,
+			&tr.BillingStatus, &tr.TrialEndsAt, &tr.UserRole,
 			&tr.CreatedAt, &tr.UpdatedAt,
 		); err != nil {
 			return nil, err

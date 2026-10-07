@@ -77,6 +77,11 @@ spec:
           value: "vrsky"
         - name: DB_NAME
           value: "vrsky"
+        # Who may set plans and quotas (docs/operator/billing.md). Comma-separated
+        # user emails; empty means nobody. Set the real value with
+        # `kubectl set env` — deploy-core-azure.sh does not apply this file.
+        - name: PLATFORM_OPERATORS
+          value: ""
         - name: ENCRYPTION_KEY
           valueFrom:
             secretKeyRef:

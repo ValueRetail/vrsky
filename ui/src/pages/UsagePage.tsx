@@ -1,8 +1,8 @@
 /**
  * Usage / Quotas page — Phase 1I (#74).
  *
- * Shows current usage against each quota and lets owners adjust the
- * limits. Non-owners see the panel read-only.
+ * Shows current usage against each quota. Limits follow the plan
+ * (plans/paid-plans.md); only a platform operator may override them here.
  */
 
 import { useEffect, useState } from 'react'
@@ -58,7 +58,7 @@ function bar(value: number, max: number, danger: boolean): JSX.Element {
 }
 
 export default function UsagePage() {
-  const { currentTenant } = useAuthStore()
+  const { currentTenant, isPlatformOperator } = useAuthStore()
   const [q, setQ] = useState<TenantQuotas | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -146,7 +146,7 @@ export default function UsagePage() {
     <div style={{ padding: '20px', maxWidth: '900px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '6px' }}>Usage & quotas</h1>
       <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
-        Plan: <strong>{q.plan_name}</strong>. Owners can adjust limits below; 0 means unlimited.
+        Plan: <strong>{q.plan_name}</strong>. Limits follow the plan — see <a href="/settings/plan">Plan</a>. 0 means unlimited.
       </p>
 
       {error && (
@@ -219,10 +219,19 @@ export default function UsagePage() {
         {bar(q.storage_bytes, q.max_storage_bytes, q.storage_exceeded)}
       </div>
 
-      <div style={card}>
+      {!isPlatformOperator && (
+        <div style={card}>
+          <strong style={{ fontSize: '14px' }}>Limits</strong>
+          <p style={{ fontSize: '12px', color: '#374151', margin: '6px 0 0' }}>
+            {q.max_integrations === 0 ? 'Unlimited' : q.max_integrations} integrations · {q.max_msg_per_sec === 0 ? 'unlimited' : q.max_msg_per_sec} msg/s · {q.max_storage_bytes === 0 ? 'unlimited' : fmtBytes(q.max_storage_bytes)} storage
+          </p>
+        </div>
+      )}
+
+      {isPlatformOperator && <div style={card}>
         <strong style={{ fontSize: '14px' }}>Configurable limits</strong>
         <p style={{ fontSize: '11px', color: '#6b7280', margin: '4px 0 14px 0' }}>
-          Owners only. Changes are recorded in the audit log.
+          Platform operators only. Changes are recorded in the audit log.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
           <div>
@@ -264,7 +273,7 @@ export default function UsagePage() {
         >
           {busy ? 'Saving…' : 'Save quotas'}
         </button>
-      </div>
+      </div>}
     </div>
   )
 }
