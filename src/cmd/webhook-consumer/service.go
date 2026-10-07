@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/idempotency"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 	"github.com/nats-io/nats.go"
@@ -31,6 +32,12 @@ type webhookConsumer struct {
 	nc      *nats.Conn
 	publish sdk.PublishFunc // injected by the runner; the one data-emit path
 	logger  *slog.Logger
+
+	// keys remembers each connection's Idempotency-Key values so a sender's
+	// retry is acknowledged without a second publish
+	// (plans/webhook-idempotency.md). Postgres in production; tests inject
+	// the memory store before Configure runs.
+	keys idempotency.Store
 
 	// auxPort is the SDK auxiliary HTTP port (WORKER_HTTP_PORT) that /webhook is
 	// served on; the cloudflared tunnel forwards to it.
@@ -85,6 +92,9 @@ func (s *webhookConsumer) Configure(ctx context.Context, res *sdk.Resources) err
 	s.activeConnections = make(map[string]*ActiveConnection)
 	s.auxPort = envOr("WORKER_HTTP_PORT", "9100")
 	s.mtlsPort = os.Getenv("WORKER_MTLS_PORT") // empty → mTLS listener disabled
+	if s.keys == nil {
+		s.keys = idempotency.NewPostgresStore(res.DB)
+	}
 
 	s.RegisterHTTPHandler("/webhook/", s.handleWebhook())
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
@@ -120,8 +130,29 @@ func (s *webhookConsumer) Run(ctx context.Context, publish sdk.PublishFunc) erro
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	go s.expireKeys(ctx)
 	<-ctx.Done()
 	return nil
+}
+
+// expireKeys forgets idempotency keys older than the retention, hourly. Both
+// replicas may run it; a delete of old rows is idempotent.
+func (s *webhookConsumer) expireKeys(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		n, err := s.keys.Expire(ctx, time.Now().Add(-idempotency.Retention))
+		if err != nil && ctx.Err() == nil {
+			s.logger.Warn("Idempotency key expiry failed", "error", err)
+		} else if n > 0 {
+			s.logger.Info("Expired idempotency keys", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // Stop unregisters all webhooks and kills the cloudflared tunnel. The SDK runner

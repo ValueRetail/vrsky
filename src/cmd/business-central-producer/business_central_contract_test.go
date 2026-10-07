@@ -34,7 +34,7 @@ func TestContract_BusinessCentralProducerSendsWhatWasPublished(t *testing.T) {
 			if !json.Valid(ce.Payload) {
 				t.Fatalf("%s payload is not valid JSON — Deliver drops it permanently", ce.Mode)
 			}
-			if err := testProducer().write(context.Background(), cfg, tok, ce.Payload); err != nil {
+			if err := testProducer().write(context.Background(), cfg, tok, "conn-1", ce.Payload); err != nil {
 				t.Fatalf("write: %v", err)
 			}
 			if gotAuth == "" {

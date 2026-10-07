@@ -7,9 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +52,11 @@ type BCProducerConfig struct {
 	ClientSecret string `json:"client_secret"` // from client_secret_secret_id
 	Entity       string `json:"entity"`        // write target, e.g. items, salesOrders
 	Method       string `json:"method"`        // POST (default) or PATCH
+	// DedupeFields (plans/webhook-idempotency.md): before a POST, GET the
+	// entity filtered on these payload fields (also the BC property names)
+	// and skip the write when a record already matches — a redelivery
+	// inside VRSky must not create a second invoice. POST only.
+	DedupeFields []string `json:"dedupe_fields"`
 
 	APIBaseURL string `json:"api_base_url"` // optional override (on-prem/tests)
 	TokenURL   string `json:"token_url"`
@@ -95,13 +104,25 @@ func (p *bcProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 		return sdk.Permanent(errors.New("payload is not valid JSON"))
 	}
 	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(p.httpClient)
-	return p.write(ctx, cfg, tok, env.Payload)
+	return p.write(ctx, cfg, tok, env.IntegrationID, env.Payload)
 }
 
-func (p *bcProducer) write(ctx context.Context, cfg *BCProducerConfig, tok *oauthcc.Client, payload []byte) error {
+func (p *bcProducer) write(ctx context.Context, cfg *BCProducerConfig, tok *oauthcc.Client, connectionID string, payload []byte) error {
 	access, err := tok.Token(ctx)
 	if err != nil {
 		return sdk.Retriable(fmt.Errorf("acquire token: %w", err)) // token endpoint hiccup → retry
+	}
+	if cfg.effectiveMethod() == http.MethodPost && len(cfg.DedupeFields) > 0 {
+		existing, err := p.alreadyExists(ctx, cfg, access, payload)
+		if err != nil {
+			return err
+		}
+		if existing != "" {
+			bcSkippedExisting.WithLabelValues(connectionID).Inc()
+			p.logger.Info("Already exists in Business Central; not writing again",
+				"entity", cfg.effectiveEntity(), "connection_id", connectionID, "bc_id", existing)
+			return nil
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, cfg.effectiveMethod(), cfg.entityURL(), bytes.NewReader(payload))
 	if err != nil {
@@ -136,6 +157,97 @@ func (p *bcProducer) write(ctx context.Context, cfg *BCProducerConfig, tok *oaut
 		return sdk.Retriable(fmt.Errorf("business central %d: %s", resp.StatusCode, snippet(body)))
 	}
 }
+
+// alreadyExists asks BC for a record matching the payload's DedupeFields and
+// returns its id, or "" when there is none. A field missing or empty in the
+// payload means "cannot tell": the write goes ahead as if the setting were
+// off, with a log line. When BC cannot be asked the message waits (retriable)
+// rather than risk a duplicate; auth failures are poison as for the write.
+func (p *bcProducer) alreadyExists(ctx context.Context, cfg *BCProducerConfig, access string, payload []byte) (string, error) {
+	var record map[string]any
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return "", sdk.Permanent(fmt.Errorf("dedupe: payload is not a JSON object: %w", err))
+	}
+	filter, missing := odataEqualityFilter(cfg.DedupeFields, record)
+	if missing != "" {
+		p.logger.Warn("dedupe: payload field absent, writing without the existence check", "field", missing, "entity", cfg.effectiveEntity())
+		return "", nil
+	}
+	q := url.Values{"$filter": {filter}, "$top": {"1"}, "$select": {"id"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.entityURL()+"?"+q.Encode(), nil)
+	if err != nil {
+		return "", sdk.Permanent(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+access)
+	req.Header.Set("Accept", "application/json")
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return "", sdk.Retriable(fmt.Errorf("dedupe lookup: %w", err))
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode == http.StatusServiceUnavailable:
+		return "", sdk.RateLimited(fmt.Errorf("dedupe lookup %d: %s", resp.StatusCode, snippet(body)), 5*time.Second)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return "", sdk.Permanent(fmt.Errorf("dedupe lookup auth %d: %s", resp.StatusCode, snippet(body)))
+	default:
+		return "", sdk.Retriable(fmt.Errorf("dedupe lookup %d: %s", resp.StatusCode, snippet(body)))
+	}
+	var page struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return "", sdk.Retriable(fmt.Errorf("dedupe lookup: unreadable answer: %w", err))
+	}
+	if len(page.Value) == 0 {
+		return "", nil
+	}
+	if page.Value[0].ID == "" {
+		return "(id not returned)", nil
+	}
+	return page.Value[0].ID, nil
+}
+
+// odataEqualityFilter builds `a eq 'x' and b eq 2` from the payload's values
+// of the named fields. Strings are quoted with single quotes doubled (OData's
+// escape); numbers and booleans go as they are. The first field that is
+// missing, empty, or of another type is returned as missing.
+func odataEqualityFilter(fields []string, record map[string]any) (filter, missing string) {
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		switch v := record[f].(type) {
+		case string:
+			if v == "" {
+				return "", f
+			}
+			parts = append(parts, fmt.Sprintf("%s eq '%s'", f, strings.ReplaceAll(v, "'", "''")))
+		case float64:
+			parts = append(parts, fmt.Sprintf("%s eq %s", f, strconv.FormatFloat(v, 'f', -1, 64)))
+		case bool:
+			parts = append(parts, fmt.Sprintf("%s eq %t", f, v))
+		default:
+			return "", f
+		}
+	}
+	if len(parts) == 0 {
+		return "", "(none configured)"
+	}
+	return strings.Join(parts, " and "), ""
+}
+
+// bcSkippedExisting counts writes skipped because BC already had the record.
+var bcSkippedExisting = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vrsky_bc_producer_skipped_existing_total",
+	Help: "Business Central writes skipped because a record matching dedupe_fields already existed.",
+}, []string{"connection_id"})
 
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))

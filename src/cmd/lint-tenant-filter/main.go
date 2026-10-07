@@ -57,6 +57,7 @@ var tenantScopedTables = []string{
 	"agents",
 	"agent_registration_tokens",
 	"plan_requests",
+	"webhook_idempotency_keys",
 }
 
 // sqlStmt extracts the backtick-quoted SQL string that follows a

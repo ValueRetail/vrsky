@@ -3467,6 +3467,24 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
           )}
         </>
       )}
+      {nodeType !== 'input' && (
+        <div>
+          <StyledInput
+            label="Skip if a record already exists — match on fields (comma-separated, optional)"
+            placeholder="externalDocumentNumber, customerNumber"
+            value={((c.dedupe_fields as string[] | undefined) || []).join(', ')}
+            onChange={(v) => {
+              const fields = v.split(',').map((f) => f.trim()).filter(Boolean)
+              update({ dedupe_fields: fields.length ? fields : undefined })
+            }}
+          />
+          <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+            Before each POST, VRSky asks Business Central for a record whose fields equal the message&apos;s and
+            skips the write if one exists — so a redelivery cannot create a second invoice. Field names are the
+            BC property names. Posted sales invoices stay in <code>salesInvoices</code>, so one check covers both.
+          </div>
+        </div>
+      )}
       <PollOrMethod cfg={c} update={update} nodeType={nodeType} methodOptions={['POST', 'PATCH']} />
     </div>
   )
