@@ -1350,6 +1350,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-url-is-stable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The URL is stable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#retries-and-the-idempotency-key-header" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2343,6 +2354,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-url-is-stable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The URL is stable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#retries-and-the-idempotency-key-header" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2416,6 +2438,13 @@ error — nothing that points at DNS. See
 <a href="../../operator/troubleshooting/">Troubleshooting</a>.</p>
 </div>
 <p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.</p>
+<h3 id="the-url-is-stable">The URL is stable<a class="headerlink" href="#the-url-is-stable" title="Permanent link">&para;</a></h3>
+<p>The connection id in the URL survives Stop/Start, Deploy from the builder
+(which updates the connection in place) and restarts of the webhook service
+(which brings running pipelines back from the database by itself). Only
+<strong>deleting</strong> the connection changes it: the builder then asks before creating
+a new one, and says that the URL will change. Keys remembered for the old
+connection (below) go with it.</p>
 <h3 id="retries-and-the-idempotency-key-header">Retries and the <code>Idempotency-Key</code> header<a class="headerlink" href="#retries-and-the-idempotency-key-header" title="Permanent link">&para;</a></h3>
 <p>A sender whose outbox delivers <em>at least once</em> — a till that lost the <code>202</code>,
 timed out, or restarted — sends the same request again. If it repeats an

@@ -1188,6 +1188,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#after-a-connector-restart-do-i-need-to-redeploy-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After a connector restart, do I need to redeploy pipelines?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2512,6 +2523,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#after-a-connector-restart-do-i-need-to-redeploy-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After a connector restart, do I need to redeploy pipelines?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-pipeline-deploys-but-no-data-flows" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2720,6 +2742,15 @@ headless on purpose: each replica keeps its own event hub, and the proxy opens
 one stream per pod so the panel sees all the traffic, not half. A test,
 <code>TestWorkerEventSourcesHaveKubernetesServices</code>, now fails if a proxied worker
 has no Service manifest.</p>
+<h2 id="after-a-connector-restart-do-i-need-to-redeploy-pipelines">After a connector restart, do I need to redeploy pipelines?<a class="headerlink" href="#after-a-connector-restart-do-i-need-to-redeploy-pipelines" title="Permanent link">&para;</a></h2>
+<p>No, not since 2026-10-07. Every standing consumer brings the pipelines the
+database lists as <code>running</code> back by itself when it starts (<code>Restored running
+pipelines count=N</code> in its log, within seconds of the pod being Ready). A
+webhook source is reachable again as soon as its consumer is up. If a
+pipeline did not come back, its consumer logged why at start (a config that
+no longer resolves, a missing secret); fix that and Stop/Start it.</p>
+<p>Deploying from the builder keeps the connection id and the webhook URL.
+Deleting a connection does not — the builder asks before creating a new one.</p>
 <h2 id="a-pipeline-deploys-but-no-data-flows">A pipeline deploys but no data flows<a class="headerlink" href="#a-pipeline-deploys-but-no-data-flows" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Confirm it's <strong>running</strong> (Settings/Connections, or the connection status).</li>

@@ -2396,6 +2396,17 @@ prod, and the config shapes it read were not the ones the UI writes — but it d
 discard a reference implementation. If any of those capabilities is wanted, it
 should be specified against the live transforms and their config, not restored;
 git history has the old code.</p>
+<h2 id="addendum-2026-10-07-consumers-restore-running-pipelines-on-boot">Addendum (2026-10-07): consumers restore running pipelines on boot<a class="headerlink" href="#addendum-2026-10-07-consumers-restore-running-pipelines-on-boot" title="Permanent link">&para;</a></h2>
+<p>Start/stop are NATS commands and are not persisted. Until
+<code>plans/stable-connections.md</code>, a standing consumer that restarted — a
+rollout, a crash, a node move — forgot every pipeline it ran and stayed idle
+until someone redeployed from the builder; a webhook source answered 404
+meanwhile. Every consumer now calls <code>sdk.RestoreRunning</code> after subscribing
+to the command subjects: it reads the connections the database says are
+<code>running</code> whose graph mentions the consumer's node type and runs the same
+start path a command would. <code>TestConsumersRestoreRunningOnBoot</code> fails for a
+consumer that does not. A connector rollout therefore no longer needs any
+redeploy afterwards.</p>
 <h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
 <p><strong>Fix the generic workers instead.</strong> Teach <code>cmd/consumer</code>/<code>cmd/producer</code> to read
 <code>type</code>, publish on <code>vrsky.data.*</code>, and speak JetStream. This rebuilds, per node
