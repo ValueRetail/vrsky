@@ -1346,6 +1346,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retries-and-the-idempotency-key-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retries and the Idempotency-Key header
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2322,6 +2339,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retries-and-the-idempotency-key-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retries and the Idempotency-Key header
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2382,6 +2416,27 @@ error — nothing that points at DNS. See
 <a href="../../operator/troubleshooting/">Troubleshooting</a>.</p>
 </div>
 <p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.</p>
+<h3 id="retries-and-the-idempotency-key-header">Retries and the <code>Idempotency-Key</code> header<a class="headerlink" href="#retries-and-the-idempotency-key-header" title="Permanent link">&para;</a></h3>
+<p>A sender whose outbox delivers <em>at least once</em> — a till that lost the <code>202</code>,
+timed out, or restarted — sends the same request again. If it repeats an
+<code>Idempotency-Key</code> header (any string up to 64 characters, unique per event;
+an outbox entry id is ideal), VRSky treats the repeat as already delivered:</p>
+<ul>
+<li><strong>First time:</strong> the signature is checked as usual, the message is published,
+  the key is remembered — then <code>202</code>.</li>
+<li><strong>Seen before:</strong> nothing is published; <code>202</code> again, with
+  <code>Idempotency-Replayed: true</code> and <code>"replayed": true</code> in the body, so the
+  sender marks it sent and stops retrying.</li>
+<li><strong>The publish failed:</strong> <code>5xx</code> and the key is <em>not</em> remembered, so the retry
+  is a real second attempt.</li>
+</ul>
+<p>Keys are remembered per connection for 30 days, in the database. A second,
+shorter layer catches two identical requests that arrive at the same instant:
+the message id on the stream is derived from the key, and JetStream drops a
+duplicate id for five minutes. The key is only consulted after the signature
+check, so an unsigned request can neither learn that a key exists nor plant
+one. A key reused with a different body is treated as a replay — that is what
+the header means. Requests without the header behave exactly as before.</p>
 <p>Config reference:</p>
 <ul>
 <li><code>type</code> — <code>"http"</code>.</li>
