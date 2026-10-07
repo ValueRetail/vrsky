@@ -34,7 +34,7 @@ func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Spend one attempt before anything is read or looked up; it is handed
 	// back below once the token proves valid. See ratelimit.go.
 	addr := clientAddress(r)
-	if wait, ok, first := s.registerLimit.take(addr, s.now()); !ok {
+	if wait, ok, first := s.registerLimit.Take(addr, s.now()); !ok {
 		registerLimited.Inc()
 		if first {
 			s.logger.Warn("Registration attempts blocked: too many failures from one address",
@@ -99,7 +99,7 @@ func (s *gateway) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// The token is real, so whatever happens next this was not a failed
 	// attempt: a taken name or a bad group is a mistake by someone entitled
 	// to register here.
-	s.registerLimit.refund(addr, s.now())
+	s.registerLimit.Refund(addr, s.now())
 
 	name := firstNonEmpty(clip(req.Name, 255), clip(suggested, 255), clip(req.Hostname, 255), "agent")
 	// The machine's own --groups win over the token's; both were typed by

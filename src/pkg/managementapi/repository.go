@@ -109,6 +109,9 @@ type Repository interface {
 
 	// CreateAuthAuditLog creates an auth audit log entry
 	CreateAuthAuditLog(ctx context.Context, log *AuthAuditLog) error
+	// HasLoginSucceededFrom reports whether this email logged in successfully
+	// from an address inside network (an inet or CIDR) since the given time.
+	HasLoginSucceededFrom(ctx context.Context, email, network string, since time.Time) (bool, error)
 
 	// ============================================
 	// Tenant Operations (Phase 1 Refactor)

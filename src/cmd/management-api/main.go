@@ -291,6 +291,7 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 		}
 	})
 	restHandler.SetDB(db)
+	restHandler.SetAuthLimits(managementapi.AuthLimitsFromEnv(slog.Default()))
 
 	// JetStream context for DLQ endpoints (#70). Optional — DLQ handlers
 	// return 503 if JS is unconfigured. Stream creation is lazy (workers

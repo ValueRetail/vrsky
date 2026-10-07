@@ -294,7 +294,7 @@ func (h *Handler) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ID:           uuid.New().String(),
 		UserID:       user.ID,
 		TokenHash:    hashedToken,
-		IPAddress:    stringPtr(getClientIP(r)),
+		IPAddress:    optString(getClientIP(r)),
 		UserAgent:    stringPtr(r.UserAgent()),
 		CreatedAt:    now,
 		ExpiresAt:    auth.CalculateSessionExpiry(),

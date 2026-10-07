@@ -18,6 +18,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
 	"github.com/ValueRetail/vrsky/pkg/claimcheck"
+	"github.com/ValueRetail/vrsky/pkg/failurelimit"
 	// lint:connector-ok — the output direction owns one durable per pipeline
 	// (remote-agent-out-<connID>) so a message can wait in the stream while
 	// its agent is offline. The SDK's producer path cannot: it NAKs on error
@@ -87,7 +88,7 @@ type gateway struct {
 	// membershipRefresh is how often group sessions re-read their members.
 	membershipRefresh time.Duration
 	// registerLimit bounds failed registration attempts per client address.
-	registerLimit *failureLimiter
+	registerLimit *failurelimit.Limiter
 
 	now func() time.Time
 }
@@ -100,7 +101,7 @@ func newGateway() *gateway {
 		uploadMax:         defaultUploadMax,
 		outputAckWait:     30 * time.Second,
 		membershipRefresh: defaultMembershipRefresh,
-		registerLimit:     newFailureLimiter(defaultRegisterMaxFailures),
+		registerLimit:     newRegisterLimiter(defaultRegisterMaxFailures),
 		now:               time.Now,
 	}
 	g.lookupAgent = g.dbLookupAgent
@@ -188,7 +189,7 @@ func (s *gateway) Configure(ctx context.Context, res *sdk.Resources) error {
 		}
 	}
 
-	s.registerLimit = newFailureLimiter(registerMaxFailuresFromEnv(s.logger))
+	s.registerLimit = newRegisterLimiter(registerMaxFailuresFromEnv(s.logger))
 
 	s.RegisterHTTPHandler("/agent/", s.agentRoutes())
 	s.RegisterHTTPHandler("/events/", s.handleEvents())

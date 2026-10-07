@@ -84,6 +84,44 @@ Follow the chain from the end:
    workspace**; a platform alert needs a target with **platform** ticked;
    `min_severity` on the target may filter it.
 
+## Login answers "too many failed sign-in attempts"
+
+That is the failed-attempt limit (plans/login-rate-limit.md), and the API
+answered `429` without checking the password. Two things trip it:
+
+- **Ten failed logins from one network address** — any accounts — then one
+  more attempt per minute. An office shares one address, so ten mistypes
+  between colleagues with no success in between is enough. Successful logins
+  never count.
+- **Ten failed logins against one account** from anywhere, then one per five
+  minutes. This is what stops password guessing, and it also means someone
+  who knows an email can keep its owner on the password form — *except* from
+  an address that has logged in to that account in the last 30 days, which
+  is still let through.
+
+The message is the same in both cases, on purpose: it must not say whether
+the account exists. Sign-up (`POST /api/v1/auth/register`) has its own
+limit, five requests per address, then one per ten minutes.
+
+Open sessions and SSO sign-in are not affected. To see what is going on:
+
+```bash
+kubectl logs -n vrsky-platform deploy/vrsky-management-api --since=1h | grep "Sign-in attempts blocked"
+```
+
+One line per block, with the scope (`address` or `account`) and the key. The
+same event is in `auth_audit_log` with status `blocked`, and
+`vrsky_auth_limited_total{endpoint,scope}` counts refusals. To change the
+allowance, or switch a limit off, without a build:
+
+```bash
+kubectl set env -n vrsky-platform deploy/vrsky-management-api AUTH_LOGIN_MAX_FAILURES=20 AUTH_SIGNUP_MAX_ATTEMPTS=5
+```
+
+`0` turns that limit off. The counters live in memory per replica, so with
+two replicas the effective allowance is up to twice the number, and a deploy
+forgets them.
+
 ## A builder panel says "cannot reach the data-converter service"
 
 The builder's live panels (Converter, Filter, File Watcher, …) are served by

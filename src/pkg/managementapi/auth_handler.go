@@ -21,6 +21,15 @@ import (
 func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Every sign-up request hashes a password, so every request counts here,
+	// before the body is read. Never refunded: many sign-ups from one address
+	// is the thing being limited. See auth_limit.go.
+	addr := clientAddr(r)
+	if wait, ok, first := h.authLimits.signup.Take(addr, h.authLimits.now()); !ok {
+		h.refuseLimited(w, r, "signup", "address", addr, "", wait, first)
+		return
+	}
+
 	// Parse request body
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -167,6 +176,18 @@ func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// One attempt is spent per address before the body is read, and one per
+	// account once the email is known; both are handed back on success. A
+	// blocked account still admits an address that has logged in to it
+	// before. See auth_limit.go.
+	limits := h.authLimits
+	now := limits.now()
+	addr := clientAddr(r)
+	if wait, ok, first := limits.address.Take(addr, now); !ok {
+		h.refuseLimited(w, r, "login", "address", addr, "", wait, first)
+		return
+	}
+
 	// Parse request body
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -184,8 +205,23 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The account key is the submitted email, registered or not, so the
+	// answer is the same for both and says nothing about who has an account.
+	account := strings.ToLower(strings.TrimSpace(req.Email))
+	wait, accountSpent, firstBlock := limits.account.Take(account, now)
+	if !accountSpent && !h.knownAddress(ctx, account, addr) {
+		h.refuseLimited(w, r, "login", "account", account, req.Email, wait, firstBlock)
+		return
+	}
+	refund := func() {
+		limits.address.Refund(addr, now)
+		if accountSpent {
+			limits.account.Refund(account, now)
+		}
+	}
+
 	// Get user by email
-	user, err := h.repo.GetUserByEmail(ctx, strings.ToLower(req.Email))
+	user, err := h.repo.GetUserByEmail(ctx, account)
 	if err != nil {
 		// Don't reveal if user exists or not
 		h.logAuthEvent(ctx, r, nil, req.Email, "login", "failed", stringPtr("user not found"))
@@ -207,6 +243,9 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The password was right: this was not a failed attempt.
+	refund()
+
 	// Generate session token
 	rawToken, hashedToken, err := auth.GenerateSessionToken()
 	if err != nil {
@@ -215,16 +254,16 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	now := time.Now().UTC()
+	created := time.Now().UTC()
 	session := &Session{
 		ID:           uuid.New().String(),
 		UserID:       user.ID,
 		TokenHash:    hashedToken,
-		IPAddress:    stringPtr(getClientIP(r)),
+		IPAddress:    optString(getClientIP(r)),
 		UserAgent:    stringPtr(r.UserAgent()),
-		CreatedAt:    now,
+		CreatedAt:    created,
 		ExpiresAt:    auth.CalculateSessionExpiry(),
-		LastActivity: now,
+		LastActivity: created,
 		IsActive:     true,
 	}
 
@@ -542,21 +581,18 @@ func extractBearerToken(r *http.Request) string {
 	return parts[1]
 }
 
-// getClientIP extracts the client IP address from the request
+// getClientIP is the client address for audit rows and sessions (see
+// clientIPAddr); empty when unknown.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first (for proxied requests)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
+	return clientIPString(r)
+}
 
-	// Check X-Real-IP header
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return xrip
+// optString is stringPtr for a value that may be absent: nil for "".
+func optString(s string) *string {
+	if s == "" {
+		return nil
 	}
-
-	// Fall back to RemoteAddr
-	return strings.Split(r.RemoteAddr, ":")[0]
+	return &s
 }
 
 // isValidEmail performs a basic email validation
@@ -583,7 +619,7 @@ func (h *Handler) logAuthEvent(ctx context.Context, r *http.Request, userID *str
 		EventType:   eventType,
 		Status:      status,
 		ErrorReason: errorReason,
-		IPAddress:   stringPtr(getClientIP(r)),
+		IPAddress:   optString(getClientIP(r)),
 		UserAgent:   stringPtr(r.UserAgent()),
 	}
 	// Ignore errors - audit logging should not fail operations

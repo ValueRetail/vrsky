@@ -311,54 +311,8 @@ func singular(name string) string {
 	}
 }
 
-// clientIP best-effort extracts the originating address, preferring
-// X-Forwarded-For when behind a proxy. The return value is bracket-free
-// and Postgres `inet`-compatible (empty string when unknown).
+// clientIP is the originating address for audit rows (see clientIPAddr),
+// bracket-free and Postgres `inet`-compatible; empty when unknown.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx > 0 {
-			return cleanIP(xff[:idx])
-		}
-		return cleanIP(xff)
-	}
-	// net.SplitHostPort handles both IPv4 ("1.2.3.4:5") and IPv6
-	// ("[::1]:5") forms — strips the port and bracket pair.
-	host, _, err := splitHostPortLoose(r.RemoteAddr)
-	if err != nil {
-		return ""
-	}
-	return cleanIP(host)
-}
-
-// splitHostPortLoose is like net.SplitHostPort but accepts inputs without a
-// port — returning the whole string as host. Avoids importing net just for
-// one helper.
-func splitHostPortLoose(s string) (host, port string, err error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", "", nil
-	}
-	if strings.HasPrefix(s, "[") {
-		// "[::1]:5" or "[::1]"
-		end := strings.IndexByte(s, ']')
-		if end < 0 {
-			return s, "", nil
-		}
-		host = s[1:end]
-		if end+1 < len(s) && s[end+1] == ':' {
-			port = s[end+2:]
-		}
-		return host, port, nil
-	}
-	if idx := strings.LastIndexByte(s, ':'); idx > 0 && strings.Count(s, ":") == 1 {
-		return s[:idx], s[idx+1:], nil
-	}
-	return s, "", nil
-}
-
-func cleanIP(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	return s
+	return clientIPString(r)
 }

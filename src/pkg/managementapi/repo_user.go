@@ -471,6 +471,21 @@ func (r *PostgresRepository) CreateAuthAuditLog(ctx context.Context, log *AuthAu
 	return nil
 }
 
+// HasLoginSucceededFrom is what lets a known address through a blocked
+// account (auth_limit.go). Only successful logins count, and only from inside
+// the given network; the audit row is written by LoginUser itself.
+func (r *PostgresRepository) HasLoginSucceededFrom(ctx context.Context, email, network string, since time.Time) (bool, error) {
+	var ok bool
+	// lint:tenant-ok — users and their sign-ins are not tenant-scoped.
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_audit_log
+			WHERE email = $1 AND event_type = 'login' AND status = 'success'
+			  AND ip_address <<= $2::inet AND created_at > $3)`,
+		email, network, since).Scan(&ok)
+	return ok, err
+}
+
 // ============================================
 // Helper Functions
 // ============================================

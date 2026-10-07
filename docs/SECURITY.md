@@ -170,6 +170,45 @@ middleware auto-captures the request; `member.role_change` and
 `member.remove` actions include `target_user_id` and (for role changes)
 `new_role` in the details column.
 
+## Failed-attempt limits on the auth routes
+
+`POST /api/v1/auth/login` and `POST /api/v1/auth/register` are the two
+unauthenticated routes that do real work per request: a bcrypt check or hash
+(cost 12) and a database round trip. Both are limited
+(`pkg/managementapi/auth_limit.go`, plan in `plans/login-rate-limit.md`); the
+remote-agent gateway limits `/agent/v1/register` the same way, with the same
+bucket (`pkg/failurelimit`).
+
+| Route | Keyed on | Allowance | Counts |
+|---|---|---|---|
+| login | client address | 10, then 1/min | failures only |
+| login | submitted email | 10, then 1/5 min | failures only |
+| sign-up | client address | 5, then 1/10 min | every request |
+
+- **Failures only** means an attempt is spent before anything is looked up
+  and handed back once the password proved right, so genuine use is never
+  slowed and a burst of simultaneous guesses still stops at the allowance.
+- **The account key is the submitted email, registered or not**, and the 429
+  body is the same for both scopes, so the limit does not reveal who has an
+  account.
+- **A blocked account still admits an address that has logged in to it in
+  the last 30 days** (read from `auth_audit_log`), so an attacker spending
+  the account's attempts does not keep its owner out from their usual place.
+- **The client address** is the first public hop reading `X-Forwarded-For`
+  from the right, skipping our own proxies (private, loopback, link-local).
+  A client-supplied entry only ever lands further left, so it cannot choose
+  its key. Audit rows use the same address. Putting a proxy with a public
+  address in front of ingress-nginx would make everyone one address;
+  `TestClientAddr` documents the chains that are handled.
+- Past the limit the answer is `429 RateLimited` with `Retry-After`; the
+  block is logged and audited once when it starts, and refusals are counted
+  in `vrsky_auth_limited_total{endpoint,scope}`.
+- Knobs: `AUTH_LOGIN_MAX_FAILURES`, `AUTH_SIGNUP_MAX_ATTEMPTS` (0 = off).
+  Counters are in memory per replica.
+
+Not limited: OIDC sign-in, forgot/reset/change-password, API-key and
+session-token checks (random secrets; guessing is not a realistic attack).
+
 ## OIDC / SSO (issue #68 — Phase 1C)
 
 Each tenant can configure one OIDC provider. The client secret is stored
