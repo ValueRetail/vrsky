@@ -63,7 +63,10 @@ alertmanager:
       group_by: ["alertname", "tenant_id"]
       group_wait: 30s
       group_interval: 5m
-      repeat_interval: 4h
+      # A reminder for an alert that is STILL firing, once a day. 4h meant six
+      # cards a day per standing alert; with resolved cards off there is no
+      # pairing to make that useful, and Ludvik muted the channel (2026-10-07).
+      repeat_interval: 24h
       routes:
         - receiver: "null"
           matchers:
@@ -111,3 +114,9 @@ defaultRules:
     kubeSchedulerRecording: false
     kubeControllerManager: false
     kubeProxy: false
+  disabled:
+    # "CPU requests exceed what is left after losing one node." On a two-node
+    # cluster with ~80 % requested that is true by construction and the alert
+    # never clears; it fired non-stop from 2026-10-01. The headroom question is
+    # tracked separately (a third node or lower connector requests), not here.
+    KubeCPUOvercommit: true

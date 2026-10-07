@@ -179,15 +179,26 @@ tests:
         alertname: RemoteAgentOffline
         exp_alerts: []
 
-  # 9. ConnectorUnavailable — a connector Deployment has no replica.
+  # 9. ConnectorUnavailable — a connector Deployment has no replica. One
+  #    scaled to 0 on purpose (the parked alert responder) must stay silent.
   - interval: 1m
     input_series:
       - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-business-central-consumer"}'
         values: '0x30'
+      - series: 'kube_deployment_spec_replicas{namespace="vrsky-platform",deployment="vrsky-business-central-consumer"}'
+        values: '1x30'
       - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-remote-agent"}'
         values: '1x30'
+      - series: 'kube_deployment_spec_replicas{namespace="vrsky-platform",deployment="vrsky-remote-agent"}'
+        values: '1x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-alert-responder"}'
+        values: '0x30'
+      - series: 'kube_deployment_spec_replicas{namespace="vrsky-platform",deployment="vrsky-alert-responder"}'
+        values: '0x30'
       - series: 'kube_deployment_status_replicas_available{namespace="kube-system",deployment="coredns"}'
         values: '0x30'
+      - series: 'kube_deployment_spec_replicas{namespace="kube-system",deployment="coredns"}'
+        values: '1x30'
     alert_rule_test:
       - eval_time: 15m
         alertname: ConnectorUnavailable
