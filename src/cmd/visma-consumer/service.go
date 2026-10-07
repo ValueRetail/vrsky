@@ -105,6 +105,11 @@ func (c *vismaConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error 
 	}
 	c.stopSub = stopSub
 	c.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, c.db, c.logger, "visma", c.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -135,15 +140,22 @@ func (c *vismaConsumer) handleStartCommand(msg *nats.Msg) {
 		c.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := c.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	c.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	c.mu.RLock()
-	_, exists := c.active[cmd.ConnectionID]
+	_, exists := c.active[connectionID]
 	c.mu.RUnlock()
 	if exists {
 		return
 	}
-	cfg, err := c.getConfig(context.Background(), cmd.ConnectionID, cmd.TenantID)
+	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Visma consumer for this connection", "error", err)
 		return
@@ -159,11 +171,11 @@ func (c *vismaConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
-	c.active[cmd.ConnectionID] = cancel
+	c.active[connectionID] = cancel
 	c.mu.Unlock()
 
 	logger.Info("Starting Visma poller", "resource", cfg.Resource, "interval", cfg.PollIntervalSeconds)
-	go c.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
+	go c.runPoller(ctx, connectionID, tenantID, cfg)
 }
 
 func (c *vismaConsumer) handleStopCommand(msg *nats.Msg) {

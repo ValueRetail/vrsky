@@ -873,3 +873,43 @@ func runInstructionContaining(dockerfile, needle string) (string, bool) {
 	}
 	return "", false
 }
+
+// Every standing consumer must restore running pipelines on boot.
+//
+// Start/stop are NATS commands and are not persisted. A consumer that only
+// reacts to commands silently drops every pipeline it runs when it restarts
+// — a rollout, a crash, a node move — until someone redeploys from the
+// builder, and a webhook source answers 404 meanwhile. sdk.RestoreRunning
+// is the one line that prevents it (plans/stable-connections.md); a new
+// consumer made by copying an old one must not lose it.
+func TestConsumersRestoreRunningOnBoot(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	paths, err := filepath.Glob(filepath.Join(root, "src", "cmd", "*", "service.go"))
+	if err != nil || len(paths) == 0 {
+		t.Skipf("no connector services found (%v) — restore guard skipped", err)
+	}
+	var missing, checked []string
+	for _, p := range paths {
+		body, err := os.ReadFile(p) //nolint:gosec // paths come from Glob over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		if !strings.Contains(string(body), `.connection.start"`) {
+			continue // producers and workers: no start command, nothing to restore
+		}
+		name := filepath.Base(filepath.Dir(p))
+		checked = append(checked, name)
+		if !strings.Contains(string(body), "sdk.RestoreRunning(") {
+			missing = append(missing, name)
+		}
+	}
+	if len(checked) < 10 {
+		t.Fatalf("only %d consumers subscribe to start commands (%v); the search pattern is probably stale", len(checked), checked)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Errorf("these consumers handle start commands but do not restore running pipelines on boot: %s\n\n"+
+			"Call sdk.RestoreRunning(ctx, db, logger, \"<node type>\", startConnection) in Run, after the command "+
+			"subscriptions, as every other consumer does.", strings.Join(missing, ", "))
+	}
+}

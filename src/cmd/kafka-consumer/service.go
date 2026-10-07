@@ -123,6 +123,11 @@ func (k *kafkaConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error 
 	k.stopSub = stopSub
 
 	k.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, k.db, k.logger, "kafka", k.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -155,17 +160,24 @@ func (k *kafkaConsumer) handleStartCommand(msg *nats.Msg) {
 		k.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := k.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	k.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := k.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	k.mu.RLock()
-	_, exists := k.active[cmd.ConnectionID]
+	_, exists := k.active[connectionID]
 	k.mu.RUnlock()
 	if exists {
 		logger.Warn("Kafka consumer already running")
 		return
 	}
 
-	cfg, ok := k.getKafkaConfig(cmd.ConnectionID, cmd.TenantID)
+	cfg, ok := k.getKafkaConfig(connectionID, tenantID)
 	if !ok {
 		logger.Debug("Not a Kafka consumer for this connection, ignoring")
 		return
@@ -177,12 +189,12 @@ func (k *kafkaConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	k.mu.Lock()
-	k.active[cmd.ConnectionID] = cancel
+	k.active[connectionID] = cancel
 	k.mu.Unlock()
-	_ = k.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
+	_ = k.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting Kafka consumer", "brokers", cfg.Brokers, "topic", cfg.Topic, "group", cfg.ConsumerGroup, "auth", cfg.AuthType)
-	go k.consumeLoop(ctx, cmd.ConnectionID, cmd.TenantID, cfg, logger)
+	go k.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
 }
 
 func (k *kafkaConsumer) handleStopCommand(msg *nats.Msg) {

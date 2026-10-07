@@ -273,32 +273,11 @@ func (s *gateway) onCommand(start bool) nats.MsgHandler {
 }
 
 // restoreRunning starts a session for every pipeline the database says is
-// running with a remote_agent node. Connection commands are not persisted, so
-// without this a restart of this service would silently stop every
-// agent-backed pipeline until someone redeployed it. It is safe to repeat:
-// starting binds each output durable at the position it kept.
+// running with a remote_agent node, through the shared helper every standing
+// consumer uses (plans/stable-connections.md). Safe to repeat: starting binds
+// each output durable at the position it kept.
 func (s *gateway) restoreRunning(ctx context.Context) {
-	// lint:tenant-ok — fleet-wide boot scan; each row's own tenant scopes everything after.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id::text, tenant_id FROM connections
-		WHERE status = 'running' AND nodes::text LIKE '%"remote_agent"%'`)
-	if err != nil {
-		s.logger.Error("Could not list running pipelines to restore", "error", err)
-		return
-	}
-	type pair struct{ id, tenant string }
-	var todo []pair
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.id, &p.tenant); err == nil {
-			todo = append(todo, p)
-		}
-	}
-	_ = rows.Close()
-	for _, p := range todo {
-		s.startConnection(ctx, p.id, p.tenant)
-	}
-	s.logger.Info("Restored running pipelines", "count", len(todo))
+	sdk.RestoreRunning(ctx, s.db, s.logger, "remote_agent", s.startConnection)
 }
 
 // startConnection brings a pipeline's remote_agent nodes up, or does nothing if

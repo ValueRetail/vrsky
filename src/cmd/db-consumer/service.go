@@ -89,6 +89,11 @@ func (s *dbConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "database", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -162,18 +167,24 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("Failed to parse start command", "error", err)
 		return
 	}
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
 
-	s.logger.Info("Received start command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	s.mu.RLock()
-	_, exists := s.activeConnections[cmd.ConnectionID]
+	_, exists := s.activeConnections[connectionID]
 	s.mu.RUnlock()
 	if exists {
-		s.logger.Warn("DB consumer already active", "connection_id", cmd.ConnectionID)
+		s.logger.Warn("DB consumer already active", "connection_id", connectionID)
 		return
 	}
 
-	conn, err := s.getConnection(cmd.ConnectionID, cmd.TenantID)
+	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to fetch connection", "error", err)
 		return
@@ -181,7 +192,7 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 
 	dbConfig, ok := s.extractDBConfig(conn)
 	if !ok {
-		s.logger.Debug("Not a database consumer, ignoring", "connection_id", cmd.ConnectionID)
+		s.logger.Debug("Not a database consumer, ignoring", "connection_id", connectionID)
 		return
 	}
 
@@ -199,7 +210,7 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 	sourceDB, err := s.openSource(connStr)
 	if err != nil {
 		s.logger.Error("Failed to open source database", "error", err)
-		s.emitEvent(cmd.ConnectionID, DBEvent{
+		s.emitEvent(connectionID, DBEvent{
 			Type: "error", Message: "Failed to connect: " + err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
@@ -209,7 +220,7 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 	if err := sourceDB.Ping(); err != nil {
 		s.logger.Error("Failed to ping source database", "error", err)
 		sourceDB.Close()
-		s.emitEvent(cmd.ConnectionID, DBEvent{
+		s.emitEvent(connectionID, DBEvent{
 			Type: "error", Message: "Cannot reach database: " + err.Error(),
 			Time: time.Now().UTC().Format(time.RFC3339),
 		})
@@ -219,29 +230,29 @@ func (s *dbConsumer) handleStartCommand(msg *nats.Msg) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ac := &ActiveDBConnection{
-		ConnectionID: cmd.ConnectionID,
-		TenantID:     cmd.TenantID,
+		ConnectionID: connectionID,
+		TenantID:     tenantID,
 		SourceDB:     sourceDB,
 		Cancel:       cancel,
 		DBConfig:     dbConfig,
 	}
 
 	s.mu.Lock()
-	s.activeConnections[cmd.ConnectionID] = ac
+	s.activeConnections[connectionID] = ac
 	s.mu.Unlock()
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running"); err != nil {
+	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
 	}
 
-	s.emitEvent(cmd.ConnectionID, DBEvent{
+	s.emitEvent(connectionID, DBEvent{
 		Type: "connected", Message: fmt.Sprintf("Connected to %s@%s:%d/%s", dbConfig.User, dbConfig.Host, dbConfig.Port, dbConfig.Database),
 		Time: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	go s.runConsumer(ctx, ac)
 
-	s.logger.Info("DB consumer started", "connection_id", cmd.ConnectionID, "host", dbConfig.Host, "database", dbConfig.Database)
+	s.logger.Info("DB consumer started", "connection_id", connectionID, "host", dbConfig.Host, "database", dbConfig.Database)
 }
 
 func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {

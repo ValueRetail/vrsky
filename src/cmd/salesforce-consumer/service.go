@@ -137,6 +137,11 @@ func (s *salesforceConsumer) Run(ctx context.Context, publish sdk.PublishFunc) e
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "salesforce", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -169,17 +174,24 @@ func (s *salesforceConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := s.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *salesforceConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	s.mu.RLock()
-	_, exists := s.active[cmd.ConnectionID]
+	_, exists := s.active[connectionID]
 	s.mu.RUnlock()
 	if exists {
 		logger.Warn("Salesforce poller already running")
 		return
 	}
 
-	cfg, err := s.getSalesforceConfig(cmd.ConnectionID, cmd.TenantID)
+	cfg, err := s.getSalesforceConfig(connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Salesforce consumer for this connection", "error", err)
 		return
@@ -194,12 +206,12 @@ func (s *salesforceConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.active[cmd.ConnectionID] = cancel
+	s.active[connectionID] = cancel
 	s.mu.Unlock()
-	_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
+	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting Salesforce poller", "instance_url", cfg.InstanceURL, "interval", cfg.PollIntervalSeconds)
-	go s.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
+	go s.runPoller(ctx, connectionID, tenantID, cfg)
 }
 
 func (s *salesforceConsumer) handleStopCommand(msg *nats.Msg) {

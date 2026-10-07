@@ -161,6 +161,19 @@ discard a reference implementation. If any of those capabilities is wanted, it
 should be specified against the live transforms and their config, not restored;
 git history has the old code.
 
+## Addendum (2026-10-07): consumers restore running pipelines on boot
+
+Start/stop are NATS commands and are not persisted. Until
+`plans/stable-connections.md`, a standing consumer that restarted — a
+rollout, a crash, a node move — forgot every pipeline it ran and stayed idle
+until someone redeployed from the builder; a webhook source answered 404
+meanwhile. Every consumer now calls `sdk.RestoreRunning` after subscribing
+to the command subjects: it reads the connections the database says are
+`running` whose graph mentions the consumer's node type and runs the same
+start path a command would. `TestConsumersRestoreRunningOnBoot` fails for a
+consumer that does not. A connector rollout therefore no longer needs any
+redeploy afterwards.
+
 ## Alternatives considered
 
 **Fix the generic workers instead.** Teach `cmd/consumer`/`cmd/producer` to read

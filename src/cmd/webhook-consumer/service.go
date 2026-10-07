@@ -131,6 +131,11 @@ func (s *webhookConsumer) Run(ctx context.Context, publish sdk.PublishFunc) erro
 
 	s.logger.Info("Subscribed to NATS command topics")
 	go s.expireKeys(ctx)
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "http", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -260,25 +265,31 @@ func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("Failed to parse start command", "error", err, "data", string(msg.Data))
 		return
 	}
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
 
-	s.logger.Info("Received start command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	s.mu.RLock()
-	_, exists := s.activeConnections[cmd.ConnectionID]
+	_, exists := s.activeConnections[connectionID]
 	s.mu.RUnlock()
 	if exists {
-		s.logger.Warn("Webhook already registered", "connection_id", cmd.ConnectionID)
+		s.logger.Warn("Webhook already registered", "connection_id", connectionID)
 		return
 	}
 
-	conn, err := s.getConnection(cmd.ConnectionID, cmd.TenantID)
+	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
-		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", cmd.ConnectionID)
+		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", connectionID)
 		return
 	}
 
 	if !s.hasWebhookConsumer(conn) {
-		s.logger.Debug("Not a webhook consumer, ignoring", "connection_id", cmd.ConnectionID)
+		s.logger.Debug("Not a webhook consumer, ignoring", "connection_id", connectionID)
 		return
 	}
 
@@ -294,26 +305,26 @@ func (s *webhookConsumer) handleStartCommand(msg *nats.Msg) {
 	clientCA := s.extractClientCA(conn)
 	if len(clientCA) > 0 && s.mtlsPort == "" {
 		s.logger.Warn("Connection requires mTLS (tls.client_ca) but WORKER_MTLS_PORT is unset; the connection is unreachable — there is no TLS listener and plain-port requests are rejected as missing a client cert. Set WORKER_MTLS_PORT.",
-			"connection_id", cmd.ConnectionID)
+			"connection_id", connectionID)
 	}
 
 	s.mu.Lock()
-	s.activeConnections[cmd.ConnectionID] = &ActiveConnection{
-		ConnectionID: cmd.ConnectionID,
-		TenantID:     cmd.TenantID,
+	s.activeConnections[connectionID] = &ActiveConnection{
+		ConnectionID: connectionID,
+		TenantID:     tenantID,
 		Cancel:       cancel,
 		Signature:    sig,
 		ClientCA:     clientCA,
 	}
 	s.mu.Unlock()
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running"); err != nil {
+	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
 	}
 
 	s.logger.Info("Webhook registered",
-		"connection_id", cmd.ConnectionID,
-		"path", fmt.Sprintf("/webhook/%s", cmd.ConnectionID))
+		"connection_id", connectionID,
+		"path", fmt.Sprintf("/webhook/%s", connectionID))
 }
 
 // handleStopCommand processes a stop command from NATS

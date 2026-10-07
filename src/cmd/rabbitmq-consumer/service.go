@@ -113,6 +113,11 @@ func (c *rabbitConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error
 	c.stopSub = stopSub
 
 	c.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, c.db, c.logger, "rabbitmq", c.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -145,17 +150,24 @@ func (c *rabbitConsumer) handleStartCommand(msg *nats.Msg) {
 		c.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := c.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	c.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	c.mu.RLock()
-	_, exists := c.active[cmd.ConnectionID]
+	_, exists := c.active[connectionID]
 	c.mu.RUnlock()
 	if exists {
 		logger.Warn("RabbitMQ consumer already running")
 		return
 	}
 
-	cfg, ok := c.getConfig(cmd.ConnectionID, cmd.TenantID)
+	cfg, ok := c.getConfig(connectionID, tenantID)
 	if !ok {
 		logger.Debug("Not a RabbitMQ consumer for this connection, ignoring")
 		return
@@ -167,12 +179,12 @@ func (c *rabbitConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
-	c.active[cmd.ConnectionID] = cancel
+	c.active[connectionID] = cancel
 	c.mu.Unlock()
-	_ = c.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
+	_ = c.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting RabbitMQ consumer", "queue", cfg.Queue, "exchange", cfg.Exchange)
-	go c.consumeLoop(ctx, cmd.ConnectionID, cmd.TenantID, cfg, logger)
+	go c.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
 }
 
 func (c *rabbitConsumer) handleStopCommand(msg *nats.Msg) {

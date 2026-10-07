@@ -111,6 +111,11 @@ func (c *frontSystemsConsumer) Run(ctx context.Context, publish sdk.PublishFunc)
 	c.stopSub = stopSub
 
 	c.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, c.db, c.logger, "front_systems", c.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -133,9 +138,16 @@ func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
 		c.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := c.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	c.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
 
-	cfg, err := c.getConfig(context.Background(), cmd.ConnectionID, cmd.TenantID)
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
+
+	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Front Systems consumer for this connection", "error", err)
 		return
