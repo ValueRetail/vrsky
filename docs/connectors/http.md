@@ -22,6 +22,15 @@ The editor's Webhook (HTTP) source panel shows the URL for the environment you a
 
 You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.
 
+### The URL is stable
+
+The connection id in the URL survives Stop/Start, Deploy from the builder
+(which updates the connection in place) and restarts of the webhook service
+(which brings running pipelines back from the database by itself). Only
+**deleting** the connection changes it: the builder then asks before creating
+a new one, and says that the URL will change. Keys remembered for the old
+connection (below) go with it.
+
 ### Retries and the `Idempotency-Key` header
 
 A sender whose outbox delivers *at least once* — a till that lost the `202`,

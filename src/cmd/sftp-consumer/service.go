@@ -133,6 +133,11 @@ func (s *sftpConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "sftp", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -165,17 +170,24 @@ func (s *sftpConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := s.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	s.mu.RLock()
-	_, exists := s.active[cmd.ConnectionID]
+	_, exists := s.active[connectionID]
 	s.mu.RUnlock()
 	if exists {
 		logger.Warn("SFTP poller already running")
 		return
 	}
 
-	cfg, ok := s.getSFTPConfig(cmd.ConnectionID, cmd.TenantID)
+	cfg, ok := s.getSFTPConfig(connectionID, tenantID)
 	if !ok {
 		logger.Debug("Not an SFTP consumer for this connection, ignoring")
 		return
@@ -194,12 +206,12 @@ func (s *sftpConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.active[cmd.ConnectionID] = cancel
+	s.active[connectionID] = cancel
 	s.mu.Unlock()
-	_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
+	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting SFTP poller", "host", cfg.Host, "remote_dir", cfg.RemoteDir, "after_action", cfg.AfterAction)
-	go s.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg)
+	go s.runPoller(ctx, connectionID, tenantID, cfg)
 }
 
 func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {

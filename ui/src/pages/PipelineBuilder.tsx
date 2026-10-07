@@ -11,6 +11,7 @@ import { materializeSecrets } from '../utils/secrets'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient, { getActiveTenantId } from '../services/api'
+import { deployPipeline as deployPipelineSequence, ConnectionGone } from '../services/deployPipeline'
 import * as authService from '../services/authService'
 import { getSessionToken } from '../services/authService'
 import { reportUnauthorized } from '@/services/sessionExpiry'
@@ -525,32 +526,39 @@ export default function PipelineBuilder() {
     setIsLoading(true)
 
     try {
-      // Step 0: Determine connection ID — reuse existing or create new
+      // Step 0: Determine connection ID — reuse existing or create new. A
+      // redeploy keeps the id (stop → update in place → start); a webhook URL
+      // carries it. If the connection was deleted on the server, ask before
+      // making a new one rather than changing the URL behind someone's back
+      // (plans/stable-connections.md).
       let connectionId: string
       const prevConnectionId = activeCanvas?.deployedConnectionId
+      const isWebhookSource = nodes.find(n => n.type === 'input')?.data?.config?.type === 'http'
 
-      if (prevConnectionId) {
-        // Redeploy: stop → update in place → restart (preserves webhook URL)
-        try {
-          await apiClient.post(`/api/v1/connections/${prevConnectionId}/stop`)
-        } catch { /* may already be stopped */ }
-
-        try {
-          await apiClient.put(`/api/v1/connections/${prevConnectionId}`, payload)
-          connectionId = prevConnectionId
-        } catch {
-          // Connection may have been deleted externally — fall back to create
-          const response = await apiClient.post('/api/v1/connections', payload)
-          connectionId = response.data?.data?.id
-          if (!connectionId) throw new Error('No connection ID returned from server')
-          if (currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
+      try {
+        const result = await deployPipelineSequence(apiClient, payload, prevConnectionId)
+        connectionId = result.connectionId
+        if (result.created && currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
+      } catch (err) {
+        if (err instanceof ConnectionGone) {
+          setIsLoading(false)
+          if (currentCanvasId) setDeployedConnectionId(currentCanvasId, null)
+          showConfirmDialog({
+            title: 'Pipeline no longer exists on the server',
+            message: `The connection this canvas deployed (${err.connectionId.slice(0, 8)}…) was deleted. ` +
+              'Deploy it as a new pipeline?' +
+              (isWebhookSource ? ' Its webhook URL will change — anyone posting to the old one must be told.' : ''),
+            confirmLabel: 'Deploy as new',
+            cancelLabel: 'Cancel',
+            onConfirm: async () => {
+              hideConfirmDialog()
+              await deployPipeline()
+            },
+            onCancel: () => hideConfirmDialog(),
+          })
+          return
         }
-      } else {
-        // First deploy: create new connection
-        const response = await apiClient.post('/api/v1/connections', payload)
-        connectionId = response.data?.data?.id
-        if (!connectionId) throw new Error('No connection ID returned from server')
-        if (currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
+        throw err
       }
 
       // Step 1: Auto-start the pipeline

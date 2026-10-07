@@ -97,6 +97,11 @@ func (s *apiConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "api", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -142,20 +147,26 @@ func (s *apiConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("Failed to parse start command", "error", err, "data", string(msg.Data))
 		return
 	}
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
 
-	s.logger.Info("Received start command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	s.mu.RLock()
-	_, exists := s.activePipelines[cmd.ConnectionID]
+	_, exists := s.activePipelines[connectionID]
 	s.mu.RUnlock()
 	if exists {
-		s.logger.Warn("Pipeline already running", "connection_id", cmd.ConnectionID)
+		s.logger.Warn("Pipeline already running", "connection_id", connectionID)
 		return
 	}
 
-	conn, err := s.getConnection(cmd.ConnectionID, cmd.TenantID)
+	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
-		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", cmd.ConnectionID)
+		s.logger.Error("Failed to fetch connection", "error", err, "connection_id", connectionID)
 		return
 	}
 
@@ -164,21 +175,21 @@ func (s *apiConsumer) handleStartCommand(msg *nats.Msg) {
 	// (matches db-consumer/file-consumer), don't log an error.
 	apiConfig, ok := s.extractAPIConsumerConfig(conn)
 	if !ok {
-		s.logger.Debug("Not an API consumer, ignoring", "connection_id", cmd.ConnectionID)
+		s.logger.Debug("Not an API consumer, ignoring", "connection_id", connectionID)
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s.mu.Lock()
-	s.activePipelines[cmd.ConnectionID] = cancel
+	s.activePipelines[connectionID] = cancel
 	s.mu.Unlock()
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running"); err != nil {
+	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
 	}
 
-	go s.pollConnection(ctx, cmd.ConnectionID, cmd.TenantID, apiConfig)
+	go s.pollConnection(ctx, connectionID, tenantID, apiConfig)
 }
 
 // handleStopCommand processes a stop command from NATS

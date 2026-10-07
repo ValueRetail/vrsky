@@ -184,6 +184,11 @@ func (c *bcConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error {
 	c.resendSub = resendSub
 
 	c.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, c.db, c.logger, "business_central", c.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -217,15 +222,22 @@ func (c *bcConsumer) handleStartCommand(msg *nats.Msg) {
 		c.logger.Error("parse start command", "error", err)
 		return
 	}
-	logger := c.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	c.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
+
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	c.mu.RLock()
-	_, exists := c.active[cmd.ConnectionID]
+	_, exists := c.active[connectionID]
 	c.mu.RUnlock()
 	if exists {
 		return
 	}
-	cfg, err := c.getConfig(context.Background(), cmd.ConnectionID, cmd.TenantID)
+	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Business Central consumer for this connection", "error", err)
 		return
@@ -246,11 +258,11 @@ func (c *bcConsumer) handleStartCommand(msg *nats.Msg) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &poller{cancel: cancel, resend: make(chan struct{}, 1)}
 	c.mu.Lock()
-	c.active[cmd.ConnectionID] = p
+	c.active[connectionID] = p
 	c.mu.Unlock()
 
 	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds, "pictures", cfg.Pictures)
-	go c.runPoller(ctx, cmd.ConnectionID, cmd.TenantID, cfg, p.resend)
+	go c.runPoller(ctx, connectionID, tenantID, cfg, p.resend)
 }
 
 // handleResendCommand asks a running poller to send everything again on an

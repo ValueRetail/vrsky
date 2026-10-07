@@ -71,6 +71,11 @@ func (s *tenantConsumer) Run(ctx context.Context, publish sdk.PublishFunc) error
 	s.stopSub = stopSub
 
 	s.logger.Info("Subscribed to NATS command topics")
+	// Bring back what the database says is running: start/stop are NATS commands
+	// and are not persisted, so without this a restart silently stopped every
+	// pipeline on this service until someone redeployed it.
+	sdk.RestoreRunning(ctx, s.db, s.logger, "tenant", s.startConnection)
+
 	<-ctx.Done()
 	return nil
 }
@@ -107,13 +112,19 @@ func (s *tenantConsumer) handleStartCommand(msg *nats.Msg) {
 		s.logger.Error("Failed to parse start command", "error", err)
 		return
 	}
+	s.startConnection(context.Background(), cmd.ConnectionID, cmd.TenantID)
+}
 
-	logger := s.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+// startConnection is the start command's work, also what RestoreRunning calls on
+// boot for every pipeline the database says is running (plans/stable-connections.md).
+func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	_ = ctx
+	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 	logger.Info("Received start command")
 
 	// Check if already running
 	s.mu.RLock()
-	_, exists := s.activeBridges[cmd.ConnectionID]
+	_, exists := s.activeBridges[connectionID]
 	s.mu.RUnlock()
 	if exists {
 		logger.Warn("Bridge already running")
@@ -121,7 +132,7 @@ func (s *tenantConsumer) handleStartCommand(msg *nats.Msg) {
 	}
 
 	// Fetch connection from DB
-	conn, err := s.getConnection(cmd.ConnectionID, cmd.TenantID)
+	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Connection not found or not a tenant consumer", "error", err)
 		return
@@ -140,12 +151,12 @@ func (s *tenantConsumer) handleStartCommand(msg *nats.Msg) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.activeBridges[cmd.ConnectionID] = cancel
+	s.activeBridges[connectionID] = cancel
 	s.mu.Unlock()
 
-	_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "running")
+	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
-	go s.runBridge(ctx, cmd.ConnectionID, cmd.TenantID, tcConfig)
+	go s.runBridge(ctx, connectionID, tenantID, tcConfig)
 }
 
 // handleStopCommand processes a stop command

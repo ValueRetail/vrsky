@@ -151,6 +151,18 @@ one stream per pod so the panel sees all the traffic, not half. A test,
 `TestWorkerEventSourcesHaveKubernetesServices`, now fails if a proxied worker
 has no Service manifest.
 
+## After a connector restart, do I need to redeploy pipelines?
+
+No, not since 2026-10-07. Every standing consumer brings the pipelines the
+database lists as `running` back by itself when it starts (`Restored running
+pipelines count=N` in its log, within seconds of the pod being Ready). A
+webhook source is reachable again as soon as its consumer is up. If a
+pipeline did not come back, its consumer logged why at start (a config that
+no longer resolves, a missing secret); fix that and Stop/Start it.
+
+Deploying from the builder keeps the connection id and the webhook URL.
+Deleting a connection does not — the builder asks before creating a new one.
+
 ## A pipeline deploys but no data flows
 
 1. Confirm it's **running** (Settings/Connections, or the connection status).
