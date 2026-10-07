@@ -1127,6 +1127,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#login-answers-too-many-failed-sign-in-attempts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Login answers "too many failed sign-in attempts"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2429,6 +2440,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#login-answers-too-many-failed-sign-in-attempts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Login answers "too many failed sign-in attempts"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2597,6 +2619,35 @@ from quay.io; if it starts failing the same way, it needs the same treatment.</p
    workspace</strong>; a platform alert needs a target with <strong>platform</strong> ticked;
    <code>min_severity</code> on the target may filter it.</li>
 </ol>
+<h2 id="login-answers-too-many-failed-sign-in-attempts">Login answers "too many failed sign-in attempts"<a class="headerlink" href="#login-answers-too-many-failed-sign-in-attempts" title="Permanent link">&para;</a></h2>
+<p>That is the failed-attempt limit (plans/login-rate-limit.md), and the API
+answered <code>429</code> without checking the password. Two things trip it:</p>
+<ul>
+<li><strong>Ten failed logins from one network address</strong> — any accounts — then one
+  more attempt per minute. An office shares one address, so ten mistypes
+  between colleagues with no success in between is enough. Successful logins
+  never count.</li>
+<li><strong>Ten failed logins against one account</strong> from anywhere, then one per five
+  minutes. This is what stops password guessing, and it also means someone
+  who knows an email can keep its owner on the password form — <em>except</em> from
+  an address that has logged in to that account in the last 30 days, which
+  is still let through.</li>
+</ul>
+<p>The message is the same in both cases, on purpose: it must not say whether
+the account exists. Sign-up (<code>POST /api/v1/auth/register</code>) has its own
+limit, five requests per address, then one per ten minutes.</p>
+<p>Open sessions and SSO sign-in are not affected. To see what is going on:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api<span class="w"> </span>--since<span class="o">=</span>1h<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">"Sign-in attempts blocked"</span>
+</code></pre></div>
+<p>One line per block, with the scope (<code>address</code> or <code>account</code>) and the key. The
+same event is in <code>auth_audit_log</code> with status <code>blocked</code>, and
+<code>vrsky_auth_limited_total{endpoint,scope}</code> counts refusals. To change the
+allowance, or switch a limit off, without a build:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>env<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api<span class="w"> </span><span class="nv">AUTH_LOGIN_MAX_FAILURES</span><span class="o">=</span><span class="m">20</span><span class="w"> </span><span class="nv">AUTH_SIGNUP_MAX_ATTEMPTS</span><span class="o">=</span><span class="m">5</span>
+</code></pre></div>
+<p><code>0</code> turns that limit off. The counters live in memory per replica, so with
+two replicas the effective allowance is up to twice the number, and a deploy
+forgets them.</p>
 <h2 id="a-builder-panel-says-cannot-reach-the-data-converter-service">A builder panel says "cannot reach the data-converter service"<a class="headerlink" href="#a-builder-panel-says-cannot-reach-the-data-converter-service" title="Permanent link">&para;</a></h2>
 <p>The builder's live panels (Converter, Filter, File Watcher, …) are served by
 the management API, which proxies each worker's event stream at

@@ -2062,6 +2062,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failed-attempt-limits-on-the-auth-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed-attempt limits on the auth routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#oidc-sso-issue-68-phase-1c" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2769,6 +2780,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failed-attempt-limits-on-the-auth-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed-attempt limits on the auth routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#oidc-sso-issue-68-phase-1c" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3159,6 +3181,67 @@ disables the relevant controls when the row is the sole owner.</p>
 middleware auto-captures the request; <code>member.role_change</code> and
 <code>member.remove</code> actions include <code>target_user_id</code> and (for role changes)
 <code>new_role</code> in the details column.</p>
+<h2 id="failed-attempt-limits-on-the-auth-routes">Failed-attempt limits on the auth routes<a class="headerlink" href="#failed-attempt-limits-on-the-auth-routes" title="Permanent link">&para;</a></h2>
+<p><code>POST /api/v1/auth/login</code> and <code>POST /api/v1/auth/register</code> are the two
+unauthenticated routes that do real work per request: a bcrypt check or hash
+(cost 12) and a database round trip. Both are limited
+(<code>pkg/managementapi/auth_limit.go</code>, plan in <code>plans/login-rate-limit.md</code>); the
+remote-agent gateway limits <code>/agent/v1/register</code> the same way, with the same
+bucket (<code>pkg/failurelimit</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Keyed on</th>
+<th>Allowance</th>
+<th>Counts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>login</td>
+<td>client address</td>
+<td>10, then 1/min</td>
+<td>failures only</td>
+</tr>
+<tr>
+<td>login</td>
+<td>submitted email</td>
+<td>10, then 1/5 min</td>
+<td>failures only</td>
+</tr>
+<tr>
+<td>sign-up</td>
+<td>client address</td>
+<td>5, then 1/10 min</td>
+<td>every request</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Failures only</strong> means an attempt is spent before anything is looked up
+  and handed back once the password proved right, so genuine use is never
+  slowed and a burst of simultaneous guesses still stops at the allowance.</li>
+<li><strong>The account key is the submitted email, registered or not</strong>, and the 429
+  body is the same for both scopes, so the limit does not reveal who has an
+  account.</li>
+<li><strong>A blocked account still admits an address that has logged in to it in
+  the last 30 days</strong> (read from <code>auth_audit_log</code>), so an attacker spending
+  the account's attempts does not keep its owner out from their usual place.</li>
+<li><strong>The client address</strong> is the first public hop reading <code>X-Forwarded-For</code>
+  from the right, skipping our own proxies (private, loopback, link-local).
+  A client-supplied entry only ever lands further left, so it cannot choose
+  its key. Audit rows use the same address. Putting a proxy with a public
+  address in front of ingress-nginx would make everyone one address;
+  <code>TestClientAddr</code> documents the chains that are handled.</li>
+<li>Past the limit the answer is <code>429 RateLimited</code> with <code>Retry-After</code>; the
+  block is logged and audited once when it starts, and refusals are counted
+  in <code>vrsky_auth_limited_total{endpoint,scope}</code>.</li>
+<li>Knobs: <code>AUTH_LOGIN_MAX_FAILURES</code>, <code>AUTH_SIGNUP_MAX_ATTEMPTS</code> (0 = off).
+  Counters are in memory per replica.</li>
+</ul>
+<p>Not limited: OIDC sign-in, forgot/reset/change-password, API-key and
+session-token checks (random secrets; guessing is not a realistic attack).</p>
 <h2 id="oidc-sso-issue-68-phase-1c">OIDC / SSO (issue #68 — Phase 1C)<a class="headerlink" href="#oidc-sso-issue-68-phase-1c" title="Permanent link">&para;</a></h2>
 <p>Each tenant can configure one OIDC provider. The client secret is stored
 encrypted in the <code>secrets</code> table (#66); only the UUID reference lives on
