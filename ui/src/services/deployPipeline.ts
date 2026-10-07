@@ -11,9 +11,12 @@
 import type { AxiosInstance } from 'axios'
 
 export class ConnectionGone extends Error {
-  constructor(public readonly connectionId: string) {
+  readonly connectionId: string
+
+  constructor(connectionId: string) {
     super(`connection ${connectionId} no longer exists on the server`)
     this.name = 'ConnectionGone'
+    this.connectionId = connectionId
   }
 }
 
