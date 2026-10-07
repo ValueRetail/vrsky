@@ -61,3 +61,17 @@ func classifySigErr(err error) string {
 		return "mismatch"
 	}
 }
+
+// webhookReplayed counts requests acknowledged without a publish because
+// their Idempotency-Key had been seen before (plans/webhook-idempotency.md).
+var webhookReplayed = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "webhook_replayed_total",
+		Help: "Number of webhook requests answered 202 as a replay of an Idempotency-Key already published.",
+	},
+	[]string{"connection_id"},
+)
+
+func incReplayed(connectionID string) {
+	webhookReplayed.WithLabelValues(connectionID).Inc()
+}

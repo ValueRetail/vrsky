@@ -144,6 +144,15 @@ with `PATCH` — updates send `If-Match: *`).
 
 - `entity` — write target (default `items`; e.g. `salesOrders`).
 - `method` — `POST` (default) or `PATCH`.
+- `dedupe_fields` — optional, `POST` only: before writing, GET the entity
+  filtered on these fields (payload field = BC property, equality) and skip
+  the write when a record already matches. Guards against a message
+  redelivered inside VRSky after BC accepted it. For sales from a till:
+  `["externalDocumentNumber", "customerNumber"]`. `salesInvoices` is an
+  aggregate whose `status` runs Draft → Open → Paid, so posted invoices are
+  found by the same lookup. A field missing from a message means the check
+  cannot run and the write proceeds, with a log line; if BC cannot be asked
+  (5xx, network) the message waits rather than risk a duplicate.
 
 ```json
 {
@@ -155,6 +164,20 @@ with `PATCH` — updates send `If-Match: *`).
     "client_secret_secret_id": "<secret-uuid>",
     "entity": "items",
     "method": "POST"
+  }
+}
+```
+
+For a till posting sales:
+
+```json
+{
+  "type": "business_central",
+  "business_central": {
+    "…": "…",
+    "entity": "salesInvoices",
+    "method": "POST",
+    "dedupe_fields": ["externalDocumentNumber", "customerNumber"]
   }
 }
 ```

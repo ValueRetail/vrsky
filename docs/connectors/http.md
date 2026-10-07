@@ -22,6 +22,29 @@ The editor's Webhook (HTTP) source panel shows the URL for the environment you a
 
 You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.
 
+### Retries and the `Idempotency-Key` header
+
+A sender whose outbox delivers *at least once* — a till that lost the `202`,
+timed out, or restarted — sends the same request again. If it repeats an
+`Idempotency-Key` header (any string up to 64 characters, unique per event;
+an outbox entry id is ideal), VRSky treats the repeat as already delivered:
+
+- **First time:** the signature is checked as usual, the message is published,
+  the key is remembered — then `202`.
+- **Seen before:** nothing is published; `202` again, with
+  `Idempotency-Replayed: true` and `"replayed": true` in the body, so the
+  sender marks it sent and stops retrying.
+- **The publish failed:** `5xx` and the key is *not* remembered, so the retry
+  is a real second attempt.
+
+Keys are remembered per connection for 30 days, in the database. A second,
+shorter layer catches two identical requests that arrive at the same instant:
+the message id on the stream is derived from the key, and JetStream drops a
+duplicate id for five minutes. The key is only consulted after the signature
+check, so an unsigned request can neither learn that a key exists nor plant
+one. A key reused with a different body is treated as a replay — that is what
+the header means. Requests without the header behave exactly as before.
+
 Config reference:
 
 - `type` — `"http"`.

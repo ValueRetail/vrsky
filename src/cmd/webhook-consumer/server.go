@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/idempotency"
 	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 	"github.com/google/uuid"
 )
@@ -38,7 +39,7 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -121,8 +122,40 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 			contentType = "application/json"
 		}
 
+		// Idempotency-Key (plans/webhook-idempotency.md): a sender whose
+		// outbox delivers at least once repeats the key on every retry.
+		// Checked only after the signature, so an unsigned probe can neither
+		// read nor plant keys. A repeat is acknowledged and not published; a
+		// lookup that fails is logged and the request is treated as new (the
+		// Nats-Msg-Id layer below still catches a repeat within five minutes).
+		key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if len(key) > idempotency.MaxKeyLength {
+			http.Error(w, fmt.Sprintf("Idempotency-Key longer than %d characters", idempotency.MaxKeyLength), http.StatusBadRequest)
+			return
+		}
+		envID := uuid.New().String()
+		if key != "" {
+			if firstID, seen, err := s.keys.Seen(r.Context(), ac.TenantID, ac.ConnectionID, key); err != nil {
+				s.logger.Warn("Idempotency key lookup failed; treating the request as new",
+					"connection_id", ac.ConnectionID, "error", err)
+			} else if seen {
+				incReplayed(ac.ConnectionID)
+				s.logger.Info("Webhook replayed; already published",
+					"connection_id", ac.ConnectionID, "tenant_id", ac.TenantID, "envelope_id", firstID)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Idempotency-Replayed", "true")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"accepted","envelope_id":"%s","replayed":true}`, firstID)))
+				return
+			}
+			// The envelope id is the NATS message id: derived from the key it
+			// is stable across retries, so JetStream drops a second publish of
+			// the same request inside its dedup window — the second layer.
+			envID = idempotencyEnvelopeID(ac.ConnectionID, key)
+		}
+
 		env := &envelope.Envelope{
-			ID:            uuid.New().String(),
+			ID:            envID,
 			TenantID:      ac.TenantID,
 			IntegrationID: ac.ConnectionID,
 			Payload:       body,
@@ -132,6 +165,9 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 			CurrentStep:   0,
 			StepHistory:   []string{"webhook-consumer"},
 			CreatedAt:     time.Now().UTC(),
+		}
+		if key != "" {
+			env.Metadata = map[string]interface{}{"idempotency_key": key}
 		}
 
 		if s.publish == nil {
@@ -145,6 +181,16 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 				"tenant", ac.TenantID, "connection", ac.ConnectionID)
 			http.Error(w, "Failed to process webhook", http.StatusInternalServerError)
 			return
+		}
+
+		// Remembered only now, after the publish: a failed publish answered
+		// 5xx above and left nothing behind, so the sender's retry is a real
+		// second attempt. A failed Remember is logged, not reported — the
+		// message is on the stream, and a retry is what the next layer is for.
+		if key != "" {
+			if err := s.keys.Remember(r.Context(), ac.TenantID, ac.ConnectionID, key, env.ID); err != nil {
+				s.logger.Warn("Could not remember idempotency key", "connection_id", ac.ConnectionID, "error", err)
+			}
 		}
 
 		s.logger.Info("Webhook received and published",
@@ -420,4 +466,15 @@ func (s *webhookConsumer) handleTunnelRegister() http.HandlerFunc {
 		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"registered","tunnel_url":"%s","callback_url":"%s","registration_status":%d,"registration_response":%s}`,
 			tunnelURL, callbackURL, resp.StatusCode, string(regRespBody))))
 	}
+}
+
+// idempotencyNamespace is the UUID namespace for envelope ids derived from an
+// Idempotency-Key. Fixed, so the same key on the same connection always maps
+// to the same id — on every replica and across restarts.
+var idempotencyNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("vrsky-webhook-idempotency"))
+
+// idempotencyEnvelopeID is the envelope (and NATS message) id for a keyed
+// request: a UUID v5 of the connection and the key.
+func idempotencyEnvelopeID(connectionID, key string) string {
+	return uuid.NewSHA1(idempotencyNamespace, []byte(connectionID+"\x00"+key)).String()
 }
