@@ -1017,6 +1017,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator/billing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans & billing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../operator/troubleshooting/" class="md-nav__link">
         
   
@@ -2284,9 +2312,12 @@
 
 <h1 id="vrsky-pricing-proposal">VRSky Pricing Proposal<a class="headerlink" href="#vrsky-pricing-proposal" title="Permanent link">&para;</a></h1>
 <blockquote>
-<p><strong>Status: proposal for decision.</strong> The <em>structure</em> below is grounded in what the
-platform already meters and enforces. The <em>price points</em> are placeholders that
-need competitor benchmarking + a target-segment decision before launch.</p>
+<p><strong>Status: partly decided (2026-10-07).</strong> Sign-up stays open; a workspace gets a
+14-day trial, then its pipelines stop until a plan is active. Tiers are
+<strong>Trial / Paid / Enterprise</strong> with the limits in <code>plan_limits</code>; plans are
+activated by the platform operator after invoicing — no payment integration
+yet. How it works: <code>docs/operator/billing.md</code>; design: <code>plans/paid-plans.md</code>.
+Price points, overage and Stripe remain open, as below.</p>
 </blockquote>
 <h2 id="recommendation-in-one-line">Recommendation in one line<a class="headerlink" href="#recommendation-in-one-line" title="Permanent link">&para;</a></h2>
 <p><strong>Hybrid: a tiered monthly subscription (the predictable base) + usage overage on

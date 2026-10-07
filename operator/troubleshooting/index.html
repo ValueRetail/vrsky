@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../alert-responder/">
+        <link rel="prev" href="../billing/">
       
       
         <link rel="next" href="../encryption-at-rest/">
@@ -1020,6 +1020,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../billing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans & billing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1131,6 +1159,17 @@
     <span class="md-ellipsis">
       
         Login answers "too many failed sign-in attempts"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipelines-will-not-start-402-planrequired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipelines will not start: 402 PlanRequired
       
     </span>
   </a>
@@ -2451,6 +2490,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#pipelines-will-not-start-402-planrequired" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipelines will not start: 402 PlanRequired
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-builder-panel-says-cannot-reach-the-data-converter-service" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2648,6 +2698,12 @@ allowance, or switch a limit off, without a build:</p>
 <p><code>0</code> turns that limit off. The counters live in memory per replica, so with
 two replicas the effective allowance is up to twice the number, and a deploy
 forgets them.</p>
+<h2 id="pipelines-will-not-start-402-planrequired">Pipelines will not start: <code>402 PlanRequired</code><a class="headerlink" href="#pipelines-will-not-start-402-planrequired" title="Permanent link">&para;</a></h2>
+<p>The workspace's trial has ended and no plan is active (<code>docs/operator/billing.md</code>).
+Its pipelines were stopped by the billing sweep and the UI shows a red banner.
+Reading and editing still work. The owner asks for a plan under Settings → Plan;
+you activate it under Platform → Workspaces, which also starts the stopped
+pipelines again. To extend a trial instead, set plan Trial with a new end date.</p>
 <h2 id="a-builder-panel-says-cannot-reach-the-data-converter-service">A builder panel says "cannot reach the data-converter service"<a class="headerlink" href="#a-builder-panel-says-cannot-reach-the-data-converter-service" title="Permanent link">&para;</a></h2>
 <p>The builder's live panels (Converter, Filter, File Watcher, …) are served by
 the management API, which proxies each worker's event stream at
