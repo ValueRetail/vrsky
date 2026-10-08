@@ -74,7 +74,7 @@ reachable by port-forward only.
 | `ConnectionInError` | a pipeline has been in status `error` for 10 min | critical | the workspace |
 | `RemoteAgentOffline` | a registered agent has not polled for 1 h (its data waits 72 h) | warning | the workspace |
 | `DLQGrowing` | messages dead-lettered in the last 10 min | warning | platform |
-| `PipelineDown` | a workspace that was publishing goes silent for 10 min | critical | the workspace |
+| `PipelineDown` | a polled source that published in the previous 6 h publishes nothing for 1 h (webhook and queue sources are exempt) | critical | the workspace |
 | `ConnectorUnavailable` | a `vrsky-*` Deployment has 0 available replicas for 10 min | critical | platform |
 | `MgmtAPIErrorRate`, `DiskUsageHigh`, `CertExpirySoon`, `NATSInstanceApproachingCapacity`, `JetStreamLagHigh` | see the rules file | — | platform / workspace |
 
