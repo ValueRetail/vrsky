@@ -2617,7 +2617,7 @@ reachable by port-forward only.</p>
 </tr>
 <tr>
 <td><code>PipelineDown</code></td>
-<td>a workspace that was publishing goes silent for 10 min</td>
+<td>a polled source that published in the previous 6 h publishes nothing for 1 h (webhook and queue sources are exempt)</td>
 <td>critical</td>
 <td>the workspace</td>
 </tr>
