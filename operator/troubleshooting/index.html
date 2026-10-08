@@ -2711,6 +2711,8 @@ limit, five requests per address, then one per ten minutes.</p>
 <p>Open sessions and SSO sign-in are not affected. To see what is going on:</p>
 <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api<span class="w"> </span>--since<span class="o">=</span>1h<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">"Sign-in attempts blocked"</span>
 </code></pre></div>
+<p>Every management-api line is JSON (<code>service</code>, <code>level</code>, <code>msg</code>, then the
+fields), these included.</p>
 <p>One line per block, with the scope (<code>address</code> or <code>account</code>) and the key. The
 same event is in <code>auth_audit_log</code> with status <code>blocked</code>, and
 <code>vrsky_auth_limited_total{endpoint,scope}</code> counts refusals. To change the
