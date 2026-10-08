@@ -51,7 +51,7 @@ func TestWebhookConsumer_RoundTrip(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
 			AddRow(connID, tenant, "WH Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &webhookConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "webhook-consumer", DB: mgmtDB})
@@ -72,6 +72,11 @@ func TestWebhookConsumer_RoundTrip(t *testing.T) {
 	if string(got.Payload) != `{"hello":"webhook"}` {
 		t.Errorf("payload = %q", got.Payload)
 	}
+
+	// The last_payload write must name the tenant (WithArgs above). The handler
+	// discards that Exec's error, so only the mock's bookkeeping sees a wrong
+	// statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }
 
 // TestWebhookConsumer_HMAC verifies the #67 signature path is preserved: a
@@ -101,7 +106,7 @@ func TestWebhookConsumer_HMAC(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	// Exactly one successful publish → one last_payload write (the rejected
 	// request must not reach the DB).
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &webhookConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "webhook-consumer", DB: mgmtDB})
@@ -134,4 +139,9 @@ func TestWebhookConsumer_HMAC(t *testing.T) {
 	if string(got.Payload) != body {
 		t.Errorf("payload = %q, want %q", got.Payload, body)
 	}
+
+	// The last_payload write must name the tenant (WithArgs above). The handler
+	// discards that Exec's error, so only the mock's bookkeeping sees a wrong
+	// statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }

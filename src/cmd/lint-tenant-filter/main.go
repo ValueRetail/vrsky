@@ -60,9 +60,11 @@ var tenantScopedTables = []string{
 	"webhook_idempotency_keys",
 }
 
-// sqlStmt extracts the backtick-quoted SQL string that follows a
-// QueryContext / QueryRowContext / ExecContext call.
-var sqlStmt = regexp.MustCompile("(?s)(?:QueryRowContext|QueryContext|ExecContext)\\s*\\([^,]+,\\s*`([^`]*)`")
+// sqlStmt extracts the backtick-quoted SQL string that follows a Query /
+// QueryRow / Exec call, with or without the Context suffix (and so with or
+// without a leading ctx argument). The webhook consumer's plain Exec and
+// QueryRow calls were invisible to the Context-only form.
+var sqlStmt = regexp.MustCompile("(?s)(?:QueryRow|Query|Exec)(?:Context)?\\s*\\((?:[^,`]+,\\s*)?`([^`]*)`")
 
 // suppressMarker is the per-call escape hatch.
 const suppressMarker = "lint:tenant-ok"

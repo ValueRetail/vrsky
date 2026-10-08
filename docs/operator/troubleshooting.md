@@ -109,6 +109,9 @@ Open sessions and SSO sign-in are not affected. To see what is going on:
 kubectl logs -n vrsky-platform deploy/vrsky-management-api --since=1h | grep "Sign-in attempts blocked"
 ```
 
+Every management-api line is JSON (`service`, `level`, `msg`, then the
+fields), these included.
+
 One line per block, with the scope (`address` or `account`) and the key. The
 same event is in `auth_audit_log` with status `blocked`, and
 `vrsky_auth_limited_total{endpoint,scope}` counts refusals. To change the

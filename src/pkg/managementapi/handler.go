@@ -29,11 +29,12 @@ type Handler struct {
 	clientRegistry    *ClientRegistry
 	metricsCache      *MetricsCache
 	generatorRegistry *TestGeneratorRegistry
-	db                *sql.DB               // Direct DB access for raw queries (e.g. sample-data)
-	js                nats.JetStreamContext // JetStream context for DLQ endpoints (#70)
-	quotas            *QuotaTracker         // In-process token buckets for per-tenant rate limits (#74)
-	authLimits        *authLimits           // Failed-login and sign-up limits (plans/login-rate-limit.md)
-	platformOperators map[string]bool       // emails allowed on the platform routes (plans/paid-plans.md)
+	db                *sql.DB                                     // Direct DB access for raw queries (e.g. sample-data)
+	js                nats.JetStreamContext                       // JetStream context for DLQ endpoints (#70)
+	quotas            *QuotaTracker                               // In-process token buckets for per-tenant rate limits (#74)
+	authLimits        *authLimits                                 // Failed-login and sign-up limits (plans/login-rate-limit.md)
+	verifyPassword    func(hashedPassword, password string) error // nil = auth.VerifyPassword; tests record calls
+	platformOperators map[string]bool                             // emails allowed on the platform routes (plans/paid-plans.md)
 	// notifyPlatform raises an alert for the operator (plan requested, trial
 	// ended). dispatchAlert in production; tests capture it.
 	notifyPlatform func(ctx context.Context, alert *notify.Alert)
