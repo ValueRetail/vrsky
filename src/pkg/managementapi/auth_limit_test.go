@@ -15,6 +15,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/ValueRetail/vrsky/pkg/auth"
 )
 
 // loginRepo is a MockRepository that knows some users and records what the
@@ -202,6 +204,34 @@ func TestLogin_UnknownEmailIsLimitedLikeARealOne(t *testing.T) {
 		fake.Header().Get("Retry-After") != real.Header().Get("Retry-After") {
 		t.Fatalf("real account: %d %s %s\nunknown email: %d %s %s", real.Code, real.Header().Get("Retry-After"), real.Body.String(),
 			fake.Code, fake.Header().Get("Retry-After"), fake.Body.String())
+	}
+}
+
+// An unknown email costs the same bcrypt verify as a wrong password, at the
+// real cost, so the time a login takes says nothing about who has an account.
+func TestLogin_UnknownEmailStillVerifiesAPassword(t *testing.T) {
+	e := newLoginEnv(t)
+	u := e.repo.addUser(t, "real@example.com", "correct horse battery staple")
+	var hashes []string
+	e.h.verifyPassword = func(hash, password string) error {
+		hashes = append(hashes, hash)
+		return auth.VerifyPassword(hash, password)
+	}
+
+	wantStatus(t, e.login(client(1), "nobody@example.com", "wrong"), http.StatusUnauthorized, "unknown email")
+	wantStatus(t, e.login(client(1), "real@example.com", "wrong"), http.StatusUnauthorized, "wrong password")
+	wantStatus(t, e.login(client(1), "nobody@example.com", "wrong"), http.StatusUnauthorized, "unknown email again")
+	if len(hashes) != 3 {
+		t.Fatalf("verify ran %d times for 3 attempts; an unknown email must cost a verify too", len(hashes))
+	}
+	if hashes[1] != u.PasswordHash {
+		t.Fatalf("the real account was verified against %q, want its own hash", hashes[1])
+	}
+	if hashes[0] == u.PasswordHash || hashes[0] != hashes[2] {
+		t.Fatalf("unknown emails verified against %q then %q; want one dummy hash, not a user's", hashes[0], hashes[2])
+	}
+	if cost, err := bcrypt.Cost([]byte(hashes[0])); err != nil || cost != auth.DefaultBcryptCost {
+		t.Fatalf("dummy hash cost %d (%v), want the real cost %d so the timing matches", cost, err, auth.DefaultBcryptCost)
 	}
 }
 

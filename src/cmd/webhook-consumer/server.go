@@ -199,11 +199,10 @@ func (s *webhookConsumer) handleWebhook() http.HandlerFunc {
 			"payload_size", len(body),
 			"envelope_id", env.ID)
 
-		// Store last payload for tenant-consumer bridges (envelope.Marshal ==
-		// json.Marshal — identical bytes to what the publish closure sent).
-		if data, mErr := json.Marshal(env); mErr == nil {
-			_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, ac.ConnectionID)
-		}
+		// last_payload (the UI's data-structure preview) is written by the SDK's
+		// publish closure: tenant-scoped and throttled to one write per
+		// connection per 30 s. The unscoped write this handler used to make on
+		// top of it is gone (plans/hygiene-fixes.md).
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -232,9 +231,12 @@ func (s *webhookConsumer) handleSampleData() http.HandlerFunc {
 		// Read last_payload from DB — try exact connection first, then fall back to
 		// most recent connection from the same tenant that has payload data.
 		var lastPayload []byte
-		err := s.db.QueryRow("SELECT last_payload FROM connections WHERE id = $1 AND last_payload IS NOT NULL", connectionID).Scan(&lastPayload)
+		// lint:tenant-ok — this endpoint is cluster-internal (the ingress only
+		// routes /webhook) and the connection id is the key; the fallback below
+		// scopes by that row's own tenant.
+		err := s.db.QueryRowContext(r.Context(), `SELECT last_payload FROM connections WHERE id = $1 AND last_payload IS NOT NULL`, connectionID).Scan(&lastPayload)
 		if err != nil || len(lastPayload) == 0 {
-			err = s.db.QueryRow(`
+			err = s.db.QueryRowContext(r.Context(), `
 				SELECT c2.last_payload FROM connections c1
 				JOIN connections c2 ON c2.tenant_id = c1.tenant_id AND c2.last_payload IS NOT NULL
 				WHERE c1.id = $1
