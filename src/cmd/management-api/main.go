@@ -49,6 +49,9 @@ func main() {
 	// where a ctx is available), shippable to Loki. The HTTP access log is
 	// fully structured separately in LoggingMiddleware.
 	appLog := logging.New("management-api")
+	// Everything that logs through slog.Default() — the sign-in limiter, the
+	// billing sweep, orchestrator failures — goes out as the same JSON.
+	slog.SetDefault(appLog)
 	logger := slog.NewLogLogger(appLog.Handler(), slog.LevelInfo)
 
 	// Load configuration

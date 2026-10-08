@@ -882,6 +882,21 @@ func runInstructionContaining(dockerfile, needle string) (string, bool) {
 // builder, and a webhook source answers 404 meanwhile. sdk.RestoreRunning
 // is the one line that prevents it (plans/stable-connections.md); a new
 // consumer made by copying an old one must not lose it.
+// The management API's default slog logger is its JSON one: the slog.Default()
+// call sites (sign-in limits, billing, orchestrator failures) must not fall
+// back to the text handler (plans/hygiene-fixes.md).
+func TestManagementAPIUsesJSONDefaultLogger(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "cmd", "management-api", "main.go"))
+	if err != nil {
+		t.Fatalf("read cmd/management-api/main.go: %v", err)
+	}
+	src := string(body)
+	newAt, setAt := strings.Index(src, `logging.New("management-api")`), strings.Index(src, "slog.SetDefault(appLog)")
+	if newAt < 0 || setAt < 0 || setAt < newAt {
+		t.Fatalf("cmd/management-api/main.go must call slog.SetDefault(appLog) right after logging.New (found at %d and %d)", newAt, setAt)
+	}
+}
+
 func TestConsumersRestoreRunningOnBoot(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	paths, err := filepath.Glob(filepath.Join(root, "src", "cmd", "*", "service.go"))

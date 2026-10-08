@@ -2,11 +2,14 @@ package managementapi
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
@@ -16,6 +19,25 @@ import (
 // ============================================
 // Auth HTTP Handlers
 // ============================================
+
+// loginDummyHash is a bcrypt hash of a password nobody knows. A login with
+// an unknown email is verified against it so the request takes as long as a
+// wrong password does; otherwise the response time says who has an account.
+// Computed once, on first use, at the real cost.
+var loginDummyHash = sync.OnceValue(func() string {
+	var b [32]byte
+	_, _ = rand.Read(b[:])
+	h, _ := auth.HashPassword(hex.EncodeToString(b[:]))
+	return h
+})
+
+// verify compares a password with a hash through the test seam.
+func (h *Handler) verify(hashedPassword, password string) error {
+	if h.verifyPassword != nil {
+		return h.verifyPassword(hashedPassword, password)
+	}
+	return auth.VerifyPassword(hashedPassword, password)
+}
 
 // RegisterUser handles POST /api/v1/auth/register
 func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +250,9 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Get user by email
 	user, err := h.repo.GetUserByEmail(ctx, account)
 	if err != nil {
-		// Don't reveal if user exists or not
+		// Don't reveal whether the user exists — not in the answer, and not
+		// in the time it takes: an unknown email still costs one verify.
+		_ = h.verify(loginDummyHash(), req.Password)
 		h.logAuthEvent(ctx, r, nil, req.Email, "login", "failed", stringPtr("user not found"))
 		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid email or password", nil)
 		return
@@ -242,7 +266,7 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify password
-	if err := auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
+	if err := h.verify(user.PasswordHash, req.Password); err != nil {
 		h.logAuthEvent(ctx, r, &user.ID, req.Email, "login", "failed", stringPtr("invalid password"))
 		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid email or password", nil)
 		return

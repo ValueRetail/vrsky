@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -45,8 +46,36 @@ const QuotaRetryAfter = 1 * time.Second
 
 // ===== Repository =====
 
-// GetTenantQuotas reads the (cached-by-caller) quota row for a tenant.
+// GetTenantQuotas reads the quota row for a tenant. A tenant without one (a
+// workspace older than the quota table, or a row removed by hand) gets a row
+// built from its plan's limits — never the table's column defaults, which
+// are the pre-billing free tier (plans/hygiene-fixes.md).
 func (r *PostgresRepository) GetTenantQuotas(ctx context.Context, tenantID string) (*TenantQuotas, error) {
+	q, err := r.readTenantQuotas(ctx, tenantID)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return q, err
+	}
+	// The plan's limits; trial's when the tenant's plan has no limits row.
+	// The tenant filter makes this a no-op for a tenant that does not exist.
+	if _, err := r.db.ExecContext(ctx, `
+		INSERT INTO tenant_quotas (tenant_id, plan_name, max_msg_per_sec, max_integrations, max_storage_bytes)
+		SELECT t.id, p.plan_name, p.max_msg_per_sec, p.max_integrations, p.max_storage_bytes
+		  FROM tenants t
+		  JOIN plan_limits p ON p.plan_name = COALESCE(
+		         (SELECT l.plan_name FROM plan_limits l WHERE l.plan_name = t.subscription_plan), 'trial')
+		 WHERE t.id = $1
+		ON CONFLICT (tenant_id) DO NOTHING
+	`, tenantID); err != nil {
+		return nil, fmt.Errorf("create quota row: %w", err)
+	}
+	q, err = r.readTenantQuotas(ctx, tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("quotas for tenant %s: %w", tenantID, ErrTenantNotFound)
+	}
+	return q, err
+}
+
+func (r *PostgresRepository) readTenantQuotas(ctx context.Context, tenantID string) (*TenantQuotas, error) {
 	q := &TenantQuotas{TenantID: tenantID}
 	err := r.db.QueryRowContext(ctx, `
 		SELECT plan_name, max_msg_per_sec, max_integrations, max_storage_bytes,
@@ -56,15 +85,6 @@ func (r *PostgresRepository) GetTenantQuotas(ctx context.Context, tenantID strin
 		&q.PlanName, &q.MaxMsgPerSec, &q.MaxIntegrations, &q.MaxStorageBytes,
 		&q.StorageBytes, &q.StorageExceeded, &q.UpdatedAt,
 	)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Auto-create a default row so newly-onboarded tenants don't 404
-		// the first time the middleware checks them.
-		_, _ = r.db.ExecContext(ctx,
-			`INSERT INTO tenant_quotas (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`,
-			tenantID,
-		)
-		return r.GetTenantQuotas(ctx, tenantID)
-	}
 	if err != nil {
 		return nil, err
 	}
