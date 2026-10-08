@@ -8,20 +8,29 @@
 groups:
   - name: vrsky-pipelines
     rules:
-      # A tenant that was publishing messages in the previous hour has gone
-      # silent: rate is zero now AND there was activity in the hour before the
-      # current quiet window (so never-active tenants don't alert).
+      # A polled source has gone quiet: a connection that published during the
+      # six hours before the last hour has published nothing for an hour. Per
+      # connection, and for polling connectors only -- a webhook or queue source
+      # is quiet whenever its sender is, and that is not a fault. The quiet
+      # window has to dwarf any poll interval: Business Central polls every 15
+      # minutes and publishes once per poll, and the former 5-minute rate window
+      # with "for: 10m" fired on that cadence alone, 92 times in one day
+      # (2026-10-08), each for a few seconds.
       - alert: PipelineDown
         expr: |
-          sum by (tenant_id) (rate(vrsky_messages_published_total[5m])) == 0
+          sum by (tenant_id, connection_id) (
+            increase(vrsky_messages_published_total{connector=~"vrsky-(api|brightpearl|business-central|cloud-storage|db|file|salesforce|sap-s4hana|sftp|sitoo|visma)-consumer"}[1h])
+          ) == 0
           and
-          sum by (tenant_id) (increase(vrsky_messages_published_total[1h] offset 10m)) > 0
-        for: 10m
+          sum by (tenant_id, connection_id) (
+            increase(vrsky_messages_published_total{connector=~"vrsky-(api|brightpearl|business-central|cloud-storage|db|file|salesforce|sap-s4hana|sftp|sitoo|visma)-consumer"}[6h] offset 1h)
+          ) > 0
+        for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "no messages published for tenant {{ $labels.tenant_id }} in 10+ minutes"
-          description: "The pipeline throughput for tenant {{ $labels.tenant_id }} dropped to zero after being active in the previous hour."
+          summary: "pipeline {{ $labels.connection_id }} has published nothing for an hour (tenant {{ $labels.tenant_id }})"
+          description: "A polled source for tenant {{ $labels.tenant_id }} published during the previous six hours and nothing in the last hour. Check the pipeline's events and the source's credentials."
 
       # Messages are being dead-lettered. pipeline_id is the connection id;
       # the metric carries no tenant label, so this routes as a platform alert.

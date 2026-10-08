@@ -10,26 +10,36 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
-  # 1. PipelineDown — tenant publishes for an hour, then goes silent.
+  # 1. PipelineDown -- a polled source publishes once per 30-minute poll for
+  #    six hours, then goes silent. A webhook source with the same shape must
+  #    never fire: its silence is the sender's.
   - interval: 1m
     input_series:
-      - series: 'vrsky_messages_published_total{tenant_id="t1"}'
-        values: '0+10x60 600x30' # rising 10/min for 60m, then flat (silent)
+      - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c1",connector="vrsky-business-central-consumer"}'
+        values: '0x29 1x29 2x29 3x29 4x29 5x29 6x29 7x29 8x29 9x29 10x29 11x29 12x120'
+      - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c2",connector="vrsky-webhook-consumer"}'
+        values: '0x29 1x29 2x29 3x29 4x29 5x29 6x29 7x29 8x29 9x29 10x29 11x29 12x120'
     alert_rule_test:
-      - eval_time: 80m
+      # Still polling: one message every 30 minutes is not an outage (the old
+      # 5-minute rate window fired at this point).
+      - eval_time: 200m
+        alertname: PipelineDown
+        exp_alerts: []
+      - eval_time: 359m
+        alertname: PipelineDown
+        exp_alerts: []
+      # An hour of silence (plus "for") after the last poll at minute 360.
+      - eval_time: 440m
         alertname: PipelineDown
         exp_alerts:
           - exp_labels:
               alertname: PipelineDown
               severity: critical
               tenant_id: t1
+              connection_id: c1
             exp_annotations:
-              summary: "no messages published for tenant t1 in 10+ minutes"
-              description: "The pipeline throughput for tenant t1 dropped to zero after being active in the previous hour."
-      # While still publishing, no alert.
-      - eval_time: 30m
-        alertname: PipelineDown
-        exp_alerts: []
+              summary: "pipeline c1 has published nothing for an hour (tenant t1)"
+              description: "A polled source for tenant t1 published during the previous six hours and nothing in the last hour. Check the pipeline's events and the source's credentials."
 
   # 2. DLQGrowing — dead-lettered messages start arriving at minute 10.
   - interval: 1m
