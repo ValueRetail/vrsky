@@ -73,6 +73,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
 
       - name: Install postgres client + build vrsky-cli
