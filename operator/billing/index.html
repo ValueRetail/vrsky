@@ -2511,10 +2511,13 @@ emails. Those users see Platform → Workspaces and may call the <code>/api/v1/p
 routes and the two legacy writes (<code>PUT …/quotas</code>, <code>PUT …/plan</code>). Nobody else
 can, whatever their workspace role — an owner can no longer raise their own
 limits. An empty list means nobody can.</p>
-<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>env<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api<span class="w"> </span><span class="nv">PLATFORM_OPERATORS</span><span class="o">=</span>you@example.com
+<p>The list lives in <code>infrastructure/kubernetes/management-api/deployment.yaml</code>;
+to add an operator, edit it there and apply the file:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/management-api/deployment.yaml
 </code></pre></div>
-<p><code>deploy-core-azure.sh</code> sets images only; the variable has to be set on the
-deployment once (and is in <code>infrastructure/kubernetes/management-api/deployment.yaml</code>).</p>
+<p>A <code>kubectl set env</code> on the deployment works too, but only until the next
+apply of that file (a rebuild with <code>deploy-azure.sh</code>, for one) puts the
+file's list back. A test keeps the file's list non-empty.</p>
 <h3 id="extending-a-trial">Extending a trial<a class="headerlink" href="#extending-a-trial" title="Permanent link">&para;</a></h3>
 <p>Platform → Workspaces → plan <strong>Trial</strong>, pick a new end date, Save. A
 suspended workspace comes back the same way.</p>
