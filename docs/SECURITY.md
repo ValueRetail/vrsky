@@ -206,8 +206,16 @@ bucket (`pkg/failurelimit`).
 - Knobs: `AUTH_LOGIN_MAX_FAILURES`, `AUTH_SIGNUP_MAX_ATTEMPTS` (0 = off).
   Counters are in memory per replica.
 
-Not limited: OIDC sign-in, forgot/reset/change-password, API-key and
-session-token checks (random secrets; guessing is not a realistic attack).
+Forgot-password is limited per address (the sign-up numbers) and per
+submitted email (3, then one per 10 minutes): it sends mail. Change-password
+is limited per user like a login account (10 wrong current passwords, one
+back per 5 minutes; a right one is handed back), so a stolen session cannot
+grind the password out of it. Both answer 429 and count in the same metric
+(`endpoint="forgot_password"` / `"change_password"`).
+
+Not limited: OIDC sign-in, reset-password (a random single-use token),
+API-key and session-token checks (random secrets; guessing is not a
+realistic attack).
 
 ## OIDC / SSO (issue #68 — Phase 1C)
 

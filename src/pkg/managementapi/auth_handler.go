@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -390,51 +391,67 @@ func (h *Handler) LogoutUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Parse request body
+	// Every request costs an attempt per address (sign-up numbers) and, once
+	// the email is known, per email: this endpoint sends mail, and the limits
+	// are what keep it from flooding an inbox or the SMTP quota.
+	limits := h.authLimits
+	now := limits.now()
+	addr := clientAddr(r)
+	if wait, ok, first := limits.forgot.Take(addr, now); !ok {
+		h.refuseLimited(w, r, "forgot_password", "address", addr, "", wait, first)
+		return
+	}
+
 	var req ForgotPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		_ = writeError(w, http.StatusBadRequest, "InvalidJSON", "failed to parse request", nil)
 		return
 	}
-
 	if req.Email == "" {
 		_ = writeError(w, http.StatusBadRequest, "ValidationError", "email is required", nil)
 		return
 	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if wait, ok, first := limits.forgotEmail.Take(email, now); !ok {
+		h.refuseLimited(w, r, "forgot_password", "account", email, req.Email, wait, first)
+		return
+	}
 
-	// Always return success to prevent email enumeration
+	// An installation that cannot send mail says so — before any lookup, so
+	// the answer is the same whether or not the address has an account.
+	if !h.canSendResetMail() {
+		_ = writeError(w, http.StatusServiceUnavailable, "ResetUnavailable", resetUnavailableMessage, nil)
+		return
+	}
+
+	// From here the answer is always the same, to prevent email enumeration.
 	defer func() {
 		_ = writeJSON(w, http.StatusOK, MessageResponse{
 			Success: true,
-			Message: "If the email exists, a password reset link will be sent",
+			Message: "If that address has an account, a password reset link is on its way",
 		})
 	}()
 
-	// Get user by email
-	user, err := h.repo.GetUserByEmail(ctx, strings.ToLower(req.Email))
+	user, err := h.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		h.logAuthEvent(ctx, r, nil, req.Email, "password_reset_requested", "not_found", nil)
 		return
 	}
-
-	// Generate password reset token
 	rawToken, hashedToken, err := auth.GeneratePasswordResetToken()
 	if err != nil {
 		return
 	}
-
-	// Save reset token
 	expiresAt := auth.CalculatePasswordResetTokenExpiry()
 	if err := h.repo.CreatePasswordResetToken(ctx, user.ID, hashedToken, expiresAt); err != nil {
 		return
 	}
-
-	// Log success
+	body := resetMailBody(user.FullName, h.resetLink(rawToken), expiresAt)
+	if err := h.mailer(ctx, user.Email, "Reset your VRSky password", body); err != nil {
+		slog.Default().Warn("password reset mail not sent", "error", err)
+		h.logAuthEvent(ctx, r, &user.ID, req.Email, "password_reset_requested", "send_failed", stringPtr(err.Error()))
+		return
+	}
 	h.logAuthEvent(ctx, r, &user.ID, req.Email, "password_reset_requested", "success", nil)
-
-	// TODO: Send password reset email
-	// For now, we just log the token (in production, send via email)
-	_ = rawToken // Use this token in the email link
 }
 
 // ResetPassword handles POST /api/v1/auth/reset-password
@@ -513,11 +530,21 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify current password
-	if err := auth.VerifyPassword(user.PasswordHash, req.CurrentPassword); err != nil {
+	// A wrong current password costs the user an attempt (login account
+	// numbers); a right one hands it back. Without this a stolen session
+	// could grind the password out of this endpoint at bcrypt speed.
+	limits := h.authLimits
+	now := limits.now()
+	if wait, ok, first := limits.changePassword.Take(user.ID, now); !ok {
+		h.refuseLimited(w, r, "change_password", "account", user.ID, user.Email, wait, first)
+		return
+	}
+	if err := h.verify(user.PasswordHash, req.CurrentPassword); err != nil {
+		h.logAuthEvent(ctx, r, &user.ID, user.Email, "password_change", "failed", stringPtr("current password is incorrect"))
 		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "current password is incorrect", nil)
 		return
 	}
+	limits.changePassword.Refund(user.ID, now)
 
 	// Hash new password
 	newPasswordHash, err := auth.HashPassword(req.NewPassword)

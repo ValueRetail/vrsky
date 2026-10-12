@@ -39,29 +39,42 @@ const (
 	// lets that address keep trying an account others have blocked.
 	knownAddressWindow = 30 * 24 * time.Hour
 
+	// forgotEmailMax is how many reset mails one address may be sent in a
+	// row (refilled one per forgotEmailRefill): the bound on what this
+	// endpoint can put in someone's inbox. Requests per client address use
+	// the sign-up numbers.
+	forgotEmailMax    = 3
+	forgotEmailRefill = 10 * time.Minute
+
 	limitedMessage = "too many failed sign-in attempts — wait a few minutes and try again"
 )
 
 var authLimited = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "vrsky_auth_limited_total",
-	Help: "Requests to the auth routes refused with 429: endpoint is login or signup, scope is address or account.",
+	Help: "Requests to the auth routes refused with 429: endpoint is login, signup, forgot_password or change_password; scope is address or account.",
 }, []string{"endpoint", "scope"})
 
-// authLimits holds the three buckets. A Handler always has one (NewHandler
-// gives it the defaults), so no caller needs a nil check.
+// authLimits holds the buckets. A Handler always has one (NewHandler gives
+// it the defaults), so no caller needs a nil check.
 type authLimits struct {
-	address *failurelimit.Limiter // failed logins per client address
-	account *failurelimit.Limiter // failed logins per submitted email
-	signup  *failurelimit.Limiter // sign-up requests per client address
-	now     func() time.Time
+	address        *failurelimit.Limiter // failed logins per client address
+	account        *failurelimit.Limiter // failed logins per submitted email
+	signup         *failurelimit.Limiter // sign-up requests per client address
+	forgot         *failurelimit.Limiter // forgot-password requests per client address (sign-up numbers)
+	forgotEmail    *failurelimit.Limiter // forgot-password requests per submitted email
+	changePassword *failurelimit.Limiter // wrong current passwords per user (login account numbers)
+	now            func() time.Time
 }
 
 func newAuthLimits(loginMaxFailures, signupMaxAttempts int) *authLimits {
 	return &authLimits{
-		address: failurelimit.New(loginMaxFailures, loginAddressRefill),
-		account: failurelimit.New(loginMaxFailures, loginAccountRefill),
-		signup:  failurelimit.New(signupMaxAttempts, signupRefill),
-		now:     time.Now,
+		address:        failurelimit.New(loginMaxFailures, loginAddressRefill),
+		account:        failurelimit.New(loginMaxFailures, loginAccountRefill),
+		signup:         failurelimit.New(signupMaxAttempts, signupRefill),
+		forgot:         failurelimit.New(signupMaxAttempts, signupRefill),
+		forgotEmail:    failurelimit.New(forgotEmailMax, forgotEmailRefill),
+		changePassword: failurelimit.New(loginMaxFailures, loginAccountRefill),
+		now:            time.Now,
 	}
 }
 

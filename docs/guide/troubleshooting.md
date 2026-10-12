@@ -71,7 +71,10 @@ is covered in the [operator troubleshooting guide](../operator/troubleshooting.m
 
 ## Forgot your password
 
-Use the **reset link** on the login screen and follow the email instructions.
+Click **Forgot your password?** on the sign-in screen, enter your email, and
+open the link in the mail (it works once and expires). If the page says
+reset is *not available on this installation*, the operator has not
+configured mail yet; ask your workspace owner to set a password for you.
 
 ## Still stuck?
 

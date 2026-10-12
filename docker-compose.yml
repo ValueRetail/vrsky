@@ -375,6 +375,9 @@ services:
       SMTP_HOST: "mailpit"
       SMTP_PORT: "1025"
       SMTP_FROM: "alerts@vrsky.local"
+      # Where the password-reset link points (the dev UI); mail lands in
+      # mailpit at http://localhost:8025.
+      PUBLIC_URL: "http://localhost:5173"
 
       # Master key for AES-256-GCM secret encryption (#66 / Phase 1A).
       # DEV-ONLY value baked into compose so a local stack starts without
