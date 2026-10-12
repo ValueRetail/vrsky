@@ -7,6 +7,40 @@ import (
 	"testing"
 )
 
+// Exchange Online offers LOGIN and XOAUTH2, never PLAIN; a relay like
+// mailpit or Postfix offers PLAIN. The chooser must follow the server.
+func TestServerAuth_FollowsWhatTheServerOffers(t *testing.T) {
+	a := newServerAuth("vrsky@example.com", "pw", "smtp.office365.com")
+	mech, _, err := a.Start(&smtp.ServerInfo{Name: "smtp.office365.com", TLS: true, Auth: []string{"LOGIN", "XOAUTH2"}})
+	if err != nil || mech != "LOGIN" {
+		t.Fatalf("Exchange-style server: mechanism %q, err %v; want LOGIN", mech, err)
+	}
+	if u, err := a.Next([]byte("Username:"), true); err != nil || string(u) != "vrsky@example.com" {
+		t.Fatalf("username challenge: %q %v", u, err)
+	}
+	if p, err := a.Next([]byte("Password:"), true); err != nil || string(p) != "pw" {
+		t.Fatalf("password challenge: %q %v", p, err)
+	}
+	if _, err := a.Next([]byte("Something else:"), true); err == nil {
+		t.Fatal("an unknown challenge must not get the password")
+	}
+
+	b := newServerAuth("u", "pw", "mail.example")
+	mech, payload, err := b.Start(&smtp.ServerInfo{Name: "mail.example", TLS: true, Auth: []string{"PLAIN", "LOGIN"}})
+	if err != nil || mech != "PLAIN" || string(payload) != "\x00u\x00pw" {
+		t.Fatalf("PLAIN-capable server: mechanism %q payload %q err %v", mech, payload, err)
+	}
+
+	c := newServerAuth("u", "pw", "mail.example")
+	if _, _, err := c.Start(&smtp.ServerInfo{Name: "mail.example", TLS: false, Auth: []string{"LOGIN"}}); err == nil {
+		t.Fatal("no TLS: the password must not be sent")
+	}
+	d := newServerAuth("u", "pw", "mail.example")
+	if _, _, err := d.Start(&smtp.ServerInfo{Name: "mail.example", TLS: true, Auth: []string{"XOAUTH2"}}); err == nil {
+		t.Fatal("no usable mechanism: want an error, not a guess")
+	}
+}
+
 func TestSendText_FormatsAPlainMail(t *testing.T) {
 	var gotAddr, gotFrom string
 	var gotTo []string
