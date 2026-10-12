@@ -1111,10 +1111,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#configuration" class="md-nav__link">
+  <a href="#microsoft-graph-production" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration
+        Microsoft Graph (production)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMTP
       
     </span>
   </a>
@@ -2342,10 +2353,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#configuration" class="md-nav__link">
+  <a href="#microsoft-graph-production" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Configuration
+        Microsoft Graph (production)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMTP
       
     </span>
   </a>
@@ -2392,7 +2414,7 @@
 
 
 <h1 id="mail">Mail<a class="headerlink" href="#mail" title="Permanent link">&para;</a></h1>
-<p>VRSky sends two kinds of mail, both through one platform identity:</p>
+<p>VRSky sends two kinds of mail, both with one platform identity:</p>
 <ul>
 <li><strong>alerts</strong>, to the e-mail notification targets a workspace configures
   (Settings → Notifications);</li>
@@ -2400,52 +2422,88 @@
 </ul>
 <p>Nothing else. Sign-up does not send a verification mail; invites are links
 the inviter passes on.</p>
-<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<p>Five variables on the management API, in production from the optional
-<code>smtp-credentials</code> secret the manifest references
-(<code>infrastructure/kubernetes/management-api/deployment.yaml</code>):</p>
+<p>Two ways to send, chosen from the management API's environment at boot:</p>
 <table>
 <thead>
 <tr>
-<th>Variable</th>
-<th>Meaning</th>
+<th>Provider</th>
+<th>When</th>
+<th>Variables</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>SMTP_HOST</code>, <code>SMTP_PORT</code></td>
-<td>the relay; port defaults to 587</td>
+<td><strong>Microsoft Graph</strong></td>
+<td>Microsoft 365 tenants — the only way when <em>security defaults</em> are on, since they block SMTP authentication for every mailbox</td>
+<td><code>GRAPH_TENANT_ID</code>, <code>GRAPH_CLIENT_ID</code>, <code>GRAPH_CLIENT_SECRET</code>, <code>MAIL_FROM</code></td>
 </tr>
 <tr>
-<td><code>SMTP_FROM</code></td>
-<td>the sender address</td>
-</tr>
-<tr>
-<td><code>SMTP_USERNAME</code>, <code>SMTP_PASSWORD</code></td>
-<td>PLAIN auth; leave both empty for an unauthenticated relay</td>
-</tr>
-<tr>
-<td><code>PUBLIC_URL</code></td>
-<td>the origin links point at, e.g. <code>https://vrsky.valueretail.no</code> — scheme and host only, set in the manifest</td>
+<td><strong>SMTP</strong></td>
+<td>a relay you control, or mailpit in dev</td>
+<td><code>SMTP_HOST</code>, <code>SMTP_PORT</code> (587), <code>SMTP_FROM</code>, <code>SMTP_USERNAME</code>, <code>SMTP_PASSWORD</code></td>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>smtp-credentials<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">host</span><span class="o">=</span>smtp.example<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">port</span><span class="o">=</span><span class="m">587</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">from</span><span class="o">=</span>vrsky@example.com<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">username</span><span class="o">=</span>…<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">password</span><span class="o">=</span>…
+<p>Graph wins when all four of its variables are set. Both need
+<code>PUBLIC_URL</code> — the origin links point at, e.g. <code>https://vrsky.valueretail.no</code>,
+scheme and host only, set in the manifest. The boot log says which one is
+in use (<code>mail: Microsoft Graph as …</code> / <code>mail: SMTP via …</code>), or
+<code>password reset is off: …</code> when neither is.</p>
+<h2 id="microsoft-graph-production">Microsoft Graph (production)<a class="headerlink" href="#microsoft-graph-production" title="Permanent link">&para;</a></h2>
+<p>An <em>app registration</em> with the <code>Mail.Send</code> application permission sends as
+the <code>MAIL_FROM</code> mailbox. That permission alone is tenant-wide, so step 4
+pins it to the one mailbox; do that before the secret goes into the cluster.</p>
+<ol>
+<li><strong>Entra admin centre → App registrations → New registration</strong>: name
+   <code>VRSky mail</code>, single tenant, no redirect URI. Note the <em>Application
+   (client) ID</em> and <em>Directory (tenant) ID</em>.</li>
+<li><strong>API permissions → Add a permission → Microsoft Graph → Application
+   permissions → <code>Mail.Send</code></strong>, then <strong>Grant admin consent</strong> (status
+   <em>Granted</em>).</li>
+<li><strong>Certificates &amp; secrets → New client secret</strong>, 24 months. Copy the
+   <em>Value</em> at once; it is shown only then. Put the expiry date in a
+   calendar: when it lapses, mail stops with <code>invalid_client</code> in the log.</li>
+<li><strong>Restrict to the mailbox</strong> (Exchange Online PowerShell,
+   <code>Install-Module ExchangeOnlineManagement</code>):</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="nb">Connect-ExchangeOnline</span>
+<span class="nb">New-ApplicationAccessPolicy</span> <span class="n">-AppId</span> <span class="p">&lt;</span><span class="n">client</span> <span class="n">id</span><span class="p">&gt;</span> <span class="n">-PolicyScopeGroupId</span> <span class="n">vrsky</span><span class="nv">@valueretail</span><span class="p">.</span><span class="n">no</span> <span class="n">-AccessRight</span> <span class="n">RestrictAccess</span> <span class="n">-Description</span> <span class="s2">"VRSky sends only as vrsky@"</span>
+<span class="nb">Test-ApplicationAccessPolicy</span> <span class="n">-Identity</span> <span class="n">someone</span><span class="p">.</span><span class="k">else</span><span class="nv">@valueretail</span><span class="p">.</span><span class="n">no</span> <span class="n">-AppId</span> <span class="p">&lt;</span><span class="n">client</span> <span class="n">id</span><span class="p">&gt;</span>   <span class="c"># AccessCheckResult: Denied</span>
+<span class="nb">Test-ApplicationAccessPolicy</span> <span class="n">-Identity</span> <span class="n">vrsky</span><span class="nv">@valueretail</span><span class="p">.</span><span class="n">no</span> <span class="n">-AppId</span> <span class="p">&lt;</span><span class="n">client</span> <span class="n">id</span><span class="p">&gt;</span>          <span class="c"># AccessCheckResult: Granted</span>
+</code></pre></div>
+<p>The policy can take up to 30 minutes to apply.
+5. The secret, then a restart:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>graph-mail<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">tenant_id</span><span class="o">=</span>&lt;tenant<span class="w"> </span>id&gt;<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">client_id</span><span class="o">=</span>&lt;client<span class="w"> </span>id&gt;<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">client_secret</span><span class="o">=</span><span class="s1">'&lt;the secret value&gt;'</span>
 kubectl<span class="w"> </span>rollout<span class="w"> </span>restart<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api
 </code></pre></div>
-<p>The dev stack points at mailpit (<code>http://localhost:8025</code>) with
-<code>PUBLIC_URL=http://localhost:5173</code>, so the whole reset flow can be walked
-locally.</p>
+<p>The sender mailbox needs no licence for this: a shared mailbox works.</p>
+<p><strong>Rotating the secret:</strong> new client secret in the portal, then
+<code>kubectl create secret … --dry-run=client -o yaml | kubectl apply -f -</code>
+with the new value, then the restart. Delete the old secret in the portal
+afterwards.</p>
+<h2 id="smtp">SMTP<a class="headerlink" href="#smtp" title="Permanent link">&para;</a></h2>
+<p>Five variables, in production from the optional <code>smtp-credentials</code> secret
+the manifest references:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>smtp-credentials<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">host</span><span class="o">=</span>smtp.example<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">port</span><span class="o">=</span><span class="m">587</span><span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">from</span><span class="o">=</span>vrsky@example.com<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">username</span><span class="o">=</span>…<span class="w"> </span>--from-literal<span class="o">=</span><span class="nv">password</span><span class="o">=</span><span class="s1">'…'</span>
+kubectl<span class="w"> </span>rollout<span class="w"> </span>restart<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>deploy/vrsky-management-api
+</code></pre></div>
+<p>The sender authenticates with PLAIN where the relay offers it and LOGIN
+otherwise, only over TLS; leave username and password empty for an
+unauthenticated relay. The dev stack points at mailpit
+(<code>http://localhost:8025</code>) with <code>PUBLIC_URL=http://localhost:5173</code>, so the
+whole reset flow can be walked locally.</p>
+<p><strong>Microsoft 365 over SMTP</strong> works only when the tenant allows SMTP
+authentication. With <em>security defaults</em> on, the sign-in log shows
+<code>530035 Access has been blocked by security defaults</code> for every attempt
+and the API logs <code>535 5.7.3 Authentication unsuccessful</code>; there is no
+per-mailbox exception. Use Graph instead; do not turn security defaults off
+for this.</p>
 <h2 id="while-mail-is-not-configured">While mail is not configured<a class="headerlink" href="#while-mail-is-not-configured" title="Permanent link">&para;</a></h2>
-<p>The API logs <code>password reset is off: set SMTP_HOST, SMTP_FROM and
-PUBLIC_URL to enable it</code> at boot. The forgot-password page answers <em>password
-reset is not available on this installation yet — ask your workspace owner
-to set your password</em> (HTTP 503), the same for every address, before any
-lookup. Alert e-mail targets fail with <em>SMTP is not configured</em> in the
-delivery log.</p>
+<p>The API logs <code>password reset is off: …</code> at boot. The forgot-password page
+answers <em>password reset is not available on this installation yet — ask
+your workspace owner to set your password</em> (HTTP 503), the same for every
+address, before any lookup. An e-mail notification target fails with
+<em>mail is not configured</em> in its delivery log.</p>
 <h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
 <p>A reset request costs the client address one of its sign-up attempts (5,
 then one per 10 minutes) and the submitted address one of three (then one

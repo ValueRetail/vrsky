@@ -1194,6 +1194,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#password-reset-mail-is-not-sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Password-reset mail is not sent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pipelines-will-not-start-402-planrequired" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2529,6 +2540,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#password-reset-mail-is-not-sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Password-reset mail is not sent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pipelines-will-not-start-402-planrequired" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2741,6 +2763,14 @@ limit, five requests per address, then one per ten minutes.</p>
 </code></pre></div>
 <p>Every management-api line is JSON (<code>service</code>, <code>level</code>, <code>msg</code>, then the
 fields), these included.</p>
+<h2 id="password-reset-mail-is-not-sent">Password-reset mail is not sent<a class="headerlink" href="#password-reset-mail-is-not-sent" title="Permanent link">&para;</a></h2>
+<p><code>kubectl logs -n vrsky-platform -l app=vrsky-management-api --all-containers | grep "reset mail"</code>
+names the reason. <code>535 5.7.3 Authentication unsuccessful</code> from
+<code>smtp.office365.com</code>, with <code>530035 Access has been blocked by security
+defaults</code> in the Entra sign-in log, means the tenant blocks SMTP
+authentication: send through Microsoft Graph instead (docs/operator/mail.md).
+<code>invalid_client</code> from the token endpoint means the Graph client secret has
+expired or was mistyped.</p>
 <p>One line per block, with the scope (<code>address</code> or <code>account</code>) and the key. The
 same event is in <code>auth_audit_log</code> with status <code>blocked</code>, and
 <code>vrsky_auth_limited_total{endpoint,scope}</code> counts refusals. To change the
