@@ -1,9 +1,9 @@
 package managementapi
 
 import (
-	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -11,27 +11,34 @@ import (
 )
 
 // Password-reset mail (plans/auth-leftovers.md). The platform sends it with
-// the same SMTP identity the alert e-mail targets use; links point at
-// PUBLIC_URL, never at whatever Host header the request carried.
+// the same mailer the alert e-mail targets use; links point at PUBLIC_URL,
+// never at whatever Host header the request carried.
 
 const resetUnavailableMessage = "password reset is not available on this installation yet — ask your workspace owner to set your password"
 
-// MailerFromEnv returns the platform mailer, or nil when SMTP_HOST or
-// SMTP_FROM is unset.
-func MailerFromEnv() func(ctx context.Context, to, subject, body string) error {
+// MailerFromEnv returns the platform mailer and a one-line description for
+// the boot log: Microsoft Graph when GRAPH_TENANT_ID, GRAPH_CLIENT_ID,
+// GRAPH_CLIENT_SECRET and MAIL_FROM are all set (plans/mail-via-graph.md),
+// else SMTP when SMTP_HOST and SMTP_FROM are, else nil.
+func MailerFromEnv() (notify.Mailer, string) {
+	g := &notify.Graph{
+		TenantID:     strings.TrimSpace(os.Getenv("GRAPH_TENANT_ID")),
+		ClientID:     strings.TrimSpace(os.Getenv("GRAPH_CLIENT_ID")),
+		ClientSecret: strings.TrimSpace(os.Getenv("GRAPH_CLIENT_SECRET")),
+		From:         strings.TrimSpace(os.Getenv("MAIL_FROM")),
+	}
+	if g.TenantID != "" && g.ClientID != "" && g.ClientSecret != "" && g.From != "" {
+		return g, "mail: Microsoft Graph as " + g.From
+	}
 	cfg := smtpFromEnv()
-	if cfg.Host == "" || cfg.From == "" {
-		return nil
+	if cfg.Host != "" && cfg.From != "" {
+		return &notify.SMTP{Config: cfg}, "mail: SMTP via " + cfg.Host + " as " + cfg.From
 	}
-	return func(ctx context.Context, to, subject, body string) error {
-		return notify.SendText(ctx, cfg, to, subject, body)
-	}
+	return nil, ""
 }
 
 // SetMailer sets how the API sends mail; nil means it cannot.
-func (h *Handler) SetMailer(m func(ctx context.Context, to, subject, body string) error) {
-	h.mailer = m
-}
+func (h *Handler) SetMailer(m notify.Mailer) { h.mailer = m }
 
 // SetPublicURL sets the origin links in mail point at: scheme and host only,
 // e.g. https://vrsky.valueretail.no. Empty clears it.

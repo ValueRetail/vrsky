@@ -112,6 +112,16 @@ kubectl logs -n vrsky-platform deploy/vrsky-management-api --since=1h | grep "Si
 Every management-api line is JSON (`service`, `level`, `msg`, then the
 fields), these included.
 
+## Password-reset mail is not sent
+
+`kubectl logs -n vrsky-platform -l app=vrsky-management-api --all-containers | grep "reset mail"`
+names the reason. `535 5.7.3 Authentication unsuccessful` from
+`smtp.office365.com`, with `530035 Access has been blocked by security
+defaults` in the Entra sign-in log, means the tenant blocks SMTP
+authentication: send through Microsoft Graph instead (docs/operator/mail.md).
+`invalid_client` from the token endpoint means the Graph client secret has
+expired or was mistyped.
+
 One line per block, with the scope (`address` or `account`) and the key. The
 same event is in `auth_audit_log` with status `blocked`, and
 `vrsky_auth_limited_total{endpoint,scope}` counts refusals. To change the

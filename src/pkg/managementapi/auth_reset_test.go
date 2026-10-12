@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
+	"github.com/ValueRetail/vrsky/pkg/notify"
 )
 
 // The password-reset round trip and the change-password limit
@@ -94,10 +95,10 @@ func newResetEnv(t *testing.T) *resetEnv {
 	base := newLoginEnv(t)
 	e := &resetEnv{loginEnv: base, repo: &resetRepo{loginRepo: base.repo, tokens: map[string]*PasswordResetToken{}}}
 	e.h.repo = e.repo
-	e.h.mailer = func(_ context.Context, to, subject, body string) error {
+	e.h.mailer = notify.MailerFunc(func(_ context.Context, to, subject, body string) error {
 		e.mails = append(e.mails, sentMail{to, subject, body})
 		return nil
-	}
+	})
 	if err := e.h.SetPublicURL("https://vrsky.example"); err != nil {
 		t.Fatal(err)
 	}

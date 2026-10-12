@@ -446,7 +446,7 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := resetMailBody(user.FullName, h.resetLink(rawToken), expiresAt)
-	if err := h.mailer(ctx, user.Email, "Reset your VRSky password", body); err != nil {
+	if err := h.mailer.Send(ctx, user.Email, "Reset your VRSky password", body); err != nil {
 		slog.Default().Warn("password reset mail not sent", "error", err)
 		h.logAuthEvent(ctx, r, &user.ID, req.Email, "password_reset_requested", "send_failed", stringPtr(err.Error()))
 		return

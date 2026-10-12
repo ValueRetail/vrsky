@@ -432,7 +432,10 @@ func (h *Handler) buildNotifier(ctx context.Context, t *NotificationTarget) (not
 	case "teams":
 		return &notify.Teams{WebhookURL: secret}, nil
 	case "email":
-		return &notify.Email{SMTP: smtpFromEnv(), To: t.Config.Email}, nil
+		if h.mailer == nil {
+			return nil, fmt.Errorf("mail is not configured on this installation (docs/operator/mail.md)")
+		}
+		return &notify.Email{Mailer: h.mailer, To: t.Config.Email}, nil
 	case "pagerduty":
 		return &notify.PagerDuty{RoutingKey: secret}, nil
 	case "webhook":

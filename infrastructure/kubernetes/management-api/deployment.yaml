@@ -107,6 +107,22 @@ spec:
           valueFrom: { secretKeyRef: { name: smtp-credentials, key: username, optional: true } }
         - name: SMTP_PASSWORD
           valueFrom: { secretKeyRef: { name: smtp-credentials, key: password, optional: true } }
+        # Mail through Microsoft Graph instead (plans/mail-via-graph.md): used
+        # when all four are set, so a tenant whose security defaults block
+        # SMTP authentication can still send. MAIL_FROM is the mailbox the
+        # app registration may send as (pin it with an Exchange application
+        # access policy; docs/operator/mail.md). Create:
+        #   kubectl create secret generic graph-mail -n vrsky-platform \
+        #     --from-literal=tenant_id=… --from-literal=client_id=… \
+        #     --from-literal=client_secret=…
+        - name: MAIL_FROM
+          value: "vrsky@valueretail.no"
+        - name: GRAPH_TENANT_ID
+          valueFrom: { secretKeyRef: { name: graph-mail, key: tenant_id, optional: true } }
+        - name: GRAPH_CLIENT_ID
+          valueFrom: { secretKeyRef: { name: graph-mail, key: client_id, optional: true } }
+        - name: GRAPH_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: graph-mail, key: client_secret, optional: true } }
         - name: ENCRYPTION_KEY
           valueFrom:
             secretKeyRef:
