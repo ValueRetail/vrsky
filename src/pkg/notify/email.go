@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -42,7 +43,7 @@ func sendText(ctx context.Context, cfg SMTPConfig, to, subject, body string, sen
 	}
 	var auth smtp.Auth
 	if cfg.Username != "" {
-		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+		auth = newServerAuth(cfg.Username, cfg.Password, cfg.Host)
 	}
 	msg := strings.Join([]string{
 		"From: " + cfg.From,
@@ -80,4 +81,57 @@ func (e *Email) Send(ctx context.Context, alert *Alert) error {
 		body += k + " = " + v + "\r\n"
 	}
 	return sendText(ctx, e.SMTP, e.To, alert.Title(), body, e.sendMail)
+}
+
+// serverAuth authenticates with whichever mechanism the server offers:
+// PLAIN where it is advertised, else LOGIN. Go's net/smtp ships PLAIN and
+// CRAM-MD5 only, and Exchange Online (smtp.office365.com) offers LOGIN and
+// XOAUTH2 — it answers PLAIN with "504 5.7.4 Unrecognized authentication
+// type". Either way the password only ever crosses a TLS connection.
+type serverAuth struct {
+	username, password, host string
+	plain                    smtp.Auth
+	login                    bool
+}
+
+func newServerAuth(username, password, host string) *serverAuth {
+	return &serverAuth{username: username, password: password, host: host, plain: smtp.PlainAuth("", username, password, host)}
+}
+
+func (a *serverAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && server.Name != "localhost" && server.Name != "127.0.0.1" && server.Name != "::1" {
+		return "", nil, errors.New("email: refusing to send a password over an unencrypted connection")
+	}
+	offered := func(m string) bool {
+		for _, o := range server.Auth {
+			if strings.EqualFold(o, m) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case offered("PLAIN"):
+		return a.plain.Start(server)
+	case offered("LOGIN"):
+		a.login = true
+		return "LOGIN", nil, nil
+	}
+	return "", nil, fmt.Errorf("email: server offers no supported authentication mechanism (%s)", strings.Join(server.Auth, " "))
+}
+
+func (a *serverAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !a.login {
+		return a.plain.Next(fromServer, more)
+	}
+	if !more {
+		return nil, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(string(fromServer)), ":"))) {
+	case "username":
+		return []byte(a.username), nil
+	case "password":
+		return []byte(a.password), nil
+	}
+	return nil, fmt.Errorf("email: unexpected LOGIN challenge %q", fromServer)
 }
