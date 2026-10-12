@@ -318,11 +318,7 @@ func (s *apiConsumer) publishToNATS(ctx context.Context, connectionID, tenantID 
 		"envelope_id", env.ID,
 		"payload_size", env.PayloadSize)
 
-	// Store last payload in DB for tenant-consumer bridges to read. envelope.
-	// Marshal == json.Marshal — identical bytes to what the publish closure sent.
-	if data, err := json.Marshal(env); err == nil {
-		_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, connectionID)
-	}
-
+	// last_payload (the UI's data-structure preview) is written by the SDK's
+	// publish closure: tenant-scoped, one write per connection per 30 s.
 	return nil
 }

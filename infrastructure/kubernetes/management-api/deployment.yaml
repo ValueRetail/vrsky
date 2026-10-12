@@ -77,11 +77,13 @@ spec:
           value: "vrsky"
         - name: DB_NAME
           value: "vrsky"
-        # Who may set plans and quotas (docs/operator/billing.md). Comma-separated
-        # user emails; empty means nobody. Set the real value with
-        # `kubectl set env` — deploy-core-azure.sh does not apply this file.
+        # Who may activate plans and set quotas (docs/operator/billing.md):
+        # comma-separated user emails; empty means nobody. This file is what a
+        # rebuild (deploy-azure.sh) and any `kubectl apply` put on the cluster,
+        # so the real list lives here — a `kubectl set env` only lasts until
+        # the next apply. TestManifestNamesAPlatformOperator keeps it non-empty.
         - name: PLATFORM_OPERATORS
-          value: ""
+          value: "ludvik.hoff@valueretail.no"
         - name: ENCRYPTION_KEY
           valueFrom:
             secretKeyRef:

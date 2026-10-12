@@ -69,7 +69,7 @@ func TestAPIConsumer_PollWithResolvedAuthValue(t *testing.T) {
 		WithArgs(secretID, tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}).AddRow(ciphertext))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &apiConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "api-consumer", DB: mgmtDB})
@@ -92,4 +92,9 @@ func TestAPIConsumer_PollWithResolvedAuthValue(t *testing.T) {
 	if a := gotAuth.Load(); a == nil || a.(string) != "Bearer "+token {
 		t.Errorf("Authorization the API saw = %v, want %q", a, "Bearer "+token)
 	}
+
+	// The one last_payload write is the SDK's, and it names the tenant
+	// (WithArgs above); the SDK ignores that Exec's error, so only the mock's
+	// bookkeeping sees a wrong statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }

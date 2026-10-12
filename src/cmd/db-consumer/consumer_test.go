@@ -35,7 +35,7 @@ func TestDBConsumer_RoundTrip(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
 			AddRow(connID, tenant, "DB Conn", []byte(nodes), []byte(`[]`)))
 	mgmtMock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mgmtMock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mgmtMock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Source DB: the table query the consumer runs.
 	srcDB, srcMock, err := sqlmock.New()
@@ -75,4 +75,9 @@ func TestDBConsumer_RoundTrip(t *testing.T) {
 	if len(rows) != 2 {
 		t.Errorf("expected 2 rows in payload, got %d", len(rows))
 	}
+
+	// The one last_payload write is the SDK's, and it names the tenant
+	// (WithArgs above); the SDK ignores that Exec's error, so only the mock's
+	// bookkeeping sees a wrong statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mgmtMock.ExpectationsWereMet() == nil })
 }

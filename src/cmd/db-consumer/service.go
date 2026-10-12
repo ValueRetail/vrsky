@@ -422,21 +422,12 @@ func (s *dbConsumer) executeAndPublish(ctx context.Context, ac *ActiveDBConnecti
 		Metadata:      map[string]interface{}{"columns": columns, "row_count": len(allRows), "filename": filename},
 	}
 
-	// Marshal once for the last_payload cache; the SDK publish path marshals
-	// the envelope itself (envelope.Marshal == json.Marshal — identical bytes).
-	envData, err := json.Marshal(env)
-	if err != nil {
-		logger.Error("Failed to marshal envelope", "error", err)
-		return
-	}
-
 	if err := s.publish(ctx, env); err != nil {
 		logger.Error("Failed to publish to JetStream", "error", err)
 		return
 	}
-
-	// Cache last payload
-	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", envData, ac.ConnectionID)
+	// last_payload (the UI's data-structure preview) is written by the SDK's
+	// publish closure: tenant-scoped, one write per connection per 30 s.
 
 	logger.Info("Query executed", "rows", len(allRows))
 	s.emitEvent(ac.ConnectionID, DBEvent{
