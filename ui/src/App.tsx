@@ -14,6 +14,8 @@ import ConnectionsList from './pages/ConnectionsList'
 import TestDataPage from './pages/TestDataPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import OAuthConnected from './pages/OAuthConnected'
 import NotFound from './pages/NotFound'
 import ConnectionRequestsPage from './pages/ConnectionRequestsPage'
@@ -51,6 +53,9 @@ function App() {
           {/* Public auth routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {/* Password reset by mail (plans/auth-leftovers.md) */}
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           {/* OAuth popup landing — posts the grant id back to the opener */}
           <Route path="/oauth/connected" element={<OAuthConnected />} />
           

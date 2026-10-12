@@ -63,6 +63,7 @@ nav:
       - Monitoring: operator/monitoring.md
       - Alert responder: operator/alert-responder.md
       - Plans & billing: operator/billing.md
+      - Mail: operator/mail.md
       - Troubleshooting: operator/troubleshooting.md
       - Encryption-at-rest checklist: operator/encryption-at-rest.md
       - Status page & uptime SLA: SLA.md

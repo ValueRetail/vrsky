@@ -84,6 +84,29 @@ spec:
         # the next apply. TestManifestNamesAPlatformOperator keeps it non-empty.
         - name: PLATFORM_OPERATORS
           value: "ludvik.hoff@valueretail.no"
+        # Where links in mail point (the password-reset link): the public
+        # origin, scheme and host only. Never derived from a request's Host
+        # header. Without it, password reset answers "not available".
+        - name: PUBLIC_URL
+          value: "https://vrsky.valueretail.no"
+        # The platform mail identity, used by alert e-mail targets and the
+        # password-reset mail (docs/operator/mail.md). The secret is optional
+        # so the pod starts without it; until it exists the API logs
+        # "password reset is off" at boot and the forgot page says so. Create:
+        #   kubectl create secret generic smtp-credentials -n vrsky-platform \
+        #     --from-literal=host=smtp.example --from-literal=port=587 \
+        #     --from-literal=from=vrsky@example.com \
+        #     --from-literal=username=… --from-literal=password=…
+        - name: SMTP_HOST
+          valueFrom: { secretKeyRef: { name: smtp-credentials, key: host, optional: true } }
+        - name: SMTP_PORT
+          valueFrom: { secretKeyRef: { name: smtp-credentials, key: port, optional: true } }
+        - name: SMTP_FROM
+          valueFrom: { secretKeyRef: { name: smtp-credentials, key: from, optional: true } }
+        - name: SMTP_USERNAME
+          valueFrom: { secretKeyRef: { name: smtp-credentials, key: username, optional: true } }
+        - name: SMTP_PASSWORD
+          valueFrom: { secretKeyRef: { name: smtp-credentials, key: password, optional: true } }
         - name: ENCRYPTION_KEY
           valueFrom:
             secretKeyRef:
