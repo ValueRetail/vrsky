@@ -882,6 +882,34 @@ func runInstructionContaining(dockerfile, needle string) (string, bool) {
 // builder, and a webhook source answers 404 meanwhile. sdk.RestoreRunning
 // is the one line that prevents it (plans/stable-connections.md); a new
 // consumer made by copying an old one must not lose it.
+// The manifest is what a rebuild and any `kubectl apply` put on the cluster,
+// so it must name at least one platform operator; with an empty list nobody
+// can activate a plan (plans/operator-manifest-and-last-payload.md).
+func TestManifestNamesAPlatformOperator(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "infrastructure", "kubernetes", "management-api", "deployment.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := strings.Split(string(body), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "- name: PLATFORM_OPERATORS" || i+1 >= len(lines) {
+			continue
+		}
+		value := strings.Trim(strings.TrimPrefix(strings.TrimSpace(lines[i+1]), "value:"), ` "`)
+		if value == "" {
+			t.Fatalf("%s: PLATFORM_OPERATORS is empty — nobody could activate a plan after an apply", path)
+		}
+		for _, email := range strings.Split(value, ",") {
+			if !strings.Contains(email, "@") {
+				t.Fatalf("%s: PLATFORM_OPERATORS entry %q is not an email", path, email)
+			}
+		}
+		return
+	}
+	t.Fatalf("%s: no PLATFORM_OPERATORS env entry found", path)
+}
+
 // The management API's default slog logger is its JSON one: the slog.Default()
 // call sites (sign-in limits, billing, orchestrator failures) must not fall
 // back to the text handler (plans/hygiene-fixes.md).
