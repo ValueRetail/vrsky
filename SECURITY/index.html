@@ -1049,6 +1049,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator/mail/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../operator/troubleshooting/" class="md-nav__link">
         
   
@@ -3268,8 +3296,15 @@ bucket (<code>pkg/failurelimit</code>).</p>
 <li>Knobs: <code>AUTH_LOGIN_MAX_FAILURES</code>, <code>AUTH_SIGNUP_MAX_ATTEMPTS</code> (0 = off).
   Counters are in memory per replica.</li>
 </ul>
-<p>Not limited: OIDC sign-in, forgot/reset/change-password, API-key and
-session-token checks (random secrets; guessing is not a realistic attack).</p>
+<p>Forgot-password is limited per address (the sign-up numbers) and per
+submitted email (3, then one per 10 minutes): it sends mail. Change-password
+is limited per user like a login account (10 wrong current passwords, one
+back per 5 minutes; a right one is handed back), so a stolen session cannot
+grind the password out of it. Both answer 429 and count in the same metric
+(<code>endpoint="forgot_password"</code> / <code>"change_password"</code>).</p>
+<p>Not limited: OIDC sign-in, reset-password (a random single-use token),
+API-key and session-token checks (random secrets; guessing is not a
+realistic attack).</p>
 <h2 id="oidc-sso-issue-68-phase-1c">OIDC / SSO (issue #68 — Phase 1C)<a class="headerlink" href="#oidc-sso-issue-68-phase-1c" title="Permanent link">&para;</a></h2>
 <p>Each tenant can configure one OIDC provider. The client secret is stored
 encrypted in the <code>secrets</code> table (#66); only the UUID reference lives on
