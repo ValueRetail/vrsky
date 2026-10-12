@@ -64,15 +64,17 @@ func sendText(ctx context.Context, cfg SMTPConfig, to, subject, body string, sen
 	return nil
 }
 
-// Email sends an alert as a plain-text mail to one recipient.
+// Email sends an alert as a plain-text mail to one recipient, through
+// whichever Mailer the installation has.
 type Email struct {
-	SMTP SMTPConfig
-	To   string
-	// sendMail is swapped in tests; defaults to smtp.SendMail.
-	sendMail sendMailFunc
+	Mailer Mailer
+	To     string
 }
 
 func (e *Email) Send(ctx context.Context, alert *Alert) error {
+	if e.Mailer == nil {
+		return fmt.Errorf("email: mail is not configured (docs/operator/mail.md)")
+	}
 	body := alert.Title() + "\r\n\r\n"
 	if alert.Description != "" {
 		body += alert.Description + "\r\n\r\n"
@@ -80,7 +82,7 @@ func (e *Email) Send(ctx context.Context, alert *Alert) error {
 	for k, v := range alert.Labels {
 		body += k + " = " + v + "\r\n"
 	}
-	return sendText(ctx, e.SMTP, e.To, alert.Title(), body, e.sendMail)
+	return e.Mailer.Send(ctx, e.To, alert.Title(), body)
 }
 
 // serverAuth authenticates with whichever mechanism the server offers:

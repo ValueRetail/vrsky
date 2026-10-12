@@ -82,12 +82,14 @@ func TestEmail_Send(t *testing.T) {
 	var gotTo []string
 	var gotMsg []byte
 	e := &Email{
-		SMTP: SMTPConfig{Host: "mail.local", Port: "1025", From: "alerts@vrsky.local"},
-		To:   "ops@example.com",
-		sendMail: func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
-			gotAddr, gotFrom, gotTo, gotMsg = addr, from, to, msg
-			return nil
+		Mailer: &SMTP{
+			Config: SMTPConfig{Host: "mail.local", Port: "1025", From: "alerts@vrsky.local"},
+			sendMail: func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+				gotAddr, gotFrom, gotTo, gotMsg = addr, from, to, msg
+				return nil
+			},
 		},
+		To: "ops@example.com",
 	}
 	if err := e.Send(context.Background(), testAlert()); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -106,9 +108,9 @@ func TestEmail_Send(t *testing.T) {
 func TestEmail_RequiresConfig(t *testing.T) {
 	e := &Email{To: "ops@example.com"}
 	if err := e.Send(context.Background(), testAlert()); err == nil {
-		t.Fatal("expected error without SMTP config")
+		t.Fatal("expected error without a mailer")
 	}
-	e = &Email{SMTP: SMTPConfig{Host: "h", Port: "25", From: "f@x"}}
+	e = &Email{Mailer: &SMTP{Config: SMTPConfig{Host: "h", Port: "25", From: "f@x"}}}
 	if err := e.Send(context.Background(), testAlert()); err == nil {
 		t.Fatal("expected error without recipient")
 	}

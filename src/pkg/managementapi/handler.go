@@ -34,10 +34,11 @@ type Handler struct {
 	quotas            *QuotaTracker                               // In-process token buckets for per-tenant rate limits (#74)
 	authLimits        *authLimits                                 // Failed-login and sign-up limits (plans/login-rate-limit.md)
 	verifyPassword    func(hashedPassword, password string) error // nil = auth.VerifyPassword; tests record calls
-	// mailer sends one plain-text mail; nil when SMTP is not configured.
-	// publicURL is the origin links in mail point at ("" = unset). With
-	// either missing, password reset answers "not available" (auth_mail.go).
-	mailer            func(ctx context.Context, to, subject, body string) error
+	// mailer sends one plain-text mail (Graph or SMTP); nil when mail is
+	// not configured. publicURL is the origin links in mail point at ("" =
+	// unset). With either missing, password reset answers "not available"
+	// (auth_mail.go), and e-mail notification targets fail with a reason.
+	mailer            notify.Mailer
 	publicURL         string
 	platformOperators map[string]bool // emails allowed on the platform routes (plans/paid-plans.md)
 	// notifyPlatform raises an alert for the operator (plan requested, trial

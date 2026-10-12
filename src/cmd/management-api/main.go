@@ -298,12 +298,16 @@ func setupServer(config *Config, db *sql.DB, nc *nats.Conn, logger *log.Logger, 
 	// Password-reset mail (plans/auth-leftovers.md): the SMTP identity the
 	// alert e-mail targets use, and PUBLIC_URL for the link. Without either
 	// the endpoint answers "not available" rather than promising a mail.
-	restHandler.SetMailer(managementapi.MailerFromEnv())
+	mailer, mailHow := managementapi.MailerFromEnv()
+	restHandler.SetMailer(mailer)
 	if err := restHandler.SetPublicURL(os.Getenv("PUBLIC_URL")); err != nil {
 		logger.Fatalf("invalid configuration: %v", err)
 	}
+	if mailHow != "" {
+		logger.Printf("%s", mailHow)
+	}
 	if !managementapi.CanSendMail(restHandler) {
-		logger.Printf("password reset is off: set SMTP_HOST, SMTP_FROM and PUBLIC_URL to enable it (docs/operator/mail.md)")
+		logger.Printf("password reset is off: set PUBLIC_URL and either GRAPH_* with MAIL_FROM or SMTP_HOST with SMTP_FROM (docs/operator/mail.md)")
 	}
 	// PLATFORM_OPERATORS: who may set plans and quotas (plans/paid-plans.md).
 	restHandler.SetPlatformOperators(managementapi.PlatformOperatorsFromEnv())
