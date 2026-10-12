@@ -186,6 +186,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
 
       # golangci-lint runs here without a config file, and gofmt is not in its
@@ -298,6 +299,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
       - name: Test the agent (including a real service install)
         working-directory: src
@@ -347,6 +349,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
       - name: Build
         working-directory: src
