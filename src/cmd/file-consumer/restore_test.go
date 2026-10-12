@@ -40,7 +40,7 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
 			AddRow(connID, tenant, "Files", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
@@ -60,4 +60,9 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 	if got.IntegrationID != connID {
 		t.Fatalf("published for %s, want %s", got.IntegrationID, connID)
 	}
+
+	// The one last_payload write is the SDK's, and it names the tenant
+	// (WithArgs above); the SDK ignores that Exec's error, so only the mock's
+	// bookkeeping sees a wrong statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }

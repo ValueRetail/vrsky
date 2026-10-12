@@ -164,25 +164,15 @@ func (s *tenantConsumer) handleSourceMessage(ctx context.Context, msg *nats.Msg,
 		CreatedAt:     time.Now().UTC(),
 	}
 
-	// Marshal once for the last_payload cache below; the SDK publish path
-	// marshals the envelope itself (envelope.Marshal == json.Marshal, so the
-	// bytes are identical).
-	data, err := json.Marshal(newEnv)
-	if err != nil {
-		logger.Error("Failed to marshal new envelope", "error", err)
-		return nil
-	}
-
 	// Publish to the target tenant's pipeline stream via the SDK's injected
-	// publish func (the one data-emit path).
+	// publish func (the one data-emit path). It also writes the target
+	// connection's last_payload (the UI's data-structure preview),
+	// tenant-scoped, one write per connection per 30 s.
 	if err := s.publish(ctx, newEnv); err != nil {
 		logger.Error("Failed to publish to target tenant via JetStream", "error", err,
 			"target_tenant", targetTenantID, "target_connection", targetConnectionID)
 		return err
 	}
-
-	// Store last_payload for the target connection (used by filter data structure preview)
-	_, _ = s.db.Exec("UPDATE connections SET last_payload = $1 WHERE id = $2", data, targetConnectionID)
 
 	logger.Info("Bridged envelope",
 		"source_envelope_id", env.ID,

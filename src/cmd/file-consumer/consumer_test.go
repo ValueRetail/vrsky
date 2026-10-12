@@ -44,7 +44,7 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
 			AddRow(connID, tenant, "File Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
@@ -92,6 +92,11 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 	if string(got.Payload) != `{"hello":"file"}` {
 		t.Errorf("payload = %q, want %q", got.Payload, `{"hello":"file"}`)
 	}
+
+	// The one last_payload write is the SDK's, and it names the tenant
+	// (WithArgs above); the SDK ignores that Exec's error, so only the mock's
+	// bookkeeping sees a wrong statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }
 
 // TestFileConsumer_WatchRoundTrip is the regression test for #143: a file
@@ -122,7 +127,7 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "nodes", "edges"}).
 			AddRow(connID, tenant, "File Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE connections SET last_payload").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
@@ -150,4 +155,9 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 	if string(got.Payload) != `{"hello":"watch"}` {
 		t.Errorf("payload = %q, want %q", got.Payload, `{"hello":"watch"}`)
 	}
+
+	// The one last_payload write is the SDK's, and it names the tenant
+	// (WithArgs above); the SDK ignores that Exec's error, so only the mock's
+	// bookkeeping sees a wrong statement.
+	harness.Eventually(t, 3*time.Second, "db expectations met", func() bool { return mock.ExpectationsWereMet() == nil })
 }

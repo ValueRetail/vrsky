@@ -48,12 +48,16 @@ routes and the two legacy writes (`PUT …/quotas`, `PUT …/plan`). Nobody else
 can, whatever their workspace role — an owner can no longer raise their own
 limits. An empty list means nobody can.
 
+The list lives in `infrastructure/kubernetes/management-api/deployment.yaml`;
+to add an operator, edit it there and apply the file:
+
 ```bash
-kubectl set env -n vrsky-platform deploy/vrsky-management-api PLATFORM_OPERATORS=you@example.com
+kubectl apply -n vrsky-platform -f infrastructure/kubernetes/management-api/deployment.yaml
 ```
 
-`deploy-core-azure.sh` sets images only; the variable has to be set on the
-deployment once (and is in `infrastructure/kubernetes/management-api/deployment.yaml`).
+A `kubectl set env` on the deployment works too, but only until the next
+apply of that file (a rebuild with `deploy-azure.sh`, for one) puts the
+file's list back. A test keeps the file's list non-empty.
 
 ### Extending a trial
 
