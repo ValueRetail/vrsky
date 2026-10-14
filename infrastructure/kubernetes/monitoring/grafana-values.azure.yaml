@@ -14,7 +14,8 @@ persistence:
   size: 5Gi
 
 resources:
-  requests: { cpu: 100m, memory: 256Mi }
+  # 7-day peak 2m; requests reserve, limits cap (plans/cpu-request-headroom.md).
+  requests: { cpu: 50m, memory: 256Mi }
   limits: { cpu: 500m, memory: 512Mi }
 
 # prometheus-values.yaml sets fullnameOverride: prometheus, so the Prometheus

@@ -68,10 +68,11 @@ spec:
               mountPath: /data
 
           resources:
-            # Modest requests so it schedules on small/k3d nodes; limits stay
-            # generous for real load.
+            # Requests are what the scheduler reserves, not what a pod may use;
+            # sized at >= 2x the 7-day peak (plans/cpu-request-headroom.md).
+            # Limits stay generous for burst under real load.
             requests:
-              cpu: 250m
+              cpu: 50m
               memory: 512Mi
             limits:
               cpu: 2

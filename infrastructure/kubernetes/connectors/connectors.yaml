@@ -85,7 +85,9 @@ spec:
           containerPort: 9260
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -183,7 +185,9 @@ spec:
           containerPort: 9270
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -281,7 +285,9 @@ spec:
           containerPort: 9280
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -379,7 +385,9 @@ spec:
           containerPort: 9310
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -477,7 +485,9 @@ spec:
           containerPort: 9320
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -575,7 +585,9 @@ spec:
           containerPort: 9290
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -680,7 +692,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -781,7 +795,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -882,7 +898,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -983,7 +1001,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1084,7 +1104,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1185,7 +1207,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1287,7 +1311,9 @@ spec:
           containerPort: 9800
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1385,7 +1411,9 @@ spec:
           containerPort: 9100
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1490,7 +1518,9 @@ spec:
           containerPort: 9200
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1595,7 +1625,9 @@ spec:
           containerPort: 9300
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1693,7 +1725,9 @@ spec:
           containerPort: 9240
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1791,7 +1825,9 @@ spec:
           containerPort: 9210
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1889,7 +1925,9 @@ spec:
           containerPort: 9220
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -1987,7 +2025,9 @@ spec:
           containerPort: 9230
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2093,7 +2133,9 @@ spec:
           containerPort: 9250
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2186,7 +2228,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2269,7 +2313,9 @@ spec:
           containerPort: 9330
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2375,7 +2421,9 @@ spec:
           containerPort: 9400
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2473,7 +2521,9 @@ spec:
           containerPort: 9500
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2580,7 +2630,9 @@ spec:
           containerPort: 9900
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2692,7 +2744,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2793,7 +2847,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2894,7 +2950,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -2995,7 +3053,9 @@ spec:
               key: secretkey
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m
@@ -3104,7 +3164,9 @@ spec:
               optional: true
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m

@@ -312,7 +312,9 @@ EOF
   cat <<EOF
         resources:
           requests:
-            cpu: 25m
+            # 7-day peak per connector is 2m; 44 pods at 25m reserved a core
+            # for nothing (plans/cpu-request-headroom.md). Limits unchanged.
+            cpu: 10m
             memory: 64Mi
           limits:
             cpu: 250m

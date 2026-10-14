@@ -30,7 +30,7 @@ spec:
         imagePullPolicy: IfNotPresent
         resources:
           requests:
-            cpu: 100m
+            cpu: 50m # >= 2x the 7-day peak (plans/cpu-request-headroom.md)
             memory: 128Mi
           limits:
             cpu: 500m

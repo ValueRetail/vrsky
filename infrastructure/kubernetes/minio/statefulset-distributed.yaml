@@ -131,7 +131,7 @@ spec:
             # Modest requests so 4 erasure-coded replicas fit on small/k3d
             # nodes; limits stay generous for real load.
             requests:
-              cpu: 250m
+              cpu: 50m
               memory: 512Mi
             limits:
               cpu: 2

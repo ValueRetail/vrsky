@@ -71,10 +71,11 @@ spec:
 
           resources:
             # Requests are the scheduling floor (not a reservation of headroom);
-            # keep them modest so the platform bin-packs onto small/k3d nodes.
-            # Limits remain generous for burst under real load.
+            # Requests are what the scheduler reserves, not what a pod may use;
+            # sized at >= 2x the 7-day peak (plans/cpu-request-headroom.md).
+            # Limits stay generous for burst under real load.
             requests:
-              cpu: 250m
+              cpu: 50m
               memory: 512Mi
             limits:
               cpu: 4
