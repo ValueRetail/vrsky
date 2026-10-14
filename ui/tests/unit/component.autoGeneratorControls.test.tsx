@@ -23,7 +23,7 @@ vi.mock('@/store/uiStore', () => ({
 }))
 
 describe('AutoGeneratorControls Component', () => {
-  let mockAddNotification: any
+  let mockAddNotification: ReturnType<typeof vi.fn>
   const mockStatus: AutoGeneratorStatusResponse = {
     connection_id: 'test-conn',
     is_running: false,
@@ -35,10 +35,10 @@ describe('AutoGeneratorControls Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAddNotification = vi.fn()
-    ;(useUIStore as any).mockReturnValue({
+    vi.mocked(useUIStore).mockReturnValue({
       addNotification: mockAddNotification,
-    })
-    ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(mockStatus)
+    } as unknown as ReturnType<typeof useUIStore>)
+    vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(mockStatus)
   })
 
   describe('Rendering', () => {
@@ -82,7 +82,7 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -99,7 +99,7 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -118,7 +118,7 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 1000,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -135,7 +135,7 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 500,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -239,8 +239,8 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 0,
         error_count: 0,
       }
-      ;(testDataService.testDataService.startAutoGenerator as any).mockResolvedValue(undefined)
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.startAutoGenerator).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -268,8 +268,8 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 0,
         error_count: 0,
       }
-      ;(testDataService.testDataService.startAutoGenerator as any).mockResolvedValue(undefined)
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(newStatus)
+      vi.mocked(testDataService.testDataService.startAutoGenerator).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(newStatus)
 
       const mockOnStatusChange = vi.fn()
       render(
@@ -287,7 +287,7 @@ describe('AutoGeneratorControls Component', () => {
     })
 
     it('should show error notification on start failure', async () => {
-      ;(testDataService.testDataService.startAutoGenerator as any).mockRejectedValue(
+      vi.mocked(testDataService.testDataService.startAutoGenerator).mockRejectedValue(
         new Error('API error')
       )
 
@@ -318,8 +318,8 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
-      ;(testDataService.testDataService.stopAutoGenerator as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.stopAutoGenerator).mockResolvedValue(undefined)
 
       render(<AutoGeneratorControls connectionId="test-conn-123" />)
 
@@ -350,10 +350,10 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus)
         .mockResolvedValueOnce(runningStatus)
         .mockResolvedValue(stoppedStatus)
-      ;(testDataService.testDataService.stopAutoGenerator as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.stopAutoGenerator).mockResolvedValue(undefined)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -388,11 +388,11 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus)
         .mockResolvedValueOnce(runningStatus)
         .mockResolvedValueOnce(runningStatus)
         .mockResolvedValueOnce(stoppedStatus)
-      ;(testDataService.testDataService.stopAutoGenerator as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.stopAutoGenerator).mockResolvedValue(undefined)
 
       const mockOnStatusChange = vi.fn()
       render(
@@ -420,8 +420,8 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
-      ;(testDataService.testDataService.stopAutoGenerator as any).mockRejectedValue(
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.stopAutoGenerator).mockRejectedValue(
         new Error('Stop failed')
       )
 
@@ -465,7 +465,7 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
 
       render(<AutoGeneratorControls connectionId="test-conn" />)
 
@@ -477,7 +477,7 @@ describe('AutoGeneratorControls Component', () => {
 
   describe('Loading states', () => {
     it('should disable slider while starting', async () => {
-      ;(testDataService.testDataService.startAutoGenerator as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.startAutoGenerator).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -495,7 +495,7 @@ describe('AutoGeneratorControls Component', () => {
     })
 
     it('should show Starting... text while loading', async () => {
-      ;(testDataService.testDataService.startAutoGenerator as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.startAutoGenerator).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -519,8 +519,8 @@ describe('AutoGeneratorControls Component', () => {
         message_count: 100,
         error_count: 0,
       }
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockResolvedValue(runningStatus)
-      ;(testDataService.testDataService.stopAutoGenerator as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockResolvedValue(runningStatus)
+      vi.mocked(testDataService.testDataService.stopAutoGenerator).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -549,7 +549,7 @@ describe('AutoGeneratorControls Component', () => {
     })
 
     it('should handle missing initial status gracefully', async () => {
-      ;(testDataService.testDataService.getGeneratorStatus as any).mockRejectedValue(
+      vi.mocked(testDataService.testDataService.getGeneratorStatus).mockRejectedValue(
         new Error('Not initialized')
       )
 

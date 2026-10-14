@@ -39,7 +39,7 @@ describe('MetricsCard Component', () => {
 
   it('should render trend indicator', () => {
     render(
-      <MetricsCard label="Test" value={100} trend="up" trendValue={"+10%" as any} />
+      <MetricsCard label="Test" value={100} trend="up" trendValue="+10%" />
     )
 
     expect(screen.getByText('↑')).toBeInTheDocument()

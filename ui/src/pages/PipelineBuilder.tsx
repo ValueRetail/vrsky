@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
+import type { FileCfg, HttpCfg, DbCfg } from '@/types/nodeConfig'
 import { useNavigate, useParams } from 'react-router-dom'
 import { onKeyActivate } from '../utils/a11y'
 import { connectionService } from '../services/connectionService'
@@ -572,7 +573,7 @@ export default function PipelineBuilder() {
       const producerNode = nodes.find(n => n.type === 'output')
       let filePath = ''
       if (producerNode?.data?.config?.type === 'file') {
-        filePath = (producerNode.data.config.file as any)?.path || ''
+        filePath = (producerNode.data.config.file as FileCfg | undefined)?.path || ''
       }
 
       // Step 4: Show success notification with details
@@ -594,18 +595,18 @@ export default function PipelineBuilder() {
       const producerType = (producerNode?.data?.config?.type as string) || 'unknown'
       let consumerDetail = ''
       let producerDetail = ''
-      if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as any)?.path || ''
+      if (consumerType === 'file') consumerDetail = (consumerNode?.data?.config?.file as FileCfg | undefined)?.path || ''
       if (consumerType === 'http') consumerDetail = `${config.webhookIngressUrl}/webhook/${connectionId}`
       if (consumerType === 'remote_agent') consumerDetail = remoteAgentDetail(consumerNode?.data?.config)
       if (consumerType === 'database') {
-        const dc = (consumerNode?.data?.config?.database as any) || {}
+        const dc = (consumerNode?.data?.config?.database as DbCfg | undefined) || {}
         consumerDetail = `${dc.host || ''}:${dc.port || 5432}/${dc.database || ''} → ${dc.table || dc.query || ''}`
       }
-      if (producerType === 'file') producerDetail = (producerNode?.data?.config?.file as any)?.path || ''
-      if (producerType === 'http') producerDetail = (producerNode?.data?.config?.http as any)?.url || ''
+      if (producerType === 'file') producerDetail = (producerNode?.data?.config?.file as FileCfg | undefined)?.path || ''
+      if (producerType === 'http') producerDetail = (producerNode?.data?.config?.http as HttpCfg | undefined)?.url || ''
       if (producerType === 'remote_agent') producerDetail = remoteAgentDetail(producerNode?.data?.config)
       if (producerType === 'database') {
-        const dp = (producerNode?.data?.config?.database as any) || {}
+        const dp = (producerNode?.data?.config?.database as DbCfg | undefined) || {}
         producerDetail = `${dp.host || ''}:${dp.port || 5432}/${dp.database || ''} → ${dp.table || ''}`
       }
       setDeploymentInfo({ connectionId, consumerType, consumerDetail, producerType, producerDetail, time: new Date().toLocaleTimeString() })
@@ -613,7 +614,7 @@ export default function PipelineBuilder() {
       // Show test panels based on consumer/producer type
       const isFileWatcher = consumerNode?.data?.config?.type === 'file'
       const isHttpProducer = producerNode?.data?.config?.type === 'http'
-      const httpTargetUrl = isHttpProducer ? (producerNode?.data?.config?.http as any)?.url || '' : ''
+      const httpTargetUrl = isHttpProducer ? (producerNode?.data?.config?.http as HttpCfg | undefined)?.url || '' : ''
 
       if (isFileWatcher) {
         setFileUploadPanel({
@@ -629,7 +630,7 @@ export default function PipelineBuilder() {
       // Show HTTP producer panel if applicable
       const payloadProducer = payload.nodes.find((n: { type: string; config?: Record<string, unknown> }) => n.type === 'output')
       const resolvedIsHttp = isHttpProducer || payloadProducer?.config?.type === 'http'
-      const resolvedUrl = httpTargetUrl || (payloadProducer?.config?.http as any)?.url || ''
+      const resolvedUrl = httpTargetUrl || (payloadProducer?.config?.http as HttpCfg | undefined)?.url || ''
 
       if (resolvedIsHttp) {
         setHttpProducerEvents([])
@@ -645,7 +646,7 @@ export default function PipelineBuilder() {
       // Show DB producer panel if applicable
       const isDbProducer = producerNode?.data?.config?.type === 'database' || payloadProducer?.config?.type === 'database'
       if (isDbProducer) {
-        const dbTable = (producerNode?.data?.config?.database as any)?.table || (payloadProducer?.config?.database as any)?.table || ''
+        const dbTable = (producerNode?.data?.config?.database as DbCfg | undefined)?.table || (payloadProducer?.config?.database as DbCfg | undefined)?.table || ''
         setDbProducerEvents([])
         setExpandedDbEvent(null)
         setDbProducerPanel({ table: dbTable, connectionId })
@@ -682,7 +683,7 @@ export default function PipelineBuilder() {
       // Show file manager panel if producer is file type
       const isFileProducer = producerNode?.data?.config?.type === 'file' || payloadProducer?.config?.type === 'file'
       if (isFileProducer) {
-        const outputPath = (producerNode?.data?.config?.file as any)?.path || (payloadProducer?.config?.file as any)?.path || '/data/output'
+        const outputPath = (producerNode?.data?.config?.file as FileCfg | undefined)?.path || (payloadProducer?.config?.file as FileCfg | undefined)?.path || '/data/output'
         setFileManagerPanel({ basePath: outputPath, currentPath: outputPath, connectionId })
         setFileManagerFiles([])
         setActiveBottomTab('filemanager')
