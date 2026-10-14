@@ -212,17 +212,9 @@ jobs:
       # 2026-10-05 proxy.golang.org dropped a single download mid-stream and 41
       # packages ended in "setup failed" before a test had run: main went red
       # on a merge that changed no code path (#299, run 37309549541). Fetch
-      # everything here instead, with retries — the loop the Dockerfiles use.
+      # everything first instead, with retries (.github/actions/go-modules).
       - name: Download Go modules
-        working-directory: src
-        run: |
-          for i in 1 2 3; do
-            go mod download && exit 0
-            echo "::warning::go mod download failed (attempt $i/3)"
-            [ "$i" = 3 ] || sleep $((i * 10))
-          done
-          echo "::error::go mod download failed three times — proxy.golang.org is likely down"
-          exit 1
+        uses: ./.github/actions/go-modules
 
       # GOPROXY=off: every module is in the cache by now. If this step ever
       # needs one that is not, it says so on every run, instead of working
@@ -273,6 +265,8 @@ jobs:
       # OpenAPI registry entry (keeps /openapi.json complete).
       - name: Lint OpenAPI annotations
         working-directory: src
+        env:
+          GOPROXY: "off"
         run: go run ./cmd/lint-openapi
 
       # Fail the build if a query touches a tenant-scoped table without a
@@ -301,9 +295,12 @@ jobs:
           go-version: '1.26'
           check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
+      - name: Download Go modules
+        uses: ./.github/actions/go-modules
       - name: Test the agent (including a real service install)
         working-directory: src
         env:
+          GOPROXY: "off"
           VRSKY_AGENT_SERVICE_TEST: "1"
         run: go test -count=1 -v ./pkg/agent/... ./pkg/agentproto/... ./cmd/vrsky-agent/...
       # The one-line installer Settings shows (pkg/managementapi/agent_install.ps1),
@@ -315,6 +312,8 @@ jobs:
       - name: Install script — offline install, check, uninstall
         shell: powershell
         working-directory: src
+        env:
+          GOPROXY: "off"
         run: |
           $ErrorActionPreference = 'Stop'
           go build -o bin\vrsky-agent-windows-amd64.exe .\cmd\vrsky-agent
@@ -351,8 +350,12 @@ jobs:
           go-version: '1.26'
           check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
+      - name: Download Go modules
+        uses: ./.github/actions/go-modules
       - name: Build
         working-directory: src
+        env:
+          GOPROXY: "off"
         run: make build-agent
       - name: Upload
         uses: actions/upload-artifact@v4

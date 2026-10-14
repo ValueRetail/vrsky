@@ -95,6 +95,9 @@ jobs:
           wait_tcp kafka-test:9092     kafka
           wait_tcp rabbitmq-test:5672  rabbitmq
 
+      # The container has no module cache, so every run fetches every module:
+      # the same three-attempt loop as .github/actions/go-modules, inside the
+      # container, then GOPROXY=off for the tests (plans/ci-module-retries.md).
       - name: Run integration tests (in-network)
         run: |
           docker run --rm --network vrsky-network \
@@ -110,11 +113,8 @@ jobs:
             -e RABBITMQ_TEST_URL=amqp://guest:guest@rabbitmq-test:5672/ \
             -e GOFLAGS=-buildvcs=false \
             golang:1.26 \
-            go test -tags=integration -count=1 -v \
-              ./pkg/objectstore/... \
-              ./cmd/sftp-consumer/... \
-              ./cmd/kafka-consumer/... \
-              ./cmd/rabbitmq-consumer/...
+            sh -c 'for i in 1 2 3; do go mod download && break; echo "go mod download failed (attempt $i/3)"; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
+                   GOPROXY=off go test -tags=integration -count=1 -v ./pkg/objectstore/... ./cmd/sftp-consumer/... ./cmd/kafka-consumer/... ./cmd/rabbitmq-consumer/...'
 
       - name: Dump broker logs on failure
         if: failure()

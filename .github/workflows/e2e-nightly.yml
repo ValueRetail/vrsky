@@ -76,6 +76,9 @@ jobs:
           # need to have subscribed, which they do within a second of starting.
           sleep 5
 
+      # The container has no module cache, so every run fetches every module:
+      # the same three-attempt loop as .github/actions/go-modules, inside the
+      # container, then GOPROXY=off for the tests (plans/ci-module-retries.md).
       - name: Run the end-to-end
         run: |
           docker run --rm --network vrsky-network \
@@ -86,7 +89,8 @@ jobs:
             -e E2E_MOCK_SAP_URL=http://mock-sap:8099 \
             -e GOFLAGS=-buildvcs=false \
             golang:1.26 \
-            go test -tags=integration -count=1 -v -timeout 10m ./test/integration/ -run TestSAP_EndToEnd
+            sh -c 'for i in 1 2 3; do go mod download && break; echo "go mod download failed (attempt $i/3)"; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
+                   GOPROXY=off go test -tags=integration -count=1 -v -timeout 10m ./test/integration/ -run TestSAP_EndToEnd'
 
       # The failure mode this test exists to catch is silent: a connector that
       # cannot parse its config logs at Debug and simply never starts polling.

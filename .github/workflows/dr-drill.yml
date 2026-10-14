@@ -76,7 +76,11 @@ jobs:
           check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
           cache-dependency-path: src/go.sum
 
+      - name: Download Go modules
+        uses: ./.github/actions/go-modules
       - name: Install postgres client + build vrsky-cli
+        env:
+          GOPROXY: "off"
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
           cd src && go build -o /usr/local/bin/vrsky-cli ./cmd/vrsky-cli

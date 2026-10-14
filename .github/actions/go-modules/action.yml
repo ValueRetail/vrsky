@@ -1,0 +1,26 @@
+# Fetch every Go module with retries, so the job can then run with
+# GOPROXY=off. On 2026-10-05 proxy.golang.org dropped a single download
+# mid-stream and 41 packages ended in "setup failed" before a test had run
+# (#299); #300 gave the Go Tests job this loop, and every Go job now shares
+# it (plans/ci-module-retries.md). TestGoJobsRetryModuleDownloads keeps
+# every job that runs Go on it.
+name: Download Go modules
+description: go mod download with three attempts; the job then runs its Go steps with GOPROXY=off
+inputs:
+  working-directory:
+    description: the module root
+    default: src
+runs:
+  using: composite
+  steps:
+    - name: Download Go modules
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        for i in 1 2 3; do
+          go mod download && exit 0
+          echo "::warning::go mod download failed (attempt $i/3)"
+          [ "$i" = 3 ] || sleep $((i * 10))
+        done
+        echo "::error::go mod download failed three times — proxy.golang.org is likely down"
+        exit 1

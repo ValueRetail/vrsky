@@ -56,10 +56,24 @@ jobs:
       # advisories that were (unfixable in v4, and reachable from the
       # management API's own database driver) went away with the move to
       # pgx v5.
+      - name: Download Go modules
+        uses: ./.github/actions/go-modules
+      # @latest on purpose: the newest scanner. It is a proxy fetch the module
+      # download above does not cover, so it gets the same three attempts.
+      - name: Install govulncheck
+        run: |
+          for i in 1 2 3; do
+            go install golang.org/x/vuln/cmd/govulncheck@latest && exit 0
+            echo "::warning::go install govulncheck failed (attempt $i/3)"
+            [ "$i" = 3 ] || sleep $((i * 10))
+          done
+          echo "::error::go install govulncheck failed three times"
+          exit 1
       - name: Scan Go modules and the standard library
         working-directory: src
+        env:
+          GOPROXY: "off" # every module is in the cache; the vulnerability database comes from vuln.go.dev, not the proxy
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./... > report.txt 2>&1 || true
           cat report.txt
 

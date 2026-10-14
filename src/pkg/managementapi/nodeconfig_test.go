@@ -789,68 +789,94 @@ func TestDockerfilesRetryModuleDownload(t *testing.T) {
 	}
 }
 
-// The Go Tests job must fetch its modules with retries, and before any test.
-//
-// `go test` downloads modules as it compiles, one attempt each. On 2026-10-05
-// proxy.golang.org dropped one download and 41 packages ended in "setup
-// failed": main went red on a merge that touched no code path (#299). The job
-// now downloads first, in a loop, and runs the tests with GOPROXY=off so a
-// module the download step missed fails every run rather than the unlucky one.
-//
-// Both halves are a few lines of YAML that read as optional. This fails when
-// either goes: the loop, or the test steps' reliance on it.
-func TestGoTestsJobRetriesModuleDownload(t *testing.T) {
-	path := filepath.Join("..", "..", "..", ".github", "workflows", "build-push.yml")
-	body, err := os.ReadFile(path) //nolint:gosec // fixed path inside the repo
+// Every CI job that runs Go must fetch the modules first with retries
+// (.github/actions/go-modules) and then run with GOPROXY=off, so that one
+// dropped download from proxy.golang.org cannot fail a job (#299, #300,
+// plans/ci-module-retries.md). A `go install …@latest` is a proxy fetch of
+// its own and must sit inside a retry loop.
+func TestGoJobsRetryModuleDownloads(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	action, err := os.ReadFile(filepath.Join(root, ".github", "actions", "go-modules", "action.yml"))
 	if err != nil {
-		t.Skipf("workflow not found (%v) — retry guard skipped", err)
+		t.Fatalf("read the go-modules action: %v", err)
 	}
-	var wf struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				Name string            `yaml:"name"`
-				Run  string            `yaml:"run"`
-				Env  map[string]string `yaml:"env"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(body, &wf); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	job, ok := wf.Jobs["go-tests"]
-	if !ok {
-		t.Fatal("build-push.yml has no go-tests job — if it was renamed, point this test at the new name")
+	if !strings.Contains(string(action), "go mod download") || !strings.Contains(string(action), "for i in") {
+		t.Fatal(".github/actions/go-modules/action.yml no longer retries `go mod download`")
 	}
 
-	download, firstTest, tests := -1, -1, 0
-	for i, step := range job.Steps {
-		switch {
-		case strings.Contains(step.Run, "go mod download"):
-			download = i
-			if !strings.Contains(step.Run, "for ") && !strings.Contains(step.Run, "until ") && !strings.Contains(step.Run, "while ") {
-				t.Errorf("step %q downloads modules without retrying: one dropped stream from "+
-					"proxy.golang.org fails the whole job", step.Name)
+	workflows, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("no workflows found (%v)", err)
+	}
+	isLoop := func(run string) bool {
+		return strings.Contains(run, "for ") || strings.Contains(run, "until ") || strings.Contains(run, "while ")
+	}
+	isGoStep := func(run string) bool {
+		for _, cmd := range []string{"go test ", "go build ", "go run ", "govulncheck ", "make build-agent"} {
+			if strings.Contains(run, cmd) {
+				return true
 			}
-		case strings.Contains(step.Run, "go test "):
-			tests++
-			if firstTest < 0 {
-				firstTest = i
+		}
+		return false
+	}
+	var checked []string
+	for _, wfPath := range workflows {
+		body, err := os.ReadFile(wfPath) //nolint:gosec // paths come from Glob over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", wfPath, err)
+		}
+		var wf struct {
+			Jobs map[string]struct {
+				Steps []struct {
+					Name string            `yaml:"name"`
+					Uses string            `yaml:"uses"`
+					Run  string            `yaml:"run"`
+					Env  map[string]string `yaml:"env"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal(body, &wf); err != nil {
+			t.Fatalf("parse %s: %v", wfPath, err)
+		}
+		for jobName, job := range wf.Jobs {
+			where := filepath.Base(wfPath) + " job " + jobName
+			download := -1
+			for i, step := range job.Steps {
+				if step.Uses == "./.github/actions/go-modules" || (strings.Contains(step.Run, "go mod download") && isLoop(step.Run)) {
+					download = i
+					continue
+				}
+				if strings.Contains(step.Run, "go install ") {
+					if !isLoop(step.Run) {
+						t.Errorf("%s: step %q runs `go install` without retrying — a proxy fetch of its own", where, step.Name)
+					}
+					continue
+				}
+				if !isGoStep(step.Run) {
+					continue
+				}
+				// A step that runs Go inside a container (docker run … golang:…)
+				// has no module cache and carries its own retried download and
+				// GOPROXY=off in the command line.
+				selfContained := strings.Contains(step.Run, "go mod download") && isLoop(step.Run)
+				if download < 0 && !selfContained {
+					t.Errorf("%s: step %q runs Go before any retried module download — add `uses: ./.github/actions/go-modules` after setup-go, or the loop inside the container", where, step.Name)
+				}
+				if step.Env["GOPROXY"] != "off" && !strings.Contains(step.Run, "GOPROXY=off") {
+					t.Errorf("%s: step %q runs Go without GOPROXY=off, so it can fetch modules itself, unretried", where, step.Name)
+				}
+				if selfContained {
+					download = i
+				}
 			}
-			if step.Env["GOPROXY"] != "off" {
-				t.Errorf("step %q runs go test without GOPROXY=off, so it can download modules itself — "+
-					"unretried, which is the failure the download step exists to prevent", step.Name)
+			if download >= 0 {
+				checked = append(checked, where)
 			}
 		}
 	}
-	if tests == 0 {
-		t.Fatal("found no `go test` step in the go-tests job — this guard no longer checks anything")
-	}
-	if download < 0 {
-		t.Fatal("the go-tests job has no `go mod download` step: modules are fetched by go test, one attempt each")
-	}
-	if download > firstTest {
-		t.Errorf("`go mod download` (step %d) comes after the first `go test` (step %d); it must come first",
-			download+1, firstTest+1)
+	sort.Strings(checked)
+	if len(checked) < 7 {
+		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are Go Tests, Remote agent on Windows, Build remote agent binaries, govulncheck, the DR drill, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
 	}
 }
 
