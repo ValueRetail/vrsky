@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import type { FileCfg, HttpCfg } from '@/types/nodeConfig'
+import { useNodeEditorState } from './useNodeEditorState'
 import {
   DndContext,
   DragOverlay,
@@ -3590,15 +3591,13 @@ export default function PropertyEditor({
   allNodes?: Node[]
   allEdges?: Edge[]
 }) {
-  const [config, setConfig] = useState(node.data.config || {})
+  const { config, setConfig, labelValue, setLabelValue, editingLabel, setEditingLabel } = useNodeEditorState(node)
   const [closeHovered, setCloseHovered] = useState(false)
   const [tunnelUrl, setTunnelUrl] = useState('')
   const [tunnelLoading, setTunnelLoading] = useState(false)
   const [_testBody, _setTestBody] = useState('{\n  "test": true,\n  "message": "Hello from VRSky!"\n}')
   const [_testResponse, _setTestResponse] = useState<{ status: number; body: string } | null>(null)
   const [_testSending, _setTestSending] = useState(false)
-  const [editingLabel, setEditingLabel] = useState(false)
-  const [labelValue, setLabelValue] = useState(node.data.label || '')
 
   // Check tunnel status on mount. Dev only: the tunnel control endpoints live
   // on the webhook-consumer's aux port on this machine, which only exists when
@@ -3613,17 +3612,6 @@ export default function PropertyEditor({
       .catch(() => {})
   }, [])
 
-  // When a different node is selected, load its config; a re-render of the
-  // same node keeps the local state (unsaved edits). Adjusting state during
-  // render is React's pattern for state that follows a prop; an effect that
-  // did the same caused a cascading render.
-  const [editedNodeId, setEditedNodeId] = useState(node.id)
-  if (editedNodeId !== node.id) {
-    setEditedNodeId(node.id)
-    setConfig(node.data.config || {})
-    setLabelValue(node.data.label || '')
-    setEditingLabel(false)
-  }
 
   const nodeType = node.type as string
   const nodeColor = NODE_COLORS[nodeType] || NODE_COLORS.consumer
