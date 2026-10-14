@@ -205,9 +205,9 @@ its real name. Whatever reads that folder never sees a half-written file. A file
 of the same name is replaced.
 
 **While the agent is offline** — machine off, network down — files for it wait
-in VRSky and are written when it reconnects. That waiting has limits: **up to
-72 hours, and 24 hours for files over 256 KB**. Past that they are lost. Files
-waiting for a read folder simply wait on the machine.
+in VRSky and are written when it reconnects. That waiting has a limit: **up to
+72 hours, whatever the file's size**. Past that they are lost. Files waiting
+for a read folder simply wait on the machine.
 
 **Revoking.** Revoking the agent in Settings → Remote agents cuts it off on its
 next request. It stops, writes the reason to its log and the Event Log, and

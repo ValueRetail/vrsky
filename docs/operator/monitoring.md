@@ -61,3 +61,11 @@ limits untouched, and two guards keep it that way:
 The AKS add-ons (Container Insights, metrics-server, Azure Policy, CoreDNS)
 reserve about 1.4 cores between them and are Azure's to size.
 
+## Grafana restarts on every upgrade
+
+Grafana's data disk attaches to one node at a time, so its Deployment uses
+the `Recreate` strategy: the old pod stops before the new one starts, and
+Grafana is away for a few seconds during `install-monitoring.sh`. (With a
+rolling update the new pod could land on the other node and hang on
+"Multi-Attach error" until someone scaled the Deployment to zero and back.)
+

@@ -7,6 +7,14 @@ adminUser: admin
 adminPassword: "changeme-grafana-password"
 
 # Persistence
+# Grafana's data disk is ReadWriteOnce: one node at a time. With the chart's
+# default RollingUpdate the new pod can land on the other node and hang in
+# Init with "Multi-Attach error" while the old pod still holds the disk; the
+# helm upgrade then "fails" (prod, 2026-10-14). Recreate stops the old pod
+# first: a few seconds of Grafana downtime on every upgrade, no deadlock.
+deploymentStrategy:
+  type: Recreate
+
 persistence:
   enabled: true
   storageClassName: longhorn
