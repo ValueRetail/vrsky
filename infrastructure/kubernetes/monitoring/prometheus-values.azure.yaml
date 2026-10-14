@@ -11,7 +11,8 @@ prometheus:
     retention: 15d
     retentionSize: "18GB"
     resources:
-      requests: { cpu: 300m, memory: 1Gi }
+      # 7-day peak 39m; requests reserve, limits cap (plans/cpu-request-headroom.md).
+      requests: { cpu: 100m, memory: 1Gi }
       limits: { cpu: "1", memory: 2Gi }
     storageSpec:
       volumeClaimTemplate:

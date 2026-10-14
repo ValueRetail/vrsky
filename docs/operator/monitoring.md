@@ -42,3 +42,22 @@ orchestrator's probes.
 
 Per-tenant message/deploy/storage usage is rolled up daily and shown under
 **Settings → Usage & quotas**, exportable as CSV for invoicing (#92).
+
+## CPU requests versus use
+
+A request is what the scheduler *reserves* for a pod, not what the pod may
+use; limits cap use. On 2026-10-14 the production nodes were 81% reserved
+and 2% busy, because every request had been set by guess. They were then
+sized at twice each workload's 7-day peak (`plans/cpu-request-headroom.md`),
+limits untouched, and two guards keep it that way:
+
+- `NodeCPURequestsHigh` fires when a node's reservations exceed 85% of its
+  allocatable CPU for an hour. The fix is to right-size the biggest
+  requests on that node (`kubectl describe node` lists them); a third node
+  is the answer only when *use* is high too (`kubectl top nodes`).
+- `TestCPURequestsStayWithinBudget` fails the build when the requests in
+  the repo's manifests add up to more than 2000m, naming the largest.
+
+The AKS add-ons (Container Insights, metrics-server, Azure Policy, CoreDNS)
+reserve about 1.4 cores between them and are Azure's to size.
+

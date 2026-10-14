@@ -45,10 +45,11 @@ spec:
         image: ghcr.io/valueretail/vrsky/management-api:latest
         imagePullPolicy: IfNotPresent
 
-        # Resource limits - sized for test cluster (k3s single/small node)
+        # Requests are what the scheduler reserves: >= 2x the 7-day peak
+        # (plans/cpu-request-headroom.md). Limits stay generous for bursts.
         resources:
           requests:
-            cpu: 100m
+            cpu: 50m
             memory: 128Mi
           limits:
             cpu: 500m

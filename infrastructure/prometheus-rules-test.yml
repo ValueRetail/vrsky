@@ -221,3 +221,32 @@ tests:
             exp_annotations:
               summary: "vrsky-business-central-consumer has no running replica"
               description: "Deployment vrsky-business-central-consumer in vrsky-platform has had 0 available replicas for 10 minutes. Every pipeline using that connector is stalled."
+
+  # 10. NodeCPURequestsHigh — a node at 90% reserved for an hour fires; one
+  #     at 70% does not; the 90% node is still pending at 30 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n0",namespace="a",pod="p1",container="c"}'
+        values: '2x90'
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n0",namespace="b",pod="p2",container="c"}'
+        values: '1.6x90'
+      - series: 'kube_node_status_allocatable{resource="cpu",unit="core",node="n0"}'
+        values: '4x90'
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n1",namespace="a",pod="p3",container="c"}'
+        values: '2.8x90'
+      - series: 'kube_node_status_allocatable{resource="cpu",unit="core",node="n1"}'
+        values: '4x90'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NodeCPURequestsHigh
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: NodeCPURequestsHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: NodeCPURequestsHigh
+              severity: warning
+              node: n0
+            exp_annotations:
+              summary: "node n0 has 90% of its CPU reserved"
+              description: "CPU requests on n0 have exceeded 85% of allocatable for an hour. Right-size requests (plans/cpu-request-headroom.md) before adding a node; usage is usually a fraction of this."

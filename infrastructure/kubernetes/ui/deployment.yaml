@@ -56,10 +56,11 @@ spec:
         image: ghcr.io/ValueRetail/vrsky/ui:latest
         imagePullPolicy: IfNotPresent
 
-        # Resource limits
+        # Static nginx: a few millicores. Requests are what the scheduler
+        # reserves (plans/cpu-request-headroom.md); limits stay for bursts.
         resources:
           requests:
-            cpu: 100m
+            cpu: 25m
             memory: 128Mi
           limits:
             cpu: 500m

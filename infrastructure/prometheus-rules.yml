@@ -134,6 +134,21 @@ groups:
           summary: "tenant NATS instance {{ $labels.tenant_id }}/{{ $labels.instance_number }} at {{ $value | printf \"%.0f\" }}% capacity"
           description: "NATS instance {{ $labels.instance_number }} for tenant {{ $labels.tenant_id }} is at/above 80% of its scale-up trigger; the autoscaler adds an instance past 100%."
 
+      # A node's CPU reservations near its allocatable: the next pod may not
+      # schedule, long before any CPU is actually busy. Requests are what
+      # the scheduler reserves; on 2026-10-14 node 0 sat at 90% reserved and
+      # 2% used (plans/cpu-request-headroom.md). Right-size before scaling.
+      - alert: NodeCPURequestsHigh
+        expr: |
+          sum by (node) (kube_pod_container_resource_requests{resource="cpu", unit="core"})
+            / on (node) kube_node_status_allocatable{resource="cpu", unit="core"} > 0.85
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "node {{ $labels.node }} has {{ $value | humanizePercentage }} of its CPU reserved"
+          description: "CPU requests on {{ $labels.node }} have exceeded 85% of allocatable for an hour. Right-size requests (plans/cpu-request-headroom.md) before adding a node; usage is usually a fraction of this."
+
       # Host filesystem above 80% (node-exporter; tmpfs/overlay excluded).
       - alert: DiskUsageHigh
         expr: |

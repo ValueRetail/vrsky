@@ -2,10 +2,12 @@ package managementapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -878,6 +880,119 @@ func TestGoJobsRetryModuleDownloads(t *testing.T) {
 	if len(checked) < 7 {
 		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are Go Tests, Remote agent on Windows, Build remote agent binaries, govulncheck, the DR drill, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
 	}
+}
+
+// The repo's own CPU requests, replicas included, must add up to under a
+// budget: requests reserve node capacity whether or not it is used, and on
+// 2026-10-14 production sat at 81% reserved and 2% busy because every
+// request had been set by guess (plans/cpu-request-headroom.md). The AKS
+// add-ons are not in the repo and not counted. Raise the budget only with
+// a measured reason in the commit message.
+func TestCPURequestsStayWithinBudget(t *testing.T) {
+	const budgetMillicores = 2000
+	root := filepath.Join("..", "..", "..", "infrastructure")
+	type item struct {
+		name string
+		m    int
+	}
+	var items []item
+	millis := func(v string) int {
+		v = strings.TrimSpace(v)
+		if strings.HasSuffix(v, "m") {
+			n, _ := strconv.Atoi(strings.TrimSuffix(v, "m"))
+			return n
+		}
+		f, _ := strconv.ParseFloat(v, 64)
+		return int(f * 1000)
+	}
+	// The manifests production runs (deploy-vrsky-platform.sh, deploy-azure.sh
+	// and deploy-connectors-azure.sh). Everything else under
+	// infrastructure/kubernetes — the per-tenant NATS template, Loki and
+	// promtail, KES, MinIO's 4-replica layout, Traefik — is lab-only or
+	// created on demand and is not counted.
+	manifests := []string{
+		"platform-nats/statefulset.yaml", "postgresql/statefulset.yaml", "minio/deployment.yaml",
+		"management-api/deployment.yaml", "ui/deployment.yaml", "data-filter/deployment.yaml",
+		"data-converter/deployment.yaml", "alert-responder/deployment.yaml", "connectors/connectors.yaml",
+	}
+	for _, rel := range manifests {
+		path := filepath.Join(root, "kubernetes", rel)
+		body, err := os.ReadFile(path) //nolint:gosec // fixed paths inside the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		dec := yaml.NewDecoder(strings.NewReader(string(body)))
+		for {
+			var doc struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+				Spec struct {
+					Replicas *int `yaml:"replicas"`
+					Template struct {
+						Spec struct {
+							Containers []struct {
+								Resources struct {
+									Requests map[string]string `yaml:"requests"`
+								} `yaml:"resources"`
+							} `yaml:"containers"`
+						} `yaml:"spec"`
+					} `yaml:"template"`
+				} `yaml:"spec"`
+			}
+			if err := dec.Decode(&doc); err != nil {
+				break
+			}
+			if doc.Kind != "Deployment" && doc.Kind != "StatefulSet" && doc.Kind != "DaemonSet" {
+				continue
+			}
+			replicas := 1
+			if doc.Spec.Replicas != nil {
+				replicas = *doc.Spec.Replicas
+			}
+			if doc.Kind == "DaemonSet" {
+				replicas = 2 // one per production node
+			}
+			sum := 0
+			for _, c := range doc.Spec.Template.Spec.Containers {
+				sum += millis(c.Resources.Requests["cpu"])
+			}
+			if sum > 0 {
+				items = append(items, item{filepath.Base(filepath.Dir(path)) + "/" + doc.Metadata.Name + " x" + strconv.Itoa(replicas), sum * replicas})
+			}
+		}
+	}
+	// Helm values for the monitoring stack: the azure files are what
+	// production installs (they override the base values).
+	for _, f := range []string{"prometheus-values.azure.yaml", "grafana-values.azure.yaml"} {
+		body, err := os.ReadFile(filepath.Join(root, "kubernetes", "monitoring", f)) //nolint:gosec // fixed path inside the repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range regexp.MustCompile(`requests:\s*\{\s*cpu:\s*"?([0-9.]+m?)"?`).FindAllStringSubmatch(string(body), -1) {
+			items = append(items, item{"monitoring/" + f, millis(m[1])})
+		}
+	}
+	total := 0
+	for _, it := range items {
+		total += it.m
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].m > items[j].m })
+	var top []string
+	for i, it := range items {
+		if i == 8 {
+			break
+		}
+		top = append(top, fmt.Sprintf("%s=%dm", it.name, it.m))
+	}
+	if len(items) < 20 {
+		t.Fatalf("only %d request entries found (%v); the manifest layout probably moved", len(items), top)
+	}
+	if total > budgetMillicores {
+		t.Fatalf("CPU requests in the repo add up to %dm, over the %dm budget; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
+	}
+	t.Logf("CPU requests in the repo: %dm of %dm; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
 }
 
 // runInstructionContaining returns the full RUN instruction whose body contains
