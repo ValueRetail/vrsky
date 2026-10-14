@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
+import type { FileCfg, HttpCfg } from '@/types/nodeConfig'
 import {
   DndContext,
   DragOverlay,
@@ -1361,7 +1362,7 @@ function DatabaseConsumerConfig({
       })
       const data = await resp.json()
       setTestStatus(data)
-    } catch (err) {
+    } catch {
       setTestStatus({ ok: false, error: 'Cannot reach db-consumer service. Is it running?' })
     }
     setTesting(false)
@@ -1533,7 +1534,7 @@ function DatabaseProducerConfig({
       })
       const data = await resp.json()
       setTestStatus(data)
-    } catch (err) {
+    } catch {
       setTestStatus({ ok: false, error: 'Cannot reach db-producer service. Is it running?' })
     }
     setTesting(false)
@@ -2019,7 +2020,7 @@ function FilterConfig({
           setDataError(result.error || 'No data yet — send data through the pipeline first')
         }
       }
-    } catch (err) {
+    } catch {
       setDataError('Connection failed — is the service running?')
     } finally {
       setLoadingData(false)
@@ -2052,7 +2053,8 @@ function FilterConfig({
             }}
             onClick={() => {
               const next = new Set(expandedPaths)
-              isExpanded ? next.delete(path) : next.add(path)
+              if (isExpanded) next.delete(path)
+              else next.add(path)
               setExpandedPaths(next)
             }}
             onKeyDown={treeNodeKeyDown(isExpanded)}
@@ -3611,21 +3613,17 @@ export default function PropertyEditor({
       .catch(() => {})
   }, [])
 
-  // Track which node we're editing to detect when it changes
-  const currentNodeIdRef = useRef<string>(node.id)
-  
-  // Only sync config from node when we switch to editing a DIFFERENT node
-  // This prevents the config from being overwritten when the same node re-renders
-  useEffect(() => {
-    if (currentNodeIdRef.current !== node.id) {
-      // Different node selected - load its config
-      setConfig(node.data.config || {})
-      setLabelValue(node.data.label || '')
-      setEditingLabel(false)
-      currentNodeIdRef.current = node.id
-    }
-    // If same node, keep local config state (preserves unsaved changes)
-  }, [node.id, node.data.config])
+  // When a different node is selected, load its config; a re-render of the
+  // same node keeps the local state (unsaved edits). Adjusting state during
+  // render is React's pattern for state that follows a prop; an effect that
+  // did the same caused a cascading render.
+  const [editedNodeId, setEditedNodeId] = useState(node.id)
+  if (editedNodeId !== node.id) {
+    setEditedNodeId(node.id)
+    setConfig(node.data.config || {})
+    setLabelValue(node.data.label || '')
+    setEditingLabel(false)
+  }
 
   const nodeType = node.type as string
   const nodeColor = NODE_COLORS[nodeType] || NODE_COLORS.consumer
@@ -3823,11 +3821,11 @@ export default function PropertyEditor({
                 <StyledInput
                   label="Watch Directory"
                   placeholder="/home/user/my-data"
-                  value={(config.file as any)?.path || ''}
+                  value={(config.file as FileCfg)?.path || ''}
                   onChange={(value) =>
                     setConfig({
                       ...config,
-                      file: { ...(config.file as any), path: value },
+                      file: { ...(config.file as FileCfg), path: value },
                     })
                   }
                 />
@@ -3975,21 +3973,21 @@ export default function PropertyEditor({
                 <StyledInput
                   label="Destination URL"
                   placeholder="https://example.com/api/webhook"
-                  value={(config.http as any)?.url || ''}
+                  value={(config.http as HttpCfg)?.url || ''}
                   onChange={(value) =>
                     setConfig({
                       ...config,
-                      http: { ...(config.http as any), url: value },
+                      http: { ...(config.http as HttpCfg), url: value },
                     })
                   }
                 />
                 <StyledSelect
                   label="HTTP Method"
-                  value={(config.http as any)?.method || 'POST'}
+                  value={(config.http as HttpCfg)?.method || 'POST'}
                   onChange={(value) =>
                     setConfig({
                       ...config,
-                      http: { ...(config.http as any), method: value },
+                      http: { ...(config.http as HttpCfg), method: value },
                     })
                   }
                   options={[
@@ -4004,23 +4002,23 @@ export default function PropertyEditor({
 
                 <StyledSelect
                   label="Authentication"
-                  value={((config.http as any)?.auth_type as string) || 'none'}
+                  value={((config.http as HttpCfg)?.auth_type as string) || 'none'}
                   onChange={(value) =>
-                    setConfig({ ...config, http: { ...(config.http as any), auth_type: value } })
+                    setConfig({ ...config, http: { ...(config.http as HttpCfg), auth_type: value } })
                   }
                   options={[
                     { value: 'none', label: 'None' },
                     { value: 'oauth', label: 'OAuth 2.0' },
                   ]}
                 />
-                {(config.http as any)?.auth_type === 'oauth' && (
+                {(config.http as HttpCfg)?.auth_type === 'oauth' && (
                   <div style={{ marginTop: '4px' }}>
                     <OAuthGrantSelector
-                      value={(config.http as any)?.oauth_grant_id || ''}
+                      value={(config.http as HttpCfg)?.oauth_grant_id || ''}
                       onChange={(grantId) =>
                         setConfig({
                           ...config,
-                          http: { ...(config.http as any), oauth_grant_id: grantId || '' },
+                          http: { ...(config.http as HttpCfg), oauth_grant_id: grantId || '' },
                         })
                       }
                       connectionId={deployedConnectionId}
@@ -4035,11 +4033,11 @@ export default function PropertyEditor({
                 <StyledInput
                   label="Output Directory"
                   placeholder="/data/output"
-                  value={(config.file as any)?.path || ''}
+                  value={(config.file as FileCfg)?.path || ''}
                   onChange={(value) =>
                     setConfig({
                       ...config,
-                      file: { ...(config.file as any), path: value },
+                      file: { ...(config.file as FileCfg), path: value },
                     })
                   }
                 />
@@ -4047,7 +4045,7 @@ export default function PropertyEditor({
                     absolute directory under a mounted root and otherwise drops
                     every message at runtime with no UI feedback (#142). */}
                 {(() => {
-                  const p = String((config.file as any)?.path || '').trim()
+                  const p = String((config.file as FileCfg)?.path || '').trim()
                   if (p && !p.startsWith('/')) {
                     return (
                       <div style={{ marginTop: '-8px', marginBottom: '16px', fontSize: '12px', color: '#b45309' }}>

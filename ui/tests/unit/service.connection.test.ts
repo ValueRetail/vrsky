@@ -103,7 +103,7 @@ describe('Connection Service', () => {
         destination_config: { type: 'http', url: 'http://example.com', method: 'POST' },
       }
 
-      const result = await connectionService.create(createData as any)
+      const result = await connectionService.create(createData as unknown as Parameters<typeof connectionService.create>[0])
       expect(result).toEqual(mockConnectionResponse)
       expect(apiClient.post).toHaveBeenCalledWith('/api/v1/connections', createData)
     })
@@ -114,7 +114,7 @@ describe('Connection Service', () => {
       const updated = { ...mockConnectionResponse, name: 'Updated' }
       vi.mocked(apiClient.put).mockResolvedValue({ data: updated })
 
-      const result = await connectionService.update('conn-1', { name: 'Updated' } as any)
+      const result = await connectionService.update('conn-1', { name: 'Updated' } as unknown as Parameters<typeof connectionService.update>[1])
       expect(result).toEqual(updated)
       expect(apiClient.put).toHaveBeenCalledWith('/api/v1/connections/conn-1', {
         name: 'Updated',

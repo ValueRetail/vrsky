@@ -47,9 +47,11 @@ export default function ConnectionsList() {
     const load = async () => {
       try {
         setLoading(true)
-        const response = await connectionService.list(page, PAGE_SIZE) as any
-        const items = response.connections || response.data || []
-        setConnections(items as Connection[])
+        const response = await connectionService.list(page, PAGE_SIZE)
+        // The list's wire shape is the API's GetConnectionResponse (metrics loosely
+        // typed); the pages work with the richer Connection, as getConnection does.
+        const items = (response.connections ?? []) as unknown as Connection[]
+        setConnections(items)
         setTotal(response.total || 0)
       } catch (error) {
         const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to load connections'

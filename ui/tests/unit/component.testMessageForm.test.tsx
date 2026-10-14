@@ -20,14 +20,14 @@ vi.mock('@/store/uiStore', () => ({
 }))
 
 describe('TestMessageForm Component', () => {
-  let mockAddNotification: any
+  let mockAddNotification: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockAddNotification = vi.fn()
-    ;(useUIStore as any).mockReturnValue({
+    vi.mocked(useUIStore).mockReturnValue({
       addNotification: mockAddNotification,
-    })
+    } as unknown as ReturnType<typeof useUIStore>)
   })
 
   describe('Rendering', () => {
@@ -77,7 +77,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should disable buttons when loading', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -93,7 +93,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should disable textarea when loading', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -132,7 +132,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should send message when valid', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockResolvedValue(undefined)
 
       render(<TestMessageForm connectionId="test-conn-123" />)
 
@@ -148,7 +148,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should show success notification after sending', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockResolvedValue(undefined)
 
       render(<TestMessageForm connectionId="test-conn" />)
 
@@ -167,7 +167,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should reset message after successful send', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockResolvedValue(undefined)
 
       render(<TestMessageForm connectionId="test-conn" />)
 
@@ -183,7 +183,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should call onMessageSent callback after successful send', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockResolvedValue(undefined)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockResolvedValue(undefined)
 
       const mockOnMessageSent = vi.fn()
       render(<TestMessageForm connectionId="test-conn" onMessageSent={mockOnMessageSent} />)
@@ -198,7 +198,7 @@ describe('TestMessageForm Component', () => {
 
     it('should show error notification on failure', async () => {
       const error = new Error('Network error')
-      ;(testDataService.testDataService.sendTestMessage as any).mockRejectedValue(error)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockRejectedValue(error)
 
       render(<TestMessageForm connectionId="test-conn" />)
 
@@ -216,7 +216,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should not call onMessageSent on error', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockRejectedValue(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockRejectedValue(
         new Error('API error')
       )
 
@@ -248,7 +248,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should disable reset button when loading', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -290,7 +290,7 @@ describe('TestMessageForm Component', () => {
   describe('Error handling', () => {
     it('should handle API errors gracefully', async () => {
       const apiError = { response: { status: 500, data: { message: 'Server error' } } }
-      ;(testDataService.testDataService.sendTestMessage as any).mockRejectedValue(apiError)
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockRejectedValue(apiError)
 
       render(<TestMessageForm connectionId="test-conn" />)
 
@@ -307,7 +307,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should show default error message for non-API errors', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockRejectedValue(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockRejectedValue(
         new Error('Unknown error')
       )
 
@@ -329,7 +329,7 @@ describe('TestMessageForm Component', () => {
 
   describe('Loading state', () => {
     it('should show Sending... text while loading', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 
@@ -344,7 +344,7 @@ describe('TestMessageForm Component', () => {
     })
 
     it('should show Stopping... text while stopping', async () => {
-      ;(testDataService.testDataService.sendTestMessage as any).mockImplementation(
+      vi.mocked(testDataService.testDataService.sendTestMessage).mockImplementation(
         () => new Promise(resolve => setTimeout(resolve, 100))
       )
 

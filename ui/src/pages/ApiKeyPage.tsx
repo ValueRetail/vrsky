@@ -10,12 +10,15 @@ export default function ApiKeyPage() {
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
   const [apiKey, setApiKey] = useState<TenantAPIKey | null>(null)
   const [rawKey, setRawKey] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Loading is derived: the page is loading until the fetch for the current
+  // workspace has finished. (Setting a loading flag inside the effect made
+  // React re-render in a cascade.)
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  const loading = !!currentTenant && loadedFor !== currentTenant.id
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!currentTenant) { setLoading(false); return }
-    setLoading(true)
+    if (!currentTenant) return
     tenantDataService.getApiKey(currentTenant.id)
       .then(setApiKey)
       .catch((e: unknown) => {
@@ -27,7 +30,7 @@ export default function ApiKeyPage() {
           addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to load the API key' })
         }
       })
-      .finally(() => setLoading(false))
+      .finally(() => setLoadedFor(currentTenant.id))
   }, [currentTenant, addNotification])
 
   const handleRotate = () => {

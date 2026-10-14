@@ -8,15 +8,18 @@ export default function TenantConnectionsPage() {
   const { currentTenant } = useAuthStore()
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
   const [connections, setConnections] = useState<TenantDataConnection[]>([])
-  const [loading, setLoading] = useState(true)
+  // Loading is derived: the page is loading until the fetch for the current
+  // workspace has finished. (Setting a loading flag inside the effect made
+  // React re-render in a cascade.)
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  const loading = !!currentTenant && loadedFor !== currentTenant.id
 
   useEffect(() => {
-    if (!currentTenant) { setLoading(false); return }
-    setLoading(true)
+    if (!currentTenant) return
     tenantDataService.listDataConnections(currentTenant.id)
       .then(setConnections)
       .catch(() => addNotification({ type: 'error', title: 'Error', message: 'Failed to load data connections' }))
-      .finally(() => setLoading(false))
+      .finally(() => setLoadedFor(currentTenant.id))
   }, [currentTenant, addNotification])
 
   const handleRevoke = (connectionId: string) => {

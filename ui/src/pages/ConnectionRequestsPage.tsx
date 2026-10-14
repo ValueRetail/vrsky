@@ -65,9 +65,11 @@ export default function ConnectionRequestsPage() {
     setSelectedSharedIds([])
     setLoadingConnections(true)
     try {
-      const resp = await connectionService.list(1, 100) as any
-      const items = resp.connections || resp.data || []
-      setMyConnections(items as Connection[])
+      const resp = await connectionService.list(1, 100)
+      // The list's wire shape is the API's GetConnectionResponse (metrics loosely
+      // typed); the pages work with the richer Connection, as getConnection does.
+      const items = (resp.connections ?? []) as unknown as Connection[]
+      setMyConnections(items)
     } catch {
       setMyConnections([])
     } finally {

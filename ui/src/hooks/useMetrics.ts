@@ -33,7 +33,9 @@ export function useMetrics(connectionId: string, options: UseMetricsOptions = {}
   // without it being an effect dependency — otherwise the polling effect tore
   // down and recreated its interval on every render (timer churn + extra polls).
   const onErrorRef = useRef(onError)
-  onErrorRef.current = onError
+  useEffect(() => {
+    onErrorRef.current = onError
+  })
 
   useEffect(() => {
     if (!enabled || !connectionId) {

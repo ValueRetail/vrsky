@@ -188,7 +188,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // Restore previously selected tenant if still valid
         const savedTenantId = localStorage.getItem(SELECTED_TENANT_KEY)
         const savedTenant = savedTenantId
-          ? tenants.find((t) => t.id === savedTenantId && (t as any).status === 'active')
+          ? tenants.find((t) => t.id === savedTenantId && t.status === 'active')
           : null
         const currentTenant = savedTenant || meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
 
@@ -236,7 +236,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   switchTenant: (tenant: Tenant) => {
     const { tenants } = get()
     const validTenant = tenants.find(
-      (t) => t.id === tenant.id && (t as any).status === 'active',
+      (t) => t.id === tenant.id && t.status === 'active',
     )
 
     if (!validTenant) {

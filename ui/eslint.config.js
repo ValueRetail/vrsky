@@ -45,4 +45,10 @@ export default defineConfig([
       }],
     },
   },
+  {
+    // Test helpers re-export testing-library next to a wrapper component;
+    // fast refresh never applies to tests.
+    files: ['tests/**/*.{ts,tsx}'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])
