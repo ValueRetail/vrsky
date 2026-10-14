@@ -1081,6 +1081,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#cpu-requests-versus-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU requests versus use
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2418,6 +2429,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#cpu-requests-versus-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU requests versus use
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2468,6 +2490,22 @@ orchestrator's probes.</p>
 <h2 id="usage-billing">Usage &amp; billing<a class="headerlink" href="#usage-billing" title="Permanent link">&para;</a></h2>
 <p>Per-tenant message/deploy/storage usage is rolled up daily and shown under
 <strong>Settings → Usage &amp; quotas</strong>, exportable as CSV for invoicing (#92).</p>
+<h2 id="cpu-requests-versus-use">CPU requests versus use<a class="headerlink" href="#cpu-requests-versus-use" title="Permanent link">&para;</a></h2>
+<p>A request is what the scheduler <em>reserves</em> for a pod, not what the pod may
+use; limits cap use. On 2026-10-14 the production nodes were 81% reserved
+and 2% busy, because every request had been set by guess. They were then
+sized at twice each workload's 7-day peak (<code>plans/cpu-request-headroom.md</code>),
+limits untouched, and two guards keep it that way:</p>
+<ul>
+<li><code>NodeCPURequestsHigh</code> fires when a node's reservations exceed 85% of its
+  allocatable CPU for an hour. The fix is to right-size the biggest
+  requests on that node (<code>kubectl describe node</code> lists them); a third node
+  is the answer only when <em>use</em> is high too (<code>kubectl top nodes</code>).</li>
+<li><code>TestCPURequestsStayWithinBudget</code> fails the build when the requests in
+  the repo's manifests add up to more than 2000m, naming the largest.</li>
+</ul>
+<p>The AKS add-ons (Container Insights, metrics-server, Azure Policy, CoreDNS)
+reserve about 1.4 cores between them and are Azure's to size.</p>
 
 
 
