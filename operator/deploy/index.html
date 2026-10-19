@@ -881,6 +881,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#while-the-cluster-is-parked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        While the cluster is parked
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#rolling-back" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2414,6 +2425,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#while-the-cluster-is-parked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        While the cluster is parked
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#rolling-back" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2522,6 +2544,19 @@ About four minutes for a UI change, ten for a change under <code>src/pkg</code>.
 <p><code>infrastructure/azure/smoke-prod.sh [deployment …]</code> is the same check run
 by hand: <code>/readyz</code> and the UI answer 200, each named consumer logged
 <em>Restored running pipelines</em>, and nothing is firing besides the Watchdog.</p>
+<h2 id="while-the-cluster-is-parked">While the cluster is parked<a class="headerlink" href="#while-the-cluster-is-parked" title="Permanent link">&para;</a></h2>
+<p>The cluster is stopped between working sessions (<code>az aks stop</code>,
+<a href="../cost-parking/">cost parking</a>). A merge while it is stopped still builds
+its images; the deploy job then reads the cluster's power state, deploys
+nothing, and finishes <strong>green</strong> with a notice and a summary listing the
+images waiting in the registry. After <code>az aks start</code>, one click brings
+production to <code>main</code>:</p>
+<p><strong>Actions → Catch up → Run workflow.</strong> It rolls every core service to its
+current <code>:latest</code> digest (a no-op for anything already there), restarts
+the connector fleet so it picks up its images (untick <em>connectors</em> to
+skip that), applies the monitoring values and rules, and runs the smoke
+check. Nothing is rebuilt. It refuses to run against a stopped cluster,
+and it queues behind a deploy rather than interleaving with one.</p>
 <h2 id="rolling-back">Rolling back<a class="headerlink" href="#rolling-back" title="Permanent link">&para;</a></h2>
 <p>Revert the merge (<code>git revert</code>, open a PR, merge): the revert deploys like
 any other change. For a single service in a hurry, an operator can still run

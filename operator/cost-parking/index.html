@@ -2503,6 +2503,9 @@ cluster looks exactly like an outage from the outside.</p>
 <h2 id="start">Start<a class="headerlink" href="#start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
+<p>If anything merged to <code>main</code> while it was stopped, production is behind:
+the images were built, nothing was deployed. GitHub → Actions → <strong>Catch
+up</strong> → <em>Run workflow</em> rolls it to <code>main</code> (see <a href="../deploy/">Deploying</a>).</p>
 <p>Allow several minutes for the nodes to register and the workloads to become
 Ready — the two-node pool has to come back before anything schedules. Check:</p>
 <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span>nodes
