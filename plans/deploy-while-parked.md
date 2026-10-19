@@ -35,6 +35,25 @@ after the next `az aks start`. Merges that deploy nothing are unaffected.
    on request — then a connector change merged while parked is easy to
    forget.
 
+## What the first catch-up found (2026-10-19)
+
+- The in-cluster runtime has **no `sed`** (nor python or envsubst; it does
+  have awk, grep, jq). The monitoring installer indented the rules file with
+  `sed`, so the PrometheusRule apply failed and the smoke check was skipped.
+  The installer now indents in plain bash, and
+  `TestInClusterScriptsUseOnlyRuntimeTools` forbids those tools in every
+  script the two jobs run in-cluster.
+- Grafana's `deploymentStrategy: Recreate` (#320) had never reached the
+  cluster: a Deployment still on RollingUpdate keeps its `rollingUpdate`
+  block and the upgrade fails with "rollingUpdate: Forbidden"
+  (kubernetes/kubernetes#24198) under helm 3 and 4 alike. The installer
+  now drops the block first when it finds the Deployment on RollingUpdate.
+- `PipelineDown` fires after a start that follows a stop of more than an
+  hour: Prometheus has no samples for the gap, so `increase[1h]` is 0 while
+  the `6h offset 1h` window still holds the pre-stop publishes. A
+  stop/start artefact, not a dead pipeline; the rule needs a "scraped for
+  the whole hour" condition: `plans/pipelinedown-after-restart.md`.
+
 ## Goal
 
 Merging while the cluster is parked is uneventful: images build, the run

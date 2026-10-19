@@ -33,6 +33,10 @@ If anything merged to `main` while it was stopped, production is behind:
 the images were built, nothing was deployed. GitHub → Actions → **Catch
 up** → *Run workflow* rolls it to `main` (see [Deploying](deploy.md)).
 
+No `PipelineDown` card follows a start: the rule waits until the counters
+have a full hour of samples again. A polled source that is really dead
+pages about an hour after the start, as it would at any other time.
+
 Allow several minutes for the nodes to register and the workloads to become
 Ready — the two-node pool has to come back before anything schedules. Check:
 

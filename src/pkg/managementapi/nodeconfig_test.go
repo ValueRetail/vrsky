@@ -1430,3 +1430,49 @@ func TestConsumersRestoreRunningOnBoot(t *testing.T) {
 			"subscriptions, as every other consumer does.", strings.Join(missing, ", "))
 	}
 }
+
+// Everything the deploy and catch-up jobs run inside the cluster executes in
+// the `az aks command invoke` runtime, which has bash, awk, grep, jq, kubectl
+// and helm but no sed, python or envsubst (probed 2026-10-19; a sed in the
+// monitoring installer failed the first catch-up). Every script those steps
+// run, and the inline commands themselves, must stay within that toolset.
+func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
+	missing := regexp.MustCompile(`(?m)(^|[\s;|&(` + "`" + `])(sed|python3?|envsubst)(\s|$)`)
+	scriptRef := regexp.MustCompile(`infrastructure/[A-Za-z0-9_./-]+\.sh`)
+	scripts := map[string]bool{}
+	for _, name := range []string{"build-push.yml", "catch-up.yml"} {
+		wf := parseWorkflow(t, name)
+		for jobName, job := range wf.Jobs {
+			for _, st := range job.Steps {
+				if !strings.Contains(st.Run, "in-cluster.sh") {
+					continue
+				}
+				if missing.MatchString(st.Run) {
+					t.Errorf("%s job %s step %q runs sed/python/envsubst in-cluster; the runtime has none", name, jobName, st.Name)
+				}
+				for _, ref := range scriptRef.FindAllString(st.Run, -1) {
+					if !strings.HasSuffix(ref, "/in-cluster.sh") {
+						scripts[ref] = true
+					}
+				}
+			}
+		}
+	}
+	if len(scripts) < 4 {
+		t.Fatalf("found only %d scripts run in-cluster (%v); the workflow layout probably moved", len(scripts), scripts)
+	}
+	for ref := range scripts {
+		body, err := os.ReadFile(filepath.Join("..", "..", "..", ref)) //nolint:gosec // paths come from the repo's own workflows
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			if missing.MatchString(line) {
+				t.Errorf("%s:%d uses a tool the in-cluster runtime lacks: %s", ref, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}

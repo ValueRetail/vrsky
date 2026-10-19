@@ -12,13 +12,14 @@ evaluation_interval: 1m
 tests:
   # 1. PipelineDown -- a polled source publishes once per 30-minute poll for
   #    six hours, then goes silent. A webhook source with the same shape must
-  #    never fire: its silence is the sender's.
-  - interval: 1m
+  #    never fire: its silence is the sender's. This group runs at the real
+  #    30 s scrape interval because the rule counts samples.
+  - interval: 30s
     input_series:
       - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c1",connector="vrsky-business-central-consumer"}'
-        values: '0x29 1x29 2x29 3x29 4x29 5x29 6x29 7x29 8x29 9x29 10x29 11x29 12x120'
+        values: '0x59 1x59 2x59 3x59 4x59 5x59 6x59 7x59 8x59 9x59 10x59 11x59 12x240'
       - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c2",connector="vrsky-webhook-consumer"}'
-        values: '0x29 1x29 2x29 3x29 4x29 5x29 6x29 7x29 8x29 9x29 10x29 11x29 12x120'
+        values: '0x59 1x59 2x59 3x59 4x59 5x59 6x59 7x59 8x59 9x59 10x59 11x59 12x240'
     alert_rule_test:
       # Still polling: one message every 30 minutes is not an outage (the old
       # 5-minute rate window fired at this point).
@@ -30,6 +31,36 @@ tests:
         exp_alerts: []
       # An hour of silence (plus "for") after the last poll at minute 360.
       - eval_time: 440m
+        alertname: PipelineDown
+        exp_alerts:
+          - exp_labels:
+              alertname: PipelineDown
+              severity: critical
+              tenant_id: t1
+              connection_id: c1
+            exp_annotations:
+              summary: "pipeline c1 has published nothing for an hour (tenant t1)"
+              description: "A polled source for tenant t1 published during the previous six hours and nothing in the last hour. Check the pipeline's events and the source's credentials."
+
+  # 1b. PipelineDown after a parked cluster: three hours of polling, a
+  #     three-hour stop with no samples at all (minutes 180-360), then the
+  #     connector restarts with its counter at 0 and finds nothing new. The
+  #     pre-stop publishes still sit in the 6h-offset-1h window, so without
+  #     the sample-count clause this fired five minutes after the start
+  #     (2026-10-19). An hour after the start the history is complete again
+  #     and a source that is still silent pages as it would any other time.
+  - interval: 30s
+    input_series:
+      - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c1",connector="vrsky-business-central-consumer"}'
+        values: '0x59 1x59 2x59 3x59 4x59 5x59 _x360 0x180'
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: PipelineDown
+        exp_alerts: []
+      - eval_time: 410m
+        alertname: PipelineDown
+        exp_alerts: []
+      - eval_time: 430m
         alertname: PipelineDown
         exp_alerts:
           - exp_labels:
