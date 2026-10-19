@@ -13,15 +13,10 @@ on:
       - main
       - develop
 
-env:
-  REGISTRY: ghcr.io
-  REGISTRY_USERNAME: ${{ github.actor }}
-
 jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     outputs:
       ui: ${{ steps.filter.outputs.ui }}
       src: ${{ steps.filter.outputs.src }}
@@ -42,83 +37,13 @@ jobs:
               - 'docker-compose.yml'
               - '.github/workflows/build-push.yml'
 
-  build-and-push:
-    name: Build and Push ${{ matrix.service }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          # Backend services. No producer/consumer/filter/converter entries:
-          # those are the legacy per-connection worker images the orchestrator
-          # stopped spawning in #201/#205 — nothing pulls them.
-          #
-          # postgres-consumer/postgres-producer are absent for a related reason:
-          # they are CDC workers configured entirely from POSTGRES_INPUT_* env
-          # vars, predating the connection-config model. "postgres" is not a node
-          # type, so no tenant can build a pipeline that uses them. They survive
-          # as a load-harness fixture (tests/load/) and docker-compose builds
-          # them locally from source, so nothing anywhere pulls these images.
-          - { name: "management-api", path: "src/cmd/management-api" }
-          - { name: "data-filter", path: "src/cmd/data-filter" }
-          - { name: "data-converter", path: "src/cmd/data-converter" }
-          - { name: "file-consumer", path: "src/cmd/file-consumer" }
-          - { name: "file-producer", path: "src/cmd/file-producer" }
-          # Frontend
-          - { name: "ui", path: "ui", dockerfile: "ui/Dockerfile" }
-
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0  # Full history for git tags
-
-      - name: Get version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION="${{ github.ref_name }}"
-          else
-            VERSION="sha-$(git rev-parse --short HEAD)"
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        id: docker_build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ${{ matrix.service.dockerfile || format('{0}/Dockerfile', matrix.service.path) }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:latest
-            ${{ env.REGISTRY }}/valueretail/vrsky/${{ matrix.service.name }}:${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
-
   test:
     name: Test UI
     runs-on: ubuntu-latest
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.ui == 'true'
+    # On a pull request and on a push to main alike: the deploy job needs the
+    # UI tests green on the merge commit, not only on the PR.
+    if: needs.changes.outputs.ui == 'true'
 
     steps:
       - name: Checkout code
@@ -363,3 +288,138 @@ jobs:
           name: vrsky-agent
           path: src/bin/vrsky-agent-*
           if-no-files-found: error
+
+  # ---- Production rollout (plans/auto-deploy.md) ---------------------------
+  # Merge to main → every test job green on that commit → the affected
+  # images are built in ACR, one per runner → the affected deployments roll by
+  # digest with the same scripts a human runs → smoke check. Serialised by
+  # the `production` concurrency group. Authentication is OpenID Connect
+  # federation (an Entra app trusts this repository's main branch); no
+  # secret is stored. TestDeployJobGatesOnTests keeps the gates in place.
+  plan:
+    name: Plan the rollout
+    needs: [changes, test, go-tests, agent-windows, agent-binaries]
+    # `test` is skipped on a merge that did not touch the UI; a skipped gate
+    # is fine, a failed or cancelled one is not.
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.plan.outputs.images }}
+      core: ${{ steps.plan.outputs.core }}
+      connectors: ${{ steps.plan.outputs.connectors }}
+      connectors_manifest: ${{ steps.plan.outputs.connectors_manifest }}
+      monitoring: ${{ steps.plan.outputs.monitoring }}
+      anything: ${{ steps.plan.outputs.anything }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: Map the merge's paths to targets
+        id: plan
+        run: |
+          git diff --name-only HEAD^ HEAD > changed.txt
+          infrastructure/azure/affected.sh < changed.txt > targets.txt
+          echo "changed paths:"; sed 's/^/  /' changed.txt
+          echo "targets:";       sed 's/^/  /' targets.txt
+          echo "images=$(awk '$1=="image"{print $2}' targets.txt | jq -R . | jq -sc .)"           >> "$GITHUB_OUTPUT"
+          echo "core=$(awk '$1=="core"{print $2}' targets.txt | tr '\n' ' ')"                      >> "$GITHUB_OUTPUT"
+          echo "connectors=$(awk '$1=="connector"{print $2}' targets.txt | tr '\n' ' ')"           >> "$GITHUB_OUTPUT"
+          echo "connectors_manifest=$(grep -qx connectors-manifest targets.txt && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "monitoring=$(grep -qx monitoring targets.txt && echo true || echo false)"           >> "$GITHUB_OUTPUT"
+          echo "anything=$([ -s targets.txt ] && echo true || echo false)"                          >> "$GITHUB_OUTPUT"
+
+  build-images:
+    name: Build ${{ matrix.image }} in ACR
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.images != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # git describe for AGENT_VERSION
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: az acr build (server-side; the runner only uploads the context)
+        run: |
+          set -euo pipefail
+          img="${{ matrix.image }}"
+          if [ "$img" = ui ]; then
+            az acr build --registry vrskyprodacr --image "vrsky/ui:latest" --file ui/Dockerfile .
+          else
+            args=()
+            # management-api ships the downloadable agent, stamped with the commit (build-push-acr.sh).
+            [ "$img" = management-api ] && args=(--build-arg "AGENT_VERSION=$(git describe --always --dirty)")
+            az acr build --registry vrskyprodacr --image "vrsky/${img}:latest" --file "src/cmd/${img}/Dockerfile" "${args[@]+"${args[@]}"}" .
+          fi
+
+  deploy:
+    name: Deploy to production
+    needs: [plan, build-images]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.plan.outputs.anything == 'true'
+      && needs.build-images.result != 'failure' && needs.build-images.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      CORE: ${{ needs.plan.outputs.core }}
+      CONNECTORS: ${{ needs.plan.outputs.connectors }}
+      CONNECTORS_MANIFEST: ${{ needs.plan.outputs.connectors_manifest }}
+      MONITORING: ${{ needs.plan.outputs.monitoring }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Cluster credentials
+        run: |
+          az aks get-credentials --resource-group "${{ vars.AKS_RESOURCE_GROUP }}" --name vrsky-prod --overwrite-existing
+          # An Entra-integrated cluster hands out a kubelogin exec config; a
+          # local-accounts cluster hands out a certificate. Convert only the former.
+          if grep -q kubelogin "$HOME/.kube/config"; then
+            az aks install-cli >/dev/null
+            kubelogin convert-kubeconfig -l azurecli
+          fi
+          kubectl get nodes
+      - name: Roll core services by digest
+        if: env.CORE != ''
+        run: infrastructure/azure/deploy-core-azure.sh $CORE
+      - name: Deploy the connector fleet (manifest changed)
+        if: env.CONNECTORS_MANIFEST == 'true'
+        run: infrastructure/azure/deploy-connectors-azure.sh
+      - name: Restart the connectors whose image changed
+        if: env.CONNECTORS_MANIFEST != 'true' && env.CONNECTORS != ''
+        run: |
+          set -euo pipefail
+          for c in $CONNECTORS; do kubectl rollout restart "deploy/vrsky-$c" -n vrsky-platform; done
+          for c in $CONNECTORS; do kubectl rollout status  "deploy/vrsky-$c" -n vrsky-platform --timeout=240s; done
+      - name: Monitoring values and alert rules
+        if: env.MONITORING == 'true'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null
+          PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh
+      - name: Smoke check
+        run: |
+          consumers=""
+          for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done
+          if [ "$CONNECTORS_MANIFEST" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
+          infrastructure/azure/smoke-prod.sh $consumers
