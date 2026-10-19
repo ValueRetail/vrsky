@@ -14,7 +14,7 @@
         <link rel="prev" href="../../guide/troubleshooting/">
       
       
-        <link rel="next" href="../windows/">
+        <link rel="next" href="../deploy/">
       
       
         
@@ -878,6 +878,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2440,7 +2468,8 @@ Prometheus <code>http://localhost:9099</code>, webhook ingress <code>http://loca
 <h2 id="production-kubernetes">Production (Kubernetes)<a class="headerlink" href="#production-kubernetes" title="Permanent link">&para;</a></h2>
 <p>Manifests live under <code>infrastructure/kubernetes/</code>. See the detailed
 <a href="../../DEPLOYMENT_GUIDE/">deployment guide</a> for the Helm/kustomize layout,
-the kube-prometheus monitoring stack, and the Loki/Tempo wiring.</p>
+the kube-prometheus monitoring stack, and the Loki/Tempo wiring. Once
+installed, production updates itself from <code>main</code>: see <a href="../deploy/">Deploying</a>.</p>
 <h2 id="verify-the-install">Verify the install<a class="headerlink" href="#verify-the-install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>http://localhost:3000/healthz<span class="w">   </span><span class="c1"># liveness</span>
 curl<span class="w"> </span>-fsS<span class="w"> </span>http://localhost:3000/readyz<span class="w">    </span><span class="c1"># readiness (drains on shutdown)</span>
