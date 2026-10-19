@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -993,6 +994,204 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 		t.Fatalf("CPU requests in the repo add up to %dm, over the %dm budget; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
 	}
 	t.Logf("CPU requests in the repo: %dm of %dm; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
+}
+
+// needsList normalises a job's `needs`, which YAML allows as a string or a list.
+func needsList(v any) []string {
+	switch n := v.(type) {
+	case string:
+		return []string{n}
+	case []any:
+		out := make([]string, 0, len(n))
+		for _, x := range n {
+			out = append(out, fmt.Sprint(x))
+		}
+		return out
+	}
+	return nil
+}
+
+// affected runs infrastructure/azure/affected.sh on a list of changed paths
+// and returns its targets.
+func affected(t *testing.T, paths ...string) []string {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "affected.sh"))
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n") + "\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("affected.sh: %v\n%s", err, out)
+	}
+	var targets []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" {
+			targets = append(targets, l)
+		}
+	}
+	return targets
+}
+
+// The deploy job rolls what a merge touched and nothing else
+// (plans/auto-deploy.md): a UI change rolls the UI, a connector change its
+// connector, a shared-package change every Go image, a rules change the
+// monitoring stack, and a docs change nothing at all.
+func TestAffectedServices(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{"docs only", []string{"docs/operator/mail.md", "plans/x.md", "README.md"}, nil},
+		{"ui", []string{"ui/src/App.tsx", "ui/package.json"}, []string{"core ui", "image ui"}},
+		{"one connector", []string{"src/cmd/webhook-consumer/server.go"}, []string{"connector webhook-consumer", "image webhook-consumer"}},
+		{"a core service", []string{"src/cmd/management-api/main.go"}, []string{"core management-api", "image management-api"}},
+		{"a service nobody deploys", []string{"src/cmd/mock-sap/main.go", "src/cmd/vrsky-cli/main.go"}, nil},
+		{"rules", []string{"infrastructure/prometheus-rules.yml"}, []string{"monitoring"}},
+		{"monitoring values", []string{"infrastructure/kubernetes/monitoring/grafana-values.azure.yaml"}, []string{"monitoring"}},
+		{"connector manifest", []string{"infrastructure/azure/deploy-connectors-azure.sh"}, []string{"connectors-manifest"}},
+		{"mixed", []string{"ui/x.ts", "src/cmd/sitoo-producer/a.go", "docs/a.md"},
+			[]string{"connector sitoo-producer", "core ui", "image sitoo-producer", "image ui"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := affected(t, tc.paths...)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("paths %v\n got %v\nwant %v", tc.paths, got, tc.want)
+			}
+		})
+	}
+	// A shared package: every Go image, core and connector, but not the UI.
+	got := affected(t, "src/pkg/sdk/restore.go")
+	images, coreUI := 0, false
+	for _, g := range got {
+		if strings.HasPrefix(g, "image ") {
+			images++
+		}
+		if g == "core ui" || g == "image ui" {
+			coreUI = true
+		}
+	}
+	if images < 30 || coreUI {
+		t.Fatalf("src/pkg change: %d images (want every Go image), ui included=%v:\n%s", images, coreUI, strings.Join(got, "\n"))
+	}
+	for _, p := range []string{"src/go.mod", "src/cmd/file-consumer/Dockerfile"} {
+		if n := len(affected(t, p)); n < 60 {
+			t.Fatalf("%s: %d targets, want every Go image rebuilt", p, n)
+		}
+	}
+}
+
+// affected.sh carries its own copy of the service lists; they must equal
+// what build-push-acr.sh builds and deploy-core-azure.sh deploys, or a new
+// connector would be built and deployed by hand but never by the deploy job.
+func TestAffectedServicesKnowsEveryImage(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "infrastructure", "azure")
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join(root, name)) //nolint:gosec // fixed paths inside the repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	listIn := func(src, varName string) []string {
+		re := regexp.MustCompile(`(?s)` + varName + `="([^"]*)"`)
+		m := re.FindStringSubmatch(src)
+		if m == nil {
+			t.Fatalf("no %s=\"…\" in affected.sh", varName)
+		}
+		return strings.Fields(m[1])
+	}
+	aff := read("affected.sh")
+	gotConn := listIn(aff, "CONNECTORS")
+	var wantConn []string
+	for img := range builtConnectorImages(read("build-push-acr.sh")) {
+		wantConn = append(wantConn, img)
+	}
+	sort.Strings(gotConn)
+	sort.Strings(wantConn)
+	if strings.Join(gotConn, " ") != strings.Join(wantConn, " ") {
+		t.Errorf("affected.sh CONNECTORS differ from what build-push-acr.sh builds:\n got %v\nwant %v", gotConn, wantConn)
+	}
+	var wantCore []string
+	for _, l := range strings.Split(regexp.MustCompile(`(?s)CORE="\n(.*?)"`).FindStringSubmatch(read("deploy-core-azure.sh"))[1], "\n") {
+		if f := strings.Fields(l); len(f) > 0 {
+			wantCore = append(wantCore, f[0])
+		}
+	}
+	gotCore := listIn(aff, "CORE")
+	sort.Strings(gotCore)
+	sort.Strings(wantCore)
+	if strings.Join(gotCore, " ") != strings.Join(wantCore, " ") {
+		t.Errorf("affected.sh CORE differs from deploy-core-azure.sh:\n got %v\nwant %v", gotCore, wantCore)
+	}
+}
+
+// The production rollout runs only on a push to main, only after every test
+// job on that commit, serialised, against the `production` environment — and
+// the registry nothing reads is gone (plans/auto-deploy.md).
+func TestDeployJobGatesOnTests(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "build-push.yml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "ghcr.io") {
+		t.Error("build-push.yml still pushes to ghcr.io, which production never reads")
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Needs       any    `yaml:"needs"` // a string or a list in YAML
+			If          string `yaml:"if"`
+			Environment string `yaml:"environment"`
+			Concurrency struct {
+				Group string `yaml:"group"`
+			} `yaml:"concurrency"`
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &wf); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	plan, ok := wf.Jobs["plan"]
+	if !ok {
+		t.Fatal("no plan job")
+	}
+	// Every job that runs tests must gate the plan.
+	for name, job := range wf.Jobs {
+		runsTests := false
+		for _, st := range job.Steps {
+			if strings.Contains(st.Run, "go test") || strings.Contains(st.Run, "npm run test") {
+				runsTests = true
+			}
+		}
+		if !runsTests {
+			continue
+		}
+		found := false
+		for _, n := range needsList(plan.Needs) {
+			if n == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("job %q runs tests but the plan job does not need it: a red test would not stop a deploy", name)
+		}
+	}
+	for _, want := range []string{"github.event_name == 'push'", "github.ref == 'refs/heads/main'", "!contains(needs.*.result, 'failure')", "!contains(needs.*.result, 'cancelled')"} {
+		if !strings.Contains(plan.If, want) {
+			t.Errorf("plan.if lacks %q: %s", want, plan.If)
+		}
+	}
+	deploy, ok := wf.Jobs["deploy"]
+	if !ok {
+		t.Fatal("no deploy job")
+	}
+	if deploy.Environment != "production" || deploy.Concurrency.Group != "production" {
+		t.Errorf("deploy job: environment %q, concurrency group %q; want production/production", deploy.Environment, deploy.Concurrency.Group)
+	}
+	if !strings.Contains(deploy.If, "needs.build-images.result != 'failure'") {
+		t.Errorf("deploy.if does not stop on a failed image build: %s", deploy.If)
+	}
 }
 
 // runInstructionContaining returns the full RUN instruction whose body contains

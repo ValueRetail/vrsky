@@ -35,7 +35,8 @@ Prometheus `http://localhost:9099`, webhook ingress `http://localhost:9100`.
 
 Manifests live under `infrastructure/kubernetes/`. See the detailed
 [deployment guide](../DEPLOYMENT_GUIDE.md) for the Helm/kustomize layout,
-the kube-prometheus monitoring stack, and the Loki/Tempo wiring.
+the kube-prometheus monitoring stack, and the Loki/Tempo wiring. Once
+installed, production updates itself from `main`: see [Deploying](deploy.md).
 
 ## Verify the install
 
