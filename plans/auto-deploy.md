@@ -33,6 +33,22 @@ Checked in the repo and the cluster on 2026-10-19.
    per runner**, so a full rebuild is ~5 minutes wall-clock. ACR builds the
    image server-side; the runner only uploads the context.
 
+## What the first runs found (2026-10-19)
+
+- A job bound to the `production` environment presents the OIDC subject
+  `repo:…:environment:production`, not the branch: a second federated
+  credential for it.
+- `success()` is implicit on a job without a status function and looks at
+  every ancestor; the skipped UI test job (no UI change) skipped the image
+  build: `!cancelled()` on it.
+- `AcrPush` cannot queue a server-side build; `Contributor` on the registry.
+- The API server's authorized IP ranges exclude GitHub runners. Rather than
+  opening ranges per run, the deploy job runs every `kubectl`/`helm`
+  **inside the cluster** via `az aks command invoke` (`in-cluster.sh`);
+  the runner resolves digests (`DIGESTS_FILE` in `deploy-core-azure.sh`)
+  and uploads the staged files. Needs `Contributor` on the cluster. The
+  smoke check uses jq (the runtime has no python3).
+
 ## Goal
 
 Merge to `main` → tests → the affected images are built in ACR → the

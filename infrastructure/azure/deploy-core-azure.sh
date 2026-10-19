@@ -33,6 +33,10 @@
 #   DRY_RUN=1 infrastructure/azure/deploy-core-azure.sh          # show, don't act
 #
 # Run build-push-acr.sh first; this deploys whatever :latest currently points at.
+#
+# DIGESTS_FILE=<file>: read "name sha256:…" lines instead of asking ACR. The
+# deploy job resolves digests where `az` is (the GitHub runner) and runs this
+# script where kubectl reaches the cluster (in-cluster.sh, which has no `az`).
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"
@@ -90,7 +94,11 @@ while read -r name ns deploy; do
   # `|| true` matters: under `set -e` a failing az would abort the script at
   # the assignment, and the validation below — the part that turns a bad digest
   # into a clear message instead of an InvalidImageName pod — would never run.
-  digest="$(az acr repository show -n "$REG" --image "vrsky/${name}:latest" --query digest -o tsv 2>/dev/null || true)"
+  if [ -n "${DIGESTS_FILE:-}" ]; then
+    digest="$(awk -v n="$name" '$1==n{print $2}' "$DIGESTS_FILE" | head -1)"
+  else
+    digest="$(az acr repository show -n "$REG" --image "vrsky/${name}:latest" --query digest -o tsv 2>/dev/null || true)"
+  fi
   # The guard that would have caught the placeholder paste. An unset or
   # malformed digest must never reach `set image`: Kubernetes accepts the
   # update, the pods land in InvalidImageName, and the rollout hangs.

@@ -388,6 +388,7 @@ jobs:
       CONNECTORS: ${{ needs.plan.outputs.connectors }}
       CONNECTORS_MANIFEST: ${{ needs.plan.outputs.connectors_manifest }}
       MONITORING: ${{ needs.plan.outputs.monitoring }}
+      AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
     steps:
       - uses: actions/checkout@v5
       - uses: azure/login@v2
@@ -395,36 +396,35 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Cluster credentials
+      # The API server accepts connections from a few approved addresses only
+      # and a runner is never one of them, so every kubectl and helm below runs
+      # INSIDE the cluster through in-cluster.sh (az aks command invoke). The
+      # files it needs are staged with their paths intact and uploaded whole.
+      - name: Stage the deploy files
         run: |
-          az aks get-credentials --resource-group "${{ vars.AKS_RESOURCE_GROUP }}" --name vrsky-prod --overwrite-existing
-          # An Entra-integrated cluster hands out a kubelogin exec config; a
-          # local-accounts cluster hands out a certificate. Convert only the former.
-          if grep -q kubelogin "$HOME/.kube/config"; then
-            az aks install-cli >/dev/null
-            kubelogin convert-kubeconfig -l azurecli
-          fi
-          kubectl get nodes
+          mkdir -p stage
+          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/prometheus-rules.yml stage/
+          for n in $CORE; do
+            d=$(az acr repository show -n vrskyprodacr --image "vrsky/$n:latest" --query digest -o tsv)
+            echo "$n $d" >> stage/digests.txt
+          done
+          [ -f stage/digests.txt ] && { echo "digests:"; sed 's/^/  /' stage/digests.txt; } || true
       - name: Roll core services by digest
         if: env.CORE != ''
-        run: infrastructure/azure/deploy-core-azure.sh $CORE
+        run: infrastructure/azure/in-cluster.sh stage "DIGESTS_FILE=digests.txt bash infrastructure/azure/deploy-core-azure.sh $CORE"
       - name: Deploy the connector fleet (manifest changed)
         if: env.CONNECTORS_MANIFEST == 'true'
-        run: infrastructure/azure/deploy-connectors-azure.sh
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-connectors-azure.sh"
       - name: Restart the connectors whose image changed
         if: env.CONNECTORS_MANIFEST != 'true' && env.CONNECTORS != ''
         run: |
-          set -euo pipefail
-          for c in $CONNECTORS; do kubectl rollout restart "deploy/vrsky-$c" -n vrsky-platform; done
-          for c in $CONNECTORS; do kubectl rollout status  "deploy/vrsky-$c" -n vrsky-platform --timeout=240s; done
+          infrastructure/azure/in-cluster.sh stage "set -e; for c in $CONNECTORS; do kubectl rollout restart deploy/vrsky-\$c -n vrsky-platform; done; for c in $CONNECTORS; do kubectl rollout status deploy/vrsky-\$c -n vrsky-platform --timeout=240s; done"
       - name: Monitoring values and alert rules
         if: env.MONITORING == 'true'
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null
-          PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh
+        run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
       - name: Smoke check
         run: |
           consumers=""
           for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done
           if [ "$CONNECTORS_MANIFEST" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
-          infrastructure/azure/smoke-prod.sh $consumers
+          infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"

@@ -24,7 +24,7 @@ for d in "$@"; do
 done
 
 firing=$(kubectl get --raw "/api/v1/namespaces/vrsky-monitoring/services/prometheus-prometheus:9090/proxy/api/v1/alerts" 2>/dev/null \
-  | python3 -c 'import sys,json; print(" ".join(sorted(a["labels"]["alertname"] for a in json.load(sys.stdin)["data"]["alerts"] if a["state"]=="firing" and a["labels"]["alertname"] not in ("Watchdog","InfoInhibitor"))))' 2>/dev/null || echo "")
+  | jq -r '[.data.alerts[] | select(.state=="firing") | .labels.alertname | select(. != "Watchdog" and . != "InfoInhibitor")] | sort | join(" ")' 2>/dev/null || echo "")
 if [ -n "$firing" ]; then echo "alerts firing: $firing" >&2; fail=1; else echo "alerts: none"; fi
 
 [ "$fail" = 0 ] && echo "smoke: ok" || { echo "smoke: FAILED" >&2; exit 1; }
