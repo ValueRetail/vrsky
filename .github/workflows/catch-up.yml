@@ -1,0 +1,68 @@
+# Catch up: bring production to what main has, without rebuilding anything.
+#
+# The cluster is parked between working sessions (docs/operator/cost-parking.md).
+# Merges while it is stopped build their images and deploy nothing; after
+# `az aks start`, this one click rolls every core service to its current
+# :latest digest (a no-op for anything already there), restarts the
+# connector fleet so it picks up its :latest images, applies the monitoring
+# values and rules, and runs the smoke check. Same scripts, same in-cluster
+# path as the deploy job (plans/deploy-while-parked.md).
+name: Catch up
+
+on:
+  workflow_dispatch:
+    inputs:
+      connectors:
+        description: Restart the connector fleet too (about ten minutes; they restore their pipelines on boot)
+        type: boolean
+        default: true
+
+jobs:
+  catch-up:
+    name: Catch production up to main
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: The cluster must be running
+        run: |
+          state=$(az aks show -g "$AKS_RESOURCE_GROUP" -n vrsky-prod --query powerState.code -o tsv)
+          echo "cluster vrsky-prod is $state"
+          if [ "$state" != Running ]; then
+            echo "::error::cluster vrsky-prod is $state — start it first: az aks start -g vrsky-prod -n vrsky-prod"
+            exit 1
+          fi
+      - name: Stage the deploy files
+        run: |
+          mkdir -p stage
+          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/prometheus-rules.yml stage/
+          for n in management-api ui data-filter data-converter alert-responder; do
+            d=$(az acr repository show -n vrskyprodacr --image "vrsky/$n:latest" --query digest -o tsv)
+            echo "$n $d" >> stage/digests.txt
+          done
+          echo "digests:"; sed 's/^/  /' stage/digests.txt
+      - name: Roll every core service to its current digest
+        run: infrastructure/azure/in-cluster.sh stage "DIGESTS_FILE=digests.txt bash infrastructure/azure/deploy-core-azure.sh"
+      - name: Restart the connector fleet
+        if: inputs.connectors
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-connectors-azure.sh"
+      - name: Monitoring values and alert rules
+        run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
+      - name: Smoke check
+        run: |
+          consumers=""
+          if [ "${{ inputs.connectors }}" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
+          infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"

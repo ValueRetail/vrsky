@@ -29,6 +29,10 @@ Takes a few minutes. Every pod is evicted; nothing is deleted.
 az aks start -g vrsky-prod -n vrsky-prod
 ```
 
+If anything merged to `main` while it was stopped, production is behind:
+the images were built, nothing was deployed. GitHub → Actions → **Catch
+up** → *Run workflow* rolls it to `main` (see [Deploying](deploy.md)).
+
 Allow several minutes for the nodes to register and the workloads to become
 Ready — the two-node pool has to come back before anything schedules. Check:
 

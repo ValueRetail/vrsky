@@ -996,6 +996,37 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 	t.Logf("CPU requests in the repo: %dm of %dm; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
 }
 
+// workflowFile is the part of a GitHub workflow the guards look at.
+type workflowFile struct {
+	Jobs map[string]struct {
+		Needs       any    `yaml:"needs"`
+		If          string `yaml:"if"`
+		Environment string `yaml:"environment"`
+		Concurrency struct {
+			Group string `yaml:"group"`
+		} `yaml:"concurrency"`
+		Steps []struct {
+			ID   string `yaml:"id"`
+			Name string `yaml:"name"`
+			If   string `yaml:"if"`
+			Run  string `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+func parseWorkflow(t *testing.T, name string) workflowFile {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", name)) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	var wf workflowFile
+	if err := yaml.Unmarshal(body, &wf); err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	return wf
+}
+
 // needsList normalises a job's `needs`, which YAML allows as a string or a list.
 func needsList(v any) []string {
 	switch n := v.(type) {
@@ -1214,6 +1245,86 @@ func TestDeployJobGatesOnTests(t *testing.T) {
 	}
 	if !strings.Contains(deploy.If, "needs.build-images.result != 'failure'") {
 		t.Errorf("deploy.if does not stop on a failed image build: %s", deploy.If)
+	}
+}
+
+// A merge while the cluster is parked must deploy nothing and stay green:
+// the deploy job reads the power state right after signing in, and every
+// in-cluster step is gated on it (plans/deploy-while-parked.md).
+func TestDeployJobSkipsWhenClusterStopped(t *testing.T) {
+	wf := parseWorkflow(t, "build-push.yml")
+	deploy, ok := wf.Jobs["deploy"]
+	if !ok {
+		t.Fatal("no deploy job")
+	}
+	stateAt := -1
+	for i, st := range deploy.Steps {
+		if st.ID == "cluster" && strings.Contains(st.Run, "powerState.code") {
+			stateAt = i
+		}
+		if !strings.Contains(st.Run, "in-cluster.sh") {
+			continue
+		}
+		if stateAt < 0 {
+			t.Errorf("deploy step %q runs in-cluster before the power state is known", st.Name)
+		}
+		if !strings.Contains(st.If, "steps.cluster.outputs.state == 'Running'") {
+			t.Errorf("deploy step %q is not gated on the cluster running; it would fail on a parked cluster: if=%q", st.Name, st.If)
+		}
+	}
+	if stateAt < 0 {
+		t.Fatal("the deploy job has no `cluster` step reading powerState.code")
+	}
+}
+
+// The Catch up workflow brings production to main after a start: manual,
+// serialised with deploys, refuses a stopped cluster, and runs the same
+// scripts through the same in-cluster path as the deploy job.
+func TestCatchUpWorkflow(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "catch-up.yml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	var on struct {
+		On map[string]any `yaml:"on"`
+	}
+	if err := yaml.Unmarshal(body, &on); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := on.On["workflow_dispatch"]; !ok || len(on.On) != 1 {
+		t.Errorf("catch-up.yml must run on workflow_dispatch only, got triggers %v", on.On)
+	}
+	wf := parseWorkflow(t, "catch-up.yml")
+	job, ok := wf.Jobs["catch-up"]
+	if !ok {
+		t.Fatal("no catch-up job")
+	}
+	if job.Environment != "production" || job.Concurrency.Group != "production" {
+		t.Errorf("catch-up job: environment %q, concurrency %q; want production/production so it never interleaves with a deploy", job.Environment, job.Concurrency.Group)
+	}
+	all := ""
+	refuses := false
+	for i, st := range job.Steps {
+		all += st.Run + "\n"
+		if strings.Contains(st.Run, "powerState.code") && strings.Contains(st.Run, "exit 1") {
+			refuses = true
+			for _, later := range job.Steps[i+1:] {
+				if (strings.Contains(later.Run, "kubectl ") || strings.Contains(later.Run, "helm ")) && !strings.Contains(later.Run, "in-cluster.sh") {
+					t.Errorf("catch-up step %q runs kubectl/helm on the runner", later.Name)
+				}
+			}
+		}
+	}
+	if !refuses {
+		t.Error("catch-up has no step that reads powerState.code and exits 1 when the cluster is not running")
+	}
+	for _, script := range []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "install-monitoring.sh", "smoke-prod.sh"} {
+		if !strings.Contains(all, script) {
+			t.Errorf("catch-up never runs %s", script)
+		}
+	}
+	if strings.Contains(all, "az acr build") {
+		t.Error("catch-up rebuilds images; it must only roll what the registry has")
 	}
 }
 
