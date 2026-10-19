@@ -396,11 +396,33 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # The cluster is parked (az aks stop) between working sessions
+      # (docs/operator/cost-parking.md). A merge while it is stopped builds its
+      # images and then deploys nothing — green, with a notice — and the
+      # Catch up workflow brings production to main after the next start
+      # (plans/deploy-while-parked.md).
+      - name: Cluster power state
+        id: cluster
+        run: |
+          state=$(az aks show -g "$AKS_RESOURCE_GROUP" -n vrsky-prod --query powerState.code -o tsv)
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "cluster vrsky-prod is $state"
+          if [ "$state" != Running ]; then
+            echo "::notice title=Cluster is $state::Nothing deployed. The images for this merge are in the registry; after az aks start, run the Catch up workflow (Actions → Catch up → Run workflow)."
+            {
+              echo "## Cluster is $state — nothing deployed"
+              echo
+              echo "Waiting in the registry: \`${{ needs.plan.outputs.images }}\`"
+              echo
+              echo "After \`az aks start\`: Actions → **Catch up** → Run workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       # The API server accepts connections from a few approved addresses only
       # and a runner is never one of them, so every kubectl and helm below runs
       # INSIDE the cluster through in-cluster.sh (az aks command invoke). The
       # files it needs are staged with their paths intact and uploaded whole.
       - name: Stage the deploy files
+        if: steps.cluster.outputs.state == 'Running'
         run: |
           mkdir -p stage
           cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/prometheus-rules.yml stage/
@@ -410,19 +432,20 @@ jobs:
           done
           [ -f stage/digests.txt ] && { echo "digests:"; sed 's/^/  /' stage/digests.txt; } || true
       - name: Roll core services by digest
-        if: env.CORE != ''
+        if: steps.cluster.outputs.state == 'Running' && env.CORE != ''
         run: infrastructure/azure/in-cluster.sh stage "DIGESTS_FILE=digests.txt bash infrastructure/azure/deploy-core-azure.sh $CORE"
       - name: Deploy the connector fleet (manifest changed)
-        if: env.CONNECTORS_MANIFEST == 'true'
+        if: steps.cluster.outputs.state == 'Running' && env.CONNECTORS_MANIFEST == 'true'
         run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-connectors-azure.sh"
       - name: Restart the connectors whose image changed
-        if: env.CONNECTORS_MANIFEST != 'true' && env.CONNECTORS != ''
+        if: steps.cluster.outputs.state == 'Running' && env.CONNECTORS_MANIFEST != 'true' && env.CONNECTORS != ''
         run: |
           infrastructure/azure/in-cluster.sh stage "set -e; for c in $CONNECTORS; do kubectl rollout restart deploy/vrsky-\$c -n vrsky-platform; done; for c in $CONNECTORS; do kubectl rollout status deploy/vrsky-\$c -n vrsky-platform --timeout=240s; done"
       - name: Monitoring values and alert rules
-        if: env.MONITORING == 'true'
+        if: steps.cluster.outputs.state == 'Running' && env.MONITORING == 'true'
         run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
       - name: Smoke check
+        if: steps.cluster.outputs.state == 'Running'
         run: |
           consumers=""
           for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done

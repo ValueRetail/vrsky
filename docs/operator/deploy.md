@@ -41,6 +41,22 @@ About four minutes for a UI change, ten for a change under `src/pkg`.
 by hand: `/readyz` and the UI answer 200, each named consumer logged
 *Restored running pipelines*, and nothing is firing besides the Watchdog.
 
+## While the cluster is parked
+
+The cluster is stopped between working sessions (`az aks stop`,
+[cost parking](cost-parking.md)). A merge while it is stopped still builds
+its images; the deploy job then reads the cluster's power state, deploys
+nothing, and finishes **green** with a notice and a summary listing the
+images waiting in the registry. After `az aks start`, one click brings
+production to `main`:
+
+**Actions → Catch up → Run workflow.** It rolls every core service to its
+current `:latest` digest (a no-op for anything already there), restarts
+the connector fleet so it picks up its images (untick *connectors* to
+skip that), applies the monitoring values and rules, and runs the smoke
+check. Nothing is rebuilt. It refuses to run against a stopped cluster,
+and it queues behind a deploy rather than interleaving with one.
+
 ## Rolling back
 
 Revert the merge (`git revert`, open a PR, merge): the revert deploys like
