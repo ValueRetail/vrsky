@@ -58,26 +58,43 @@ stops them entirely. Both are settings, not code.
 ## How the job reaches Azure
 
 OpenID Connect federation: an Entra app registration **VRSky deploy** trusts
-tokens GitHub issues for `repo:ValueRetail/vrsky:ref:refs/heads/main`, so no
-password or secret is stored anywhere. The app holds `AcrPush` on
-`vrskyprodacr` and *Azure Kubernetes Service Cluster User Role* on
-`vrsky-prod`. One-time setup, signed in as an owner:
+tokens GitHub issues for this repository's `main` branch and for its
+`production` environment (a job bound to an environment presents the
+environment subject), so no password or secret is stored anywhere.
+
+The cluster's API server accepts connections from a few approved addresses
+only, and a GitHub runner is never one of them. So the job never talks to
+the API server itself: every `kubectl` and `helm` runs **inside the
+cluster** through Azure's command runner (`az aks command invoke`),
+wrapped by `infrastructure/azure/in-cluster.sh`. The runner resolves image
+digests (it has `az`; the in-cluster runtime does not), stages the deploy
+scripts, manifests and monitoring values with their paths intact, uploads
+them, and runs the same scripts an operator runs by hand. The in-cluster
+runtime has bash, curl, jq, kubectl and helm.
+
+Roles the app holds: `AcrPush` and `Contributor` on `vrskyprodacr` (a
+server-side `az acr build` needs to read the registry and queue a run);
+`Contributor` on `vrsky-prod` (the command runner). One-time setup, by a
+subscription Owner:
 
 ```bash
 APP=$(az ad app create --display-name "VRSky deploy" --query appId -o tsv)
 az ad sp create --id "$APP" >/dev/null
-az ad app federated-credential create --id "$APP" --parameters '{"name":"github-main","issuer":"https://token.actions.githubusercontent.com","subject":"repo:ValueRetail/vrsky:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}'
+for SUBJECT in "repo:ValueRetail/vrsky:ref:refs/heads/main" "repo:ValueRetail/vrsky:environment:production"; do
+  az ad app federated-credential create --id "$APP" --parameters "{\"name\":\"github-$(echo $SUBJECT | tr ':/' '--')\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"$SUBJECT\",\"audiences\":[\"api://AzureADTokenExchange\"]}"
+done
 SP=$(az ad sp show --id "$APP" --query id -o tsv)
-az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --role AcrPush --scope "$(az acr show -n vrskyprodacr --query id -o tsv)"
-az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --role "Azure Kubernetes Service Cluster User Role" --scope "$(az aks show -g <resource group> -n vrsky-prod --query id -o tsv)"
+ACR=$(az acr show -n vrskyprodacr --query id -o tsv); AKS=$(az aks show -g vrsky-prod -n vrsky-prod --query id -o tsv)
+az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --role AcrPush --scope "$ACR"
+az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --role Contributor --scope "$ACR"
+az role assignment create --assignee-object-id "$SP" --assignee-principal-type ServicePrincipal --role Contributor --scope "$AKS"
 ```
-
-If the cluster is Entra-integrated with Azure RBAC, add *Azure Kubernetes
-Service RBAC Writer* on the namespaces `vrsky-platform`, `vrsky-ui` and
-`vrsky-monitoring` as well; with local accounts the Cluster User role is
-enough.
 
 Then in GitHub → Settings → Secrets and variables → Actions → **Variables**
 (none of these are secret): `AZURE_CLIENT_ID` (the app id), `AZURE_TENANT_ID`,
 `AZURE_SUBSCRIPTION_ID`, `AKS_RESOURCE_GROUP`. And Settings → Environments →
 New environment → `production`.
+
+`in-cluster.sh <dir> <command…>` also works from a laptop with `az` signed
+in and Contributor on the cluster: `infrastructure/azure/in-cluster.sh
+stage "bash infrastructure/azure/smoke-prod.sh"`.

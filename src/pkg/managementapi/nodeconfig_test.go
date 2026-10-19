@@ -1198,6 +1198,17 @@ func TestDeployJobGatesOnTests(t *testing.T) {
 	if !ok {
 		t.Fatal("no deploy job")
 	}
+	// The API server accepts a few approved addresses only; every kubectl and
+	// helm in the deploy job must go through in-cluster.sh (az aks command
+	// invoke), never run on the runner.
+	for _, st := range deploy.Steps {
+		if strings.Contains(st.Run, "in-cluster.sh") {
+			continue
+		}
+		if strings.Contains(st.Run, "kubectl ") || strings.Contains(st.Run, "helm ") || strings.Contains(st.Run, "aks get-credentials") {
+			t.Errorf("deploy step runs kubectl/helm on the runner, which cannot reach the API server: %q", strings.SplitN(st.Run, "\n", 2)[0])
+		}
+	}
 	if deploy.Environment != "production" || deploy.Concurrency.Group != "production" {
 		t.Errorf("deploy job: environment %q, concurrency group %q; want production/production", deploy.Environment, deploy.Concurrency.Group)
 	}
