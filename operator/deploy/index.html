@@ -2534,25 +2534,40 @@ digest discipline, so nothing fights.</p>
 stops them entirely. Both are settings, not code.</p>
 <h2 id="how-the-job-reaches-azure">How the job reaches Azure<a class="headerlink" href="#how-the-job-reaches-azure" title="Permanent link">&para;</a></h2>
 <p>OpenID Connect federation: an Entra app registration <strong>VRSky deploy</strong> trusts
-tokens GitHub issues for <code>repo:ValueRetail/vrsky:ref:refs/heads/main</code>, so no
-password or secret is stored anywhere. The app holds <code>AcrPush</code> on
-<code>vrskyprodacr</code> and <em>Azure Kubernetes Service Cluster User Role</em> on
-<code>vrsky-prod</code>. One-time setup, signed in as an owner:</p>
+tokens GitHub issues for this repository's <code>main</code> branch and for its
+<code>production</code> environment (a job bound to an environment presents the
+environment subject), so no password or secret is stored anywhere.</p>
+<p>The cluster's API server accepts connections from a few approved addresses
+only, and a GitHub runner is never one of them. So the job never talks to
+the API server itself: every <code>kubectl</code> and <code>helm</code> runs <strong>inside the
+cluster</strong> through Azure's command runner (<code>az aks command invoke</code>),
+wrapped by <code>infrastructure/azure/in-cluster.sh</code>. The runner resolves image
+digests (it has <code>az</code>; the in-cluster runtime does not), stages the deploy
+scripts, manifests and monitoring values with their paths intact, uploads
+them, and runs the same scripts an operator runs by hand. The in-cluster
+runtime has bash, curl, jq, kubectl and helm.</p>
+<p>Roles the app holds: <code>AcrPush</code> and <code>Contributor</code> on <code>vrskyprodacr</code> (a
+server-side <code>az acr build</code> needs to read the registry and queue a run);
+<code>Contributor</code> on <code>vrsky-prod</code> (the command runner). One-time setup, by a
+subscription Owner:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">APP</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>ad<span class="w"> </span>app<span class="w"> </span>create<span class="w"> </span>--display-name<span class="w"> </span><span class="s2">"VRSky deploy"</span><span class="w"> </span>--query<span class="w"> </span>appId<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
 az<span class="w"> </span>ad<span class="w"> </span>sp<span class="w"> </span>create<span class="w"> </span>--id<span class="w"> </span><span class="s2">"</span><span class="nv">$APP</span><span class="s2">"</span><span class="w"> </span>&gt;/dev/null
-az<span class="w"> </span>ad<span class="w"> </span>app<span class="w"> </span>federated-credential<span class="w"> </span>create<span class="w"> </span>--id<span class="w"> </span><span class="s2">"</span><span class="nv">$APP</span><span class="s2">"</span><span class="w"> </span>--parameters<span class="w"> </span><span class="s1">'{"name":"github-main","issuer":"https://token.actions.githubusercontent.com","subject":"repo:ValueRetail/vrsky:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}'</span>
+<span class="k">for</span><span class="w"> </span>SUBJECT<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"repo:ValueRetail/vrsky:ref:refs/heads/main"</span><span class="w"> </span><span class="s2">"repo:ValueRetail/vrsky:environment:production"</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>az<span class="w"> </span>ad<span class="w"> </span>app<span class="w"> </span>federated-credential<span class="w"> </span>create<span class="w"> </span>--id<span class="w"> </span><span class="s2">"</span><span class="nv">$APP</span><span class="s2">"</span><span class="w"> </span>--parameters<span class="w"> </span><span class="s2">"{\"name\":\"github-</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="nv">$SUBJECT</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span><span class="s1">':/'</span><span class="w"> </span><span class="s1">'--'</span><span class="k">)</span><span class="s2">\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"</span><span class="nv">$SUBJECT</span><span class="s2">\",\"audiences\":[\"api://AzureADTokenExchange\"]}"</span>
+<span class="k">done</span>
 <span class="nv">SP</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>ad<span class="w"> </span>sp<span class="w"> </span>show<span class="w"> </span>--id<span class="w"> </span><span class="s2">"</span><span class="nv">$APP</span><span class="s2">"</span><span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
-az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="nv">$SP</span><span class="s2">"</span><span class="w"> </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span>--role<span class="w"> </span>AcrPush<span class="w"> </span>--scope<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>acr<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>vrskyprodacr<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span>
-az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="nv">$SP</span><span class="s2">"</span><span class="w"> </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span>--role<span class="w"> </span><span class="s2">"Azure Kubernetes Service Cluster User Role"</span><span class="w"> </span>--scope<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>&lt;resource<span class="w"> </span>group&gt;<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span>
+<span class="nv">ACR</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>acr<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>vrskyprodacr<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="nv">AKS</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="nv">$SP</span><span class="s2">"</span><span class="w"> </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span>--role<span class="w"> </span>AcrPush<span class="w"> </span>--scope<span class="w"> </span><span class="s2">"</span><span class="nv">$ACR</span><span class="s2">"</span>
+az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="nv">$SP</span><span class="s2">"</span><span class="w"> </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span>--role<span class="w"> </span>Contributor<span class="w"> </span>--scope<span class="w"> </span><span class="s2">"</span><span class="nv">$ACR</span><span class="s2">"</span>
+az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="nv">$SP</span><span class="s2">"</span><span class="w"> </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span>--role<span class="w"> </span>Contributor<span class="w"> </span>--scope<span class="w"> </span><span class="s2">"</span><span class="nv">$AKS</span><span class="s2">"</span>
 </code></pre></div>
-<p>If the cluster is Entra-integrated with Azure RBAC, add <em>Azure Kubernetes
-Service RBAC Writer</em> on the namespaces <code>vrsky-platform</code>, <code>vrsky-ui</code> and
-<code>vrsky-monitoring</code> as well; with local accounts the Cluster User role is
-enough.</p>
 <p>Then in GitHub → Settings → Secrets and variables → Actions → <strong>Variables</strong>
 (none of these are secret): <code>AZURE_CLIENT_ID</code> (the app id), <code>AZURE_TENANT_ID</code>,
 <code>AZURE_SUBSCRIPTION_ID</code>, <code>AKS_RESOURCE_GROUP</code>. And Settings → Environments →
 New environment → <code>production</code>.</p>
+<p><code>in-cluster.sh &lt;dir&gt; &lt;command…&gt;</code> also works from a laptop with <code>az</code> signed
+in and Contributor on the cluster: <code>infrastructure/azure/in-cluster.sh
+stage "bash infrastructure/azure/smoke-prod.sh"</code>.</p>
 
 
 
