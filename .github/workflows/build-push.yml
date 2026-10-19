@@ -333,7 +333,12 @@ jobs:
   build-images:
     name: Build ${{ matrix.image }} in ACR
     needs: plan
-    if: needs.plan.result == 'success' && needs.plan.outputs.images != '[]'
+    # !cancelled(): without a status function GitHub prepends success(), which
+    # looks at every ancestor job — and the UI test job is skipped on a merge
+    # that did not touch the UI, which skipped this job on the first run
+    # (2026-10-19) although the plan had 35 images for it.
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.images != '[]'
     runs-on: ubuntu-latest
     permissions:
       id-token: write

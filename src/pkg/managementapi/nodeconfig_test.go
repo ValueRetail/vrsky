@@ -1182,6 +1182,18 @@ func TestDeployJobGatesOnTests(t *testing.T) {
 			t.Errorf("plan.if lacks %q: %s", want, plan.If)
 		}
 	}
+	build, ok := wf.Jobs["build-images"]
+	if !ok {
+		t.Fatal("no build-images job")
+	}
+	// Without a status function the implicit success() looks at every
+	// ancestor, and the skipped UI test job (no UI change) skips the build.
+	if !strings.Contains(build.If, "!cancelled()") && !strings.Contains(build.If, "always()") {
+		t.Errorf("build-images.if has no status function; a skipped ancestor (the UI tests on a non-UI merge) skips the build: %s", build.If)
+	}
+	if !strings.Contains(build.If, "needs.plan.result == 'success'") {
+		t.Errorf("build-images.if does not require the plan to have succeeded: %s", build.If)
+	}
 	deploy, ok := wf.Jobs["deploy"]
 	if !ok {
 		t.Fatal("no deploy job")
