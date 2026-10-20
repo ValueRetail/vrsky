@@ -30,8 +30,10 @@ az aks start -g vrsky-prod -n vrsky-prod
 ```
 
 If anything merged to `main` while it was stopped, production is behind:
-the images were built, nothing was deployed. GitHub → Actions → **Catch
-up** → *Run workflow* rolls it to `main` (see [Deploying](deploy.md)).
+the images were built, nothing was deployed. Within about half an hour the
+**Drift check** notices and runs Catch up by itself; to not wait, GitHub →
+Actions → **Catch up** → *Run workflow* rolls it to `main` now (see
+[Deploying](deploy.md)).
 
 No `PipelineDown` card follows a start: the rule waits until the counters
 have a full hour of samples again. A polled source that is really dead

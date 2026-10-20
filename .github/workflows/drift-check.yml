@@ -1,0 +1,91 @@
+# Drift check: is production running what the registry has?
+#
+# The cluster is parked between working sessions. Merges while it is stopped
+# build their images and deploy nothing; after `az aks start` production is
+# behind until someone runs Catch up. This check runs every half hour, reads
+# the digest every container actually runs, compares it with the registry's
+# :latest, and when anything differs dispatches Catch up itself — connectors
+# included only when a connector drifted. It writes nothing else. A stopped
+# cluster, or a build in progress on main (the deploy job will roll it in a
+# minute), makes it exit green without looking (plans/digest-drift.md).
+name: Drift check
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  drift:
+    name: Production at main?
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+      actions: write
+    env:
+      AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Gate
+        id: gate
+        run: |
+          state=$(az aks show -g "$AKS_RESOURCE_GROUP" -n vrsky-prod --query powerState.code -o tsv)
+          building=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-push.yml --branch main --status in_progress --json databaseId -q length)
+          echo "cluster $state, builds in progress on main: $building"
+          if [ "$state" != Running ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Cluster is $state::Nothing to compare."
+          elif [ "$building" != 0 ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Build in progress on main::The deploy job rolls it; checking again next time."
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Stage
+        if: steps.gate.outputs.go == 'true'
+        run: mkdir -p stage && cp --parents infrastructure/azure/running-digests.sh stage/
+      - name: Running digests
+        if: steps.gate.outputs.go == 'true'
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/running-digests.sh" > running.txt && cat running.txt
+      - name: Registry digests
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          for repo in $(az acr repository list -n vrskyprodacr -o tsv | grep '^vrsky/'); do
+            d=$(az acr repository show-tags -n vrskyprodacr --repository "$repo" --detail --query "[?name=='latest'].digest | [0]" -o tsv)
+            [ -n "$d" ] && echo "${repo#vrsky/} $d" >> latest.txt
+          done
+          cat latest.txt
+      - name: Compare
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          infrastructure/azure/drift.sh running.txt latest.txt > drift.txt
+          if [ ! -s drift.txt ]; then
+            echo "production is at main ($(wc -l < running.txt) running digests checked)"
+            exit 0
+          fi
+          connectors=false
+          while read -r name _; do
+            case " management-api ui data-filter data-converter alert-responder " in
+              *" $name "*) ;;
+              *) connectors=true ;;
+            esac
+          done < drift.txt
+          {
+            echo "## Production is behind main"; echo
+            echo "| service | running | registry |"; echo "|---|---|---|"
+            awk '{printf "| %s | %s | %s |\n", $1, substr($2, 8, 12), (substr($3, 1, 7) == "sha256:" ? substr($3, 8, 12) : $3)}' drift.txt
+            echo; echo "Catch up dispatched (connectors: $connectors)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Production is behind main::$(wc -l < drift.txt) service(s) drifted; Catch up dispatched (connectors: $connectors)."
+          gh workflow run catch-up.yml --repo "$GITHUB_REPOSITORY" --ref main -f connectors="$connectors"
