@@ -60,11 +60,25 @@ if [[ "$PROFILE" == "azure" ]]; then
 		echo "  name: vrsky-alerts"
 		echo "  namespace: $NS"
 		echo "spec:"
-		sed 's/^/  /' "$RULES_FILE"
+		# Indent in plain bash: the in-cluster runtime (az aks command
+		# invoke) has no sed.
+		while IFS= read -r line || [[ -n "$line" ]]; do
+			printf '  %s\n' "$line"
+		done <"$RULES_FILE"
 	} | kubectl apply -f -
 fi
 
 echo "Installing Grafana..."
+# grafana-values.yaml asks for strategy Recreate (one RWO volume). A Deployment
+# that is still RollingUpdate keeps its rollingUpdate block, and neither helm
+# 3's three-way merge nor helm 4's server-side apply removes it, so the
+# upgrade fails with "rollingUpdate: Forbidden" (kubernetes/kubernetes#24198).
+# Drop it first; a no-op once the Deployment is Recreate.
+if [[ "$(kubectl -n "$NS" get deploy grafana -o jsonpath='{.spec.strategy.type}' 2>/dev/null)" == "RollingUpdate" ]]; then
+	echo "Switching the grafana Deployment from RollingUpdate to Recreate..."
+	kubectl -n "$NS" patch deploy grafana --type merge \
+		-p '{"spec":{"strategy":{"rollingUpdate":null,"type":"Recreate"}}}'
+fi
 helm upgrade --install grafana grafana/grafana \
 	--namespace "$NS" "${graf_values[@]}" --wait --timeout 5m
 

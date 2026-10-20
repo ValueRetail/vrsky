@@ -16,6 +16,14 @@ groups:
       # minutes and publishes once per poll, and the former 5-minute rate window
       # with "for: 10m" fired on that cadence alone, 92 times in one day
       # (2026-10-08), each for a few seconds.
+      #
+      # The third clause: the counter must have been scraped for the whole
+      # hour -- 120 samples at the 30 s interval in
+      # kubernetes/monitoring/podmonitors.yaml, so fewer than 100 means the
+      # cluster was parked (az aks stop) within the hour. Without it a start
+      # after a long stop fired at once: no samples in the last hour, the
+      # pre-stop publishes still in the comparison window (2026-10-19). The
+      # sum folds the old and new pod of a rolling restart together.
       - alert: PipelineDown
         expr: |
           sum by (tenant_id, connection_id) (
@@ -25,6 +33,10 @@ groups:
           sum by (tenant_id, connection_id) (
             increase(vrsky_messages_published_total{connector=~"vrsky-(api|brightpearl|business-central|cloud-storage|db|file|salesforce|sap-s4hana|sftp|sitoo|visma)-consumer"}[6h] offset 1h)
           ) > 0
+          and
+          sum by (tenant_id, connection_id) (
+            count_over_time(vrsky_messages_published_total{connector=~"vrsky-(api|brightpearl|business-central|cloud-storage|db|file|salesforce|sap-s4hana|sftp|sitoo|visma)-consumer"}[1h])
+          ) >= 100
         for: 5m
         labels:
           severity: critical
