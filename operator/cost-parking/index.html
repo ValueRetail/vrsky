@@ -2504,8 +2504,10 @@ cluster looks exactly like an outage from the outside.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
 <p>If anything merged to <code>main</code> while it was stopped, production is behind:
-the images were built, nothing was deployed. GitHub → Actions → <strong>Catch
-up</strong> → <em>Run workflow</em> rolls it to <code>main</code> (see <a href="../deploy/">Deploying</a>).</p>
+the images were built, nothing was deployed. Within about half an hour the
+<strong>Drift check</strong> notices and runs Catch up by itself; to not wait, GitHub →
+Actions → <strong>Catch up</strong> → <em>Run workflow</em> rolls it to <code>main</code> now (see
+<a href="../deploy/">Deploying</a>).</p>
 <p>No <code>PipelineDown</code> card follows a start: the rule waits until the counters
 have a full hour of samples again. A polled source that is really dead
 pages about an hour after the start, as it would at any other time.</p>
