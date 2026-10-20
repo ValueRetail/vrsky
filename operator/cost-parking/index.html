@@ -1082,6 +1082,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-monthly-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The monthly budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#verifying-after-a-start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2458,6 +2469,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-monthly-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The monthly budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#verifying-after-a-start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2500,6 +2522,11 @@ cluster looks exactly like an outage from the outside.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>stop<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
 <p>Takes a few minutes. Every pod is evicted; nothing is deleted.</p>
+<p><strong>It happens by itself at 16:00 Oslo time, every day.</strong> The <em>Park</em>
+workflow (<code>.github/workflows/park.yml</code>) runs on GitHub's schedule, queues
+behind any deploy or catch-up in progress, and stops a Running cluster;
+a stopped one is left alone. Still working at 16:00? Start it again. A
+stop from anywhere, any hour: Actions → <strong>Park</strong> → <em>Run workflow</em>.</p>
 <h2 id="start">Start<a class="headerlink" href="#start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
@@ -2563,6 +2590,27 @@ kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> <
 <p>So parking cuts the bill substantially but does not take it to zero. Deleting
 the cluster would, and would also throw away the volumes and both IPs — which
 means a new URL and re-issued certificates. Park it; don't delete it.</p>
+<h2 id="the-monthly-budget">The monthly budget<a class="headerlink" href="#the-monthly-budget" title="Permanent link">&para;</a></h2>
+<p>October 2026 (<code>plans/cost-cap.md</code>): a parked cluster costs about 1 450 NOK
+a month in disks, load balancer, registry and addresses before a single
+node-hour; two E4ds v6 nodes add 214 NOK for every day they run, and the
+Standard tier 21 NOK. The budget is <strong>1 500 NOK a month</strong> for the two
+VRSky resource groups, set in two places:</p>
+<ul>
+<li>An Azure budget <code>vrsky-monthly</code> (subscription scope, filtered to the two
+  resource groups) e-mails the operator at 80 and 100 percent. It stops
+  nothing.</li>
+<li>The repository variable <code>MONTHLY_BUDGET_NOK</code> turns on the <em>Budget</em> step
+  of the Production check: every half hour it reads the month-to-date
+  cost of the two groups and, at or above the budget, <strong>stops the cluster
+  and opens the issue</strong>; a start afterwards lasts until the next run that
+  month. A failed cost query fails the run and stops nothing. The deploy
+  identity needs <em>Cost Management Reader</em> on the two resource groups for
+  this (an Owner grants it); without the variable the step is skipped.</li>
+</ul>
+<p>What the budget assumes: one node, Free tier, a start by hand around
+09:00 on working days and the 16:00 stop. Two nodes and the Standard tier
+would spend it by the 12th.</p>
 <h2 id="verifying-after-a-start">Verifying after a start<a class="headerlink" href="#verifying-after-a-start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>vrsky-platform
 curl<span class="w"> </span>-fsS<span class="w"> </span>https://20.251.107.2.sslip.io/healthz

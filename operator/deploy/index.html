@@ -2563,9 +2563,10 @@ check. Nothing is rebuilt. It refuses to run against a stopped cluster,
 and it queues behind a deploy rather than interleaving with one.</p>
 <p>You do not have to remember the click. <strong>Production check</strong>
 (<code>drift-check.yml</code>) runs every half hour: while the cluster is running and
-no build is in progress on <code>main</code>, it first checks that the monitoring is
-alive (see <a href="../monitoring/">Monitoring</a>), then reads the digest every
-container actually runs
+no build is in progress on <code>main</code>, it first checks the month's spend
+against the budget and that the monitoring is alive (see
+<a href="../cost-parking/">cost parking</a> and <a href="../monitoring/">Monitoring</a>), then
+reads the digest every container actually runs
 (<code>running-digests.sh</code>, in-cluster), compares it with the registry's
 <code>:latest</code> (<code>drift.sh</code>), and when anything differs dispatches Catch up
 itself, with the fleet restart only when a connector drifted. The run's
