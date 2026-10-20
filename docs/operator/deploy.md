@@ -63,9 +63,10 @@ and it queues behind a deploy rather than interleaving with one.
 
 You do not have to remember the click. **Production check**
 (`drift-check.yml`) runs every half hour: while the cluster is running and
-no build is in progress on `main`, it first checks that the monitoring is
-alive (see [Monitoring](monitoring.md)), then reads the digest every
-container actually runs
+no build is in progress on `main`, it first checks the month's spend
+against the budget and that the monitoring is alive (see
+[cost parking](cost-parking.md) and [Monitoring](monitoring.md)), then
+reads the digest every container actually runs
 (`running-digests.sh`, in-cluster), compares it with the registry's
 `:latest` (`drift.sh`), and when anything differs dispatches Catch up
 itself, with the fleet restart only when a connector drifted. The run's

@@ -58,6 +58,33 @@ jobs:
           else
             echo "go=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Budget
+        # The month's spend against vars.MONTHLY_BUDGET_NOK (plans/cost-cap.md).
+        # At or above it the cluster is stopped and the run is red, so the
+        # issue opens; a start afterwards lasts until the next run. Unset
+        # variable: no check. A failed query fails the run and stops nothing.
+        if: steps.gate.outputs.go == 'true' && vars.MONTHLY_BUDGET_NOK != ''
+        env:
+          MONTHLY_BUDGET_NOK: ${{ vars.MONTHLY_BUDGET_NOK }}
+        run: |
+          mtd=$(az rest --method post \
+            --url "https://management.azure.com/subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/providers/Microsoft.CostManagement/query?api-version=2023-11-01" \
+            --body '{"type":"ActualCost","timeframe":"MonthToDate","dataset":{"granularity":"None","aggregation":{"totalCost":{"name":"Cost","function":"Sum"}},"filter":{"dimensions":{"name":"ResourceGroupName","operator":"In","values":["vrsky-prod","MC_vrsky-prod_vrsky-prod_norwayeast"]}}}}' \
+            --query 'properties.rows[0][0]' -o tsv 2>/dev/null || echo "query failed")
+          [ -n "$mtd" ] || mtd=0   # no rows yet this month
+          set +e
+          line=$(infrastructure/azure/budget.sh "$mtd" "$MONTHLY_BUDGET_NOK" 2>&1); code=$?
+          set -e
+          echo "$line"
+          case $code in
+            0) echo "$line" >> "$GITHUB_STEP_SUMMARY" ;;
+            3) az aks stop -g "$AKS_RESOURCE_GROUP" -n vrsky-prod
+               echo "::error title=Monthly budget reached::$line. The cluster has been stopped; it will be stopped again on every run this month."
+               { echo "## Monthly budget reached"; echo; echo "$line"; echo; echo "The cluster has been stopped and stays parked until next month (or a higher MONTHLY_BUDGET_NOK)."; } >> "$GITHUB_STEP_SUMMARY"
+               exit 1 ;;
+            *) echo "::error title=Budget check failed::$line. Nothing was stopped; does the deploy identity hold Cost Management Reader on the resource groups?"
+               exit 1 ;;
+          esac
       - name: Stage
         if: steps.gate.outputs.go == 'true'
         run: mkdir -p stage && cp --parents infrastructure/azure/running-digests.sh infrastructure/azure/monitoring-alive.sh stage/

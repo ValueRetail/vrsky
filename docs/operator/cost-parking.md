@@ -23,6 +23,12 @@ az aks stop -g vrsky-prod -n vrsky-prod
 
 Takes a few minutes. Every pod is evicted; nothing is deleted.
 
+**It happens by itself at 16:00 Oslo time, every day.** The *Park*
+workflow (`.github/workflows/park.yml`) runs on GitHub's schedule, queues
+behind any deploy or catch-up in progress, and stops a Running cluster;
+a stopped one is left alone. Still working at 16:00? Start it again. A
+stop from anywhere, any hour: Actions → **Park** → *Run workflow*.
+
 ## Start
 
 ```bash
@@ -68,6 +74,29 @@ Stopping deallocates the nodes. It does **not** stop billing for:
 So parking cuts the bill substantially but does not take it to zero. Deleting
 the cluster would, and would also throw away the volumes and both IPs — which
 means a new URL and re-issued certificates. Park it; don't delete it.
+
+## The monthly budget
+
+October 2026 (`plans/cost-cap.md`): a parked cluster costs about 1 450 NOK
+a month in disks, load balancer, registry and addresses before a single
+node-hour; two E4ds v6 nodes add 214 NOK for every day they run, and the
+Standard tier 21 NOK. The budget is **1 500 NOK a month** for the two
+VRSky resource groups, set in two places:
+
+- An Azure budget `vrsky-monthly` (subscription scope, filtered to the two
+  resource groups) e-mails the operator at 80 and 100 percent. It stops
+  nothing.
+- The repository variable `MONTHLY_BUDGET_NOK` turns on the *Budget* step
+  of the Production check: every half hour it reads the month-to-date
+  cost of the two groups and, at or above the budget, **stops the cluster
+  and opens the issue**; a start afterwards lasts until the next run that
+  month. A failed cost query fails the run and stops nothing. The deploy
+  identity needs *Cost Management Reader* on the two resource groups for
+  this (an Owner grants it); without the variable the step is skipped.
+
+What the budget assumes: one node, Free tier, a start by hand around
+09:00 on working days and the 16:00 stop. Two nodes and the Standard tier
+would spend it by the 12th.
 
 ## Verifying after a start
 

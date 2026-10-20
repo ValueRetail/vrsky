@@ -1,0 +1,60 @@
+# Park: stop the cluster at 16:00 in Oslo, every day.
+#
+# The two nodes cost about 214 NOK a day while they run and nothing while
+# they are stopped (plans/cost-cap.md). A start is by hand (az aks start)
+# and the Production check catches production up within the half hour; a
+# stop that nobody remembered is what this is for. GitHub's cron is UTC, so
+# both 14:00 and 15:00 UTC are scheduled and the job checks the Oslo clock:
+# exactly one of them is 16:00. A dispatch stops the cluster whatever the
+# hour (a stop from the phone). It queues behind a deploy or a catch-up on
+# the production group and never interrupts one.
+name: Park
+
+on:
+  schedule:
+    - cron: "0 14 * * *" # 16:00 Europe/Oslo in winter (CET)
+    - cron: "0 15 * * *" # 16:00 Europe/Oslo in summer (CEST)
+  workflow_dispatch:
+
+jobs:
+  park:
+    name: Stop the cluster at 16:00 Oslo
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Is it 16:00 in Oslo?
+        id: clock
+        run: |
+          hour=$(TZ=Europe/Oslo date +%H)
+          echo "Oslo hour: $hour, event: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$hour" = 16 ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Not 16:00 in Oslo::The other schedule is the right one today; nothing to do."
+          fi
+      - name: Stop the cluster
+        if: steps.clock.outputs.go == 'true'
+        run: |
+          state=$(az aks show -g "$AKS_RESOURCE_GROUP" -n vrsky-prod --query powerState.code -o tsv)
+          if [ "$state" = Running ]; then
+            az aks stop -g "$AKS_RESOURCE_GROUP" -n vrsky-prod
+            echo "## Cluster stopped at $(TZ=Europe/Oslo date '+%H:%M %Z')" >> "$GITHUB_STEP_SUMMARY"
+            echo "To start it again: the Start section of docs/operator/cost-parking.md." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "cluster is already $state"
+            echo "## Cluster was already $state" >> "$GITHUB_STEP_SUMMARY"
+          fi

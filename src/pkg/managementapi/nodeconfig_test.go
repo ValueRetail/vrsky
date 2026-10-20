@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1609,9 +1610,14 @@ func TestDriftCheckWorkflow(t *testing.T) {
 	// The heartbeat (plans/monitoring-heartbeat.md): an in-cluster step
 	// before the comparison that may fail without stopping it, and a
 	// verdict step at the end that turns its failure into a red run.
-	alive, compare, verdict := -1, -1, -1
+	alive, compare, verdict, budget := -1, -1, -1, -1
 	for i, st := range job.Steps {
 		switch {
+		case strings.Contains(st.Run, "budget.sh"):
+			budget = i
+			if !strings.Contains(st.If, "vars.MONTHLY_BUDGET_NOK != ''") || !strings.Contains(st.Run, "az aks stop") || !strings.Contains(st.Run, "MonthToDate") {
+				t.Errorf("the budget step must be skipped without MONTHLY_BUDGET_NOK, read the month-to-date cost, and stop the cluster at the budget (if=%q)", st.If)
+			}
 		case strings.Contains(st.Run, "bash infrastructure/azure/monitoring-alive.sh"):
 			alive = i
 			if !strings.Contains(st.Run, "in-cluster.sh") || st.ID != "alive" || !st.ContinueOnError {
@@ -1631,6 +1637,11 @@ func TestDriftCheckWorkflow(t *testing.T) {
 	}
 	if alive >= 0 && compare >= 0 && !(alive < compare && compare < verdict) {
 		t.Errorf("step order must be heartbeat (%d) < comparison (%d) < verdict (%d)", alive, compare, verdict)
+	}
+	if budget < 0 {
+		t.Error("no step runs budget.sh; the monthly budget would be an e-mail, not a stop (plans/cost-cap.md)")
+	} else if alive >= 0 && budget > alive {
+		t.Errorf("the budget step (%d) must come before the heartbeat (%d): over budget, nothing else runs", budget, alive)
 	}
 	for _, forbidden := range []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "install-monitoring.sh", "kubectl set", "kubectl rollout", "kubectl apply", "az acr build"} {
 		if strings.Contains(all, forbidden) {
@@ -1784,5 +1795,119 @@ func TestMonitoringAliveScript(t *testing.T) {
 				t.Errorf("output lacks %q:\n%s", tc.mention, out)
 			}
 		})
+	}
+}
+
+// budgetVerdict runs infrastructure/azure/budget.sh and returns its exit
+// code and output.
+func budgetVerdict(t *testing.T, mtd, budget string) (int, string) {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "budget.sh"), mtd, budget)
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatalf("budget.sh: %v\n%s", err, out)
+		}
+		code = ee.ExitCode()
+	}
+	return code, string(out)
+}
+
+// The budget verdict: below → 0, at or above → 3 (the caller parks the
+// cluster), and anything that is not a number → 2 (the caller fails loudly
+// and parks nothing: a broken cost query must never stop production).
+func TestBudgetVerdict(t *testing.T) {
+	cases := []struct {
+		name, mtd, budget string
+		code              int
+		mention           string
+	}{
+		{"below", "1234.5", "1500", 0, "spent 1234 of 1500 NOK this month (82%)"},
+		{"at", "1500", "1500", 3, "reached"},
+		{"above", "5414.17", "1500", 3, "reached"},
+		{"zero spend", "0", "1500", 0, "(0%)"},
+		{"query failed", "query failed", "1500", 2, "not a number"},
+		{"empty", "", "1500", 2, "not a number"},
+		{"zero budget", "100", "0", 2, "not a positive number"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := budgetVerdict(t, tc.mtd, tc.budget)
+			if code != tc.code {
+				t.Errorf("exit %d, want %d\n%s", code, tc.code, out)
+			}
+			if !strings.Contains(out, tc.mention) {
+				t.Errorf("output lacks %q:\n%s", tc.mention, out)
+			}
+		})
+	}
+}
+
+// Park stops the cluster at 16:00 in Oslo every day and does nothing else:
+// both UTC crons, the Oslo-hour check in front of the stop, the production
+// environment and group so it queues behind a deploy, and no deploy
+// script, no kubectl, no start (plans/cost-cap.md).
+func TestParkWorkflow(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "park.yml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top struct {
+		On struct {
+			Schedule []struct {
+				Cron string `yaml:"cron"`
+			} `yaml:"schedule"`
+			Dispatch any `yaml:"workflow_dispatch"`
+		} `yaml:"on"`
+	}
+	if err := yaml.Unmarshal(body, &top); err != nil {
+		t.Fatal(err)
+	}
+	crons := map[string]bool{}
+	for _, s := range top.On.Schedule {
+		crons[s.Cron] = true
+	}
+	for _, want := range []string{"0 14 * * *", "0 15 * * *"} {
+		if !crons[want] {
+			t.Errorf("park.yml lacks the cron %q; 16:00 Oslo is 14:00 UTC in winter and 15:00 UTC in summer", want)
+		}
+	}
+	wf := parseWorkflow(t, "park.yml")
+	job, ok := wf.Jobs["park"]
+	if !ok {
+		t.Fatal("no park job")
+	}
+	if job.Environment != "production" || job.Concurrency.Group != "production" {
+		t.Errorf("park job: environment %q, concurrency %q; want production/production so it never interrupts a deploy", job.Environment, job.Concurrency.Group)
+	}
+	clock, stop := -1, -1
+	all := ""
+	for i, st := range job.Steps {
+		all += st.Run + "\n"
+		if st.ID == "clock" {
+			clock = i
+			if !strings.Contains(st.Run, "TZ=Europe/Oslo date +%H") || !strings.Contains(st.Run, `"$hour" = 16`) {
+				t.Errorf("the clock step must read the Oslo hour and compare it with 16: %q", strings.SplitN(st.Run, "\n", 2)[0])
+			}
+		}
+		if strings.Contains(st.Run, "az aks stop") {
+			stop = i
+			if !strings.Contains(st.If, "steps.clock.outputs.go == 'true'") {
+				t.Errorf("the stop step is not gated on the Oslo clock: if=%q", st.If)
+			}
+			if !strings.Contains(st.Run, "powerState.code") {
+				t.Error("the stop step must read the power state and stop only a Running cluster")
+			}
+		}
+	}
+	if clock < 0 || stop < 0 || clock >= stop {
+		t.Errorf("want a step with id clock (%d) before the stop step (%d)", clock, stop)
+	}
+	for _, forbidden := range []string{"az aks start", "kubectl ", "helm ", "deploy-core-azure.sh", "deploy-connectors-azure.sh", "in-cluster.sh"} {
+		if strings.Contains(all, forbidden) {
+			t.Errorf("park.yml runs %q; it must only stop the cluster", forbidden)
+		}
 	}
 }
