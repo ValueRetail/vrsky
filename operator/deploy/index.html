@@ -2580,7 +2580,9 @@ wrapped by <code>infrastructure/azure/in-cluster.sh</code>. The runner resolves 
 digests (it has <code>az</code>; the in-cluster runtime does not), stages the deploy
 scripts, manifests and monitoring values with their paths intact, uploads
 them, and runs the same scripts an operator runs by hand. The in-cluster
-runtime has bash, curl, jq, kubectl and helm.</p>
+runtime has bash, awk, grep, curl, jq, kubectl and helm 3, and <strong>no sed,
+python or envsubst</strong>; <code>TestInClusterScriptsUseOnlyRuntimeTools</code> keeps the
+scripts the jobs run in-cluster inside that set.</p>
 <p>Roles the app holds: <code>AcrPush</code> and <code>Contributor</code> on <code>vrskyprodacr</code> (a
 server-side <code>az acr build</code> needs to read the registry and queue a run);
 <code>Contributor</code> on <code>vrsky-prod</code> (the command runner). One-time setup, by a

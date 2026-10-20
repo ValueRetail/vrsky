@@ -2673,7 +2673,7 @@ reachable by port-forward only.</p>
 </tr>
 <tr>
 <td><code>PipelineDown</code></td>
-<td>a polled source that published in the previous 6 h publishes nothing for 1 h (webhook and queue sources are exempt)</td>
+<td>a polled source that published in the previous 6 h publishes nothing for 1 h, and its counter was scraped for that whole hour, so a start after <code>az aks stop</code> does not page (webhook and queue sources are exempt)</td>
 <td>critical</td>
 <td>the workspace</td>
 </tr>
