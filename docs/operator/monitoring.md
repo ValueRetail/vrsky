@@ -23,6 +23,17 @@ check fails on the same rules (the `vrsky-*` groups, above `info`) and on
 anything `critical`; stock warnings such as `KubeClientErrors` reach Teams
 as before but do not turn a rollout red (`infrastructure/azure/smoke-alerts.sh`).
 
+**Who watches the monitoring.** Every alert goes Prometheus → Alertmanager
+→ management-api → Teams, so a dead Prometheus looks like a quiet day. The
+**Production check** workflow (every half hour while the cluster runs)
+asks Prometheus whether the chart's always-firing `Watchdog` is firing and
+Alertmanager whether it holds it (`infrastructure/azure/monitoring-alive.sh`);
+a miss fails the run and the CI failure alert opens the issue "CI red on
+main: Production check", closed again by the next green run. A parked
+cluster raises nothing. The webhook and the Teams target are not
+exercised; `/readyz` in the smoke check and `MgmtAPIErrorRate` cover the
+API.
+
 ## Traces (Tempo)
 
 Each message is a trace spanning consumer → producer (and the external call).

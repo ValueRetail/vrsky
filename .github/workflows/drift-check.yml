@@ -1,14 +1,20 @@
-# Drift check: is production running what the registry has?
+# Production check: is the monitoring alive, and is production running what
+# the registry has?
 #
-# The cluster is parked between working sessions. Merges while it is stopped
-# build their images and deploy nothing; after `az aks start` production is
-# behind until someone runs Catch up. This check runs every half hour, reads
-# the digest every container actually runs, compares it with the registry's
-# :latest, and when anything differs dispatches Catch up itself — connectors
-# included only when a connector drifted. It writes nothing else. A stopped
-# cluster, or a build in progress on main (the deploy job will roll it in a
-# minute), makes it exit green without looking (plans/digest-drift.md).
-name: Drift check
+# Every half hour while the cluster runs. First the heartbeat: Prometheus
+# must report the Watchdog firing and Alertmanager must hold it, or a dead
+# monitoring stack would look exactly like "all is well"; a miss fails the
+# run, and the CI failure alert opens the stateful issue
+# (plans/monitoring-heartbeat.md). Then drift: the cluster is parked between
+# working sessions, merges while it is stopped build their images and deploy
+# nothing, and after `az aks start` production is behind until someone runs
+# Catch up. The check reads the digest every container actually runs,
+# compares it with the registry's :latest, and when anything differs
+# dispatches Catch up itself — connectors included only when a connector
+# drifted. It writes nothing else. A stopped cluster, or a build in progress
+# on main (the deploy job will roll it in a minute), makes it exit green
+# without looking (plans/digest-drift.md).
+name: Production check
 
 on:
   schedule:
@@ -17,7 +23,7 @@ on:
 
 jobs:
   drift:
-    name: Production at main?
+    name: Monitoring alive, production at main?
     runs-on: ubuntu-latest
     environment: production
     concurrency:
@@ -54,7 +60,14 @@ jobs:
           fi
       - name: Stage
         if: steps.gate.outputs.go == 'true'
-        run: mkdir -p stage && cp --parents infrastructure/azure/running-digests.sh stage/
+        run: mkdir -p stage && cp --parents infrastructure/azure/running-digests.sh infrastructure/azure/monitoring-alive.sh stage/
+      - name: Monitoring alive
+        id: alive
+        if: steps.gate.outputs.go == 'true'
+        # The drift comparison below still runs when this fails; the verdict
+        # step at the end turns the miss into a red run.
+        continue-on-error: true
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/monitoring-alive.sh"
       - name: Running digests
         if: steps.gate.outputs.go == 'true'
         run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/running-digests.sh" > running.txt && cat running.txt
@@ -89,3 +102,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=Production is behind main::$(wc -l < drift.txt) service(s) drifted; Catch up dispatched (connectors: $connectors)."
           gh workflow run catch-up.yml --repo "$GITHUB_REPOSITORY" --ref main -f connectors="$connectors"
+      - name: Monitoring verdict
+        if: steps.gate.outputs.go == 'true' && steps.alive.outcome == 'failure'
+        run: |
+          echo "::error title=Monitoring is not alive::Prometheus or Alertmanager is not reporting the Watchdog; see the Monitoring alive step."
+          exit 1
