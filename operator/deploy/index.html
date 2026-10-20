@@ -2543,7 +2543,11 @@ runner; <em>Deploy to production</em> shows each rollout and the smoke output.
 About four minutes for a UI change, ten for a change under <code>src/pkg</code>.</p>
 <p><code>infrastructure/azure/smoke-prod.sh [deployment …]</code> is the same check run
 by hand: <code>/readyz</code> and the UI answer 200, each named consumer logged
-<em>Restored running pipelines</em>, and nothing is firing besides the Watchdog.</p>
+<em>Restored running pipelines</em>, and nothing that matters is firing. What
+matters is VRSky's own alerts (the <code>vrsky-*</code> rule groups) above <code>info</code>
+and anything <code>critical</code> from any group; a stock warning that a fleet
+restart produces by itself, such as <code>KubeClientErrors</code>, does not fail a
+deploy (<code>smoke-alerts.sh</code>, table-tested).</p>
 <h2 id="while-the-cluster-is-parked">While the cluster is parked<a class="headerlink" href="#while-the-cluster-is-parked" title="Permanent link">&para;</a></h2>
 <p>The cluster is stopped between working sessions (<code>az aks stop</code>,
 <a href="../cost-parking/">cost parking</a>). A merge while it is stopped still builds
