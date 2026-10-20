@@ -2528,6 +2528,16 @@ and feed the per-tenant notification targets (#84). The deploy job's smoke
 check fails on the same rules (the <code>vrsky-*</code> groups, above <code>info</code>) and on
 anything <code>critical</code>; stock warnings such as <code>KubeClientErrors</code> reach Teams
 as before but do not turn a rollout red (<code>infrastructure/azure/smoke-alerts.sh</code>).</p>
+<p><strong>Who watches the monitoring.</strong> Every alert goes Prometheus → Alertmanager
+→ management-api → Teams, so a dead Prometheus looks like a quiet day. The
+<strong>Production check</strong> workflow (every half hour while the cluster runs)
+asks Prometheus whether the chart's always-firing <code>Watchdog</code> is firing and
+Alertmanager whether it holds it (<code>infrastructure/azure/monitoring-alive.sh</code>);
+a miss fails the run and the CI failure alert opens the issue "CI red on
+main: Production check", closed again by the next green run. A parked
+cluster raises nothing. The webhook and the Teams target are not
+exercised; <code>/readyz</code> in the smoke check and <code>MgmtAPIErrorRate</code> cover the
+API.</p>
 <h2 id="traces-tempo">Traces (Tempo)<a class="headerlink" href="#traces-tempo" title="Permanent link">&para;</a></h2>
 <p>Each message is a trace spanning consumer → producer (and the external call).
 Explore → Tempo → Search, or click a trace ID in a log line. See
