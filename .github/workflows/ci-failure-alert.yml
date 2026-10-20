@@ -29,6 +29,7 @@ on:
       - "docs"
       - "Vulnerability scan"
       - "Production check"
+      - "Park"
     types: [completed]
 
 permissions:
