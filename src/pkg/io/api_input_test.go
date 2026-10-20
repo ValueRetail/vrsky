@@ -738,10 +738,24 @@ func TestExtractNextLink_FromHeader(t *testing.T) {
 // REAL API TESTS - api.met.no (Norwegian Meteorological Institute)
 // ============================================================================
 
-func TestRealAPI_MetNo_LocationForecast(t *testing.T) {
+// liveAPIEnv opts the tests below in: they reach https://api.met.no, a
+// public service whose slowness must never block a deploy (#331, the
+// 2026-10-20 timeout). CI does not set it; TestLiveAPITestsAreOptIn keeps
+// every live test behind this helper.
+const liveAPIEnv = "VRSKY_TEST_LIVE_APIS"
+
+func skipUnlessLiveAPIs(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping real API test in short mode")
 	}
+	if os.Getenv(liveAPIEnv) == "" {
+		t.Skipf("%s not set; set it to 1 to run the live api.met.no tests", liveAPIEnv)
+	}
+}
+
+func TestRealAPI_MetNo_LocationForecast(t *testing.T) {
+	skipUnlessLiveAPIs(t)
 
 	// api.met.no requires User-Agent header and doesn't support pagination
 	config := `{
@@ -806,9 +820,7 @@ func TestRealAPI_MetNo_LocationForecast(t *testing.T) {
 }
 
 func TestRealAPI_MetNo_MultipleRecords(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real API test in short mode")
-	}
+	skipUnlessLiveAPIs(t)
 
 	config := `{
 		"id": "met-no-multi-test",
@@ -859,9 +871,7 @@ func TestRealAPI_MetNo_MultipleRecords(t *testing.T) {
 }
 
 func TestRealAPI_MetNo_Sunrise(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real API test in short mode")
-	}
+	skipUnlessLiveAPIs(t)
 
 	// Test different endpoint - sunrise API
 	config := `{
