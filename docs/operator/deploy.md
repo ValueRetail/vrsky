@@ -39,7 +39,11 @@ About four minutes for a UI change, ten for a change under `src/pkg`.
 
 `infrastructure/azure/smoke-prod.sh [deployment …]` is the same check run
 by hand: `/readyz` and the UI answer 200, each named consumer logged
-*Restored running pipelines*, and nothing is firing besides the Watchdog.
+*Restored running pipelines*, and nothing that matters is firing. What
+matters is VRSky's own alerts (the `vrsky-*` rule groups) above `info`
+and anything `critical` from any group; a stock warning that a fleet
+restart produces by itself, such as `KubeClientErrors`, does not fail a
+deploy (`smoke-alerts.sh`, table-tested).
 
 ## While the cluster is parked
 

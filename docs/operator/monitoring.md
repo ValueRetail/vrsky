@@ -18,7 +18,10 @@ Scraped from every worker's `/metrics` (port 8080) and the management API
 - `webhook_signature_failures_total`, `webhook_client_cert_failures_total` — auth rejections
 
 Alert rules + Alertmanager routing live in `infrastructure/prometheus-rules.yml`
-and feed the per-tenant notification targets (#84).
+and feed the per-tenant notification targets (#84). The deploy job's smoke
+check fails on the same rules (the `vrsky-*` groups, above `info`) and on
+anything `critical`; stock warnings such as `KubeClientErrors` reach Teams
+as before but do not turn a rollout red (`infrastructure/azure/smoke-alerts.sh`).
 
 ## Traces (Tempo)
 

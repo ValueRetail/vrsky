@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # smoke-prod.sh — what the deploy job checks after a rollout, and what you can
 # run by hand after one: the public endpoints answer, every restarted
-# consumer restored its pipelines, and nothing new is firing. Alerts at
-# severity "info" (the chart's CPUThrottlingHigh and friends, which
-# Alertmanager routes to nowhere) do not count: a fleet restart throttles
-# every starting pod for a minute, and that is not a failed deploy.
+# consumer restored its pipelines, and nothing that matters is firing. What
+# matters is decided by smoke-alerts.sh beside this script: VRSky's own
+# alerts above info, and anything critical. A fleet restart throttles every
+# starting pod for a minute and makes the API server's client calls error
+# for a while (CPUThrottlingHigh, KubeClientErrors); neither is a failed
+# deploy (plans/smoke-alert-scope.md).
 #   smoke-prod.sh [consumer-deployment …]   e.g. smoke-prod.sh vrsky-webhook-consumer
 set -euo pipefail
 URL="${PUBLIC_URL:-https://vrsky.valueretail.no}"
@@ -26,8 +28,9 @@ for d in "$@"; do
   fi
 done
 
-firing=$(kubectl get --raw "/api/v1/namespaces/vrsky-monitoring/services/prometheus-prometheus:9090/proxy/api/v1/alerts" 2>/dev/null \
-  | jq -r '[.data.alerts[] | select(.state=="firing" and .labels.severity != "info") | .labels.alertname | select(. != "Watchdog" and . != "InfoInhibitor")] | sort | unique | join(" ")' 2>/dev/null || echo "")
+firing=$(kubectl get --raw "/api/v1/namespaces/vrsky-monitoring/services/prometheus-prometheus:9090/proxy/api/v1/rules" 2>/dev/null \
+  | bash "$(dirname "${BASH_SOURCE[0]}")/smoke-alerts.sh" 2>/dev/null | tr '\n' ' ' || echo "")
+firing="${firing% }"
 if [ -n "$firing" ]; then echo "alerts firing: $firing" >&2; fail=1; else echo "alerts: none"; fi
 
 [ "$fail" = 0 ] && echo "smoke: ok" || { echo "smoke: FAILED" >&2; exit 1; }
