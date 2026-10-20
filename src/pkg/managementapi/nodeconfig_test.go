@@ -1440,7 +1440,7 @@ func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
 	missing := regexp.MustCompile(`(?m)(^|[\s;|&(` + "`" + `])(sed|python3?|envsubst)(\s|$)`)
 	scriptRef := regexp.MustCompile(`infrastructure/[A-Za-z0-9_./-]+\.sh`)
 	scripts := map[string]bool{}
-	for _, name := range []string{"build-push.yml", "catch-up.yml"} {
+	for _, name := range []string{"build-push.yml", "catch-up.yml", "drift-check.yml"} {
 		wf := parseWorkflow(t, name)
 		for jobName, job := range wf.Jobs {
 			for _, st := range job.Steps {
@@ -1473,6 +1473,141 @@ func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
 			if missing.MatchString(line) {
 				t.Errorf("%s:%d uses a tool the in-cluster runtime lacks: %s", ref, i+1, strings.TrimSpace(line))
 			}
+		}
+	}
+}
+
+// drift runs infrastructure/azure/drift.sh on a running and a registry
+// listing and returns its lines.
+func drift(t *testing.T, running, latest string) []string {
+	t.Helper()
+	dir := t.TempDir()
+	r := filepath.Join(dir, "running.txt")
+	l := filepath.Join(dir, "latest.txt")
+	if err := os.WriteFile(r, []byte(running), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(l, []byte(latest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "drift.sh"), r, l).CombinedOutput()
+	if err != nil {
+		t.Fatalf("drift.sh: %v\n%s", err, out)
+	}
+	var lines []string
+	for _, x := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if x != "" {
+			lines = append(lines, x)
+		}
+	}
+	return lines
+}
+
+// The drift check compares what every container runs with the registry's
+// :latest and reports exactly the pairs that differ (plans/digest-drift.md):
+// a service behind, a connector behind, the old pod of a rollout next to the
+// new one, and an image the registry no longer has. Equal is silence.
+func TestDriftDetection(t *testing.T) {
+	const a, b, c = "sha256:" + "a000000000000000000000000000000000000000000000000000000000000000",
+		"sha256:" + "b000000000000000000000000000000000000000000000000000000000000000",
+		"sha256:" + "c000000000000000000000000000000000000000000000000000000000000000"
+	latest := "management-api " + a + "\nsitoo-consumer " + b + "\nui " + c + "\n"
+	cases := []struct {
+		name    string
+		running string
+		want    []string
+	}{
+		{"at main", "management-api " + a + "\nsitoo-consumer " + b + "\nui " + c + "\n", nil},
+		{"two replicas at main", "management-api " + a + "\nmanagement-api " + a + "\n", nil},
+		{"core behind", "management-api " + b + "\nui " + c + "\n", []string{"management-api " + b + " " + a}},
+		{"connector behind", "sitoo-consumer " + a + "\n", []string{"sitoo-consumer " + a + " " + b}},
+		{"rollout: old and new pod", "ui " + a + "\nui " + c + "\n", []string{"ui " + a + " " + c}},
+		{"not in registry", "ghost-consumer " + a + "\n", []string{"ghost-consumer " + a + " (not in registry)"}},
+		{"nothing running", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := drift(t, tc.running, latest)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("drift.sh\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The drift check is read-only except for one dispatch of Catch up: it runs
+// on a schedule and by hand, in the production environment and concurrency
+// group so it never looks at a cluster mid-rollout, gates on the power state
+// and on no build in progress before any in-cluster step, reads digests
+// through in-cluster.sh only, and never runs a deploy script itself.
+func TestDriftCheckWorkflow(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "drift-check.yml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top struct {
+		On   map[string]any `yaml:"on"`
+		Jobs map[string]struct {
+			Permissions map[string]string `yaml:"permissions"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top.On["schedule"]; !ok {
+		t.Error("drift-check.yml has no schedule; it is the thing that notices without a click")
+	}
+	if _, ok := top.On["workflow_dispatch"]; !ok || len(top.On) != 2 {
+		t.Errorf("drift-check.yml must run on schedule and workflow_dispatch only, got triggers %v", top.On)
+	}
+	wf := parseWorkflow(t, "drift-check.yml")
+	job, ok := wf.Jobs["drift"]
+	if !ok {
+		t.Fatal("no drift job")
+	}
+	if job.Environment != "production" || job.Concurrency.Group != "production" {
+		t.Errorf("drift job: environment %q, concurrency %q; want production/production so it queues behind a deploy", job.Environment, job.Concurrency.Group)
+	}
+	if top.Jobs["drift"].Permissions["actions"] != "write" {
+		t.Error("drift job cannot dispatch Catch up without `actions: write`")
+	}
+	gate := -1
+	all := ""
+	for i, st := range job.Steps {
+		all += st.Run + "\n"
+		if st.ID == "gate" {
+			gate = i
+			if !strings.Contains(st.Run, "powerState.code") || !strings.Contains(st.Run, "--status in_progress") {
+				t.Error("the gate step must read the cluster's power state and look for a build in progress on main")
+			}
+		}
+	}
+	if gate < 0 {
+		t.Fatal("no step with id gate")
+	}
+	for i, st := range job.Steps {
+		if st.Run == "" || i == gate {
+			continue
+		}
+		inCluster := strings.Contains(st.Run, "in-cluster.sh")
+		if (strings.Contains(st.Run, "kubectl ") || strings.Contains(st.Run, "helm ")) && !inCluster {
+			t.Errorf("step %q runs kubectl/helm on the runner", st.Name)
+		}
+		if i > gate && !strings.Contains(st.If, "steps.gate.outputs.go == 'true'") {
+			t.Errorf("step %q is not gated on steps.gate.outputs.go", st.Name)
+		}
+		if i < gate && inCluster {
+			t.Errorf("step %q reaches the cluster before the gate", st.Name)
+		}
+	}
+	for _, needle := range []string{"running-digests.sh", "drift.sh", "gh workflow run catch-up.yml"} {
+		if !strings.Contains(all, needle) {
+			t.Errorf("drift check never uses %s", needle)
+		}
+	}
+	for _, forbidden := range []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "install-monitoring.sh", "kubectl set", "kubectl rollout", "kubectl apply", "az acr build"} {
+		if strings.Contains(all, forbidden) {
+			t.Errorf("drift check runs %q; it must only compare and dispatch Catch up", forbidden)
 		}
 	}
 }

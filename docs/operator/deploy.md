@@ -57,6 +57,16 @@ skip that), applies the monitoring values and rules, and runs the smoke
 check. Nothing is rebuilt. It refuses to run against a stopped cluster,
 and it queues behind a deploy rather than interleaving with one.
 
+You do not have to remember the click. **Drift check** (`drift-check.yml`)
+runs every half hour: while the cluster is running and no build is in
+progress on `main`, it reads the digest every container actually runs
+(`running-digests.sh`, in-cluster), compares it with the registry's
+`:latest` (`drift.sh`), and when anything differs dispatches Catch up
+itself, with the fleet restart only when a connector drifted. The run's
+summary lists the drifted services; a clean run says "production is at
+main". It writes nothing else. GitHub pauses scheduled workflows after
+sixty days without a commit, which this repository has never gone.
+
 ## Rolling back
 
 Revert the merge (`git revert`, open a PR, merge): the revert deploys like
