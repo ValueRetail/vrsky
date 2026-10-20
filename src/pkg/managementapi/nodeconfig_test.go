@@ -1611,3 +1611,90 @@ func TestDriftCheckWorkflow(t *testing.T) {
 		}
 	}
 }
+
+// smokeAlerts runs infrastructure/azure/smoke-alerts.sh on a Prometheus
+// /api/v1/rules document and returns the alert names it prints.
+func smokeAlerts(t *testing.T, rulesJSON string) []string {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "smoke-alerts.sh"))
+	cmd.Stdin = strings.NewReader(rulesJSON)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("smoke-alerts.sh: %v\n%s", err, out)
+	}
+	var names []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" {
+			names = append(names, l)
+		}
+	}
+	return names
+}
+
+// rulesDoc builds a /api/v1/rules document from (group, alert, severity,
+// state) rows; an empty state means the rule has no active alert.
+func rulesDoc(rows ...[4]string) string {
+	groups := map[string][]string{}
+	var order []string
+	for _, r := range rows {
+		group, alert, severity, state := r[0], r[1], r[2], r[3]
+		alerts := "[]"
+		if state != "" {
+			alerts = fmt.Sprintf(`[{"state":%q,"labels":{"alertname":%q,"severity":%q}}]`, state, alert, severity)
+		}
+		if _, ok := groups[group]; !ok {
+			order = append(order, group)
+		}
+		groups[group] = append(groups[group], fmt.Sprintf(`{"type":"alerting","name":%q,"labels":{"severity":%q},"alerts":%s}`, alert, severity, alerts))
+	}
+	var gs []string
+	for _, g := range order {
+		gs = append(gs, fmt.Sprintf(`{"name":%q,"rules":[%s]}`, g, strings.Join(groups[g], ",")))
+	}
+	return `{"status":"success","data":{"groups":[` + strings.Join(gs, ",") + `]}}`
+}
+
+// The smoke check fails a deploy for VRSky's own alerts above info and for
+// anything critical, and for nothing else: a stock warning that a fleet
+// restart produces by itself must not turn a good rollout red
+// (plans/smoke-alert-scope.md).
+func TestSmokeAlertScope(t *testing.T) {
+	cases := []struct {
+		name string
+		rows [][4]string
+		want []string
+	}{
+		{"stock warning firing", [][4]string{{"kubernetes-system-apiserver", "KubeClientErrors", "warning", "firing"}}, nil},
+		{"vrsky alert firing", [][4]string{{"vrsky-platform", "ConnectorUnavailable", "warning", "firing"}}, []string{"ConnectorUnavailable"}},
+		{"vrsky alert only pending", [][4]string{{"vrsky-pipelines", "PipelineDown", "critical", "pending"}}, nil},
+		{"stock critical firing", [][4]string{{"kubernetes-system-apiserver", "KubeAPIDown", "critical", "firing"}}, []string{"KubeAPIDown"}},
+		{"vrsky info firing", [][4]string{{"vrsky-pipelines", "ConnectionQuiet", "info", "firing"}}, nil},
+		{"watchdog and inhibitor", [][4]string{{"general.rules", "Watchdog", "none", "firing"}, {"general.rules", "InfoInhibitor", "none", "firing"}}, nil},
+		{"two that count, sorted", [][4]string{{"vrsky-platform", "MgmtAPIErrorRate", "warning", "firing"}, {"node-exporter", "NodeFilesystemAlmostOutOfSpace", "critical", "firing"}, {"kubernetes-apps", "KubeDeploymentReplicasMismatch", "warning", "firing"}}, []string{"MgmtAPIErrorRate", "NodeFilesystemAlmostOutOfSpace"}},
+		{"nothing active", [][4]string{{"vrsky-platform", "ConnectorUnavailable", "warning", ""}}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := smokeAlerts(t, rulesDoc(tc.rows...))
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("smoke-alerts.sh\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// smoke-prod.sh decides on alerts through smoke-alerts.sh and the rules API,
+// never through an inline filter of /api/v1/alerts again.
+func TestSmokeProdUsesAlertScope(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "infrastructure", "azure", "smoke-prod.sh")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	if !strings.Contains(s, "api/v1/rules") || !strings.Contains(s, "smoke-alerts.sh") {
+		t.Error("smoke-prod.sh must pipe /api/v1/rules into smoke-alerts.sh")
+	}
+	if strings.Contains(s, "api/v1/alerts") || strings.Contains(s, `select(.state=="firing"`) {
+		t.Error("smoke-prod.sh filters alerts inline; the scope lives in smoke-alerts.sh so TestSmokeAlertScope covers it")
+	}
+}
