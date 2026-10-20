@@ -1006,10 +1006,11 @@ type workflowFile struct {
 			Group string `yaml:"group"`
 		} `yaml:"concurrency"`
 		Steps []struct {
-			ID   string `yaml:"id"`
-			Name string `yaml:"name"`
-			If   string `yaml:"if"`
-			Run  string `yaml:"run"`
+			ID              string `yaml:"id"`
+			Name            string `yaml:"name"`
+			If              string `yaml:"if"`
+			Run             string `yaml:"run"`
+			ContinueOnError bool   `yaml:"continue-on-error"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
@@ -1605,6 +1606,32 @@ func TestDriftCheckWorkflow(t *testing.T) {
 			t.Errorf("drift check never uses %s", needle)
 		}
 	}
+	// The heartbeat (plans/monitoring-heartbeat.md): an in-cluster step
+	// before the comparison that may fail without stopping it, and a
+	// verdict step at the end that turns its failure into a red run.
+	alive, compare, verdict := -1, -1, -1
+	for i, st := range job.Steps {
+		switch {
+		case strings.Contains(st.Run, "bash infrastructure/azure/monitoring-alive.sh"):
+			alive = i
+			if !strings.Contains(st.Run, "in-cluster.sh") || st.ID != "alive" || !st.ContinueOnError {
+				t.Errorf("the monitoring-alive step must run in-cluster with id alive and continue-on-error: true (got id %q, continue-on-error %v)", st.ID, st.ContinueOnError)
+			}
+		case strings.Contains(st.Run, "drift.sh"):
+			compare = i
+		case strings.Contains(st.If, "steps.alive.outcome == 'failure'") && strings.Contains(st.Run, "exit 1"):
+			verdict = i
+		}
+	}
+	if alive < 0 {
+		t.Error("no step runs monitoring-alive.sh; a dead Prometheus would look like all is well")
+	}
+	if verdict < 0 {
+		t.Error("no verdict step fails the run when steps.alive.outcome == 'failure'")
+	}
+	if alive >= 0 && compare >= 0 && !(alive < compare && compare < verdict) {
+		t.Errorf("step order must be heartbeat (%d) < comparison (%d) < verdict (%d)", alive, compare, verdict)
+	}
 	for _, forbidden := range []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "install-monitoring.sh", "kubectl set", "kubectl rollout", "kubectl apply", "az acr build"} {
 		if strings.Contains(all, forbidden) {
 			t.Errorf("drift check runs %q; it must only compare and dispatch Catch up", forbidden)
@@ -1696,5 +1723,66 @@ func TestSmokeProdUsesAlertScope(t *testing.T) {
 	}
 	if strings.Contains(s, "api/v1/alerts") || strings.Contains(s, `select(.state=="firing"`) {
 		t.Error("smoke-prod.sh filters alerts inline; the scope lives in smoke-alerts.sh so TestSmokeAlertScope covers it")
+	}
+}
+
+// monitoringAlive runs infrastructure/azure/monitoring-alive.sh against a
+// stub kubectl that answers `get --raw <path>` from the given bodies (an
+// empty body means the call fails, as it does when the service is down).
+func monitoringAlive(t *testing.T, prometheusBody, alertmanagerBody string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	stub := "#!/usr/bin/env bash\ncase \"$3\" in\n" +
+		"  */prometheus-prometheus:*) [ -s \"$PROM\" ] && cat \"$PROM\" || exit 1 ;;\n" +
+		"  */prometheus-alertmanager:*) [ -s \"$AM\" ] && cat \"$AM\" || exit 1 ;;\n" +
+		"  *) exit 2 ;;\nesac\n"
+	kubectl := filepath.Join(dir, "kubectl")
+	if err := os.WriteFile(kubectl, []byte(stub), 0o700); err != nil { //nolint:gosec // an executable stub in a temp dir
+		t.Fatal(err)
+	}
+	prom := filepath.Join(dir, "prom.json")
+	am := filepath.Join(dir, "am.json")
+	if err := os.WriteFile(prom, []byte(prometheusBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(am, []byte(alertmanagerBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "monitoring-alive.sh"))
+	cmd.Env = append(os.Environ(), "KUBECTL="+kubectl, "PROM="+prom, "AM="+am)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// The heartbeat is alive only when Prometheus reports the Watchdog firing
+// AND Alertmanager holds it; each missing side is named, and an unreachable
+// service counts as missing (plans/monitoring-heartbeat.md).
+func TestMonitoringAliveScript(t *testing.T) {
+	const promFiring = `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"alertname":"Watchdog","alertstate":"firing"},"value":[1,"1"]}]}}`
+	const promEmpty = `{"status":"success","data":{"resultType":"vector","result":[]}}`
+	const amHolds = `[{"labels":{"alertname":"Watchdog"},"status":{"state":"active"}}]`
+	const amEmpty = `[]`
+	cases := []struct {
+		name     string
+		prom, am string
+		alive    bool
+		mention  string
+	}{
+		{"both present", promFiring, amHolds, true, "monitoring alive"},
+		{"watchdog not firing in prometheus", promEmpty, amHolds, false, "prometheus: no firing Watchdog"},
+		{"alertmanager without it", promFiring, amEmpty, false, "alertmanager: no Watchdog"},
+		{"prometheus unreachable", "", amHolds, false, "prometheus: no firing Watchdog"},
+		{"alertmanager unreachable", promFiring, "", false, "alertmanager: no Watchdog"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := monitoringAlive(t, tc.prom, tc.am)
+			if (err == nil) != tc.alive {
+				t.Errorf("alive=%v, want %v\n%s", err == nil, tc.alive, out)
+			}
+			if !strings.Contains(out, tc.mention) {
+				t.Errorf("output lacks %q:\n%s", tc.mention, out)
+			}
+		})
 	}
 }

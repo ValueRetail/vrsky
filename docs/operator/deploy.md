@@ -61,9 +61,11 @@ skip that), applies the monitoring values and rules, and runs the smoke
 check. Nothing is rebuilt. It refuses to run against a stopped cluster,
 and it queues behind a deploy rather than interleaving with one.
 
-You do not have to remember the click. **Drift check** (`drift-check.yml`)
-runs every half hour: while the cluster is running and no build is in
-progress on `main`, it reads the digest every container actually runs
+You do not have to remember the click. **Production check**
+(`drift-check.yml`) runs every half hour: while the cluster is running and
+no build is in progress on `main`, it first checks that the monitoring is
+alive (see [Monitoring](monitoring.md)), then reads the digest every
+container actually runs
 (`running-digests.sh`, in-cluster), compares it with the registry's
 `:latest` (`drift.sh`), and when anything differs dispatches Catch up
 itself, with the fleet restart only when a connector drifted. The run's
