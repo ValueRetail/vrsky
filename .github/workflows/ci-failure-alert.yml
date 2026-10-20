@@ -28,6 +28,7 @@ on:
       - "DR Restore Drill"
       - "docs"
       - "Vulnerability scan"
+      - "Drift check"
     types: [completed]
 
 permissions:
