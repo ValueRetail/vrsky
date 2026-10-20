@@ -125,6 +125,18 @@ export VRSKY_TEST_POSTGRES_URL="postgres://postgres:<password>@localhost:5434/po
 cd src && make test-db
 ```
 
+#### Tests that reach the public internet
+
+Three tests in `pkg/io` call the live https://api.met.no API. They skip
+unless `VRSKY_TEST_LIVE_APIS` is set; CI never sets it, so a public
+service's slowness cannot fail a merge or block a deploy.
+`TestLiveAPITestsAreOptIn` keeps every live test behind that skip and the
+host out of every other test file.
+
+```bash
+cd src && VRSKY_TEST_LIVE_APIS=1 go test ./pkg/io/ -run TestRealAPI -v
+```
+
 ### Lint and Format Commands
 
 ```bash
