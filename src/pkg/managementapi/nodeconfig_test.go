@@ -1845,10 +1845,13 @@ func TestBudgetVerdict(t *testing.T) {
 	}
 }
 
-// Park stops the cluster at 16:00 in Oslo every day and does nothing else:
-// both UTC crons, the Oslo-hour check in front of the stop, the production
-// environment and group so it queues behind a deploy, and no deploy
-// script, no kubectl, no start (plans/cost-cap.md).
+// Park stops a Running cluster whenever one of its runs lands outside Oslo
+// working hours (16:00 to 07:00) and does nothing else. GitHub fires
+// schedules hours late on this repository (2026-10-20: the 14:00 UTC cron
+// ran at 18:10), so the guard wants a half-hourly cron across the whole
+// window and a window check, not an "is it 16:00" check; the production
+// environment and group so it queues behind a deploy; no deploy script, no
+// kubectl, no start (plans/cost-cap.md).
 func TestParkWorkflow(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "park.yml")) //nolint:gosec // fixed path inside the repo
 	if err != nil {
@@ -1869,9 +1872,9 @@ func TestParkWorkflow(t *testing.T) {
 	for _, s := range top.On.Schedule {
 		crons[s.Cron] = true
 	}
-	for _, want := range []string{"0 14 * * *", "0 15 * * *"} {
+	for _, want := range []string{"*/30 14-23 * * *", "*/30 0-5 * * *"} {
 		if !crons[want] {
-			t.Errorf("park.yml lacks the cron %q; 16:00 Oslo is 14:00 UTC in winter and 15:00 UTC in summer", want)
+			t.Errorf("park.yml lacks the cron %q; a single cron at 16:00 ran four hours late on 2026-10-20 and stopped nothing", want)
 		}
 	}
 	wf := parseWorkflow(t, "park.yml")
@@ -1888,8 +1891,8 @@ func TestParkWorkflow(t *testing.T) {
 		all += st.Run + "\n"
 		if st.ID == "clock" {
 			clock = i
-			if !strings.Contains(st.Run, "TZ=Europe/Oslo date +%H") || !strings.Contains(st.Run, `"$hour" = 16`) {
-				t.Errorf("the clock step must read the Oslo hour and compare it with 16: %q", strings.SplitN(st.Run, "\n", 2)[0])
+			if !strings.Contains(st.Run, "TZ=Europe/Oslo date +%H") || !strings.Contains(st.Run, `"$hour" -ge 16`) || !strings.Contains(st.Run, `"$hour" -lt 7`) {
+				t.Errorf("the clock step must read the Oslo hour and act on the whole 16:00-07:00 window, not one hour: %q", strings.SplitN(st.Run, "\n", 2)[0])
 			}
 		}
 		if strings.Contains(st.Run, "az aks stop") {
