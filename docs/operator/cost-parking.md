@@ -23,11 +23,16 @@ az aks stop -g vrsky-prod -n vrsky-prod
 
 Takes a few minutes. Every pod is evicted; nothing is deleted.
 
-**It happens by itself at 16:00 Oslo time, every day.** The *Park*
-workflow (`.github/workflows/park.yml`) runs on GitHub's schedule, queues
-behind any deploy or catch-up in progress, and stops a Running cluster;
-a stopped one is left alone. Still working at 16:00? Start it again. A
-stop from anywhere, any hour: Actions → **Park** → *Run workflow*.
+**It happens by itself outside working hours.** The *Park* workflow
+(`.github/workflows/park.yml`) is scheduled every half hour from 16:00 to
+07:00 Oslo time; each run that lands in that window queues behind any
+deploy or catch-up in progress and stops a Running cluster, a stopped one
+is left alone. GitHub runs schedules hours late on this repository (the
+first evening, a single 16:00 cron fired at 20:10 and stopped nothing),
+which is why it is a window with many crons and not one o'clock: expect
+the stop somewhere between 16:00 and 20:00. Still working in the evening?
+Start it again; the next run stops it again. A stop from anywhere, any
+hour: Actions → **Park** → *Run workflow*.
 
 ## Start
 

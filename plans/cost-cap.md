@@ -89,6 +89,13 @@ decision; it is not in this plan.
   created with `az rest`; `az consumption budget create` has no
   notifications.
 
+- **GitHub's scheduler runs this repository's crons hours late** (the
+  first evening: 14:00 and 15:00 UTC fired at 18:10 and 18:53; the
+  Production check runs every four to five hours, not every thirty
+  minutes). An "is it 16:00" check therefore never matched and the cluster
+  ran all night. Park now stops on any run landing between 16:00 and 07:00
+  Oslo, with a cron every half hour across the window.
+
 ## Goal
 
 The cluster is never left running overnight by mistake, the monthly cost
