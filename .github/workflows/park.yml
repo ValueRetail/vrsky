@@ -1,24 +1,27 @@
-# Park: stop the cluster at 16:00 in Oslo, every day.
+# Park: the cluster does not run outside working hours.
 #
-# The two nodes cost about 214 NOK a day while they run and nothing while
-# they are stopped (plans/cost-cap.md). A start is by hand (az aks start)
-# and the Production check catches production up within the half hour; a
-# stop that nobody remembered is what this is for. GitHub's cron is UTC, so
-# both 14:00 and 15:00 UTC are scheduled and the job checks the Oslo clock:
-# exactly one of them is 16:00. A dispatch stops the cluster whatever the
-# hour (a stop from the phone). It queues behind a deploy or a catch-up on
-# the production group and never interrupts one.
+# The node costs about 107 NOK a day while it runs and nothing while it is
+# stopped (plans/cost-cap.md). A start is by hand (az aks start) and the
+# Production check catches production up; a stop that nobody remembered is
+# what this is for. GitHub runs schedules late, on this repository by hours
+# (2026-10-20: the 14:00 and 15:00 UTC crons ran at 18:10 and 18:53), so
+# this is not "at 16:00" but "any run that lands between 16:00 and 07:00
+# Europe/Oslo stops a Running cluster", with a cron every half hour through
+# that window so that enough of them land. A start in the evening is
+# stopped again by the next run; dispatch stops it at any hour (a stop from
+# the phone). It queues behind a deploy or a catch-up on the production
+# group and never interrupts one.
 name: Park
 
 on:
   schedule:
-    - cron: "0 14 * * *" # 16:00 Europe/Oslo in winter (CET)
-    - cron: "0 15 * * *" # 16:00 Europe/Oslo in summer (CEST)
+    - cron: "*/30 14-23 * * *" # 16:00 Oslo (14:00 UTC in summer, 15:00 in winter) to midnight UTC
+    - cron: "*/30 0-5 * * *" # midnight UTC to 07:00 Oslo
   workflow_dispatch:
 
 jobs:
   park:
-    name: Stop the cluster at 16:00 Oslo
+    name: Stop the cluster outside working hours
     runs-on: ubuntu-latest
     environment: production
     concurrency:
@@ -35,16 +38,17 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Is it 16:00 in Oslo?
+      - name: Outside working hours in Oslo?
         id: clock
         run: |
           hour=$(TZ=Europe/Oslo date +%H)
+          hour=$((10#$hour))
           echo "Oslo hour: $hour, event: ${{ github.event_name }}"
-          if [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$hour" = 16 ]; then
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || [ "$hour" -ge 16 ] || [ "$hour" -lt 7 ]; then
             echo "go=true" >> "$GITHUB_OUTPUT"
           else
             echo "go=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Not 16:00 in Oslo::The other schedule is the right one today; nothing to do."
+            echo "::notice title=Working hours in Oslo::Between 07:00 and 16:00 the cluster may run; nothing to do."
           fi
       - name: Stop the cluster
         if: steps.clock.outputs.go == 'true'
