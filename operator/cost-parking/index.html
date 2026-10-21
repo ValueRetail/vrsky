@@ -2522,11 +2522,16 @@ cluster looks exactly like an outage from the outside.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>stop<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
 <p>Takes a few minutes. Every pod is evicted; nothing is deleted.</p>
-<p><strong>It happens by itself at 16:00 Oslo time, every day.</strong> The <em>Park</em>
-workflow (<code>.github/workflows/park.yml</code>) runs on GitHub's schedule, queues
-behind any deploy or catch-up in progress, and stops a Running cluster;
-a stopped one is left alone. Still working at 16:00? Start it again. A
-stop from anywhere, any hour: Actions → <strong>Park</strong> → <em>Run workflow</em>.</p>
+<p><strong>It happens by itself outside working hours.</strong> The <em>Park</em> workflow
+(<code>.github/workflows/park.yml</code>) is scheduled every half hour from 16:00 to
+07:00 Oslo time; each run that lands in that window queues behind any
+deploy or catch-up in progress and stops a Running cluster, a stopped one
+is left alone. GitHub runs schedules hours late on this repository (the
+first evening, a single 16:00 cron fired at 20:10 and stopped nothing),
+which is why it is a window with many crons and not one o'clock: expect
+the stop somewhere between 16:00 and 20:00. Still working in the evening?
+Start it again; the next run stops it again. A stop from anywhere, any
+hour: Actions → <strong>Park</strong> → <em>Run workflow</em>.</p>
 <h2 id="start">Start<a class="headerlink" href="#start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
