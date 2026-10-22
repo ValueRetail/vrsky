@@ -213,9 +213,9 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 		}
 
 		if err := p.processForTarget(connectionID, tc, env); err != nil {
-			if errors.Is(err, errBadPayload) {
-				// Malformed payload — drop (Permanent); retrying can't help.
-				p.logger.Error("dropping: payload is not valid JSON", "error", err, "envelope_id", env.ID)
+			if errors.Is(err, errBadPayload) || errors.Is(err, errBadTableName) {
+				// Malformed payload or table name — drop (Permanent); retrying can't help.
+				p.logger.Error("dropping message", "error", err, "envelope_id", env.ID)
 				return sdk.Permanent(err)
 			}
 			if transient == nil {
@@ -232,8 +232,13 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 // errBadPayload marks an envelope whose payload isn't JSON — a poison message.
 var errBadPayload = errors.New("payload is not valid JSON")
 
+// errBadTableName marks a destination whose configured table name is neither
+// `table` nor `schema.table` — retrying can't fix a config typo.
+var errBadTableName = errors.New("table name must be `table` or `schema.table`")
+
 // processForTarget writes one envelope to one target DB. It returns
-// errBadPayload for unparseable payloads (Permanent) and a transient error if
+// errBadPayload for unparseable payloads and errBadTableName for a malformed
+// table name (both Permanent), and a transient error if
 // table creation fails (Retriable); per-row insert failures are logged and the
 // batch continues (best-effort, as before).
 func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection, env *envelope.Envelope) error {
@@ -262,6 +267,11 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 	}
 
 	table := tc.Config.Table
+	schema, tableName, err := parseTableName(table)
+	if err != nil {
+		p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: err.Error(), Time: now(), Table: table})
+		return err
+	}
 	mode := tc.Config.Mode
 	if mode == "" {
 		mode = "create_insert"
@@ -279,7 +289,7 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 	p.emitEvent(connectionID, DBProdEvent{Type: "info", Message: fmt.Sprintf("Writing %d rows to %s", len(rows), table), Time: now(), Payload: payloadPreview, Table: table, Columns: columns})
 
 	if mode == "create_insert" {
-		if err := p.ensureTable(tc, table, rows[0]); err != nil {
+		if err := p.ensureTable(tc, schema, tableName, rows[0]); err != nil {
 			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Failed to create table: " + err.Error(), Time: now()})
 			return fmt.Errorf("ensure table %q: %w", table, err)
 		}
@@ -287,7 +297,7 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 
 	inserted := 0
 	for _, row := range rows {
-		if err := p.insertRow(tc, table, row); err != nil {
+		if err := p.insertRow(tc, schema, tableName, row); err != nil {
 			p.logger.Error("Failed to insert row", "error", err, "table", table)
 			p.emitEvent(connectionID, DBProdEvent{Type: "error", Message: "Insert failed: " + err.Error(), Time: now()})
 			continue
@@ -303,9 +313,16 @@ func (p *dbProducer) processForTarget(connectionID string, tc *TargetConnection,
 	return nil
 }
 
-func (p *dbProducer) ensureTable(tc *TargetConnection, table string, sample map[string]interface{}) error {
+// ensureTable creates schema.table (or a bare table) from the sample row's keys
+// unless it already exists. A bare name is looked up in public, as before.
+func (p *dbProducer) ensureTable(tc *TargetConnection, schema, table string, sample map[string]interface{}) error {
+	lookupSchema := schema
+	if lookupSchema == "" {
+		lookupSchema = "public"
+	}
 	var exists bool
-	err := tc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)", table).Scan(&exists)
+	err := tc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name=$2)",
+		lookupSchema, table).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -325,16 +342,16 @@ func (p *dbProducer) ensureTable(tc *TargetConnection, table string, sample map[
 		cols = append(cols, fmt.Sprintf("%s %s", quoteIdent(key), colType))
 	}
 
-	query := fmt.Sprintf("CREATE TABLE %s (%s)", quoteIdent(table), strings.Join(cols, ", "))
+	query := fmt.Sprintf("CREATE TABLE %s (%s)", qualifiedTable(schema, table), strings.Join(cols, ", "))
 	if _, err = tc.DB.Exec(query); err != nil {
 		return err
 	}
 
-	p.logger.Info("Created table", "table", table, "columns", len(cols))
+	p.logger.Info("Created table", "schema", schema, "table", table, "columns", len(cols))
 	return nil
 }
 
-func (p *dbProducer) insertRow(tc *TargetConnection, table string, row map[string]interface{}) error {
+func (p *dbProducer) insertRow(tc *TargetConnection, schema, table string, row map[string]interface{}) error {
 	columns := make([]string, 0, len(row))
 	placeholders := make([]string, 0, len(row))
 	values := make([]interface{}, 0, len(row))
@@ -354,7 +371,7 @@ func (p *dbProducer) insertRow(tc *TargetConnection, table string, row map[strin
 	}
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		quoteIdent(table),
+		qualifiedTable(schema, table),
 		strings.Join(columns, ", "),
 		strings.Join(placeholders, ", "))
 
@@ -364,6 +381,35 @@ func (p *dbProducer) insertRow(tc *TargetConnection, table string, row map[strin
 
 func quoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// parseTableName splits a configured table name into schema and table. The
+// name is taken literally: a dot always separates schema from table, so
+// `orders` gives ("", "orders") and `public.orders` gives ("public", "orders").
+// More than one dot, or an empty part, is errBadTableName.
+func parseTableName(s string) (schema, table string, err error) {
+	parts := strings.Split(s, ".")
+	for _, part := range parts {
+		if part == "" {
+			return "", "", fmt.Errorf("%w (got %q)", errBadTableName, s)
+		}
+	}
+	switch len(parts) {
+	case 1:
+		return "", parts[0], nil
+	case 2:
+		return parts[0], parts[1], nil
+	default:
+		return "", "", fmt.Errorf("%w (got %q)", errBadTableName, s)
+	}
+}
+
+// qualifiedTable quotes table, prefixed by the quoted schema when there is one.
+func qualifiedTable(schema, table string) string {
+	if schema == "" {
+		return quoteIdent(table)
+	}
+	return quoteIdent(schema) + "." + quoteIdent(table)
 }
 
 // getTargetConnections returns all DB-producer target connections for a

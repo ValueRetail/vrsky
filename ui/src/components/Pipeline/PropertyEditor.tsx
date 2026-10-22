@@ -1628,6 +1628,11 @@ function DatabaseProducerConfig({
         value={table}
         onChange={(v) => updateDB({ table: v })}
       />
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+        <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">table</code> or{' '}
+        <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">schema.table</code>; a bare name goes to{' '}
+        <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">public</code>.
+      </p>
 
       <StyledSelect
         label="Write Mode"
