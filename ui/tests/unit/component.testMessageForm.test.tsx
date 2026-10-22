@@ -2,8 +2,8 @@
  * TestMessageForm Component Tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { TestMessageForm } from '@/components/TestData/TestMessageForm'
 import * as testDataService from '@/services/testDataService'
 import { useUIStore } from '@/store/uiStore'
@@ -29,6 +29,31 @@ describe('TestMessageForm Component', () => {
       addNotification: mockAddNotification,
     } as unknown as ReturnType<typeof useUIStore>)
   })
+
+  // A test that ends while a send is still in flight lets the component's
+  // `finally { setLoading(false) }` run after the test, and on a slow CI runner
+  // after the jsdom environment is gone: "ReferenceError: window is not
+  // defined", an unhandled rejection that fails the whole Test UI job (main,
+  // 2026-10-22). This runs before the shared cleanup (hooks unwind in reverse
+  // order) and fails any such test deterministically, whatever the timing.
+  afterEach(() => {
+    try {
+      expect(
+        screen.queryByText('Sending...'),
+        'the test ended with a send still in flight; await sendSettled() before it returns'
+      ).toBeNull()
+    } finally {
+      // A failing after-hook skips the shared cleanup; unmount here too so one
+      // offender does not leak its form into every test after it.
+      cleanup()
+    }
+  })
+
+  // Wait for the send a test started to finish: the button leaves "Sending...".
+  const sendSettled = () =>
+    waitFor(() => {
+      expect(screen.queryByText('Sending...')).toBeNull()
+    })
 
   describe('Rendering', () => {
     it('should render form title', () => {
@@ -90,6 +115,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(sendButton).toBeDisabled()
       })
+
+      await sendSettled()
     })
 
     it('should disable textarea when loading', async () => {
@@ -107,6 +134,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(textarea).toBeDisabled()
       })
+
+      await sendSettled()
     })
   })
 
@@ -145,6 +174,8 @@ describe('TestMessageForm Component', () => {
           '{"test": "message"}'
         )
       })
+
+      await sendSettled()
     })
 
     it('should show success notification after sending', async () => {
@@ -164,6 +195,8 @@ describe('TestMessageForm Component', () => {
           })
         )
       })
+
+      await sendSettled()
     })
 
     it('should reset message after successful send', async () => {
@@ -180,6 +213,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(textarea.value).toBe('{"test": "message"}')
       })
+
+      await sendSettled()
     })
 
     it('should call onMessageSent callback after successful send', async () => {
@@ -194,6 +229,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(mockOnMessageSent).toHaveBeenCalled()
       })
+
+      await sendSettled()
     })
 
     it('should show error notification on failure', async () => {
@@ -213,6 +250,8 @@ describe('TestMessageForm Component', () => {
           })
         )
       })
+
+      await sendSettled()
     })
 
     it('should not call onMessageSent on error', async () => {
@@ -225,6 +264,7 @@ describe('TestMessageForm Component', () => {
 
       const sendButton = screen.getByRole('button', { name: /Send Message/ })
       fireEvent.click(sendButton)
+      await sendSettled()
 
       await waitFor(() => {
         expect(mockOnMessageSent).not.toHaveBeenCalled()
@@ -262,6 +302,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(resetButton).toBeDisabled()
       })
+
+      await sendSettled()
     })
   })
 
@@ -304,6 +346,8 @@ describe('TestMessageForm Component', () => {
           })
         )
       })
+
+      await sendSettled()
     })
 
     it('should show default error message for non-API errors', async () => {
@@ -324,6 +368,8 @@ describe('TestMessageForm Component', () => {
           })
         )
       })
+
+      await sendSettled()
     })
   })
 
@@ -341,6 +387,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(screen.getByText('Sending...')).toBeInTheDocument()
       })
+
+      await sendSettled()
     })
 
     it('should show Stopping... text while stopping', async () => {
@@ -356,6 +404,8 @@ describe('TestMessageForm Component', () => {
       await waitFor(() => {
         expect(sendButton).toHaveTextContent('Sending...')
       })
+
+      await sendSettled()
     })
   })
 })

@@ -150,9 +150,17 @@ groups:
       # schedule, long before any CPU is actually busy. Requests are what
       # the scheduler reserves; on 2026-10-14 node 0 sat at 90% reserved and
       # 2% used (plans/cpu-request-headroom.md). Right-size before scaling.
+      # Only pods that hold their reservation count: kube-state-metrics keeps
+      # the requests of Succeeded and Failed pods too, and every deploy step
+      # leaves a finished `az aks command invoke` pod (200m) in aks-command.
+      # On one node those pushed the sum to 106% while the scheduler saw 72%
+      # (2026-10-22), and the smoke check failed three deploys on it.
       - alert: NodeCPURequestsHigh
         expr: |
-          sum by (node) (kube_pod_container_resource_requests{resource="cpu", unit="core"})
+          sum by (node) (
+            kube_pod_container_resource_requests{resource="cpu", unit="core"}
+              and on (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+          )
             / on (node) kube_node_status_allocatable{resource="cpu", unit="core"} > 0.85
         for: 1h
         labels:

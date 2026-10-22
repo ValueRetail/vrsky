@@ -254,7 +254,9 @@ tests:
               description: "Deployment vrsky-business-central-consumer in vrsky-platform has had 0 available replicas for 10 minutes. Every pipeline using that connector is stalled."
 
   # 10. NodeCPURequestsHigh — a node at 90% reserved for an hour fires; one
-  #     at 70% does not; the 90% node is still pending at 30 minutes.
+  #     at 70% does not; the 90% node is still pending at 30 minutes. n2 is
+  #     the 2026-10-22 case: 50% held by a running pod plus 50% in finished
+  #     pods (Succeeded, Failed) that hold nothing — it must not fire.
   - interval: 1m
     input_series:
       - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n0",namespace="a",pod="p1",container="c"}'
@@ -266,6 +268,28 @@ tests:
       - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n1",namespace="a",pod="p3",container="c"}'
         values: '2.8x90'
       - series: 'kube_node_status_allocatable{resource="cpu",unit="core",node="n1"}'
+        values: '4x90'
+      - series: 'kube_pod_status_phase{namespace="a",pod="p1",phase="Running"}'
+        values: '1x90'
+      - series: 'kube_pod_status_phase{namespace="b",pod="p2",phase="Pending"}'
+        values: '1x90'
+      - series: 'kube_pod_status_phase{namespace="a",pod="p3",phase="Running"}'
+        values: '1x90'
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n2",namespace="a",pod="p4",container="c"}'
+        values: '2x90'
+      - series: 'kube_pod_status_phase{namespace="a",pod="p4",phase="Running"}'
+        values: '1x90'
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n2",namespace="aks-command",pod="cmd1",container="c"}'
+        values: '1.2x90'
+      - series: 'kube_pod_status_phase{namespace="aks-command",pod="cmd1",phase="Succeeded"}'
+        values: '1x90'
+      - series: 'kube_pod_status_phase{namespace="aks-command",pod="cmd1",phase="Running"}'
+        values: '0x90'
+      - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n2",namespace="kube-system",pod="eraser1",container="c"}'
+        values: '0.8x90'
+      - series: 'kube_pod_status_phase{namespace="kube-system",pod="eraser1",phase="Failed"}'
+        values: '1x90'
+      - series: 'kube_node_status_allocatable{resource="cpu",unit="core",node="n2"}'
         values: '4x90'
     alert_rule_test:
       - eval_time: 30m
