@@ -245,6 +245,10 @@ export default function OnboardingWizard() {
           <div style={card}>
             <label style={label} htmlFor="ob-pipeline-name">Pipeline name</label>
             <input id="ob-pipeline-name" style={input} value={name} onChange={(e) => setName(e.target.value)} />
+            <div style={help}>
+              This creates a new pipeline. To change one you already have, open it from the dashboard and edit it in
+              the builder.
+            </div>
           </div>
 
           {template.fields.map((f) => {

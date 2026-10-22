@@ -27,6 +27,9 @@ export interface Canvas {
   nodes: Node[]
   edges: Edge[]
   deployedConnectionId?: string
+  /** The name the server has for deployedConnectionId, when known; a deploy
+   *  compares the tab name with it to tell a rename (deployIdentity). */
+  deployedName?: string
   createdAt: number
   updatedAt: number
 }

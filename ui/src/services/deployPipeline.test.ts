@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { deployPipeline, create, ConnectionGone } from './deployPipeline'
+import { deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION } from './deployPipeline'
+import builderSource from '../pages/PipelineBuilder.tsx?raw'
 
 const post = vi.fn()
 const put = vi.fn()
@@ -61,5 +62,54 @@ describe('deployPipeline', () => {
   it('create insists on an id coming back', async () => {
     post.mockResolvedValue({ data: {} })
     await expect(create(client, {})).rejects.toThrow('No connection ID')
+  })
+})
+
+// plans/builder-deploy-names.md: every deploy used to rename the pipeline to
+// `Pipeline <time>` and reset its description, the update included.
+describe('deployIdentity', () => {
+  const now = new Date('2026-10-22T12:00:00Z')
+  const stamp = `Pipeline ${now.toLocaleTimeString()}`
+
+  it.each([
+    ['an update of an edited connection keeps the server name and description',
+      { name: 'Edit: BC → Bifrost', deployedConnectionId: 'c1', deployedName: 'BC → Bifrost' }, {}],
+    ['an update after renaming the tab sends the new name, still no description',
+      { name: 'Edit: Bifrost items', deployedConnectionId: 'c1', deployedName: 'BC → Bifrost' }, { name: 'Bifrost items' }],
+    ['an update from an untitled canvas keeps the server name',
+      { name: 'Tenant 2', deployedConnectionId: 'c1', deployedName: 'Pipeline 2:26:01 PM' }, {}],
+    ['an update whose server name is unknown sends a titled tab name',
+      { name: 'Webhook in', deployedConnectionId: 'c1' }, { name: 'Webhook in' }],
+    ['a create from an edit tab drops the "Edit: " prefix',
+      { name: 'Edit: CSV → Database' }, { name: 'CSV → Database', description: NEW_PIPELINE_DESCRIPTION }],
+    ['a create from a named tab uses the tab name',
+      { name: 'Orders to ERP' }, { name: 'Orders to ERP', description: NEW_PIPELINE_DESCRIPTION }],
+    ['a create from an untitled canvas falls back to Pipeline <time>',
+      { name: 'Tenant 1' }, { name: stamp, description: NEW_PIPELINE_DESCRIPTION }],
+    ['a create from an empty name falls back too',
+      { name: '   ' }, { name: stamp, description: NEW_PIPELINE_DESCRIPTION }],
+  ])('%s', (_, canvas, want) => {
+    expect(deployIdentity(canvas, now)).toEqual(want)
+  })
+
+  it('an update never carries a description', () => {
+    for (const name of ['Edit: x', 'y', 'Tenant 3', '']) {
+      expect(deployIdentity({ name, deployedConnectionId: 'c1', deployedName: 'old' }, now)).not.toHaveProperty('description')
+    }
+  })
+})
+
+describe('the builder names its deploy through deployIdentity', () => {
+  // The page is a large canvas component; this pins the one wiring that
+  // matters here: the payload's name comes from deployIdentity and nowhere
+  // else, so the old `Pipeline <time>` literal cannot come back on updates.
+  it('buildConnectionPayload spreads deployIdentity and builds no name itself', () => {
+    const src = builderSource
+    const start = src.indexOf('const buildConnectionPayload')
+    const body = src.slice(start, src.indexOf('\n  }\n', start))
+    expect(start, 'buildConnectionPayload not found').toBeGreaterThan(0)
+    expect(body).toContain('...deployIdentity(')
+    expect(body).not.toMatch(/name:\s*`Pipeline/)
+    expect(body).not.toMatch(/description:\s*'/)
   })
 })

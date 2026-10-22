@@ -12,7 +12,7 @@ import { materializeSecrets } from '../utils/secrets'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient, { getActiveTenantId } from '../services/api'
-import { deployPipeline as deployPipelineSequence, ConnectionGone } from '../services/deployPipeline'
+import { deployPipeline as deployPipelineSequence, ConnectionGone, deployIdentity } from '../services/deployPipeline'
 import * as authService from '../services/authService'
 import { getSessionToken } from '../services/authService'
 import { reportUnauthorized } from '@/services/sessionExpiry'
@@ -244,7 +244,7 @@ export default function PipelineBuilder() {
         const conn = await connectionService.get(editConnectionId)
         if (cancelled) return
         const { nodes: loadedNodes, edges: loadedEdges } = connectionToCanvas(conn)
-        importCanvas(`Edit: ${conn.name || editConnectionId.slice(0, 8)}`, loadedNodes, loadedEdges, editConnectionId)
+        importCanvas(`Edit: ${conn.name || editConnectionId.slice(0, 8)}`, loadedNodes, loadedEdges, editConnectionId, conn.name)
       } catch {
         if (!cancelled) {
           showErrorNotification('Edit connection', 'Failed to load this connection onto the canvas.')
@@ -488,8 +488,9 @@ export default function PipelineBuilder() {
       }))
     )
     return {
-      name: `Pipeline ${new Date().toLocaleTimeString()}`,
-      description: 'Created via visual pipeline editor',
+      // An update keeps the server's name and description unless the tab was
+      // renamed (plans/builder-deploy-names.md).
+      ...deployIdentity(activeCanvas ?? { name: '' }, new Date()),
       nodes: builtNodes,
       edges: edges.map((edge, index) => ({
         id: edge.id || `edge-${index}`,
@@ -539,7 +540,9 @@ export default function PipelineBuilder() {
       try {
         const result = await deployPipelineSequence(apiClient, payload, prevConnectionId)
         connectionId = result.connectionId
-        if (result.created && currentCanvasId) setDeployedConnectionId(currentCanvasId, connectionId)
+        if (currentCanvasId && (result.created || payload.name !== undefined)) {
+          setDeployedConnectionId(currentCanvasId, connectionId, payload.name)
+        }
       } catch (err) {
         if (err instanceof ConnectionGone) {
           setIsLoading(false)
