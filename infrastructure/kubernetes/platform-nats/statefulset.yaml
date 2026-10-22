@@ -135,4 +135,8 @@ spec:
         storageClassName: local-path
         resources:
           requests:
-            storage: 100Gi
+            # JetStream holds VRSKY_DATA (capped at 512 MiB, DiscardOld) and the
+            # age-limited DLQ: tens of MB in practice. 100Gi was sized for KV
+            # buckets nothing used (plans/disk-costs.md). max_file in
+            # configmap.yaml must stay below this; a guard checks it.
+            storage: 8Gi

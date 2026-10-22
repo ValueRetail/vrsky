@@ -5,9 +5,9 @@ This directory contains Kubernetes manifests for deploying the **Platform NATS C
 ## Architecture
 
 - **Type**: StatefulSet (3 replicas)
-- **NATS Mode**: JetStream + NATS KV enabled
+- **NATS Mode**: JetStream (the streams are created by the services, `messaging.EnsureStreams`)
 - **Resources**: 4 CPU, 8GB RAM per pod (requests: 2 CPU, 4GB RAM)
-- **Storage**: 100GB per pod via Longhorn distributed storage
+- **Storage**: 8 GiB per pod (`max_file: 6G`); the streams hold tens of MB (plans/disk-costs.md)
 - **Replication**: R3 (3-way replication)
 
 ## Components
@@ -18,16 +18,11 @@ This directory contains Kubernetes manifests for deploying the **Platform NATS C
 2. **configmap.yaml** - NATS server configuration
 3. **statefulset.yaml** - 3-node NATS cluster with JetStream
 4. **service.yaml** - ClusterIP service + Headless service for StatefulSet
-5. **kv-setup-job.yaml** - Job to create NATS KV buckets after deployment
 
-### KV Buckets Created
-
-| Bucket Name         | TTL        | Max Size | Purpose                               |
-| ------------------- | ---------- | -------- | ------------------------------------- |
-| `message_state`     | 15 minutes | 10 GB    | Message processing status tracking    |
-| `integration_locks` | 5 minutes  | 1 GB     | Prevent duplicate message processing  |
-| `retry_queue`       | 1 hour     | 50 GB    | Messages awaiting retry after failure |
-| `dead_letter_queue` | 7 days     | 100 GB   | Failed messages after max retries     |
+There are no KV buckets. A setup job used to create four (`message_state`,
+`integration_locks`, `retry_queue`, `dead_letter_queue`); no service ever
+used them, and they reserved 61 GiB of every server's store, which is why
+the volumes were 100 GiB. Removed 2026-10 (plans/disk-costs.md).
 
 ## Deployment
 
@@ -41,12 +36,6 @@ kubectl apply -f statefulset.yaml
 
 # Wait for all pods to be ready
 kubectl wait --for=condition=ready pod -l app=nats-platform -n vrsky-platform --timeout=300s
-
-# Create KV buckets
-kubectl apply -f kv-setup-job.yaml
-
-# Check job logs
-kubectl logs -n vrsky-platform job/nats-kv-setup -f
 ```
 
 ### Manual Deploy (Step-by-Step)
@@ -75,12 +64,6 @@ kubectl get pods -n vrsky-platform -l app=nats-platform
 # nats-platform-0   1/1     Running   0          2m
 # nats-platform-1   1/1     Running   0          1m
 # nats-platform-2   1/1     Running   0          30s
-
-# 7. Create KV buckets
-kubectl apply -f kv-setup-job.yaml
-
-# 8. Verify KV buckets
-kubectl logs -n vrsky-platform job/nats-kv-setup
 ```
 
 ## Verification

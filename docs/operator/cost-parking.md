@@ -73,9 +73,19 @@ kubectl get pods -A --field-selector=status.phase!=Running
 
 Stopping deallocates the nodes. It does **not** stop billing for:
 
-- **Managed disks** — 2 × 150 GB OS disks, plus every persistent volume.
+- **Persistent volumes** — billed by provisioned size, used or not:
+  Postgres 50 GiB, Prometheus 20 GiB, NATS 3 × 8 GiB, MinIO 8 GiB,
+  Grafana 5 GiB, Alertmanager 2 GiB (`TestPersistentVolumesStayWithinBudget`
+  keeps the total under 120 GiB). Azure Files (`vrsky-files`) is billed by
+  what is stored. The node's OS disk is ephemeral, on the VM's local NVMe:
+  it does not exist, and costs nothing, while the cluster is parked.
 - **Public IP addresses** — two Standard IPs are allocated to the node
   resource group (`20.251.107.2` for ingress, and one more).
+- **The load balancer and the container registry.**
+
+Until October 2026 the NATS and MinIO disks were 100 GiB each and the OS
+disk a 128 GB Premium, about 790 NOK a month for a few MB of data
+(`plans/disk-costs.md`). The parked floor is now about 660 NOK a month.
 
 So parking cuts the bill substantially but does not take it to zero. Deleting
 the cluster would, and would also throw away the volumes and both IPs — which
@@ -83,9 +93,9 @@ means a new URL and re-issued certificates. Park it; don't delete it.
 
 ## The monthly budget
 
-October 2026 (`plans/cost-cap.md`): a parked cluster costs about 1 450 NOK
+October 2026 (`plans/cost-cap.md`): a parked cluster cost about 1 450 NOK
 a month in disks, load balancer, registry and addresses before a single
-node-hour; two E4ds v6 nodes add 214 NOK for every day they run, and the
+node-hour (about 660 after `plans/disk-costs.md`); two E4ds v6 nodes add 214 NOK for every day they run, and the
 Standard tier 21 NOK. The budget is **1 500 NOK a month** for the two
 VRSky resource groups, set in two places:
 

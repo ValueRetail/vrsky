@@ -107,13 +107,11 @@ deploy_platform_nats() {
 
 	print_success "Platform NATS is ready"
 
-	# Create KV buckets
-	echo "Creating NATS KV buckets..."
-	kubectl apply -f kv-setup-job.yaml
-	kubectl wait --for=condition=complete job/nats-kv-setup -n vrsky-platform --timeout=120s || {
-		print_warning "KV setup job did not complete. Check logs:"
-		kubectl logs -n vrsky-platform job/nats-kv-setup
-	}
+	# No KV buckets: the four this used to create (message_state,
+	# integration_locks, retry_queue, dead_letter_queue) were never read or
+	# written by any service and reserved 61 GiB per server
+	# (plans/disk-costs.md). The streams the platform uses are created by
+	# the services themselves (messaging.EnsureStreams).
 
 	print_success "Platform NATS deployment complete"
 }

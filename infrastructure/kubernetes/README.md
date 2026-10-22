@@ -323,7 +323,7 @@ kubectl exec -n vrsky-database postgresql-0 -- \
 kubectl cp vrsky-database/postgresql-0:/tmp/vrsky-backup.dump ./vrsky-backup.dump
 
 # MinIO (use mc client or Longhorn snapshot)
-kubectl annotate pvc minio-data -n vrsky-storage \
+kubectl annotate pvc minio-data-small -n vrsky-storage \
   snapshot.storage.kubernetes.io/snapshot-name=minio-backup-$(date +%Y%m%d)
 ```
 

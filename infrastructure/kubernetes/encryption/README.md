@@ -32,7 +32,7 @@ kubectl apply -f storage-classes/aws-ebs-kms.yaml
 # 2. Re-create the PVCs of the base manifests so they bind to the new
 #    StorageClass. (PVCs are immutable wrt storageClassName — this is a
 #    destructive step in a fresh cluster only.)
-kubectl -n vrsky-storage delete pvc minio-data
+kubectl -n vrsky-storage delete pvc minio-data-small
 kubectl apply -k ../  # re-apply base + the patch below
 
 # 3. Deploy KES + apply the MinIO encryption patch.

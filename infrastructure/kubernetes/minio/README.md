@@ -266,7 +266,7 @@ mc mirror /path/to/backup/ vrsky-minio/vrsky-objects
 
 ```bash
 # Create snapshot via Longhorn
-kubectl annotate pvc minio-data -n vrsky-storage \
+kubectl annotate pvc minio-data-small -n vrsky-storage \
   snapshot.storage.kubernetes.io/snapshot-name=minio-backup-$(date +%Y%m%d-%H%M%S)
 ```
 
@@ -330,7 +330,7 @@ kubectl run -it --rm dns-test --image=busybox --restart=Never -n vrsky-platform 
 
 ```bash
 # Edit PVC
-kubectl edit pvc minio-data -n vrsky-storage
+kubectl edit pvc minio-data-small -n vrsky-storage
 
 # Change storage: 100Gi to 200Gi
 # Longhorn will automatically expand the volume
