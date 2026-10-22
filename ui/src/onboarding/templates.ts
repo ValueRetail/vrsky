@@ -10,12 +10,21 @@
  * Templates use only connectors that exist today. "Webhook → Slack" is an HTTP
  * producer pointed at a Slack incoming-webhook URL (a Slack webhook is just an
  * HTTP POST), so it needs no dedicated Slack connector.
+ *
+ * Not in the catalog (plans/template-fields.md): Sitoo ⇄ Business Central. Both
+ * directions need a tested field mapping between the two systems' records; a
+ * template that wires them straight together deploys, runs, and has every
+ * message rejected by the target API.
  */
 
 export type TemplateNode = {
   id: string
-  type: 'consumer' | 'producer'
-  // Pre-filled connector config, e.g. { type: 'http', http: { url, method } }.
+  type: 'consumer' | 'converter' | 'producer'
+  // Pre-filled config. Sources and destinations carry a connector type and its
+  // settings block, e.g. { type: 'http', http: { url, method } }; a converter
+  // carries its settings flat, e.g. { input_format: 'csv' }. Every key must be
+  // one the connector reads: templates.test.ts checks them against
+  // CONNECTOR_KEYS (types/nodeConfig.ts).
   config: Record<string, unknown>
 }
 
@@ -33,6 +42,8 @@ export type TemplateField = {
   link?: { text: string; url: string }
   /** Render a masked SecretInput; key must be in SECRET_FIELDS. */
   secret?: boolean
+  /** Store the value as a number (ports, intervals): the connector reads an int. */
+  numeric?: boolean
   placeholder?: string
 }
 
@@ -141,36 +152,87 @@ export const TEMPLATES: PipelineTemplate[] = [
   {
     id: 'csv-to-database',
     name: 'CSV → Database',
-    summary: 'Load uploaded CSV rows into a database table.',
+    summary: 'Load the rows of CSV files dropped in a folder into a database table.',
     icon: '🗄️',
     sourceLabel: 'CSV file',
     destLabel: 'Database',
     nodes: [
-      { id: 'src', type: 'consumer', config: { type: 'file', file: { format: 'csv' } } },
+      // The file source publishes each file whole; the converter turns CSV
+      // (header row = column names) into JSON records, which the database
+      // destination inserts one row per record.
+      { id: 'src', type: 'consumer', config: { type: 'file', file: { path: '/data/input/csv' } } },
+      { id: 'conv', type: 'converter', config: { input_format: 'csv' } },
       {
         id: 'dst',
         type: 'producer',
-        config: { type: 'database', database: { connection_string: '', table: '', operation: 'insert' } },
+        config: {
+          type: 'database',
+          database: { host: '', port: 5432, user: '', password: '', database: '', table: '', mode: 'insert' },
+        },
       },
     ],
-    edges: [{ source: 'src', target: 'dst' }],
+    edges: [
+      { source: 'src', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
     fields: [
+      {
+        nodeId: 'src',
+        objectPath: 'file',
+        key: 'path',
+        label: 'Folder to watch',
+        help: 'Every .csv file that lands here is loaded. Its first row must name the columns.',
+        placeholder: '/data/input/csv',
+      },
       {
         nodeId: 'dst',
         objectPath: 'database',
-        key: 'connection_string',
-        label: 'Database connection string',
-        help: 'Postgres URL of the target database. Stored encrypted — never saved in plain text.',
+        key: 'host',
+        label: 'Database host',
+        help: 'Host name of the PostgreSQL server the rows go to.',
+        placeholder: 'db.example.com',
+      },
+      {
+        nodeId: 'dst',
+        objectPath: 'database',
+        key: 'port',
+        label: 'Port',
+        help: 'Usually 5432.',
+        numeric: true,
+        placeholder: '5432',
+      },
+      {
+        nodeId: 'dst',
+        objectPath: 'database',
+        key: 'database',
+        label: 'Database name',
+        help: 'The database that holds the target table.',
+        placeholder: 'analytics',
+      },
+      {
+        nodeId: 'dst',
+        objectPath: 'database',
+        key: 'user',
+        label: 'User',
+        help: 'A database user allowed to insert into the table.',
+        placeholder: 'vrsky_loader',
+      },
+      {
+        nodeId: 'dst',
+        objectPath: 'database',
+        key: 'password',
+        label: 'Password',
+        help: 'Stored encrypted — never saved in plain text.',
         secret: true,
-        placeholder: 'postgres://user:pass@host:5432/dbname',
+        placeholder: 'password',
       },
       {
         nodeId: 'dst',
         objectPath: 'database',
         key: 'table',
         label: 'Target table',
-        help: 'The table each CSV row is inserted into.',
-        placeholder: 'public.imported_rows',
+        help: 'The table each CSV row is inserted into, without a schema prefix (it is looked up in the public schema); its columns must match the CSV header.',
+        placeholder: 'imported_rows',
       },
     ],
   },
@@ -182,7 +244,18 @@ export const TEMPLATES: PipelineTemplate[] = [
     sourceLabel: 'REST API',
     destLabel: 'File',
     nodes: [
-      { id: 'src', type: 'consumer', config: { type: 'api', api: { url: '', method: 'GET', interval: '60s' } } },
+      {
+        id: 'src',
+        type: 'consumer',
+        config: {
+          type: 'api',
+          api: {
+            base_url: '',
+            endpoints: [{ path: '/', params: '', auth_type: 'none', auth_value: '' }],
+            poll_interval_seconds: 60,
+          },
+        },
+      },
       { id: 'dst', type: 'producer', config: { type: 'file', file: { path: '/data/output' } } },
     ],
     edges: [{ source: 'src', target: 'dst' }],
@@ -190,18 +263,27 @@ export const TEMPLATES: PipelineTemplate[] = [
       {
         nodeId: 'src',
         objectPath: 'api',
-        key: 'url',
-        label: 'API URL',
-        help: 'A REST endpoint returning JSON. It is polled on the interval below.',
-        placeholder: 'https://api.example.com/v1/items',
+        key: 'base_url',
+        label: 'API base URL',
+        help: 'The scheme and host of a REST API returning JSON, without the path.',
+        placeholder: 'https://api.example.com',
+      },
+      {
+        nodeId: 'src',
+        objectPath: 'api.endpoints.0',
+        key: 'path',
+        label: 'Endpoint path',
+        help: 'The path called on every poll, with any query string, e.g. /v1/items?limit=100.',
+        placeholder: '/v1/items',
       },
       {
         nodeId: 'src',
         objectPath: 'api',
-        key: 'interval',
-        label: 'Poll interval',
-        help: 'How often to call the API, e.g. 30s, 5m, 1h.',
-        placeholder: '60s',
+        key: 'poll_interval_seconds',
+        label: 'Poll interval (seconds)',
+        help: 'How often to call the API.',
+        numeric: true,
+        placeholder: '60',
       },
       {
         nodeId: 'dst',
@@ -211,71 +293,6 @@ export const TEMPLATES: PipelineTemplate[] = [
         help: 'Folder each response is written to.',
         placeholder: '/data/output',
       },
-    ],
-  },
-  // --- Retail: omnichannel sync (POS ⇄ ERP) --------------------------------
-  // The flagship demo scenarios — connect a store POS to the ERP so sales and
-  // stock stay in sync. Both directions of the same two systems.
-  {
-    id: 'sitoo-to-business-central',
-    name: 'POS sales → ERP (Sitoo → Business Central)',
-    summary: 'Sync completed POS sales from Sitoo into Dynamics 365 Business Central as sales orders.',
-    icon: '🛒',
-    sourceLabel: 'Sitoo (POS)',
-    destLabel: 'Business Central (ERP)',
-    nodes: [
-      {
-        id: 'src',
-        type: 'consumer',
-        config: { type: 'sitoo', sitoo: { resource: 'transactions', poll_interval_seconds: 300 } },
-      },
-      {
-        id: 'dst',
-        type: 'producer',
-        config: { type: 'business_central', business_central: { entity: 'salesOrders', method: 'POST', environment: 'Production' } },
-      },
-    ],
-    edges: [{ source: 'src', target: 'dst' }],
-    fields: [
-      { nodeId: 'src', objectPath: 'sitoo', key: 'account_id', label: 'Sitoo account ID', help: 'Your Sitoo account number.', placeholder: '12345' },
-      { nodeId: 'src', objectPath: 'sitoo', key: 'site_id', label: 'Sitoo site ID', help: 'The Sitoo site to read transactions from.', placeholder: '1' },
-      { nodeId: 'src', objectPath: 'sitoo', key: 'api_id', label: 'Sitoo API ID', help: 'From Sitoo Backoffice → Settings → Sitoo REST API.', placeholder: 'your-api-id' },
-      { nodeId: 'src', objectPath: 'sitoo', key: 'api_password', label: 'Sitoo API password', help: 'Stored encrypted — never saved in plain text.', secret: true, placeholder: 'API password' },
-      { nodeId: 'dst', objectPath: 'business_central', key: 'aad_tenant_id', label: 'Business Central Entra tenant ID', help: 'Your Microsoft Entra (Azure AD) tenant GUID or domain.', link: { text: 'BC: OAuth setup', url: 'https://learn.microsoft.com/dynamics365/business-central/dev-itpro/webservices/authenticate-web-services-using-oauth' }, placeholder: '<tenant-guid>' },
-      { nodeId: 'dst', objectPath: 'business_central', key: 'company_id', label: 'BC company ID (GUID)', help: 'The Business Central company the orders are created in.', placeholder: '<company-guid>' },
-      { nodeId: 'dst', objectPath: 'business_central', key: 'client_id', label: 'BC app (client) ID', help: 'The Entra app registration id with Business Central API.ReadWrite.All.', placeholder: '<app-id>' },
-      { nodeId: 'dst', objectPath: 'business_central', key: 'client_secret', label: 'BC client secret', help: 'The Entra app client secret. Stored encrypted.', secret: true, placeholder: 'client secret' },
-    ],
-  },
-  {
-    id: 'business-central-to-sitoo',
-    name: 'ERP inventory → POS (Business Central → Sitoo)',
-    summary: 'Push item stock levels from Dynamics 365 Business Central out to Sitoo POS to prevent overselling.',
-    icon: '📦',
-    sourceLabel: 'Business Central (ERP)',
-    destLabel: 'Sitoo (POS)',
-    nodes: [
-      {
-        id: 'src',
-        type: 'consumer',
-        config: { type: 'business_central', business_central: { entity: 'items', poll_interval_seconds: 300, environment: 'Production' } },
-      },
-      {
-        id: 'dst',
-        type: 'producer',
-        config: { type: 'sitoo', sitoo: { resource: 'warehouseitems', method: 'POST' } },
-      },
-    ],
-    edges: [{ source: 'src', target: 'dst' }],
-    fields: [
-      { nodeId: 'src', objectPath: 'business_central', key: 'aad_tenant_id', label: 'Business Central Entra tenant ID', help: 'Your Microsoft Entra (Azure AD) tenant GUID or domain.', placeholder: '<tenant-guid>' },
-      { nodeId: 'src', objectPath: 'business_central', key: 'company_id', label: 'BC company ID (GUID)', help: 'The Business Central company to read items from.', placeholder: '<company-guid>' },
-      { nodeId: 'src', objectPath: 'business_central', key: 'client_id', label: 'BC app (client) ID', help: 'The Entra app registration id.', placeholder: '<app-id>' },
-      { nodeId: 'src', objectPath: 'business_central', key: 'client_secret', label: 'BC client secret', help: 'Stored encrypted.', secret: true, placeholder: 'client secret' },
-      { nodeId: 'dst', objectPath: 'sitoo', key: 'account_id', label: 'Sitoo account ID', help: 'Your Sitoo account number.', placeholder: '12345' },
-      { nodeId: 'dst', objectPath: 'sitoo', key: 'site_id', label: 'Sitoo site ID', help: 'The Sitoo site whose stock is updated.', placeholder: '1' },
-      { nodeId: 'dst', objectPath: 'sitoo', key: 'api_id', label: 'Sitoo API ID', help: 'From Sitoo Backoffice → Settings → Sitoo REST API.', placeholder: 'your-api-id' },
-      { nodeId: 'dst', objectPath: 'sitoo', key: 'api_password', label: 'Sitoo API password', help: 'Stored encrypted.', secret: true, placeholder: 'API password' },
     ],
   },
 ]
