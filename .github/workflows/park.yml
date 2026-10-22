@@ -7,7 +7,10 @@
 # (2026-10-20: the 14:00 and 15:00 UTC crons ran at 18:10 and 18:53), so
 # this is not "at 16:00" but "any run that lands between 16:00 and 07:00
 # Europe/Oslo stops a Running cluster", with a cron every half hour through
-# that window so that enough of them land. A start in the evening is
+# that window so that enough of them land. The crons sit at :07 and :37, off
+# the round minutes where GitHub's scheduler is busiest and delays or drops
+# runs (2026-10-21: every :00/:30 run from 16:00 to 20:00 Oslo was dropped,
+# the first one arrived at 20:19). A start in the evening is
 # stopped again by the next run; dispatch stops it at any hour (a stop from
 # the phone). It queues behind a deploy or a catch-up on the production
 # group and never interrupts one.
@@ -15,8 +18,8 @@ name: Park
 
 on:
   schedule:
-    - cron: "*/30 14-23 * * *" # 16:00 Oslo (14:00 UTC in summer, 15:00 in winter) to midnight UTC
-    - cron: "*/30 0-5 * * *" # midnight UTC to 07:00 Oslo
+    - cron: "7,37 14-23 * * *" # 16:00 Oslo (14:00 UTC in summer, 15:00 in winter) to midnight UTC
+    - cron: "7,37 0-5 * * *" # midnight UTC to 07:00 Oslo
   workflow_dispatch:
 
 jobs:

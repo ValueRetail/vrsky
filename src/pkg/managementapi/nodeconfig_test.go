@@ -1872,9 +1872,20 @@ func TestParkWorkflow(t *testing.T) {
 	for _, s := range top.On.Schedule {
 		crons[s.Cron] = true
 	}
-	for _, want := range []string{"*/30 14-23 * * *", "*/30 0-5 * * *"} {
+	for _, want := range []string{"7,37 14-23 * * *", "7,37 0-5 * * *"} {
 		if !crons[want] {
 			t.Errorf("park.yml lacks the cron %q; a single cron at 16:00 ran four hours late on 2026-10-20 and stopped nothing", want)
+		}
+	}
+	// Off the round minutes: GitHub delays or drops scheduled runs at :00 and
+	// :30 under load, and on 2026-10-21 every one of them from 16:00 to 20:00
+	// Oslo was dropped.
+	for c := range crons {
+		minute := strings.Fields(c)[0]
+		for _, m := range strings.Split(minute, ",") {
+			if m == "0" || m == "30" || strings.HasPrefix(m, "*") {
+				t.Errorf("park.yml cron %q fires on a round minute (%s); use minutes like 7 and 37", c, m)
+			}
 		}
 	}
 	wf := parseWorkflow(t, "park.yml")
