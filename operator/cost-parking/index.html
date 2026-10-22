@@ -2589,17 +2589,26 @@ kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> <
 <h2 id="what-you-still-pay-for">What you still pay for<a class="headerlink" href="#what-you-still-pay-for" title="Permanent link">&para;</a></h2>
 <p>Stopping deallocates the nodes. It does <strong>not</strong> stop billing for:</p>
 <ul>
-<li><strong>Managed disks</strong> — 2 × 150 GB OS disks, plus every persistent volume.</li>
+<li><strong>Persistent volumes</strong> — billed by provisioned size, used or not:
+  Postgres 50 GiB, Prometheus 20 GiB, NATS 3 × 8 GiB, MinIO 8 GiB,
+  Grafana 5 GiB, Alertmanager 2 GiB (<code>TestPersistentVolumesStayWithinBudget</code>
+  keeps the total under 120 GiB). Azure Files (<code>vrsky-files</code>) is billed by
+  what is stored. The node's OS disk is ephemeral, on the VM's local NVMe:
+  it does not exist, and costs nothing, while the cluster is parked.</li>
 <li><strong>Public IP addresses</strong> — two Standard IPs are allocated to the node
   resource group (<code>20.251.107.2</code> for ingress, and one more).</li>
+<li><strong>The load balancer and the container registry.</strong></li>
 </ul>
+<p>Until October 2026 the NATS and MinIO disks were 100 GiB each and the OS
+disk a 128 GB Premium, about 790 NOK a month for a few MB of data
+(<code>plans/disk-costs.md</code>). The parked floor is now about 660 NOK a month.</p>
 <p>So parking cuts the bill substantially but does not take it to zero. Deleting
 the cluster would, and would also throw away the volumes and both IPs — which
 means a new URL and re-issued certificates. Park it; don't delete it.</p>
 <h2 id="the-monthly-budget">The monthly budget<a class="headerlink" href="#the-monthly-budget" title="Permanent link">&para;</a></h2>
-<p>October 2026 (<code>plans/cost-cap.md</code>): a parked cluster costs about 1 450 NOK
+<p>October 2026 (<code>plans/cost-cap.md</code>): a parked cluster cost about 1 450 NOK
 a month in disks, load balancer, registry and addresses before a single
-node-hour; two E4ds v6 nodes add 214 NOK for every day they run, and the
+node-hour (about 660 after <code>plans/disk-costs.md</code>); two E4ds v6 nodes add 214 NOK for every day they run, and the
 Standard tier 21 NOK. The budget is <strong>1 500 NOK a month</strong> for the two
 VRSky resource groups, set in two places:</p>
 <ul>
