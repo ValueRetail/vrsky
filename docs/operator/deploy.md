@@ -43,7 +43,10 @@ by hand: `/readyz` and the UI answer 200, each named consumer logged
 matters is VRSky's own alerts (the `vrsky-*` rule groups) above `info`
 and anything `critical` from any group; a stock warning that a fleet
 restart produces by itself, such as `KubeClientErrors`, does not fail a
-deploy (`smoke-alerts.sh`, table-tested).
+deploy (`smoke-alerts.sh`, table-tested). An alert that counts is re-read
+every 15 seconds for up to two minutes before the check fails: a merge that
+fixes a firing alert applies the new rule seconds before the check, and
+Prometheus serves the old rule until it reloads. A clean run reads once.
 
 ## While the cluster is parked
 

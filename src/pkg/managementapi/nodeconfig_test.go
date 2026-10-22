@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1924,4 +1926,81 @@ func TestParkWorkflow(t *testing.T) {
 			t.Errorf("park.yml runs %q; it must only stop the cluster", forbidden)
 		}
 	}
+}
+
+// runSmokeAlerts runs infrastructure/azure/smoke-prod.sh with no consumers
+// against a local server for the two URL probes and a stub kubectl whose
+// rules API reports a firing VRSky alert for the first firingReads reads and
+// nothing after. It returns the output, how many reads the script made, and
+// the script's error.
+func runSmokeAlerts(t *testing.T, firingReads int) (string, int, error) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	firing := filepath.Join(dir, "firing.json")
+	clear := filepath.Join(dir, "clear.json")
+	counter := filepath.Join(dir, "reads")
+	write := func(p, body string) {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(firing, rulesDoc([4]string{"vrsky-platform", "ConnectorUnavailable", "warning", "firing"}))
+	write(clear, rulesDoc([4]string{"vrsky-platform", "ConnectorUnavailable", "warning", ""}))
+	write(counter, "0")
+	stub := "#!/usr/bin/env bash\n" +
+		"[ \"$1 $2\" = \"get --raw\" ] || exit 2\n" +
+		"n=$(( $(cat \"$READS\") + 1 )); echo \"$n\" > \"$READS\"\n" +
+		"if [ \"$n\" -le \"$FIRING_READS\" ]; then cat \"$FIRING\"; else cat \"$CLEAR\"; fi\n"
+	kubectl := filepath.Join(dir, "kubectl")
+	if err := os.WriteFile(kubectl, []byte(stub), 0o700); err != nil { //nolint:gosec // an executable stub in a temp dir
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "smoke-prod.sh"))
+	cmd.Env = append(os.Environ(),
+		"PUBLIC_URL="+srv.URL, "KUBECTL="+kubectl,
+		"SMOKE_ALERT_WINDOW=2", "SMOKE_ALERT_EVERY=1",
+		"READS="+counter, "FIRING="+firing, "CLEAR="+clear, fmt.Sprintf("FIRING_READS=%d", firingReads))
+	out, err := cmd.CombinedOutput()
+	raw, rerr := os.ReadFile(counter) //nolint:gosec // the test's own temp file
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	reads, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	return string(out), reads, err
+}
+
+// A deploy that fixes a firing alert applies the rule seconds before the
+// smoke check reads alerts, and Prometheus serves the old rule until it
+// reloads (run 39764021090, 2026-10-22). The check re-reads for a window and
+// fails only on an alert that is still firing at its end
+// (plans/smoke-rule-reload.md).
+func TestSmokeProdWaitsOutARuleReload(t *testing.T) {
+	t.Run("an alert that clears within the window passes", func(t *testing.T) {
+		out, reads, err := runSmokeAlerts(t, 1)
+		if err != nil {
+			t.Fatalf("smoke failed on an alert that cleared on the second read: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "re-checking") || !strings.Contains(out, "smoke: ok") || reads != 2 {
+			t.Errorf("want one re-check, then ok after 2 reads; got %d reads:\n%s", reads, out)
+		}
+	})
+	t.Run("an alert still firing at the end fails", func(t *testing.T) {
+		out, reads, err := runSmokeAlerts(t, 1000)
+		if err == nil {
+			t.Fatalf("smoke passed with an alert firing on every read:\n%s", out)
+		}
+		if !strings.Contains(out, "alerts firing: ConnectorUnavailable") || !strings.Contains(out, "smoke: FAILED") || reads < 3 {
+			t.Errorf("want it to keep reading through the window, then fail; got %d reads:\n%s", reads, out)
+		}
+	})
+	t.Run("nothing firing reads once", func(t *testing.T) {
+		out, reads, err := runSmokeAlerts(t, 0)
+		if err != nil || strings.Contains(out, "re-checking") || reads != 1 {
+			t.Errorf("want ok after a single read; got err=%v, %d reads:\n%s", err, reads, out)
+		}
+	})
 }
