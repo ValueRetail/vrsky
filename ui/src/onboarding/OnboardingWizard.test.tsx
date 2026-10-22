@@ -33,7 +33,7 @@ const materialize = vi.fn(async (cfg: Record<string, unknown>, _nodeId: string) 
     const v = out[k]
     if (v && typeof v === 'object') {
       for (const inner of Object.keys(v as Record<string, unknown>)) {
-        if (inner === 'api_password' || inner === 'client_secret' || inner === 'connection_string') {
+        if (inner === 'password' || inner === 'api_password' || inner === 'client_secret' || inner === 'connection_string') {
           delete (v as Record<string, unknown>)[inner]
           ;(v as Record<string, unknown>)[`${inner}_secret_id`] = 'sec-123'
         }
@@ -64,9 +64,12 @@ const pick = (name: string) => {
 
 // Fills every input on the configure step, including the masked SecretInputs,
 // which are type=password and so have no `textbox` role.
+// Numeric inputs (ports, poll intervals) get a number; anything else a
+// placeholder string. A non-numeric value in a numeric field leaves it missing.
 const fillEveryField = (container: HTMLElement) => {
   container.querySelectorAll('input').forEach((el, i) => {
-    fireEvent.change(el, { target: { value: `v${i}` } })
+    const value = el.getAttribute('inputmode') === 'numeric' ? String(100 + i) : `v${i}`
+    fireEvent.change(el, { target: { value } })
   })
 }
 
@@ -131,14 +134,14 @@ describe('deploying', () => {
     // The wizard must not post what the user typed. This is the same path the
     // visual builder uses; skipping it would persist credentials in plaintext.
     const { container } = render(<OnboardingWizard />)
-    pick('POS sales → ERP (Sitoo → Business Central)')
+    pick('CSV → Database')
     fillEveryField(container)
 
     await waitFor(() => expect(deployButton()).toBeEnabled())
     fireEvent.click(deployButton())
     await waitFor(() => expect(post).toHaveBeenCalled())
 
-    const tpl = TEMPLATES.find((t) => t.id === 'sitoo-to-business-central')!
+    const tpl = TEMPLATES.find((t) => t.id === 'csv-to-database')!
     expect(materialize).toHaveBeenCalledTimes(tpl.nodes.length)
 
     // Nothing that went out may still carry a raw secret key.
@@ -146,6 +149,32 @@ describe('deploying', () => {
     for (const f of tpl.fields.filter((f) => f.secret)) {
       expect(body, `${f.key} left the browser unencrypted`).not.toContain(`"${f.key}":`)
     }
+  })
+
+  it('sends numeric fields as numbers, which the connectors require', async () => {
+    // db-producer's port and api-consumer's poll_interval_seconds are ints on
+    // the Go side; the JSON string "5433" fails to unmarshal and the connector
+    // never claims the node.
+    const { container } = render(<OnboardingWizard />)
+    pick('CSV → Database')
+    fillEveryField(container)
+    fireEvent.change(screen.getByDisplayValue(/^1\d\d$/), { target: { value: '5433' } })
+
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.click(deployButton())
+    await waitFor(() => expect(post).toHaveBeenCalled())
+
+    const nodes = post.mock.calls[0][1].nodes as { id: string; config: { database?: { port?: unknown } } }[]
+    expect(nodes.find((n) => n.id === 'dst')!.config.database!.port).toBe(5433)
+  })
+
+  it('keeps deploy disabled while a numeric field holds text', async () => {
+    const { container } = render(<OnboardingWizard />)
+    pick('CSV → Database')
+    fillEveryField(container)
+    await waitFor(() => expect(deployButton()).toBeEnabled())
+    fireEvent.change(screen.getByDisplayValue(/^1\d\d$/), { target: { value: 'abc' } })
+    await waitFor(() => expect(deployButton()).toBeDisabled())
   })
 
   it('starts the connection it just created', async () => {
