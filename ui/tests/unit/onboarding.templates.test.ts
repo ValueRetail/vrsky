@@ -37,8 +37,13 @@ describe('onboarding templates', () => {
         expect(nodeIds.has(e.source)).toBe(true)
         expect(nodeIds.has(e.target)).toBe(true)
       }
-      // Every node config declares a connector "type".
-      for (const n of t.nodes) expect(typeof n.config.type).toBe('string')
+      // Every source and destination declares a connector "type". A converter
+      // is the data-converter by its node type and keeps its settings flat
+      // (plans/template-fields.md).
+      for (const n of t.nodes) {
+        if (n.type === 'converter') continue
+        expect(typeof n.config.type).toBe('string')
+      }
     }
   })
 

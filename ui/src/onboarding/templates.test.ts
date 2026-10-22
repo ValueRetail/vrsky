@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { SECRET_FIELDS } from '../utils/secrets'
+import { connectorKeysFor } from '../types/nodeConfig'
 import { TEMPLATES, type PipelineTemplate } from './templates'
 
 // Walks a dot-path without creating anything, mirroring the wizard's readObj.
@@ -63,6 +64,9 @@ describe('every template is a deployable pipeline', () => {
     expect(t.nodes.filter((n) => n.type === 'producer').length).toBeGreaterThanOrEqual(1)
     expect(t.edges.length).toBeGreaterThanOrEqual(1)
     for (const n of t.nodes) {
+      // Sources and destinations name their connector; a converter is the
+      // data-converter by its node type and keeps its settings flat.
+      if (n.type === 'converter') continue
       expect(typeof n.config.type, `node ${n.id} has no connector type`).toBe('string')
     }
   })
@@ -120,6 +124,107 @@ describe('gallery cards are presentable', () => {
     for (const f of t.fields) {
       expect(f.label.trim(), `${t.id}: a field has no label`).not.toBe('')
       expect(f.help.trim(), `${t.id}: field "${f.key}" has no help text`).not.toBe('')
+    }
+  })
+})
+
+// --- What the connectors actually read (plans/template-fields.md) ----------
+// The checks above are about the catalog's shape. These are about whether a
+// deployed template does anything: on 2026-10-22 "API poll → File" wrote
+// api.url / api.interval (the consumer reads base_url / endpoints /
+// poll_interval_seconds) and "CSV → Database" wrote database.connection_string
+// (the producer reads host/port/user/…), so one polled nothing and the other
+// was refused at start. Each check names the key so the fix is obvious.
+
+// The settings object a node's keys live in: config[block], or the config
+// itself for a converter.
+function settings(n: PipelineTemplate['nodes'][number], block: string): Record<string, unknown> {
+  if (!block) return n.config
+  const b = n.config[block]
+  return b && typeof b === 'object' ? (b as Record<string, unknown>) : {}
+}
+
+describe('every node uses a connector whose keys are known', () => {
+  each((t) => {
+    for (const n of t.nodes) {
+      expect(
+        connectorKeysFor(n.type, n.config),
+        `${t.id}: node ${n.id} (${n.type}/${String(n.config.type)}) is not in CONNECTOR_KEYS; add it there first`
+      ).toBeDefined()
+    }
+  })
+})
+
+describe('no template writes a key its connector ignores', () => {
+  each((t) => {
+    for (const n of t.nodes) {
+      const ck = connectorKeysFor(n.type, n.config)
+      if (!ck) continue
+      if (ck.block) {
+        for (const k of Object.keys(n.config)) {
+          expect(['type', ck.block], `${t.id}: node ${n.id} has a stray top-level key "${k}"`).toContain(k)
+        }
+      }
+      for (const k of Object.keys(settings(n, ck.block))) {
+        expect(ck.keys, `${t.id}: node ${n.id} sets "${k}", which ${n.type}/${String(n.config.type ?? n.type)} never reads`).toContain(k)
+      }
+    }
+  })
+})
+
+describe('every key the connector needs is there or asked for', () => {
+  each((t) => {
+    for (const n of t.nodes) {
+      const ck = connectorKeysFor(n.type, n.config)
+      if (!ck) continue
+      const s = settings(n, ck.block)
+      for (const k of ck.required) {
+        const asked = t.fields.some((f) => f.nodeId === n.id && f.key === k && f.objectPath === ck.block)
+        const pre = s[k]
+        const present = Array.isArray(pre) ? pre.length > 0 : pre !== undefined && pre !== ''
+        expect(present || asked, `${t.id}: node ${n.id} needs "${k}", which is neither pre-filled nor a wizard field`).toBe(true)
+      }
+    }
+  })
+})
+
+describe('numbers stay numbers', () => {
+  // The Go structs read these as ints; a string fails to unmarshal.
+  each((t) => {
+    for (const n of t.nodes) {
+      const ck = connectorKeysFor(n.type, n.config)
+      if (!ck) continue
+      const s = settings(n, ck.block)
+      for (const k of ck.numeric) {
+        if (s[k] !== undefined) {
+          expect(typeof s[k], `${t.id}: node ${n.id} pre-fills "${k}" as ${typeof s[k]}`).toBe('number')
+        }
+      }
+      for (const f of t.fields.filter((f) => f.nodeId === n.id)) {
+        expect(
+          Boolean(f.numeric),
+          `${t.id}: wizard field "${f.key}" must be ${ck.numeric.includes(f.key) ? '' : 'not '}marked numeric`
+        ).toBe(ck.numeric.includes(f.key))
+      }
+    }
+  })
+})
+
+describe('every wizard field lands on a key the connector reads', () => {
+  each((t) => {
+    for (const f of t.fields) {
+      const n = t.nodes.find((n) => n.id === f.nodeId)
+      if (!n) continue // reported by "every field points at a node that exists"
+      const ck = connectorKeysFor(n.type, n.config)
+      if (!ck) continue
+      const top = f.objectPath.split('.')[0]
+      expect(top, `${t.id}: field "${f.key}" writes into "${f.objectPath}", outside the ${ck.block || 'root'} settings`).toBe(ck.block)
+      if (f.objectPath === ck.block) {
+        expect(ck.keys, `${t.id}: field "${f.key}" is a key the connector never reads`).toContain(f.key)
+      } else {
+        // A nested path (api.endpoints.0) must start at a key the connector reads.
+        expect(ck.keys, `${t.id}: field "${f.key}" is nested under an unknown key`).toContain(f.objectPath.split('.')[1])
+      }
     }
   })
 })
