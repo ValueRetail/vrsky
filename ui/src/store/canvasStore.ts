@@ -70,12 +70,12 @@ interface CanvasStore {
   // Actions
   initialize: (tenantId?: string) => void
   createCanvas: (name?: string) => Canvas | null
-  importCanvas: (name: string, nodes: Node[], edges: Edge[], deployedConnectionId?: string) => Canvas | null
+  importCanvas: (name: string, nodes: Node[], edges: Edge[], deployedConnectionId?: string, deployedName?: string) => Canvas | null
   updateCanvas: (id: string, nodes: Node[], edges: Edge[]) => void
   deleteCanvas: (id: string) => void
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
-  setDeployedConnectionId: (canvasId: string, connectionId: string | null) => void
+  setDeployedConnectionId: (canvasId: string, connectionId: string | null, deployedName?: string) => void
 
   // Helpers
   getActiveCanvas: () => Canvas | null
@@ -160,7 +160,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   // Create a canvas pre-populated with nodes/edges (and optionally linked to an
   // existing deployed connection) and switch to it. Used by the Edit flow (#128)
   // to load a saved connection's graph when no local canvas is already linked.
-  importCanvas: (name, nodes, edges, deployedConnectionId) => {
+  importCanvas: (name, nodes, edges, deployedConnectionId, deployedName) => {
     const { canvases, tenantId } = get()
 
     if (canvases.length >= MAX_CANVASES) {
@@ -175,6 +175,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       nodes,
       edges,
       deployedConnectionId: deployedConnectionId || undefined,
+      deployedName: deployedConnectionId ? deployedName : undefined,
       createdAt: now,
       updatedAt: now,
     }
@@ -254,11 +255,19 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
   },
 
-  setDeployedConnectionId: (canvasId, connectionId) => {
+  // deployedName: the name the server now has for the connection; omitted,
+  // the one already recorded is kept (an update that sent no name), and
+  // dropped with the link when connectionId is null.
+  setDeployedConnectionId: (canvasId, connectionId, deployedName) => {
     const { canvases, currentCanvasId, tenantId } = get()
     const updatedCanvases = canvases.map((c) =>
       c.id === canvasId
-        ? { ...c, deployedConnectionId: connectionId || undefined, updatedAt: Date.now() }
+        ? {
+            ...c,
+            deployedConnectionId: connectionId || undefined,
+            deployedName: connectionId ? (deployedName ?? c.deployedName) : undefined,
+            updatedAt: Date.now(),
+          }
         : c
     )
     set({ canvases: updatedCanvases })
