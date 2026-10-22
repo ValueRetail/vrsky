@@ -2547,7 +2547,10 @@ by hand: <code>/readyz</code> and the UI answer 200, each named consumer logged
 matters is VRSky's own alerts (the <code>vrsky-*</code> rule groups) above <code>info</code>
 and anything <code>critical</code> from any group; a stock warning that a fleet
 restart produces by itself, such as <code>KubeClientErrors</code>, does not fail a
-deploy (<code>smoke-alerts.sh</code>, table-tested).</p>
+deploy (<code>smoke-alerts.sh</code>, table-tested). An alert that counts is re-read
+every 15 seconds for up to two minutes before the check fails: a merge that
+fixes a firing alert applies the new rule seconds before the check, and
+Prometheus serves the old rule until it reloads. A clean run reads once.</p>
 <h2 id="while-the-cluster-is-parked">While the cluster is parked<a class="headerlink" href="#while-the-cluster-is-parked" title="Permanent link">&para;</a></h2>
 <p>The cluster is stopped between working sessions (<code>az aks stop</code>,
 <a href="../cost-parking/">cost parking</a>). A merge while it is stopped still builds
