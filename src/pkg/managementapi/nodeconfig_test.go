@@ -2004,3 +2004,122 @@ func TestSmokeProdWaitsOutARuleReload(t *testing.T) {
 		}
 	})
 }
+
+// The persistent volumes production declares must add up to under a budget,
+// and NATS's JetStream store limit must sit below its volume. A provisioned
+// disk is billed every hour whether the cluster runs or is parked; on
+// 2026-10-22 the parked floor was ~1 450 NOK a month, ~790 of it in NATS and
+// MinIO disks of 100 GiB holding a few MB, sized for KV buckets nothing used
+// (plans/disk-costs.md). Raise the budget only with a measured reason.
+// Not counted: Azure Files (vrsky-files), billed by what is stored.
+func TestPersistentVolumesStayWithinBudget(t *testing.T) {
+	const budgetGiB = 120
+	root := filepath.Join("..", "..", "..", "infrastructure", "kubernetes")
+	gib := func(v string) int {
+		v = strings.TrimSpace(v)
+		n, err := strconv.Atoi(strings.TrimSuffix(v, "Gi"))
+		if err != nil || !strings.HasSuffix(v, "Gi") {
+			t.Fatalf("volume size %q is not in Gi", v)
+		}
+		return n
+	}
+	type item struct {
+		name string
+		g    int
+	}
+	var items []item
+	natsVolume := 0
+
+	// StatefulSet templates × replicas, and standalone claims.
+	for _, rel := range []string{"platform-nats/statefulset.yaml", "postgresql/statefulset.yaml", "minio/deployment.yaml"} {
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // fixed paths inside the repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		dec := yaml.NewDecoder(strings.NewReader(string(body)))
+		for {
+			var doc struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+				Spec struct {
+					Replicas  *int `yaml:"replicas"`
+					Resources struct {
+						Requests map[string]string `yaml:"requests"`
+					} `yaml:"resources"`
+					VolumeClaimTemplates []struct {
+						Spec struct {
+							Resources struct {
+								Requests map[string]string `yaml:"requests"`
+							} `yaml:"resources"`
+						} `yaml:"spec"`
+					} `yaml:"volumeClaimTemplates"`
+				} `yaml:"spec"`
+			}
+			if err := dec.Decode(&doc); err != nil {
+				break
+			}
+			switch doc.Kind {
+			case "StatefulSet":
+				replicas := 1
+				if doc.Spec.Replicas != nil {
+					replicas = *doc.Spec.Replicas
+				}
+				for _, vct := range doc.Spec.VolumeClaimTemplates {
+					g := gib(vct.Spec.Resources.Requests["storage"])
+					items = append(items, item{fmt.Sprintf("%s x%d", doc.Metadata.Name, replicas), g * replicas})
+					if doc.Metadata.Name == "nats-platform" {
+						natsVolume = g
+					}
+				}
+			case "PersistentVolumeClaim":
+				items = append(items, item{doc.Metadata.Name, gib(doc.Spec.Resources.Requests["storage"])})
+			}
+		}
+	}
+
+	// The monitoring stack's volumes, as the Azure overlays size them.
+	sizeLine := regexp.MustCompile(`(?m)^\s+(?:storage|size):\s*(\d+Gi)\s*$`)
+	for _, rel := range []string{"monitoring/prometheus-values.azure.yaml", "monitoring/grafana-values.azure.yaml"} {
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // fixed paths inside the repo
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range sizeLine.FindAllStringSubmatch(string(body), -1) {
+			items = append(items, item{rel, gib(m[1])})
+		}
+	}
+
+	if natsVolume == 0 || len(items) < 6 {
+		t.Fatalf("found %d volumes and no NATS template (%v); the manifest layout probably moved", len(items), items)
+	}
+
+	// JetStream refuses to start (or to create streams) once its reservations
+	// exceed the disk; max_file must leave room on the volume.
+	cfg, err := os.ReadFile(filepath.Join(root, "platform-nats", "configmap.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mf := regexp.MustCompile(`max_file:\s*(\d+)G\b`).FindStringSubmatch(string(cfg))
+	if mf == nil {
+		t.Fatal("platform-nats/configmap.yaml has no max_file in G")
+	}
+	if maxFile, _ := strconv.Atoi(mf[1]); maxFile >= natsVolume {
+		t.Errorf("NATS max_file is %dG but each volume is %dGi; JetStream would plan for space the disk does not have", maxFile, natsVolume)
+	}
+
+	total := 0
+	for _, it := range items {
+		total += it.g
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].g > items[j].g })
+	var top []string
+	for _, it := range items {
+		top = append(top, fmt.Sprintf("%s=%dGi", it.name, it.g))
+	}
+	if total > budgetGiB {
+		t.Fatalf("persistent volumes add up to %dGi, over the %dGi budget; largest: %s", total, budgetGiB, strings.Join(top, ", "))
+	}
+	t.Logf("persistent volumes: %dGi of %dGi; %s", total, budgetGiB, strings.Join(top, ", "))
+}

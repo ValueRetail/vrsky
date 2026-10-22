@@ -16,7 +16,7 @@ data:
     jetstream {
       store_dir: /data/jetstream
       max_mem: 4G
-      max_file: 90G
+      max_file: 6G # below the 8Gi volume (statefulset.yaml); plans/disk-costs.md
     }
 
     # Cluster Configuration

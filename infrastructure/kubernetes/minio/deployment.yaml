@@ -98,12 +98,15 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: minio-data
+            claimName: minio-data-small
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: minio-data
+  # Was minio-data at 100Gi. A claim cannot shrink, so the small one has a
+  # new name; spill objects expire after a day and use a few MB
+  # (plans/disk-costs.md).
+  name: minio-data-small
   namespace: vrsky-storage
 spec:
   accessModes:
@@ -111,4 +114,4 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      storage: 100Gi
+      storage: 8Gi
