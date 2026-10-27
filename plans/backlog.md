@@ -197,6 +197,26 @@ Last updated 2026-10-27.
     which layers production has (Azure disks are encrypted at rest by the
     platform; whether with a customer key can't be told from the repo) and
     which are optional overlays. Found in #386.
+38. **The whitepaper promises inbound mTLS for webhooks that production
+    can't do.** `docs/security/whitepaper.md` section 4 says a webhook
+    consumer can require a client certificate. That needs the worker's TLS
+    listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
+    webhook Ingress has no SSL passthrough or `auth-tls` annotations, so
+    ingress-nginx terminates TLS and the worker never sees a client cert.
+    Either wire it up or say it's compose-only for now. Found in review of
+    #386.
+39. **The encryption-at-rest checklist says `sslmode=require`; production
+    uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
+    to use TLS to the databases in production, but the AKS connection
+    strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
+    `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
+    on TLS for Postgres or make the checklist say where production stands.
+    Found in review of #386.
+40. **The CNPG manifest calls the restore drill a backup.** The comment in
+    `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
+    are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
+    in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
+    manifest, so PR plus `agent:needs-human`. Found in review of #386.
 
 ## Human
 

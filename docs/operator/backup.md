@@ -27,8 +27,9 @@ vrsky-cli restore --target-db-url 'postgres://…/management_db' --confirm \
 ```
 
 A Dockerfile (`src/cmd/vrsky-cli/Dockerfile`) and a daily Kubernetes CronJob
-(`infrastructure/kubernetes/backup/`) exist, but nothing builds or publishes
-the image and nothing applies the CronJob. As far as the repo shows, no
+(`infrastructure/kubernetes/backup/`) exist, but nothing in CI builds or
+publishes the image (only the compose `backup` profile builds it locally) and
+nothing applies the CronJob. As far as the repo shows, no
 scheduled backup runs in production; the
 [disaster-recovery guide](../DR.md#what-runs-today) has the details.
 

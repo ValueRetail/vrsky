@@ -21,8 +21,13 @@ scheduled for 02:00 UTC daily, which would give a recovery point objective
 ## Setup
 1. Build and push the CLI image from `src/cmd/vrsky-cli/Dockerfile` (repo root
    as the build context) to a registry the cluster can pull, and point the
-   CronJob's `image:` at it. CI doesn't build this image.
-2. Create the config Secret with the object-store target + the master key:
+   CronJob's `image:` at it. CI doesn't build this image. On AKS, the
+   `vrsky-database` namespace has no `acr-pull` secret (the Azure scripts
+   create it only in `vrsky-platform`, `vrsky-storage` and `vrsky-ui`), so
+   pulling from ACR there needs one first.
+2. Create the config Secret with the object-store target + the master key.
+   On AKS the database and its user are both `vrsky`, not
+   `postgres`/`management_db` as below (backlog item 36).
 
 ```sh
 kubectl -n vrsky-database create secret generic vrsky-backup-config \
@@ -47,10 +52,11 @@ kubectl apply -f infrastructure/kubernetes/backup/cronjob.yaml
 # Trigger an out-of-schedule backup
 kubectl -n vrsky-database create job --from=cronjob/vrsky-mgmt-backup backup-manual-$(date +%s)
 
-# List backups
+# List backups. IMAGE is the image you pushed in Setup step 1.
+IMAGE=<your-registry>/vrsky-cli:<tag>
 kubectl -n vrsky-database run vrsky-cli-list --rm -it --restart=Never \
-  --image=ghcr.io/valueretail/vrsky/vrsky-cli:latest \
-  --overrides='{"spec":{"containers":[{"name":"c","image":"ghcr.io/valueretail/vrsky/vrsky-cli:latest","args":["list"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
+  --image="$IMAGE" \
+  --overrides='{"spec":{"containers":[{"name":"c","image":"'"$IMAGE"'","args":["list"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
 ```
 
 > ⚠️ **The `ENCRYPTION_KEY` is not in the backup.** Backups are encrypted with

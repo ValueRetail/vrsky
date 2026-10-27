@@ -71,6 +71,7 @@ mc cat --metadata s3/test/x | grep -i sse
   table (#66). The disk under Postgres must be encrypted by the
   StorageClass; per-column secrecy is the application's job.
 - **TLS in transit**: client traffic is covered by the ingress
-  (ingress-nginx + cert-manager). Traffic inside the cluster is not
-  encrypted: there is no service mesh, and the NATS manifests set no TLS.
+  (ingress-nginx + cert-manager). Inside the cluster there is no service
+  mesh, and Postgres, NATS, MinIO and the API talk without TLS (KES, when
+  deployed, is the exception).
   See "Encryption at rest" in `docs/DEPLOYMENT_GUIDE.md`.

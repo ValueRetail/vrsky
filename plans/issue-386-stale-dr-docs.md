@@ -156,3 +156,19 @@ manifest changes.
 - The production database name mismatch (`vrsky` vs `management_db` in the
   backup README's Secret example) goes to the backlog with item 27's work,
   not into this PR.
+
+## Review round 1
+
+The reviewer confirmed the core claims. The PR carries `agent:needs-human`:
+the repo is public and these are security and DR disclosures, so a human
+decides whether they ship. Fixes made:
+
+| Fix | Evidence |
+|-----|----------|
+| Name the limits production does have: login and sign-up failed-attempt limits, remote-agent register limit, per-connection rate limit | `src/pkg/managementapi/auth_limit.go:28-36`, `src/cmd/remote-agent/register.go:37`, `src/pkg/managementapi/rate_limiter.go:9-24`, `src/pkg/managementapi/tenant_data_handler.go:11,46` |
+| "Nothing in CI builds the image"; compose does | `docker-compose.yml:1183-1188` |
+| Backup README: list command uses the pushed image; AKS DB/user are `vrsky`; `vrsky-database` has no `acr-pull` | `infrastructure/kubernetes/postgresql/configmap.yaml:7-8`; `infrastructure/azure/deploy-azure.sh:47-64`, `minio-images-acr.sh:19,48`, `deploy-ui-azure.sh:21-26` |
+| RPO also needs the Secret with a correct DB URL; RTO is an unmeasured estimate | `infrastructure/kubernetes/backup/cronjob.yaml:37-39` |
+| Encryption README names the plain-text services; KES uses TLS | `infrastructure/kubernetes/encryption/kes-deployment.yaml:19-26` |
+| Whitepaper: "services talk over the cluster's private network without TLS" | as item 4 above |
+| Backlog 38-40 | `git grep WORKER_MTLS_PORT\|auth-tls\|ssl-passthrough -- infrastructure/kubernetes infrastructure/azure` (empty); `docs/operator/encryption-at-rest.md:18`; `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml:71` |

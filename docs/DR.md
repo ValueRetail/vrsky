@@ -26,8 +26,8 @@ none.
 
 | Objective | Target | Status |
 |-----------|--------|--------|
-| **RPO** (max data loss) | **≤ 24h** | Not met while no backup runs. The CronJob would meet it once it can pull an image and is applied. |
-| **RTO** (max time to restore) | **≤ 1h** | Depends on having a backup. With one, a single `vrsky-cli restore` of the small management dump into a fresh DB runs in minutes. |
+| **RPO** (max data loss) | **≤ 24h** | Not met while no backup runs. The CronJob would meet it once it can pull an image, its `vrsky-backup-config` Secret exists with a correct database URL, and it is applied. |
+| **RTO** (max time to restore) | **≤ 1h** | Depends on having a backup. With one, a single `vrsky-cli restore` of the small management dump into a fresh DB should run in minutes. That is an estimate: it hasn't been measured on a production-sized dump. |
 
 > **Scope:** the management DB only. Tenant *data in flight* lives in NATS
 > JetStream (durable, replicated) and large payloads in object storage; those
