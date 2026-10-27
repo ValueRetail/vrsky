@@ -73,7 +73,7 @@ Last updated 2026-10-27.
     done, and once the name is known the finished file is never published.
     Wait until size and mtime are unchanged across two polls (or skip
     dotfiles and temp names) before ingesting. Found during #362.
-20. **Two starts for one file connection can race**
+20. ~~**Two starts for one file connection can race**~~ (#375)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The "already
     active" check and the insert are separate lock sections, and the boot
     restore runs alongside the start-command handler, so a start command
@@ -152,6 +152,32 @@ Last updated 2026-10-27.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
+32. **The other consumers have the start race #375 fixed in the file
+    consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
+    visma and business-central each check "already active" under `RLock`,
+    release it, do the slow work and insert later, while
+    `sdk.RestoreRunning` runs alongside the start-command handler. A start
+    command during boot restore can start a second poller for one
+    connection. Port the reservation from `src/cmd/file-consumer/service.go`
+    (`reserveStart`/`activateStart`/`releaseStart`), or move it into the SDK
+    so each consumer gets it once. Until then the comment on
+    `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during
+    the scan is harmless holds only for the file consumer. Found during #375.
+33. **A stop just after a file connection becomes active can leave the
+    database saying `running`** (`src/cmd/file-consumer/service.go`,
+    `startConnection`). The `running` status write comes after the
+    connection is in `activeConnections`. A stop landing in between cancels
+    the watcher and writes `stopped`, then the start writes `running`. Older
+    than #375, which closed the same gap for a stop that lands earlier in
+    the start. Found during #375.
+34. **A start refused while another start is in flight is lost if that one
+    fails** (`src/cmd/file-consumer/service.go`, `startConnection`). Since
+    #375 a second start for a connection that is already starting returns
+    at once. If the first then fails (say a transient database error during
+    boot restore), the second start, which might have succeeded, is not
+    retried and the connection stays down until someone starts it again.
+    A "start again" flag on the reservation would cover it. Found by the
+    test author on #375.
 
 ## Human
 
