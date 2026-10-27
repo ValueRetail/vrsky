@@ -28,7 +28,7 @@ The folder is checked every 5 seconds. A new file is published once its size and
 
 Names that start with `.` or `~`, or end in `.tmp` or `.part` (in any case), are never ingested. Upload under such a name and rename the file to its final name when the upload is done; the final name is then published once, complete. A writer that pauses for longer than a check partway through a file can still have it published early, so renaming into place is the safe way to deliver large files.
 
-Files already in the folder when the pipeline starts are not ingested.
+Files already in the folder when the pipeline starts are not ingested. That includes a file that landed in the last few seconds before a stop, restart or deploy and had not been published yet: it may be skipped. Copy it in again under a new name once the pipeline is running; overwriting it under the same name is not picked up.
 
 ## As a destination (producer)
 

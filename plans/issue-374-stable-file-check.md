@@ -138,10 +138,11 @@ Changes:
   the wait. The fixture's `poll()` now means "one interval passed, then
   poll" on a fake clock.
 - `docs/connectors/file.md` describes the skipped names, the 5–10 s delay and
-  rename-into-place. A skipped temp name is logged at debug level.
-- Backlog items renumbered to follow main (24, 25); 25 is the reviewer's
-  point that files still settling at a stop or restart land in the new
-  baseline and are never published.
+  rename-into-place, and that a file landing just before a stop, restart
+  or deploy may be skipped. A skipped temp name is logged at debug level.
+- Backlog items renumbered to follow main (29, 30, after #376 took up to
+  28); 30 is the reviewer's point that files still settling at a stop or
+  restart land in the new baseline and are never published.
 
 Not covered by a test: swapping the timer back to a ticker. With the clock
 check in place that no longer publishes a truncated file, so a deterministic
