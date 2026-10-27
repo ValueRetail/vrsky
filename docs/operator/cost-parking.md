@@ -23,17 +23,114 @@ az aks stop -g vrsky-prod -n vrsky-prod
 
 Takes a few minutes. Every pod is evicted; nothing is deleted.
 
-**It happens by itself outside working hours.** The *Park* workflow
-(`.github/workflows/park.yml`) is scheduled every half hour from 16:00 to
-07:00 Oslo time, at :07 and :37 past the hour because GitHub drops runs at
-:00 and :30 when it is busy; each run that lands in that window queues behind any
-deploy or catch-up in progress and stops a Running cluster, a stopped one
-is left alone. GitHub runs schedules hours late on this repository (the
-first evening, a single 16:00 cron fired at 20:10 and stopped nothing),
-which is why it is a window with many crons and not one o'clock: expect
-the stop somewhere between 16:00 and 20:00. Still working in the evening?
-Start it again; the next run stops it again. A stop from anywhere, any
+**It happens by itself at 16:00.** The cluster stops itself: a CronJob in
+the cluster (see [The 16:00 stop](#the-1600-stop)) asks Azure to stop it at
+16:00 Oslo time, every day it is running. The nodes are gone a few minutes
+later.
+
+The *Park* workflow (`.github/workflows/park.yml`) is the backstop. It is
+scheduled every half hour from 16:00 to 07:00 Oslo time, at :07 and :37
+past the hour because GitHub drops runs at :00 and :30 when it is busy;
+each run that lands in that window queues behind any deploy or catch-up in
+progress and stops a Running cluster, a stopped one is left alone. GitHub
+runs schedules hours late on this repository (2026-10-22: the first run
+landed at 20:28), so Park alone means a stop somewhere between 16:00 and
+21:00; it catches the evenings the CronJob did not run or failed. Still
+working in the evening? Start it again; the CronJob has had its run for
+the day, and Park's next run stops it again. A stop from anywhere, any
 hour: Actions → **Park** → *Run workflow*.
+
+## The 16:00 stop
+
+`infrastructure/kubernetes/park/cronjob.yaml`: namespace `vrsky-park`,
+service account `cluster-park`, CronJob `cluster-park` at `0 16 * * *`,
+`timeZone: Europe/Oslo`. The job logs in with AKS workload identity as the
+managed identity `vrsky-cluster-park`, reads the power state and, when it
+is Running, runs `az aks stop --no-wait` (the job runs on the nodes it is
+stopping, so it does not wait for them). The identity has one custom role,
+*VRSky cluster park*, on the cluster alone: read it and stop it, nothing
+else. `TestClusterParkCronJob` pins the schedule, the time zone, the
+concurrency policy, the deadlines below and that the job runs no other
+`az` command against any other cluster.
+
+The CronJob drops a run it could not start within ten minutes of 16:00. A
+cluster started the next morning would otherwise run the missed 16:00 job
+straight away and stop again.
+
+Unlike Park, the CronJob does not queue behind a deploy: GitHub's
+`production` concurrency group means nothing inside the cluster. A deploy
+or catch-up still rolling out at 16:00 is cut off by the stop; after the
+next start the Production check sees production behind `main` and runs
+Catch up, as after any stop.
+
+Did today's run work?
+
+```bash
+kubectl get jobs -n vrsky-park
+kubectl logs -n vrsky-park -l app=cluster-park --tail=20
+```
+
+### One-time setup (a human, with Owner on the subscription)
+
+Not applied by the deploy scripts. Creating a role and assigning it needs
+Owner or User Access Administrator.
+
+```bash
+SUB=8c020b54-b237-4d6e-82ba-190f6a415d1d
+
+# 0. OIDC issuer and workload identity. Both were on on 2026-10-27. Unless
+#    this prints "True  True", run the update below.
+az aks show -g vrsky-prod -n vrsky-prod \
+  --query '[oidcIssuerProfile.enabled, securityProfile.workloadIdentity.enabled]' -o tsv
+# az aks update -g vrsky-prod -n vrsky-prod --enable-oidc-issuer --enable-workload-identity
+
+# 1. The identity.
+az identity create -g vrsky-prod -n vrsky-cluster-park -l norwayeast
+
+# 2. Trust the CronJob's service account, and nothing else.
+az identity federated-credential create -g vrsky-prod --identity-name vrsky-cluster-park \
+  -n vrsky-park-cluster-park \
+  --issuer "$(az aks show -g vrsky-prod -n vrsky-prod --query oidcIssuerProfile.issuerUrl -o tsv)" \
+  --subject system:serviceaccount:vrsky-park:cluster-park \
+  --audiences api://AzureADTokenExchange
+
+# 3. A role that can read and stop a cluster, assigned on vrsky-prod only.
+az role definition create --role-definition "{
+  \"Name\": \"VRSky cluster park\",
+  \"Description\": \"Read and stop the vrsky-prod AKS cluster.\",
+  \"Actions\": [\"Microsoft.ContainerService/managedClusters/read\",
+                \"Microsoft.ContainerService/managedClusters/stop/action\"],
+  \"NotActions\": [],
+  \"AssignableScopes\": [\"/subscriptions/$SUB/resourceGroups/vrsky-prod\"]
+}"
+# A new role takes a minute or two to be usable; retry if this says it does not exist.
+az role assignment create \
+  --assignee-object-id "$(az identity show -g vrsky-prod -n vrsky-cluster-park --query principalId -o tsv)" \
+  --assignee-principal-type ServicePrincipal \
+  --role "VRSky cluster park" \
+  --scope "$(az aks show -g vrsky-prod -n vrsky-prod --query id -o tsv)"
+
+# 4. Apply the manifest with the identity's client id filled in, against
+#    the production cluster. Always apply it this way: applying the file as
+#    it is in the repo puts the placeholder back and the next run fails.
+az aks get-credentials -g vrsky-prod -n vrsky-prod
+CLIENT_ID=$(az identity show -g vrsky-prod -n vrsky-cluster-park --query clientId -o tsv)
+sed "s/REPLACE_WITH_CLUSTER_PARK_IDENTITY_CLIENT_ID/$CLIENT_ID/" \
+  infrastructure/kubernetes/park/cronjob.yaml | kubectl apply -f -
+kubectl get cronjob -n vrsky-park
+```
+
+The built-in *Azure Kubernetes Service Contributor Role* would also do,
+but it grants `Microsoft.ContainerService/managedClusters/*`: delete,
+scale, upgrade and the admin kubeconfig as well. The custom role grants
+the two actions the job uses.
+
+To try it, on an evening when the cluster may stop (it stops it):
+
+```bash
+kubectl create job --from=cronjob/cluster-park -n vrsky-park park-now
+kubectl logs -n vrsky-park job/park-now -f
+```
 
 ## Start
 
