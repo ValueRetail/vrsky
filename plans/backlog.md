@@ -67,7 +67,7 @@ Last updated 2026-10-27.
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
     spell it `docker-compose` rather than `docker compose`. Found in #367.
-19. **The file watcher can publish a half-written file**
+19. ~~**The file watcher can publish a half-written file**~~ (#374)
     (`src/cmd/file-consumer/service.go`, `watchDirectory`). A new name is
     read on the first poll that sees it, with no check that the writer is
     done, and once the name is known the finished file is never published.
@@ -79,6 +79,12 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
+21. **A watched file replaced under the same name is never published again**
+    (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
+    the name only: once `orders.csv` is published, a writer that overwrites
+    it or renames a new `orders.csv` over it is ignored, unless the name
+    disappeared for at least one poll in between. Decide whether a changed
+    size or mtime on a known name means a new file. Found during #374.
 
 ## Human
 

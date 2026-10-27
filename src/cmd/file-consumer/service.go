@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,10 @@ type fileConsumer struct {
 
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
+
+	// pollInterval is how often a watched directory is scanned; zero means
+	// defaultPollInterval. Tests shorten it.
+	pollInterval time.Duration
 
 	// Event subscribers: connectionId → list of channels
 	eventSubs   map[string][]chan FileEvent
@@ -140,7 +145,21 @@ type ActiveConnection struct {
 	TenantID     string
 	WatchDir     string
 	Cancel       context.CancelFunc
-	knownFiles   map[string]bool // all files seen in last scan
+
+	// knownFiles holds names that are done: the baseline taken at start and
+	// every name published (or failed) since. They are not ingested again
+	// while the name exists. pending holds names seen but not yet stable,
+	// with the size and mtime from the last poll (#374). Both are touched only
+	// by the watcher goroutine after startConnection returns.
+	knownFiles map[string]bool
+	pending    map[string]fileState
+}
+
+// fileState is what the watcher compares between polls to decide that the
+// writer has finished with a file.
+type fileState struct {
+	size    int64
+	modTime time.Time
 }
 
 // Configure wires dependencies and registers the HTTP endpoints the UI uses
@@ -390,13 +409,20 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	s.logger.Info("File watcher stopped", "connection_id", cmd.ConnectionID)
 }
 
-// watchDirectory polls for file additions and deletions only (no auto-processing).
-// Files are only ingested via explicit upload through the HTTP endpoint.
-func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection) {
-	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
-	logger.Info("Starting directory watch", "interval", "5s")
+// defaultPollInterval is how often a watched directory is scanned.
+const defaultPollInterval = 5 * time.Second
 
-	ticker := time.NewTicker(5 * time.Second)
+// watchDirectory polls the watch directory until ctx is cancelled and
+// publishes each new file once its writer has finished (pollOnce).
+func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection) {
+	interval := s.pollInterval
+	if interval <= 0 {
+		interval = defaultPollInterval
+	}
+	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
+	logger.Info("Starting directory watch", "interval", interval.String())
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// ac.knownFiles already holds the baseline startConnection took.
@@ -406,48 +432,94 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 			logger.Info("Directory watch stopped")
 			return
 		case <-ticker.C:
-			currentFiles := s.listFiles(ac.WatchDir)
-
-			// Detect new files and ingest them into the pipeline. Previously
-			// this only emitted a UI "added" event and never published the
-			// file's contents — so the directory-watch source silently did
-			// nothing downstream (#143).
-			for name := range currentFiles {
-				if ac.knownFiles[name] {
-					continue
-				}
-				logger.Info("File added", "file", name)
-				path := filepath.Join(ac.WatchDir, name)
-				env, size, streamed, ingErr := s.ingestWatchedFile(ctx, ac, name, path)
-				if ingErr != nil {
-					logger.Error("Failed to ingest detected file", "file", name, "error", ingErr)
-					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "error", Filename: name, Size: size, Message: ingErr.Error(),
-						Time: time.Now().UTC().Format(time.RFC3339),
-					})
-					continue
-				}
-				logger.Info("File ingested from watch dir", "file", name, "size", size, "streamed", streamed, "envelope_id", env.ID)
-				s.emitEvent(ac.ConnectionID, FileEvent{
-					Type: "added", Filename: name, Size: size,
-					Time: time.Now().UTC().Format(time.RFC3339),
-				})
-			}
-
-			// Detect deleted files
-			for name := range ac.knownFiles {
-				if !currentFiles[name] {
-					logger.Info("File deleted", "file", name)
-					s.emitEvent(ac.ConnectionID, FileEvent{
-						Type: "deleted", Filename: name,
-						Time: time.Now().UTC().Format(time.RFC3339),
-					})
-				}
-			}
-
-			ac.knownFiles = currentFiles
+			s.pollOnce(ctx, ac)
 		}
 	}
+}
+
+// pollOnce scans the watch directory once. A new file is published only when
+// its size and mtime are the same as at the previous poll, so a file still
+// being written is not read half-way. Until #374 it was read on the first poll
+// that saw its name, and the finished file was then never published. Temp
+// names are left alone until they are renamed to their final name.
+func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
+	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
+	if ac.knownFiles == nil {
+		ac.knownFiles = make(map[string]bool)
+	}
+	if ac.pending == nil {
+		ac.pending = make(map[string]fileState)
+	}
+
+	currentFiles := s.listFiles(ac.WatchDir)
+
+	// Detect new files and ingest them into the pipeline. Previously this only
+	// emitted a UI "added" event and never published the file's contents, so
+	// the directory-watch source silently did nothing downstream (#143).
+	for name := range currentFiles {
+		if ac.knownFiles[name] || isTempName(name) {
+			continue
+		}
+		path := filepath.Join(ac.WatchDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			// Gone or unreadable since the listing; look again next poll.
+			delete(ac.pending, name)
+			continue
+		}
+		now := fileState{size: info.Size(), modTime: info.ModTime()}
+		prev, seen := ac.pending[name]
+		if !seen || prev.size != now.size || !prev.modTime.Equal(now.modTime) {
+			ac.pending[name] = now
+			continue
+		}
+		delete(ac.pending, name)
+		ac.knownFiles[name] = true
+
+		logger.Info("File added", "file", name)
+		env, size, streamed, ingErr := s.ingestWatchedFile(ctx, ac, name, path)
+		if ingErr != nil {
+			logger.Error("Failed to ingest detected file", "file", name, "error", ingErr)
+			s.emitEvent(ac.ConnectionID, FileEvent{
+				Type: "error", Filename: name, Size: size, Message: ingErr.Error(),
+				Time: time.Now().UTC().Format(time.RFC3339),
+			})
+			continue
+		}
+		logger.Info("File ingested from watch dir", "file", name, "size", size, "streamed", streamed, "envelope_id", env.ID)
+		s.emitEvent(ac.ConnectionID, FileEvent{
+			Type: "added", Filename: name, Size: size,
+			Time: time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+
+	// Detect deleted files. A name that comes back later is new again.
+	for name := range ac.knownFiles {
+		if !currentFiles[name] {
+			logger.Info("File deleted", "file", name)
+			delete(ac.knownFiles, name)
+			s.emitEvent(ac.ConnectionID, FileEvent{
+				Type: "deleted", Filename: name,
+				Time: time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}
+	for name := range ac.pending {
+		if !currentFiles[name] {
+			delete(ac.pending, name)
+		}
+	}
+}
+
+// isTempName reports whether a file name looks like one a writer is still
+// filling and will rename when done: dotfiles, ~ prefixes, and .tmp or .part
+// suffixes in any case.
+func isTempName(name string) bool {
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "~") {
+		return true
+	}
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".tmp") || strings.HasSuffix(lower, ".part")
 }
 
 // listFiles returns a set of non-directory filenames in a directory.
