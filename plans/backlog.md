@@ -94,11 +94,11 @@ Last updated 2026-10-27.
     after the merge. Match paths the way Docker does (probably
     `github.com/moby/patternmatcher`) and check every Dockerfile, not only
     the UI's. Found in review of #369.
-23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+23. ~~**`ui/.dockerignore` is dead.**~~ (#380) Every image, the UI included, now builds
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
-24. **The docs tell people to copy a `.env.example` that doesn't exist.**
+24. ~~**The docs tell people to copy a `.env.example` that doesn't exist.**~~ (#381)
     `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
     say `cp .env.example .env`; there is no root `.env.example` (only
     `ui/.env.example`), and `docker-compose.yml` has defaults for every
@@ -152,14 +152,36 @@ Last updated 2026-10-27.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
+32. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+    sets `build.sourcemap: true`, so the image serves
+    `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
+    read the original TypeScript. Decide whether that's wanted; if not, turn
+    it off for the production build or upload the maps somewhere private.
+    Found in #380.
+33. **The PowerShell key generator in `docs/operator/windows.md` isn't
+    cryptographic.** It builds `ENCRYPTION_KEY` from `Get-Random`, which is
+    `System.Random`, not a CSPRNG. Use
+    `[System.Security.Cryptography.RandomNumberGenerator]` instead
+    (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
+    and say so next to the `openssl rand -hex 32` advice. Found in review of
+    #381.
+34. **No way to mount a Windows home folder for the file connectors.**
+    `docker-compose.yml` mounts `${HOME:-./data/input}` at
+    `${HOME:-/data/input}` for `file-consumer` and `file-producer`, the same
+    path on both sides. A Windows path can't be a target in the Linux
+    engine ("mount path must be absolute"), so setting `HOME` on Windows
+    breaks `make up-core`, and the stack falls back to `data/input`. A
+    proper fix needs a separate source and target (for example a host-path
+    variable mounted at a fixed Linux path, with `HOST_HOME` translating
+    editor paths), plus a check that a Unix-style shell's
+    `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
 35. **The other consumers have the start race #375 fixed in the file
     consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
     visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
-    check "already active" under `RLock`,
-    release it, do the slow work and insert later, while
-    `sdk.RestoreRunning` runs alongside the start-command handler. A start
-    command during boot restore can start a second poller for one
-    connection. Port the reservation from `src/cmd/file-consumer/service.go`
+    check "already active" under `RLock`, release it, do the slow work and
+    insert later, while `sdk.RestoreRunning` runs alongside the
+    start-command handler. A start command during boot restore can start a
+    second poller for one connection. Port the reservation from `src/cmd/file-consumer/service.go`
     (`reserveStart`/`activateStart`/`releaseStart`), or move it into the SDK
     so each consumer gets it once. Until then the comment on
     `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during

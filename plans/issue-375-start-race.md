@@ -145,9 +145,8 @@ stability rule, clock, `pending`/`knownFiles`) are not touched.
 - A test seam (`beforeStartWork`) in production code, nil outside tests.
 - A refused second start returns at once rather than waiting for or retrying
   after the first (backlog item 37).
-- Backlog numbers start at 35: #379 took 31, #382 is taking 32 and #384
-  33-34. They may need renumbering at merge time. Item 38 (test-only
-  changes rebuilding every image) was noticed on the way.
+- Backlog items 35-37 follow main's 34. Item 38 (test-only changes
+  rebuilding every image) was noticed on the way.
 
 ## Tests
 
