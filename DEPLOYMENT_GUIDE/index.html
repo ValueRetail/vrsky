@@ -3372,11 +3372,15 @@ and runs on <code>postgres:18-alpine</code>.</p>
   user with <code>ui/nginx.conf</code> and <code>ui/nginx.default.conf</code>.</li>
 </ul>
 <h3 id="build-context">Build context<a class="headerlink" href="#build-context" title="Permanent link">&para;</a></h3>
-<p>The context is always the repo root, so the root <code>.dockerignore</code> is the one
-that applies. It excludes everything, then lets back in <code>src/go.mod</code>,
-<code>src/go.sum</code>, <code>src/cmd</code>, <code>src/pkg</code>, <code>src/internal</code>, <code>ui</code> (without
-<code>node_modules</code> and <code>dist</code>) and <code>infrastructure/migrations</code>. <code>ui/.dockerignore</code>
-is not read by a repo-root build.</p>
+<p>The context is always the repo root, and the root <code>.dockerignore</code> is the
+only one in the repo. It excludes everything, then lets back in <code>src/go.mod</code>,
+<code>src/go.sum</code>, <code>src/cmd</code>, <code>src/pkg</code>, <code>src/internal</code>, <code>ui</code> and
+<code>infrastructure/migrations</code>. Under <code>ui</code> it still drops <code>node_modules</code>,
+<code>dist</code>, test coverage, <code>.env*</code> files, logs and editor files. A plain
+<code>.dockerignore</code> under <code>ui/</code> or <code>src/</code> is ignored. BuildKit does read a
+<code>&lt;Dockerfile&gt;.dockerignore</code> next to the Dockerfile (for example
+<code>ui/Dockerfile.dockerignore</code>) instead of the root file, so don't add one
+unless it repeats the root allowlist.</p>
 <hr />
 <h2 id="cicd-pipeline">CI/CD pipeline<a class="headerlink" href="#cicd-pipeline" title="Permanent link">&para;</a></h2>
 <p><code>.github/workflows/build-push.yml</code> runs on pushes to <code>main</code>, <code>develop</code> and
