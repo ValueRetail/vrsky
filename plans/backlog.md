@@ -38,13 +38,25 @@ Last updated 2026-10-27.
     (`docker-build`, `docker-push`, `run`, `e2e-test` and the `*-consumer`
     ones) are missing from `src/Makefile`, and root `make help` misses
     `up-core`, `up-core-remote` and `down-core`.
-13. **`TestFileConsumer_WatchRoundTrip` looks flaky** (`src/cmd/file-consumer`).
+13. ~~**`TestFileConsumer_WatchRoundTrip` looks flaky**~~ (#362) (`src/cmd/file-consumer`).
     It failed once in a full `go test -race ./...` ("no matching envelope
     within 12s") and passed alone. Make it deterministic.
 14. **Fix the stale comment on `messaging.MainRetention`**
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
+15. **The file watcher can publish a half-written file**
+    (`src/cmd/file-consumer/service.go`, `watchDirectory`). A new name is
+    read on the first poll that sees it, with no check that the writer is
+    done, and once the name is known the finished file is never published.
+    Wait until size and mtime are unchanged across two polls (or skip
+    dotfiles and temp names) before ingesting. Found during #362.
+16. **Two starts for one file connection can race**
+    (`src/cmd/file-consumer/service.go`, `startConnection`). The "already
+    active" check and the insert are separate lock sections, and the boot
+    restore runs alongside the start-command handler, so a start command
+    arriving during restore could start a second watcher for the same
+    connection. Check and insert under one lock. Found during #362.
 
 ## Human
 
