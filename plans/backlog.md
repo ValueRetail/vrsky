@@ -152,9 +152,10 @@ Last updated 2026-10-27.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
-32. **The other consumers have the start race #375 fixed in the file
+35. **The other consumers have the start race #375 fixed in the file
     consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
-    visma and business-central each check "already active" under `RLock`,
+    visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
+    check "already active" under `RLock`,
     release it, do the slow work and insert later, while
     `sdk.RestoreRunning` runs alongside the start-command handler. A start
     command during boot restore can start a second poller for one
@@ -163,14 +164,14 @@ Last updated 2026-10-27.
     so each consumer gets it once. Until then the comment on
     `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during
     the scan is harmless holds only for the file consumer. Found during #375.
-33. **A stop just after a file connection becomes active can leave the
+36. **A stop just after a file connection becomes active can leave the
     database saying `running`** (`src/cmd/file-consumer/service.go`,
     `startConnection`). The `running` status write comes after the
     connection is in `activeConnections`. A stop landing in between cancels
     the watcher and writes `stopped`, then the start writes `running`. Older
     than #375, which closed the same gap for a stop that lands earlier in
     the start. Found during #375.
-34. **A start refused while another start is in flight is lost if that one
+37. **A start refused while another start is in flight is lost if that one
     fails** (`src/cmd/file-consumer/service.go`, `startConnection`). Since
     #375 a second start for a connection that is already starting returns
     at once. If the first then fails (say a transient database error during
@@ -178,6 +179,15 @@ Last updated 2026-10-27.
     retried and the connection stays down until someone starts it again.
     A "start again" flag on the reservation would cover it. Found by the
     test author on #375.
+38. **A test-only change rebuilds every Go image**
+    (`infrastructure/azure/affected.sh`, the `src/pkg/*` case around line
+    36). Any change under `src/pkg/`, `_test.go` files included, marks all
+    Go images as affected, so a PR that only adds a test (#379's guard test,
+    for one) rebuilds about 37 images in ACR and restarts every connector
+    whose image digest changed. Skip `_test.go` files (and probably
+    `testdata/`) there and in the `src/cmd/*` case. The script is under
+    `infrastructure/azure/**`, so the fix is a PR labelled
+    `agent:needs-human`, not an agent merge. Found during #375.
 
 ## Human
 

@@ -127,14 +127,14 @@ stability rule, clock, `pending`/`knownFiles`) are not touched.
 - A start that panics part-way: the deferred release still runs.
 - Not fixed here, pre-existing: a stop that lands after `activateStart` but
   before the `running` write leaves the database saying `running` with no
-  watcher. Backlog item 33.
+  watcher. Backlog item 36.
 - The same check-then-insert shape is in the other command-driven consumers
-  (db, api, salesforce, cloud-storage, sftp, ...). Out of scope; backlog
-  item 32.
+  (db, api, salesforce, cloud-storage, sftp, kafka, rabbitmq, ...). Out of
+  scope; backlog item 35.
 - New with this change (the test author spotted it): a start refused because
   another is in flight is dropped, not queued. If the first then fails, the
   connection stays down until the next start. Before, the second start ran
-  anyway, at the price of the double watcher. Backlog item 34.
+  anyway, at the price of the double watcher. Backlog item 37.
 
 ## Decisions
 
@@ -144,9 +144,10 @@ stability rule, clock, `pending`/`knownFiles`) are not touched.
 - Stop during a start wins and does not write status (above).
 - A test seam (`beforeStartWork`) in production code, nil outside tests.
 - A refused second start returns at once rather than waiting for or retrying
-  after the first (backlog item 34).
-- Backlog numbers start at 32 because #379 is taking 31; they may need
-  renumbering at merge time.
+  after the first (backlog item 37).
+- Backlog numbers start at 35: #379 took 31, #382 is taking 32 and #384
+  33-34. They may need renumbering at merge time. Item 38 (test-only
+  changes rebuilding every image) was noticed on the way.
 
 ## Tests
 
@@ -168,6 +169,8 @@ record, not by map entries, since the old code overwrote the entry.
   start succeeds and publishes once.
 - `TestStartRace_StopDuringStartWins`
 - `TestStartRace_StartAfterStopWhileAbandonedStartInFlight`
+- `TestStartRace_AbandonedStartDoesNotFreeAnotherStartsClaim` (added after
+  the second review, see below)
 
 ## Verification
 
@@ -182,9 +185,17 @@ From `src/`:
 ## Review
 
 A fresh reviewer approved with no must-fix findings. Nits taken: the PR says
-plainly that a refused start is now dropped (item 34), and item 32 notes
+plainly that a refused start is now dropped (item 37), and item 35 notes
 that the "harmless" comment on `RestoreRunning` only holds for the file
-consumer until the other consumers get the same fix. Not taken: a test for
-the ownership check in `releaseStart` (a mutant that deletes without
-checking survives); it needs a three-start interleaving and the case it
-guards is a stop-then-start during a start that then fails.
+consumer until the other consumers get the same fix. The first reviewer
+also noted that a mutant of `releaseStart` that deletes without checking it
+owns the claim survived the tests.
+
+A second reviewer showed that mutant is reachable in production and ends in
+two watchers: command A is held in its slow part, a stop takes A's claim,
+restore B claims the connection and is held, A gives up and (in the mutant)
+drops B's claim, and command C then starts while B is still in flight; B
+starts a second watcher when it finishes.
+`TestStartRace_AbandonedStartDoesNotFreeAnotherStartsClaim` drives that
+order with two `beforeStartWork` gates. It passes on the fix and fails the
+mutant with "2 envelopes for three.json, want exactly 1".

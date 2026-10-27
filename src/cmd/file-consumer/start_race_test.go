@@ -601,3 +601,74 @@ func TestStartRace_StartAfterStopWhileAbandonedStartInFlight(t *testing.T) {
 		t.Errorf("%d watchers started, want 1", n)
 	}
 }
+
+// A start abandoned by a stop must free only its own claim. The order that
+// matters: command A is held in its slow part, a stop takes A's claim, restore
+// B claims the connection and is held, A is released and gives up, then
+// command C arrives while B is still in flight. If A's give-up dropped B's
+// claim, C would start a watcher and B would start a second one when released.
+func TestStartRace_AbandonedStartDoesNotFreeAnotherStartsClaim(t *testing.T) {
+	f := newRaceFixture(t)
+
+	// Hold the first two starts that reach the window, each on its own gate;
+	// any later start passes straight on.
+	enteredA, releaseA := make(chan struct{}), make(chan struct{})
+	enteredB, releaseB := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	f.c.beforeStartWork = func(string) {
+		var entered, release chan struct{}
+		switch calls.Add(1) {
+		case 1:
+			entered, release = enteredA, releaseA
+		case 2:
+			entered, release = enteredB, releaseB
+		default:
+			return
+		}
+		close(entered)
+		select {
+		case <-release:
+		case <-time.After(raceWaitStep):
+		}
+	}
+	released := false
+	releaseAll := func() {
+		if !released {
+			released = true
+			close(releaseB)
+		}
+	}
+	t.Cleanup(releaseAll)
+
+	doneA := make(chan struct{})
+	go func() { defer close(doneA); f.command() }()
+	waitDone(t, enteredA, "command A reaching the start window")
+
+	f.c.handleStopCommand(f.stopCmd())
+
+	doneB := make(chan struct{})
+	go func() { defer close(doneB); f.restore() }()
+	waitDone(t, enteredB, "restore B reaching the start window")
+
+	close(releaseA)
+	waitDone(t, doneA, "abandoned command A")
+	if f.c.getActiveConnection(raceConnID) != nil {
+		t.Fatal("connection active after the abandoned start returned, before B finished")
+	}
+
+	f.command() // C, while B still holds the claim
+
+	releaseAll()
+	waitDone(t, doneB, "restore B after release")
+
+	if f.c.getActiveConnection(raceConnID) == nil {
+		t.Fatal("connection not active after restore B finished")
+	}
+	if _, running, _ := f.fdb.counts(); running != 1 {
+		t.Errorf("status running written %d times, want 1", running)
+	}
+	f.requireOneWatcherPublishingOnce("after three overlapping starts", "three.json")
+	if n := f.logs.count(watchStartedMsg); n != 1 {
+		t.Errorf("%d watchers started, want 1", n)
+	}
+}
