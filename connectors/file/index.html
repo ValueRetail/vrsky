@@ -1486,6 +1486,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#files-dropped-into-the-watched-folder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files dropped into the watched folder
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2378,6 +2395,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#files-dropped-into-the-watched-folder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files dropped into the watched folder
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2436,6 +2470,10 @@
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="files-dropped-into-the-watched-folder">Files dropped into the watched folder<a class="headerlink" href="#files-dropped-into-the-watched-folder" title="Permanent link">&para;</a></h3>
+<p>The folder is checked every 5 seconds. A new file is published once its size and modification time have not changed between two checks, so it goes into the pipeline 5–10 seconds after it lands. A file that is still being written waits until the writer stops.</p>
+<p>Names that start with <code>.</code> or <code>~</code>, or end in <code>.tmp</code> or <code>.part</code> (in any case), are never ingested. Upload under such a name and rename the file to its final name when the upload is done; the final name is then published once, complete. A writer that pauses for longer than a check partway through a file can still have it published early, so renaming into place is the safe way to deliver large files.</p>
+<p>Files already in the folder when the pipeline starts are not ingested. That includes a file that landed in the last few seconds before a stop, restart or deploy and had not been published yet: it may be skipped. Copy it in again under a new name once the pipeline is running; overwriting it under the same name is not picked up.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A producer node writes one file per incoming message to the configured directory.</p>
 <p>Config reference:</p>
