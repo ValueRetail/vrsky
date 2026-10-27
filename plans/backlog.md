@@ -52,14 +52,14 @@ Last updated 2026-10-27.
     `docker-build-filter`/`-converter`, none of which exist any more. Point
     them at what builds images now, or drop the sections. Found in review of
     #365.
-16. **`make docker-build-ui` can't build the UI** (`src/Makefile`). It runs
+16. ~~**`make docker-build-ui` can't build the UI**~~ (#369) (`src/Makefile`). It runs
     `docker build -t vrsky/ui:latest ../ui`, so the build context is `ui/`,
     but `ui/Dockerfile` copies `ui/...` from the repo root. It fails with
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
     Docker Hub `vrsky/`, which nothing uses. Fix the context or drop both
     targets (and the root forwards). Found in #367.
-17. **The `ui-prod` service in `docker-compose.ui.yml` has the same broken
-    context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
+17. ~~**The `ui-prod` service in `docker-compose.ui.yml` has the same broken
+    context**~~ (#370) (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
 18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
@@ -79,12 +79,39 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
-21. **A watched file replaced under the same name is never published again**
+21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+    non-root user and can't write `/var/run/nginx.pid` (`Permission
+    denied`). Production avoids it with an emptyDir at `/var/run`
+    (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
+    (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
+    the image can write, would make it run. Found in #370.
+22. **The Dockerfile guard test doesn't apply `.dockerignore`**
+    (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
+    COPY/ADD source in `ui/Dockerfile` exists under the build context, but
+    not that the root `.dockerignore` lets it through. Changing `!ui` to
+    `!ui/src` still passes the guard while `COPY ui/package*.json` would
+    fail, and the first place that shows up is a failed ACR build on main
+    after the merge. Match paths the way Docker does (probably
+    `github.com/moby/patternmatcher`) and check every Dockerfile, not only
+    the UI's. Found in review of #369.
+23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+    with the repo root as context, so Docker reads only the root
+    `.dockerignore`. Delete it, or fold anything it still says into the
+    root file. Found in review of #369.
+24. **A watched file replaced under the same name is never published again**
     (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
     the name only: once `orders.csv` is published, a writer that overwrites
     it or renames a new `orders.csv` over it is ignored, unless the name
     disappeared for at least one poll in between. Decide whether a changed
     size or mtime on a known name means a new file. Found during #374.
+25. **Files still settling at a stop or restart are never published**
+    (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
+    taken at start counts every name in the directory as already there, so
+    a file that landed before a stop or restart but had not been published
+    yet is skipped for good. That was true before #374 too, but the window
+    has grown from at most 5 s to at most 10 s now that a file needs two
+    unchanged polls. Persisting what was published, or treating files newer
+    than the last stop as new, would close it. Found in review of #374.
 
 ## Human
 

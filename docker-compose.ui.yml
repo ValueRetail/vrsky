@@ -24,8 +24,8 @@ services:
 
   ui-prod:
     build:
-      context: ./ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ui/Dockerfile
       target: nginx
     container_name: vrsky-ui-prod
     ports:

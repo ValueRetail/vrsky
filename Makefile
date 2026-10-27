@@ -1,4 +1,4 @@
-.PHONY: help build build-agent clean test test-db lint lint-tenant lint-connector lint-openapi fmt vet mod-tidy mod-verify info docker-build-ui docker-push-ui up-core up-core-remote down-core
+.PHONY: help build build-agent clean test test-db lint lint-tenant lint-connector lint-openapi fmt vet mod-tidy mod-verify info docker-build-ui up-core up-core-remote down-core
 
 BLUE=\033[0;34m
 GREEN=\033[0;32m
@@ -56,9 +56,6 @@ info:
 
 docker-build-ui:
 	@$(MAKE) -C src docker-build-ui
-
-docker-push-ui:
-	@$(MAKE) -C src docker-push-ui
 
 # The smallest compose set that runs a pipeline end to end: control plane,
 # NATS, the generic webhook/http/file connectors, filter + converter, the
