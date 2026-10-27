@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
@@ -45,16 +46,23 @@ func (p *recordingProbe) forName(name string) []*envelope.Envelope {
 	return out
 }
 
+// watchInterval is the poll interval the fixture sets explicitly, so the tests
+// do not depend on defaultPollInterval.
+const watchInterval = 5 * time.Second
+
 // watchFixture is a consumer wired to a recording probe plus one connection
 // watching a temp dir. Everything goes inline (no payload store, large
 // inlineMax) and db is nil, so the last_payload write is skipped. Polls happen
-// only when the test calls poll(); nothing runs in the background.
+// only when the test calls poll() or pollAfter(); nothing runs in the
+// background. The watcher's clock is a fake the fixture owns and only those two
+// methods move it, so no test sleeps.
 type watchFixture struct {
 	t     *testing.T
 	dir   string
 	probe *recordingProbe
 	c     *fileConsumer
 	ac    *ActiveConnection
+	clock time.Time
 }
 
 // newWatchFixture creates the watch dir, lets setup put files in it, then takes
@@ -66,10 +74,14 @@ func newWatchFixture(t *testing.T, setup func(dir string)) *watchFixture {
 		setup(dir)
 	}
 	probe := &recordingProbe{}
+	f := &watchFixture{t: t, dir: dir, probe: probe,
+		clock: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
 	c := &fileConsumer{
-		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		publish:   probe.publish,
-		inlineMax: 1 << 20,
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		publish:      probe.publish,
+		inlineMax:    1 << 20,
+		pollInterval: watchInterval,
+		now:          func() time.Time { return f.clock },
 	}
 	ac := &ActiveConnection{
 		ConnectionID: "conn-watch",
@@ -78,11 +90,22 @@ func newWatchFixture(t *testing.T, setup func(dir string)) *watchFixture {
 		Cancel:       func() {},
 		knownFiles:   c.listFiles(dir),
 	}
-	return &watchFixture{t: t, dir: dir, probe: probe, c: c, ac: ac}
+	f.c, f.ac = c, ac
+	return f
 }
 
+// poll means "one poll interval has passed, then poll": the regular cadence of
+// the watch loop.
 func (f *watchFixture) poll() {
 	f.t.Helper()
+	f.pollAfter(watchInterval)
+}
+
+// pollAfter advances the watcher's clock by d and polls once. A d smaller than
+// watchInterval models a poll that comes early, e.g. right behind a slow one.
+func (f *watchFixture) pollAfter(d time.Duration) {
+	f.t.Helper()
+	f.clock = f.clock.Add(d)
 	f.c.pollOnce(context.Background(), f.ac)
 }
 
@@ -337,4 +360,143 @@ func TestPollOnce_DeletedAndRecreatedFilePublishedAgain(t *testing.T) {
 
 	f.poll()
 	f.requireTotal("after a further poll", 2)
+}
+
+// Pins the mtime half of the stability check (#374 review): a rewrite that
+// keeps the size the same (an in-place overwrite, a fixed-width record) must
+// restart the wait. Only the mtime moves here, by a full hour so filesystem
+// timestamp granularity cannot hide it; a size-only check publishes on the
+// second poll and fails this test.
+func TestPollOnce_MtimeChangeRestartsWait(t *testing.T) {
+	f := newWatchFixture(t, nil)
+	content := []byte(`{"fixed":"width"}`)
+	f.write("same-size.json", content)
+
+	f.poll()
+	f.requireTotal("first poll that sees the file", 0)
+
+	info, err := os.Stat(f.path("same-size.json"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	moved := info.ModTime().Add(time.Hour)
+	if err := os.Chtimes(f.path("same-size.json"), moved, moved); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	after, err := os.Stat(f.path("same-size.json"))
+	if err != nil {
+		t.Fatalf("stat after chtimes: %v", err)
+	}
+	if after.Size() != info.Size() || after.ModTime().Equal(info.ModTime()) {
+		t.Fatalf("setup: want same size and a new mtime, got size %d->%d mtime %v->%v",
+			info.Size(), after.Size(), info.ModTime(), after.ModTime())
+	}
+
+	f.poll()
+	f.requireTotal("poll after the mtime moved (size unchanged)", 0)
+
+	f.poll()
+	f.requirePublishedOnce("poll with size and mtime unchanged", "same-size.json", content)
+
+	f.poll()
+	f.requireTotal("after a further poll", 1)
+}
+
+// Pins the slow-poll regression from the #374 review: a poll that came right
+// behind a slow one saw a just-sighted file again a few ms later, took it as
+// stable and published it truncated. Stability needs a full poll interval on
+// the watcher's clock since the first sighting. A too-soon poll must neither
+// publish nor reset that first sighting, and a write in between must still
+// restart the wait from the poll that sees it.
+func TestPollOnce_TooSoonPollDoesNotPublish(t *testing.T) {
+	part1 := []byte(`{"rows":[1,2,`)
+	part2 := []byte(`3,4]}`)
+	full := append(append([]byte(nil), part1...), part2...)
+
+	type step struct {
+		desc      string
+		advance   time.Duration // clock step before this poll
+		appendNow bool          // append part2 before this poll
+		wantTotal int
+	}
+	cases := []struct {
+		name    string
+		content []byte // what must finally be published
+		steps   []step
+	}{
+		{
+			name:    "poll a few ms behind the first sighting",
+			content: part1,
+			steps: []step{
+				{desc: "first sighting at t", advance: watchInterval, wantTotal: 0},
+				{desc: "t+5ms, unchanged", advance: 5 * time.Millisecond, wantTotal: 0},
+				{desc: "t+interval+5ms, unchanged", advance: watchInterval, wantTotal: 1},
+			},
+		},
+		{
+			name:    "first sighting kept: exactly t+interval publishes",
+			content: part1,
+			steps: []step{
+				{desc: "first sighting at t", advance: watchInterval, wantTotal: 0},
+				{desc: "t+10ms, unchanged", advance: 10 * time.Millisecond, wantTotal: 0},
+				{desc: "t+interval, unchanged", advance: watchInterval - 10*time.Millisecond, wantTotal: 1},
+			},
+		},
+		{
+			name:    "several too-soon polls in a row",
+			content: part1,
+			steps: []step{
+				{desc: "first sighting at t", advance: watchInterval, wantTotal: 0},
+				{desc: "t+1ms", advance: time.Millisecond, wantTotal: 0},
+				{desc: "t+2ms", advance: time.Millisecond, wantTotal: 0},
+				{desc: "t+interval-1ms", advance: watchInterval - 3*time.Millisecond, wantTotal: 0},
+				{desc: "t+interval", advance: time.Millisecond, wantTotal: 1},
+			},
+		},
+		{
+			name:    "write seen by the too-soon poll restarts the wait from it",
+			content: full,
+			steps: []step{
+				{desc: "first sighting of part 1 at t", advance: watchInterval, wantTotal: 0},
+				{desc: "t+10ms sees part 2", advance: 10 * time.Millisecond, appendNow: true, wantTotal: 0},
+				{desc: "t+interval: only interval-10ms since the change", advance: watchInterval - 10*time.Millisecond, wantTotal: 0},
+				{desc: "t+10ms+interval", advance: 10 * time.Millisecond, wantTotal: 1},
+			},
+		},
+		{
+			name:    "write after a too-soon poll restarts the wait",
+			content: full,
+			steps: []step{
+				{desc: "first sighting of part 1 at t", advance: watchInterval, wantTotal: 0},
+				{desc: "t+10ms, unchanged", advance: 10 * time.Millisecond, wantTotal: 0},
+				{desc: "t+interval sees part 2", advance: watchInterval - 10*time.Millisecond, appendNow: true, wantTotal: 0},
+				{desc: "t+interval+10ms, too soon after the change", advance: 10 * time.Millisecond, wantTotal: 0},
+				{desc: "t+2*interval", advance: watchInterval - 10*time.Millisecond, wantTotal: 1},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchFixture(t, nil)
+			f.write("slow.json", part1)
+			for _, s := range tc.steps {
+				if s.appendNow {
+					f.appendTo("slow.json", part2)
+				}
+				f.pollAfter(s.advance)
+				f.requireTotal(s.desc, s.wantTotal)
+			}
+			f.requirePublishedOnce("end", "slow.json", tc.content)
+			if !bytes.Equal(tc.content, part1) {
+				for _, env := range f.probe.published() {
+					if bytes.Equal(env.Payload, part1) {
+						t.Fatalf("published the half-written file: %q", env.Payload)
+					}
+				}
+			}
+
+			f.poll()
+			f.requireTotal("after a further poll", 1)
+		})
+	}
 }

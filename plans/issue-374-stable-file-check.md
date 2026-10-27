@@ -33,8 +33,9 @@ whoever writes it has finished, and publishes the complete file exactly once.
   for the round-trip tests, see Risks)
 - a new `src/cmd/file-consumer/watch_test.go` (the test author's)
 - `plans/backlog.md`
+- `docs/connectors/file.md` (added in review round 1)
 
-Nothing outside `src/cmd/file-consumer`. Tenant path resolution, directory
+No code outside `src/cmd/file-consumer`. Tenant path resolution, directory
 creation and its permissions, `ingestWatchedFile` and the streaming path stay
 as they are.
 
@@ -112,3 +113,37 @@ From `src/`:
 - Mutation: ingest on first sight (drop the stability check) and the
   two-part test must fail; drop the temp-name skip and the rename test must
   fail. Restore and re-run.
+
+## Review round 1
+
+The reviewer found that the stability window could collapse. With
+`time.NewTicker`, a poll slower than the interval (a big file being
+published) was followed at once by the next tick, so a file stat'ed late in
+the slow poll was stat'ed again a few milliseconds later, looked stable, and
+went out truncated. They reproduced it through the real `watchDirectory`
+every time.
+
+Changes:
+- `watchDirectory` uses a timer re-armed after each `pollOnce`, so polls
+  are at least one interval apart.
+- `pollOnce` also requires at least one interval on the watcher's clock
+  between the first sighting of a size and mtime and the look that publishes
+  it. A look that comes too soon keeps the first sighting. The clock is a
+  field (`now`, nil means `time.Now`) so tests drive it. This check alone
+  closes the bug, whatever the loop does; the timer keeps normal polls from
+  bunching up.
+- New tests (separate author): mtime moved with `os.Chtimes` at the same
+  size restarts the wait; a poll a few ms behind the first sighting does not
+  publish, the first sighting survives it, and a write in between restarts
+  the wait. The fixture's `poll()` now means "one interval passed, then
+  poll" on a fake clock.
+- `docs/connectors/file.md` describes the skipped names, the 5–10 s delay and
+  rename-into-place. A skipped temp name is logged at debug level.
+- Backlog items renumbered to follow main (24, 25); 25 is the reviewer's
+  point that files still settling at a stop or restart land in the new
+  baseline and are never published.
+
+Not covered by a test: swapping the timer back to a ticker. With the clock
+check in place that no longer publishes a truncated file, so a deterministic
+test cannot tell the two apart, and a real-time one would need a writer that
+keeps pace under `-race -count=20`.
