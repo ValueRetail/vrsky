@@ -73,7 +73,7 @@ Last updated 2026-10-27.
     done, and once the name is known the finished file is never published.
     Wait until size and mtime are unchanged across two polls (or skip
     dotfiles and temp names) before ingesting. Found during #362.
-20. **Two starts for one file connection can race**
+20. ~~**Two starts for one file connection can race**~~ (#375)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The "already
     active" check and the insert are separate lock sections, and the boot
     restore runs alongside the start-command handler, so a start command
@@ -175,6 +175,41 @@ Last updated 2026-10-27.
     variable mounted at a fixed Linux path, with `HOST_HOME` translating
     editor paths), plus a check that a Unix-style shell's
     `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
+35. **The other consumers have the start race #375 fixed in the file
+    consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
+    visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
+    check "already active" under `RLock`, release it, do the slow work and
+    insert later, while `sdk.RestoreRunning` runs alongside the
+    start-command handler. A start command during boot restore can start a
+    second poller for one connection. Port the reservation from `src/cmd/file-consumer/service.go`
+    (`reserveStart`/`activateStart`/`releaseStart`), or move it into the SDK
+    so each consumer gets it once. Until then the comment on
+    `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during
+    the scan is harmless holds only for the file consumer. Found during #375.
+36. **A stop just after a file connection becomes active can leave the
+    database saying `running`** (`src/cmd/file-consumer/service.go`,
+    `startConnection`). The `running` status write comes after the
+    connection is in `activeConnections`. A stop landing in between cancels
+    the watcher and writes `stopped`, then the start writes `running`. Older
+    than #375, which closed the same gap for a stop that lands earlier in
+    the start. Found during #375.
+37. **A start refused while another start is in flight is lost if that one
+    fails** (`src/cmd/file-consumer/service.go`, `startConnection`). Since
+    #375 a second start for a connection that is already starting returns
+    at once. If the first then fails (say a transient database error during
+    boot restore), the second start, which might have succeeded, is not
+    retried and the connection stays down until someone starts it again.
+    A "start again" flag on the reservation would cover it. Found by the
+    test author on #375.
+38. **A test-only change rebuilds every Go image**
+    (`infrastructure/azure/affected.sh`, the `src/pkg/*` case around line
+    36). Any change under `src/pkg/`, `_test.go` files included, marks all
+    Go images as affected, so a PR that only adds a test (#379's guard test,
+    for one) rebuilds about 37 images in ACR and restarts every connector
+    whose image digest changed. Skip `_test.go` files (and probably
+    `testdata/`) there and in the `src/cmd/*` case. The script is under
+    `infrastructure/azure/**`, so the fix is a PR labelled
+    `agent:needs-human`, not an agent merge. Found during #375.
 
 ## Human
 
