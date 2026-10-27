@@ -6,9 +6,21 @@ How agents pick up issues, branch, review and merge here is in
 
 VRSky is a multi-tenant integration platform: Go services on NATS JetStream
 and PostgreSQL, a React UI, running on AKS in Azure. Production is
-https://vrsky.valueretail.no. Payloads are not stored by the platform; they
-move through JetStream, and large ones go to object storage with only a
-reference on the bus (`src/pkg/claimcheck`, `src/pkg/objectstore`).
+https://vrsky.valueretail.no.
+
+Payloads move through JetStream, and large ones go to object storage with
+only a reference on the bus (`src/pkg/claimcheck`, `src/pkg/objectstore`).
+What the platform does keep:
+
+- each consumer writes the latest payload of a connection to
+  `connections.last_payload` (at most every 30 seconds, `src/pkg/sdk/lifecycle.go`)
+  so the UI can show sample data;
+- a message that fails every delivery attempt lands in the DLQ stream and
+  stays there for 7 days (`messaging.DLQRetention`);
+- a large payload offloaded to object storage stays for 8 days
+  (`messaging.SpillRetention`), a day longer than the DLQ;
+- acked messages leave the main streams at once; unacked ones are dropped
+  after 72 hours at the latest (`messaging.MainRetention`).
 
 ## Layout
 
@@ -17,7 +29,8 @@ reference on the bus (`src/pkg/claimcheck`, `src/pkg/objectstore`).
 | `src/` | The Go module `github.com/ValueRetail/vrsky`. All Go commands run from here. |
 | `src/cmd/<service>/` | One directory per binary, most with their own `Dockerfile`: `management-api` (control plane and REST API), `data-filter` and `data-converter`, the connectors (`webhook-consumer`, `http-producer`, `business-central-*`, `sitoo-*`, `sftp-*`, …), `remote-agent` (the gateway) and `vrsky-agent` (the agent that runs on customer machines), and the linters `lint-tenant-filter`, `lint-connector`, `lint-openapi`. |
 | `src/pkg/` | Shared packages. The ones you meet first: `sdk` (the connector SDK; `sdk/harness` runs connectors against an embedded JetStream), `messaging` (NATS, streams, DLQ), `managementapi` (the API, the pipeline validator and the guard tests), `orchestrator`, `auth`, `testdb`. |
-| `src/test/` | Contract and integration tests (`-tags=integration`). |
+| `src/internal/config/` | An old environment-config loader. Nothing in the module imports it. |
+| `src/test/` | `contract/` is the shared machinery for the connector contract tests, and `fixtures/` holds their recorded payloads. The `*_contract_test.go` files themselves live in the connector `cmd/` directories and run in a plain `go test`. Only `integration/` is behind `-tags=integration`. |
 | `ui/` | The admin UI: React 18, TypeScript, Vite, Tailwind, Vitest. |
 | `infrastructure/migrations/` | SQL migrations. The management API applies them when it starts. |
 | `infrastructure/kubernetes/` | Manifests and install scripts for the cluster: core services, connectors, monitoring, ingress, NATS, Postgres, MinIO. |
@@ -46,11 +59,13 @@ go test -race ./...           # CI runs go test -v -race -cover ./...
 make lint-tenant              # see "Tenant isolation"
 make lint                     # lint-tenant, lint-connector, lint-openapi and golangci-lint
 govulncheck ./...             # when dependencies change; the nightly scan runs it too
+make build-agent              # cross-compiles vrsky-agent for Windows, Linux and macOS into ./bin
 ```
 
-`make help` lists every target. The `Makefile` at the repo root forwards
-`build`, `test`, `lint`, `fmt` and `vet` to `src/`, and owns the local-stack
-targets (`up-core` and friends, below).
+`make help` in `src/` lists the targets there. The `Makefile` at the repo
+root forwards `build`, `test`, `lint`, `fmt` and `vet` to `src/`, and owns
+the local-stack targets (`up-core` and friends, below), which its own
+`make help` does not show.
 
 New management-API routes need an entry in
 `src/pkg/managementapi/openapi_registry.go`; `make lint-openapi` fails
@@ -91,6 +106,38 @@ From `src/`:
 ```bash
 VRSKY_TEST_LIVE_APIS=1 go test ./pkg/io/ -run TestRealAPI -v
 ```
+
+### Connector integration tests
+
+`.github/workflows/integration.yml` runs on every PR. It starts the test
+brokers from `docker-compose.yml` (`minio-test`, `minio-init`,
+`azurite-test`, `fake-gcs-test`, `sftp-test`, `kafka-test`,
+`rabbitmq-test`) and runs the `-tags=integration` tests in
+`pkg/objectstore`, `cmd/sftp-consumer`, `cmd/kafka-consumer` and
+`cmd/rabbitmq-consumer`. Each test skips unless its `*_TEST_*` variable is
+set, so a plain `go test` passes over them.
+
+Kafka and RabbitMQ publish no host ports, and fake-gcs advertises itself
+as `fake-gcs-test:4443`, so run the tests the way CI does: in a container
+on `vrsky-network`. From the repo root:
+
+```bash
+docker compose up -d minio-test minio-init azurite-test fake-gcs-test sftp-test kafka-test rabbitmq-test
+docker run --rm --network vrsky-network -v "$PWD/src":/src -w /src \
+  -e S3_TEST_ENDPOINT=http://minio-test:9000 -e S3_TEST_ACCESS_KEY=minioadmin -e S3_TEST_SECRET_KEY=minioadmin \
+  -e AZURE_TEST_CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite-test:10000/devstoreaccount1;" \
+  -e GCS_TEST_EMULATOR_HOST=fake-gcs-test:4443 \
+  -e SFTP_TEST_HOST=sftp-test -e SFTP_TEST_PORT=22 \
+  -e KAFKA_TEST_BROKER=kafka-test:9092 \
+  -e RABBITMQ_TEST_URL=amqp://guest:guest@rabbitmq-test:5672/ \
+  -e GOFLAGS=-buildvcs=false \
+  golang:1.26 go test -tags=integration -count=1 ./pkg/objectstore/... ./cmd/sftp-consumer/... ./cmd/kafka-consumer/... ./cmd/rabbitmq-consumer/...
+docker compose stop minio-test azurite-test fake-gcs-test sftp-test kafka-test rabbitmq-test
+```
+
+The Azure key is Azurite's published development key, not a secret. Give
+the brokers a few seconds after `up` (Kafka is the slowest); CI waits for
+each port before it starts.
 
 ### Guard tests
 
@@ -187,16 +234,28 @@ machines; see `docker-compose.remote.yml`.
 A merge to `main` is a production deploy. `.github/workflows/build-push.yml`
 runs the Go tests, the UI tests with coverage, the remote-agent builds and
 the Windows agent tests on the merge commit. When they are green,
-`infrastructure/azure/affected.sh` maps the changed paths to images, those
-images are built in ACR, the matching deployments roll by digest, and a
-smoke check finishes the run. A change under `src/pkg` rebuilds every Go
-image; one that touches only docs, plans or workflows deploys nothing.
-Details: [`docs/operator/deploy.md`](docs/operator/deploy.md).
+`infrastructure/azure/affected.sh` maps the changed paths to targets and
+the affected images are built in ACR. Then:
 
-The cluster is parked (`az aks stop`) outside working hours: the Park
-workflow stops it from 16:00 to 07:00 Oslo time, and it often stays stopped
-longer. A merge while it is stopped builds its images and skips the rollout,
-green, with a notice. The Production check (`drift-check.yml`, every half
+- core services (`management-api`, `ui`, `data-filter`, `data-converter`,
+  `alert-responder`) roll by digest through `deploy-core-azure.sh`;
+- a changed connector gets a `kubectl rollout restart`, or the whole fleet
+  goes through `deploy-connectors-azure.sh` when the connector manifest
+  changed;
+- a change to `infrastructure/prometheus-rules.yml` or
+  `infrastructure/kubernetes/monitoring/` runs `install-monitoring.sh`;
+- a smoke check finishes the run.
+
+A change under `src/pkg` (or `go.mod`, or any service `Dockerfile`)
+rebuilds and restarts every Go service; one that touches only docs, plans
+or workflows deploys nothing. Details:
+[`docs/operator/deploy.md`](docs/operator/deploy.md).
+
+The cluster is parked (`az aks stop`) outside working hours. Any Park run
+between 16:00 and 07:00 Oslo time stops a running cluster, but GitHub
+fires them late, so expect the stop somewhere between 16:00 and 20:00. It
+often stays stopped longer. A merge while it is stopped builds its images
+and skips the rollout, green, with a notice. The Production check (`drift-check.yml`, every half
 hour) notices the difference once the cluster is running again and runs
 the Catch up workflow, which brings production to `main`. See
 [`docs/operator/cost-parking.md`](docs/operator/cost-parking.md).
@@ -217,6 +276,13 @@ Revert by reverting the merge in a PR; the revert deploys like any change.
   existing code leans on that: say which issue or incident a rule comes from.
 - Pass a `context.Context` through anything that blocks, and stop
   goroutines when it is cancelled.
+- Don't write your own retry loop around a delivery. A handler that fails
+  returns an error and JetStream redelivers with backoff
+  (`messaging.DefaultBackoff`, `src/pkg/messaging/subscriber.go`), up to
+  `messaging.MaxDeliveryAttempts` (5, `src/pkg/messaging/messaging.go`).
+  After that the message moves to the DLQ. In the SDK, wrap an error that
+  retrying can't fix in `sdk.Permanent`: the message is acked and logged
+  instead of retried, and it does not go to the DLQ.
 - Tests are table-driven where there is more than one case. NATS behaviour
   is tested against the embedded server in `src/pkg/sdk/harness`, not only
   mocks; database behaviour that Postgres decides goes through
