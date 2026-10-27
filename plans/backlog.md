@@ -94,7 +94,7 @@ Last updated 2026-10-27.
     after the merge. Match paths the way Docker does (probably
     `github.com/moby/patternmatcher`) and check every Dockerfile, not only
     the UI's. Found in review of #369.
-23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+23. ~~**`ui/.dockerignore` is dead.**~~ (#380) Every image, the UI included, now builds
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
@@ -152,6 +152,12 @@ Last updated 2026-10-27.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
+32. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+    sets `build.sourcemap: true`, so the image serves
+    `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
+    read the original TypeScript. Decide whether that's wanted; if not, turn
+    it off for the production build or upload the maps somewhere private.
+    Found in #380.
 
 ## Human
 
