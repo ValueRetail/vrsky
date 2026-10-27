@@ -182,13 +182,21 @@ happens while the cluster is parked are all in
 ## Building and deploying by hand
 
 A merge to `main` does all of this for you. By hand is for a rollback in a
-hurry, a first bring-up, or a change the deploy job doesn't cover. Run the
-scripts from a repo checkout, signed in with `az login` to an account that
-can build in `vrskyprodacr`; the deploy scripts also run `kubectl`, so they
-need a kubeconfig for `vrsky-prod` from an address the API server accepts.
+hurry, the UI's nginx config and Ingress (the deploy job doesn't apply
+`infrastructure/kubernetes/ui/`), and a first bring-up on an empty cluster,
+which has its own section below. Run the scripts from a repo checkout,
+signed in with `az login` to an account that can build in `vrskyprodacr`;
+the deploy scripts also run `kubectl`, so they need a kubeconfig for
+`vrsky-prod` from an address the API server accepts.
 [How the job reaches Azure](operator/deploy.md#how-the-job-reaches-azure)
-explains that limit and how `infrastructure/azure/in-cluster.sh` gets around
-it.
+explains that limit.
+
+From anywhere else, `infrastructure/azure/in-cluster.sh` runs a script
+inside the cluster, but only the ones written for its runtime, which has no
+`az`, `sed` or `perl`: `deploy-core-azure.sh` with `DIGESTS_FILE` (digests
+resolved beforehand, as the deploy job does), `deploy-connectors-azure.sh`,
+`install-monitoring.sh` and `smoke-prod.sh`. `deploy-azure.sh` and
+`deploy-ui-azure.sh` can't run through it.
 
 ```bash
 # Build in ACR: core, connectors, or all (the default)
@@ -208,14 +216,23 @@ isn't a `sha256:` digest, sets the image, waits for the rollout and reads
 the deployment back to check what landed. It only updates deployments that
 already exist.
 
+To change the UI's nginx config, Service, PDB or Ingress on a running
+cluster, re-run `bash infrastructure/azure/deploy-ui-azure.sh`. It applies
+the deployment with `ui:latest` rather than a digest, so run
+`deploy-core-azure.sh ui` afterwards to pin it again. It also applies
+`ui/ingress.yaml`, whose header says to diff it against the live object
+first.
+
 ### First bring-up
 
-On an empty cluster, in this order:
+Only on an empty cluster, in this order:
 
 1. `infrastructure/azure/deploy-azure.sh`: NATS, Postgres, MinIO, the
    transforms and the management API, from a copy of
    `infrastructure/kubernetes/` with the image references rewritten to ACR,
-   plus the `acr-pull` pull secret.
+   plus the `acr-pull` pull secret. Never run it, or
+   `infrastructure/kubernetes/deploy-vrsky-platform.sh` which it wraps,
+   against production (see the warning below).
 2. `bash infrastructure/azure/deploy-ui-azure.sh`: the UI and the public
    Ingress (below). The file isn't executable, hence `bash`.
 3. `infrastructure/azure/deploy-connectors-azure.sh`: the connectors.
@@ -237,25 +254,35 @@ Then by hand:
   `infrastructure/kubernetes/ingress/webhooks-ingress.yaml` and
   `agent-ingress.yaml`; read each file's header before applying it.
 
-None of these scripts installs ingress-nginx or cert-manager. The UI's
+None of the Azure scripts installs ingress-nginx or cert-manager. The UI's
 Ingress assumes both, with a `letsencrypt-prod` ClusterIssuer
 (`infrastructure/kubernetes/ingress/cert-issuers.yaml`;
-`install-cert-manager.sh` next to it installs cert-manager). Nothing in the
-repo installs ingress-nginx.
+`install-cert-manager.sh` next to it installs cert-manager, and
+`infrastructure/kubernetes/ingress/README.md` has the `helm` command for
+ingress-nginx).
 
 `deploy-azure.sh` starts on the committed development secrets; replace them
 before any real connection (the script's closing message says which).
 
-!!! danger "Don't apply the core and UI manifests to AKS directly"
+!!! danger "On a running cluster, use `deploy-core-azure.sh` and `deploy-ui-azure.sh`"
 
+    Don't re-run `deploy-azure.sh` or `deploy-vrsky-platform.sh` on
+    production. Without a local `secret.yaml` they apply
+    `secret.example.yaml`, which overwrites the `postgres-credentials`
+    Secret in `vrsky-platform` (`connection_string`, `encryption_key`) with
+    the committed development values: stored credentials stop decrypting
+    and the management API loses its database.
+
+    Don't `kubectl apply` the core and UI manifests either.
     `infrastructure/kubernetes/{management-api,data-filter,data-converter,ui}/`
     are shared with the local k3d path and name `ghcr.io` images that AKS
-    cannot pull, so a plain `kubectl apply` leaves the pods in
-    `ImagePullBackOff` (`InvalidImageName` for the UI, whose reference has
-    capital letters). The scripts above apply them from a rewritten copy.
+    cannot pull, so the pods end up in `ImagePullBackOff`
+    (`InvalidImageName` for the UI, whose reference has capital letters).
+    `deploy-ui-azure.sh` applies the UI manifests from a rewritten copy.
+
     And don't `kubectl rollout restart` a core deployment to ship a new
     image: it is pinned by digest, so a restart redeploys the image it
-    already runs. Use `deploy-core-azure.sh`.
+    already runs. `deploy-core-azure.sh` sets the new digest.
 
 ---
 

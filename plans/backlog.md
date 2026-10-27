@@ -103,6 +103,13 @@ Last updated 2026-10-27.
     builds it, but no workflow or script builds `vrsky-cli` into any
     registry. Find out whether the CronJob runs on AKS; if it does, it can't
     pull. Manifests: PR plus `agent:needs-human`. Found in #371.
+26. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
+    rewrote the guide down to "Encryption at rest" and left the rest alone.
+    "Disaster Recovery" says the management Postgres "is backed up daily",
+    but the backup CronJob's image is built nowhere (item 25), so check
+    whether any backup runs in prod. The encryption table says TLS
+    terminates at Traefik; production runs ingress-nginx. Fix both (and
+    `docs/DR.md` if it says the same). Found in review of #376.
 
 ## Human
 

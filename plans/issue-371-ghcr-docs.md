@@ -24,7 +24,8 @@ deploy job. Make the guide describe what the workflows and scripts do.
 ## Files
 
 - `docs/DEPLOYMENT_GUIDE.md`
-- `plans/issue-371-deploy-guide-ghcr.md` (this file)
+- `plans/issue-371-ghcr-docs.md` (this file; `.gitignore`'s `*GUIDE*.md`
+  matches `deploy-guide` on a case-insensitive filesystem)
 - `plans/backlog.md`: strike item 18; add what turned up along the way
 
 Not `docker-compose.ui.yml`: #370 fixes the `ui-prod` build context.
