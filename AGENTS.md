@@ -13,14 +13,15 @@ only a reference on the bus (`src/pkg/claimcheck`, `src/pkg/objectstore`).
 What the platform does keep:
 
 - each consumer writes the latest payload of a connection to
-  `connections.last_payload` (at most every 30 seconds, `src/pkg/sdk/lifecycle.go`)
-  so the UI can show sample data;
+  `connections.last_payload` (at most every 30 seconds,
+  `src/pkg/sdk/lifecycle.go`) so the UI can show sample data;
 - a message that fails every delivery attempt lands in the DLQ stream and
   stays there for 7 days (`messaging.DLQRetention`);
 - a large payload offloaded to object storage stays for 8 days
   (`messaging.SpillRetention`), a day longer than the DLQ;
-- acked messages leave the main streams at once; unacked ones are dropped
-  after 72 hours at the latest (`messaging.MainRetention`).
+- the main stream (`VRSKY_DATA`) keeps every message, acked or not, for
+  up to 72 hours (`messaging.MainRetention`), or until its 512 MiB /
+  1M-message caps shed the oldest. An ack deletes nothing.
 
 ## Layout
 
@@ -246,7 +247,7 @@ the affected images are built in ACR. Then:
   `infrastructure/kubernetes/monitoring/` runs `install-monitoring.sh`;
 - a smoke check finishes the run.
 
-A change under `src/pkg` (or `go.mod`, or any service `Dockerfile`)
+A change under `src/pkg` (or `src/go.mod`, or any `src/cmd/*/Dockerfile`)
 rebuilds and restarts every Go service; one that touches only docs, plans
 or workflows deploys nothing. Details:
 [`docs/operator/deploy.md`](docs/operator/deploy.md).
@@ -255,9 +256,10 @@ The cluster is parked (`az aks stop`) outside working hours. Any Park run
 between 16:00 and 07:00 Oslo time stops a running cluster, but GitHub
 fires them late, so expect the stop somewhere between 16:00 and 20:00. It
 often stays stopped longer. A merge while it is stopped builds its images
-and skips the rollout, green, with a notice. The Production check (`drift-check.yml`, every half
-hour) notices the difference once the cluster is running again and runs
-the Catch up workflow, which brings production to `main`. See
+and skips the rollout, green, with a notice. The Production check
+(`drift-check.yml`, every half hour) notices the difference once the
+cluster is running again and runs the Catch up workflow, which brings
+production to `main`. See
 [`docs/operator/cost-parking.md`](docs/operator/cost-parking.md).
 
 Revert by reverting the merge in a PR; the revert deploys like any change.
