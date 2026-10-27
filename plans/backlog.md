@@ -98,7 +98,7 @@ Last updated 2026-10-27.
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
-24. **The docs tell people to copy a `.env.example` that doesn't exist.**
+24. ~~**The docs tell people to copy a `.env.example` that doesn't exist.**~~ (#381)
     `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
     say `cp .env.example .env`; there is no root `.env.example` (only
     `ui/.env.example`), and `docker-compose.yml` has defaults for every

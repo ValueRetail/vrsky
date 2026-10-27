@@ -21,7 +21,7 @@ Full documentation lives in [`docs/`](docs/index.md) and builds into a site
 ## Quick start
 
 ```bash
-cp .env.example .env          # set ENCRYPTION_KEY (openssl rand -hex 32) + passwords
+cp .env.example .env          # optional: set ENCRYPTION_KEY (openssl rand -hex 32)
 docker compose up -d --build  # start the stack (detached)
 cd ui && npm install && npm run dev   # UI at http://localhost:5173
 ```
