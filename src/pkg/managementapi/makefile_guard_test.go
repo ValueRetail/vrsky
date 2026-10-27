@@ -231,3 +231,124 @@ func TestRootMakefileHelpOutputListsDocumentedTargets(t *testing.T) {
 		}
 	}
 }
+
+// TestMakefileDockerBuildUIContextHoldsDockerfileSources guards issue #369:
+// `make docker-build-ui` passed `../ui` as the build context while
+// ui/Dockerfile copies `ui/...` paths from the repo root, so the build
+// failed at the first COPY. This runs `make -n docker-build-ui` in src/,
+// resolves the Dockerfile and the context the printed `docker build` uses,
+// and checks every COPY and ADD source (other than `--from` stage copies)
+// matches a file under that context. It doesn't need Docker, and it doesn't
+// apply the root .dockerignore (plans/backlog.md item 22).
+func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
+	makeBin, err := exec.LookPath("make")
+	if err != nil {
+		t.Skip("make is not on PATH, so `make -n docker-build-ui` can't run here")
+	}
+	srcDir := filepath.Join("..", "..")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, makeBin, "-n", "-C", srcDir, "docker-build-ui").CombinedOutput()
+	if err != nil {
+		t.Fatalf("`make -n docker-build-ui` failed: %v\n%s", err, out)
+	}
+
+	var args []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "docker" && fields[1] == "build" {
+			if args != nil {
+				t.Fatalf("`make -n docker-build-ui` printed more than one `docker build`; update this test:\n%s", out)
+			}
+			args = fields[2:]
+		}
+	}
+	if args == nil {
+		t.Fatalf("`make -n docker-build-ui` printed no `docker build` command:\n%s", out)
+	}
+
+	// The context is the one positional argument; -f names the Dockerfile,
+	// which defaults to <context>/Dockerfile.
+	var buildCtx, dockerfile string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "-f" || a == "--file":
+			i++
+			if i < len(args) {
+				dockerfile = args[i]
+			}
+		case strings.HasPrefix(a, "--file="):
+			dockerfile = strings.TrimPrefix(a, "--file=")
+		case a == "-t" || a == "--tag" || a == "--build-arg" || a == "--target" || a == "--platform":
+			i++
+		case strings.HasPrefix(a, "-"):
+		default:
+			if buildCtx != "" {
+				t.Fatalf("two build contexts (%q, %q) in `docker build %s`; update this test",
+					buildCtx, a, strings.Join(args, " "))
+			}
+			buildCtx = a
+		}
+	}
+	if buildCtx == "" {
+		t.Fatalf("no build context in `docker build %s`", strings.Join(args, " "))
+	}
+	buildCtx = filepath.Join(srcDir, buildCtx) // make runs the recipe in src/
+	if dockerfile == "" {
+		dockerfile = filepath.Join(buildCtx, "Dockerfile")
+	} else {
+		dockerfile = filepath.Join(srcDir, dockerfile)
+	}
+
+	df, err := os.ReadFile(dockerfile)
+	if err != nil {
+		t.Fatalf("read the Dockerfile `docker build` names: %v", err)
+	}
+	copies := 0
+	for _, line := range strings.Split(string(df), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || (!strings.EqualFold(fields[0], "COPY") && !strings.EqualFold(fields[0], "ADD")) {
+			continue
+		}
+		// ADD is checked like COPY. Two forms this parser can't read get a
+		// hard stop instead of a silent pass: a COPY/ADD continued on the
+		// next line, and an ADD that fetches a URL rather than a context path.
+		if strings.HasSuffix(strings.TrimSpace(line), `\`) {
+			t.Fatalf("%s has a %s split over several lines (%q); update this test", dockerfile, fields[0], line)
+		}
+		if len(fields) < 3 {
+			continue
+		}
+		var srcs []string
+		fromStage := false
+		for _, f := range fields[1 : len(fields)-1] { // the last field is the destination
+			if strings.HasPrefix(f, "--from=") {
+				fromStage = true
+			}
+			if !strings.HasPrefix(f, "--") {
+				srcs = append(srcs, f)
+			}
+		}
+		if fromStage {
+			continue
+		}
+		for _, s := range srcs {
+			if strings.Contains(s, "://") || strings.HasPrefix(s, "git@") {
+				t.Fatalf("%s has %s from a remote source (%q); update this test", dockerfile, fields[0], s)
+			}
+			copies++
+			matches, err := filepath.Glob(filepath.Join(buildCtx, s))
+			if err != nil {
+				t.Fatalf("bad COPY pattern %q in %s: %v", s, dockerfile, err)
+			}
+			if len(matches) == 0 {
+				t.Errorf("%s copies %q, but the build context `make docker-build-ui` uses (%s) has nothing there",
+					dockerfile, s, buildCtx)
+			}
+		}
+	}
+	if copies == 0 {
+		t.Fatalf("found no COPY sources in %s; the format changed, update this test", dockerfile)
+	}
+}
