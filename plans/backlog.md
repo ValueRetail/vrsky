@@ -67,6 +67,12 @@ Last updated 2026-10-27.
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
     spell it `docker-compose` rather than `docker compose`. Found in #367.
+21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+    non-root user and can't write `/var/run/nginx.pid` (`Permission
+    denied`). Production avoids it with an emptyDir at `/var/run`
+    (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
+    (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
+    the image can write, would make it run. Found in #370.
 
 ## Human
 
