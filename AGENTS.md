@@ -64,9 +64,10 @@ make build-agent              # cross-compiles vrsky-agent for Windows, Linux an
 ```
 
 `make help` in `src/` lists the targets there. The `Makefile` at the repo
-root forwards `build`, `test`, `lint`, `fmt` and `vet` to `src/`, and owns
-the local-stack targets (`up-core` and friends, below), which its own
-`make help` does not show.
+root forwards every one of them to `src/`, and owns the local-stack targets
+(`up-core`, `up-core-remote`, `down-core`, below); its `make help` lists
+both. `src/pkg/managementapi/makefile_guard_test.go` fails if a root
+forward or a help entry points at a target that doesn't exist.
 
 New management-API routes need an entry in
 `src/pkg/managementapi/openapi_registry.go`; `make lint-openapi` fails

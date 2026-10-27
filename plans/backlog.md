@@ -34,7 +34,7 @@ Last updated 2026-10-27.
 11. **Untrack the Go binaries in `src/`.** `src/remote-agent`,
     `src/vrsky-cli` and `src/spill-e2e` are 34–64 MB Mach-O build outputs
     committed to git. Remove them from the index and add them to `.gitignore`.
-12. **The root Makefile forwards targets that don't exist.** Eight of them
+12. ~~**The root Makefile forwards targets that don't exist.**~~ (#361) Eight of them
     (`docker-build`, `docker-push`, `run`, `e2e-test` and the `*-consumer`
     ones) are missing from `src/Makefile`, and root `make help` misses
     `up-core`, `up-core-remote` and `down-core`.
