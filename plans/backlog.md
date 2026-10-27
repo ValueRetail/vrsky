@@ -158,8 +158,8 @@ Last updated 2026-10-27.
     read the original TypeScript. Decide whether that's wanted; if not, turn
     it off for the production build or upload the maps somewhere private.
     Found in #380.
-33. **The PowerShell key generator in `docs/operator/windows.md` isn't
-    cryptographic.** It builds `ENCRYPTION_KEY` from `Get-Random`, which is
+33. ~~**The PowerShell key generator in `docs/operator/windows.md` isn't
+    cryptographic.**~~ (#387) It builds `ENCRYPTION_KEY` from `Get-Random`, which is
     `System.Random`, not a CSPRNG. Use
     `[System.Security.Cryptography.RandomNumberGenerator]` instead
     (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
