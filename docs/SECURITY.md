@@ -350,7 +350,11 @@ unaffected.
 - Compose: `traefik` fronts the API on host `:8090`; base config in
   `infrastructure/traefik/`; the shared dir is `infrastructure/traefik/dynamic/`.
 - Kubernetes: `Middleware` CRDs in `infrastructure/kubernetes/traefik/`; the same
-  generated `tenants.yml` is written to a shared file-provider volume.
+  generated `tenants.yml` is written to a shared file-provider volume. These
+  manifests aren't wired up: no script applies them, and the Kubernetes
+  management-api manifests don't set `TRAEFIK_DYNAMIC_DIR`. Production (AKS)
+  runs ingress-nginx, not Traefik, so it has no gateway rate limit; only the
+  application quotas apply there.
 
 ### Observability
 Traefik exposes Prometheus metrics (scrape job `traefik` →

@@ -14,22 +14,32 @@ JetStream is in-flight data and is bounded/replayable, not a backup target.
 
 ## Tooling
 
-`vrsky-cli` provides `backup` / `restore` / `list` and is packaged as a container
-and a Kubernetes CronJob (see `infrastructure/kubernetes/`). Backups are
-encrypted (`pkg/crypto` `EncryptBytes`/`DecryptBytes`).
+`vrsky-cli` provides `backup` / `list` / `restore`. Backups are encrypted
+(`pkg/crypto` `EncryptBytes`/`DecryptBytes`). The bucket, credentials and
+source database come from `BACKUP_*` environment variables and
+`ENCRYPTION_KEY`, not from flags (see the [disaster-recovery guide](../DR.md)).
 
 ```bash
-vrsky-cli backup  --out s3://backups/vrsky/$(date +%F).enc
-vrsky-cli list    --bucket s3://backups/vrsky/
-vrsky-cli restore --in  s3://backups/vrsky/2026-06-23.enc
+vrsky-cli backup     # dump, encrypt, upload as mgmt-backups/management_db-<timestamp>.dump.gz.enc
+vrsky-cli list       # keys, sizes, ages
+vrsky-cli restore --target-db-url 'postgres://…/management_db' --confirm \
+  mgmt-backups/management_db-20260610T020000Z.dump.gz.enc
 ```
+
+A Dockerfile (`src/cmd/vrsky-cli/Dockerfile`) and a daily Kubernetes CronJob
+(`infrastructure/kubernetes/backup/`) exist, but nothing builds or publishes
+the image and nothing applies the CronJob. As far as the repo shows, no
+scheduled backup runs in production; the
+[disaster-recovery guide](../DR.md#what-runs-today) has the details.
 
 ## Restore drill
 
 A restore is only real if it's been tested. CI runs a **restore drill**
-(`.github/workflows/dr-drill.yml`) that backs up, tears down, restores into a
-fresh database, and asserts the data matches. Run it before you rely on a new
-backup target.
+(`.github/workflows/dr-drill.yml`) when the backup code changes: it backs up a
+seeded test database to a MinIO in the runner, restores into a second
+database, and checks the rows arrived. It tests the commands, not your backup
+target or a production backup, so rehearse a restore against your own target
+before you rely on it.
 
-Full procedures, RPO/RTO targets, and the K8s CronJob schedule are in the
+Full procedures, RPO/RTO targets and what the drill leaves out are in the
 [disaster-recovery guide](../DR.md).
