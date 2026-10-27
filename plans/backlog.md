@@ -26,7 +26,7 @@ Last updated 2026-10-27.
    yet" and describes a planned layout. Rewrite it from the code: the real
    layout under `src/`, `ui/`, `infrastructure/`, the make targets, the
    test-database and live-API opt-ins, the guard tests.
-4. **Check the builder's "Deploy as new" path.** After `ConnectionGone`,
+4. ~~**Check the builder's "Deploy as new" path.**~~ (#355) After `ConnectionGone`,
    the confirm dialog calls `deployPipeline()` from the closure that saw the
    old `deployedConnectionId`; it may PUT the deleted id again instead of
    creating. Reproduce with a test first; fix only if it is real
