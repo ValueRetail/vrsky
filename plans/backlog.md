@@ -31,7 +31,7 @@ Last updated 2026-10-27.
    old `deployedConnectionId`; it may PUT the deleted id again instead of
    creating. Reproduce with a test first; fix only if it is real
    (`ui/src/pages/PipelineBuilder.tsx`).
-11. **Untrack the Go binaries in `src/`.** `src/remote-agent`,
+11. ~~**Untrack the Go binaries in `src/`.**~~ (#360) `src/remote-agent`,
     `src/vrsky-cli` and `src/spill-e2e` are 34–64 MB Mach-O build outputs
     committed to git. Remove them from the index and add them to `.gitignore`.
 12. **The root Makefile forwards targets that don't exist.** Eight of them
