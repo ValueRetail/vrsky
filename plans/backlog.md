@@ -143,8 +143,8 @@ Last updated 2026-10-27.
     has grown from at most 5 s to at most 10 s now that a file needs two
     unchanged polls. Persisting what was published, or treating files newer
     than the last stop as new, would close it. Found in review of #374.
-31. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
-    `VITE_ENVIRONMENT`** on both the `ui` dev service and `ui-prod`. The UI
+31. ~~**`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
+    `VITE_ENVIRONMENT`**~~ (#392) on both the `ui` dev service and `ui-prod`. The UI
     never reads either name (`ui/src/config/env.ts` reads `VITE_API_URL`,
     `VITE_WS_URL` and others), so they do nothing and suggest the API URL
     can be set there. Drop them from both services. The file's `version:`
@@ -210,6 +210,18 @@ Last updated 2026-10-27.
     `testdata/`) there and in the `src/cmd/*` case. The script is under
     `infrastructure/azure/**`, so the fix is a PR labelled
     `agent:needs-human`, not an agent merge. Found during #375.
+39. **The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**
+    The axios client (`ui/src/services/api.ts`) always sends relative
+    `/api/...` requests, and Vite's proxy in `ui/vite.config.ts` forwards
+    them to a hardcoded `http://localhost:3000`. Inside the container that
+    is the container itself, so every API call fails; no `VITE_*` variable
+    changes it. `npm run dev` on the host doesn't have the problem, since
+    the local stack publishes the management API on `127.0.0.1:3000`. A fix: let
+    `vite.config.ts` take the proxy target from an env var (default
+    `http://localhost:3000`) and set it on the service to
+    `http://host.docker.internal:3000` (plus `extra_hosts` for Linux), or
+    drop the dev service and point "Option 1" in `docs/DEPLOYMENT_GUIDE.md`
+    at `npm run dev`. Found in #392.
 
 ## Human
 
