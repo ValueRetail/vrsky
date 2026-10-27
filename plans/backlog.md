@@ -62,7 +62,7 @@ Last updated 2026-10-27.
     context**~~ (#370) (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
-18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
+18. ~~**`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.**~~ (#371) The registry,
     image naming, image tags and Kubernetes sections name
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
@@ -98,13 +98,44 @@ Last updated 2026-10-27.
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
-24. **A watched file replaced under the same name is never published again**
+24. **The docs tell people to copy a `.env.example` that doesn't exist.**
+    `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
+    say `cp .env.example .env`; there is no root `.env.example` (only
+    `ui/.env.example`), and `docker-compose.yml` has defaults for every
+    variable. Add the file with the variables that matter or change the
+    docs. Found in #371.
+25. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
+    100644; every other script there is 100755). The guide now says `bash
+    ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
+    #371.
+26. **The k3d path doesn't line up with its manifests.**
+    `k3d-load-images.sh` imports `data-filter` and `data-converter` as
+    `localhost:5000/vrsky/...` while their manifests pull
+    `ghcr.io/valueretail/vrsky/...`, loads no UI image, and the UI manifest's
+    `ghcr.io/ValueRetail/...` is an invalid (uppercase) reference.
+    `TestUIDeployRewritesMatchManifest` and `deploy-ui-azure.sh`'s rewrite
+    depend on that string, so change them together. Manifests: PR plus
+    `agent:needs-human`. Found in #371.
+27. **The backup CronJob's image is built nowhere.**
+    `infrastructure/kubernetes/backup/cronjob.yaml` runs
+    `ghcr.io/valueretail/vrsky/vrsky-cli:latest`, and its README says CI
+    builds it, but no workflow or script builds `vrsky-cli` into any
+    registry. Find out whether the CronJob runs on AKS; if it does, it can't
+    pull. Manifests: PR plus `agent:needs-human`. Found in #371.
+28. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
+    rewrote the guide down to "Encryption at rest" and left the rest alone.
+    "Disaster Recovery" says the management Postgres "is backed up daily",
+    but the backup CronJob's image is built nowhere (item 27), so check
+    whether any backup runs in prod. The encryption table says TLS
+    terminates at Traefik; production runs ingress-nginx. Fix both (and
+    `docs/DR.md` if it says the same). Found in review of #376.
+29. **A watched file replaced under the same name is never published again**
     (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
     the name only: once `orders.csv` is published, a writer that overwrites
     it or renames a new `orders.csv` over it is ignored, unless the name
     disappeared for at least one poll in between. Decide whether a changed
     size or mtime on a known name means a new file. Found during #374.
-25. **Files still settling at a stop or restart are never published**
+30. **Files still settling at a stop or restart are never published**
     (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
     taken at start counts every name in the directory as already there, so
     a file that landed before a stop or restart but had not been published
