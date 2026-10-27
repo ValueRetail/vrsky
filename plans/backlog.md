@@ -22,7 +22,7 @@ Last updated 2026-10-27.
    existing config already matches; it was the trigger for the nats-server
    race fixed in #339 and is log noise. NATS stream configuration: PR plus
    `agent:needs-human`.
-3. **`AGENTS.md` is out of date.** It says "research phase, no code exists
+3. ~~**`AGENTS.md` is out of date.**~~ (#354) It says "research phase, no code exists
    yet" and describes a planned layout. Rewrite it from the code: the real
    layout under `src/`, `ui/`, `infrastructure/`, the make targets, the
    test-database and live-API opt-ins, the guard tests.
@@ -31,6 +31,16 @@ Last updated 2026-10-27.
    old `deployedConnectionId`; it may PUT the deleted id again instead of
    creating. Reproduce with a test first; fix only if it is real
    (`ui/src/pages/PipelineBuilder.tsx`).
+11. **Untrack the Go binaries in `src/`.** `src/remote-agent`,
+    `src/vrsky-cli` and `src/spill-e2e` are 34–64 MB Mach-O build outputs
+    committed to git. Remove them from the index and add them to `.gitignore`.
+12. **The root Makefile forwards targets that don't exist.** Eight of them
+    (`docker-build`, `docker-push`, `run`, `e2e-test` and the `*-consumer`
+    ones) are missing from `src/Makefile`, and root `make help` misses
+    `up-core`, `up-core-remote` and `down-core`.
+13. **`TestFileConsumer_WatchRoundTrip` looks flaky** (`src/cmd/file-consumer`).
+    It failed once in a full `go test -race ./...` ("no matching envelope
+    within 12s") and passed alone. Make it deterministic.
 
 ## Human
 

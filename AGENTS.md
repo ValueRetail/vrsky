@@ -1,477 +1,238 @@
-# AGENTS.md - Developer Guide for VRSky Integration Platform
+# AGENTS.md
 
-**Last Updated**: January 27, 2026  
-**Project Status**: Research Phase (Week 1 of 11) - No code exists yet  
-**Target**: POC Release April 15, 2026
+A working reference for anyone changing this repository, human or agent.
+How agents pick up issues, branch, review and merge here is in
+[`CLAUDE.md`](CLAUDE.md); read that too if you are one.
 
-## Project Context
+VRSky is a multi-tenant integration platform: Go services on NATS JetStream
+and PostgreSQL, a React UI, running on AKS in Azure. Production is
+https://vrsky.valueretail.no. Payloads are not stored by the platform; they
+move through JetStream, and large ones go to object storage with only a
+reference on the bus (`src/pkg/claimcheck`, `src/pkg/objectstore`).
 
-VRSky is a highly scalable, cloud-native integration platform (iPaaS) currently in the research phase. This is a **greenfield project** with no source code yet. Development begins February 10, 2026.
+## Layout
 
-**Core Principles**:
+| Path | What is there |
+|---|---|
+| `src/` | The Go module `github.com/ValueRetail/vrsky`. All Go commands run from here. |
+| `src/cmd/<service>/` | One directory per binary, most with their own `Dockerfile`: `management-api` (control plane and REST API), `data-filter` and `data-converter`, the connectors (`webhook-consumer`, `http-producer`, `business-central-*`, `sitoo-*`, `sftp-*`, …), `remote-agent` (the gateway) and `vrsky-agent` (the agent that runs on customer machines), and the linters `lint-tenant-filter`, `lint-connector`, `lint-openapi`. |
+| `src/pkg/` | Shared packages. The ones you meet first: `sdk` (the connector SDK; `sdk/harness` runs connectors against an embedded JetStream), `messaging` (NATS, streams, DLQ), `managementapi` (the API, the pipeline validator and the guard tests), `orchestrator`, `auth`, `testdb`. |
+| `src/test/` | Contract and integration tests (`-tags=integration`). |
+| `ui/` | The admin UI: React 18, TypeScript, Vite, Tailwind, Vitest. |
+| `infrastructure/migrations/` | SQL migrations. The management API applies them when it starts. |
+| `infrastructure/kubernetes/` | Manifests and install scripts for the cluster: core services, connectors, monitoring, ingress, NATS, Postgres, MinIO. |
+| `infrastructure/azure/` | The scripts the deploy job and operators run: image builds in ACR, rollouts, smoke check, drift check, budget. |
+| `infrastructure/prometheus-rules.yml` | Alert rules, with unit tests in `prometheus-rules-test.yml`. |
+| `docs/` | The documentation site (MkDocs): operator runbooks in `docs/operator/`, connector pages in `docs/connectors/`, ADRs in `docs/adr/`. |
+| `plans/` | One `plans/<task>.md` per non-trivial change, linked from its PR. `plans/backlog.md` holds work without an issue yet. |
+| `docker-compose.yml` | The local stack. |
 
-- **Ephemeral by Design**: No persistent storage in platform core - messages live only during transit
-- **Reference-Based Messaging**: Large payloads (>256KB) stored in object storage, NATS carries references
-- **Multi-Tenant with Isolation**: Strong tenant isolation using NATS accounts
-- **Component-Based**: Consumers, Producers, Converters, Filters as composable building blocks
+## Tools
 
-**Key Documents**:
+Go 1.26 (CI takes the newest patch), golangci-lint v2.13.2 (configured in
+`src/.golangci.yml`), Node 20 for the UI, and Docker for the local stack
+and the promtool check.
 
-- Architecture & Vision: `docs/PROJECT_INCEPTION.md`
-- Timeline & Milestones: `docs/ACCELERATED_TIMELINE.md`
-- Research Tasks: `docs/tasks/README.md`
+## Go
 
----
-
-## Technology Stack
-
-| Component             | Technology                 | Purpose                                    |
-| --------------------- | -------------------------- | ------------------------------------------ |
-| **Backend**           | Go 1.21+                   | Core platform services, high concurrency   |
-| **Messaging**         | NATS + JetStream           | Message transport, 11M+ msgs/sec           |
-| **Database**          | PostgreSQL 18+             | Metadata, tenant config, integration state |
-| **Object Storage**    | MinIO (local) / S3 (cloud) | Large payload temporary storage            |
-| **Container Runtime** | Docker + Kubernetes        | Orchestration and deployment               |
-| **API Gateway**       | Kong                       | API management and routing                 |
-| **Monitoring**        | Prometheus + Grafana       | Metrics and dashboards                     |
-| **Logging**           | Loki                       | Structured log aggregation                 |
-| **UI**                | React + TailwindCSS        | Admin dashboard                            |
-| **CI/CD**             | GitHub Actions             | Automated build, test, deploy              |
-
----
-
-## Build, Test, and Lint Commands
-
-### Prerequisites
+From `src/`:
 
 ```bash
-# Install Go 1.21+
-go version
-
-# Install development tools
-go install golang.org/x/tools/cmd/goimports@latest
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go build ./...                # or `make build`, which writes every binary to ./bin
+go vet ./...
+gofmt -l .                    # CI fails if this prints anything; fix with gofmt -w <file>
+golangci-lint run
+go test -race ./...           # CI runs go test -v -race -cover ./...
+make lint-tenant              # see "Tenant isolation"
+make lint                     # lint-tenant, lint-connector, lint-openapi and golangci-lint
+govulncheck ./...             # when dependencies change; the nightly scan runs it too
 ```
 
-### Build Commands
+`make help` lists every target. The `Makefile` at the repo root forwards
+`build`, `test`, `lint`, `fmt` and `vet` to `src/`, and owns the local-stack
+targets (`up-core` and friends, below).
+
+New management-API routes need an entry in
+`src/pkg/managementapi/openapi_registry.go`; `make lint-openapi` fails
+without one. Connectors build on `src/pkg/sdk` and call `sdk.Run*`;
+`make lint-connector` checks that.
+
+### Tests that need a real Postgres
+
+Most tests run on sqlmock. A few need a real database: tenant isolation as
+Postgres enforces it, the advisory lock, agent registration under a race,
+the database driver's behaviour, and the `pkg/io` state store. They use
+`src/pkg/testdb`: each creates its own database, applies the migrations,
+and drops it afterwards. Without `VRSKY_TEST_POSTGRES_URL` they skip, so a
+plain `go test ./...` still passes; CI sets it and fails if one is skipped
+there.
+
+From `src/`:
 
 ```bash
-# Build all services
-make build
-
-# Build specific service
-go build -o bin/api-gateway ./cmd/api-gateway
-
-# Build with version info
-go build -ldflags "-X main.Version=$(git describe --tags)" -o bin/service ./cmd/service
-
-# Build Docker images
-make docker-build
-
-# Build for Linux (cross-compile from macOS)
-GOOS=linux GOARCH=amd64 go build -o bin/service-linux ./cmd/service
-```
-
-### Test Commands
-
-```bash
-# Run all tests
-make test
-# or
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out  # View coverage in browser
-
-# Run tests with race detector
-go test -race ./...
-
-# Run specific test
-go test ./pkg/messaging -run TestReferenceMessaging
-
-# Run specific test function in a package
-go test -v ./pkg/consumer -run TestHTTPConsumer/handles_webhook
-
-# Run tests matching pattern
-go test ./... -run ".*Integration.*"
-
-# Run tests with timeout
-go test -timeout 30s ./...
-
-# Verbose output
-go test -v ./pkg/...
-
-# Run only short tests (unit tests, skip integration)
-go test -short ./...
-
-# Run integration tests only
-go test -tags=integration ./...
-```
-
-#### Tests that need a real Postgres
-
-Most tests run on sqlmock. A few need a real database — tenant isolation as
-Postgres enforces it, the advisory lock, agent registration under a race, the
-database driver's behaviour, and the `pkg/io` state store. They use
-`src/pkg/testdb`: each creates its own database, applies the migrations, and
-drops it afterwards. Without `VRSKY_TEST_POSTGRES_URL` they skip, so a plain
-`go test ./...` still passes; CI sets it and fails if one is skipped there.
-
-```bash
-# Any Postgres the role may create databases on; the dev stack's works:
+# Any Postgres the role may create databases on; the local stack's
+# postgres-management (port 5434) works:
 export VRSKY_TEST_POSTGRES_URL="postgres://postgres:<password>@localhost:5434/postgres?sslmode=disable"
-cd src && make test-db
+make test-db                  # the core set: testdb, advisory lock, agent registration, driver, pkg/io state store
+go test -race ./...           # every other testdb user too (quotas, login, billing, idempotency, SDK restore),
+                              # but not the pkg/io state store: that one is behind -tags=integration
 ```
 
-#### Tests that reach the public internet
+### Tests that reach the public internet
 
 Three tests in `pkg/io` call the live https://api.met.no API. They skip
-unless `VRSKY_TEST_LIVE_APIS` is set; CI never sets it, so a public
-service's slowness cannot fail a merge or block a deploy.
-`TestLiveAPITestsAreOptIn` keeps every live test behind that skip and the
-host out of every other test file.
+unless `VRSKY_TEST_LIVE_APIS` is set. CI never sets it, so a slow public
+service cannot fail a merge or block a deploy. `TestLiveAPITestsAreOptIn`
+keeps every live test behind that skip and the host out of every other test
+file.
+
+From `src/`:
 
 ```bash
-cd src && VRSKY_TEST_LIVE_APIS=1 go test ./pkg/io/ -run TestRealAPI -v
+VRSKY_TEST_LIVE_APIS=1 go test ./pkg/io/ -run TestRealAPI -v
 ```
 
-### Lint and Format Commands
+### Guard tests
+
+`src/pkg/managementapi/nodeconfig_test.go` holds tests that read files
+across the repo and fail when they drift apart: every connector type the
+UI offers has a validator rule and a deployed service, every image is
+built, ingress points at services that exist, the deploy job waits for the
+tests and skips a stopped cluster, the Park and drift-check workflows behave,
+CPU requests and disk sizes stay within budget, and the scripts that run
+inside the cluster use only the tools it has. When you change a workflow,
+a manifest, a Dockerfile or an `infrastructure/azure` script, expect one of
+these to have an opinion.
+
+Some of them run shell scripts through bash, and `go test` does not see
+the files those scripts read, so a cached pass can survive a change. Run
+them with `-count=1`, always when mutation-testing a guard. From `src/`:
 
 ```bash
-# Format all code (REQUIRED before commit)
-gofmt -s -w .
-
-# Organize imports
-goimports -w .
-
-# Run linter (CI will fail if this fails)
-golangci-lint run
-
-# Lint specific directory
-golangci-lint run ./pkg/messaging/...
-
-# Auto-fix issues where possible
-golangci-lint run --fix
-
-# Check for common mistakes
-go vet ./...
+go test -count=1 ./pkg/managementapi/                         # the whole package, about a minute
+go test -count=1 ./pkg/managementapi/ -run 'TestParkWorkflow' # one guard
 ```
 
-### Local Development
+### Tenant isolation
+
+Every read, update or delete on a tenant-scoped table filters by
+`tenant_id`. `make lint-tenant` (from `src/`) checks this statically over
+the management API, the remote-agent gateway and the webhook consumer, and
+CI runs it. A query that legitimately crosses tenants (an admin job, say)
+carries a `lint:tenant-ok` comment saying why. A new table with a
+`tenant_id` column goes into the list in `src/cmd/lint-tenant-filter`.
+
+Tenant isolation as Postgres enforces it is tested through `src/pkg/testdb`
+(above). Changes to auth, tenancy or secrets handling are never merged by an
+agent; see `CLAUDE.md`.
+
+## UI
+
+From `ui/`:
 
 ```bash
-# Start local environment (NATS, PostgreSQL, MinIO)
-docker-compose up -d
-
-# Run service locally
-go run ./cmd/api-gateway
-
-# Hot reload during development (install air first)
-air
-
-# View logs
-docker-compose logs -f
-
-# Stop local environment
-docker-compose down
+npm ci
+npm run dev                   # http://localhost:5173, proxies /api to the management API on :3000
+npm run lint
+npm run build                 # tsc -b, then vite build
+npx vitest run --coverage     # same as npm run test:coverage, which CI runs
 ```
 
----
+Run `npm run build` before pushing, not only `tsc --noEmit`: `tsc -b` catches
+errors (`erasableSyntaxOnly`, for one) that `--noEmit` misses.
 
-## Project Structure (Planned)
+Coverage thresholds live in `ui/vitest.config.ts` and CI enforces them:
+lines, functions and statements 80%, branches 75%.
 
-```
-vrsky/
-├── cmd/                      # Application entry points
-│   ├── api-gateway/         # API gateway service
-│   ├── control-plane/       # Tenant & integration management
-│   ├── data-plane/          # Message processing runtime
-│   └── worker/              # Background job processor
-├── pkg/                      # Public libraries (reusable)
-│   ├── messaging/           # NATS client, reference messaging
-│   ├── consumer/            # Consumer interface & runtime
-│   ├── producer/            # Producer interface & runtime
-│   ├── converter/           # Converter interface & runtime
-│   ├── filter/              # Filter interface & runtime
-│   └── storage/             # MinIO/S3 client wrapper
-├── internal/                 # Private application code
-│   ├── api/                 # HTTP/gRPC handlers
-│   ├── models/              # Domain models
-│   ├── repository/          # Database access layer
-│   └── service/             # Business logic
-├── connectors/               # Built-in connectors
-│   ├── http/                # HTTP REST consumer/producer
-│   ├── file/                # File consumer/producer
-│   └── postgres/            # PostgreSQL consumer/producer
-├── deployments/              # Kubernetes manifests, Helm charts
-│   ├── k8s/                 # Raw Kubernetes YAML
-│   ├── helm/                # Helm charts
-│   └── docker-compose.yml   # Local development
-├── scripts/                  # Build and deployment scripts
-├── test/                     # Integration and E2E tests
-├── docs/                     # Documentation
-├── .github/                  # GitHub Actions workflows
-│   └── workflows/
-├── Makefile                  # Build automation
-├── go.mod                    # Go dependencies
-└── go.sum                    # Dependency checksums
+## Alert rules
+
+From the repo root, the same check CI runs:
+
+```bash
+docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
+docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml
 ```
 
----
+## Docs site
 
-## Code Style Guidelines
+`docs/` is built with MkDocs (`mkdocs.yml` at the root) and published to
+GitHub Pages from `main`. CI builds it with `--strict`, so a broken link
+fails the PR. From the repo root, with `pip install mkdocs-material`:
 
-### General Go Conventions
-
-- Follow [Effective Go](https://go.dev/doc/effective_go)
-- Use `gofmt` and `goimports` before every commit
-- Line length: 120 characters max (prefer 80-100)
-- Use tabs for indentation (Go standard)
-
-### Imports Organization
-
-```go
-import (
-    // Standard library (alphabetical)
-    "context"
-    "fmt"
-    "time"
-
-    // Third-party packages (alphabetical)
-    "github.com/nats-io/nats.go"
-    "github.com/google/uuid"
-
-    // Internal packages (alphabetical)
-    "github.com/ValueRetail/vrsky/pkg/messaging"
-    "github.com/ValueRetail/vrsky/internal/models"
-)
+```bash
+mkdocs build --strict
 ```
 
-### Naming Conventions
+## Local stack
 
-- **Packages**: Short, lowercase, single word (e.g., `messaging`, `consumer`, not `message_handler`)
-- **Files**: Lowercase with underscores (e.g., `http_consumer.go`, `reference_message.go`)
-- **Interfaces**: Noun or adjective (e.g., `Consumer`, `MessageHandler`, `Runnable`)
-- **Types**: PascalCase (e.g., `IntegrationConfig`, `TenantID`)
-- **Functions/Methods**: mixedCase (e.g., `processMessage`, `GetTenantByID`)
-- **Constants**: PascalCase or ALL_CAPS for exported/local (e.g., `MaxRetryAttempts`, `defaultTimeout`)
-- **Acronyms**: Keep consistent case (e.g., `HTTPConsumer`, `userID`, `apiURL`)
+From the repo root:
 
-### Error Handling
-
-```go
-// REQUIRED: Always check errors immediately
-data, err := fetchData()
-if err != nil {
-    return fmt.Errorf("fetch data: %w", err)  // Use %w to wrap errors
-}
-
-// Use custom error types for domain errors
-var ErrTenantNotFound = errors.New("tenant not found")
-
-// Structured errors with context
-return fmt.Errorf("failed to process message (tenant=%s, integration=%s): %w",
-    tenantID, integrationID, err)
-
-// Don't ignore errors - use _ only if truly not needed
-_ = file.Close()  // Document why error is ignored
+```bash
+make up-core                  # the 12 services a pipeline needs end to end; fits a laptop with 8 GB
+docker compose up -d --build  # the full stack (much heavier)
+docker compose ps
+docker compose logs -f management-api
+make down-core                # stops the core set
+docker compose down           # stops everything
 ```
 
-### Type Usage
+The management API answers on http://localhost:3000, NATS on 4222, its
+Postgres (`postgres-management`) on 5434, and httpbin (the sink a first
+pipeline's HTTP destination points at) on 8080. Everything binds to
+127.0.0.1. `make up-core-remote` exposes the webhook ingress to other
+machines; see `docker-compose.remote.yml`.
 
-```go
-// Prefer explicit types over 'var'
-config := &IntegrationConfig{}  // Good
-var config *IntegrationConfig = &IntegrationConfig{}  // Verbose
+## How a merge deploys
 
-// Use type aliases for clarity
-type TenantID string
-type IntegrationID string
+A merge to `main` is a production deploy. `.github/workflows/build-push.yml`
+runs the Go tests, the UI tests with coverage, the remote-agent builds and
+the Windows agent tests on the merge commit. When they are green,
+`infrastructure/azure/affected.sh` maps the changed paths to images, those
+images are built in ACR, the matching deployments roll by digest, and a
+smoke check finishes the run. A change under `src/pkg` rebuilds every Go
+image; one that touches only docs, plans or workflows deploys nothing.
+Details: [`docs/operator/deploy.md`](docs/operator/deploy.md).
 
-// Use structs for configuration
-type ConsumerConfig struct {
-    URL         string        `json:"url"`
-    Timeout     time.Duration `json:"timeout"`
-    RetryCount  int           `json:"retry_count"`
-}
-```
+The cluster is parked (`az aks stop`) outside working hours: the Park
+workflow stops it from 16:00 to 07:00 Oslo time, and it often stays stopped
+longer. A merge while it is stopped builds its images and skips the rollout,
+green, with a notice. The Production check (`drift-check.yml`, every half
+hour) notices the difference once the cluster is running again and runs
+the Catch up workflow, which brings production to `main`. See
+[`docs/operator/cost-parking.md`](docs/operator/cost-parking.md).
 
-### Documentation
+Revert by reverting the merge in a PR; the revert deploys like any change.
 
-```go
-// Package documentation (in doc.go or main file)
-// Package messaging provides NATS-based message transport with reference-based
-// handling for large payloads (>256KB).
-package messaging
+## Go conventions
 
-// Public functions/types MUST have godoc comments
-// Consumer defines the interface for data ingestion from external systems.
-// Implementations include HTTP webhooks, file watchers, and database CDC.
-type Consumer interface {
-    // Start begins consuming messages and returns an error if startup fails.
-    Start(ctx context.Context) error
+- Effective Go, gofmt-clean. Imports in three groups: standard library,
+  third-party, then `github.com/ValueRetail/vrsky/...`.
+- Short lowercase package names; file names in `snake_case.go`; acronyms
+  keep their case (`HTTPProducer`, `tenantID`, `apiURL`).
+- Check errors right away and wrap them with context:
+  `fmt.Errorf("load connection %s: %w", id, err)`. Sentinel errors for
+  domain cases (`var ErrNotFound = errors.New(...)`). An ignored error gets
+  `_ =` and a reason.
+- Exported identifiers have doc comments. Comments explain why, and the
+  existing code leans on that: say which issue or incident a rule comes from.
+- Pass a `context.Context` through anything that blocks, and stop
+  goroutines when it is cancelled.
+- Tests are table-driven where there is more than one case. NATS behaviour
+  is tested against the embedded server in `src/pkg/sdk/harness`, not only
+  mocks; database behaviour that Postgres decides goes through
+  `src/pkg/testdb`.
+- Log with structured fields: tenant, connection and message ID where
+  they exist.
 
-    // Stop gracefully shuts down the consumer.
-    Stop(ctx context.Context) error
-}
+## Commits and PRs
 
-// Private functions: optional but recommended for complex logic
-// processLargePayload stores the payload in object storage and returns a reference
-func processLargePayload(data []byte) (string, error) { ... }
-```
-
-### Concurrency Patterns
-
-```go
-// Use context for cancellation
-func (c *HTTPConsumer) Start(ctx context.Context) error {
-    for {
-        select {
-        case <-ctx.Done():
-            return ctx.Err()
-        case msg := <-c.messages:
-            go c.processMessage(ctx, msg)  // Process in goroutine
-        }
-    }
-}
-
-// Always use sync.WaitGroup for goroutine coordination
-var wg sync.WaitGroup
-for _, item := range items {
-    wg.Add(1)
-    go func(item Item) {
-        defer wg.Done()
-        process(item)
-    }(item)
-}
-wg.Wait()
-```
-
----
-
-## Development Workflow
-
-### Git Workflow
-
-- **Main branch**: `main` (protected, requires PR)
-- **Feature branches**: `feature/short-description`
-- **Bug fixes**: `fix/issue-description`
-- **Commits**: Follow [Conventional Commits](https://www.conventionalcommits.org/)
-
-### Commit Message Format
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
-**Examples**:
-
-```
-feat(messaging): add reference-based messaging for large payloads
-
-Implements object storage integration for messages >256KB.
-NATS now carries lightweight references instead of full payload.
-
-Closes #12
-```
-
-### Pull Request Process
-
-1. Create feature branch from `main`
-2. Write tests for new functionality
-3. Ensure all tests pass: `make test`
-4. Run linter: `golangci-lint run`
-5. Format code: `gofmt -s -w . && goimports -w .`
-6. Commit with conventional message
-7. Push and create PR with description
-8. Address review comments
-9. Squash merge to `main` after approval
-
----
-
-## Testing Standards
-
-### Test File Naming
-
-- Unit tests: `file_test.go` (same package)
-- Integration tests: `file_integration_test.go` (use build tag)
-
-### Test Organization
-
-```go
-func TestHTTPConsumer_Start(t *testing.T) {
-    tests := []struct {
-        name    string
-        input   string
-        want    string
-        wantErr bool
-    }{
-        {"valid webhook", "payload", "success", false},
-        {"invalid json", "bad", "", true},
-    }
-
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            // Test implementation
-        })
-    }
-}
-```
-
-### Coverage Requirements
-
-- **Minimum**: 70% overall coverage
-- **Target**: 80%+ for `pkg/` packages
-- **Critical paths**: 90%+ (auth, message routing, multi-tenancy)
-
-### Integration Tests
-
-```go
-// +build integration
-
-package messaging_test
-
-func TestNATSReferenceMessaging(t *testing.T) {
-    // Requires NATS and MinIO running
-    // Run with: go test -tags=integration ./...
-}
-```
-
----
-
-## Architecture-Specific Guidelines
-
-### Multi-Tenancy
-
-- Always validate `TenantID` in requests
-- Use NATS accounts for message isolation
-- Never leak data across tenants
-
-### Reference-Based Messaging
-
-- Threshold: Messages >256KB go to object storage
-- Always set TTL on stored objects (default: 15 minutes)
-- Clean up references after successful delivery
-
-### Error Handling & Retries
-
-- Use exponential backoff for retries (max 3 attempts)
-- Send failed messages to dead letter queue after max retries
-- Log all errors with structured context (tenant, integration, message ID)
-
----
-
-## Additional Resources
-
-- Go Code Review Comments: https://go.dev/wiki/CodeReviewComments
-- NATS Documentation: https://docs.nats.io/
-- Project Timeline: `docs/ACCELERATED_TIMELINE.md`
-- Architecture Vision: `docs/PROJECT_INCEPTION.md`
+- Branch from `main`: `feat/…`, `fix/…`, `docs/…`, `ci/…`, `chore/…`,
+  `test/…`, or `issue-<n>-<slug>` for agent work.
+- [Conventional Commits](https://www.conventionalcommits.org/):
+  `type(scope): subject`, for example
+  `fix(builder): a redeploy keeps the pipeline's name and description`.
+- A non-trivial change gets `plans/<task>.md` (goal, acceptance criteria,
+  files, approach, how it is verified), linked from the PR.
+- The PR says what changed, the decisions made on the way, and the test
+  evidence. "Closes #n" when it closes an issue. Squash-merged.
+- Behaviour or configuration changes update `docs/` in the same PR.
