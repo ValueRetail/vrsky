@@ -154,7 +154,11 @@ func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.nc = res.NATS
 	s.logger = res.Logger
 	s.inlineMax = res.InlineMaxBytes()
+	// Under the lock like every other access: the map is read from NATS
+	// callbacks and HTTP handlers that may already be running (#362).
+	s.mu.Lock()
 	s.activeConnections = make(map[string]*ActiveConnection)
+	s.mu.Unlock()
 	s.eventSubs = make(map[string][]chan FileEvent)
 	s.baseDir = getEnv("FILE_CONSUMER_BASE_DIR", "/data/input")
 	s.hostHome = os.Getenv("HOST_HOME")
@@ -329,12 +333,16 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Take the baseline (files already there, never ingested) before the
+	// connection shows as active or running. Taken later, in the watcher
+	// goroutine, a file dropped in between was counted as already there and
+	// silently never published (#362).
 	ac := &ActiveConnection{
 		ConnectionID: connectionID,
 		TenantID:     tenantID,
 		WatchDir:     watchDir,
 		Cancel:       cancel,
-		knownFiles:   make(map[string]bool),
+		knownFiles:   s.listFiles(watchDir),
 	}
 
 	s.mu.Lock()
@@ -391,9 +399,7 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	// Snapshot current files on first scan (no events emitted)
-	ac.knownFiles = s.listFiles(ac.WatchDir)
-
+	// ac.knownFiles already holds the baseline startConnection took.
 	for {
 		select {
 		case <-ctx.Done():
