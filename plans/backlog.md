@@ -52,7 +52,7 @@ Last updated 2026-10-27.
     `docker-build-filter`/`-converter`, none of which exist any more. Point
     them at what builds images now, or drop the sections. Found in review of
     #365.
-16. **`make docker-build-ui` can't build the UI** (`src/Makefile`). It runs
+16. ~~**`make docker-build-ui` can't build the UI**~~ (#369) (`src/Makefile`). It runs
     `docker build -t vrsky/ui:latest ../ui`, so the build context is `ui/`,
     but `ui/Dockerfile` copies `ui/...` from the repo root. It fails with
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
@@ -67,6 +67,11 @@ Last updated 2026-10-27.
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
     spell it `docker-compose` rather than `docker compose`. Found in #367.
+19. **DEPLOYMENT_GUIDE's UI troubleshooting builds with the wrong context.**
+    Lines 444, 456 and 501 of `docs/DEPLOYMENT_GUIDE.md` run
+    `docker build -t vrsky/ui:latest ui/`, which fails the same way #369
+    did. Use `-f ui/Dockerfile .` from the repo root (as line 106 does) or
+    `make docker-build-ui`. Found in #369.
 
 ## Human
 

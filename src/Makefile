@@ -1,4 +1,4 @@
-.PHONY: help build docker-build-ui docker-push-ui clean test test-db lint fmt vet
+.PHONY: help build docker-build-ui clean test test-db lint fmt vet
 
 # Variables
 BIN_DIR=./bin
@@ -106,14 +106,11 @@ info: ## Show build information
 	@echo "  Docker Registry: $(DOCKER_REGISTRY)"
 	@echo ""
 
+# ui/Dockerfile copies ui/... paths, so the context is the repo root (..),
+# the same one `az acr build` uses in production. Local only; nothing pushes it.
 docker-build-ui: ## Build UI Docker image: vrsky/ui:latest
 	@echo "$(BLUE)Building UI Docker image...$(NC)"
-	@docker build -t vrsky/ui:latest ../ui
+	@docker build -f ../ui/Dockerfile -t vrsky/ui:latest ..
 	@echo "$(GREEN)✓ UI Docker image built: vrsky/ui:latest$(NC)"
-
-docker-push-ui: docker-build-ui ## Push UI Docker image to registry
-	@echo "$(BLUE)Pushing UI Docker image...$(NC)"
-	@docker push vrsky/ui:latest
-	@echo "$(GREEN)✓ UI Docker image pushed$(NC)"
 
 .DEFAULT_GOAL := help
