@@ -36,9 +36,11 @@ So the file is added, kept to the variables a local operator would change:
 | `ANTHROPIC_API_KEY`, `RESPONDER_MODE`, `RESPONDER_TENANT_KEYS` | the opt-in `responder` profile needs them |
 
 Left out: `OTEL_EXPORTER_OTLP_ENDPOINT` and `PROMETHEUS_URL` (internal
-service addresses), `HOME`, `UID`, `GID` (come from the shell),
+service addresses), `UID`, `GID` (come from the shell),
 `VRSKY_BIND` (read by `docker-compose.remote.yml`, documented with its
-command in `remote-access.md`).
+command in `remote-access.md`). `HOME` comes from the shell on macOS and
+Linux, but PowerShell doesn't set it, and `windows.md` tells Windows users to
+set it in `.env`; the file carries it as a commented Windows-only hint.
 
 Values are empty or the compose dev default. Every reference uses `:-`, which
 treats an empty value as unset, so a fresh copy of the file starts the same

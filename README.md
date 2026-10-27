@@ -21,10 +21,14 @@ Full documentation lives in [`docs/`](docs/index.md) and builds into a site
 ## Quick start
 
 ```bash
-cp .env.example .env          # optional: set ENCRYPTION_KEY (openssl rand -hex 32)
+cp .env.example .env          # works as is; ENCRYPTION_KEY: see below
 docker compose up -d --build  # start the stack (detached)
 cd ui && npm install && npm run dev   # UI at http://localhost:5173
 ```
+
+The stack runs on dev defaults, which is fine for a quick try. Before you
+store real credentials, set `ENCRYPTION_KEY` in `.env` (`openssl rand -hex 32`)
+and back it up: secrets stored under one key don't decrypt under another.
 
 On a small machine (8 GB), `make up-core` starts only the ten services a
 pipeline needs instead of the full 68-container stack; `make down-core` stops

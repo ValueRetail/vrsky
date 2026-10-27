@@ -152,6 +152,13 @@ Last updated 2026-10-27.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
+33. **The PowerShell key generator in `docs/operator/windows.md` isn't
+    cryptographic.** It builds `ENCRYPTION_KEY` from `Get-Random`, which is
+    `System.Random`, not a CSPRNG. Use
+    `[System.Security.Cryptography.RandomNumberGenerator]` instead
+    (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
+    and say so next to the `openssl rand -hex 32` advice. Found in review of
+    #381.
 
 ## Human
 

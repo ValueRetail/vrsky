@@ -79,10 +79,10 @@ cd vrsky
 copy .env.example .env
 ```
 
-Edit `.env` and set `ENCRYPTION_KEY` to 64 hex characters. The rest of the
-file can stay as it is: empty values fall back to the defaults in
-`docker-compose.yml`, and the database passwords are fixed dev values there.
-To generate a key in PowerShell:
+For a quick try, `.env` works as it is: empty values fall back to the
+defaults in `docker-compose.yml`, and the database passwords are fixed dev
+values there. Before you store real credentials, set `ENCRYPTION_KEY` in
+`.env` to 64 hex characters and back it up. To generate a key in PowerShell:
 
 ```powershell
 -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
