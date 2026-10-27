@@ -159,6 +159,16 @@ Last updated 2026-10-27.
     (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
     and say so next to the `openssl rand -hex 32` advice. Found in review of
     #381.
+34. **No way to mount a Windows home folder for the file connectors.**
+    `docker-compose.yml` mounts `${HOME:-./data/input}` at
+    `${HOME:-/data/input}` for `file-consumer` and `file-producer`, the same
+    path on both sides. A Windows path can't be a target in the Linux
+    engine ("mount path must be absolute"), so setting `HOME` on Windows
+    breaks `make up-core`, and the stack falls back to `data/input`. A
+    proper fix needs a separate source and target (for example a host-path
+    variable mounted at a fixed Linux path, with `HOST_HOME` translating
+    editor paths), plus a check that a Unix-style shell's
+    `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
 
 ## Human
 
