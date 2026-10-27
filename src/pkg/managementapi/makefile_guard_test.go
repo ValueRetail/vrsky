@@ -237,8 +237,9 @@ func TestRootMakefileHelpOutputListsDocumentedTargets(t *testing.T) {
 // ui/Dockerfile copies `ui/...` paths from the repo root, so the build
 // failed at the first COPY. This runs `make -n docker-build-ui` in src/,
 // resolves the Dockerfile and the context the printed `docker build` uses,
-// and checks every COPY source (other than `--from` stage copies) matches a
-// file under that context. It doesn't need Docker.
+// and checks every COPY and ADD source (other than `--from` stage copies)
+// matches a file under that context. It doesn't need Docker, and it doesn't
+// apply the root .dockerignore (plans/backlog.md item 21).
 func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 	makeBin, err := exec.LookPath("make")
 	if err != nil {
@@ -307,7 +308,16 @@ func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 	copies := 0
 	for _, line := range strings.Split(string(df), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 3 || !strings.EqualFold(fields[0], "COPY") {
+		if len(fields) == 0 || (!strings.EqualFold(fields[0], "COPY") && !strings.EqualFold(fields[0], "ADD")) {
+			continue
+		}
+		// ADD is checked like COPY. Two forms this parser can't read get a
+		// hard stop instead of a silent pass: a COPY/ADD continued on the
+		// next line, and an ADD that fetches a URL rather than a context path.
+		if strings.HasSuffix(strings.TrimSpace(line), `\`) {
+			t.Fatalf("%s has a %s split over several lines (%q); update this test", dockerfile, fields[0], line)
+		}
+		if len(fields) < 3 {
 			continue
 		}
 		var srcs []string
@@ -324,6 +334,9 @@ func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 			continue
 		}
 		for _, s := range srcs {
+			if strings.Contains(s, "://") || strings.HasPrefix(s, "git@") {
+				t.Fatalf("%s has %s from a remote source (%q); update this test", dockerfile, fields[0], s)
+			}
 			copies++
 			matches, err := filepath.Glob(filepath.Join(buildCtx, s))
 			if err != nil {
