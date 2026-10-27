@@ -24,7 +24,7 @@ applies. Remove it and move whatever in it still matters into the root file.
 - `ui/.dockerignore`: deleted.
 - `.dockerignore`: new exclusions in the UI section.
 - `docs/DEPLOYMENT_GUIDE.md`: "Build context" paragraph.
-- `plans/backlog.md`: strike item 23; new item 31 (source maps, found here).
+- `plans/backlog.md`: strike item 23; new item 32 (source maps, found here).
 - `plans/issue-380-ui-dockerignore.md` (this file).
 
 ## Approach

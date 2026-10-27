@@ -79,7 +79,7 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
-21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+21. ~~**The `ui-prod` image exits at once when run locally.**~~ (#377) nginx runs as a
     non-root user and can't write `/var/run/nginx.pid` (`Permission
     denied`). Production avoids it with an emptyDir at `/var/run`
     (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
@@ -143,7 +143,16 @@ Last updated 2026-10-27.
     has grown from at most 5 s to at most 10 s now that a file needs two
     unchanged polls. Persisting what was published, or treating files newer
     than the last stop as new, would close it. Found in review of #374.
-31. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+31. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
+    `VITE_ENVIRONMENT`** on both the `ui` dev service and `ui-prod`. The UI
+    never reads either name (`ui/src/config/env.ts` reads `VITE_API_URL`,
+    `VITE_WS_URL` and others), so they do nothing and suggest the API URL
+    can be set there. Drop them from both services. The file's `version:`
+    key is obsolete too (compose warns).
+    `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
+    already commented as dead; dropping them there is a manifest change
+    for a human-reviewed PR. Found in #377.
+32. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
     sets `build.sourcemap: true`, so the image serves
     `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
     read the original TypeScript. Decide whether that's wanted; if not, turn

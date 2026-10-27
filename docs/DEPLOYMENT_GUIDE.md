@@ -149,9 +149,11 @@ The context is always the repo root, and the root `.dockerignore` is the
 only one in the repo. It excludes everything, then lets back in `src/go.mod`,
 `src/go.sum`, `src/cmd`, `src/pkg`, `src/internal`, `ui` and
 `infrastructure/migrations`. Under `ui` it still drops `node_modules`,
-`dist`, test coverage, `.env*` files, logs and editor files. Docker reads
-only the `.dockerignore` at the root of the context, so don't add one under
-`ui/` or `src/`; it would be ignored.
+`dist`, test coverage, `.env*` files, logs and editor files. A plain
+`.dockerignore` under `ui/` or `src/` is ignored. BuildKit does read a
+`<Dockerfile>.dockerignore` next to the Dockerfile (for example
+`ui/Dockerfile.dockerignore`) instead of the root file, so don't add one
+unless it repeats the root allowlist.
 
 ---
 
