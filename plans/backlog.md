@@ -62,7 +62,7 @@ Last updated 2026-10-27.
     context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
-18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
+18. ~~**`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.**~~ (#371) The registry,
     image naming, image tags and Kubernetes sections name
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
@@ -79,6 +79,30 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
+22. **The docs tell people to copy a `.env.example` that doesn't exist.**
+    `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
+    say `cp .env.example .env`; there is no root `.env.example` (only
+    `ui/.env.example`), and `docker-compose.yml` has defaults for every
+    variable. Add the file with the variables that matter or change the
+    docs. Found in #371.
+23. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
+    100644; every other script there is 100755). The guide now says `bash
+    ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
+    #371.
+24. **The k3d path doesn't line up with its manifests.**
+    `k3d-load-images.sh` imports `data-filter` and `data-converter` as
+    `localhost:5000/vrsky/...` while their manifests pull
+    `ghcr.io/valueretail/vrsky/...`, loads no UI image, and the UI manifest's
+    `ghcr.io/ValueRetail/...` is an invalid (uppercase) reference.
+    `TestUIDeployRewritesMatchManifest` and `deploy-ui-azure.sh`'s rewrite
+    depend on that string, so change them together. Manifests: PR plus
+    `agent:needs-human`. Found in #371.
+25. **The backup CronJob's image is built nowhere.**
+    `infrastructure/kubernetes/backup/cronjob.yaml` runs
+    `ghcr.io/valueretail/vrsky/vrsky-cli:latest`, and its README says CI
+    builds it, but no workflow or script builds `vrsky-cli` into any
+    registry. Find out whether the CronJob runs on AKS; if it does, it can't
+    pull. Manifests: PR plus `agent:needs-human`. Found in #371.
 
 ## Human
 
