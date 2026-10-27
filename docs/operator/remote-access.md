@@ -1,8 +1,8 @@
 # Reaching a local stack from another machine
 
 The compose stack binds every port to `127.0.0.1`. That is deliberate: a dev
-stack holds real credentials in a database whose password is in a file called
-`.env.example`, and it should not appear on a network because somebody ran
+stack holds real credentials in a database whose password is written into
+`docker-compose.yml`, and it should not appear on a network because somebody ran
 `docker compose up`.
 
 Sometimes it has to. A till on another machine posting into a webhook; a
@@ -72,7 +72,7 @@ networks.
 ## What this is not
 
 A way to run VRSky for other people. There is no TLS on the ingress here, the
-stack's passwords are the ones from `.env.example` unless you changed them, and
+stack's database passwords are the fixed ones in `docker-compose.yml`, and
 a webhook connection without HMAC configured accepts whatever is posted to its
 URL. It is a test stack you have chosen to let one other machine reach.
 

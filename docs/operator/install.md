@@ -9,7 +9,7 @@ Postgres, orchestrated by Docker Compose (local/single-host) or Kubernetes
 ```bash
 git clone https://github.com/ValueRetail/vrsky.git
 cd vrsky
-cp .env.example .env          # set ENCRYPTION_KEY + passwords (see below)
+cp .env.example .env          # works as is; ENCRYPTION_KEY: see below
 docker compose up -d --build  # detached; -d is important (see Troubleshooting)
 ```
 
@@ -23,13 +23,24 @@ Core endpoints (local): Management API `http://localhost:3000`, gateway
 (Traefik) `http://localhost:8090`, Grafana `http://localhost:3001`,
 Prometheus `http://localhost:9099`, webhook ingress `http://localhost:9100`.
 
-## Required configuration
+## Configuration
 
-- **`ENCRYPTION_KEY`** — 64 hex chars (32 bytes). The same value must be set on
-  the management-API and every worker that resolves secrets. **Generate once and
-  store it safely — losing it makes all stored secrets unrecoverable.** See the
-  [encryption-at-rest checklist](encryption-at-rest.md).
-- Database passwords and any object-storage credentials.
+The local stack runs without any `.env`. `docker-compose.yml` has a dev
+default for each variable it reads, and an empty value in `.env` falls back
+to that default, so an unedited copy of `.env.example` starts the same stack
+as no `.env`. To override one, set it in `.env` (or in the shell, e.g.
+`ENCRYPTION_KEY=... docker compose up -d`).
+
+- **`ENCRYPTION_KEY`**: 64 hex chars (32 bytes), `openssl rand -hex 32`.
+  Optional for a quick local try, where compose falls back to a dev key that
+  every checkout shares. Set your own before you store real credentials, and
+  back it up: secrets stored under one key don't decrypt under another, and
+  losing it makes them unrecoverable. In production it is required, with the
+  same value on the management-API and every worker that resolves secrets.
+  See the [encryption-at-rest checklist](encryption-at-rest.md).
+- Database passwords and any object-storage credentials. In the local compose
+  stack these are fixed dev values written into `docker-compose.yml`, not
+  read from `.env`; the stack binds its ports to `127.0.0.1` for that reason.
 
 ## Production (Kubernetes)
 

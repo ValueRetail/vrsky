@@ -98,7 +98,7 @@ Last updated 2026-10-27.
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
-24. **The docs tell people to copy a `.env.example` that doesn't exist.**
+24. ~~**The docs tell people to copy a `.env.example` that doesn't exist.**~~ (#381)
     `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
     say `cp .env.example .env`; there is no root `.env.example` (only
     `ui/.env.example`), and `docker-compose.yml` has defaults for every
@@ -158,6 +158,23 @@ Last updated 2026-10-27.
     read the original TypeScript. Decide whether that's wanted; if not, turn
     it off for the production build or upload the maps somewhere private.
     Found in #380.
+33. **The PowerShell key generator in `docs/operator/windows.md` isn't
+    cryptographic.** It builds `ENCRYPTION_KEY` from `Get-Random`, which is
+    `System.Random`, not a CSPRNG. Use
+    `[System.Security.Cryptography.RandomNumberGenerator]` instead
+    (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
+    and say so next to the `openssl rand -hex 32` advice. Found in review of
+    #381.
+34. **No way to mount a Windows home folder for the file connectors.**
+    `docker-compose.yml` mounts `${HOME:-./data/input}` at
+    `${HOME:-/data/input}` for `file-consumer` and `file-producer`, the same
+    path on both sides. A Windows path can't be a target in the Linux
+    engine ("mount path must be absolute"), so setting `HOME` on Windows
+    breaks `make up-core`, and the stack falls back to `data/input`. A
+    proper fix needs a separate source and target (for example a host-path
+    variable mounted at a fixed Linux path, with `HOST_HOME` translating
+    editor paths), plus a check that a Unix-style shell's
+    `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
 
 ## Human
 

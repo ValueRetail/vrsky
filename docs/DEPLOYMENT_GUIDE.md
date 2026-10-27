@@ -60,9 +60,10 @@ for the local stack) and `vrsky-cli`.
 ### Running locally
 
 The local stack is `docker-compose.yml` at the repo root. It runs on
-built-in development defaults; to set your own `ENCRYPTION_KEY` or
-passwords, put them in a `.env` file at the repo root
-([Install](operator/install.md) lists what matters).
+built-in development defaults. To set your own `ENCRYPTION_KEY`, copy
+`.env.example` to `.env` at the repo root and fill it in. The database
+passwords are fixed dev values in `docker-compose.yml`; `.env` doesn't
+change them ([Install](operator/install.md) lists what matters).
 
 #### Option 1: Build UI Only (Dev Mode)
 
