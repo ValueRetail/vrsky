@@ -44,9 +44,9 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
-	// Configure runs on the harness goroutine and allocates the active map;
-	// give it the moment the other tests give it before reading that map.
-	time.Sleep(200 * time.Millisecond)
+	// Configure allocates the active map under c.mu, so polling it before the
+	// runner gets that far is safe; no head start needed (#362). The baseline
+	// is taken before the connection shows here, so the file below is new.
 	harness.Eventually(t, 5*time.Second, "watcher restored from the database", func() bool {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
