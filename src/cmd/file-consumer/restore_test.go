@@ -42,7 +42,9 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
-	c := &fileConsumer{}
+	// A file is published on the second poll that sees it unchanged (#374);
+	// a short interval keeps that well inside the deadline below.
+	c := &fileConsumer{pollInterval: 200 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
 	// Configure allocates the active map under c.mu, so polling it before the
 	// runner gets that far is safe; no head start needed (#362). The baseline
