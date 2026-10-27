@@ -98,7 +98,7 @@ Last updated 2026-10-27.
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
-29. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
+31. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
     `VITE_ENVIRONMENT`** on both the `ui` dev service and `ui-prod`. The UI
     never reads either name (`ui/src/config/env.ts` reads `VITE_API_URL`,
     `VITE_WS_URL` and others), so they do nothing and suggest the API URL

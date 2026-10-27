@@ -49,12 +49,13 @@ func mountCovers(target, dir string) bool {
 // checkTmpfsOptions decides whether a tmpfs mounted with these options
 // (`uid=101,gid=101,mode=0755`, …) is writable by the nginx user.
 //
-// Docker's tmpfs defaults to mode 1777, so a bare `/var/run` tmpfs is already
-// writable by uid 101. A uid= option is how someone pins ownership, though,
-// and pinning it to anything but nginx's uid is a mistake even while the
-// default mode happens to hide it, so a uid other than 101 fails. A mode= that
-// drops the world-write bit is only fine when the tmpfs is owned by uid 101
-// and keeps the owner-write bit.
+// A bare tmpfs is not: in the nginx:alpine image /var/run is a symlink to
+// /run, which is root-owned with mode 755, and Docker copies that owner and
+// mode onto the tmpfs (checked on Docker Desktop for #377: `--tmpfs /var/run`
+// gives `mode=755` and uid 101 gets Permission denied). So the tmpfs must
+// either be owned by uid 101 with the owner-write bit, or set a mode with the
+// world-write bit. A uid other than 101 fails even with a world-writable mode,
+// since pinning ownership to anyone else is a mistake waiting for a mode change.
 func checkTmpfsOptions(opts string) error {
 	uid := -1
 	mode := int64(-1)
@@ -78,22 +79,30 @@ func checkTmpfsOptions(opts string) error {
 	if uid != -1 && uid != nginxUID {
 		return fmt.Errorf("tmpfs is owned by uid %d, but nginx runs as uid %d", uid, nginxUID)
 	}
-	if mode != -1 && mode&0o002 == 0 && (uid != nginxUID || mode&0o200 == 0) {
-		return fmt.Errorf("tmpfs mode %o does not let uid %d write", mode, nginxUID)
+	if mode != -1 && mode&0o002 != 0 {
+		return nil // world-writable
+	}
+	if uid != nginxUID {
+		return fmt.Errorf("tmpfs sets neither uid=%d nor a world-writable mode, so it keeps the image's root-owned 755 /run and uid %d can't write it", nginxUID, nginxUID)
+	}
+	if mode != -1 && mode&0o200 == 0 {
+		return fmt.Errorf("tmpfs mode %o does not let its owner (uid %d) write", mode, nginxUID)
 	}
 	return nil
 }
 
 // writableMountFor looks through a compose service definition for a mount
-// that makes dir writable and returns a short description of it. It accepts:
+// that makes dir writable by uid 101 and returns a short description of it.
+// It accepts:
 //
-//   - `tmpfs:` as a string or a list, each entry `target[:options]`
-//   - `volumes:` short syntax `[source:]target[:options]`, unless options has `ro`
-//   - `volumes:` long syntax `{type, target, read_only}`, unless read_only is
-//     true; a long-syntax tmpfs has its `tmpfs.mode` checked like the above
+//   - `tmpfs:` as a string or a list, each entry `target[:options]`, with
+//     options checked by checkTmpfsOptions
+//   - `volumes:` long syntax `{type: tmpfs, target, tmpfs: {mode}}` with a
+//     world-writable mode (long syntax has no uid option)
 //
-// A bind or named volume only proves the path is mounted read-write, not that
-// uid 101 owns it; the fix uses tmpfs, which this checks properly.
+// Any other volume covering dir fails: a named or anonymous volume copies the
+// image's root-owned /run (checked for #377), and a bind mount's owner depends
+// on the host.
 func writableMountFor(svc map[string]any, dir string) (string, error) {
 	var tmpfs []string
 	switch v := svc["tmpfs"].(type) {
@@ -127,47 +136,40 @@ func writableMountFor(svc map[string]any, dir string) (string, error) {
 		switch v := e.(type) {
 		case string:
 			parts := strings.Split(v, ":")
-			var target, opts string
-			switch len(parts) {
-			case 1:
-				target = parts[0]
-			case 2:
+			target := parts[0]
+			if len(parts) > 1 {
 				target = parts[1]
-			default:
-				target, opts = parts[1], parts[2]
 			}
-			if !mountCovers(target, dir) {
-				continue
+			if mountCovers(target, dir) {
+				return "", fmt.Errorf("volume %q covers %s, but a named or anonymous volume copies the image's root-owned /run and a bind mount's owner depends on the host; use a tmpfs", v, dir)
 			}
-			for _, o := range strings.Split(opts, ",") {
-				if o == "ro" {
-					return "", fmt.Errorf("volume %q covers %s but is read-only", v, dir)
-				}
-			}
-			return "volume " + v, nil
 		case map[string]any:
 			target, _ := v["target"].(string)
 			if target == "" || !mountCovers(target, dir) {
 				continue
 			}
+			if v["type"] != "tmpfs" {
+				return "", fmt.Errorf("volume %v covers %s, but only a tmpfs gives uid %d a writable directory there", v, dir, nginxUID)
+			}
 			if ro, _ := v["read_only"].(bool); ro {
 				return "", fmt.Errorf("volume %v covers %s but is read_only", v, dir)
 			}
-			if v["type"] == "tmpfs" {
-				if t, ok := v["tmpfs"].(map[string]any); ok {
-					if m, ok := t["mode"].(int); ok {
-						// yaml.v3 (which compose-go also uses) already reads
-						// 0755 and 0o755 as octal, so m holds the mode bits.
-						if err := checkTmpfsOptions("mode=" + strconv.FormatInt(int64(m), 8)); err != nil {
-							return "", fmt.Errorf("volume %v covers %s but: %w", v, dir, err)
-						}
-					}
+			// Long-syntax tmpfs has mode but no uid, so it needs a
+			// world-writable mode. yaml.v3 (which compose-go also uses)
+			// reads 0755 and 0o755 as octal, so m holds the mode bits.
+			opts := ""
+			if t, ok := v["tmpfs"].(map[string]any); ok {
+				if m, ok := t["mode"].(int); ok {
+					opts = "mode=" + strconv.FormatInt(int64(m), 8)
 				}
+			}
+			if err := checkTmpfsOptions(opts); err != nil {
+				return "", fmt.Errorf("volume %v covers %s but: %w", v, dir, err)
 			}
 			return fmt.Sprintf("volume %v", v), nil
 		}
 	}
-	return "", fmt.Errorf("no tmpfs or read-write volume covers %s", dir)
+	return "", fmt.Errorf("no tmpfs covers %s", dir)
 }
 
 // TestComposeWritableMountMatcher checks writableMountFor on small compose
@@ -178,24 +180,28 @@ func TestComposeWritableMountMatcher(t *testing.T) {
 		yaml string
 		ok   bool
 	}{
-		{"tmpfs string", `tmpfs: /var/run`, true},
+		{"tmpfs string owned by nginx", `tmpfs: /var/run:uid=101`, true},
 		{"tmpfs list with options", "tmpfs:\n  - /tmp\n  - /var/run:uid=101,gid=101", true},
-		{"tmpfs on a parent dir", `tmpfs: /var`, true},
-		{"tmpfs with trailing slash", `tmpfs: /var/run/`, true},
+		{"tmpfs on a parent dir", `tmpfs: /var:uid=101`, true},
+		{"tmpfs with trailing slash", `tmpfs: /var/run/:uid=101`, true},
+		{"bare tmpfs keeps the image's root 755", `tmpfs: /var/run`, false},
+		{"tmpfs with only gid", `tmpfs: /var/run:gid=101`, false},
 		{"tmpfs owned by root", `tmpfs: /var/run:uid=0`, false},
-		{"tmpfs not world-writable, owned by nginx", `tmpfs: /var/run:uid=101,mode=0755`, true},
-		{"tmpfs not world-writable, owned by root", `tmpfs: /var/run:mode=0755`, false},
-		{"tmpfs on a sibling with a shared prefix", `tmpfs: /var/ru`, false},
-		{"tmpfs on an unrelated path", `tmpfs: /tmp`, false},
-		{"rw bind volume", "volumes:\n  - ./run:/var/run", true},
-		{"rw bind volume explicit", "volumes:\n  - ./run:/var/run:rw", true},
+		{"tmpfs owned by root, world-writable", `tmpfs: /var/run:uid=0,mode=1777`, false},
+		{"tmpfs world-writable mode", `tmpfs: /var/run:mode=1777`, true},
+		{"tmpfs owned by nginx, mode 0755", `tmpfs: /var/run:uid=101,mode=0755`, true},
+		{"tmpfs owned by nginx, no owner write", `tmpfs: /var/run:uid=101,mode=0555`, false},
+		{"tmpfs not world-writable, no uid", `tmpfs: /var/run:mode=0755`, false},
+		{"tmpfs on a sibling with a shared prefix", `tmpfs: /var/ru:uid=101`, false},
+		{"tmpfs on an unrelated path", `tmpfs: /tmp:uid=101`, false},
+		{"rw bind volume", "volumes:\n  - ./run:/var/run", false},
 		{"ro bind volume", "volumes:\n  - ./run:/var/run:ro", false},
-		{"anonymous volume", "volumes:\n  - /var/run", true},
-		{"long volume", "volumes:\n  - type: volume\n    source: run\n    target: /var/run", true},
-		{"long volume read_only", "volumes:\n  - type: bind\n    source: ./run\n    target: /var/run\n    read_only: true", false},
-		{"long tmpfs", "volumes:\n  - type: tmpfs\n    target: /var/run", true},
+		{"anonymous volume", "volumes:\n  - /var/run", false},
+		{"long named volume", "volumes:\n  - type: volume\n    source: run\n    target: /var/run", false},
+		{"long tmpfs without mode", "volumes:\n  - type: tmpfs\n    target: /var/run", false},
 		{"long tmpfs world-writable mode", "volumes:\n  - type: tmpfs\n    target: /var/run\n    tmpfs:\n      mode: 01777", true},
 		{"long tmpfs restrictive mode", "volumes:\n  - type: tmpfs\n    target: /var/run\n    tmpfs:\n      mode: 0755", false},
+		{"long tmpfs read_only", "volumes:\n  - type: tmpfs\n    target: /var/run\n    read_only: true\n    tmpfs:\n      mode: 01777", false},
 		{"unrelated volume", "volumes:\n  - ./ui:/app", false},
 		{"nothing mounted", `image: nginx`, false},
 	}
@@ -236,8 +242,8 @@ func TestComposeNginxPidPath(t *testing.T) {
 // docker-compose.ui.yml --profile prod up ui-prod` exited at once because the
 // image runs nginx as uid 101 and nginx couldn't create its pid file in the
 // image's root-owned /var/run. Production mounts an emptyDir there
-// (infrastructure/kubernetes/ui/deployment.yaml); the compose service needs a
-// writable mount at the same place. The pid path comes from ui/nginx.conf, so
+// (infrastructure/kubernetes/ui/deployment.yaml) with fsGroup 101; the compose
+// service needs a tmpfs there that uid 101 can write. The pid path comes from ui/nginx.conf, so
 // moving the pid file moves what this checks.
 //
 // The files are part of this repo, so a missing one fails rather than skips.

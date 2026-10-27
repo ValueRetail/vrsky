@@ -38,8 +38,10 @@ compose service the same writable paths.
     - /var/run:uid=101,gid=101
   ```
   `nginx.conf` sets `pid /var/run/nginx.pid`, so that's the one path that
-  fails. Mode stays the tmpfs default (1777), which the nginx user can write
-  regardless; the uid/gid make the owner match production's fsGroup.
+  fails. The uid is required, not cosmetic: `/var/run` is a symlink to
+  `/run` in the image, and Docker copies `/run`'s owner and mode (root, 755)
+  onto the tmpfs, so a bare tmpfs still gets `Permission denied`. uid/gid
+  101 match production's `runAsUser`/`fsGroup`.
 - `/var/cache/nginx` is already owned by nginx in the image (the Dockerfile
   chowns it), and the compose root filesystem is writable, so it doesn't need
   a mount here. Production needs one only because it runs with
@@ -50,8 +52,9 @@ compose service the same writable paths.
   closer to production, but it's a bigger change than the issue asks for.
   Noted in the PR.
 - The guard test parses `docker-compose.ui.yml` with `gopkg.in/yaml.v3`
-  (already a dependency) and checks `services.ui-prod` mounts something
-  writable at `/var/run` (a tmpfs entry, or a volume targeting it).
+  (already a dependency) and checks `services.ui-prod` has a tmpfs covering
+  the pid directory that uid 101 can write (uid=101, or a world-writable
+  mode). Named, anonymous and bind volumes don't count.
 
 ## Risks
 
@@ -75,14 +78,15 @@ compose service the same writable paths.
 
 ## What happened (2026-10-27)
 
-- The Go checks, `docker compose config` and the mutation run are done
-  (see the PR).
-- The build couldn't run: Docker Desktop's daemon hangs on every pull from
-  Docker Hub (`load metadata for docker.io/library/node:20-alpine:
-  DeadlineExceeded`), other sessions' pulls included, while containers
-  reach the registry fine. So neither the `Permission denied` repro nor the
-  200s have been seen on this branch yet. The tmpfs itself was checked with
-  a local busybox image: `--tmpfs /var/run:uid=101,gid=101` gives
-  `drwxrwxrwt 101 101` and uid 101 can create `/var/run/nginx.pid` there.
-- Still to do before merge: build and run `ui-prod` once the daemon can pull,
-  and check `/` and `/index.html` return 200.
+- First pass: Docker Desktop hung on every pull from Docker Hub, so only the
+  Go checks, `docker compose config` and the guard mutation ran.
+- Second pass, after pulls worked again:
+  - Without the tmpfs, the container exits 1 with
+    `open() "/var/run/nginx.pid" failed (13: Permission denied)`.
+  - With `/var/run:uid=101,gid=101` it runs, turns healthy, stays up, and
+    `/` and `/index.html` return 200. nginx writes its temp dirs under
+    `/var/cache/nginx` fine, so no other mount is needed.
+  - A bare `tmpfs: /var/run` (no uid) mounts as `mode=755` owned by root and
+    fails the same way, as does a named volume. The guard first written for
+    this issue accepted both (it assumed a 1777 default), so it was tightened
+    to require uid 101 or a world-writable mode and to reject volumes.

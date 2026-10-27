@@ -36,6 +36,7 @@ services:
     # The image runs nginx as the nginx user (uid/gid 101), which can't
     # create /var/run/nginx.pid on the image's own /var/run. Production
     # mounts an emptyDir there (infrastructure/kubernetes/ui/deployment.yaml).
+    # The uid is needed: a bare tmpfs takes the image's root-owned 755 /run.
     tmpfs:
       - /var/run:uid=101,gid=101
     healthcheck:
