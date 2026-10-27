@@ -52,7 +52,7 @@ Last updated 2026-10-27.
     `docker-build-filter`/`-converter`, none of which exist any more. Point
     them at what builds images now, or drop the sections. Found in review of
     #365.
-16. **`make docker-build-ui` can't build the UI** (`src/Makefile`). It runs
+16. ~~**`make docker-build-ui` can't build the UI**~~ (#369) (`src/Makefile`). It runs
     `docker build -t vrsky/ui:latest ../ui`, so the build context is `ui/`,
     but `ui/Dockerfile` copies `ui/...` from the repo root. It fails with
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
@@ -85,6 +85,19 @@ Last updated 2026-10-27.
     (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
     (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
     the image can write, would make it run. Found in #370.
+22. **The Dockerfile guard test doesn't apply `.dockerignore`**
+    (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
+    COPY/ADD source in `ui/Dockerfile` exists under the build context, but
+    not that the root `.dockerignore` lets it through. Changing `!ui` to
+    `!ui/src` still passes the guard while `COPY ui/package*.json` would
+    fail, and the first place that shows up is a failed ACR build on main
+    after the merge. Match paths the way Docker does (probably
+    `github.com/moby/patternmatcher`) and check every Dockerfile, not only
+    the UI's. Found in review of #369.
+23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+    with the repo root as context, so Docker reads only the root
+    `.dockerignore`. Delete it, or fold anything it still says into the
+    root file. Found in review of #369.
 
 ## Human
 
