@@ -58,8 +58,8 @@ Last updated 2026-10-27.
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
     Docker Hub `vrsky/`, which nothing uses. Fix the context or drop both
     targets (and the root forwards). Found in #367.
-17. **The `ui-prod` service in `docker-compose.ui.yml` has the same broken
-    context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
+17. ~~**The `ui-prod` service in `docker-compose.ui.yml` has the same broken
+    context**~~ (#370) (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
 18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
@@ -79,7 +79,13 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
-21. **The Dockerfile guard test doesn't apply `.dockerignore`**
+21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+    non-root user and can't write `/var/run/nginx.pid` (`Permission
+    denied`). Production avoids it with an emptyDir at `/var/run`
+    (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
+    (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
+    the image can write, would make it run. Found in #370.
+22. **The Dockerfile guard test doesn't apply `.dockerignore`**
     (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
     COPY/ADD source in `ui/Dockerfile` exists under the build context, but
     not that the root `.dockerignore` lets it through. Changing `!ui` to
@@ -88,7 +94,7 @@ Last updated 2026-10-27.
     after the merge. Match paths the way Docker does (probably
     `github.com/moby/patternmatcher`) and check every Dockerfile, not only
     the UI's. Found in review of #369.
-22. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.

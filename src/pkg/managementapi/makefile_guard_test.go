@@ -239,7 +239,7 @@ func TestRootMakefileHelpOutputListsDocumentedTargets(t *testing.T) {
 // resolves the Dockerfile and the context the printed `docker build` uses,
 // and checks every COPY and ADD source (other than `--from` stage copies)
 // matches a file under that context. It doesn't need Docker, and it doesn't
-// apply the root .dockerignore (plans/backlog.md item 21).
+// apply the root .dockerignore (plans/backlog.md item 22).
 func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 	makeBin, err := exec.LookPath("make")
 	if err != nil {
