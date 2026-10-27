@@ -3308,9 +3308,10 @@ published image is needed.</p>
 </ul>
 <h3 id="running-locally">Running locally<a class="headerlink" href="#running-locally" title="Permanent link">&para;</a></h3>
 <p>The local stack is <code>docker-compose.yml</code> at the repo root. It runs on
-built-in development defaults; to set your own <code>ENCRYPTION_KEY</code> or
-passwords, put them in a <code>.env</code> file at the repo root
-(<a href="../operator/install/">Install</a> lists what matters).</p>
+built-in development defaults. To set your own <code>ENCRYPTION_KEY</code>, copy
+<code>.env.example</code> to <code>.env</code> at the repo root and fill it in. The database
+passwords are fixed dev values in <code>docker-compose.yml</code>; <code>.env</code> doesn't
+change them (<a href="../operator/install/">Install</a> lists what matters).</p>
 <h4 id="option-1-build-ui-only-dev-mode">Option 1: Build UI Only (Dev Mode)<a class="headerlink" href="#option-1-build-ui-only-dev-mode" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><span class="c1"># Serves UI on http://localhost:5173 with hot reload</span>
 docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>--profile<span class="w"> </span>dev<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>ui

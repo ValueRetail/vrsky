@@ -2443,8 +2443,8 @@
 
 <h1 id="reaching-a-local-stack-from-another-machine">Reaching a local stack from another machine<a class="headerlink" href="#reaching-a-local-stack-from-another-machine" title="Permanent link">&para;</a></h1>
 <p>The compose stack binds every port to <code>127.0.0.1</code>. That is deliberate: a dev
-stack holds real credentials in a database whose password is in a file called
-<code>.env.example</code>, and it should not appear on a network because somebody ran
+stack holds real credentials in a database whose password is written into
+<code>docker-compose.yml</code>, and it should not appear on a network because somebody ran
 <code>docker compose up</code>.</p>
 <p>Sometimes it has to. A till on another machine posting into a webhook; a
 colleague's laptop driving the UI; a Windows PC that cannot run Docker itself
@@ -2507,7 +2507,7 @@ than what the compose file says.</p>
 networks.</p>
 <h2 id="what-this-is-not">What this is not<a class="headerlink" href="#what-this-is-not" title="Permanent link">&para;</a></h2>
 <p>A way to run VRSky for other people. There is no TLS on the ingress here, the
-stack's passwords are the ones from <code>.env.example</code> unless you changed them, and
+stack's database passwords are the fixed ones in <code>docker-compose.yml</code>, and
 a webhook connection without HMAC configured accepts whatever is posted to its
 URL. It is a test stack you have chosen to let one other machine reach.</p>
 <p>For anything real, deploy it: see <a href="../install/">Install</a>.</p>

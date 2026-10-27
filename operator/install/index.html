@@ -842,10 +842,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#required-configuration" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required configuration
+        Configuration
       
     </span>
   </a>
@@ -2392,10 +2392,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#required-configuration" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required configuration
+        Configuration
       
     </span>
   </a>
@@ -2448,7 +2448,7 @@ Postgres, orchestrated by Docker Compose (local/single-host) or Kubernetes
 <h2 id="local-single-host-docker-compose">Local / single host (Docker Compose)<a class="headerlink" href="#local-single-host-docker-compose" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/ValueRetail/vrsky.git
 <span class="nb">cd</span><span class="w"> </span>vrsky
-cp<span class="w"> </span>.env.example<span class="w"> </span>.env<span class="w">          </span><span class="c1"># set ENCRYPTION_KEY + passwords (see below)</span>
+cp<span class="w"> </span>.env.example<span class="w"> </span>.env<span class="w">          </span><span class="c1"># works as is; ENCRYPTION_KEY: see below</span>
 docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build<span class="w">  </span><span class="c1"># detached; -d is important (see Troubleshooting)</span>
 </code></pre></div>
 <p>The UI dev server runs separately:</p>
@@ -2457,13 +2457,23 @@ docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> 
 <p>Core endpoints (local): Management API <code>http://localhost:3000</code>, gateway
 (Traefik) <code>http://localhost:8090</code>, Grafana <code>http://localhost:3001</code>,
 Prometheus <code>http://localhost:9099</code>, webhook ingress <code>http://localhost:9100</code>.</p>
-<h2 id="required-configuration">Required configuration<a class="headerlink" href="#required-configuration" title="Permanent link">&para;</a></h2>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>The local stack runs without any <code>.env</code>. <code>docker-compose.yml</code> has a dev
+default for each variable it reads, and an empty value in <code>.env</code> falls back
+to that default, so an unedited copy of <code>.env.example</code> starts the same stack
+as no <code>.env</code>. To override one, set it in <code>.env</code> (or in the shell, e.g.
+<code>ENCRYPTION_KEY=... docker compose up -d</code>).</p>
 <ul>
-<li><strong><code>ENCRYPTION_KEY</code></strong> — 64 hex chars (32 bytes). The same value must be set on
-  the management-API and every worker that resolves secrets. <strong>Generate once and
-  store it safely — losing it makes all stored secrets unrecoverable.</strong> See the
-  <a href="../encryption-at-rest/">encryption-at-rest checklist</a>.</li>
-<li>Database passwords and any object-storage credentials.</li>
+<li><strong><code>ENCRYPTION_KEY</code></strong>: 64 hex chars (32 bytes), <code>openssl rand -hex 32</code>.
+  Optional for a quick local try, where compose falls back to a dev key that
+  every checkout shares. Set your own before you store real credentials, and
+  back it up: secrets stored under one key don't decrypt under another, and
+  losing it makes them unrecoverable. In production it is required, with the
+  same value on the management-API and every worker that resolves secrets.
+  See the <a href="../encryption-at-rest/">encryption-at-rest checklist</a>.</li>
+<li>Database passwords and any object-storage credentials. In the local compose
+  stack these are fixed dev values written into <code>docker-compose.yml</code>, not
+  read from <code>.env</code>; the stack binds its ports to <code>127.0.0.1</code> for that reason.</li>
 </ul>
 <h2 id="production-kubernetes">Production (Kubernetes)<a class="headerlink" href="#production-kubernetes" title="Permanent link">&para;</a></h2>
 <p>Manifests live under <code>infrastructure/kubernetes/</code>. See the detailed

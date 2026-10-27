@@ -2573,8 +2573,10 @@ memory=4GB
 <span class="nb">cd </span><span class="n">vrsky</span>
 <span class="nb">copy </span><span class="p">.</span><span class="n">env</span><span class="p">.</span><span class="n">example</span> <span class="p">.</span><span class="n">env</span>
 </code></pre></div>
-<p>Edit <code>.env</code> and set <code>ENCRYPTION_KEY</code> to 64 hex characters, plus the passwords.
-In PowerShell:</p>
+<p>For a quick try, <code>.env</code> works as it is: empty values fall back to the
+defaults in <code>docker-compose.yml</code>, and the database passwords are fixed dev
+values there. Before you store real credentials, set <code>ENCRYPTION_KEY</code> in
+<code>.env</code> to 64 hex characters and back it up. To generate a key in PowerShell:</p>
 <div class="highlight"><pre><span></span><code><span class="n">-join</span> <span class="p">((</span><span class="n">1</span><span class="p">..</span><span class="n">32</span><span class="p">)</span> <span class="p">|</span> <span class="k">ForEach</span><span class="n">-Object</span> <span class="p">{</span> <span class="s1">'{0:x2}'</span> <span class="o">-f</span> <span class="p">(</span><span class="nb">Get-Random</span> <span class="n">-Maximum</span> <span class="n">256</span><span class="p">)</span> <span class="p">})</span>
 </code></pre></div>
 <div class="admonition danger">
@@ -2626,11 +2628,14 @@ it, Git for Windows checks out <code>entrypoint.sh</code> with CRLF and the mana
 container exits reporting that a file which plainly exists cannot be found. If
 you cloned before that file existed, <code>git rm --cached -r . &amp;&amp; git reset --hard</code>
 re-normalises.</p>
-<p><strong><code>HOME</code> is not set in PowerShell.</strong> The file connectors mount your home
-directory so a path typed in the editor means the same thing inside the
-container. Where <code>HOME</code> is unset they fall back to the repository's
-<code>data/input</code>, so file pipelines read and write there instead. Set <code>HOME</code> in
-<code>.env</code> if you want the mount.</p>
+<p><strong>File pipelines use <code>data/input</code> in the repository.</strong> On macOS and Linux
+the file connectors mount your home directory, so a path typed in the editor
+means the same thing inside the container. PowerShell doesn't set <code>HOME</code>, so
+on Windows they mount the repository's <code>data/input</code> instead, and file
+pipelines read and write there. Don't set <code>HOME</code> in <code>.env</code> to get your home
+folder: compose uses it as both the source and the target of the mount, and
+Docker rejects a Windows path like <code>C:/Users/you</code> as a target, so the file
+connectors won't start.</p>
 <p><strong>Ports.</strong> The core set binds 3000, 4222, 5434, 8080, 8222, 9100, 9101, 9310,
 9400, 9600, 9700 and 9900 on loopback. <code>netstat -ano | findstr :3000</code> finds a
 conflict.</p>
