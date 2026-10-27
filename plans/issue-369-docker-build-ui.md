@@ -43,9 +43,9 @@ So `docker-push-ui` goes.
 - `src/pkg/managementapi/makefile_guard_test.go`: a guard that the
   `docker build` commands `make -n` prints use a context that holds every
   file the Dockerfile copies.
-- `plans/backlog.md`: strike item 16; add item 19 for the three
-  `docker build ... ui/` lines in DEPLOYMENT_GUIDE's troubleshooting, which
-  have the same wrong context (out of scope here).
+- `plans/backlog.md`: strike item 16. The three `docker build ... ui/`
+  lines in DEPLOYMENT_GUIDE's troubleshooting have the same wrong context;
+  #371 fixes them as part of rewriting that guide.
 - `AGENTS.md`: checked; it doesn't name either target, and "the root
   forwards every one of them" stays true. No change expected.
 

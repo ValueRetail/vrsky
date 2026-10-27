@@ -67,11 +67,6 @@ Last updated 2026-10-27.
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
     spell it `docker-compose` rather than `docker compose`. Found in #367.
-19. **DEPLOYMENT_GUIDE's UI troubleshooting builds with the wrong context.**
-    Lines 444, 456 and 501 of `docs/DEPLOYMENT_GUIDE.md` run
-    `docker build -t vrsky/ui:latest ui/`, which fails the same way #369
-    did. Use `-f ui/Dockerfile .` from the repo root (as line 106 does) or
-    `make docker-build-ui`. Found in #369.
 
 ## Human
 
