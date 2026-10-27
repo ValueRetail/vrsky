@@ -52,14 +52,14 @@ Last updated 2026-10-27.
     `docker-build-filter`/`-converter`, none of which exist any more. Point
     them at what builds images now, or drop the sections. Found in review of
     #365.
-16. **`make docker-build-ui` can't build the UI** (`src/Makefile`). It runs
+16. ~~**`make docker-build-ui` can't build the UI**~~ (#369) (`src/Makefile`). It runs
     `docker build -t vrsky/ui:latest ../ui`, so the build context is `ui/`,
     but `ui/Dockerfile` copies `ui/...` from the repo root. It fails with
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
     Docker Hub `vrsky/`, which nothing uses. Fix the context or drop both
     targets (and the root forwards). Found in #367.
-17. **The `ui-prod` service in `docker-compose.ui.yml` has the same broken
-    context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
+17. ~~**The `ui-prod` service in `docker-compose.ui.yml` has the same broken
+    context**~~ (#370) (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
 18. ~~**`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.**~~ (#371) The registry,
@@ -79,17 +79,36 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
-22. **The docs tell people to copy a `.env.example` that doesn't exist.**
+21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+    non-root user and can't write `/var/run/nginx.pid` (`Permission
+    denied`). Production avoids it with an emptyDir at `/var/run`
+    (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
+    (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
+    the image can write, would make it run. Found in #370.
+22. **The Dockerfile guard test doesn't apply `.dockerignore`**
+    (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
+    COPY/ADD source in `ui/Dockerfile` exists under the build context, but
+    not that the root `.dockerignore` lets it through. Changing `!ui` to
+    `!ui/src` still passes the guard while `COPY ui/package*.json` would
+    fail, and the first place that shows up is a failed ACR build on main
+    after the merge. Match paths the way Docker does (probably
+    `github.com/moby/patternmatcher`) and check every Dockerfile, not only
+    the UI's. Found in review of #369.
+23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+    with the repo root as context, so Docker reads only the root
+    `.dockerignore`. Delete it, or fold anything it still says into the
+    root file. Found in review of #369.
+24. **The docs tell people to copy a `.env.example` that doesn't exist.**
     `README.md`, `docs/operator/install.md` and `docs/operator/windows.md`
     say `cp .env.example .env`; there is no root `.env.example` (only
     `ui/.env.example`), and `docker-compose.yml` has defaults for every
     variable. Add the file with the variables that matter or change the
     docs. Found in #371.
-23. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
+25. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
     100644; every other script there is 100755). The guide now says `bash
     ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
     #371.
-24. **The k3d path doesn't line up with its manifests.**
+26. **The k3d path doesn't line up with its manifests.**
     `k3d-load-images.sh` imports `data-filter` and `data-converter` as
     `localhost:5000/vrsky/...` while their manifests pull
     `ghcr.io/valueretail/vrsky/...`, loads no UI image, and the UI manifest's
@@ -97,16 +116,16 @@ Last updated 2026-10-27.
     `TestUIDeployRewritesMatchManifest` and `deploy-ui-azure.sh`'s rewrite
     depend on that string, so change them together. Manifests: PR plus
     `agent:needs-human`. Found in #371.
-25. **The backup CronJob's image is built nowhere.**
+27. **The backup CronJob's image is built nowhere.**
     `infrastructure/kubernetes/backup/cronjob.yaml` runs
     `ghcr.io/valueretail/vrsky/vrsky-cli:latest`, and its README says CI
     builds it, but no workflow or script builds `vrsky-cli` into any
     registry. Find out whether the CronJob runs on AKS; if it does, it can't
     pull. Manifests: PR plus `agent:needs-human`. Found in #371.
-26. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
+28. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
     rewrote the guide down to "Encryption at rest" and left the rest alone.
     "Disaster Recovery" says the management Postgres "is backed up daily",
-    but the backup CronJob's image is built nowhere (item 25), so check
+    but the backup CronJob's image is built nowhere (item 27), so check
     whether any backup runs in prod. The encryption table says TLS
     terminates at Traefik; production runs ingress-nginx. Fix both (and
     `docs/DR.md` if it says the same). Found in review of #376.
