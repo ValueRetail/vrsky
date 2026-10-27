@@ -123,7 +123,9 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 
-	c := &fileConsumer{}
+	// A file is published on the second poll that sees it unchanged (#374);
+	// a short interval keeps that well inside the deadline below.
+	c := &fileConsumer{pollInterval: 200 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
 
 	startAndWaitActive(t, h, c, connID, tenant)
@@ -135,7 +137,6 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 		t.Fatalf("write watched file: %v", err)
 	}
 
-	// The watcher polls on a 5s ticker, so allow more than one interval.
 	got := h.ExpectEnvelope(t, harness.MatchTenant(tenant), 12*time.Second)
 	if got.IntegrationID != connID {
 		t.Errorf("integration id = %q, want %q", got.IntegrationID, connID)

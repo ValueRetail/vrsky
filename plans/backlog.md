@@ -67,7 +67,7 @@ Last updated 2026-10-27.
     `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
     are built in ACR (`vrskyprodacr`). The local-development options also
     spell it `docker-compose` rather than `docker compose`. Found in #367.
-19. **The file watcher can publish a half-written file**
+19. ~~**The file watcher can publish a half-written file**~~ (#374)
     (`src/cmd/file-consumer/service.go`, `watchDirectory`). A new name is
     read on the first poll that sees it, with no check that the writer is
     done, and once the name is known the finished file is never published.
@@ -129,6 +129,20 @@ Last updated 2026-10-27.
     whether any backup runs in prod. The encryption table says TLS
     terminates at Traefik; production runs ingress-nginx. Fix both (and
     `docs/DR.md` if it says the same). Found in review of #376.
+29. **A watched file replaced under the same name is never published again**
+    (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
+    the name only: once `orders.csv` is published, a writer that overwrites
+    it or renames a new `orders.csv` over it is ignored, unless the name
+    disappeared for at least one poll in between. Decide whether a changed
+    size or mtime on a known name means a new file. Found during #374.
+30. **Files still settling at a stop or restart are never published**
+    (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
+    taken at start counts every name in the directory as already there, so
+    a file that landed before a stop or restart but had not been published
+    yet is skipped for good. That was true before #374 too, but the window
+    has grown from at most 5 s to at most 10 s now that a file needs two
+    unchanged polls. Persisting what was published, or treating files newer
+    than the last stop as new, would close it. Found in review of #374.
 31. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
     `VITE_ENVIRONMENT`** on both the `ui` dev service and `ui-prod`. The UI
     never reads either name (`ui/src/config/env.ts` reads `VITE_API_URL`,
