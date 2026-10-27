@@ -1,5 +1,6 @@
 .PHONY: help build build-agent clean test test-db lint lint-tenant lint-connector lint-openapi fmt vet mod-tidy mod-verify info docker-build-ui docker-push-ui up-core up-core-remote down-core
 
+BLUE=\033[0;34m
 GREEN=\033[0;32m
 NC=\033[0m
 
@@ -7,7 +8,7 @@ NC=\033[0m
 # local-stack targets this file owns (the ones with a `##` comment below).
 help:
 	@$(MAKE) -C src help
-	@echo "Local stack (repo root only):"
+	@echo "$(BLUE)Local stack (repo root only)$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "$(GREEN)  %-20s$(NC)  %s\n", $$1, $$2}'
 	@echo ""
 

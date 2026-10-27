@@ -2,12 +2,15 @@ package managementapi
 
 import (
 	"bufio"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // makeRule is one rule parsed from a Makefile: its documentation (the text
@@ -23,8 +26,9 @@ type makeRule struct {
 var ruleLine = regexp.MustCompile(`^([A-Za-z0-9_.-]+(?:[ \t]+[A-Za-z0-9_.-]+)*)[ \t]*:([^=:].*)?$`)
 
 // forwardLine matches a recipe that hands the target to src/Makefile:
-// `$(MAKE) -C src <target>`, with or without a leading `@`.
-var forwardLine = regexp.MustCompile(`^\t@?\$\(MAKE\)\s+-C\s+src\s+([A-Za-z0-9_.-]+)\s*$`)
+// `$(MAKE) -C src <target>`, with or without a leading `@`. The target is a
+// name or `$@` (the rule's own name).
+var forwardLine = regexp.MustCompile(`^\t@?\$\(MAKE\)\s+-C\s+src\s+([A-Za-z0-9_.-]+|\$@)\s*$`)
 
 // parseMakefile reads a Makefile and returns its rules by target name.
 // Special targets such as .PHONY and .DEFAULT_GOAL are left out.
@@ -108,12 +112,23 @@ func TestRootMakefileForwardsOnlyExistingSrcTargets(t *testing.T) {
 		for _, line := range root[name].recipe {
 			m := forwardLine.FindStringSubmatch(line)
 			if m == nil {
+				// Anything else that calls make or reaches into src is a
+				// forward this test can't read; skipping it would hide a
+				// broken one.
+				if strings.Contains(line, "$(MAKE)") || strings.Contains(line, "-C src") {
+					t.Errorf("root Makefile target %q has an unrecognised forward %q; update this test",
+						name, strings.TrimSpace(line))
+				}
 				continue
 			}
 			forwards++
-			if _, ok := src[m[1]]; !ok {
+			target := m[1]
+			if target == "$@" {
+				target = name
+			}
+			if _, ok := src[target]; !ok {
 				t.Errorf("root Makefile target %q forwards to `make -C src %s`, but src/Makefile has no %q rule",
-					name, m[1], m[1])
+					name, target, target)
 			}
 		}
 	}
@@ -165,5 +180,54 @@ func TestRootMakefileHelpListsCoreStackTargets(t *testing.T) {
 				t.Errorf("root Makefile rule %q has no `## description`, so `make help` doesn't list it", name)
 			}
 		})
+	}
+}
+
+// ansiEscape matches the colour codes `make help` wraps target names in.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// TestRootMakefileHelpOutputListsDocumentedTargets guards issue #361 on the
+// outcome rather than the comments: it runs root `make help` and checks that
+// every `##`-documented target in src/Makefile and the root Makefile shows up
+// as a listed entry. Dropping the root help's own grep, for instance, hides
+// up-core and friends while their `##` comments stay in place.
+func TestRootMakefileHelpOutputListsDocumentedTargets(t *testing.T) {
+	makeBin, err := exec.LookPath("make")
+	if err != nil {
+		t.Skip("make is not on PATH, so root `make help` can't run here; the static checks above still apply")
+	}
+	root, src := makefiles(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, makeBin, "-C", filepath.Join("..", "..", ".."), "help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("root `make help` failed: %v\n%s", err, out)
+	}
+
+	// A listed entry is an indented line whose first word is the target.
+	listed := map[string]bool{}
+	for _, line := range strings.Split(ansiEscape.ReplaceAllString(string(out), ""), "\n") {
+		if !strings.HasPrefix(line, " ") {
+			continue
+		}
+		if fields := strings.Fields(line); len(fields) > 1 {
+			listed[fields[0]] = true
+		}
+	}
+
+	for _, mf := range []struct {
+		file  string
+		rules map[string]*makeRule
+	}{
+		{"src/Makefile", src},
+		{"Makefile", root},
+	} {
+		for _, name := range sortedTargets(mf.rules) {
+			if mf.rules[name].doc != "" && !listed[name] {
+				t.Errorf("%q is documented in %s, but root `make help` doesn't list it; output:\n%s",
+					name, mf.file, out)
+			}
+		}
 	}
 }

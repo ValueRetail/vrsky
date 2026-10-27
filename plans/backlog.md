@@ -45,6 +45,13 @@ Last updated 2026-10-27.
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
+15. **Docs still name make targets that are gone.** `docs/DEPLOYMENT_GUIDE.md`
+    (lines ~120–129, in the mkdocs nav) and `PROJECT_STRUCTURE.md` (~127,
+    238, 241, 286) tell readers to run `make docker-build`,
+    `docker-build-consumer`, `docker-push*` and
+    `docker-build-filter`/`-converter`, none of which exist any more. Point
+    them at what builds images now, or drop the sections. Found in review of
+    #365.
 
 ## Human
 
