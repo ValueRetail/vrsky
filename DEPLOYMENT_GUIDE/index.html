@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#vrsky-docker-deployment-guide-phase-12" class="md-skip">
+        <a href="#deployment-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -1251,63 +1251,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
+  <a href="#images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Table of Contents
+        Images
       
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#architecture-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture Overview
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Architecture Overview">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#services-and-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Services and Components
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#container-registry" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Container Registry
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-naming-convention" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Naming Convention
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1315,12 +1265,12 @@
   <a href="#local-development" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local Development
+        Local development
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Local Development">
+    <nav class="md-nav" aria-label="Local development">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1335,15 +1285,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#building-locally" class="md-nav__link">
+  <a href="#running-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Building Locally
+        Running locally
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Building Locally">
+    <nav class="md-nav" aria-label="Running locally">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1395,11 +1345,50 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#production-images" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-dockerfiles-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Production Images
+        What the Dockerfiles do
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the Dockerfiles do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#go-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Go services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build context
       
     </span>
   </a>
@@ -1412,72 +1401,33 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#docker-image-building" class="md-nav__link">
+  <a href="#cicd-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker Image Building
+        CI/CD pipeline
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Docker Image Building">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-and-deploying-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building and deploying by hand
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building and deploying by hand">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#multi-stage-build-strategy" class="md-nav__link">
+  <a href="#first-bring-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Multi-Stage Build Strategy
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Multi-Stage Build Strategy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#backend-services-go" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend Services (Go)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#frontend-react-nginx" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frontend (React + Nginx)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#docker-ignore" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker Ignore
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#build-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Build Process
+        First bring-up
       
     </span>
   </a>
@@ -1490,22 +1440,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#github-actions-cicd-pipeline" class="md-nav__link">
+  <a href="#kubernetes-manifests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GitHub Actions CI/CD Pipeline
+        Kubernetes manifests
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="GitHub Actions CI/CD Pipeline">
+    <nav class="md-nav" aria-label="Kubernetes manifests">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#workflow-githubworkflowsbuild-pushyml" class="md-nav__link">
+  <a href="#the-ui-manifests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Workflow: .github/workflows/build-push.yml
+        The UI manifests
       
     </span>
   </a>
@@ -1513,43 +1463,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#build-matrix" class="md-nav__link">
+  <a href="#local-cluster-k3d" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Build Matrix
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-tags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Tags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cache-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cache Strategy
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#running-tests-in-ci" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Tests in CI
+        Local cluster (k3d)
       
     </span>
   </a>
@@ -1562,218 +1479,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kubernetes-deployment" class="md-nav__link">
+  <a href="#tags-and-digests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Kubernetes Deployment
+        Tags and digests
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Kubernetes Deployment">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#namespace-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Namespace Structure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ui-deployment-manifests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UI Deployment Manifests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="UI Deployment Manifests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-namespaceyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. namespace.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-configmapyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. configmap.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-deploymentyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. deployment.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-serviceyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. service.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-ingressyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. ingress.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#6-hpayaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. hpa.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#7-pdbyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. pdb.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deploying-to-k3d-local" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deploying to k3d (Local)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deploying-to-k3s-production-oslo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deploying to K3s Production (Oslo)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blue-green-deployment-optional" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blue-Green Deployment (Optional)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#versioning-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Versioning Strategy
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Versioning Strategy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#semantic-versioning-semver" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Semantic Versioning (SemVer)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#git-tag-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Git Tag Strategy
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-version-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Version Resolution
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deployment-by-version" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deployment by Version
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1790,22 +1502,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#npm-ci-fails-in-the-ui-image-build" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Issues
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Common Issues">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#build-fails-npm-ci-requires-package-lockjson" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Build Fails: "npm ci requires package-lock.json"
+        npm ci fails in the UI image build
       
     </span>
   </a>
@@ -1813,10 +1513,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#image-build-runs-tests-inside-container" class="md-nav__link">
+  <a href="#ui-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Image Build Runs Tests Inside Container
+        UI tests
       
     </span>
   </a>
@@ -1824,10 +1524,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#kubernetes-pod-stays-in-pending" class="md-nav__link">
+  <a href="#a-pod-stays-pending" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Kubernetes Pod Stays in "Pending"
+        A pod stays Pending
       
     </span>
   </a>
@@ -1835,10 +1535,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#liveness-probe-fails" class="md-nav__link">
+  <a href="#the-uis-probes-fail" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Liveness Probe Fails
+        The UI's probes fail
       
     </span>
   </a>
@@ -1846,18 +1546,24 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#image-pull-errors-in-k8s" class="md-nav__link">
+  <a href="#image-pull-errors-on-aks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Image Pull Errors in K8s
+        Image pull errors on AKS
       
     </span>
   </a>
   
 </li>
         
-      </ul>
-    </nav>
+          <li class="md-nav__item">
+  <a href="#a-rollout-succeeded-but-the-old-version-is-still-served" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A rollout succeeded but the old version is still served
+      
+    </span>
+  </a>
   
 </li>
         
@@ -1865,7 +1571,7 @@
   <a href="#debugging-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Debugging Commands
+        Debugging commands
       
     </span>
   </a>
@@ -1874,28 +1580,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#summary-phase-12-deliverables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary - PHASE 12 Deliverables
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
   
 </li>
       
@@ -3097,63 +2781,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
+  <a href="#images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Table of Contents
+        Images
       
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#architecture-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Architecture Overview
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Architecture Overview">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#services-and-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Services and Components
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#container-registry" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Container Registry
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-naming-convention" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Naming Convention
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3161,12 +2795,12 @@
   <a href="#local-development" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local Development
+        Local development
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Local Development">
+    <nav class="md-nav" aria-label="Local development">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3181,15 +2815,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#building-locally" class="md-nav__link">
+  <a href="#running-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Building Locally
+        Running locally
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Building Locally">
+    <nav class="md-nav" aria-label="Running locally">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3241,11 +2875,50 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#production-images" class="md-nav__link">
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-dockerfiles-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Production Images
+        What the Dockerfiles do
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the Dockerfiles do">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#go-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Go services
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build context
       
     </span>
   </a>
@@ -3258,72 +2931,33 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#docker-image-building" class="md-nav__link">
+  <a href="#cicd-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker Image Building
+        CI/CD pipeline
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Docker Image Building">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-and-deploying-by-hand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building and deploying by hand
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building and deploying by hand">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#multi-stage-build-strategy" class="md-nav__link">
+  <a href="#first-bring-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Multi-Stage Build Strategy
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Multi-Stage Build Strategy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#backend-services-go" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend Services (Go)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#frontend-react-nginx" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frontend (React + Nginx)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#docker-ignore" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Docker Ignore
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#build-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Build Process
+        First bring-up
       
     </span>
   </a>
@@ -3336,22 +2970,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#github-actions-cicd-pipeline" class="md-nav__link">
+  <a href="#kubernetes-manifests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GitHub Actions CI/CD Pipeline
+        Kubernetes manifests
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="GitHub Actions CI/CD Pipeline">
+    <nav class="md-nav" aria-label="Kubernetes manifests">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#workflow-githubworkflowsbuild-pushyml" class="md-nav__link">
+  <a href="#the-ui-manifests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Workflow: .github/workflows/build-push.yml
+        The UI manifests
       
     </span>
   </a>
@@ -3359,43 +2993,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#build-matrix" class="md-nav__link">
+  <a href="#local-cluster-k3d" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Build Matrix
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-tags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Tags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cache-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cache Strategy
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#running-tests-in-ci" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Tests in CI
+        Local cluster (k3d)
       
     </span>
   </a>
@@ -3408,218 +3009,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#kubernetes-deployment" class="md-nav__link">
+  <a href="#tags-and-digests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Kubernetes Deployment
+        Tags and digests
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Kubernetes Deployment">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#namespace-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Namespace Structure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#ui-deployment-manifests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UI Deployment Manifests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="UI Deployment Manifests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-namespaceyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. namespace.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-configmapyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. configmap.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-deploymentyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. deployment.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-serviceyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. service.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-ingressyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. ingress.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#6-hpayaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. hpa.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#7-pdbyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. pdb.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deploying-to-k3d-local" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deploying to k3d (Local)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deploying-to-k3s-production-oslo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deploying to K3s Production (Oslo)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blue-green-deployment-optional" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Blue-Green Deployment (Optional)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#versioning-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Versioning Strategy
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Versioning Strategy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#semantic-versioning-semver" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Semantic Versioning (SemVer)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#git-tag-strategy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Git Tag Strategy
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#image-version-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Image Version Resolution
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deployment-by-version" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deployment by Version
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -3636,22 +3032,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#common-issues" class="md-nav__link">
+  <a href="#npm-ci-fails-in-the-ui-image-build" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Issues
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Common Issues">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#build-fails-npm-ci-requires-package-lockjson" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Build Fails: "npm ci requires package-lock.json"
+        npm ci fails in the UI image build
       
     </span>
   </a>
@@ -3659,10 +3043,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#image-build-runs-tests-inside-container" class="md-nav__link">
+  <a href="#ui-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Image Build Runs Tests Inside Container
+        UI tests
       
     </span>
   </a>
@@ -3670,10 +3054,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#kubernetes-pod-stays-in-pending" class="md-nav__link">
+  <a href="#a-pod-stays-pending" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Kubernetes Pod Stays in "Pending"
+        A pod stays Pending
       
     </span>
   </a>
@@ -3681,10 +3065,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#liveness-probe-fails" class="md-nav__link">
+  <a href="#the-uis-probes-fail" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Liveness Probe Fails
+        The UI's probes fail
       
     </span>
   </a>
@@ -3692,18 +3076,24 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#image-pull-errors-in-k8s" class="md-nav__link">
+  <a href="#image-pull-errors-on-aks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Image Pull Errors in K8s
+        Image pull errors on AKS
       
     </span>
   </a>
   
 </li>
         
-      </ul>
-    </nav>
+          <li class="md-nav__item">
+  <a href="#a-rollout-succeeded-but-the-old-version-is-still-served" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A rollout succeeded but the old version is still served
+      
+    </span>
+  </a>
   
 </li>
         
@@ -3711,7 +3101,7 @@
   <a href="#debugging-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Debugging Commands
+        Debugging commands
       
     </span>
   </a>
@@ -3720,28 +3110,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#summary-phase-12-deliverables" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary - PHASE 12 Deliverables
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#next-steps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next Steps
-      
-    </span>
-  </a>
   
 </li>
       
@@ -3873,79 +3241,99 @@
 
 
 
-<h1 id="vrsky-docker-deployment-guide-phase-12">VRSky Docker Deployment Guide - PHASE 12<a class="headerlink" href="#vrsky-docker-deployment-guide-phase-12" title="Permanent link">&para;</a></h1>
-<p>This guide covers the complete deployment pipeline for VRSky services using Docker and Kubernetes, including the React UI frontend and all 9 backend services.</p>
-<p><strong>Target Date</strong>: PHASE 12 (Docker Deployment)<br />
-<strong>Status</strong>: 🔄 Implementation in Progress</p>
-<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h2>
-<ol>
-<li><a href="#architecture-overview">Architecture Overview</a></li>
-<li><a href="#local-development">Local Development</a></li>
-<li><a href="#docker-image-building">Docker Image Building</a></li>
-<li><a href="#github-actions-cicd-pipeline">GitHub Actions CI/CD Pipeline</a></li>
-<li><a href="#kubernetes-deployment">Kubernetes Deployment</a></li>
-<li><a href="#versioning-strategy">Versioning Strategy</a></li>
-<li><a href="#troubleshooting">Troubleshooting</a></li>
-<li><a href="#disaster-recovery">Disaster Recovery</a></li>
-</ol>
+<h1 id="deployment-guide">Deployment guide<a class="headerlink" href="#deployment-guide" title="Permanent link">&para;</a></h1>
+<p>How VRSky's container images are built, where they live and how they reach
+production. Production is the AKS cluster <code>vrsky-prod</code>, which pulls its
+images from the Azure Container Registry <code>vrskyprodacr</code>, and a merge to
+<code>main</code> builds and deploys the images it touched. The day-to-day side of
+that (what a merge deploys, watching a run, the parked cluster, rolling
+back) is in <a href="../operator/deploy/">Deploying</a>. This page covers the parts
+around it: local builds, the images, the pipeline, and the scripts an
+operator runs by hand.</p>
+<p>No workflow pushes to GitHub Container Registry or Docker Hub, whatever
+older versions of this page said.</p>
 <hr />
-<h2 id="architecture-overview">Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">&para;</a></h2>
-<h3 id="services-and-components">Services and Components<a class="headerlink" href="#services-and-components" title="Permanent link">&para;</a></h3>
-<p>VRSky consists of:</p>
-<ul>
-<li><strong>1 Frontend</strong>: React SPA (UI)</li>
-<li><strong>9 Backend Services</strong>:</li>
-<li><code>producer</code> - Message production</li>
-<li><code>consumer</code> - Basic message consumption</li>
-<li><code>converter</code> - Data format conversion</li>
-<li><code>filter</code> - Message filtering</li>
-<li><code>management-api</code> - Tenant and integration management</li>
-<li><code>file-consumer</code> - File-based message source</li>
-<li><code>file-producer</code> - File-based message destination</li>
-<li><code>postgres-consumer</code> - PostgreSQL CDC consumer</li>
-<li><code>postgres-producer</code> - PostgreSQL message sink</li>
-</ul>
-<h3 id="container-registry">Container Registry<a class="headerlink" href="#container-registry" title="Permanent link">&para;</a></h3>
-<p>All images are pushed to <strong>GitHub Container Registry (GHCR)</strong>:</p>
-<div class="highlight"><pre><span></span><code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:&lt;tag&gt;
-</code></pre></div>
-<h3 id="image-naming-convention">Image Naming Convention<a class="headerlink" href="#image-naming-convention" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Development</strong>: <code>vrsky/&lt;service&gt;:latest</code> (local builds)</li>
-<li><strong>Production</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:latest</code> (GHCR)</li>
-<li><strong>Versioned</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:v1.2.3</code> (semver tags)</li>
-<li><strong>Commit Hash</strong>: <code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:sha-a1b2c3d4</code> (branch builds)</li>
-</ul>
+<h2 id="images">Images<a class="headerlink" href="#images" title="Permanent link">&para;</a></h2>
+<p>Every VRSky image is <code>vrskyprodacr.azurecr.io/vrsky/&lt;name&gt;:latest</code>.
+There are no version or commit tags. Each build overwrites <code>:latest</code>, and a
+deploy pins the core deployments to the digest <code>:latest</code> pointed at when it
+ran (see <a href="#tags-and-digests">Tags and digests</a>).</p>
+<p><code>infrastructure/azure/build-push-acr.sh</code> builds them in two groups, and
+<code>infrastructure/azure/affected.sh</code> and the deploy scripts use the same
+split:</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Images</th>
+<th>Rolled out by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>core</td>
+<td><code>management-api</code>, <code>ui</code>, <code>data-filter</code>, <code>data-converter</code>, <code>alert-responder</code></td>
+<td><code>deploy-core-azure.sh</code>, by digest</td>
+</tr>
+<tr>
+<td>connectors</td>
+<td><code>sitoo</code>, <code>front-systems</code>, <code>business-central</code>, <code>visma</code>, <code>brightpearl</code> and <code>sap-s4hana</code>, each as <code>-consumer</code> and <code>-producer</code>; <code>api-consumer</code>, <code>webhook-consumer</code>, <code>file-consumer</code>, <code>db-consumer</code>, <code>tenant-consumer</code>, <code>cloud-storage-consumer</code>, <code>sftp-consumer</code>, <code>kafka-consumer</code>, <code>rabbitmq-consumer</code>, <code>salesforce-consumer</code>, <code>remote-agent</code>; <code>http-producer</code>, <code>db-producer</code>, <code>file-producer</code>, <code>cloud-storage-producer</code>, <code>sftp-producer</code>, <code>kafka-producer</code>, <code>rabbitmq-producer</code>, <code>salesforce-producer</code></td>
+<td><code>deploy-connectors-azure.sh</code>, or a restart of the deployment</td>
+</tr>
+</tbody>
+</table>
+<p>The UI is built from <code>ui/Dockerfile</code>, every other image from
+<code>src/cmd/&lt;name&gt;/Dockerfile</code>. The UI runs in namespace <code>vrsky-ui</code>; the other
+core services and all connectors run in <code>vrsky-platform</code>, as
+<code>vrsky-&lt;name&gt;</code>.</p>
+<p>Four directories under <code>src/cmd</code> have a Dockerfile but no image in ACR:
+<code>postgres-consumer</code>, <code>postgres-producer</code>, <code>mock-sap</code> (a fake SAP endpoint
+for the local stack) and <code>vrsky-cli</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">postgres-consumer / postgres-producer are not built here</p>
+<p><code>postgres-consumer</code> (CDC, configured from <code>POSTGRES_INPUT_*</code>) and
+<code>postgres-producer</code> (a writer, <code>POSTGRES_OUTPUT_*</code>) predate the
+connection-config model. No connector type claims them, so no tenant
+pipeline can use them. <code>postgres-consumer</code> is a load-harness fixture
+(<code>tests/load/</code>), and <code>docker compose</code> builds both from source, so no
+published image is needed.</p>
+</div>
 <hr />
-<h2 id="local-development">Local Development<a class="headerlink" href="#local-development" title="Permanent link">&para;</a></h2>
+<h2 id="local-development">Local development<a class="headerlink" href="#local-development" title="Permanent link">&para;</a></h2>
 <h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Docker 24.0+</li>
-<li>Docker Compose 2.20+</li>
-<li>Node.js 20+</li>
-<li>Go 1.22+</li>
+<li>Docker with Compose v2 (the <code>docker compose</code> subcommand)</li>
+<li>Node.js 20 and Go 1.26 if you build or test outside containers</li>
 <li>Git</li>
 </ul>
-<h3 id="building-locally">Building Locally<a class="headerlink" href="#building-locally" title="Permanent link">&para;</a></h3>
+<h3 id="running-locally">Running locally<a class="headerlink" href="#running-locally" title="Permanent link">&para;</a></h3>
+<p>The local stack is <code>docker-compose.yml</code> at the repo root. It runs on
+built-in development defaults; to set your own <code>ENCRYPTION_KEY</code> or
+passwords, put them in a <code>.env</code> file at the repo root
+(<a href="../operator/install/">Install</a> lists what matters).</p>
 <h4 id="option-1-build-ui-only-dev-mode">Option 1: Build UI Only (Dev Mode)<a class="headerlink" href="#option-1-build-ui-only-dev-mode" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><span class="c1"># Serves UI on http://localhost:5173 with hot reload</span>
-docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--profile<span class="w"> </span>dev<span class="w"> </span>ui
+docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>--profile<span class="w"> </span>dev<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>ui
 </code></pre></div>
 <h4 id="option-2-build-ui-production-image">Option 2: Build UI Production Image<a class="headerlink" href="#option-2-build-ui-production-image" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><span class="c1"># Builds optimized production image</span>
-docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--profile<span class="w"> </span>prod<span class="w"> </span>ui-prod
+docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>--profile<span class="w"> </span>prod<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build<span class="w"> </span>ui-prod
 
 <span class="c1"># Access on http://localhost:80</span>
 </code></pre></div>
 <h4 id="option-3-build-all-services-current-flow">Option 3: Build All Services (Current Flow)<a class="headerlink" href="#option-3-build-all-services-current-flow" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c1"># Build full stack from current docker-compose.yml</span>
-docker-compose<span class="w"> </span>build
-docker-compose<span class="w"> </span>up<span class="w"> </span>-d
+<div class="highlight"><pre><span></span><code><span class="c1"># Build and start the full stack from docker-compose.yml</span>
+docker<span class="w"> </span>compose<span class="w"> </span>build
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
 </code></pre></div>
+<p>The full stack is large. <code>make up-core</code> starts the smaller set a laptop
+can run (<code>docker compose up -d --build</code> with a fixed service list; see the
+root <code>Makefile</code>).</p>
 <h3 id="building-one-image-by-hand">Building One Image by Hand<a class="headerlink" href="#building-one-image-by-hand" title="Permanent link">&para;</a></h3>
 <p>There is no make target that only builds backend images (<code>make up-core</code>
-builds the core set as part of starting it). Every Dockerfile uses the repo
-root as its build context, so run these from the repo root:</p>
+builds the core set as part of starting it).</p>
+<p>Every Dockerfile uses the repo root as its build context, so run these from
+the repo root:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># A backend service, the way the local stack builds it</span>
 docker<span class="w"> </span>compose<span class="w"> </span>build<span class="w"> </span>http-producer
 
@@ -3957,459 +3345,320 @@ docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </
 </code></pre></div>
 <p>The service names are the ones in <code>docker-compose.yml</code>; <code>docker compose
 config --services</code> lists them.</p>
-<h3 id="production-images">Production Images<a class="headerlink" href="#production-images" title="Permanent link">&para;</a></h3>
-<p>Production images are built in Azure Container Registry (<code>vrskyprodacr</code>),
-not on your machine, and nothing is pushed from a laptop:</p>
-<ul>
-<li>A merge to <code>main</code> builds them for you. <code>.github/workflows/build-push.yml</code>
-  asks <code>infrastructure/azure/affected.sh</code> which images the merge touched,
-  runs <code>az acr build</code> for each, then rolls them out. See
-  <a href="../operator/deploy/">Deploying</a>.</li>
-<li>By hand, <code>infrastructure/azure/build-push-acr.sh [core|connectors|all]</code>
-  (default <code>all</code>) runs the same <code>az acr build</code> for a group of images. It needs
-  an <code>az login</code> with access to the registry. Roll the core images out
-  afterwards with <code>infrastructure/azure/deploy-core-azure.sh</code>, which reads
-  each digest from ACR, and the connectors with
-  <code>infrastructure/azure/deploy-connectors-azure.sh</code>.</li>
-</ul>
 <hr />
-<h2 id="docker-image-building">Docker Image Building<a class="headerlink" href="#docker-image-building" title="Permanent link">&para;</a></h2>
-<h3 id="multi-stage-build-strategy">Multi-Stage Build Strategy<a class="headerlink" href="#multi-stage-build-strategy" title="Permanent link">&para;</a></h3>
-<p>All images use multi-stage builds to minimize final size:</p>
-<h4 id="backend-services-go">Backend Services (Go)<a class="headerlink" href="#backend-services-go" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c"># Stage 1: Build</span>
-<span class="k">FROM</span><span class="w"> </span><span class="s">golang:1.21-alpine</span>
-<span class="c"># ... compile binary ...</span>
-
-<span class="c"># Stage 2: Runtime</span>
-<span class="k">FROM</span><span class="w"> </span><span class="s">alpine:3.21</span>
-<span class="c"># Copy binary from stage 1</span>
-<span class="c"># Minimal dependencies</span>
-</code></pre></div>
-<h4 id="frontend-react-nginx">Frontend (React + Nginx)<a class="headerlink" href="#frontend-react-nginx" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c"># Stage 1: Build</span>
-<span class="k">FROM</span><span class="w"> </span><span class="s">node:20-alpine</span>
-<span class="c"># ... npm build ...</span>
-
-<span class="c"># Stage 2: Runtime</span>
-<span class="k">FROM</span><span class="w"> </span><span class="s">nginx:1.27-alpine</span>
-<span class="c"># Copy built artifacts from stage 1</span>
-<span class="c"># Optimized for static serving</span>
-</code></pre></div>
-<h3 id="docker-ignore">Docker Ignore<a class="headerlink" href="#docker-ignore" title="Permanent link">&para;</a></h3>
-<p>Critical for build performance:</p>
+<h2 id="what-the-dockerfiles-do">What the Dockerfiles do<a class="headerlink" href="#what-the-dockerfiles-do" title="Permanent link">&para;</a></h2>
+<h3 id="go-services">Go services<a class="headerlink" href="#go-services" title="Permanent link">&para;</a></h3>
+<p>This holds for every Go image in ACR. Two of the four Dockerfiles outside
+ACR differ: <code>mock-sap</code> has no health check, and <code>vrsky-cli</code> has none either
+and runs on <code>postgres:18-alpine</code>.</p>
 <ul>
-<li><strong>ui/.dockerignore</strong>: Excludes node_modules, coverage, dist (but keeps package-lock.json)</li>
-<li>Prevents large context transfers</li>
-<li>Speeds up builds with Docker BuildKit cache</li>
+<li>Build stage <code>golang:1.26-alpine</code>: <code>go mod download</code> (up to three attempts),
+  then a static <code>linux/amd64</code> binary (<code>CGO_ENABLED=0</code>).</li>
+<li>Runtime stage <code>alpine:3.18</code> or <code>alpine:3.19</code> with <code>ca-certificates</code> and
+  <code>curl</code>, and a <code>HEALTHCHECK</code> on the service's health port. The Go images
+  set no <code>USER</code>, so they run as root unless the manifest overrides it:
+  <code>management-api</code>, <code>data-filter</code> and <code>data-converter</code> run as UID 1000 on
+  Kubernetes.</li>
+<li><code>management-api</code> also builds the Windows remote agent into the image,
+  stamped with the <code>AGENT_VERSION</code> build argument (<code>dev</code> unless the ACR
+  build passes <code>git describe</code>), and bundles <code>infrastructure/migrations</code>
+  with <code>golang-migrate</code>, which applies them on every start.</li>
 </ul>
-<h3 id="build-process">Build Process<a class="headerlink" href="#build-process" title="Permanent link">&para;</a></h3>
-<ol>
-<li>Tests run during image build (Go: <code>go test</code> + backend tests)</li>
-<li>UI tests run in Docker: all 279 tests must pass</li>
-<li>Production artifacts built: Go binaries, Vite bundle</li>
-<li>Minimal runtime image created with only necessary files</li>
-<li>Non-root user enforced (security best practice)</li>
-</ol>
+<h3 id="ui">UI<a class="headerlink" href="#ui" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Build stage <code>node:20-alpine</code>: <code>npm ci</code>, then <code>npm run build</code>. No tests
+  run during the image build; CI runs them (below).</li>
+<li>Runtime stage <code>nginx:1.27-alpine</code>, serving the bundle as the <code>nginx</code>
+  user with <code>ui/nginx.conf</code> and <code>ui/nginx.default.conf</code>.</li>
+</ul>
+<h3 id="build-context">Build context<a class="headerlink" href="#build-context" title="Permanent link">&para;</a></h3>
+<p>The context is always the repo root, so the root <code>.dockerignore</code> is the one
+that applies. It excludes everything, then lets back in <code>src/go.mod</code>,
+<code>src/go.sum</code>, <code>src/cmd</code>, <code>src/pkg</code>, <code>src/internal</code>, <code>ui</code> (without
+<code>node_modules</code> and <code>dist</code>) and <code>infrastructure/migrations</code>. <code>ui/.dockerignore</code>
+is not read by a repo-root build.</p>
 <hr />
-<h2 id="github-actions-cicd-pipeline">GitHub Actions CI/CD Pipeline<a class="headerlink" href="#github-actions-cicd-pipeline" title="Permanent link">&para;</a></h2>
-<h3 id="workflow-githubworkflowsbuild-pushyml">Workflow: <code>.github/workflows/build-push.yml</code><a class="headerlink" href="#workflow-githubworkflowsbuild-pushyml" title="Permanent link">&para;</a></h3>
-<p><strong>Triggers</strong>:
-- Push to <code>main</code>, <code>develop</code>, <code>feature/**</code> branches
-- Tags matching <code>v*</code> (semantic versioning)
-- Pull requests to <code>main</code>, <code>develop</code></p>
-<h3 id="build-matrix">Build Matrix<a class="headerlink" href="#build-matrix" title="Permanent link">&para;</a></h3>
-<p>The workflow builds these services in parallel:</p>
+<h2 id="cicd-pipeline">CI/CD pipeline<a class="headerlink" href="#cicd-pipeline" title="Permanent link">&para;</a></h2>
+<p><code>.github/workflows/build-push.yml</code> runs on pushes to <code>main</code>, <code>develop</code> and
+<code>feature/**</code>, on tags matching <code>v*</code>, and on pull requests to <code>main</code> and
+<code>develop</code>. Only a push to <code>main</code> builds images; everything else runs the
+tests and stops.</p>
 <table>
 <thead>
 <tr>
-<th>Service</th>
-<th>Path</th>
-<th>Image Registry</th>
+<th>Job</th>
+<th>Runs</th>
+<th>What it does</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>management-api</td>
-<td>src/cmd/management-api</td>
-<td>ghcr.io/ValueRetail/vrsky/management-api</td>
+<td>Detect changed paths</td>
+<td>always</td>
+<td>Decides whether <code>ui/**</code> changed</td>
 </tr>
 <tr>
-<td>data-filter</td>
-<td>src/cmd/data-filter</td>
-<td>ghcr.io/ValueRetail/vrsky/data-filter</td>
+<td>Test UI</td>
+<td>when <code>ui/**</code> changed</td>
+<td><code>npm ci</code>, <code>npm run test:coverage</code> (thresholds in <code>ui/vitest.config.ts</code>), <code>npm run build</code></td>
 </tr>
 <tr>
-<td>data-converter</td>
-<td>src/cmd/data-converter</td>
-<td>ghcr.io/ValueRetail/vrsky/data-converter</td>
+<td>Go Tests</td>
+<td>pushes and PRs</td>
+<td><code>promtool</code> on the alert rules, <code>gofmt</code>, <code>go test -v -race -cover ./...</code> against a Postgres service, the <code>pkg/io</code> state-store tests, <code>golangci-lint</code>, the OpenAPI and tenant-filter lints</td>
 </tr>
 <tr>
-<td>file-consumer</td>
-<td>src/cmd/file-consumer</td>
-<td>ghcr.io/ValueRetail/vrsky/file-consumer</td>
+<td>Remote agent on Windows</td>
+<td>pushes and PRs</td>
+<td>Agent tests and the install script on a Windows runner</td>
 </tr>
 <tr>
-<td>file-producer</td>
-<td>src/cmd/file-producer</td>
-<td>ghcr.io/ValueRetail/vrsky/file-producer</td>
+<td>Build remote agent binaries</td>
+<td>pushes and PRs</td>
+<td><code>make build-agent</code>, uploaded as the <code>vrsky-agent</code> artifact</td>
 </tr>
 <tr>
-<td>ui</td>
-<td>ui</td>
-<td>ghcr.io/ValueRetail/vrsky/ui</td>
+<td>Plan the rollout</td>
+<td>pushes to <code>main</code>, once the jobs above passed or were skipped</td>
+<td>Feeds the merge's changed paths to <code>affected.sh</code></td>
+</tr>
+<tr>
+<td>Build <code>&lt;image&gt;</code> in ACR</td>
+<td>one runner per image the plan named</td>
+<td><code>az acr build --registry vrskyprodacr --image vrsky/&lt;image&gt;:latest</code> with the image's Dockerfile and the repo root as context</td>
+</tr>
+<tr>
+<td>Deploy to production</td>
+<td>after the builds</td>
+<td>Rolls out what the plan named, then the smoke check</td>
 </tr>
 </tbody>
 </table>
-<div class="admonition note">
-<p class="admonition-title">postgres-consumer / postgres-producer are not built here</p>
-<p>They are CDC workers configured from <code>POSTGRES_INPUT_*</code> environment
-variables, predating the connection-config model, and <code>postgres</code> is not a
-node type — no tenant can build a pipeline that uses them. They remain as a
-load-harness fixture (<code>tests/load/</code>), and <code>docker-compose</code> builds them
-locally from source, so no published image is needed.</p>
-</div>
-<h3 id="image-tags">Image Tags<a class="headerlink" href="#image-tags" title="Permanent link">&para;</a></h3>
-<p>Each build creates <strong>multiple tags</strong>:</p>
-<div class="highlight"><pre><span></span><code>ghcr.io/ValueRetail/vrsky/&lt;service&gt;:latest        # Always latest from main
-ghcr.io/ValueRetail/vrsky/&lt;service&gt;:v1.2.3        # Semantic version (on tags)
-ghcr.io/ValueRetail/vrsky/&lt;service&gt;:sha-a1b2c3d4  # Commit hash (on branches)
-</code></pre></div>
-<h3 id="cache-strategy">Cache Strategy<a class="headerlink" href="#cache-strategy" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Uses GitHub Actions Docker Cache (<code>type=gha</code>)</li>
-<li>Caches each layer for faster rebuilds</li>
-<li>Parallelizes builds for all services</li>
-<li>Typical build time: 5-15 minutes for all services</li>
-</ul>
-<h3 id="running-tests-in-ci">Running Tests in CI<a class="headerlink" href="#running-tests-in-ci" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nt">test</span><span class="p">:</span>
-<span class="w">  </span><span class="c1"># UI tests (Node.js)</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm ci</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm run test</span><span class="w">  </span><span class="c1"># All 279 tests</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npm run build</span>
-
-<span class="nt">go-tests</span><span class="p">:</span>
-<span class="w">  </span><span class="c1"># Go tests with race detector</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">go test -v -race -cover ./...</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">golangci-lint run</span>
-</code></pre></div>
+<p><code>az acr build</code> runs in the registry: the runner uploads the build context
+and ACR builds it for <code>linux/amd64</code>. There is no layer cache on the GitHub
+side. What a merge deploys, how the deploy job reaches the cluster and what
+happens while the cluster is parked are all in
+<a href="../operator/deploy/">Deploying</a>.</p>
 <hr />
-<h2 id="kubernetes-deployment">Kubernetes Deployment<a class="headerlink" href="#kubernetes-deployment" title="Permanent link">&para;</a></h2>
-<h3 id="namespace-structure">Namespace Structure<a class="headerlink" href="#namespace-structure" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>vrsky-ui                    # UI frontend (NEW in PHASE 12)
-vrsky-platform              # Existing backend services
-vrsky-monitoring            # Prometheus, Grafana
-vrsky-messaging             # NATS platform
-vrsky-tenants               # Per-tenant NATS accounts
+<h2 id="building-and-deploying-by-hand">Building and deploying by hand<a class="headerlink" href="#building-and-deploying-by-hand" title="Permanent link">&para;</a></h2>
+<p>A merge to <code>main</code> does all of this for you. By hand is for a rollback in a
+hurry, the UI's nginx config and Ingress (the deploy job doesn't apply
+<code>infrastructure/kubernetes/ui/</code>), and a first bring-up on an empty cluster,
+which has its own section below. Run the scripts from a repo checkout,
+signed in with <code>az login</code> to an account that can build in <code>vrskyprodacr</code>;
+the deploy scripts also run <code>kubectl</code>, so they need a kubeconfig for
+<code>vrsky-prod</code> from an address the API server accepts.
+<a href="../operator/deploy/#how-the-job-reaches-azure">How the job reaches Azure</a>
+explains that limit.</p>
+<p>From anywhere else, <code>infrastructure/azure/in-cluster.sh</code> runs a script
+inside the cluster, but only the ones written for its runtime, which has no
+<code>az</code>, <code>sed</code> or <code>perl</code>: <code>deploy-core-azure.sh</code> with <code>DIGESTS_FILE</code> (digests
+resolved beforehand, as the deploy job does), <code>deploy-connectors-azure.sh</code>,
+<code>install-monitoring.sh</code> and <code>smoke-prod.sh</code>. <code>deploy-azure.sh</code> and
+<code>deploy-ui-azure.sh</code> can't run through it.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build in ACR: core, connectors, or all (the default)</span>
+infrastructure/azure/build-push-acr.sh<span class="w"> </span>core
+
+<span class="c1"># Roll the core services to what :latest points at now</span>
+<span class="nv">DRY_RUN</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>infrastructure/azure/deploy-core-azure.sh<span class="w">   </span><span class="c1"># show what would change</span>
+infrastructure/azure/deploy-core-azure.sh<span class="w">             </span><span class="c1"># all five</span>
+infrastructure/azure/deploy-core-azure.sh<span class="w"> </span>ui<span class="w">          </span><span class="c1"># or a subset</span>
+
+<span class="c1"># Regenerate and apply the connector manifest, then restart the fleet</span>
+infrastructure/azure/deploy-connectors-azure.sh
 </code></pre></div>
-<h3 id="ui-deployment-manifests">UI Deployment Manifests<a class="headerlink" href="#ui-deployment-manifests" title="Permanent link">&para;</a></h3>
-<p>All UI manifests in <code>infrastructure/kubernetes/ui/</code>:</p>
-<h4 id="1-namespaceyaml">1. <strong>namespace.yaml</strong><a class="headerlink" href="#1-namespaceyaml" title="Permanent link">&para;</a></h4>
-<p>Isolates UI in <code>vrsky-ui</code> namespace with labels.</p>
-<h4 id="2-configmapyaml">2. <strong>configmap.yaml</strong><a class="headerlink" href="#2-configmapyaml" title="Permanent link">&para;</a></h4>
-<p>Configuration for UI environment:
-- <code>VITE_API_BASE_URL</code> - Backend API endpoint
-- Feature flags (metrics, logging, etc.)
-- Performance settings</p>
-<h4 id="3-deploymentyaml">3. <strong>deployment.yaml</strong><a class="headerlink" href="#3-deploymentyaml" title="Permanent link">&para;</a></h4>
+<p><code>deploy-core-azure.sh</code> reads each digest from ACR, refuses anything that
+isn't a <code>sha256:</code> digest, sets the image, waits for the rollout and reads
+the deployment back to check what landed. It only updates deployments that
+already exist.</p>
+<p>To change the UI's nginx config, Service, PDB or Ingress on a running
+cluster, re-run <code>bash infrastructure/azure/deploy-ui-azure.sh</code>. It applies
+the deployment with <code>ui:latest</code> rather than a digest, so run
+<code>deploy-core-azure.sh ui</code> afterwards to pin it again. It also applies
+<code>ui/ingress.yaml</code>, whose header says to diff it against the live object
+first.</p>
+<h3 id="first-bring-up">First bring-up<a class="headerlink" href="#first-bring-up" title="Permanent link">&para;</a></h3>
+<p>Only on an empty cluster, in this order:</p>
+<ol>
+<li><code>infrastructure/azure/deploy-azure.sh</code>: NATS, Postgres, MinIO, the
+   transforms and the management API, from a copy of
+   <code>infrastructure/kubernetes/</code> with the image references rewritten to ACR,
+   plus the <code>acr-pull</code> pull secret. Never run it, or
+   <code>infrastructure/kubernetes/deploy-vrsky-platform.sh</code> which it wraps,
+   against production (see the warning below).</li>
+<li><code>bash infrastructure/azure/deploy-ui-azure.sh</code>: the UI and the public
+   Ingress (below). The file isn't executable, hence <code>bash</code>.</li>
+<li><code>infrastructure/azure/deploy-connectors-azure.sh</code>: the connectors.</li>
+<li><code>PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh</code>:
+   monitoring and the alert rules. It stops unless the <code>vrsky-monitoring</code>
+   namespace and its <code>alerts-webhook-token</code> and <code>grafana-admin</code> Secrets
+   exist; "Azure profile (prod)" in
+   <code>infrastructure/kubernetes/monitoring/README.md</code> lists what to create
+   first.</li>
+</ol>
+<p>Then by hand:</p>
 <ul>
-<li><strong>Replicas</strong>: 3 (HA configuration)</li>
-<li><strong>Image</strong>: <code>ghcr.io/ValueRetail/vrsky/ui:latest</code></li>
-<li><strong>Resources</strong>: </li>
-<li>Request: 100m CPU, 128Mi memory</li>
-<li>Limit: 500m CPU, 256Mi memory</li>
-<li><strong>Probes</strong>: Liveness (port 80/health) + Readiness (port 80/index.html)</li>
-<li><strong>Security</strong>: Non-root user (UID 101), read-only root, no privileges</li>
-<li><strong>Volumes</strong>: emptyDir for cache, /tmp, /var/run</li>
+<li>The alert responder: its secrets and a <code>kubectl apply</code> of its manifest,
+  as <a href="../operator/alert-responder/">Alert responder</a> describes.
+  <code>deploy-core-azure.sh</code> updates it afterwards but can't create it, so on a
+  cluster without it, a run over all five core services reports it missing
+  and exits 1.</li>
+<li>The webhook and remote-agent Ingresses,
+  <code>infrastructure/kubernetes/ingress/webhooks-ingress.yaml</code> and
+  <code>agent-ingress.yaml</code>; read each file's header before applying it.</li>
 </ul>
-<h4 id="4-serviceyaml">4. <strong>service.yaml</strong><a class="headerlink" href="#4-serviceyaml" title="Permanent link">&para;</a></h4>
-<p>ClusterIP service exposing port 80 internally.</p>
-<h4 id="5-ingressyaml">5. <strong>ingress.yaml</strong><a class="headerlink" href="#5-ingressyaml" title="Permanent link">&para;</a></h4>
-<p>Routes external traffic:
-- Hosts: <code>ui.vrsky.local</code>, <code>ui.valueretalgroup.no</code>
-- TLS termination (cert-manager)
-- NGINX ingress controller</p>
-<h4 id="6-hpayaml">6. <strong>hpa.yaml</strong><a class="headerlink" href="#6-hpayaml" title="Permanent link">&para;</a></h4>
-<p>Horizontal Pod Autoscaling:
-- <strong>Min replicas</strong>: 2
-- <strong>Max replicas</strong>: 5
-- <strong>Triggers</strong>:
-  - CPU &gt; 70%
-  - Memory &gt; 80%
-- <strong>Scaling behavior</strong>: Fast scale-up (30s), gradual scale-down (300s)</p>
-<h4 id="7-pdbyaml">7. <strong>pdb.yaml</strong><a class="headerlink" href="#7-pdbyaml" title="Permanent link">&para;</a></h4>
-<p>Pod Disruption Budget:
-- <strong>Min available</strong>: 1 pod (maintains availability during cluster updates)</p>
-<h3 id="deploying-to-k3d-local">Deploying to k3d (Local)<a class="headerlink" href="#deploying-to-k3d-local" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Create k3d cluster (already exists from PHASE 11)</span>
-k3d<span class="w"> </span>cluster<span class="w"> </span>create<span class="w"> </span>vrsky-k3d<span class="w"> </span>--config<span class="w"> </span>infrastructure/kubernetes/k3d-config.yaml
-
-<span class="c1"># Deploy UI namespace</span>
-kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/namespace.yaml
-
-<span class="c1"># Deploy UI components</span>
-kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/
-
-<span class="c1"># Verify deployment</span>
-kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
-kubectl<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui
-
-<span class="c1"># Port-forward for testing</span>
-kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>svc/vrsky-ui<span class="w"> </span><span class="m">8080</span>:80
-<span class="c1"># Access: http://localhost:8080</span>
-</code></pre></div>
-<h3 id="deploying-to-k3s-production-oslo">Deploying to K3s Production (Oslo)<a class="headerlink" href="#deploying-to-k3s-production-oslo" title="Permanent link">&para;</a></h3>
+<p>None of the Azure scripts installs ingress-nginx or cert-manager. The UI's
+Ingress assumes both, with a <code>letsencrypt-prod</code> ClusterIssuer
+(<code>infrastructure/kubernetes/ingress/cert-issuers.yaml</code>;
+<code>install-cert-manager.sh</code> next to it installs cert-manager, and
+<code>infrastructure/kubernetes/ingress/README.md</code> has the <code>helm</code> command for
+ingress-nginx).</p>
+<p><code>deploy-azure.sh</code> starts on the committed development secrets; replace them
+before any real connection (the script's closing message says which).</p>
 <div class="admonition danger">
-<p class="admonition-title">Not the AKS cluster (<code>vrsky-prod</code>)</p>
-<p>On AKS, use <code>infrastructure/azure/deploy-core-azure.sh</code>. Do <strong>not</strong>
-<code>kubectl apply -f infrastructure/kubernetes/ui/</code> there: those manifests are
-shared with the local k3d path and name <code>ghcr.io</code> images AKS cannot pull, so
-an apply produces <code>ImagePullBackOff</code>. The AKS deployments are also pinned by
-digest, which means <code>kubectl rollout restart</code> changes no image and silently
-redeploys the running one.</p>
-<p>The script resolves each digest from ACR, validates it, rolls out, and then
-re-reads the cluster to confirm what landed. Run <code>build-push-acr.sh</code> first.</p>
+<p class="admonition-title">On a running cluster, use <code>deploy-core-azure.sh</code> and <code>deploy-ui-azure.sh</code></p>
+<p>Don't re-run <code>deploy-azure.sh</code> or <code>deploy-vrsky-platform.sh</code> on
+production. Without a local <code>secret.yaml</code> they apply
+<code>secret.example.yaml</code>, which overwrites the <code>postgres-credentials</code>
+Secret in <code>vrsky-platform</code> (<code>connection_string</code>, <code>encryption_key</code>) with
+the committed development values: stored credentials stop decrypting
+and the management API loses its database.</p>
+<p>Don't <code>kubectl apply</code> the core and UI manifests either.
+<code>infrastructure/kubernetes/{management-api,data-filter,data-converter,ui}/</code>
+are shared with the local k3d path and name <code>ghcr.io</code> images that AKS
+cannot pull, so the pods end up in <code>ImagePullBackOff</code>
+(<code>InvalidImageName</code> for the UI, whose reference has capital letters).
+<code>deploy-ui-azure.sh</code> applies the UI manifests from a rewritten copy.</p>
+<p>And don't <code>kubectl rollout restart</code> a core deployment to ship a new
+image: it is pinned by digest, so a restart redeploys the image it
+already runs. <code>deploy-core-azure.sh</code> sets the new digest.</p>
 </div>
-<p>Same manifests work for production K3s cluster:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Set kubeconfig to production</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">KUBECONFIG</span><span class="o">=</span>~/.kube/vrsky-production.yaml
-
-<span class="c1"># Deploy (same commands as k3d)</span>
-kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/
-
-<span class="c1"># Verify rolling deployment</span>
-kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
-</code></pre></div>
-<h3 id="blue-green-deployment-optional">Blue-Green Deployment (Optional)<a class="headerlink" href="#blue-green-deployment-optional" title="Permanent link">&para;</a></h3>
-<p>For zero-downtime updates:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Update image in deployment.</span>
-<span class="c1"># On AKS this is what deploy-core-azure.sh does for you, with the digest read</span>
-<span class="c1"># from ACR rather than typed — hand-copying it has gone wrong more than once.</span>
-kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:v1.2.3<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Monitor rollout</span>
-kubectl<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Rollback if needed</span>
-kubectl<span class="w"> </span>rollout<span class="w"> </span>undo<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
-</code></pre></div>
 <hr />
-<h2 id="versioning-strategy">Versioning Strategy<a class="headerlink" href="#versioning-strategy" title="Permanent link">&para;</a></h2>
-<h3 id="semantic-versioning-semver">Semantic Versioning (SemVer)<a class="headerlink" href="#semantic-versioning-semver" title="Permanent link">&para;</a></h3>
-<p>VRSky follows semantic versioning: <strong>MAJOR.MINOR.PATCH</strong></p>
-<p>Example: <code>v1.2.3</code></p>
-<h3 id="git-tag-strategy">Git Tag Strategy<a class="headerlink" href="#git-tag-strategy" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Create a release tag</span>
-git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>v1.2.3<span class="w"> </span>-m<span class="w"> </span><span class="s2">"Release v1.2.3: Add UI deployment"</span>
-git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v1.2.3
-
-<span class="c1"># GitHub Actions automatically builds and pushes:</span>
-<span class="c1"># - ghcr.io/ValueRetail/vrsky/ui:latest</span>
-<span class="c1"># - ghcr.io/ValueRetail/vrsky/ui:v1.2.3</span>
-<span class="c1"># - ... (all 10 services)</span>
-</code></pre></div>
-<h3 id="image-version-resolution">Image Version Resolution<a class="headerlink" href="#image-version-resolution" title="Permanent link">&para;</a></h3>
-<p>The workflow uses <code>scripts/get-version.sh</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="ch">#!/bin/bash</span>
-<span class="c1"># Returns git tag (v1.2.3) or commit hash (sha-a1b2c3d4)</span>
-
-<span class="nv">VERSION</span><span class="o">=</span><span class="k">$(</span>git<span class="w"> </span>describe<span class="w"> </span>--exact-match<span class="w"> </span>--tags<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="se">\</span>
-<span class="w">          </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"sha-</span><span class="k">$(</span>git<span class="w"> </span>rev-parse<span class="w"> </span>--short<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">"</span><span class="k">)</span>
-<span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VERSION</span><span class="s2">"</span>
-</code></pre></div>
-<h3 id="deployment-by-version">Deployment by Version<a class="headerlink" href="#deployment-by-version" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Deploy latest (always works)</span>
-kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:latest<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Deploy specific version</span>
-kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:v1.2.3<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Deploy specific commit</span>
-kubectl<span class="w"> </span><span class="nb">set</span><span class="w"> </span>image<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="nv">ui</span><span class="o">=</span>ghcr.io/ValueRetail/vrsky/ui:sha-a1b2c3d4<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
-</code></pre></div>
+<h2 id="kubernetes-manifests">Kubernetes manifests<a class="headerlink" href="#kubernetes-manifests" title="Permanent link">&para;</a></h2>
+<h3 id="the-ui-manifests">The UI manifests<a class="headerlink" href="#the-ui-manifests" title="Permanent link">&para;</a></h3>
+<p><code>infrastructure/kubernetes/ui/</code> holds the UI's manifests.
+<code>deploy-ui-azure.sh</code> uses them like this:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>On AKS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>namespace.yaml</code></td>
+<td>Not applied; the script creates <code>vrsky-ui</code> itself and copies the <code>acr-pull</code> secret into it</td>
+</tr>
+<tr>
+<td><code>configmap.yaml</code></td>
+<td>Applied. Its <code>VITE_*</code> values have no effect; the file's header explains why</td>
+</tr>
+<tr>
+<td><code>deployment.yaml</code></td>
+<td>Applied from a copy: image <code>vrskyprodacr.azurecr.io/vrsky/ui:latest</code>, <code>imagePullPolicy: Always</code>, 2 replicas, and the <code>vrsky-ui-nginx</code> ConfigMap mounted as the nginx config, which proxies <code>/api</code> and <code>/ws</code> to the management API</td>
+</tr>
+<tr>
+<td><code>service.yaml</code></td>
+<td>Applied: ClusterIP <code>vrsky-ui</code>, port 80</td>
+</tr>
+<tr>
+<td><code>pdb.yaml</code></td>
+<td>Applied: at least one replica stays up during a drain</td>
+</tr>
+<tr>
+<td><code>ingress.yaml</code></td>
+<td>Applied: Ingress <code>vrsky</code> for <code>vrsky.valueretail.no</code> and <code>20.251.107.2.sslip.io</code>, class <code>nginx</code>, certificate from cert-manager (<code>letsencrypt-prod</code>) in secret <code>vrsky-tls</code></td>
+</tr>
+<tr>
+<td><code>hpa.yaml</code></td>
+<td>Not applied by any script</td>
+</tr>
+</tbody>
+</table>
+<p>After that first run, <code>deploy-core-azure.sh</code> only changes the UI
+deployment's image, pinned to a digest.</p>
+<h3 id="local-cluster-k3d">Local cluster (k3d)<a class="headerlink" href="#local-cluster-k3d" title="Permanent link">&para;</a></h3>
+<p><code>infrastructure/scripts/local-up.sh</code> creates the k3d cluster <code>vrsky-dev</code>
+from <code>infrastructure/kubernetes/k3d-config.yaml</code>, and
+<code>infrastructure/kubernetes/deploy-vrsky-platform.sh</code> deploys the platform
+onto it. The cluster can't pull the registries the manifests name, so
+<code>infrastructure/scripts/k3d-load-images.sh [core|connectors|all]</code> builds
+images from your checkout and imports them into the cluster.</p>
+<p>Only <code>management-api</code> lines up today. The script imports <code>data-filter</code> and
+<code>data-converter</code> as <code>localhost:5000/vrsky/...</code> while their manifests pull
+<code>ghcr.io/valueretail/vrsky/...</code>. The <code>connectors</code> scope imports nine
+connectors as <code>localhost:5000/vrsky/...</code>, which nothing on k3d deploys (the
+connector manifest names ACR and only <code>deploy-connectors-azure.sh</code> applies
+it). And the UI doesn't run on k3d at all: the
+script loads no UI image, and the manifest's
+<code>ghcr.io/ValueRetail/vrsky/ui:latest</code> has capital letters, which Docker and
+Kubernetes reject in an image reference. Use the compose options above for
+the UI.</p>
+<hr />
+<h2 id="tags-and-digests">Tags and digests<a class="headerlink" href="#tags-and-digests" title="Permanent link">&para;</a></h2>
+<p>Images carry one tag, <code>:latest</code>. Git tags and branches add none, and
+nothing reads <code>scripts/get-version.sh</code>.</p>
+<ul>
+<li>Core services run by digest:
+  <code>vrskyprodacr.azurecr.io/vrsky/&lt;name&gt;@sha256:…</code>, set by
+  <code>deploy-core-azure.sh</code>. What runs only changes when that script (or the
+  deploy job, or Catch up, which call it) sets a new digest.</li>
+<li>Connectors run <code>vrskyprodacr.azurecr.io/vrsky/&lt;name&gt;:latest</code> with
+  <code>imagePullPolicy: Always</code>, so a restart pulls whatever <code>:latest</code> is.</li>
+<li>Rolling back means getting an older build into <code>:latest</code> and rolling it
+  out. Normally that is a revert merged to <code>main</code>; see
+  <a href="../operator/deploy/#rolling-back">Rolling back</a>.</li>
+<li><strong>Production check</strong> (<code>drift-check.yml</code>) compares what each container
+  runs with the registry's <code>:latest</code> and catches up when they differ; see
+  <a href="../operator/deploy/#while-the-cluster-is-parked">Deploying</a>.</li>
+</ul>
 <hr />
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<h3 id="common-issues">Common Issues<a class="headerlink" href="#common-issues" title="Permanent link">&para;</a></h3>
-<h4 id="build-fails-npm-ci-requires-package-lockjson">Build Fails: "npm ci requires package-lock.json"<a class="headerlink" href="#build-fails-npm-ci-requires-package-lockjson" title="Permanent link">&para;</a></h4>
-<p><strong>Solution</strong>: Ensure <code>.dockerignore</code> doesn't exclude <code>package-lock.json</code></p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Check .dockerignore</span>
-grep<span class="w"> </span>-n<span class="w"> </span>package-lock.json<span class="w"> </span>ui/.dockerignore<span class="w">  </span><span class="c1"># Should be empty</span>
+<h3 id="npm-ci-fails-in-the-ui-image-build"><code>npm ci</code> fails in the UI image build<a class="headerlink" href="#npm-ci-fails-in-the-ui-image-build" title="Permanent link">&para;</a></h3>
+<p>The UI image copies <code>ui/package*.json</code> from the repo root, so build with
+the repo root as context. <code>docker build ui/</code> fails at the first <code>COPY</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># package-lock.json must not be excluded by the root .dockerignore</span>
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s1">'package-lock'</span><span class="w"> </span>.dockerignore<span class="w">   </span><span class="c1"># should print nothing</span>
 
-<span class="c1"># Remove if present and rebuild</span>
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>-f<span class="w"> </span>ui/Dockerfile<span class="w"> </span>.
 </code></pre></div>
-<h4 id="image-build-runs-tests-inside-container">Image Build Runs Tests Inside Container<a class="headerlink" href="#image-build-runs-tests-inside-container" title="Permanent link">&para;</a></h4>
-<p><strong>Expected behavior</strong>: Tests run during build (Stage 1).</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># To skip tests, modify Dockerfile temporarily:</span>
-<span class="c1"># Comment out: RUN npm run test</span>
-
-<span class="c1"># To verify tests passed in build:</span>
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">"✓.*tests"</span>
+<h3 id="ui-tests">UI tests<a class="headerlink" href="#ui-tests" title="Permanent link">&para;</a></h3>
+<p>They don't run in the image build. Run them in <code>ui/</code> the way CI does:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>ui<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>test:coverage
 </code></pre></div>
-<h4 id="kubernetes-pod-stays-in-pending">Kubernetes Pod Stays in "Pending"<a class="headerlink" href="#kubernetes-pod-stays-in-pending" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c1"># Check resource availability</span>
-kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>&lt;pod-name&gt;
-
-<span class="c1"># Check node resources</span>
+<h3 id="a-pod-stays-pending">A pod stays <code>Pending</code><a class="headerlink" href="#a-pod-stays-pending" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>&lt;pod-name&gt;
 kubectl<span class="w"> </span>describe<span class="w"> </span>nodes<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="s2">"Allocated resources"</span>
-
-<span class="c1"># Reduce resource requests in deployment.yaml and reapply</span>
-kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>infrastructure/kubernetes/ui/deployment.yaml
 </code></pre></div>
-<h4 id="liveness-probe-fails">Liveness Probe Fails<a class="headerlink" href="#liveness-probe-fails" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c1"># Check endpoint manually</span>
-kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>svc/vrsky-ui<span class="w"> </span><span class="m">8080</span>:80
-curl<span class="w"> </span>-f<span class="w"> </span>http://localhost:8080/health
-
-<span class="c1"># View logs</span>
+<p>Resource requests are set in the manifests; <code>plans/cpu-request-headroom.md</code>
+explains how they were sized.</p>
+<h3 id="the-uis-probes-fail">The UI's probes fail<a class="headerlink" href="#the-uis-probes-fail" title="Permanent link">&para;</a></h3>
+<p>The liveness and readiness probes fetch <code>/index.html</code> on port 80.</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>port-forward<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>svc/vrsky-ui<span class="w"> </span><span class="m">8080</span>:80
+curl<span class="w"> </span>-f<span class="w"> </span>http://localhost:8080/index.html
 kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-f
 </code></pre></div>
-<h4 id="image-pull-errors-in-k8s">Image Pull Errors in K8s<a class="headerlink" href="#image-pull-errors-in-k8s" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="c1"># Verify GHCR credentials</span>
-kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>docker-registry<span class="w"> </span>ghcr-secret<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--docker-server<span class="o">=</span>ghcr.io<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--docker-username<span class="o">=</span>&lt;github-username&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--docker-password<span class="o">=</span>&lt;github-token&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Update deployment.yaml imagePullSecrets:</span>
-<span class="c1"># - name: ghcr-secret</span>
+<h3 id="image-pull-errors-on-aks">Image pull errors on AKS<a class="headerlink" href="#image-pull-errors-on-aks" title="Permanent link">&para;</a></h3>
+<p>Pods pull from ACR with the <code>acr-pull</code> secret on the <code>default</code> service
+account of <code>vrsky-platform</code>, <code>vrsky-storage</code> and <code>vrsky-ui</code>, and on the
+management API's own <code>vrsky-management-api</code> service account. An image
+reference that names <code>ghcr.io</code> means a manifest was applied without the
+rewrite (see the warning above). A tag ACR doesn't
+have means the image was never built: check with
+<code>az acr repository show-tags -n vrskyprodacr --repository vrsky/&lt;name&gt;</code>.</p>
+<h3 id="a-rollout-succeeded-but-the-old-version-is-still-served">A rollout succeeded but the old version is still served<a class="headerlink" href="#a-rollout-succeeded-but-the-old-version-is-still-served" title="Permanent link">&para;</a></h3>
+<p>A digest-pinned deployment was restarted instead of updated. Run
+<code>deploy-core-azure.sh</code> for that service; it sets the current digest and
+checks it landed. To see which UI bundle is actually served:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>deploy/vrsky-ui<span class="w"> </span>--<span class="w"> </span>ls<span class="w"> </span>/usr/share/nginx/html/assets
 </code></pre></div>
-<h3 id="debugging-commands">Debugging Commands<a class="headerlink" href="#debugging-commands" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># View build logs</span>
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>ui/<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-100
-
-<span class="c1"># Inspect running image</span>
-docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>/bin/sh
-
-<span class="c1"># Check K8s events</span>
-kubectl<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>--sort-by<span class="o">=</span><span class="s1">'.lastTimestamp'</span>
-
-<span class="c1"># Describe deployment issues</span>
+<h3 id="debugging-commands">Debugging commands<a class="headerlink" href="#debugging-commands" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>--sort-by<span class="o">=</span><span class="s1">'.lastTimestamp'</span>
 kubectl<span class="w"> </span>describe<span class="w"> </span>deployment<span class="w"> </span>vrsky-ui<span class="w"> </span>-n<span class="w"> </span>vrsky-ui
-
-<span class="c1"># Stream logs</span>
 kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deployment/vrsky-ui<span class="w"> </span>-f<span class="w"> </span>--all-containers
-
-<span class="c1"># SSH into pod</span>
-kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>pod/&lt;pod-name&gt;<span class="w"> </span>--<span class="w"> </span>/bin/sh
+kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>-n<span class="w"> </span>vrsky-ui<span class="w"> </span>deploy/vrsky-ui<span class="w"> </span>--<span class="w"> </span>/bin/sh
 </code></pre></div>
-<hr />
-<h2 id="summary-phase-12-deliverables">Summary - PHASE 12 Deliverables<a class="headerlink" href="#summary-phase-12-deliverables" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Item</th>
-<th>File</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Dockerfile</td>
-<td><code>ui/Dockerfile</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>.dockerignore</td>
-<td><code>ui/.dockerignore</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>Nginx Config</td>
-<td><code>ui/nginx.conf</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>Nginx Default</td>
-<td><code>ui/nginx.default.conf</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>CI/CD Workflow</td>
-<td><code>.github/workflows/build-push.yml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>Version Script</td>
-<td><code>scripts/get-version.sh</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s Namespace</td>
-<td><code>infrastructure/kubernetes/ui/namespace.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s ConfigMap</td>
-<td><code>infrastructure/kubernetes/ui/configmap.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s Deployment</td>
-<td><code>infrastructure/kubernetes/ui/deployment.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s Service</td>
-<td><code>infrastructure/kubernetes/ui/service.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s Ingress</td>
-<td><code>infrastructure/kubernetes/ui/ingress.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s HPA</td>
-<td><code>infrastructure/kubernetes/ui/hpa.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>K8s PDB</td>
-<td><code>infrastructure/kubernetes/ui/pdb.yaml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>Docker Compose UI</td>
-<td><code>docker-compose.ui.yml</code></td>
-<td>✅ Created</td>
-</tr>
-<tr>
-<td>Makefile Updates</td>
-<td><code>src/Makefile</code></td>
-<td>✅ Updated</td>
-</tr>
-<tr>
-<td>Deployment Guide</td>
-<td><code>docs/DEPLOYMENT_GUIDE.md</code></td>
-<td>✅ Created</td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
-<ol>
-<li>✅ All 13 deliverables created</li>
-<li>✅ Local Docker build tested (279 tests pass)</li>
-<li>🔄 Push changes to git (5 commits)</li>
-<li>🔄 GitHub Actions workflow validation</li>
-<li>🔄 K8s deployment testing (k3d + K3s)</li>
-<li>✅ PHASE 12 Complete</li>
-</ol>
-<hr />
-<p><strong>Last Updated</strong>: February 24, 2026<br />
-<strong>PHASE</strong>: 12 - Docker Deployment<br />
-<strong>Status</strong>: Implementation Complete ✅</p>
 <hr />
 <h2 id="encryption-at-rest-phase-1f-issue-71">Encryption at rest (Phase 1F / issue #71)<a class="headerlink" href="#encryption-at-rest-phase-1f-issue-71" title="Permanent link">&para;</a></h2>
 <p>VRSky processes credentials, user data, and cross-tenant payloads. Customer
