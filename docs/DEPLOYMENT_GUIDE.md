@@ -89,45 +89,41 @@ docker-compose build
 docker-compose up -d
 ```
 
-### Manual Docker Build Commands
+### Building One Image by Hand
+
+There is no make target that only builds backend images (`make up-core`
+builds the core set as part of starting it). Every Dockerfile uses the repo
+root as its build context, so run these from the repo root:
 
 ```bash
-# Build UI image locally
-cd vrsky
-docker build -t vrsky/ui:latest -f ui/Dockerfile .
+# A backend service, the way the local stack builds it
+docker compose build http-producer
 
-# Build individual backend service
+# The same with plain docker
 docker build -t vrsky/http-producer:latest -f src/cmd/http-producer/Dockerfile .
 
-# Use Makefile for convenience
-cd src
-make docker-build-ui
-make docker-push-ui
+# The UI (not part of docker-compose.yml)
+docker build -t vrsky/ui:latest -f ui/Dockerfile .
 ```
 
-### Makefile Commands
+The service names are the ones in `docker-compose.yml`; `docker compose
+config --services` lists them.
 
-The `src/Makefile` provides convenient targets:
+### Production Images
 
-```bash
-# Build UI
-make docker-build-ui
+Production images are built in Azure Container Registry (`vrskyprodacr`),
+not on your machine, and nothing is pushed from a laptop:
 
-# Push UI to registry
-make docker-push-ui
-
-# Build backend services
-make docker-build              # Producer (default)
-make docker-build-consumer
-make docker-build-filter
-make docker-build-converter
-
-# Push backend services
-make docker-push
-make docker-push-consumer
-make docker-push-filter
-make docker-push-converter
-```
+- A merge to `main` builds them for you. `.github/workflows/build-push.yml`
+  asks `infrastructure/azure/affected.sh` which images the merge touched,
+  runs `az acr build` for each, then rolls them out. See
+  [Deploying](operator/deploy.md).
+- By hand, `infrastructure/azure/build-push-acr.sh [core|connectors|all]`
+  (default `all`) runs the same `az acr build` for a group of images. It needs
+  an `az login` with access to the registry. Roll the core images out
+  afterwards with `infrastructure/azure/deploy-core-azure.sh`, which reads
+  each digest from ACR, and the connectors with
+  `infrastructure/azure/deploy-connectors-azure.sh`.
 
 ---
 

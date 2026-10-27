@@ -31,10 +31,10 @@ Last updated 2026-10-27.
    old `deployedConnectionId`; it may PUT the deleted id again instead of
    creating. Reproduce with a test first; fix only if it is real
    (`ui/src/pages/PipelineBuilder.tsx`).
-11. **Untrack the Go binaries in `src/`.** `src/remote-agent`,
+11. ~~**Untrack the Go binaries in `src/`.**~~ (#360) `src/remote-agent`,
     `src/vrsky-cli` and `src/spill-e2e` are 34–64 MB Mach-O build outputs
     committed to git. Remove them from the index and add them to `.gitignore`.
-12. **The root Makefile forwards targets that don't exist.** Eight of them
+12. ~~**The root Makefile forwards targets that don't exist.**~~ (#361) Eight of them
     (`docker-build`, `docker-push`, `run`, `e2e-test` and the `*-consumer`
     ones) are missing from `src/Makefile`, and root `make help` misses
     `up-core`, `up-core-remote` and `down-core`.
@@ -45,13 +45,35 @@ Last updated 2026-10-27.
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
-15. **The file watcher can publish a half-written file**
+15. ~~**Docs still name make targets that are gone.**~~ (#367) `docs/DEPLOYMENT_GUIDE.md`
+    (lines ~120–129, in the mkdocs nav) and `PROJECT_STRUCTURE.md` (~127,
+    238, 241, 286) tell readers to run `make docker-build`,
+    `docker-build-consumer`, `docker-push*` and
+    `docker-build-filter`/`-converter`, none of which exist any more. Point
+    them at what builds images now, or drop the sections. Found in review of
+    #365.
+16. **`make docker-build-ui` can't build the UI** (`src/Makefile`). It runs
+    `docker build -t vrsky/ui:latest ../ui`, so the build context is `ui/`,
+    but `ui/Dockerfile` copies `ui/...` from the repo root. It fails with
+    `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
+    Docker Hub `vrsky/`, which nothing uses. Fix the context or drop both
+    targets (and the root forwards). Found in #367.
+17. **The `ui-prod` service in `docker-compose.ui.yml` has the same broken
+    context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
+    Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
+    `ui` dev service already uses `context: .`. Found in #367.
+18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
+    image naming, image tags and Kubernetes sections name
+    `ghcr.io/ValueRetail/vrsky/...`, but no workflow pushes there; images
+    are built in ACR (`vrskyprodacr`). The local-development options also
+    spell it `docker-compose` rather than `docker compose`. Found in #367.
+19. **The file watcher can publish a half-written file**
     (`src/cmd/file-consumer/service.go`, `watchDirectory`). A new name is
     read on the first poll that sees it, with no check that the writer is
     done, and once the name is known the finished file is never published.
     Wait until size and mtime are unchanged across two polls (or skip
     dotfiles and temp names) before ingesting. Found during #362.
-16. **Two starts for one file connection can race**
+20. **Two starts for one file connection can race**
     (`src/cmd/file-consumer/service.go`, `startConnection`). The "already
     active" check and the insert are separate lock sections, and the boot
     restore runs alongside the start-command handler, so a start command
