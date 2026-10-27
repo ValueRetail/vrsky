@@ -2576,9 +2576,18 @@ memory=4GB
 <p>For a quick try, <code>.env</code> works as it is: empty values fall back to the
 defaults in <code>docker-compose.yml</code>, and the database passwords are fixed dev
 values there. Before you store real credentials, set <code>ENCRYPTION_KEY</code> in
-<code>.env</code> to 64 hex characters and back it up. To generate a key in PowerShell:</p>
-<div class="highlight"><pre><span></span><code><span class="n">-join</span> <span class="p">((</span><span class="n">1</span><span class="p">..</span><span class="n">32</span><span class="p">)</span> <span class="p">|</span> <span class="k">ForEach</span><span class="n">-Object</span> <span class="p">{</span> <span class="s1">'{0:x2}'</span> <span class="o">-f</span> <span class="p">(</span><span class="nb">Get-Random</span> <span class="n">-Maximum</span> <span class="n">256</span><span class="p">)</span> <span class="p">})</span>
+<code>.env</code> to 64 hex characters and back it up. To generate a key in PowerShell
+(works in Windows PowerShell 5.1 and PowerShell 7):</p>
+<div class="highlight"><pre><span></span><code><span class="nv">$bytes</span> <span class="p">=</span> <span class="nb">New-Object</span> <span class="n">byte</span><span class="p">[]</span> <span class="n">32</span>
+<span class="nv">$rng</span> <span class="p">=</span> <span class="no">[System.Security.Cryptography.RandomNumberGenerator]</span><span class="p">::</span><span class="n">Create</span><span class="p">()</span>
+<span class="nv">$rng</span><span class="p">.</span><span class="n">GetBytes</span><span class="p">(</span><span class="nv">$bytes</span><span class="p">)</span>
+<span class="nv">$rng</span><span class="p">.</span><span class="n">Dispose</span><span class="p">()</span>
+<span class="n">-join</span> <span class="p">(</span><span class="nv">$bytes</span> <span class="p">|</span> <span class="k">ForEach</span><span class="n">-Object</span> <span class="p">{</span> <span class="s1">'{0:x2}'</span> <span class="o">-f</span> <span class="nv">$_</span> <span class="p">})</span>
 </code></pre></div>
+<p>This is the PowerShell version of <code>openssl rand -hex 32</code>, which you can also
+run as is from WSL or Git Bash. Don't build the key with <code>Get-Random</code>: it
+isn't a cryptographic random generator, and this key protects every stored
+credential.</p>
 <div class="admonition danger">
 <p class="admonition-title">Back that key up somewhere else, now</p>
 <p>Every credential you enter in the editor is encrypted with it. Lose the
