@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1385,10 +1385,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#manual-docker-build-commands" class="md-nav__link">
+  <a href="#building-one-image-by-hand" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Manual Docker Build Commands
+        Building One Image by Hand
       
     </span>
   </a>
@@ -1396,10 +1396,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#makefile-commands" class="md-nav__link">
+  <a href="#production-images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Makefile Commands
+        Production Images
       
     </span>
   </a>
@@ -3231,10 +3231,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#manual-docker-build-commands" class="md-nav__link">
+  <a href="#building-one-image-by-hand" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Manual Docker Build Commands
+        Building One Image by Hand
       
     </span>
   </a>
@@ -3242,10 +3242,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#makefile-commands" class="md-nav__link">
+  <a href="#production-images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Makefile Commands
+        Production Images
       
     </span>
   </a>
@@ -3942,39 +3942,36 @@ docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.u
 docker-compose<span class="w"> </span>build
 docker-compose<span class="w"> </span>up<span class="w"> </span>-d
 </code></pre></div>
-<h3 id="manual-docker-build-commands">Manual Docker Build Commands<a class="headerlink" href="#manual-docker-build-commands" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Build UI image locally</span>
-<span class="nb">cd</span><span class="w"> </span>vrsky
-docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>-f<span class="w"> </span>ui/Dockerfile<span class="w"> </span>.
+<h3 id="building-one-image-by-hand">Building One Image by Hand<a class="headerlink" href="#building-one-image-by-hand" title="Permanent link">&para;</a></h3>
+<p>There is no make target that only builds backend images (<code>make up-core</code>
+builds the core set as part of starting it). Every Dockerfile uses the repo
+root as its build context, so run these from the repo root:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># A backend service, the way the local stack builds it</span>
+docker<span class="w"> </span>compose<span class="w"> </span>build<span class="w"> </span>http-producer
 
-<span class="c1"># Build individual backend service</span>
+<span class="c1"># The same with plain docker</span>
 docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/http-producer:latest<span class="w"> </span>-f<span class="w"> </span>src/cmd/http-producer/Dockerfile<span class="w"> </span>.
 
-<span class="c1"># Use Makefile for convenience</span>
-<span class="nb">cd</span><span class="w"> </span>src
-make<span class="w"> </span>docker-build-ui
-make<span class="w"> </span>docker-push-ui
+<span class="c1"># The UI (not part of docker-compose.yml)</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>vrsky/ui:latest<span class="w"> </span>-f<span class="w"> </span>ui/Dockerfile<span class="w"> </span>.
 </code></pre></div>
-<h3 id="makefile-commands">Makefile Commands<a class="headerlink" href="#makefile-commands" title="Permanent link">&para;</a></h3>
-<p>The <code>src/Makefile</code> provides convenient targets:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Build UI</span>
-make<span class="w"> </span>docker-build-ui
-
-<span class="c1"># Push UI to registry</span>
-make<span class="w"> </span>docker-push-ui
-
-<span class="c1"># Build backend services</span>
-make<span class="w"> </span>docker-build<span class="w">              </span><span class="c1"># Producer (default)</span>
-make<span class="w"> </span>docker-build-consumer
-make<span class="w"> </span>docker-build-filter
-make<span class="w"> </span>docker-build-converter
-
-<span class="c1"># Push backend services</span>
-make<span class="w"> </span>docker-push
-make<span class="w"> </span>docker-push-consumer
-make<span class="w"> </span>docker-push-filter
-make<span class="w"> </span>docker-push-converter
-</code></pre></div>
+<p>The service names are the ones in <code>docker-compose.yml</code>; <code>docker compose
+config --services</code> lists them.</p>
+<h3 id="production-images">Production Images<a class="headerlink" href="#production-images" title="Permanent link">&para;</a></h3>
+<p>Production images are built in Azure Container Registry (<code>vrskyprodacr</code>),
+not on your machine, and nothing is pushed from a laptop:</p>
+<ul>
+<li>A merge to <code>main</code> builds them for you. <code>.github/workflows/build-push.yml</code>
+  asks <code>infrastructure/azure/affected.sh</code> which images the merge touched,
+  runs <code>az acr build</code> for each, then rolls them out. See
+  <a href="../operator/deploy/">Deploying</a>.</li>
+<li>By hand, <code>infrastructure/azure/build-push-acr.sh [core|connectors|all]</code>
+  (default <code>all</code>) runs the same <code>az acr build</code> for a group of images. It needs
+  an <code>az login</code> with access to the registry. Roll the core images out
+  afterwards with <code>infrastructure/azure/deploy-core-azure.sh</code>, which reads
+  each digest from ACR, and the connectors with
+  <code>infrastructure/azure/deploy-connectors-azure.sh</code>.</li>
+</ul>
 <hr />
 <h2 id="docker-image-building">Docker Image Building<a class="headerlink" href="#docker-image-building" title="Permanent link">&para;</a></h2>
 <h3 id="multi-stage-build-strategy">Multi-Stage Build Strategy<a class="headerlink" href="#multi-stage-build-strategy" title="Permanent link">&para;</a></h3>
@@ -4595,10 +4592,10 @@ backup CronJob + its config Secret are documented in
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>
