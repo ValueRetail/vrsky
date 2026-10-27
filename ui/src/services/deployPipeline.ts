@@ -103,3 +103,49 @@ export function deployIdentity(canvas: CanvasIdentity, now: Date): { name?: stri
     description: NEW_PIPELINE_DESCRIPTION,
   }
 }
+
+/** What one builder deploy works from. */
+export interface DeployPlan {
+  /** The connection to update in place; undefined creates one. */
+  previousConnectionId: string | undefined
+  /** The name and description the payload carries (deployIdentity). */
+  identity: { name?: string; description?: string }
+}
+
+/**
+ * Plans a deploy of the canvas. asNew is the user's answer to ConnectionGone
+ * ("Deploy as new"): the canvas is treated as unlinked, so the deploy creates
+ * and is named like a create. It is passed in rather than read from the
+ * canvas because the page's confirm handler runs the closure of the render
+ * that still saw the deleted id; that closure stopped the deleted id again
+ * and reopened the same dialog (#355).
+ */
+export function deployPlan(canvas: CanvasIdentity, asNew: boolean, now: Date): DeployPlan {
+  const target: CanvasIdentity = asNew ? { name: canvas.name } : canvas
+  return {
+    previousConnectionId: target.deployedConnectionId,
+    identity: deployIdentity(target, now),
+  }
+}
+
+/**
+ * Runs the deploy sequence for a payload built from a DeployPlan and keeps the
+ * canvas's link in step: link(id, name) after a create or a rename,
+ * link(null) when the connection turned out to be gone. ConnectionGone is
+ * rethrown for the page to ask about.
+ */
+export async function deployCanvas(
+  client: Client,
+  payload: { name?: string },
+  previousConnectionId: string | undefined,
+  link: (connectionId: string | null, deployedName?: string) => void,
+): Promise<DeployResult> {
+  try {
+    const result = await deployPipeline(client, payload, previousConnectionId)
+    if (result.created || payload.name !== undefined) link(result.connectionId, payload.name)
+    return result
+  } catch (err) {
+    if (err instanceof ConnectionGone) link(null)
+    throw err
+  }
+}

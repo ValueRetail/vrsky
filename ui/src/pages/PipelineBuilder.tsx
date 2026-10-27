@@ -12,7 +12,7 @@ import { materializeSecrets } from '../utils/secrets'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient, { getActiveTenantId } from '../services/api'
-import { deployPipeline as deployPipelineSequence, ConnectionGone, deployIdentity } from '../services/deployPipeline'
+import { ConnectionGone, deployCanvas, deployPlan, type DeployPlan } from '../services/deployPipeline'
 import * as authService from '../services/authService'
 import { getSessionToken } from '../services/authService'
 import { reportUnauthorized } from '@/services/sessionExpiry'
@@ -478,7 +478,7 @@ export default function PipelineBuilder() {
    * references (see materializeSecrets) — so nothing plaintext is stored
    * server-side. The worker resolves the references back at runtime (#66).
    */
-  const buildConnectionPayload = async () => {
+  const buildConnectionPayload = async (identity: DeployPlan['identity']) => {
     const builtNodes = await Promise.all(
       nodes.map(async (node) => ({
         id: node.id,
@@ -490,7 +490,7 @@ export default function PipelineBuilder() {
     return {
       // An update keeps the server's name and description unless the tab was
       // renamed (plans/builder-deploy-names.md).
-      ...deployIdentity(activeCanvas ?? { name: '' }, new Date()),
+      ...identity,
       nodes: builtNodes,
       edges: edges.map((edge, index) => ({
         id: edge.id || `edge-${index}`,
@@ -501,7 +501,10 @@ export default function PipelineBuilder() {
     }
   }
 
-  const deployPipeline = async () => {
+  // asNew: the user confirmed "Deploy as new" after ConnectionGone. The
+  // confirm handler runs this render's closure, whose activeCanvas still has
+  // the deleted id, so the intent is passed explicitly (#355).
+  const deployPipeline = async (asNew = false) => {
     // Mark that user attempted to deploy (shows validation errors if any)
     setDeployAttempted(true)
 
@@ -515,9 +518,10 @@ export default function PipelineBuilder() {
       return
     }
 
+    const plan = deployPlan(activeCanvas ?? { name: '' }, asNew, new Date())
     let payload
     try {
-      payload = await buildConnectionPayload()
+      payload = await buildConnectionPayload(plan.identity)
     } catch (err) {
       showErrorNotification(
         'Secret storage',
@@ -534,19 +538,17 @@ export default function PipelineBuilder() {
       // making a new one rather than changing the URL behind someone's back
       // (plans/stable-connections.md).
       let connectionId: string
-      const prevConnectionId = activeCanvas?.deployedConnectionId
       const isWebhookSource = nodes.find(n => n.type === 'input')?.data?.config?.type === 'http'
+      const link = (id: string | null, deployedName?: string) => {
+        if (currentCanvasId) setDeployedConnectionId(currentCanvasId, id, deployedName)
+      }
 
       try {
-        const result = await deployPipelineSequence(apiClient, payload, prevConnectionId)
+        const result = await deployCanvas(apiClient, payload, plan.previousConnectionId, link)
         connectionId = result.connectionId
-        if (currentCanvasId && (result.created || payload.name !== undefined)) {
-          setDeployedConnectionId(currentCanvasId, connectionId, payload.name)
-        }
       } catch (err) {
         if (err instanceof ConnectionGone) {
           setIsLoading(false)
-          if (currentCanvasId) setDeployedConnectionId(currentCanvasId, null)
           showConfirmDialog({
             title: 'Pipeline no longer exists on the server',
             message: `The connection this canvas deployed (${err.connectionId.slice(0, 8)}…) was deleted. ` +
@@ -556,7 +558,7 @@ export default function PipelineBuilder() {
             cancelLabel: 'Cancel',
             onConfirm: async () => {
               hideConfirmDialog()
-              await deployPipeline()
+              await deployPipeline(true)
             },
             onCancel: () => hideConfirmDialog(),
           })
@@ -875,7 +877,7 @@ export default function PipelineBuilder() {
 
           {/* Deploy Button */}
           <button
-            onClick={deployPipeline}
+            onClick={() => deployPipeline()}
             disabled={isLoading}
             style={{
               padding: '8px 24px',
