@@ -1,10 +1,11 @@
 package managementapi
 
 import (
-	"errors"
+	"fmt"
 	"io"
-	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -92,109 +93,185 @@ func dockerignoreExcludes(t *testing.T, pm *patternmatcher.PatternMatcher, rel s
 	return excluded
 }
 
-// contextHasSource reports whether a COPY/ADD source survives the
-// .dockerignore: the source, globbed from the context root, must match a
-// file the matcher lets through, or a directory with at least one such file
-// under it. A wildcard with nothing left and a missing directory fail the
-// COPY in Docker; a directory with every file filtered out copies as empty,
-// which breaks the build just the same.
-func contextHasSource(t *testing.T, pm *patternmatcher.PatternMatcher, root, src string) bool {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(root, src))
-	if err != nil {
-		t.Fatalf("bad COPY pattern %q: %v", src, err)
+// dockerignoreKeepOut lists tracked files that a COPY source covers but the
+// root .dockerignore leaves out on purpose. An entry is a file path, or a
+// directory ending in "/" that stands for everything under it. Each entry
+// must still be in use, so the list can't go stale.
+//
+// All of today's entries come from the `src/*` rule: the images build from
+// src/go.mod, src/go.sum, src/cmd, src/pkg and src/internal, and the 32
+// Dockerfiles with `COPY src/ ./` don't need the rest of src/.
+var dockerignoreKeepOut = []string{
+	"src/.golangci.yml",      // golangci-lint config, CI only
+	"src/.govulncheck-allow", // vuln-scan.yml's accepted findings, CI only
+	"src/Makefile",           // developer targets
+	"src/test/",              // contract, fixture and integration tests, run outside the images
+}
+
+// keptOutOnPurpose returns the dockerignoreKeepOut entry that covers file, or
+// "" if none does.
+func keptOutOnPurpose(keepOut []string, file string) string {
+	for _, k := range keepOut {
+		if file == k || (strings.HasSuffix(k, "/") && strings.HasPrefix(file, k)) {
+			return k
+		}
 	}
-	for _, m := range matches {
-		info, err := os.Stat(m)
+	return ""
+}
+
+// trackedFiles returns the files git tracks, slash-separated and relative to
+// root. The guard reads these rather than the working tree, so a git-ignored
+// local file (a docker-compose.override.yml, a stray build output) can't
+// change the result. Without git the test is skipped.
+func trackedFiles(t *testing.T, root string) []string {
+	t.Helper()
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not on PATH, so the tracked files this guard checks can't be listed")
+	}
+	out, err := exec.Command(gitBin, "-C", root, "ls-files", "-z").Output()
+	if err != nil {
+		t.Fatalf("`git ls-files` in %s: %v", root, err)
+	}
+	var files []string
+	for _, f := range strings.Split(string(out), "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		t.Fatalf("`git ls-files` in %s listed nothing", root)
+	}
+	return files
+}
+
+// copyCovers reports whether a COPY/ADD source copies file, a slash path
+// relative to the context root. Docker matches the source (with filepath.Match
+// wildcards) against context paths and copies a matched directory whole, so
+// the source covers file when it matches file or one of its parent
+// directories.
+func copyCovers(t *testing.T, src, file string) bool {
+	t.Helper()
+	pattern := strings.TrimPrefix(path.Clean("/"+filepath.ToSlash(src)), "/")
+	for p := file; p != "." && p != ""; p = path.Dir(p) {
+		ok, err := path.Match(pattern, p)
 		if err != nil {
-			t.Fatalf("stat %s: %v", m, err)
+			t.Fatalf("bad COPY pattern %q: %v", src, err)
 		}
-		if !info.IsDir() {
-			rel, err := filepath.Rel(root, m)
-			if err != nil {
-				t.Fatalf("relative path of %s: %v", m, err)
-			}
-			if !dockerignoreExcludes(t, pm, rel) {
-				return true
-			}
-			continue
-		}
-		found := false
-		err = filepath.WalkDir(m, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			rel, err := filepath.Rel(root, p)
-			if err != nil {
-				return err
-			}
-			if !dockerignoreExcludes(t, pm, rel) {
-				found = true
-				return fs.SkipAll
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", m, err)
-		}
-		if found {
+		if ok {
 			return true
 		}
 	}
 	return false
 }
 
-// excludedCopySources returns "<dockerfile>: COPY <src>" for every COPY/ADD
-// source of the given Dockerfiles (paths relative to root) that the matcher
-// keeps out of a build context rooted at root.
-func excludedCopySources(t *testing.T, pm *patternmatcher.PatternMatcher, root string, dockerfiles []string) []string {
+// copyProblem is one COPY/ADD source the .dockerignore breaks: either it
+// drops tracked files the source covers, or nothing the source covers
+// reaches the build context at all.
+type copyProblem struct {
+	dockerfile string
+	src        string
+	dropped    []string // covered tracked files left out, not on the keep-out list
+	nothing    bool     // no covered tracked file reaches the context
+}
+
+// key is "<dockerfile>: COPY <src>", the form the tests compare against.
+func (p copyProblem) key() string { return p.dockerfile + ": COPY " + p.src }
+
+func (p copyProblem) String() string {
+	if p.nothing && len(p.dropped) == 0 {
+		return p.key() + ", but nothing it covers reaches the build context"
+	}
+	const show = 5
+	files := p.dropped
+	more := ""
+	if len(files) > show {
+		more = fmt.Sprintf(" and %d more", len(files)-show)
+		files = files[:show]
+	}
+	return fmt.Sprintf("%s, but the .dockerignore leaves out %s%s", p.key(), strings.Join(files, ", "), more)
+}
+
+// excludedCopySources checks every COPY/ADD source of the given Dockerfiles
+// (paths relative to root) against the matcher. Every tracked file a source
+// covers must reach the build context, except those on keepOut, and at
+// least one must: a missing file or directory fails the COPY in Docker, and
+// a partly filtered directory builds an image that is missing code. It
+// returns the problems and the keepOut entries that excused a file.
+func excludedCopySources(t *testing.T, pm *patternmatcher.PatternMatcher, root string, tracked, keepOut, dockerfiles []string) ([]copyProblem, map[string]bool) {
 	t.Helper()
-	var bad []string
+	excluded := map[string]bool{}
+	isExcluded := func(f string) bool {
+		e, ok := excluded[f]
+		if !ok {
+			e = dockerignoreExcludes(t, pm, f)
+			excluded[f] = e
+		}
+		return e
+	}
+	usedKeepOut := map[string]bool{}
+	var problems []copyProblem
 	for _, df := range dockerfiles {
 		srcs := dockerfileCopySources(t, filepath.Join(root, df))
 		if len(srcs) == 0 {
 			t.Fatalf("found no COPY sources in %s; the format changed, update this test", df)
 		}
 		for _, s := range srcs {
-			if !contextHasSource(t, pm, root, s) {
-				bad = append(bad, df+": COPY "+s)
+			p := copyProblem{dockerfile: df, src: s, nothing: true}
+			for _, f := range tracked {
+				if !copyCovers(t, s, f) {
+					continue
+				}
+				if !isExcluded(f) {
+					p.nothing = false
+					continue
+				}
+				if k := keptOutOnPurpose(keepOut, f); k != "" {
+					usedKeepOut[k] = true
+					continue
+				}
+				p.dropped = append(p.dropped, f)
+			}
+			if p.nothing || len(p.dropped) > 0 {
+				problems = append(problems, p)
 			}
 		}
 	}
-	return bad
+	return problems, usedKeepOut
 }
 
 // repoRootDockerfiles lists the Dockerfiles built with the repo root as the
-// build context, relative to root: ui/Dockerfile and src/cmd/*/Dockerfile
-// (what infrastructure/azure/build-push-acr.sh and the build-images job in
-// build-push.yml pass to `az acr build --file ... .`), and every Dockerfile a
-// `build:` in a docker-compose*.yml names. A compose build with another
-// context, or a <Dockerfile>.dockerignore that BuildKit would read instead
-// of the root file, stops the test: this guard only knows the root file.
-func repoRootDockerfiles(t *testing.T, root string) []string {
+// build context, from the tracked files: ui/Dockerfile and
+// src/cmd/*/Dockerfile (what infrastructure/azure/build-push-acr.sh and the
+// build-images job in build-push.yml pass to `az acr build --file ... .`),
+// and every Dockerfile a `build:` in a docker-compose*.yml names. A compose
+// build with another context, or a <Dockerfile>.dockerignore that BuildKit
+// would read instead of the root file, stops the test: this guard only
+// knows the root file.
+func repoRootDockerfiles(t *testing.T, root string, tracked []string) []string {
 	t.Helper()
+	isTracked := map[string]bool{}
+	for _, f := range tracked {
+		isTracked[f] = true
+	}
 	set := map[string]bool{"ui/Dockerfile": true}
-	cmd, err := filepath.Glob(filepath.Join(root, "src", "cmd", "*", "Dockerfile"))
-	if err != nil || len(cmd) == 0 {
-		t.Fatalf("found no src/cmd/*/Dockerfile (%v); the layout changed, update this test", err)
-	}
-	for _, p := range cmd {
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			t.Fatalf("relative path of %s: %v", p, err)
+	var composeFiles []string
+	for _, f := range tracked {
+		if ok, _ := path.Match("src/cmd/*/Dockerfile", f); ok {
+			set[f] = true
 		}
-		set[filepath.ToSlash(rel)] = true
+		if ok, _ := path.Match("docker-compose*.yml", f); ok {
+			composeFiles = append(composeFiles, f)
+		}
 	}
-
-	composeFiles, err := filepath.Glob(filepath.Join(root, "docker-compose*.yml"))
-	if err != nil || len(composeFiles) == 0 {
-		t.Fatalf("found no docker-compose*.yml at the repo root (%v); update this test", err)
+	if len(set) < 2 {
+		t.Fatal("found no tracked src/cmd/*/Dockerfile; the layout changed, update this test")
+	}
+	if len(composeFiles) == 0 {
+		t.Fatal("found no tracked docker-compose*.yml at the repo root; update this test")
 	}
 	for _, cf := range composeFiles {
-		raw, err := os.ReadFile(cf)
+		raw, err := os.ReadFile(filepath.Join(root, cf))
 		if err != nil {
 			t.Fatalf("read %s: %v", cf, err)
 		}
@@ -225,22 +302,19 @@ func repoRootDockerfiles(t *testing.T, root string) []string {
 			}
 			if filepath.Clean(buildCtx) != "." {
 				t.Fatalf("%s: service %s builds with context %q, not the repo root; this guard only checks the root .dockerignore, update it",
-					filepath.Base(cf), name, buildCtx)
+					cf, name, buildCtx)
 			}
-			set[filepath.ToSlash(filepath.Clean(dockerfile))] = true
+			set[path.Clean(filepath.ToSlash(dockerfile))] = true
 		}
 	}
 
 	var out []string
 	for df := range set {
-		if _, err := os.Stat(filepath.Join(root, df)); err != nil {
-			t.Fatalf("Dockerfile %s: %v", df, err)
+		if !isTracked[df] {
+			t.Fatalf("Dockerfile %s is not tracked by git", df)
 		}
-		own := filepath.Join(root, df+".dockerignore")
-		if _, err := os.Stat(own); err == nil {
+		if isTracked[df+".dockerignore"] {
 			t.Fatalf("%s.dockerignore exists; BuildKit reads it instead of the root .dockerignore (az acr build doesn't), update this test", df)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			t.Fatalf("stat %s: %v", own, err)
 		}
 		out = append(out, df)
 	}
@@ -254,11 +328,12 @@ func repoRootDockerfiles(t *testing.T, root string) []string {
 // allowlist (say `!ui` to `!ui/src`) still left every source on disk, so the
 // old guard passed while `COPY ui/package*.json` failed, first seen as a red
 // ACR build on main after the merge. This applies the root .dockerignore
-// the way Docker does and checks that each COPY/ADD source of every
-// repo-root Dockerfile still reaches the build context. It doesn't need
-// Docker.
+// the way Docker does and checks that every tracked file each COPY/ADD
+// source of every repo-root Dockerfile covers still reaches the build
+// context, apart from dockerignoreKeepOut. It doesn't need Docker.
 func TestDockerignoreKeepsDockerfileSources(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
+	tracked := trackedFiles(t, root)
 	f, err := os.Open(filepath.Join(root, ".dockerignore"))
 	if err != nil {
 		t.Fatalf("open the root .dockerignore: %v", err)
@@ -266,8 +341,14 @@ func TestDockerignoreKeepsDockerfileSources(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	pm := newDockerignoreMatcher(t, f)
 
-	for _, bad := range excludedCopySources(t, pm, root, repoRootDockerfiles(t, root)) {
-		t.Errorf("%s, but the root .dockerignore keeps it out of the build context", bad)
+	problems, used := excludedCopySources(t, pm, root, tracked, dockerignoreKeepOut, repoRootDockerfiles(t, root, tracked))
+	for _, p := range problems {
+		t.Error(p.String())
+	}
+	for _, k := range dockerignoreKeepOut {
+		if !used[k] {
+			t.Errorf("dockerignoreKeepOut lists %q, but no tracked file a COPY covers is left out by it any more; drop the entry", k)
+		}
 	}
 }
 
@@ -284,7 +365,8 @@ func TestDockerignoreGuardCatchesMutations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the root .dockerignore: %v", err)
 	}
-	dockerfiles := repoRootDockerfiles(t, root)
+	tracked := trackedFiles(t, root)
+	dockerfiles := repoRootDockerfiles(t, root, tracked)
 
 	// replaceLine swaps the one line equal to oldLine for newLine; an empty
 	// newLine drops the line. It fails unless exactly one line matches.
@@ -353,6 +435,32 @@ func TestDockerignoreGuardCatchesMutations(t *testing.T) {
 				"ui/Dockerfile: COPY ui/tsconfig*.json",
 			},
 		},
+		// The four below leave every COPY source with something to copy, so
+		// a check that only asks for one surviving file per source passes
+		// them; each still breaks a production build.
+		{
+			name:       "one connector's directory excluded",
+			appendLine: "src/cmd/sitoo-consumer",
+			want:       []string{"src/cmd/sitoo-consumer/Dockerfile: COPY src/"},
+		},
+		{
+			name:       "the SDK package excluded",
+			appendLine: "src/pkg/sdk",
+			want: []string{
+				"src/cmd/sitoo-consumer/Dockerfile: COPY src/",
+				"src/cmd/management-api/Dockerfile: COPY src/pkg/",
+			},
+		},
+		{
+			name:       "every ui .tsx file excluded",
+			appendLine: "ui/src/**/*.tsx",
+			want:       []string{"ui/Dockerfile: COPY ui/src"},
+		},
+		{
+			name:       "ui/package.json excluded while package-lock.json still matches",
+			appendLine: "ui/package.json",
+			want:       []string{"ui/Dockerfile: COPY ui/package*.json"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -364,17 +472,19 @@ func TestDockerignoreGuardCatchesMutations(t *testing.T) {
 				text = strings.TrimRight(text, "\n") + "\n" + tc.appendLine + "\n"
 			}
 			pm := newDockerignoreMatcher(t, strings.NewReader(text))
-			bad := excludedCopySources(t, pm, root, dockerfiles)
+			problems, _ := excludedCopySources(t, pm, root, tracked, dockerignoreKeepOut, dockerfiles)
+			var bad []string
+			got := map[string]bool{}
+			for _, p := range problems {
+				bad = append(bad, p.String())
+				got[p.key()] = true
+			}
 
 			if len(tc.want) == 0 {
 				if len(bad) != 0 {
 					t.Fatalf("the unmodified .dockerignore should pass, got:\n%s", strings.Join(bad, "\n"))
 				}
 				return
-			}
-			got := map[string]bool{}
-			for _, b := range bad {
-				got[b] = true
 			}
 			for _, w := range tc.want {
 				if !got[w] {
@@ -550,60 +660,102 @@ func TestDockerfileCopySourcesSkipsStageCopies(t *testing.T) {
 }
 
 // TestExcludedCopySourcesOnFakeContext runs excludedCopySources against a
-// build context in a temp dir, for cases the real repo can't show on
-// demand: a directory whose every file is ignored, a wildcard with nothing
-// left, a missing source, and a `--from` copy of a path the context lacks.
+// made-up build context, for cases the real repo can't show on demand. The
+// tracked list stands in for the files git tracks; untracked files are
+// written to disk only, to show they don't count.
 func TestExcludedCopySourcesOnFakeContext(t *testing.T) {
 	tests := []struct {
 		name       string
-		files      []string // created under the context root
+		tracked    []string
+		untracked  []string // on disk but not tracked
+		keepOut    []string
 		dockerfile string
 		ignore     string
 		want       []string
 	}{
 		{
 			name:       "directory with every file ignored is reported",
-			files:      []string{"assets/a.txt", "assets/sub/b.txt"},
+			tracked:    []string{"assets/a.txt", "assets/sub/b.txt"},
 			dockerfile: "COPY assets ./assets\n",
 			ignore:     "assets/**/*.txt\n",
 			want:       []string{"Dockerfile: COPY assets"},
 		},
 		{
-			name:       "directory with one file left passes",
-			files:      []string{"assets/a.txt", "assets/sub/b.json"},
+			// Was "directory with one file left passes" before #385's review:
+			// a partly filtered directory builds an image missing code.
+			name:       "directory with one file dropped is reported",
+			tracked:    []string{"assets/a.txt", "assets/sub/b.json"},
 			dockerfile: "COPY assets ./assets\n",
 			ignore:     "assets/**/*.txt\n",
+			want:       []string{"Dockerfile: COPY assets"},
 		},
 		{
 			name:       "wildcard with every match ignored is reported",
-			files:      []string{"package.json", "package-lock.json"},
+			tracked:    []string{"package.json", "package-lock.json"},
 			dockerfile: "COPY package*.json ./\n",
 			ignore:     "*\n!src\n",
 			want:       []string{"Dockerfile: COPY package*.json"},
 		},
 		{
+			name:       "wildcard with one match dropped is reported",
+			tracked:    []string{"package.json", "package-lock.json"},
+			dockerfile: "COPY package*.json ./\n",
+			ignore:     "package.json\n",
+			want:       []string{"Dockerfile: COPY package*.json"},
+		},
+		{
 			name:       "missing source is reported",
-			files:      []string{"keep.txt"},
+			tracked:    []string{"keep.txt"},
 			dockerfile: "COPY keep.txt ./\nCOPY gone.txt ./\n",
 			want:       []string{"Dockerfile: COPY gone.txt"},
 		},
 		{
+			name:       "an untracked file doesn't satisfy a COPY",
+			tracked:    []string{"keep.txt"},
+			untracked:  []string{"local.txt"},
+			dockerfile: "COPY keep.txt ./\nCOPY local.txt ./\n",
+			want:       []string{"Dockerfile: COPY local.txt"},
+		},
+		{
 			name:       "--from copy of a path not in the context is skipped",
-			files:      []string{"keep.txt"},
+			tracked:    []string{"keep.txt"},
 			dockerfile: "COPY keep.txt ./\nCOPY --from=builder /app/dist ./dist\n",
 			ignore:     "*\n!keep.txt\n",
 		},
 		{
 			name:       "child re-included under an excluded directory passes",
-			files:      []string{"dir/drop.txt", "dir/keep/a.txt"},
+			tracked:    []string{"dir/drop.txt", "dir/keep/a.txt"},
 			dockerfile: "COPY dir/keep ./keep\n",
 			ignore:     "dir\n!dir/keep\n",
+		},
+		{
+			name:       "files on the keep-out list may be dropped",
+			tracked:    []string{"src/go.mod", "src/Makefile", "src/test/a_test.go", "src/test/fixtures/x.json"},
+			keepOut:    []string{"src/Makefile", "src/test/"},
+			dockerfile: "COPY src/ ./\n",
+			ignore:     "src/*\n!src/go.mod\n",
+		},
+		{
+			name:       "a keep-out directory doesn't cover a sibling with the same prefix",
+			tracked:    []string{"src/go.mod", "src/testdata/x.json"},
+			keepOut:    []string{"src/test/"},
+			dockerfile: "COPY src/ ./\n",
+			ignore:     "src/*\n!src/go.mod\n",
+			want:       []string{"Dockerfile: COPY src/"},
+		},
+		{
+			name:       "a source left with only keep-out files is reported",
+			tracked:    []string{"src/Makefile"},
+			keepOut:    []string{"src/Makefile"},
+			dockerfile: "COPY src/ ./\n",
+			ignore:     "src/Makefile\n",
+			want:       []string{"Dockerfile: COPY src/"},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			for _, f := range tc.files {
+			for _, f := range tc.untracked {
 				p := filepath.Join(root, filepath.FromSlash(f))
 				if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 					t.Fatalf("mkdir for %s: %v", f, err)
@@ -617,7 +769,11 @@ func TestExcludedCopySourcesOnFakeContext(t *testing.T) {
 				t.Fatalf("write Dockerfile: %v", err)
 			}
 			pm := newDockerignoreMatcher(t, strings.NewReader(tc.ignore))
-			got := excludedCopySources(t, pm, root, []string{"Dockerfile"})
+			problems, _ := excludedCopySources(t, pm, root, tc.tracked, tc.keepOut, []string{"Dockerfile"})
+			var got []string
+			for _, p := range problems {
+				got = append(got, p.key())
+			}
 			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Fatalf("excludedCopySources = %q, want %q", got, tc.want)
 			}

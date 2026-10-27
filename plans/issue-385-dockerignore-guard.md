@@ -51,24 +51,43 @@ rather than being skipped.
   (comments, whitespace, `filepath.Clean`, leading `/`), and
   `MatchesOrParentMatches` gives the "last match wins, a parent's match
   counts" result. It has no dependencies of its own and is used only in a
-  test file, so nothing ships in a binary. Writing our own matcher would
-  mean re-deriving `**` and parent-match rules and keeping them in step
-  with Docker; that is how the guard would drift from what ACR does.
+  test file, so nothing ships in a binary (`go list -deps ./...` doesn't
+  list it; only `-test` does). Writing our own matcher would mean
+  re-deriving `**` and parent-match rules and keeping them in step with
+  Docker; that is how the guard would drift from what ACR does.
 - Factor the COPY/ADD parsing out of the existing test into
   `dockerfileCopySources(t, dockerfile)`: same rules (skip `--from`, skip
   flags, the last field is the destination, hard stop on a line
   continuation or a remote ADD). The existing test calls it and keeps its
   glob-against-context check and its "found no COPY sources" stop.
-- Per source: glob it from the repo root. It passes when at least one
-  match is a file the matcher lets through, or a directory holding at
-  least one such file (walk stops at the first). That mirrors BuildKit: a
-  wildcard with no surviving match or a missing directory fails the COPY.
-  A directory where every file is ignored would copy as empty, which is
-  just as broken, so it fails too.
+- The file list is the tracked files (`git ls-files`), not the working
+  tree, so a git-ignored local file (a `docker-compose.override.yml`, a
+  stray build output) can't change the result. Without git the test skips
+  with a message; if git is there and fails, the test fails.
+- Per source: a tracked file is covered when the source (with
+  `filepath.Match` wildcards, as Docker matches it) matches the file or one
+  of its parent directories. Every covered file must survive the
+  `.dockerignore`, apart from `dockerignoreKeepOut`, and at least one must.
+- `dockerignoreKeepOut` is a commented list in the test of tracked files
+  that a COPY covers but the `.dockerignore` leaves out on purpose. Today
+  that's the 15 files from the `src/*` rule that the 32 `COPY src/ ./`
+  Dockerfiles don't need: `src/.golangci.yml`, `src/.govulncheck-allow`,
+  `src/Makefile` and `src/test/` (12 files). An entry that no longer
+  excuses anything fails the test, so the list can't go stale.
 - New file `src/pkg/managementapi/dockerignore_guard_test.go`:
-  the helper, the guard test, and table tests for the matcher setup
+  the helpers, the guard test, and table tests for the matcher setup
   (Docker's documented examples plus this repo's allowlist shape) so the
   test's use of the library is pinned.
+
+### Review round 1
+
+The first version passed a source when at least one covered file got
+through. Thirty-two Dockerfiles use `COPY src/ ./`, so `src/go.mod` alone
+satisfied them, and these lines passed the guard while each would break a
+production build: `src/cmd/sitoo-consumer`, `src/pkg/sdk`,
+`ui/src/**/*.tsx`, `ui/package.json` (`ui/package-lock.json` still matched
+`ui/package*.json`). The rule is now "every covered tracked file", and those
+four are mutation cases.
 
 ## Files
 
@@ -81,18 +100,16 @@ rather than being skipped.
 
 ## Risks
 
-- It reads the working tree, not `git ls-files`. A git-ignored file on a
-  dev machine could satisfy a COPY that a clean checkout can't. CI runs on
-  a clean checkout, which is where it counts; the existing guard has the
-  same property.
-- "At least one file gets through" doesn't catch a pattern that drops part
-  of a copied directory (say `ui/src/**/*.tsx`). Checking every tracked file
-  would flag the intended exclusions (`src/Makefile` under `COPY src/`,
-  `ui/.env.example`), so that stays out of scope.
-- `az acr build` packs the context with the Azure CLI's own code, not
-  BuildKit. Production images build fine with the current allowlist, so it
-  reads the same syntax for what we use today, but this test can't prove
-  the two agree on every corner case.
+- Changing `src/go.mod` makes `affected.sh` treat every Go image as
+  changed, so the merge rebuilds every Go image and rolls every service and
+  connector. Nothing new is linked into a binary. Merge while the cluster
+  is parked.
+- `az acr build` packs the context with the Azure CLI's own Python matcher,
+  not BuildKit. Production images build fine with the current allowlist,
+  so it reads the same syntax for what we use today, but this test can't
+  prove the two agree on every corner case.
+- Untracked files that a build needs (none today) would be reported as
+  missing. That's the right call for CI, which builds from a clean checkout.
 
 ## Verification
 
@@ -102,7 +119,9 @@ From `src/`:
 - `go vet ./...`, `golangci-lint run ./pkg/managementapi/...`, `gofmt -l`
 - `govulncheck ./...`
 - `go mod tidy` leaves no diff
-- Mutation run (by a separate test-author agent): `!ui` → `!ui/src`,
-  `src/go.sum` excluded, `infrastructure/migrations` excluded each fail
-  the new test; `.dockerignore` restored after.
+- Mutation run on the real `.dockerignore`, restored after each: `!ui` →
+  `!ui/src`, `src/go.sum`, `infrastructure/migrations`,
+  `src/cmd/sitoo-consumer`, `src/pkg/sdk`, `ui/src/**/*.tsx` and
+  `ui/package.json` each fail the new test. The old guard still passes
+  `!ui/src`. Dropping a keep-out entry, or adding a stale one, fails too.
 - CI green on the PR.
