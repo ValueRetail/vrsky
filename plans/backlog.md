@@ -34,7 +34,7 @@ Last updated 2026-10-27.
 11. ~~**Untrack the Go binaries in `src/`.**~~ (#360) `src/remote-agent`,
     `src/vrsky-cli` and `src/spill-e2e` are 34–64 MB Mach-O build outputs
     committed to git. Remove them from the index and add them to `.gitignore`.
-12. **The root Makefile forwards targets that don't exist.** Eight of them
+12. ~~**The root Makefile forwards targets that don't exist.**~~ (#361) Eight of them
     (`docker-build`, `docker-push`, `run`, `e2e-test` and the `*-consumer`
     ones) are missing from `src/Makefile`, and root `make help` misses
     `up-core`, `up-core-remote` and `down-core`.
@@ -45,6 +45,13 @@ Last updated 2026-10-27.
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
+15. **Docs still name make targets that are gone.** `docs/DEPLOYMENT_GUIDE.md`
+    (lines ~120–129, in the mkdocs nav) and `PROJECT_STRUCTURE.md` (~127,
+    238, 241, 286) tell readers to run `make docker-build`,
+    `docker-build-consumer`, `docker-push*` and
+    `docker-build-filter`/`-converter`, none of which exist any more. Point
+    them at what builds images now, or drop the sections. Found in review of
+    #365.
 
 ## Human
 
