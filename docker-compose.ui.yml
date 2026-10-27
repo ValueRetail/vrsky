@@ -33,6 +33,11 @@ services:
     environment:
       VITE_API_BASE_URL: "http://localhost:8080/api"
       VITE_ENVIRONMENT: "production"
+    # The image runs nginx as the nginx user (uid/gid 101), which can't
+    # create /var/run/nginx.pid on the image's own /var/run. Production
+    # mounts an emptyDir there (infrastructure/kubernetes/ui/deployment.yaml).
+    tmpfs:
+      - /var/run:uid=101,gid=101
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/index.html"]
       interval: 30s

@@ -79,12 +79,18 @@ Last updated 2026-10-27.
     restore runs alongside the start-command handler, so a start command
     arriving during restore could start a second watcher for the same
     connection. Check and insert under one lock. Found during #362.
-21. **The `ui-prod` image exits at once when run locally.** nginx runs as a
+21. ~~**The `ui-prod` image exits at once when run locally.**~~ (#377) nginx runs as a
     non-root user and can't write `/var/run/nginx.pid` (`Permission
     denied`). Production avoids it with an emptyDir at `/var/run`
     (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
     (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
     the image can write, would make it run. Found in #370.
+22. **`ui-prod` sets `VITE_API_BASE_URL` and `VITE_ENVIRONMENT` as runtime
+    environment** in `docker-compose.ui.yml`. Vite reads them at build time
+    only, so on the nginx image they do nothing and suggest the API URL can
+    be changed per container. Drop them, or pass them as build args if the
+    Dockerfile ever takes any. The file's `version:` key is obsolete too
+    (compose warns). Found in #377.
 
 ## Human
 
