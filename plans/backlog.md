@@ -58,8 +58,8 @@ Last updated 2026-10-27.
     `"/ui/nginx.default.conf": not found`. `docker-push-ui` pushes to
     Docker Hub `vrsky/`, which nothing uses. Fix the context or drop both
     targets (and the root forwards). Found in #367.
-17. **The `ui-prod` service in `docker-compose.ui.yml` has the same broken
-    context** (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
+17. ~~**The `ui-prod` service in `docker-compose.ui.yml` has the same broken
+    context**~~ (#370) (`context: ./ui` with `dockerfile: Dockerfile`), so "Option 2:
     Build UI Production Image" in `docs/DEPLOYMENT_GUIDE.md` fails. The
     `ui` dev service already uses `context: .`. Found in #367.
 18. **`docs/DEPLOYMENT_GUIDE.md` still describes GHCR.** The registry,
