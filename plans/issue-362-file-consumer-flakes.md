@@ -125,13 +125,13 @@ The watcher ingests a new file on the first tick that sees its name, with no
 check that the writer is done. A large file copied in slowly can be published
 half-written, and since its name is then known the complete file is never
 published. Needs a stable-size (or mtime) check across two polls.
-Backlog item 15.
+Backlog item 19.
 
 The "already active" check and the insert in `startConnection` are separate
 lock sections, and the boot restore runs alongside the start-command handler,
 so a start command arriving during restore could start a second watcher.
 Not hit by these tests (the restore query fails on the mock in the
-command-driven ones). Backlog item 16.
+command-driven ones). Backlog item 20.
 
 ## Review
 
