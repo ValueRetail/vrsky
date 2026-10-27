@@ -145,11 +145,13 @@ and runs on `postgres:18-alpine`.
 
 ### Build context
 
-The context is always the repo root, so the root `.dockerignore` is the one
-that applies. It excludes everything, then lets back in `src/go.mod`,
-`src/go.sum`, `src/cmd`, `src/pkg`, `src/internal`, `ui` (without
-`node_modules` and `dist`) and `infrastructure/migrations`. `ui/.dockerignore`
-is not read by a repo-root build.
+The context is always the repo root, and the root `.dockerignore` is the
+only one in the repo. It excludes everything, then lets back in `src/go.mod`,
+`src/go.sum`, `src/cmd`, `src/pkg`, `src/internal`, `ui` and
+`infrastructure/migrations`. Under `ui` it still drops `node_modules`,
+`dist`, test coverage, `.env*` files, logs and editor files. Docker reads
+only the `.dockerignore` at the root of the context, so don't add one under
+`ui/` or `src/`; it would be ignored.
 
 ---
 

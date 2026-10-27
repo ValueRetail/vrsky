@@ -94,7 +94,7 @@ Last updated 2026-10-27.
     after the merge. Match paths the way Docker does (probably
     `github.com/moby/patternmatcher`) and check every Dockerfile, not only
     the UI's. Found in review of #369.
-23. **`ui/.dockerignore` is dead.** Every image, the UI included, now builds
+23. ~~**`ui/.dockerignore` is dead.**~~ (#380) Every image, the UI included, now builds
     with the repo root as context, so Docker reads only the root
     `.dockerignore`. Delete it, or fold anything it still says into the
     root file. Found in review of #369.
@@ -143,6 +143,12 @@ Last updated 2026-10-27.
     has grown from at most 5 s to at most 10 s now that a file needs two
     unchanged polls. Persisting what was published, or treating files newer
     than the last stop as new, would close it. Found in review of #374.
+31. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+    sets `build.sourcemap: true`, so the image serves
+    `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
+    read the original TypeScript. Decide whether that's wanted; if not, turn
+    it off for the production build or upload the maps somewhere private.
+    Found in #380.
 
 ## Human
 
