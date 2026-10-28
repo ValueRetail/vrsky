@@ -391,6 +391,62 @@ Last updated 2026-10-28.
     running connection as stopped. Write the status only when the entry was
     still this poller's own (`dropActive` could report it). Found during
     #408.
+62. **The Sitoo poller re-reads the whole collection every poll**
+    (`src/cmd/sitoo-consumer/service.go`, `fetchAndPublish`). The POS sales
+    template sends every receipt to Business Central every 5 minutes, and
+    only `dedupe_fields` keeps them from becoming duplicate invoices, at one
+    BC GET per receipt per poll. A cursor (Sitoo's modified-after filter,
+    stored in `connection_node_checkpoints` like the BC consumer's) would
+    send each receipt once. The `resource` key can't carry a query string
+    today: the poller appends `?start=…`. Found during #435.
+63. **The converter editor doesn't know `each` or `split_records`**
+    (`ui/src/components/Pipeline/PropertyEditor.tsx`). A retail template's
+    converter opened in the builder shows the `each` mapping as "Rename"
+    (the type select has no `each` option) without its nested mappings, and
+    `split_records` not at all. Saving keeps both (`updateMapping` spreads
+    the old mapping), but picking another type in that select drops the
+    lines. Show them, read-only at least. Found during #435.
+64. **Check the other `messaging.Subscribe` callers for cancel-before-Stop.**
+    #444 found the remote-agent gateway cancelling what its handlers wait
+    on before stopping the subscriber, so the loop re-fetched the NAK'd
+    message until it was dead-lettered. `Subscriber.Halt` now exists for
+    this. Check `pkg/sdk/lifecycle.go`, `cmd/data-filter`,
+    `cmd/data-converter` and `cmd/tenant-consumer/bridge.go` for a handler
+    that returns an error once a context is cancelled ahead of `Stop`.
+    Found in #444.
+65. **Two remote-agent tests sit on fixed 4 s waits.**
+    `TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount` sleeps four
+    AckWaits and `TestOutput_TakesOnlyItsPredecessorsMessage` polls for 4 s
+    to prove a message never comes; with cleanup each takes ~6 s. The
+    second could wait for the consumer's ack floor to pass both messages
+    instead. Not flaky, just slow. Found in #444.
+
+66. **The remote agent's stop tests don't pin cancel-after-halt, and a
+    reconcile can start a member on a cancelled context.** The test seam
+    in `src/cmd/remote-agent/service.go` (`afterCancel`) fires after the
+    halts, so moving `sess.cancel()` back to the top of `endSession`
+    passes both stop tests. Separately, if `endSession` runs during a group
+    reconcile, a member subscribed at `groups.go:~235` starts with an
+    already-cancelled context and NAKs until the lock at `:~252` halts it
+    (older than #447, tiny window). Add a seam right after the cancel and a
+    reconcile test. Found in review of #447.
+67. **CI never runs `make lint-connector`.** `make lint` runs it beside
+    lint-tenant and lint-openapi, but the Go lint job in `build-push.yml`
+    does not, so a connector that bypasses the SDK passes CI. Add it as a
+    step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
+    Found during #446.
+68. **golangci-lint's caches barely help.** On main the action restores a
+    1.4 MB `golangci-lint.cache-…` entry and still spends 2 m 18 s, and
+    setup-go's Go build cache uses one key for every Go job, so whichever
+    job saves first (a `-race` test shard) wins and the lint job's own
+    build output is never kept. A lint-specific `GOCACHE` entry could take
+    a minute off; measure before and after. Off the critical path since
+    #446. Found during #446.
+69. **`promtool test rules` takes four minutes** because the backup alert
+    tests (#404) evaluate up to ten days at one-minute steps. If the
+    Alert rules job ever becomes the slowest before a deploy, name the
+    test groups and split them over matrix legs with `--run`, with a guard
+    that every group runs in exactly one leg. Found during #446.
 
 ## Human
 

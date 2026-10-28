@@ -148,6 +148,42 @@ func TestGroup_OfflineMemberDoesNotBlockOthers(t *testing.T) {
 	}
 }
 
+// Stopping a group pipeline releases each member's held message to the next
+// session, as TestOutput_StopReleasesTheMessage does for one agent. Member
+// subscribers used to be stopped one after another after the cancel, so each
+// spun on its NAK'd message while it waited its turn (#444); the stop is held
+// open here so that window is certain.
+func TestGroup_StopReleasesTheMessage(t *testing.T) {
+	e := newTestEnv(t)
+	e.g.afterCancel = func() { time.Sleep(100 * time.Millisecond) }
+	members := [][]driver.Value{
+		memberRow(agentA, "till-a", "{all-tills}", outWrite),
+		memberRow(agentA2, "till-a2", "{all-tills}", outWrite),
+	}
+	e.startGroupPipeline(t, "g-stop", members...)
+	e.publishTo(t, tenant1, "g-stop", `{"order":7}`)
+	for _, id := range []string{agentA, agentA2} {
+		waitFor(t, "in flight for "+id, func() bool { ci, _ := e.memberInfo("g-stop", id); return ci != nil && ci.NumAckPending == 1 })
+	}
+
+	e.g.stopConnection(context.Background(), "g-stop", tenant1)
+	if n := e.dlqMsgs(t); n != 0 {
+		t.Fatalf("the stop dead-lettered held messages (%d in the DLQ)", n)
+	}
+
+	e.startGroupPipeline(t, "g-stop", members...)
+	for _, cred := range []string{credA, credA2} {
+		var got []agentproto.Delivery
+		waitFor(t, "the released message to reach "+cred, func() bool {
+			got = e.poll(t, cred, 1).Deliveries
+			return len(got) == 1
+		})
+		if body, _ := base64.StdEncoding.DecodeString(got[0].InlineBase64); string(body) != `{"order":7}` {
+			t.Fatalf("redelivered body = %q", body)
+		}
+	}
+}
+
 // A member added while the pipeline runs starts at "now": nothing from
 // before it joined, everything from then on.
 func TestGroup_LateJoinerStartsAtNow(t *testing.T) {

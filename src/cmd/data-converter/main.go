@@ -37,15 +37,29 @@ type Config struct {
 type FieldMapping struct {
 	Source     string      `json:"source"`               // source field path (e.g. "name")
 	Target     string      `json:"target"`               // target field name (e.g. "full_name")
-	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template"
+	Type       string      `json:"type,omitempty"`       // "rename", "copy", "static", "remove", "template", "to_string", "to_number", "each"
 	Value      interface{} `json:"value,omitempty"`      // for static type
 	Expression string      `json:"expression,omitempty"` // for template type
+
+	// For "each": the mappings applied to every object in the Source array,
+	// and whether fields they do not name are dropped from those objects. The
+	// result is written to Target. This is how a record's nested lines (a
+	// receipt's items) become another system's lines (a sales invoice's
+	// salesInvoiceLines); see plans/issue-435-sitoo-bc-mapping.md.
+	Mappings     []FieldMapping `json:"mappings,omitempty"`
+	DropUnmapped bool           `json:"drop_unmapped,omitempty"`
 }
 
 // ConverterNodeConfig is what the UI stores in the node config
 type ConverterNodeConfig struct {
 	Mappings     []FieldMapping `json:"mappings"`
 	DropUnmapped bool           `json:"drop_unmapped"`
+
+	// SplitRecords publishes each record of an array result as its own
+	// message instead of the whole array as one. A destination whose API takes
+	// one record per request (Business Central's POST salesInvoices) needs this:
+	// the sources publish a page of records per message.
+	SplitRecords bool `json:"split_records"`
 
 	// Input parsing (ADR 0003). Empty InputFormat = auto-detect from the
 	// envelope's ContentType, then a content sniff, then json.
@@ -330,8 +344,9 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 	hasMapping := len(converterCfg.Mappings) > 0
 	hasFormat := converterCfg.OutputFormat != ""
 	// A non-JSON input is a conversion in itself (ADR 0003): "CSV in, nothing
-	// else configured" means "give me JSON", so it is not a no-op.
-	if !hasMapping && !hasFormat && !converterCfg.transcodes(origEnv) {
+	// else configured" means "give me JSON", so it is not a no-op. Nor is a
+	// node that only splits a page into records.
+	if !hasMapping && !hasFormat && !converterCfg.SplitRecords && !converterCfg.transcodes(origEnv) {
 		return nil
 	}
 
@@ -381,78 +396,114 @@ func (s *ConverterService) processEntry(ctx context.Context, connectionID, subje
 		}
 	}
 
-	var newPayload []byte
+	// One result, or one per record when the node splits an array result
+	// (split_records). Every part is rendered before anything is published, so
+	// a part that cannot be marshalled drops the message whole instead of
+	// leaving half of it delivered. Offload and publish still happen part by
+	// part: a failure at part k NAKs with the earlier parts already out.
+	parts := []interface{}{transformed}
+	split := false
+	if arr, ok := transformed.([]interface{}); ok && converterCfg.SplitRecords {
+		parts, split = arr, true
+	}
+	payloads := make([][]byte, 0, len(parts))
 	var newContentType string
 	formatLabel := "JSON"
-
-	if hasFormat {
-		rows := toRows(transformed)
-		var formatted string
-		formatted, newContentType, formatLabel = convertFormat(rows, converterCfg)
-		newPayload = []byte(formatted)
-	} else {
-		var err error
-		newPayload, err = json.Marshal(transformed)
+	for _, part := range parts {
+		if hasFormat {
+			var formatted string
+			formatted, newContentType, formatLabel = convertFormat(toRows(part), converterCfg)
+			payloads = append(payloads, []byte(formatted))
+			continue
+		}
+		b, err := json.Marshal(part)
 		if err != nil {
 			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to marshal: " + err.Error(), Time: now()})
 			return nil
 		}
+		payloads = append(payloads, b)
 		newContentType = "application/json"
 	}
 
-	afterPreview := string(newPayload)
-	if len(afterPreview) > 2000 {
-		afterPreview = afterPreview[:2000] + "..."
-	}
+	afterPreview := ""
+	for i, newPayload := range payloads {
+		if i == 0 {
+			afterPreview = string(newPayload)
+			if len(afterPreview) > 2000 {
+				afterPreview = afterPreview[:2000] + "..."
+			}
+		}
 
-	// Build a new envelope copy for this branch. Fresh ID so the JetStream
-	// MsgID dedup window doesn't drop this as a duplicate of the upstream
-	// message (5-minute dedup window).
-	env := *origEnv
-	env.ID = uuid.New().String()
-	env.Payload = newPayload
-	if newContentType != "" {
-		env.ContentType = newContentType
-	}
-	// Never inherit the INPUT's size/checksum/ref — they describe a different
-	// payload. OffloadIfLarge re-stamps them when it spills.
-	env.PayloadRef, env.PayloadSize, env.Checksum = "", int64(len(newPayload)), ""
-	env.Metadata = make(map[string]interface{})
-	for k, v := range origEnv.Metadata {
-		env.Metadata[k] = v
-	}
-	env.Metadata["_last_processed_by"] = entry.NodeID
-	env.Metadata["_converted"] = true
-	env.Metadata["_source_envelope_id"] = origEnv.ID
-	if hasFormat {
-		env.Metadata["_output_format"] = converterCfg.OutputFormat
-	}
+		// Build a new envelope copy for this branch. Fresh ID so the JetStream
+		// MsgID dedup window doesn't drop this as a duplicate of the upstream
+		// message (5-minute dedup window).
+		env := *origEnv
+		env.ID = uuid.New().String()
+		if split && origEnv.ID != "" {
+			// A split part's ID is derived from the input, this node and its
+			// position, so when a redelivered input is split again inside the
+			// dedup window JetStream drops the parts it already has.
+			env.ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(origEnv.ID+"/"+entry.NodeID+"/"+strconv.Itoa(i))).String()
+		}
+		env.Payload = newPayload
+		if newContentType != "" {
+			env.ContentType = newContentType
+		}
+		// Never inherit the INPUT's size/checksum/ref — they describe a different
+		// payload. OffloadIfLarge re-stamps them when it spills.
+		env.PayloadRef, env.PayloadSize, env.Checksum = "", int64(len(newPayload)), ""
+		env.Metadata = make(map[string]interface{})
+		for k, v := range origEnv.Metadata {
+			env.Metadata[k] = v
+		}
+		env.Metadata["_last_processed_by"] = entry.NodeID
+		env.Metadata["_converted"] = true
+		env.Metadata["_source_envelope_id"] = origEnv.ID
+		if hasFormat {
+			env.Metadata["_output_format"] = converterCfg.OutputFormat
+		}
+		if split {
+			env.Metadata["_split_index"] = i
+			env.Metadata["_split_count"] = len(payloads)
+			if _, had := env.Metadata["record_count"]; had {
+				env.Metadata["record_count"] = 1
+			}
+		}
 
-	// Offload an over-threshold result (claim-check) so the published message
-	// stays under NATS max_payload — conversion can INFLATE a payload (XML,
-	// row-expanded formats), so this applies even when the input arrived inline.
-	if _, err := claimcheck.OffloadIfLarge(ctx, s.spill, &env, s.inlineMax, s.logger); err != nil {
-		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload offload failed: " + err.Error(), Time: now()})
-		return fmt.Errorf("offload: %w", err)
-	}
+		// Offload an over-threshold result (claim-check) so the published message
+		// stays under NATS max_payload — conversion can INFLATE a payload (XML,
+		// row-expanded formats), so this applies even when the input arrived inline.
+		if _, err := claimcheck.OffloadIfLarge(ctx, s.spill, &env, s.inlineMax, s.logger); err != nil {
+			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Payload offload failed: " + err.Error(), Time: now()})
+			return fmt.Errorf("offload: %w", err)
+		}
 
-	envData, err := json.Marshal(env)
-	if err != nil {
-		return nil
-	}
+		envData, err := json.Marshal(env)
+		if err != nil {
+			return nil
+		}
 
-	if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, envData); err != nil {
-		// Publish failures were previously logged and ACKED — output silently
-		// lost. NAK instead so redelivery retries the publish.
-		s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
-		return fmt.Errorf("publish: %w", err)
+		// A failure part-way through a split NAKs the input, and redelivery
+		// publishes every part again: at-least-once, as for branching. The
+		// parts already published arrive twice, so a split pipeline's
+		// destination must be idempotent (the Business Central template sets
+		// dedupe_fields for this).
+		if err := s.pub.Publish(ctx, env.TenantID, connectionID, env.ID, envData); err != nil {
+			// Publish failures were previously logged and ACKED — output silently
+			// lost. NAK instead so redelivery retries the publish.
+			s.emitEvent(connectionID, ConvertEvent{Type: "error", Message: "Failed to re-publish: " + err.Error(), Time: now()})
+			return fmt.Errorf("publish: %w", err)
+		}
 	}
 
 	msg2 := fmt.Sprintf("Converted to %s", formatLabel)
 	if fieldCount > 0 {
 		msg2 = fmt.Sprintf("Mapped %d fields, converted to %s", fieldCount, formatLabel)
 	}
-	s.logger.Info("Data converted", "connection_id", connectionID, "format", formatLabel, "fields", fieldCount)
+	if split {
+		msg2 += fmt.Sprintf(", split into %d messages", len(payloads))
+	}
+	s.logger.Info("Data converted", "connection_id", connectionID, "format", formatLabel, "fields", fieldCount, "messages", len(payloads))
 	s.emitEvent(connectionID, ConvertEvent{
 		Type:    "converted",
 		Message: msg2,
@@ -512,7 +563,7 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 			}
 		case "to_string":
 			if val, ok := getNestedField(obj, m.Source); ok {
-				setNestedField(result, m.Target, fmt.Sprintf("%v", val))
+				setNestedField(result, m.Target, toString(val))
 				applied++
 			}
 		case "to_number":
@@ -522,6 +573,34 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 					applied++
 				}
 			}
+		case "each":
+			// Each: map every object of the Source array with the nested
+			// mappings and write the new array to Target. Elements that are
+			// not objects are kept as they are, like the top-level array path.
+			// A Source that is missing or not an array is left alone.
+			val, ok := getNestedField(obj, m.Source)
+			if !ok {
+				continue
+			}
+			arr, ok := val.([]interface{})
+			if !ok {
+				continue
+			}
+			sub := &ConverterNodeConfig{Mappings: m.Mappings, DropUnmapped: m.DropUnmapped}
+			out := make([]interface{}, 0, len(arr))
+			for _, el := range arr {
+				if eo, isObj := el.(map[string]interface{}); isObj {
+					mapped, _ := applyMappings(eo, sub)
+					out = append(out, mapped)
+				} else {
+					out = append(out, el)
+				}
+			}
+			if !cfg.DropUnmapped {
+				delete(result, m.Source)
+			}
+			setNestedField(result, m.Target, out)
+			applied++
 		}
 	}
 
@@ -559,6 +638,16 @@ func setNestedField(obj map[string]interface{}, path string, value interface{}) 
 			current = next
 		}
 	}
+}
+
+// toString renders a value for to_string. A JSON number is a float64 here, and
+// %v prints a million as "1e+06", which no API reading a quantity accepts; it
+// is written out in plain decimal instead.
+func toString(val interface{}) string {
+	if f, ok := val.(float64); ok {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return fmt.Sprintf("%v", val)
 }
 
 func toFloat(val interface{}) (float64, error) {

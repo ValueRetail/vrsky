@@ -45,6 +45,42 @@ pipeline editor (Property panel): connect source fields to destination fields
 and apply conversion functions as needed. For the available conversion
 functions, see [`docs/converter/`](../converter/).
 
+### Nested lines and one message per record
+
+Two settings for records that carry lines, like a receipt with its items
+(added for the Sitoo ⇄ Business Central templates, #435). Neither is in the
+editor yet; set them in the node config.
+
+- **`each` mapping** maps every object of an array field with its own nested
+  mappings and writes the new array to `target`:
+
+    ```json
+    {
+      "type": "each", "source": "items", "target": "salesInvoiceLines",
+      "drop_unmapped": true,
+      "mappings": [
+        { "type": "rename", "source": "sku", "target": "lineObjectNumber" },
+        { "type": "to_number", "source": "priceeach", "target": "unitPrice" }
+      ]
+    }
+    ```
+
+    Elements that are not objects are kept as they are. A missing or non-array
+    `source` is left alone.
+
+- **`split_records: true`** on the node publishes each record of an array
+  result as its own message, for a destination whose API takes one record per
+  request (Business Central's `POST salesInvoices`). Sources publish a page
+  of records per message, so without it the destination gets the whole page.
+  If publishing fails part-way the input is retried and every record is sent
+  again, so give the destination a way to skip records it has
+  (`dedupe_fields` on a Business Central destination). A quick redelivery is
+  dropped by JetStream itself, because a part's message id is derived from
+  the input and its position. Payloads over the rehydrate cap (128 MB)
+  cannot be split and go to the DLQ.
+
+`to_string` writes numbers in plain decimal (`1000000`, not `1e+06`).
+
 ## Notes
 
 - Both node types carry their detailed configuration (rules and mappings) in
