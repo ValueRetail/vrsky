@@ -47,7 +47,7 @@ groups:
       # Messages are being dead-lettered. pipeline_id is the connection id;
       # the metric carries no tenant label, so this routes as a platform alert.
       - alert: DLQGrowing
-        expr: sum by (pipeline_id) (increase(vrsky_dlq_messages_total[10m])) > 0
+        expr: sum by (pipeline_id) (increase(vrsky_dlq_messages_total[10m])) > > 0
         for: 10m
         labels:
           severity: warning
