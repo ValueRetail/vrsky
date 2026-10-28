@@ -27,7 +27,10 @@ JetStream.
   rotation (see the [encryption-at-rest checklist](encryption-at-rest.md)).
 - JetStream stream config is reconciled on boot (`EnsureStreams`); the data
   stream is size-bounded (512 MiB / 1M msgs, discard-old) so a backlog can't
-  OOM the broker.
+  OOM the broker. A stream is only updated when it differs on a field VRSky
+  sets (subjects, retention, storage, max age, max bytes, max msgs, discard,
+  duplicates window); a hand-made change to any other field, such as
+  replicas, stays until one of those drifts.
 - Check `/readyz` on each service after the roll; it reports NATS + DB health.
 
 ## Rollback

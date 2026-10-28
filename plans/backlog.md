@@ -10,15 +10,15 @@ Last updated 2026-10-27.
 
 ## Agent
 
-1. **Stop the cluster at 16:00 from inside the cluster.** GitHub fires only
+1. ~~**Stop the cluster at 16:00 from inside the cluster.**~~ (#352) GitHub fires only
    5–6 of Park's 32 daily runs and the first lands hours late (2026-10-22:
    20:28 Oslo). A Kubernetes CronJob with `timeZone: Europe/Oslo` at 16:00
    calls `az aks stop` through a managed identity with workload identity;
    Park stays as the backstop. Plan first (`plans/cost-cap.md` has the
    context). Touches manifests and Azure identity: PR plus
    `agent:needs-human`, never merged by an agent.
-2. **`messaging.ensure` updates every existing stream on every connector
-   start** (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
+2. ~~**`messaging.ensure` updates every existing stream on every connector
+   start**~~ (#353) (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
    existing config already matches; it was the trigger for the nats-server
    race fixed in #339 and is log noise. NATS stream configuration: PR plus
    `agent:needs-human`.
