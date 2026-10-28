@@ -284,7 +284,7 @@ Last updated 2026-10-28.
     `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
     on TLS for Postgres or make the checklist say where production stands.
     Found in review of #386.
-48. **The CNPG manifest calls the restore drill a backup.** The comment in
+48. ~~**The CNPG manifest calls the restore drill a backup.**~~ (#427) The comment in
     `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
@@ -521,6 +521,13 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
+82. **The Postgres manifests call the StatefulSet production uses
+    "dev-only".** `statefulset.yaml` opens with "DEV / SINGLE-NODE ONLY" and
+    `cnpg-cluster.yaml` says it replaces it, but production runs that
+    StatefulSet (`postgresql`, the disk Azure Disk Backup snapshots, see
+    `docs/DR.md`) and no CNPG cluster. Either say so in both headers and the
+    README, or plan the move to CNPG with its own backup. Manifests: PR plus
+    `agent:needs-human`. Found during #427.
 
 ## Human
 
