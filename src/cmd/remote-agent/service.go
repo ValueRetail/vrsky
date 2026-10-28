@@ -92,10 +92,18 @@ type gateway struct {
 
 	now func() time.Time
 
-	// afterCancel is a test seam, nil in production. It runs in endSession
-	// between cancelling a session and waiting for its subscribers: the
-	// window in which a stop used to dead-letter the held message (#444).
+	// afterCancel is a test seam, nil in production. It is folded into each
+	// session's cancel func (see newSessionContext), so it runs right after
+	// the cancel wherever that cancel sits: a test that holds this window
+	// open fails if endSession ever cancels before it halts (#444, #461).
+	// It is captured when a session is created, so set it before the
+	// pipeline starts; setting it later has no effect on that session.
 	afterCancel func()
+	// afterMemberSubscribe is a test seam, nil in production. It runs in
+	// reconcileGroups after a member's subscriber started and before it is
+	// registered in memberSubs: the window in which an endSession could not
+	// see it to halt it (#461).
+	afterMemberSubscribe func(agentID string)
 }
 
 func newGateway() *gateway {
@@ -344,7 +352,7 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 		}
 	}
 
-	sctx, cancel := context.WithCancel(context.Background())
+	sctx, cancel := s.newSessionContext()
 	sess := &connSession{
 		connID: connID, tenantID: tenantID, fingerprint: fp,
 		inputs: inputs, outputs: outputs, ctx: sctx, cancel: cancel,
@@ -411,6 +419,16 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 	logger.Info("Remote agent pipeline started", "inputs", len(inputs), "outputs", len(outputs), "group_members", len(sess.members))
 }
 
+// newSessionContext is a session's context. Its cancel func carries the
+// afterCancel test seam, so the seam moves with the cancel.
+func (s *gateway) newSessionContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if hook := s.afterCancel; hook != nil {
+		return ctx, func() { cancel(); hook() }
+	}
+	return ctx, cancel
+}
+
 func hasSingleAgentOutput(outputs []remoteNode) bool {
 	for _, n := range outputs {
 		if n.Target != targetGroup {
@@ -448,7 +466,21 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) {
 // CPU for a few milliseconds, or a member subscriber waiting its turn behind
 // the pipeline's own Stop, burned all five attempts and dead-lettered the
 // message (#444).
+//
+// It also waits for a reconcile of this session that is under way. A member
+// subscriber the reconcile has started but not yet registered is not in
+// memberSubs, so it could not be halted here, and the cancel would leave it
+// NAK'ing and refetching until the reconcile took the lock (#461). Callers
+// take the session out of s.sessions first, so a reconcile that gets the
+// lock after this sees it ended and stops what it started, halt first. A
+// reconcile checks for that before its membership query and before each
+// subscribe, so a stop waits for at most the step in flight: the query (under
+// the reconcile's context: reconcileTimeout for the background ones, the
+// caller's in startConnection), or one subscribe and its halt and stop (under
+// JetStream's own timeouts).
 func (s *gateway) endSession(sess *connSession) {
+	sess.reconcileMu.Lock()
+	defer sess.reconcileMu.Unlock()
 	s.mu.Lock()
 	subs := make([]*memberSub, 0, len(sess.memberSubs))
 	for _, ms := range sess.memberSubs {
@@ -463,9 +495,6 @@ func (s *gateway) endSession(sess *connSession) {
 		ms.sub.Halt()
 	}
 	sess.cancel() // also ends every member's context
-	if s.afterCancel != nil {
-		s.afterCancel()
-	}
 	if sess.sub != nil {
 		sess.sub.Stop()
 	}

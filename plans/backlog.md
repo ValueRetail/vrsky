@@ -41,7 +41,7 @@ Last updated 2026-10-28.
 13. ~~**`TestFileConsumer_WatchRoundTrip` looks flaky**~~ (#362) (`src/cmd/file-consumer`).
     It failed once in a full `go test -race ./...` ("no matching envelope
     within 12s") and passed alone. Make it deterministic.
-14. **Fix the stale comment on `messaging.MainRetention`**
+14. ~~**Fix the stale comment on `messaging.MainRetention`**~~ (#363)
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
@@ -414,15 +414,15 @@ Last updated 2026-10-28.
     `cmd/data-converter` and `cmd/tenant-consumer/bridge.go` for a handler
     that returns an error once a context is cancelled ahead of `Stop`.
     Found in #444.
-65. **Two remote-agent tests sit on fixed 4 s waits.**
+65. ~~**Two remote-agent tests sit on fixed 4 s waits.**~~ (#460)
     `TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount` sleeps four
     AckWaits and `TestOutput_TakesOnlyItsPredecessorsMessage` polls for 4 s
     to prove a message never comes; with cleanup each takes ~6 s. The
     second could wait for the consumer's ack floor to pass both messages
     instead. Not flaky, just slow. Found in #444.
 
-66. **The remote agent's stop tests don't pin cancel-after-halt, and a
-    reconcile can start a member on a cancelled context.** The test seam
+66. ~~**The remote agent's stop tests don't pin cancel-after-halt, and a
+    reconcile can start a member on a cancelled context.**~~ (#461) The test seam
     in `src/cmd/remote-agent/service.go` (`afterCancel`) fires after the
     halts, so moving `sess.cancel()` back to the top of `endSession`
     passes both stop tests. Separately, if `endSession` runs during a group
@@ -435,14 +435,14 @@ Last updated 2026-10-28.
     does not, so a connector that bypasses the SDK passes CI. Add it as a
     step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
     Found during #446.
-68. **golangci-lint's caches barely help.** On main the action restores a
+68. ~~**golangci-lint's caches barely help.**~~ (#463) On main the action restores a
     1.4 MB `golangci-lint.cache-…` entry and still spends 2 m 18 s, and
     setup-go's Go build cache uses one key for every Go job, so whichever
     job saves first (a `-race` test shard) wins and the lint job's own
     build output is never kept. A lint-specific `GOCACHE` entry could take
     a minute off; measure before and after. Off the critical path since
     #446. Found during #446.
-69. **`promtool test rules` takes four minutes** because the backup alert
+69. ~~**`promtool test rules` takes four minutes**~~ (#464) because the backup alert
     tests (#404) evaluate up to ten days at one-minute steps. If the
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
@@ -498,7 +498,30 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
-79. **A late status write can still land over a newer start's `running`.**
+79. **`TestEveryLintCheckStillGates` matches raw step text**
+    (`src/pkg/managementapi/lintgates_guard_test.go`), so a commented-out
+    `gofmt -l .`, `make lint-tenant` or `check rules` line still satisfies
+    it. Strip shell comments first, as the shard guard does since #443
+    (`stripShellComments` in `gotestshards_guard_test.go`). The alert-rules
+    step is already covered by running it (`TestRuleTestGroupsRunOnce`).
+    Found during #443.
+80. **Every new alert test edits the workflow.** Since #464 a new test
+    group in `infrastructure/prometheus-rules-test.yml` must also be listed
+    in a leg of the `alert-rules` matrix in `.github/workflows/build-push.yml`,
+    so any PR that adds an alert test touches `.github/` and is
+    `agent:needs-human`. Move the leg lists into a file under
+    `infrastructure/` (say `prometheus-rules-test-legs.yml`) that the job
+    reads, keeping only the leg count in the workflow, and point
+    `TestRuleTestGroupsRunOnce` at it. Found in review of #468.
+81. **A subscriber's `Stop` waits out its fetch.** `Subscriber.loop` in
+    `pkg/messaging` fetches with `MaxWait(2s)` and `Halt` cannot cut that
+    short, so every stop takes up to 2 s even when nothing is held. It is
+    most of what the remote-agent tests still spend (a stop in each
+    cleanup) and it slows every pipeline stop and redeploy. A fetch that
+    also ends on the stop channel (a context-aware `Fetch`) would make
+    `Stop` return at once. Shared code: every connector's subscriber.
+    Found during #460.
+82. **A late status write can still land over a newer start's `running`.**
     #456 left a window in api, sftp, cloud-storage and tenant: with the
     6-connection DB pool saturated, a new start's lookup and its `running`
     UPDATE can both get a connection before an old poller's `stopped` or

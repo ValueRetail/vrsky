@@ -271,6 +271,139 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// ackLog is what one durable's subscriber tells JetStream about its messages,
+// read off the ack subjects: the +WPI heartbeats that keep a held message in
+// flight, and the +ACK, -NAK or +TERM that settle it.
+//
+// The consumer's counters cannot show a held message is being kept alive. A
+// handler that waits blocks the dispatch loop, so there is no pull request
+// outstanding and the server has nowhere to redeliver to: NumRedelivered stays
+// 0 and NumAckPending 1 whether heartbeats flow or not. The ack subjects show
+// the heartbeats themselves.
+type ackLog struct {
+	durable string
+	mu      sync.Mutex
+	events  []ackEvent
+	changed chan struct{} // capacity 1: "an event arrived"
+}
+
+type ackEvent struct {
+	kind      string // "+WPI", "+ACK", "-NAK", "+TERM"
+	delivered uint64 // the message's delivery count, from the reply subject
+	at        time.Time
+}
+
+// watchAcks starts recording a durable's acks. Call it before the message is
+// published, so nothing is missed.
+func (e *testEnv) watchAcks(t *testing.T, durable string) *ackLog {
+	t.Helper()
+	l := &ackLog{durable: durable, changed: make(chan struct{}, 1)}
+	sub, err := e.nc.Subscribe("$JS.ACK.>", func(m *nats.Msg) {
+		// $JS.ACK.<stream>.<consumer>.<delivered>.<sseq>.<cseq>.<ts>.<pending>,
+		// or the v2 form with <domain>.<account hash> after ACK.
+		tok := strings.Split(m.Subject, ".")
+		i := 2
+		if len(tok) >= 11 {
+			i = 4
+		}
+		if len(tok) < i+3 || tok[i] != messaging.MainStreamName || tok[i+1] != durable {
+			return
+		}
+		delivered, _ := strconv.ParseUint(tok[i+2], 10, 64)
+		kind := "+ACK" // an empty body is an ack too
+		if f := strings.Fields(string(m.Data)); len(f) > 0 {
+			kind = f[0]
+		}
+		l.mu.Lock()
+		l.events = append(l.events, ackEvent{kind: kind, delivered: delivered, at: time.Now()})
+		l.mu.Unlock()
+		select {
+		case l.changed <- struct{}{}:
+		default:
+		}
+	})
+	if err != nil {
+		t.Fatalf("watch acks: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err := e.nc.Flush(); err != nil {
+		t.Fatalf("watch acks: %v", err)
+	}
+	return l
+}
+
+// waitUntil blocks until cond holds for the events so far, or fails the test
+// after 5 s. cond may fail the test itself on an event that must not happen.
+func (l *ackLog) waitUntil(t *testing.T, what string, cond func([]ackEvent) bool) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		l.mu.Lock()
+		evs := append([]ackEvent(nil), l.events...)
+		l.mu.Unlock()
+		if cond(evs) {
+			return
+		}
+		select {
+		case <-l.changed:
+		case <-deadline.C:
+			t.Fatalf("%s: timed out waiting for %s; acks seen: %s", l.durable, what, describeAcks(evs))
+		}
+	}
+}
+
+// heldPast waits until the subscriber has kept its one message in flight for
+// longer than d after `since` (a moment the test saw it already in flight):
+// a +WPI heartbeat arrives after since+d. Until then it must send nothing but
+// heartbeats on the first delivery: a NAK, ack or term while the agent is
+// away, or a second delivery attempt, fails the test at once.
+//
+// This is the minimum wait that proves the hold. Past one AckWait, the server
+// would have taken the message back had the heartbeats not reset the timer;
+// with them stopped, none arrives and this times out.
+func (l *ackLog) heldPast(t *testing.T, since time.Time, d time.Duration) {
+	t.Helper()
+	l.waitUntil(t, fmt.Sprintf("heartbeats for more than %v", d), func(evs []ackEvent) bool {
+		for _, ev := range evs {
+			if ev.kind != "+WPI" || ev.delivered != 1 {
+				t.Fatalf("%s: %s on delivery %d while the agent was away; want only heartbeats on the first delivery (acks seen: %s)",
+					l.durable, ev.kind, ev.delivered, describeAcks(evs))
+			}
+		}
+		return len(evs) > 0 && evs[len(evs)-1].at.After(since.Add(d))
+	})
+}
+
+// settledOnFirstDelivery waits for the message to be acked, and fails if it
+// was ever NAK'd or termed, or acked on any but its first delivery.
+func (l *ackLog) settledOnFirstDelivery(t *testing.T) {
+	t.Helper()
+	l.waitUntil(t, "the ack", func(evs []ackEvent) bool {
+		for _, ev := range evs {
+			if ev.kind == "-NAK" || ev.kind == "+TERM" || ev.delivered != 1 {
+				t.Fatalf("%s: %s on delivery %d; want the message acked on its first delivery (acks seen: %s)",
+					l.durable, ev.kind, ev.delivered, describeAcks(evs))
+			}
+			if ev.kind == "+ACK" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func describeAcks(evs []ackEvent) string {
+	if len(evs) == 0 {
+		return "none"
+	}
+	parts := make([]string, len(evs))
+	for i, ev := range evs {
+		parts[i] = fmt.Sprintf("%s#%d", ev.kind, ev.delivered)
+	}
+	return strings.Join(parts, " ")
+}
+
 // startOutputPipeline starts tenant 1's pipeline: input → agent A's "out" folder.
 func (e *testEnv) startOutputPipeline(t *testing.T, connID string) {
 	t.Helper()
@@ -410,18 +543,22 @@ func TestOutput_AcksOnlyAfterAgentConfirms(t *testing.T) {
 }
 
 // TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount is the offline
-// guarantee. With nobody polling for several AckWait periods, the message must
-// stay in flight — held by the handler, kept alive by heartbeats — with its
-// delivery count unchanged, and then be delivered normally when the agent
-// returns. A NAK-and-retry design would have spent its attempts and
-// dead-lettered it within minutes.
+// guarantee. With nobody polling for longer than an AckWait, the message must
+// stay in flight — held by the handler, kept alive by heartbeats — on its
+// first delivery, never NAK'd, acked or termed, and then be delivered and
+// acked normally when the agent returns. A NAK-and-retry design would have
+// spent its attempts and dead-lettered it within minutes.
+//
+// The hold is read off the ack subjects (see ackLog): the consumer counters
+// alone stay the same with the heartbeats switched off.
 func TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount(t *testing.T) {
 	e := newTestEnv(t)
 	e.startOutputPipeline(t, "conn-off")
+	acks := e.watchAcks(t, outputDurable("conn-off"))
 	e.publishTo(t, tenant1, "conn-off", `{"order":2}`)
 
 	waitFor(t, "the message to reach the handler", func() bool { return e.consumerInfo(t, "conn-off").NumAckPending == 1 })
-	time.Sleep(4 * e.g.outputAckWait) // the agent is offline
+	acks.heldPast(t, time.Now(), e.g.outputAckWait) // the agent is offline
 
 	ci := e.consumerInfo(t, "conn-off")
 	if ci.NumRedelivered != 0 {
@@ -435,7 +572,11 @@ func TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount(t *testing.T) {
 	if len(w.Deliveries) != 1 {
 		t.Fatalf("returning agent got %d deliveries, want 1", len(w.Deliveries))
 	}
-	e.do(t, http.MethodPost, "/agent/v1/deliveries/"+w.Deliveries[0].ID+"/ack", credA, mustJSON(agentproto.AckRequest{Status: agentproto.AckOK}))
+	if body, _ := base64.StdEncoding.DecodeString(w.Deliveries[0].InlineBase64); string(body) != `{"order":2}` {
+		t.Fatalf("returning agent got %q", body)
+	}
+	e.ack(t, credA, w.Deliveries[0].ID)
+	acks.settledOnFirstDelivery(t)
 	waitFor(t, "ack", func() bool { return e.consumerInfo(t, "conn-off").NumAckPending == 0 })
 }
 
@@ -535,6 +676,11 @@ func TestOutput_StopReleasesTheMessage(t *testing.T) {
 
 // A pipeline's subject carries every step's copy of a message. An output after
 // a filter must write only the filtered copy — not the raw input as well.
+//
+// The test ends once the output's durable has settled both messages: its ack
+// floor reached the last one published, with nothing in flight. Every message
+// the output took for the agent has been offered by then, so a raw copy taken
+// by mistake would be in bodies.
 func TestOutput_TakesOnlyItsPredecessorsMessage(t *testing.T) {
 	e := newTestEnv(t)
 	nodes := []any{
@@ -548,16 +694,22 @@ func TestOutput_TakesOnlyItsPredecessorsMessage(t *testing.T) {
 
 	e.publishStep(t, tenant1, "conn-pred", `{"raw":true}`, "")
 	e.publishStep(t, tenant1, "conn-pred", `{"filtered":true}`, "f")
+	si, err := e.js.StreamInfo(messaging.MainStreamName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := si.State.LastSeq
 
 	var bodies []string
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, d := range e.poll(t, credA, 1).Deliveries {
+	waitFor(t, "the output to settle both messages", func() bool {
+		for _, d := range e.poll(t, credA, 0).Deliveries {
 			b, _ := base64.StdEncoding.DecodeString(d.InlineBase64)
 			bodies = append(bodies, string(b))
-			e.do(t, http.MethodPost, "/agent/v1/deliveries/"+d.ID+"/ack", credA, mustJSON(agentproto.AckRequest{Status: agentproto.AckOK}))
+			e.ack(t, credA, d.ID)
 		}
-	}
+		ci := e.consumerInfo(t, "conn-pred")
+		return ci.AckFloor.Stream >= last && ci.NumAckPending == 0
+	})
 	if len(bodies) != 1 || bodies[0] != `{"filtered":true}` {
 		t.Fatalf("agent was asked to write %q, want only the filtered message", bodies)
 	}

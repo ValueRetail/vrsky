@@ -119,8 +119,17 @@ func (s *gateway) memberTakes(sess *connSession, agentID string, n remoteNode, m
 	return sess.members[agentID].takes(n, mode)
 }
 
+// reconcileTimeout is the context the background reconciles (membershipLoop,
+// reconcileTenant) run under. Only the membership query uses that context;
+// Subscribe, DeleteConsumer and Stop rely on JetStream's own timeouts. The
+// reconcile inside startConnection runs on its caller's context instead.
+const reconcileTimeout = 20 * time.Second
+
 // reconcileGroups brings a session's members and per-member subscriptions in
-// line with the database. Safe to call often and concurrently.
+// line with the database. Safe to call often and concurrently. It holds
+// reconcileMu throughout, which endSession takes as well; see there. Because
+// a stop waits on that lock, it checks whether the session has ended before
+// the membership query and before each subscribe, and gives up at once if so.
 func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	groups := sess.groupNames()
 	if len(groups) == 0 {
@@ -128,6 +137,9 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	}
 	sess.reconcileMu.Lock()
 	defer sess.reconcileMu.Unlock()
+	if s.ended(sess) {
+		return
+	}
 
 	members, err := s.liveMembers(ctx, sess.tenantID, groups)
 	if err != nil {
@@ -231,6 +243,12 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	}
 	sort.Strings(toStart)
 	for _, id := range toStart {
+		if s.ended(sess) {
+			// Stopped meanwhile: its stop is waiting for this reconcile.
+			// Subscribing the rest would make durables for a stopped
+			// pipeline and cost the stop a fetch wait for each.
+			break
+		}
 		mctx, mcancel := context.WithCancel(sess.ctx)
 		sub, err := messaging.Subscribe(s.js, messaging.SubscriberOpts{
 			DurableName:   memberDurable(sess.connID, id),
@@ -249,6 +267,13 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 			s.events.emit(sess.connID, event{Type: "failed", Message: "could not subscribe " + s.agentName(id) + ": " + err.Error(), Agent: s.agentName(id)})
 			continue
 		}
+		if s.afterMemberSubscribe != nil {
+			s.afterMemberSubscribe(id)
+		}
+		// endSession holds reconcileMu too, so the session cannot be
+		// cancelled between the subscribe above and this check: either it
+		// ended before (and the check sees it), or it ends after the
+		// subscriber is in memberSubs and is halted with the rest.
 		s.mu.Lock()
 		if s.sessions[sess.connID] != sess || sess.memberSubs[id] != nil {
 			s.mu.Unlock()
@@ -260,6 +285,14 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		sess.memberSubs[id] = &memberSub{sub: sub, cancel: mcancel}
 		s.mu.Unlock()
 	}
+}
+
+// ended reports whether a session has been taken out of s.sessions, which a
+// stop does before it ends the session.
+func (s *gateway) ended(sess *connSession) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessions[sess.connID] != sess
 }
 
 // reconcileAll refreshes every group session.
@@ -300,7 +333,7 @@ func (s *gateway) membershipLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			rctx, cancel := context.WithTimeout(ctx, reconcileTimeout)
 			s.reconcileAll(rctx)
 			cancel()
 		}

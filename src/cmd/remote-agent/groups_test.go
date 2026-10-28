@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,15 +118,23 @@ func TestGroup_EachMemberGetsItsOwnCopy(t *testing.T) {
 }
 
 // The point of the feature: a till that is off does not hold up the others.
-// A2 never polls; A receives and acknowledges message after message, while
-// A2's first message waits with no delivery attempt spent.
+// A2 does not poll; A receives and acknowledges message after message, while
+// A2's first message waits, kept in flight by heartbeats with no delivery
+// attempt spent, for longer than an AckWait. When A2 comes back it gets that
+// message and acks it on its first delivery.
 func TestGroup_OfflineMemberDoesNotBlockOthers(t *testing.T) {
 	e := newTestEnv(t)
 	e.startGroupPipeline(t, "g-off",
 		memberRow(agentA, "till-a", "{all-tills}", outWrite),
 		memberRow(agentA2, "till-a2", "{all-tills}", outWrite))
+	acks := e.watchAcks(t, memberDurable("g-off", agentA2))
 	e.publishTo(t, tenant1, "g-off", `{"order":1}`)
 	e.publishTo(t, tenant1, "g-off", `{"order":2}`)
+	waitFor(t, "A2's handler to hold its first message", func() bool {
+		ci, _ := e.memberInfo("g-off", agentA2)
+		return ci != nil && ci.NumAckPending == 1
+	})
+	heldSince := time.Now()
 
 	for i := 1; i <= 2; i++ {
 		w := e.poll(t, credA, 5)
@@ -138,13 +148,242 @@ func TestGroup_OfflineMemberDoesNotBlockOthers(t *testing.T) {
 		return ci != nil && ci.NumAckPending == 0 && ci.NumPending == 0
 	})
 
-	time.Sleep(4 * e.g.outputAckWait) // A2 is offline all along
+	acks.heldPast(t, heldSince, e.g.outputAckWait) // A2 is offline all along
 	ci, err := e.memberInfo("g-off", agentA2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ci.NumRedelivered != 0 || ci.NumAckPending != 1 {
 		t.Fatalf("A2 offline: NumRedelivered=%d NumAckPending=%d, want 0 and 1 (held, not retried)", ci.NumRedelivered, ci.NumAckPending)
+	}
+
+	w := e.poll(t, credA2, 5)
+	if len(w.Deliveries) != 1 {
+		t.Fatalf("A2 back: got %d deliveries, want 1", len(w.Deliveries))
+	}
+	if body, _ := base64.StdEncoding.DecodeString(w.Deliveries[0].InlineBase64); string(body) != `{"order":1}` {
+		t.Fatalf("A2 back: got %q, want the message it was holding", body)
+	}
+	e.ack(t, credA2, w.Deliveries[0].ID)
+	acks.settledOnFirstDelivery(t)
+}
+
+// A reconcile starts a member's subscriber and only then registers it in
+// memberSubs. A stop landing in between must not leave that subscriber
+// running on a cancelled session: its handler would NAK the held message, the
+// loop fetch it again, and so on, spending every delivery attempt and
+// dead-lettering the message (#461). endSession waits for the reconcile, which
+// then sees the session gone and halts the subscriber before releasing it.
+//
+// The window is opened deterministically with the afterMemberSubscribe seam:
+// A2 joins, its subscriber starts and takes a message, the stop begins on
+// another goroutine (it may wait for the reconcile, so it cannot be called
+// from inside it), and the window is held open the way the stop tests hold
+// theirs. Asserted on the outcome: nothing dead-lettered, and A2 gets the
+// message after a restart.
+func TestGroup_StopDuringReconcileReleasesTheMessage(t *testing.T) {
+	e := newTestEnv(t)
+	memberA := memberRow(agentA, "till-a", "{all-tills}", outWrite)
+	memberA2 := memberRow(agentA2, "till-a2", "{all-tills}", outWrite)
+	e.startGroupPipeline(t, "g-race", memberA)
+
+	// The seam parks the reconcile until the test releases it. The release
+	// also runs at cleanup (before the env's own cleanup stops the gateway),
+	// so a test that fails half-way never leaves the reconcile holding the
+	// session's lock.
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	free := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(free)
+	e.g.afterMemberSubscribe = func(id string) {
+		if id != agentA2 {
+			return
+		}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}
+
+	e.expectMembers(tenant1, 1, memberA, memberA2) // A2 joins
+	reconciled := make(chan struct{})
+	go func() { e.g.reconcileAll(context.Background()); close(reconciled) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconcile never started A2's subscriber")
+	}
+
+	// A2's subscriber runs but is not registered yet. A2's durable starts at
+	// "now", so the message is published after it exists.
+	e.publishTo(t, tenant1, "g-race", `{"order":9}`)
+	waitFor(t, "A2's subscriber to hold the message", func() bool {
+		ci, _ := e.memberInfo("g-race", agentA2)
+		return ci != nil && ci.NumAckPending == 1
+	})
+
+	stopped := make(chan struct{})
+	go func() { e.g.stopConnection(context.Background(), "g-race", tenant1); close(stopped) }()
+	waitFor(t, "the stop to take the session out", func() bool {
+		e.g.mu.Lock()
+		defer e.g.mu.Unlock()
+		return e.g.sessions["g-race"] == nil
+	})
+	// Hold the window open. A stop that cancelled the session now would
+	// leave A2's unhalted loop spinning on the NAK'd message for all of it.
+	time.Sleep(100 * time.Millisecond)
+	free()
+
+	for _, w := range []struct {
+		what string
+		done chan struct{}
+	}{{"the reconcile", reconciled}, {"the stop", stopped}} {
+		select {
+		case <-w.done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not return: deadlock between the stop and the reconcile?", w.what)
+		}
+	}
+	e.g.afterMemberSubscribe = nil
+	if n := e.dlqMsgs(t); n != 0 {
+		t.Fatalf("the stop dead-lettered the message A2's subscriber held (%d in the DLQ)", n)
+	}
+
+	e.startGroupPipeline(t, "g-race", memberA, memberA2)
+	var got []agentproto.Delivery
+	waitFor(t, "the released message to reach A2", func() bool {
+		got = e.poll(t, credA2, 1).Deliveries
+		return len(got) == 1
+	})
+	if body, _ := base64.StdEncoding.DecodeString(got[0].InlineBase64); string(body) != `{"order":9}` {
+		t.Fatalf("A2 got %q, want the message it held during the stop", body)
+	}
+}
+
+// A stop waits for a reconcile under way (endSession takes reconcileMu), so
+// the reconcile must give up as soon as the session is gone. Here a reconcile
+// is adding many members at once, as a group's first reconcile or a batch of
+// new tills does, and the stop arrives after the first of them. Subscribing
+// the rest anyway would create a durable for each on a stopped pipeline, and
+// cost the stop the JetStream calls plus, whenever the new loop is already
+// fetching when it is halted, a 2 s fetch wait per member: up to 30 s for
+// these 15, the whole budget of a start or stop command. The stop must return
+// in a few seconds, leave no durable for the members after it, and still
+// release the message the first new member held. The durables are the sure
+// signal; the time limit catches the slow case when it happens.
+func TestGroup_StopDuringALargeReconcileReturnsQuickly(t *testing.T) {
+	e := newTestEnv(t)
+	memberA := memberRow(agentA, "till-a", "{all-tills}", outWrite)
+	memberA2 := memberRow(agentA2, "till-a2", "{all-tills}", outWrite)
+	e.startGroupPipeline(t, "g-many", memberA)
+
+	// Fifteen more tills, sorted after A2 so A2 is subscribed first.
+	rows := [][]driver.Value{memberA, memberA2}
+	var extra []string
+	for i := 0; i < 15; i++ {
+		id := fmt.Sprintf("cccccccc-0000-0000-0000-%012d", i)
+		extra = append(extra, id)
+		rows = append(rows, memberRow(id, fmt.Sprintf("till-%d", i), "{all-tills}", outWrite))
+	}
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	free := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(free)
+	e.g.afterMemberSubscribe = func(id string) {
+		if id != agentA2 {
+			return
+		}
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}
+
+	e.expectMembers(tenant1, 1, rows...)
+	reconciled := make(chan struct{})
+	go func() { e.g.reconcileAll(context.Background()); close(reconciled) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconcile never started A2's subscriber")
+	}
+	e.publishTo(t, tenant1, "g-many", `{"order":11}`)
+	waitFor(t, "A2's subscriber to hold the message", func() bool {
+		ci, _ := e.memberInfo("g-many", agentA2)
+		return ci != nil && ci.NumAckPending == 1
+	})
+
+	began := time.Now()
+	stopped := make(chan struct{})
+	go func() { e.g.stopConnection(context.Background(), "g-many", tenant1); close(stopped) }()
+	waitFor(t, "the stop to take the session out", func() bool {
+		e.g.mu.Lock()
+		defer e.g.mu.Unlock()
+		return e.g.sessions["g-many"] == nil
+	})
+	free()
+
+	// Two fetch waits at most (A2's subscriber, then member A's), with room
+	// for a loaded runner. Subscribing every member would take 15 more.
+	const limit = 8 * time.Second
+	select {
+	case <-stopped:
+	case <-time.After(limit):
+		t.Fatalf("the stop took more than %v: it waited for the reconcile to subscribe and stop all %d remaining members", limit, len(extra))
+	}
+	t.Logf("stop returned after %v", time.Since(began).Round(time.Millisecond))
+	select {
+	case <-reconciled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconcile did not return after the stop")
+	}
+	e.g.afterMemberSubscribe = nil
+
+	for _, id := range extra {
+		if _, err := e.memberInfo("g-many", id); err == nil {
+			t.Fatalf("a durable was created for %s after the pipeline stopped", id)
+		}
+	}
+	if n := e.dlqMsgs(t); n != 0 {
+		t.Fatalf("the stop dead-lettered the held message (%d in the DLQ)", n)
+	}
+
+	e.startGroupPipeline(t, "g-many", memberA, memberA2)
+	var got []agentproto.Delivery
+	waitFor(t, "the released message to reach A2", func() bool {
+		got = e.poll(t, credA2, 1).Deliveries
+		return len(got) == 1
+	})
+	if body, _ := base64.StdEncoding.DecodeString(got[0].InlineBase64); string(body) != `{"order":11}` {
+		t.Fatalf("A2 got %q, want the message it held during the stop", body)
+	}
+}
+
+// A reconcile that gets the lock after its session was stopped returns without
+// reading the members, so a stop queued behind it never waits on a membership
+// query for a pipeline that no longer runs. The query is made slow so that
+// running it shows up as time.
+func TestGroup_ReconcileOfAStoppedSessionSkipsTheQuery(t *testing.T) {
+	e := newTestEnv(t)
+	e.startGroupPipeline(t, "g-gone", memberRow(agentA, "till-a", "{all-tills}", outWrite))
+	e.g.mu.Lock()
+	sess := e.g.sessions["g-gone"]
+	e.g.mu.Unlock()
+	e.g.stopConnection(context.Background(), "g-gone", tenant1)
+
+	e.mock.ExpectQuery(`SELECT id::text, name, groups, directories FROM agents`).
+		WillDelayFor(3 * time.Second).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "groups", "directories"}).
+			AddRow(memberRow(agentA, "till-a", "{all-tills}", outWrite)...))
+	began := time.Now()
+	e.g.reconcileGroups(context.Background(), sess)
+	if took := time.Since(began); took > time.Second {
+		t.Fatalf("reconciling a stopped session took %v: it ran the membership query", took)
 	}
 }
 

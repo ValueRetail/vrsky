@@ -196,12 +196,19 @@ lines, functions and statements 80%, branches 75%.
 
 ## Alert rules
 
-From the repo root, the same check CI runs:
+From the repo root, the same checks CI runs (CI splits `test rules` over
+four legs with `--run`; locally the whole file takes about 90 s):
 
 ```bash
-docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
-docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml
+docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
+docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml
 ```
+
+A new test group in `prometheus-rules-test.yml` needs a `name:` made of
+`[a-z0-9-]`, and that name must be listed in exactly one leg of the
+`alert-rules` matrix in `.github/workflows/build-push.yml`. A group no leg
+names never runs in CI. `TestRuleTestGroupsRunOnce` fails until it is listed.
+To run one group: `--run '^<name>$'`.
 
 ## Docs site
 
