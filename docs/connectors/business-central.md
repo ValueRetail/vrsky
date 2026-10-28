@@ -186,6 +186,28 @@ Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors retry; `4xx` bad-data and `401`/`403` auth are
 poison and go to the DLQ.
 
+## Templates: Sitoo ⇄ Business Central (beta)
+
+Two onboarding templates connect Business Central to Sitoo POS through a
+converter node. Both are beta until tested against live tenants; see
+[Sitoo](sitoo.md#templates-sitoo-business-central-beta) for what the wizard
+asks and the assumptions they make.
+
+- **POS sales → ERP** posts one draft `salesInvoices` record per Sitoo
+  receipt, lines inline (`salesInvoiceLines` with `lineType: Item`,
+  `lineObjectNumber` = Sitoo SKU, `quantity`, `unitPrice` incl. VAT), for one
+  customer number you choose. `dedupe_fields: ["externalDocumentNumber"]`
+  keeps a receipt from becoming two invoices. Invoices rather than orders
+  because `salesInvoices` lists posted invoices too, while a posted order
+  drops out of `salesOrders` and the dedupe lookup would no longer find it.
+- **ERP inventory → POS** reads `items` filtered on `type eq 'Inventory'`,
+  500 per page, every 15 minutes, and not incrementally: an item's
+  `lastModifiedDateTime` does not change when its stock does.
+
+A Business Central destination writes only what its predecessor in the
+pipeline sends: with a converter in front, the source's raw page (which every
+node sees) is skipped and the converted record is written.
+
 ## Notes & roadmap
 
 - **On-prem / sandbox** — set `api_base_url`, `token_url`, and `scope` overrides

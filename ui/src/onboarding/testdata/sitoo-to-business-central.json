@@ -1,0 +1,20 @@
+{
+  "drop_unmapped": true,
+  "split_records": true,
+  "mappings": [
+    { "type": "static", "source": "", "target": "customerNumber", "value": "" },
+    { "type": "rename", "source": "receiptnumber", "target": "externalDocumentNumber" },
+    {
+      "type": "each",
+      "source": "items",
+      "target": "salesInvoiceLines",
+      "drop_unmapped": true,
+      "mappings": [
+        { "type": "static", "source": "", "target": "lineType", "value": "Item" },
+        { "type": "rename", "source": "sku", "target": "lineObjectNumber" },
+        { "type": "to_number", "source": "quantity", "target": "quantity" },
+        { "type": "to_number", "source": "priceeach", "target": "unitPrice" }
+      ]
+    }
+  ]
+}

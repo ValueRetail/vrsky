@@ -165,7 +165,7 @@ func TestSitooContract_DeliverDropsSilently(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT nodes FROM connections").
+	mock.ExpectQuery("SELECT nodes, edges FROM connections").
 		WithArgs("conn-unknown", "tenant-vr").
 		WillReturnError(sql.ErrNoRows)
 

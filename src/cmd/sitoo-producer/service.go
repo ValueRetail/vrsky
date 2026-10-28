@@ -87,9 +87,14 @@ func (p *sitooProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	if env.IntegrationID == "" {
 		return nil
 	}
-	cfg, err := p.getSitooConfig(ctx, env.IntegrationID, env.TenantID)
+	cfg, rt, err := p.getSitooConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
 		p.logger.Debug("No Sitoo producer config", "connection_id", env.IntegrationID, "error", err)
+		return nil
+	}
+	if !rt.accepts(env) {
+		// Not from this node's predecessor: the source's raw page in a
+		// pipeline with a converter in front. The converted copy follows.
 		return nil
 	}
 	if cfg.AccountID == 0 || cfg.SiteID == 0 || cfg.APIID == "" || cfg.APIPassword == "" {
@@ -222,17 +227,18 @@ func (c *SitooProducerConfig) effectiveMethod() string {
 // getSitooConfig loads the connection, resolves any *_secret_id references, and
 // extracts its Sitoo producer node config.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
-func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenantID string) (*SitooProducerConfig, error) {
+func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenantID string) (*SitooProducerConfig, route, error) {
 	var nodesJSON json.RawMessage
+	var edgesJSON []byte
 	if err := p.db.QueryRowContext(ctx,
-		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
+		`SELECT nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
-	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+	).Scan(&nodesJSON, &edgesJSON); err != nil {
+		return nil, route{}, fmt.Errorf("connection not found: %w", err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		return nil, fmt.Errorf("parse nodes: %w", err)
+		return nil, route{}, fmt.Errorf("parse nodes: %w", err)
 	}
 	reader := crypto.NewSQLSecretReader(p.db)
 	for _, n := range nodes {
@@ -241,17 +247,64 @@ func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenant
 		}
 		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
 		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
+			return nil, route{}, fmt.Errorf("resolve secrets: %w", rerr)
 		}
 		var nc nodeConfig
 		if err := json.Unmarshal(resolved, &nc); err != nil {
 			continue
 		}
 		if nc.Type == "sitoo" && nc.Sitoo != nil {
-			return nc.Sitoo, nil
+			return nc.Sitoo, routeTo(n.ID, nodes, edgesJSON), nil
 		}
 	}
-	return nil, errors.New("no sitoo producer node found")
+	return nil, route{}, errors.New("no sitoo producer node found")
+}
+
+// route is where the destination node sits in its pipeline: which node's
+// output it takes. Every node of a pipeline publishes on the same subject, so
+// with a converter in front of this destination it receives the source's raw
+// page as well as the converter's result, and must take only the latter
+// (#435). Same rule as the other producers (kafka, http, db, ...).
+type route struct {
+	predecessorID  string
+	predIsConsumer bool
+}
+
+// accepts reports whether env comes from this destination's predecessor. A
+// node with no incoming edge accepts everything, as before.
+func (r route) accepts(env *envelope.Envelope) bool {
+	last, _ := env.Metadata["_last_processed_by"].(string)
+	if r.predIsConsumer {
+		return last == ""
+	}
+	if r.predecessorID != "" {
+		return last == r.predecessorID
+	}
+	return true
+}
+
+// routeTo finds the node feeding nodeID through edgesJSON (connections.edges).
+func routeTo(nodeID string, nodes []node, edgesJSON []byte) route {
+	var edges []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	if len(edgesJSON) > 0 {
+		_ = json.Unmarshal(edgesJSON, &edges)
+	}
+	for _, e := range edges {
+		if e.Target != nodeID {
+			continue
+		}
+		r := route{predecessorID: e.Source}
+		for _, m := range nodes {
+			if m.ID == e.Source && m.Type == "consumer" {
+				r.predIsConsumer = true
+			}
+		}
+		return r
+	}
+	return route{}
 }
 
 // ServesConnection reports whether this connection has a Sitoo destination —
@@ -261,7 +314,7 @@ func (p *sitooProducer) ServesConnection(ctx context.Context, tenantID, connecti
 	if connectionID == "" {
 		return false
 	}
-	_, err := p.getSitooConfig(ctx, connectionID, tenantID)
+	_, _, err := p.getSitooConfig(ctx, connectionID, tenantID)
 	return err == nil
 }
 

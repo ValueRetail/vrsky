@@ -9,8 +9,10 @@
 
 import { describe, it, expect } from 'vitest'
 import { SECRET_FIELDS } from '../utils/secrets'
-import { connectorKeysFor } from '../types/nodeConfig'
+import { connectorKeysFor, CONVERTER_MAPPING_TYPES } from '../types/nodeConfig'
 import { TEMPLATES, type PipelineTemplate } from './templates'
+import sitooToBusinessCentral from './testdata/sitoo-to-business-central.json'
+import businessCentralToSitoo from './testdata/business-central-to-sitoo.json'
 
 // Walks a dot-path without creating anything, mirroring the wizard's readObj.
 function at(root: Record<string, unknown>, path: string): unknown {
@@ -217,14 +219,93 @@ describe('every wizard field lands on a key the connector reads', () => {
       if (!n) continue // reported by "every field points at a node that exists"
       const ck = connectorKeysFor(n.type, n.config)
       if (!ck) continue
-      const top = f.objectPath.split('.')[0]
-      expect(top, `${t.id}: field "${f.key}" writes into "${f.objectPath}", outside the ${ck.block || 'root'} settings`).toBe(ck.block)
-      if (f.objectPath === ck.block) {
+      // Path segments below the settings block: api.endpoints.0 → [endpoints, 0]
+      // for an api source; mappings.0 → [mappings, 0] for a converter, whose
+      // settings are the config root.
+      const segs = f.objectPath ? f.objectPath.split('.') : []
+      if (ck.block) {
+        expect(segs[0], `${t.id}: field "${f.key}" writes into "${f.objectPath}", outside the ${ck.block} settings`).toBe(ck.block)
+        segs.shift()
+      }
+      if (segs.length === 0) {
         expect(ck.keys, `${t.id}: field "${f.key}" is a key the connector never reads`).toContain(f.key)
       } else {
-        // A nested path (api.endpoints.0) must start at a key the connector reads.
-        expect(ck.keys, `${t.id}: field "${f.key}" is nested under an unknown key`).toContain(f.objectPath.split('.')[1])
+        // A nested path must start at a key the connector reads.
+        expect(ck.keys, `${t.id}: field "${f.key}" is nested under an unknown key`).toContain(segs[0])
       }
     }
+  })
+})
+
+// --- Converter mappings (#435) ----------------------------------------------
+// The retail templates carry a field mapping. The converter skips a mapping
+// type it does not know without a word, and a wizard value written anywhere
+// but a static mapping's value is ignored; both deploy a pipeline that drops a
+// field the target needs.
+
+type Mapping = { type?: string; value?: unknown; mappings?: Mapping[] }
+
+function allMappings(ms: Mapping[] | undefined): Mapping[] {
+  return (ms ?? []).flatMap((m) => [m, ...allMappings(m.mappings)])
+}
+
+describe('converter mappings use types the converter implements', () => {
+  each((t) => {
+    for (const n of t.nodes.filter((n) => n.type === 'converter')) {
+      for (const m of allMappings(n.config.mappings as Mapping[] | undefined)) {
+        expect(CONVERTER_MAPPING_TYPES, `${t.id}: node ${n.id} uses mapping type "${m.type}"`).toContain(m.type)
+        if (m.type === 'each') {
+          expect(m.mappings?.length, `${t.id}: an "each" mapping in node ${n.id} has no nested mappings`).toBeGreaterThan(0)
+        }
+      }
+    }
+  })
+})
+
+describe('a wizard value inside a converter mapping is a static value', () => {
+  each((t) => {
+    for (const f of t.fields) {
+      const n = t.nodes.find((n) => n.id === f.nodeId)
+      if (n?.type !== 'converter' || !f.objectPath.startsWith('mappings.')) continue
+      const m = at(n.config, f.objectPath) as Mapping | undefined
+      expect(m?.type, `${t.id}: field "${f.label}" writes into a ${m?.type} mapping, which ignores "value"`).toBe('static')
+      expect(f.key, `${t.id}: field "${f.label}" sets "${f.key}" on a static mapping`).toBe('value')
+    }
+  })
+})
+
+describe('the retail templates deploy the mapping the Go tests check', () => {
+  // src/cmd/data-converter/template_mapping_test.go runs the real converter
+  // with these files on Sitoo and BC fixtures. A mapping changed here but not
+  // there would ship untested.
+  const goTestdata: Record<string, unknown> = {
+    'sitoo-to-business-central': sitooToBusinessCentral,
+    'business-central-to-sitoo': businessCentralToSitoo,
+  }
+  for (const [id, want] of Object.entries(goTestdata)) {
+    it(id, () => {
+      const t = TEMPLATES.find((t) => t.id === id)
+      expect(t, `template ${id} is not in the catalog`).toBeDefined()
+      const conv = t!.nodes.filter((n) => n.type === 'converter')
+      expect(conv).toHaveLength(1)
+      expect(conv[0].config).toEqual(want)
+    })
+  }
+})
+
+describe('the retail templates', () => {
+  it('both directions are in the gallery and say they are beta', () => {
+    for (const id of ['sitoo-to-business-central', 'business-central-to-sitoo']) {
+      const t = TEMPLATES.find((t) => t.id === id)
+      expect(t, id).toBeDefined()
+      expect(t!.summary).toMatch(/^Beta: verify the mapping/)
+    }
+  })
+
+  it('a BC destination skips sales invoices it already has', () => {
+    // The Sitoo source re-reads every receipt on each poll and split_records
+    // republishes a whole page on redelivery: without this BC gets duplicates.
+    const dst = TEMPLATES.find((t) => t.id === 'sitoo-to-business-central')!.nodes.find((n) => n.id === 'dst')!
+    expect((dst.config.business_central as Record<string, unknown>).dedupe_fields).toEqual(['externalDocumentNumber'])
   })
 })

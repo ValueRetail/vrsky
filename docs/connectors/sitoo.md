@@ -91,6 +91,9 @@ A `sitoo` producer node writes each incoming message into a Sitoo REST resource
 (e.g. updating warehouse stock, prices, or products) with HTTP Basic auth —
 completing two-way sync. The message payload is sent as the request body, so an
 upstream converter/filter should shape it to the target resource's schema.
+The producer writes only what its predecessor in the pipeline sends: with a
+converter in front, the source's raw page (which every node sees) is skipped
+and the converted one is written.
 
 - `account_id` / `site_id` / `api_id` / `api_password_secret_id` — as above.
 - `resource` — the target collection (default `warehouseitems`; e.g. `prices`).
@@ -115,6 +118,47 @@ Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `5xx`/network errors are retried (with the rate-limit backoff hint); `4xx`
 (bad request/data) and `401`/`403` (auth) are treated as poison and sent to the
 DLQ rather than retried forever.
+
+## Templates: Sitoo ⇄ Business Central (beta)
+
+The onboarding gallery has two templates between Sitoo and Business Central.
+Both are **beta**: their field mapping is tested against the converter, not
+yet against live Sitoo and BC tenants. Try them on a test company and a test
+warehouse first. The full field tables and the assumptions behind them are in
+`plans/issue-435-sitoo-bc-mapping.md`.
+
+**POS sales → ERP.** Polls Sitoo `transactions` every 5 minutes and creates
+one draft BC sales invoice per receipt, one line per item. The wizard asks
+for:
+
+- Sitoo account number, site id, API id and password
+- BC Entra tenant id, environment, company id, client id and secret
+- the BC customer number every invoice is created for
+
+What to know before you use it:
+
+- The Sitoo `sku` must equal the BC item number. Item variants are not
+  handled.
+- Sitoo prices include VAT, so the BC customer needs *Prices Including VAT*
+  turned on.
+- The receipt number goes to `externalDocumentNumber`, which is how a receipt
+  already in BC is skipped, posted or not. The poller re-reads every receipt
+  on each poll, one BC lookup each, so keep it to a test site with few
+  receipts until the poller gets a cursor.
+- Use one Sitoo site per pipeline: receipt numbers from two sites could
+  collide.
+- Currency and posting date are not sent. BC takes them from the customer
+  and the work date.
+
+**ERP inventory → POS.** Reads every BC inventory item every 15 minutes and
+sends `[{sku, decimaltotal}]` to `warehouses/<id>/warehouseitems`. The wizard
+asks for the BC and Sitoo credentials and that path with your warehouse id in
+it. BC's item `inventory` is the total over all locations, and prices are not
+synced.
+
+Running both together: a draft invoice does not lower BC stock until it is
+posted, so until then the stock push sends Sitoo the level from before the
+sale.
 
 ## Notes & roadmap
 
