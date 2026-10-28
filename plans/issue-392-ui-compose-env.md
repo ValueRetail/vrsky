@@ -41,8 +41,10 @@ No.
   cross-origin while the axios calls still go through the dead proxy. So
   setting it would not make the service work and would split the UI's
   traffic two ways. Left unset; the proxy target goes to the backlog as a
-  new item (needs `vite.config.ts` to take the target from env and the
-  service to reach the API, e.g. `host.docker.internal:3000`).
+  new item (needs `vite.config.ts` to take the target from env, and the
+  service on the stack's external `vrsky-network` with the target
+  `http://management-api:3000`; the host port is bound to 127.0.0.1 only,
+  so `host.docker.internal` can't reach it).
 
 ## Files
 

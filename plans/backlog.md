@@ -216,12 +216,14 @@ Last updated 2026-10-27.
     them to a hardcoded `http://localhost:3000`. Inside the container that
     is the container itself, so every API call fails; no `VITE_*` variable
     changes it. `npm run dev` on the host doesn't have the problem, since
-    the local stack publishes the management API on `127.0.0.1:3000`. A fix: let
+    the local stack publishes the management API on `127.0.0.1:3000`.
+    `host.docker.internal` won't help: that port is published on
+    127.0.0.1 only. A fix that works on every platform: let
     `vite.config.ts` take the proxy target from an env var (default
-    `http://localhost:3000`) and set it on the service to
-    `http://host.docker.internal:3000` (plus `extra_hosts` for Linux), or
-    drop the dev service and point "Option 1" in `docs/DEPLOYMENT_GUIDE.md`
-    at `npm run dev`. Found in #392.
+    `http://localhost:3000`), put the `ui` service on the stack's external
+    `vrsky-network`, and set the target to `http://management-api:3000`.
+    Or drop the dev service and point "Option 1" in
+    `docs/DEPLOYMENT_GUIDE.md` at `npm run dev`. Found in #392.
 
 ## Human
 
