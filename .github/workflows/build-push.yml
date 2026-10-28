@@ -311,6 +311,7 @@ jobs:
       connectors: ${{ steps.plan.outputs.connectors }}
       connectors_manifest: ${{ steps.plan.outputs.connectors_manifest }}
       monitoring: ${{ steps.plan.outputs.monitoring }}
+      backup: ${{ steps.plan.outputs.backup }}
       anything: ${{ steps.plan.outputs.anything }}
     steps:
       - uses: actions/checkout@v5
@@ -328,6 +329,7 @@ jobs:
           echo "connectors=$(awk '$1=="connector"{print $2}' targets.txt | tr '\n' ' ')"           >> "$GITHUB_OUTPUT"
           echo "connectors_manifest=$(grep -qx connectors-manifest targets.txt && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "monitoring=$(grep -qx monitoring targets.txt && echo true || echo false)"           >> "$GITHUB_OUTPUT"
+          echo "backup=$(grep -qx backup targets.txt && echo true || echo false)"                   >> "$GITHUB_OUTPUT"
           echo "anything=$([ -s targets.txt ] && echo true || echo false)"                          >> "$GITHUB_OUTPUT"
 
   build-images:
@@ -388,6 +390,7 @@ jobs:
       CONNECTORS: ${{ needs.plan.outputs.connectors }}
       CONNECTORS_MANIFEST: ${{ needs.plan.outputs.connectors_manifest }}
       MONITORING: ${{ needs.plan.outputs.monitoring }}
+      BACKUP: ${{ needs.plan.outputs.backup }}
       AKS_RESOURCE_GROUP: ${{ vars.AKS_RESOURCE_GROUP }}
     steps:
       - uses: actions/checkout@v5
@@ -425,7 +428,7 @@ jobs:
         if: steps.cluster.outputs.state == 'Running'
         run: |
           mkdir -p stage
-          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/prometheus-rules.yml stage/
+          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/kubernetes/backup infrastructure/prometheus-rules.yml stage/
           for n in $CORE; do
             d=$(az acr repository show -n vrskyprodacr --image "vrsky/$n:latest" --query digest -o tsv)
             echo "$n $d" >> stage/digests.txt
@@ -451,3 +454,9 @@ jobs:
           for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done
           if [ "$CONNECTORS_MANIFEST" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
           infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"
+      # The management-DB backup CronJob (#395). Suspended until a human has
+      # created vrsky-backup-config; the script never touches that Secret.
+      # After the smoke check, so a failing apply can't hide its result.
+      - name: Backup CronJob
+        if: steps.cluster.outputs.state == 'Running' && env.BACKUP == 'true'
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"

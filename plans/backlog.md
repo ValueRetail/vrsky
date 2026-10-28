@@ -6,7 +6,7 @@ issue with acceptance criteria and works it. Items marked **human** wait on
 Ludvik; agents never work them, the progress log lists them. The PR that
 closes an item strikes its line and adds the issue number.
 
-Last updated 2026-10-27.
+Last updated 2026-10-28.
 
 ## Agent
 
@@ -116,7 +116,7 @@ Last updated 2026-10-27.
     `TestUIDeployRewritesMatchManifest` and `deploy-ui-azure.sh`'s rewrite
     depend on that string, so change them together. Manifests: PR plus
     `agent:needs-human`. Found in #371.
-27. **The backup CronJob's image is built nowhere.**
+27. ~~**The backup CronJob's image is built nowhere.**~~ (#395)
     `infrastructure/kubernetes/backup/cronjob.yaml` runs
     `ghcr.io/valueretail/vrsky/vrsky-cli:latest`, and its README says CI
     builds it, but no workflow or script builds `vrsky-cli` into any
@@ -256,7 +256,7 @@ Last updated 2026-10-27.
     client to one management-api replica. Rework the advice for the real
     path. Production runs one replica today (`deploy-azure.sh`), so nothing
     is broken yet. Found in #386.
-44. **The backup Secret example names the wrong database for AKS.**
+44. ~~**The backup Secret example names the wrong database for AKS.**~~ (#395)
     `infrastructure/kubernetes/backup/README.md` builds `BACKUP_DB_URL` as
     `postgres://postgres:…/management_db`, but on AKS the database and its
     user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
@@ -333,6 +333,34 @@ Last updated 2026-10-27.
     so two start commands can race and leak the overwritten session's
     subscription; its fingerprint/replace model doesn't fit `StartGuard`
     as is. Found during #397 and its review.
+54. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+    `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
+    there maps to no target, so the deploy job rebuilds none of those images.
+    Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
+    to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
+    `agent:needs-human`. Found in #395.
+55. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+    output, the gzipped copy and the encrypted copy all sit in byte slices
+    (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
+    `EncryptBytes` call), so a dump of roughly a third of the CronJob's
+    512Mi limit or more gets the Job OOM-killed. Fine for today's small
+    management DB. Stream pg_dump through gzip and encryption into
+    `PutStream`, or at least alert on the dump size. Found in review of #404.
+56. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+    a backup change.** `deploy-backup-azure.sh` copies it from
+    `vrsky-platform`, and nothing else runs that script. After an ACR
+    password rotation the backup Job can't pull until the next Catch up.
+    Run the copy wherever `acr-pull` is rotated, or give the script a step
+    in every deploy. Workflow change: PR plus `agent:needs-human`. Found in
+    review of #404.
+57. **A backup CronJob left suspended is silent.** `MgmtBackupMissing` is
+    quiet while `vrsky-mgmt-backup` is suspended, by design, so a CronJob
+    suspended by hand (or never re-enabled after a restore) and left that
+    way for more than 7 days after `vrsky-backup-config` exists pages
+    nobody. Add a rule for "suspended over 7 days while the Secret exists"
+    (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
+    Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
+    in review of #404.
 
 ## Human
 

@@ -8,6 +8,11 @@
 #   connector <name>      a connector deployment to restart
 #   connectors-manifest   the connector manifest changed: full deploy-connectors-azure.sh
 #   monitoring            alert rules or monitoring values changed: install-monitoring.sh
+#   backup                the backup CronJob or its deploy script changed:
+#                         deploy-backup-azure.sh
+#
+# TOOLS are images with nothing to roll: the backup CronJob pulls
+# vrsky-cli:latest at every run, so a rebuild is the whole deploy.
 #
 # The deploy job in .github/workflows/build-push.yml feeds it a merge's diff.
 # Pure text in, text out, so TestAffectedServices drives it with path lists.
@@ -24,6 +29,7 @@ cloud-storage-consumer sftp-consumer kafka-consumer rabbitmq-consumer
 salesforce-consumer remote-agent
 http-producer db-producer file-producer cloud-storage-producer
 sftp-producer kafka-producer rabbitmq-producer salesforce-producer"
+TOOLS="vrsky-cli"
 
 has() { case " $1 " in *" $2 "*) return 0 ;; esac; return 1; }
 
@@ -39,17 +45,21 @@ while IFS= read -r p; do
       name="${p#src/cmd/}"; name="${name%%/*}"
       if has "$CORE" "$name"; then out+=("image $name" "core $name")
       elif has "$CONNECTORS" "$name"; then out+=("image $name" "connector $name")
+      elif has "$TOOLS" "$name"; then out+=("image $name")
       fi ;;
     infrastructure/prometheus-rules.yml|infrastructure/kubernetes/monitoring/*)
                                             out+=("monitoring") ;;
     infrastructure/azure/deploy-connectors-azure.sh|infrastructure/kubernetes/connectors/*)
                                             out+=("connectors-manifest") ;;
+    infrastructure/azure/deploy-backup-azure.sh|infrastructure/kubernetes/backup/*)
+                                            out+=("backup") ;;
   esac
 done
 
 if [ "$all_go" = 1 ]; then
   for n in $CORE; do [ "$n" = ui ] && continue; out+=("image $n" "core $n"); done
   for n in $CONNECTORS; do out+=("image $n" "connector $n"); done
+  for n in $TOOLS; do out+=("image $n"); done
 fi
 
 [ ${#out[@]} -eq 0 ] && exit 0

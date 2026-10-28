@@ -557,22 +557,17 @@ control families.
 ## Disaster Recovery
 
 The management Postgres (tenants, connections, secrets, OAuth grants,
-notification targets, audit log) has backup and restore tooling, but as far as
-this repo shows, no scheduled backup runs in production:
+notification targets, audit log) is meant to have two backup layers in
+production, and both need a one-time human setup before they run:
 
-- `vrsky-cli backup`/`list`/`restore` exist, and the
-  [DR drill](DR.md#the-ci-restore-drill) proves backup and restore against
-  throwaway databases in CI.
-- A daily CronJob is defined in `infrastructure/kubernetes/backup/cronjob.yaml`,
-  but no script or workflow applies it, and its image
-  (`ghcr.io/valueretail/vrsky/vrsky-cli:latest`) is built nowhere. AKS can't
-  pull `ghcr.io` images anyway (see the warning above). Item 27 in
-  `plans/backlog.md` tracks this.
-- No script or workflow snapshots the Postgres volume.
+- Azure Disk Backup of the Postgres disk, daily, kept 7 days. A human sets
+  up the vault; the repo has no part in it.
+- An encrypted logical dump, weekdays at 12:00 Oslo, from the CronJob
+  `vrsky-mgmt-backup` to Azure Blob storage, kept 14 days. CI builds its
+  image into ACR and the deploy job applies it, suspended until a human has
+  created its storage account and the `vrsky-backup-config` Secret.
 
-The repo can't tell whether someone applied the CronJob by hand or set up
-backups on the Azure side. Until one of those is confirmed, treat production
-as having no backups. See **[`docs/DR.md`](DR.md)** for the runbook: the
-backup flow, the RPO/RTO targets, the `ENCRYPTION_KEY` caveat and the recovery
-procedure. The CronJob and its config Secret are described in
-[`infrastructure/kubernetes/backup/README.md`](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md).
+The repo can't show whether those human steps are done. Check before you
+rely on a backup. **[`docs/DR.md`](DR.md)** has the state, retention, the
+`ENCRYPTION_KEY` caveat and both restore runbooks; the setup is in
+[Backup & restore](operator/backup.md).
