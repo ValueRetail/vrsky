@@ -91,6 +91,11 @@ type gateway struct {
 	registerLimit *failurelimit.Limiter
 
 	now func() time.Time
+
+	// afterCancel is a test seam, nil in production. It runs in endSession
+	// between cancelling a session and waiting for its subscribers: the
+	// window in which a stop used to dead-letter the held message (#444).
+	afterCancel func()
 }
 
 func newGateway() *gateway {
@@ -433,11 +438,17 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) {
 	s.logger.Info("Remote agent pipeline stopped", "connection_id", connID)
 }
 
-// endSession cancels a session and waits for its subscriber to let go. The
+// endSession cancels a session and waits for its subscribers to let go. The
 // in-flight message, if any, is NAK'd and waits for the next session.
 // Must not be called with s.mu held: the output handler takes it to dequeue.
+//
+// Every subscriber is halted before the cancel. Cancelling first left each
+// dispatch loop running until its Stop was reached: it fetched the NAK'd
+// message again, the ended handler NAK'd it again, and a stop that lost the
+// CPU for a few milliseconds, or a member subscriber waiting its turn behind
+// the pipeline's own Stop, burned all five attempts and dead-lettered the
+// message (#444).
 func (s *gateway) endSession(sess *connSession) {
-	sess.cancel() // also ends every member's context
 	s.mu.Lock()
 	subs := make([]*memberSub, 0, len(sess.memberSubs))
 	for _, ms := range sess.memberSubs {
@@ -445,6 +456,16 @@ func (s *gateway) endSession(sess *connSession) {
 	}
 	sess.memberSubs = map[string]*memberSub{}
 	s.mu.Unlock()
+	if sess.sub != nil {
+		sess.sub.Halt()
+	}
+	for _, ms := range subs {
+		ms.sub.Halt()
+	}
+	sess.cancel() // also ends every member's context
+	if s.afterCancel != nil {
+		s.afterCancel()
+	}
 	if sess.sub != nil {
 		sess.sub.Stop()
 	}

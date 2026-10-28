@@ -406,6 +406,20 @@ Last updated 2026-10-28.
     `split_records` not at all. Saving keeps both (`updateMapping` spreads
     the old mapping), but picking another type in that select drops the
     lines. Show them, read-only at least. Found during #435.
+64. **Check the other `messaging.Subscribe` callers for cancel-before-Stop.**
+    #444 found the remote-agent gateway cancelling what its handlers wait
+    on before stopping the subscriber, so the loop re-fetched the NAK'd
+    message until it was dead-lettered. `Subscriber.Halt` now exists for
+    this. Check `pkg/sdk/lifecycle.go`, `cmd/data-filter`,
+    `cmd/data-converter` and `cmd/tenant-consumer/bridge.go` for a handler
+    that returns an error once a context is cancelled ahead of `Stop`.
+    Found in #444.
+65. **Two remote-agent tests sit on fixed 4 s waits.**
+    `TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount` sleeps four
+    AckWaits and `TestOutput_TakesOnlyItsPredecessorsMessage` polls for 4 s
+    to prove a message never comes; with cleanup each takes ~6 s. The
+    second could wait for the consumer's ack floor to pass both messages
+    instead. Not flaky, just slow. Found in #444.
 
 ## Human
 
