@@ -542,20 +542,20 @@ Last updated 2026-10-28.
     and have `backup verify` and `restore` check it against the key they
     were given. Changes the format (`VRSKYBK2`; keep reading v1 until it
     ages out). Found in review of #471.
-82. **Delete the legacy single-seal restore path** in `vrsky-cli`
+85. **Delete the legacy single-seal restore path** in `vrsky-cli`
     (`openArchive`'s `crypto.DecryptBytes` branch) once the 14-day
     retention holds only chunked archives, i.e. 14 days after #471 reaches
     production and the CronJob has run on it. Until then restore still
     opens archives sealed directly under `ENCRYPTION_KEY`; removing it
     finishes the key separation. Found in review of #471.
-85. **The file destination's host folder is fixed to `data/output`.**
+86. **The file destination's host folder is fixed to `data/output`.**
     #422 lets `.env` pick the host folder behind `/data/input`
     (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
     repository's `data/output`, so a Windows user can read from their home
     folder and not write to it. A second variable for `/data/output`, with
     the same fixed target and the guard in
     `compose_files_mount_guard_test.go`, would close that. Found in #422.
-86. **Rename and `each` leave a dotted source in place.** With the node's
+87. **Rename and `each` leave a dotted source in place.** With the node's
     `drop_unmapped` off, both read `source` as a path but remove it with
     `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
     `rename` and `each` cases), which only deletes a top-level key. So
@@ -563,7 +563,7 @@ Last updated 2026-10-28.
     Either delete along the path (a behaviour change for existing
     pipelines, so say so in the PR) or document it. The editor's `each`
     help text says so since #458. Found in #458.
-87. **Converter editor accessibility.** Nested mapping rows repeat the
+88. **Converter editor accessibility.** Nested mapping rows repeat the
     accessible names "Mapping type" and "Remove mapping" with no row
     context, so a screen reader can't tell rows apart, and a row's
     warnings aren't tied to its inputs with `aria-describedby`

@@ -38,7 +38,7 @@ means the same thing inside the container", which stopped being true then.
 - `file-producer` keeps a mount of the same folder at the same target,
   read-only, so `HOST_HOME` still exists there for its allowlist and owner
   lookup. Its writes still go to `./data/output`; a variable for that is
-  backlog item 79.
+  backlog item 86.
 - Review finding: `getHostOwner` follows `HOST_HOME`'s owner when it differs
   from `FILE_OWNER_UID`. That was the user's `$HOME`; now it is the host's
   `data/input`, which dockerd creates as root:root on a fresh Linux clone, so
