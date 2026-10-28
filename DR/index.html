@@ -1279,6 +1279,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-runs-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What runs today
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-a-backup-works" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2381,6 +2392,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-runs-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What runs today
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-a-backup-works" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2445,26 +2467,42 @@
 <p>This is the runbook for backing up and restoring the <strong>management Postgres</strong> —
 the database that holds every tenant, connection/pipeline definition, encrypted
 secret reference, OAuth provider/grant, notification target, and the audit log.
-Losing it loses the platform's control plane, so it is backed up daily and the
-restore path is tested in CI.</p>
+Losing it loses the platform's control plane.</p>
+<h2 id="what-runs-today">What runs today<a class="headerlink" href="#what-runs-today" title="Permanent link">&para;</a></h2>
+<p>As far as this repo shows, <strong>no scheduled backup of the production database
+runs</strong>:</p>
+<ul>
+<li>The daily CronJob in <code>infrastructure/kubernetes/backup/cronjob.yaml</code>
+  (02:00 UTC) is not applied by any script or workflow.</li>
+<li>Its image, <code>ghcr.io/valueretail/vrsky/vrsky-cli:latest</code>, is built by no
+  workflow or script, and AKS can't pull from <code>ghcr.io</code>. Applied as it is, the
+  CronJob's pods would fail to pull. Item 27 in <code>plans/backlog.md</code> tracks this.</li>
+<li>No script or workflow snapshots the Postgres volume (an Azure disk through
+  the <code>managed-csi</code> storage class).</li>
+<li>The <a href="#the-ci-restore-drill">CI restore drill</a> tests the backup and restore
+  commands, not a production backup.</li>
+</ul>
+<p>The repo can't show whether someone applied the CronJob by hand or set up
+backups on the Azure side. Until one of those is confirmed, assume there are
+none.</p>
 <table>
 <thead>
 <tr>
 <th>Objective</th>
 <th>Target</th>
-<th>How it's met</th>
+<th>Status</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>RPO</strong> (max data loss)</td>
 <td><strong>≤ 24h</strong></td>
-<td>Daily backup CronJob (<code>infrastructure/kubernetes/backup/cronjob.yaml</code>, 02:00 UTC)</td>
+<td>Not met while no backup runs. The CronJob would meet it once it can pull an image, its <code>vrsky-backup-config</code> Secret exists with a correct database URL, and it is applied.</td>
 </tr>
 <tr>
 <td><strong>RTO</strong> (max time to restore)</td>
 <td><strong>≤ 1h</strong></td>
-<td>A single <code>vrsky-cli restore</code> of the (small) management dump into a fresh DB runs in minutes; the procedure below + the CI restore drill keep it exercised</td>
+<td>Depends on having a backup. With one, a single <code>vrsky-cli restore</code> of the small management dump into a fresh DB should run in minutes. That is an estimate: it hasn't been measured on a production-sized dump.</td>
 </tr>
 </tbody>
 </table>
@@ -2474,7 +2512,8 @@ JetStream (durable, replicated) and large payloads in object storage; those
 have their own durability and are out of scope here.</p>
 </blockquote>
 <h2 id="how-a-backup-works">How a backup works<a class="headerlink" href="#how-a-backup-works" title="Permanent link">&para;</a></h2>
-<p><code>vrsky-cli backup</code> (shipped in the <code>vrsky-cli</code> image):
+<p><code>vrsky-cli backup</code> (source in <code>src/cmd/vrsky-cli/</code>; its image is built from
+the <code>Dockerfile</code> there, which today only the compose <code>backup</code> profile does):
 1. <code>pg_dump --format=custom</code> of the management DB,
 2. gzip,
 3. encrypt with <strong>AES-256-GCM</strong> using the platform <code>ENCRYPTION_KEY</code> (the same
@@ -2534,11 +2573,22 @@ versioning can't protect you from, so guard the key independently.</p>
 </li>
 </ol>
 <h2 id="the-ci-restore-drill">The CI restore drill<a class="headerlink" href="#the-ci-restore-drill" title="Permanent link">&para;</a></h2>
-<p><code>.github/workflows/dr-drill.yml</code> proves this path on every change to the backup
-tooling: it seeds a source Postgres, runs <code>vrsky-cli backup</code> to MinIO, runs
-<code>vrsky-cli restore</code> into a <em>separate</em> target Postgres, and asserts the sentinel
-rows survived. A green run is the standing guarantee that the backup format and
-restore command actually work — not just that they compile.</p>
+<p><code>.github/workflows/dr-drill.yml</code> runs on pushes and pull requests to <code>main</code> or
+<code>develop</code> that change <code>src/cmd/vrsky-cli/</code>, <code>src/pkg/crypto/</code>, <code>src/pkg/objectstore/</code>,
+<code>infrastructure/migrations/</code> or the workflow itself, and can be started by
+hand. It has no schedule. It:</p>
+<ol>
+<li>builds <code>vrsky-cli</code> from source with <code>go build</code>,</li>
+<li>starts two <code>postgres:16-alpine</code> databases and a MinIO in the runner,</li>
+<li>seeds the source with one table and two sentinel rows,</li>
+<li>runs <code>vrsky-cli backup</code> to MinIO, then <code>vrsky-cli restore</code> into the
+   separate target,</li>
+<li>checks that both rows arrived.</li>
+</ol>
+<p>A green run shows the backup format and the restore command work end to end.
+It doesn't cover the CronJob, its image or its Secret, the real schema and
+migrations, Postgres 18 (what production runs), or any production storage, and
+it says nothing about whether a production backup exists.</p>
 <h2 id="local-dry-run-compose">Local dry-run (compose)<a class="headerlink" href="#local-dry-run-compose" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>postgres-management<span class="w"> </span>minio-test<span class="w"> </span>minio-init
 docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>backup<span class="w">            </span><span class="c1"># backup the local mgmt DB → MinIO</span>

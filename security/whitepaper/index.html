@@ -2568,8 +2568,15 @@ its filter. Cross-tenant data sharing is explicit and consent-based: a request
 is created, approved by the data owner, and only then bridges data, with every
 access logged.</p>
 <h2 id="transport-gateway">Transport &amp; gateway<a class="headerlink" href="#transport-gateway" title="Permanent link">&para;</a></h2>
-<p>The UI and API share an origin behind a gateway (Traefik) that applies
-<strong>per-tenant rate limiting</strong> keyed to the subscription plan. Session auth uses
+<p>The UI and API share an origin. In production, TLS terminates at the
+ingress (ingress-nginx, with a Let's Encrypt certificate from cert-manager);
+inside the cluster, services talk over the cluster's private network without
+TLS. A gateway (Traefik) that applies <strong>per-tenant rate limiting</strong> keyed to
+the subscription plan exists for the Docker Compose stack but is not part of
+the production deployment. Production relies on the limits built into the
+services: plan quotas, failed-attempt limits on login, sign-up and
+remote-agent registration, and a per-connection rate limit on data
+ingestion. Session auth uses
 <code>SameSite</code> cookies; service-to-service calls (e.g. the OAuth token endpoint) use
 a shared service token.</p>
 <h2 id="reporting">Reporting<a class="headerlink" href="#reporting" title="Permanent link">&para;</a></h2>

@@ -3695,8 +3695,8 @@ encryption of every stateful component. The layers below are stacked:</p>
 </tr>
 <tr>
 <td>Transit</td>
-<td>All HTTP between services</td>
-<td>TLS terminated at Traefik, internal mTLS via the cluster mesh (cluster-trust CA).</td>
+<td>Client traffic to the public host</td>
+<td>TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer <code>letsencrypt-prod</code>, secret <code>vrsky-tls</code>, set on the <code>vrsky</code> Ingress in <code>infrastructure/kubernetes/ui/ingress.yaml</code>). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over <code>http://</code>, Postgres URLs use <code>sslmode=disable</code>, the NATS manifests set no TLS).</td>
 </tr>
 </tbody>
 </table>
@@ -3785,11 +3785,24 @@ control families.</p>
 <hr />
 <h2 id="disaster-recovery">Disaster Recovery<a class="headerlink" href="#disaster-recovery" title="Permanent link">&para;</a></h2>
 <p>The management Postgres (tenants, connections, secrets, OAuth grants,
-notification targets, audit log) is backed up daily and its restore path is
-tested in CI. See <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> for the full runbook — backup flow,
-the <code>vrsky-cli backup</code>/<code>restore</code>/<code>list</code> commands, RPO ≤ 24h / RTO ≤ 1h, the
-critical <code>ENCRYPTION_KEY</code> caveat, and the step-by-step recovery procedure. The
-backup CronJob + its config Secret are documented in
+notification targets, audit log) has backup and restore tooling, but as far as
+this repo shows, no scheduled backup runs in production:</p>
+<ul>
+<li><code>vrsky-cli backup</code>/<code>list</code>/<code>restore</code> exist, and the
+  <a href="../DR/#the-ci-restore-drill">DR drill</a> proves backup and restore against
+  throwaway databases in CI.</li>
+<li>A daily CronJob is defined in <code>infrastructure/kubernetes/backup/cronjob.yaml</code>,
+  but no script or workflow applies it, and its image
+  (<code>ghcr.io/valueretail/vrsky/vrsky-cli:latest</code>) is built nowhere. AKS can't
+  pull <code>ghcr.io</code> images anyway (see the warning above). Item 27 in
+  <code>plans/backlog.md</code> tracks this.</li>
+<li>No script or workflow snapshots the Postgres volume.</li>
+</ul>
+<p>The repo can't tell whether someone applied the CronJob by hand or set up
+backups on the Azure side. Until one of those is confirmed, treat production
+as having no backups. See <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> for the runbook: the
+backup flow, the RPO/RTO targets, the <code>ENCRYPTION_KEY</code> caveat and the recovery
+procedure. The CronJob and its config Secret are described in
 <a href="https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md"><code>infrastructure/kubernetes/backup/README.md</code></a>.</p>
 
 
