@@ -919,14 +919,22 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 	// deploy-connectors-azure.sh and deploy-backup-azure.sh). Everything else
 	// under infrastructure/kubernetes — the per-tenant NATS template, Loki and
 	// promtail, KES, MinIO's 4-replica layout, Traefik — is lab-only or
-	// created on demand and is not counted. The backup CronJob's pod runs a
-	// few minutes a day, but while it runs its request is reserved like any
-	// other, so it counts as one replica.
+	// created on demand and is not counted. The park CronJob is applied by
+	// hand in production and is counted as if its pod always ran.
+	// The backup CronJob's pod runs a few minutes a day, but while it runs its
+	// request is reserved like any other, so it counts as one replica too.
 	manifests := []string{
 		"platform-nats/statefulset.yaml", "postgresql/statefulset.yaml", "minio/deployment.yaml",
 		"management-api/deployment.yaml", "ui/deployment.yaml", "data-filter/deployment.yaml",
 		"data-converter/deployment.yaml", "alert-responder/deployment.yaml", "connectors/connectors.yaml",
-		"backup/cronjob.yaml",
+		"park/cronjob.yaml", "backup/cronjob.yaml",
+	}
+	type podSpec struct {
+		Containers []struct {
+			Resources struct {
+				Requests map[string]string `yaml:"requests"`
+			} `yaml:"resources"`
+		} `yaml:"containers"`
 	}
 	backupCounted := false
 	for _, rel := range manifests {
@@ -937,26 +945,21 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 		}
 		dec := yaml.NewDecoder(strings.NewReader(string(body)))
 		for {
-			type podTemplate struct {
-				Spec struct {
-					Containers []struct {
-						Resources struct {
-							Requests map[string]string `yaml:"requests"`
-						} `yaml:"resources"`
-					} `yaml:"containers"`
-				} `yaml:"spec"`
-			}
 			var doc struct {
 				Kind     string `yaml:"kind"`
 				Metadata struct {
 					Name string `yaml:"name"`
 				} `yaml:"metadata"`
 				Spec struct {
-					Replicas    *int        `yaml:"replicas"`
-					Template    podTemplate `yaml:"template"`
+					Replicas *int `yaml:"replicas"`
+					Template struct {
+						Spec podSpec `yaml:"spec"`
+					} `yaml:"template"`
 					JobTemplate struct {
 						Spec struct {
-							Template podTemplate `yaml:"template"`
+							Template struct {
+								Spec podSpec `yaml:"spec"`
+							} `yaml:"template"`
 						} `yaml:"spec"`
 					} `yaml:"jobTemplate"`
 				} `yaml:"spec"`
@@ -974,12 +977,13 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 			if doc.Kind == "DaemonSet" {
 				replicas = 2 // one per production node
 			}
-			pod := doc.Spec.Template
+			pod := doc.Spec.Template.Spec
 			if doc.Kind == "CronJob" {
-				pod = doc.Spec.JobTemplate.Spec.Template // concurrencyPolicy Forbid: one pod at a time
+				pod = doc.Spec.JobTemplate.Spec.Template.Spec
+				replicas = 1
 			}
 			sum := 0
-			for _, c := range pod.Spec.Containers {
+			for _, c := range pod.Containers {
 				sum += millis(c.Resources.Requests["cpu"])
 			}
 			if sum > 0 {
@@ -2021,6 +2025,227 @@ func TestParkWorkflow(t *testing.T) {
 	for _, forbidden := range []string{"az aks start", "kubectl ", "helm ", "deploy-core-azure.sh", "deploy-connectors-azure.sh", "in-cluster.sh"} {
 		if strings.Contains(all, forbidden) {
 			t.Errorf("park.yml runs %q; it must only stop the cluster", forbidden)
+		}
+	}
+}
+
+// The cluster stops itself at 16:00 Oslo time from a CronJob, because GitHub
+// runs Park hours late and Kubernetes runs a CronJob on time (#352). The job
+// logs in with workload identity, reads vrsky-prod's power state and stops it
+// only when it is Running. It must never start, change or delete anything.
+func TestClusterParkCronJob(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "infrastructure", "kubernetes", "park", "cronjob.yaml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	type container struct {
+		Name    string   `yaml:"name"`
+		Command []string `yaml:"command"`
+		Args    []string `yaml:"args"`
+		Env     []struct {
+			Name  string `yaml:"name"`
+			Value string `yaml:"value"`
+		} `yaml:"env"`
+		Resources struct {
+			Requests map[string]string `yaml:"requests"`
+		} `yaml:"resources"`
+	}
+	type doc struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name        string         `yaml:"name"`
+			Namespace   string         `yaml:"namespace"`
+			Annotations map[string]any `yaml:"annotations"`
+		} `yaml:"metadata"`
+		Spec struct {
+			Schedule                   string `yaml:"schedule"`
+			TimeZone                   string `yaml:"timeZone"`
+			ConcurrencyPolicy          string `yaml:"concurrencyPolicy"`
+			SuccessfulJobsHistoryLimit *int   `yaml:"successfulJobsHistoryLimit"`
+			FailedJobsHistoryLimit     *int   `yaml:"failedJobsHistoryLimit"`
+			StartingDeadlineSeconds    *int   `yaml:"startingDeadlineSeconds"`
+			JobTemplate                struct {
+				Spec struct {
+					ActiveDeadlineSeconds *int `yaml:"activeDeadlineSeconds"`
+					Template              struct {
+						Metadata struct {
+							Labels map[string]any `yaml:"labels"`
+						} `yaml:"metadata"`
+						Spec struct {
+							RestartPolicy      string      `yaml:"restartPolicy"`
+							ServiceAccountName string      `yaml:"serviceAccountName"`
+							InitContainers     []container `yaml:"initContainers"`
+							Containers         []container `yaml:"containers"`
+						} `yaml:"spec"`
+					} `yaml:"template"`
+				} `yaml:"spec"`
+			} `yaml:"jobTemplate"`
+		} `yaml:"spec"`
+	}
+	var cronJobs, accounts []doc
+	dec := yaml.NewDecoder(strings.NewReader(string(body)))
+	for {
+		var d doc
+		if err := dec.Decode(&d); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("park/cronjob.yaml: %v", err)
+		}
+		switch d.Kind {
+		case "CronJob":
+			cronJobs = append(cronJobs, d)
+		case "ServiceAccount":
+			accounts = append(accounts, d)
+		}
+	}
+	if len(cronJobs) != 1 {
+		t.Fatalf("park/cronjob.yaml holds %d CronJobs, want exactly 1", len(cronJobs))
+	}
+	cj := cronJobs[0]
+
+	for _, f := range []struct{ field, got, want, why string }{
+		{"schedule", cj.Spec.Schedule, "0 16 * * *", "the cluster stops at 16:00"},
+		{"timeZone", cj.Spec.TimeZone, "Europe/Oslo", "read in UTC, the stop lands at 17:00 or 18:00 Oslo"},
+		{"concurrencyPolicy", cj.Spec.ConcurrencyPolicy, "Forbid", "two runs must never race to stop the same cluster"},
+	} {
+		if f.got != f.want {
+			t.Errorf("CronJob %s is %q, want %q: %s", f.field, f.got, f.want, f.why)
+		}
+	}
+	for _, h := range []struct {
+		field string
+		v     *int
+	}{
+		{"successfulJobsHistoryLimit", cj.Spec.SuccessfulJobsHistoryLimit},
+		{"failedJobsHistoryLimit", cj.Spec.FailedJobsHistoryLimit},
+	} {
+		if h.v == nil || *h.v < 1 || *h.v > 5 {
+			t.Errorf("CronJob %s must be set between 1 and 5 so a few runs stay readable and finished pods do not pile up", h.field)
+		}
+	}
+	for _, d := range []struct {
+		field string
+		v     *int
+		why   string
+	}{
+		{"spec.startingDeadlineSeconds", cj.Spec.StartingDeadlineSeconds,
+			"without it a cluster started the next morning runs the missed 16:00 job at once and stops itself at 08:00"},
+		{"spec.jobTemplate.spec.activeDeadlineSeconds", cj.Spec.JobTemplate.Spec.ActiveDeadlineSeconds,
+			"a run left over across a stop must be failed when the cluster starts, not retried"},
+	} {
+		if d.v == nil || *d.v < 1 || *d.v > 900 {
+			t.Errorf("CronJob %s must be set and at most 900: %s", d.field, d.why)
+		}
+	}
+
+	pod := cj.Spec.JobTemplate.Spec.Template
+	if pod.Spec.RestartPolicy != "Never" {
+		t.Errorf("pod restartPolicy is %q, want Never: a failed stop is retried by the Job's backoff, not by restarting az in place", pod.Spec.RestartPolicy)
+	}
+	// A string, not a YAML bool: Kubernetes rejects a label value that is not a string.
+	if v, ok := pod.Metadata.Labels["azure.workload.identity/use"].(string); !ok || v != "true" {
+		t.Errorf(`pod template label azure.workload.identity/use is %#v, want the string "true": without it the webhook mounts no token and az login fails`, pod.Metadata.Labels["azure.workload.identity/use"])
+	}
+
+	sa := pod.Spec.ServiceAccountName
+	found := false
+	for _, a := range accounts {
+		if a.Metadata.Name != sa || a.Metadata.Namespace != cj.Metadata.Namespace {
+			continue
+		}
+		found = true
+		if id, _ := a.Metadata.Annotations["azure.workload.identity/client-id"].(string); strings.TrimSpace(id) == "" {
+			t.Errorf("ServiceAccount %s has no azure.workload.identity/client-id annotation; it names the managed identity the job logs in as", sa)
+		}
+	}
+	if sa == "" || !found {
+		t.Errorf("pod serviceAccountName %q names no ServiceAccount in this file in namespace %q; the federated credential trusts that one account", sa, cj.Metadata.Namespace)
+	}
+
+	var script strings.Builder
+	env := map[string]string{}
+	containers := append(append([]container{}, pod.Spec.InitContainers...), pod.Spec.Containers...)
+	if len(pod.Spec.Containers) == 0 {
+		t.Fatal("the CronJob's pod has no containers")
+	}
+	for _, c := range containers {
+		cpu, mem := c.Resources.Requests["cpu"], c.Resources.Requests["memory"]
+		if cpu == "" || mem == "" {
+			t.Errorf("container %s requests cpu=%q memory=%q; both must be set so the CPU budget counts it and the scheduler reserves room", c.Name, cpu, mem)
+		}
+		script.WriteString(strings.Join(c.Command, "\n") + "\n" + strings.Join(c.Args, "\n") + "\n")
+		for _, e := range c.Env {
+			env[e.Name] = e.Value
+		}
+	}
+	// Shell line continuations would split "az aks stop \" from its flags; join them.
+	// Then put the container's env values in for $NAME and ${NAME}, and drop
+	// quotes, so `-n "$CLUSTER"` reads as the cluster it names and a quoted
+	// "az" is still az.
+	text := strings.ReplaceAll(script.String(), "\\\n", " ")
+	text = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?`).ReplaceAllStringFunc(text, func(ref string) string {
+		if v, ok := env[strings.Trim(ref, "${}")]; ok {
+			return v
+		}
+		return ref
+	})
+	text = strings.NewReplacer(`"`, "", "'", "").Replace(text)
+
+	allowed := map[string]bool{"login": true, "aks show": true, "aks stop": true}
+	seen := map[string]int{}
+	azCall := regexp.MustCompile(`(?:^|[^\w.-])az[ \t]+(\S+)(?:[ \t]+(\S+))?`)
+	for _, m := range azCall.FindAllStringSubmatch(text, -1) {
+		verb := m[1]
+		if verb == "aks" {
+			verb += " " + m[2]
+		}
+		seen[verb]++
+		if !allowed[verb] {
+			t.Errorf("the job runs `az %s`; it may only run az login, az aks show and az aks stop", verb)
+		}
+	}
+	for _, want := range []string{"aks show", "aks stop"} {
+		if seen[want] == 0 {
+			t.Errorf("the job never runs `az %s`; it must read the power state and then stop the cluster", want)
+		}
+	}
+	// Every az aks call names the production cluster, its resource group and
+	// its subscription, and the stop never waits.
+	aksCall := regexp.MustCompile(`(?:^|[^\w.-])az[ \t]+aks[ \t]+(\S+)`)
+	target := map[string]string{"-n": "vrsky-prod", "-g": "vrsky-prod", "--subscription": "8c020b54-b237-4d6e-82ba-190f6a415d1d"}
+	long := map[string]string{"--name": "-n", "--resource-group": "-g"}
+	for _, line := range strings.Split(text, "\n") {
+		m := aksCall.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if m[1] == "stop" && !strings.Contains(line, "--no-wait") {
+			t.Errorf("`az aks stop` runs without --no-wait: %q; the pod runs on the nodes it stops and would be killed mid-call", strings.TrimSpace(line))
+		}
+		got := map[string]string{}
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			flag := fields[i]
+			if short, ok := long[flag]; ok {
+				flag = short
+			}
+			if _, ok := target[flag]; ok {
+				got[flag] = fields[i+1]
+			}
+		}
+		for flag, want := range target {
+			if got[flag] != want {
+				t.Errorf("`az aks %s` has %s %q, want %q: the job stops the production cluster and nothing else", m[1], flag, got[flag], want)
+			}
+		}
+	}
+	if !strings.Contains(text, "powerState") || !strings.Contains(text, "Running") {
+		t.Error("the job must read powerState and stop the cluster only when it is Running")
+	}
+	for _, tool := range []string{"kubectl", "helm"} {
+		if regexp.MustCompile(`\b` + tool + `\b`).MatchString(text) {
+			t.Errorf("the job runs %s; it must only stop the cluster through az", tool)
 		}
 	}
 }

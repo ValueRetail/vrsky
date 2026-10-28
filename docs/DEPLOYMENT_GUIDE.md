@@ -437,7 +437,7 @@ encryption of every stateful component. The layers below are stacked:
 | Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. |
 | Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, KES key store | Encrypted StorageClass (cloud KMS) or LUKS on bare metal. |
 | Object storage | MinIO bucket contents | SSE-S3 via KES sidecar wrapping a KMS data key. |
-| Transit | All HTTP between services | TLS terminated at Traefik, internal mTLS via the cluster mesh (cluster-trust CA). |
+| Transit | Client traffic to the public host | TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer `letsencrypt-prod`, secret `vrsky-tls`, set on the `vrsky` Ingress in `infrastructure/kubernetes/ui/ingress.yaml`). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over `http://`, Postgres URLs use `sslmode=disable`, the NATS manifests set no TLS). |
 
 ### Per-target setup
 
@@ -544,9 +544,17 @@ control families.
 ## Disaster Recovery
 
 The management Postgres (tenants, connections, secrets, OAuth grants,
-notification targets, audit log) is backed up daily and its restore path is
-tested in CI. See **[`docs/DR.md`](DR.md)** for the full runbook — backup flow,
-the `vrsky-cli backup`/`restore`/`list` commands, RPO ≤ 24h / RTO ≤ 1h, the
-critical `ENCRYPTION_KEY` caveat, and the step-by-step recovery procedure. The
-backup CronJob + its config Secret are documented in
-[`infrastructure/kubernetes/backup/README.md`](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md).
+notification targets, audit log) is meant to have two backup layers in
+production, and both need a one-time human setup before they run:
+
+- Azure Disk Backup of the Postgres disk, daily, kept 7 days. A human sets
+  up the vault; the repo has no part in it.
+- An encrypted logical dump, weekdays at 12:00 Oslo, from the CronJob
+  `vrsky-mgmt-backup` to Azure Blob storage, kept 14 days. CI builds its
+  image into ACR and the deploy job applies it, suspended until a human has
+  created its storage account and the `vrsky-backup-config` Secret.
+
+The repo can't show whether those human steps are done. Check before you
+rely on a backup. **[`docs/DR.md`](DR.md)** has the state, retention, the
+`ENCRYPTION_KEY` caveat and both restore runbooks; the setup is in
+[Backup & restore](operator/backup.md).

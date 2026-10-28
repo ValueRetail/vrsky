@@ -1,0 +1,119 @@
+# The cluster stops itself at 16:00 Oslo time (#352).
+#
+# GitHub fires only a few of Park's scheduled runs and the first lands hours
+# late (2026-10-22: 20:28 Oslo), so the stop moved into the cluster, where a
+# CronJob runs on time; Park (.github/workflows/park.yml) stays as the
+# backstop. The stop only matters while the cluster runs, which is exactly
+# when this CronJob can run.
+#
+# The job logs in with AKS workload identity as a user-assigned managed
+# identity that can only read and stop the vrsky-prod cluster. That identity,
+# its federated credential and its role are created once by hand, and the
+# client id below is filled in before this file is applied:
+# docs/operator/cost-parking.md, "The 16:00 stop". Not applied by the deploy
+# scripts.
+#
+# --no-wait: the job runs on the nodes it is stopping, so it asks for the
+# stop and exits instead of waiting to be killed. startingDeadlineSeconds:
+# a start the next morning would otherwise run the missed 16:00 job at once
+# and stop the cluster again. activeDeadlineSeconds: a run that is still
+# around after a stop and start is failed, not retried.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vrsky-park
+  labels:
+    app.kubernetes.io/part-of: vrsky
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-park
+  namespace: vrsky-park
+  annotations:
+    # The managed identity "vrsky-cluster-park": az identity show -g vrsky-prod -n vrsky-cluster-park --query clientId -o tsv
+    azure.workload.identity/client-id: REPLACE_WITH_CLUSTER_PARK_IDENTITY_CLIENT_ID
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cluster-park
+  namespace: vrsky-park
+  labels:
+    app: cluster-park
+spec:
+  schedule: "0 16 * * *"
+  timeZone: Europe/Oslo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: cluster-park
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: cluster-park
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: stop
+              image: mcr.microsoft.com/azure-cli:2.91.0
+              env:
+                - name: SUBSCRIPTION
+                  value: 8c020b54-b237-4d6e-82ba-190f6a415d1d
+                - name: RESOURCE_GROUP
+                  value: vrsky-prod
+                - name: CLUSTER
+                  value: vrsky-prod
+                - name: HOME
+                  value: /home/park
+                - name: AZURE_CONFIG_DIR
+                  value: /home/park/.azure
+                - name: AZURE_CORE_COLLECT_TELEMETRY
+                  value: "false"
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  az login --service-principal --username "$AZURE_CLIENT_ID" --tenant "$AZURE_TENANT_ID" \
+                    --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" --output none
+                  state=$(az aks show --subscription "$SUBSCRIPTION" -g "$RESOURCE_GROUP" -n "$CLUSTER" --query powerState.code -o tsv)
+                  echo "$CLUSTER is $state"
+                  if [ "$state" = Running ]; then
+                    az aks stop --subscription "$SUBSCRIPTION" -g "$RESOURCE_GROUP" -n "$CLUSTER" --no-wait
+                    echo "stop requested at $(date -u '+%H:%M') UTC"
+                  fi
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: home
+                  mountPath: /home/park
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: home
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
