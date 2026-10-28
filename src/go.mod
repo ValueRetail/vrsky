@@ -20,6 +20,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lib/pq v1.10.2
+	github.com/moby/patternmatcher v0.6.1
 	github.com/nats-io/nats-server/v2 v2.15.1
 	github.com/nats-io/nats.go v1.53.1
 	github.com/pkg/sftp v1.13.6

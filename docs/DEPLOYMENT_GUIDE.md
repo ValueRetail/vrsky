@@ -1,82 +1,82 @@
-# VRSky Docker Deployment Guide - PHASE 12
+# Deployment guide
 
-This guide covers the complete deployment pipeline for VRSky services using Docker and Kubernetes, including the React UI frontend and all 9 backend services.
+How VRSky's container images are built, where they live and how they reach
+production. Production is the AKS cluster `vrsky-prod`, which pulls its
+images from the Azure Container Registry `vrskyprodacr`, and a merge to
+`main` builds and deploys the images it touched. The day-to-day side of
+that (what a merge deploys, watching a run, the parked cluster, rolling
+back) is in [Deploying](operator/deploy.md). This page covers the parts
+around it: local builds, the images, the pipeline, and the scripts an
+operator runs by hand.
 
-**Target Date**: PHASE 12 (Docker Deployment)  
-**Status**: 🔄 Implementation in Progress
-
-## Table of Contents
-
-1. [Architecture Overview](#architecture-overview)
-2. [Local Development](#local-development)
-3. [Docker Image Building](#docker-image-building)
-4. [GitHub Actions CI/CD Pipeline](#github-actions-cicd-pipeline)
-5. [Kubernetes Deployment](#kubernetes-deployment)
-6. [Versioning Strategy](#versioning-strategy)
-7. [Troubleshooting](#troubleshooting)
-8. [Disaster Recovery](#disaster-recovery)
+No workflow pushes to GitHub Container Registry or Docker Hub, whatever
+older versions of this page said.
 
 ---
 
-## Architecture Overview
+## Images
 
-### Services and Components
+Every VRSky image is `vrskyprodacr.azurecr.io/vrsky/<name>:latest`.
+There are no version or commit tags. Each build overwrites `:latest`, and a
+deploy pins the core deployments to the digest `:latest` pointed at when it
+ran (see [Tags and digests](#tags-and-digests)).
 
-VRSky consists of:
+`infrastructure/azure/build-push-acr.sh` builds them in two groups, and
+`infrastructure/azure/affected.sh` and the deploy scripts use the same
+split:
 
-- **1 Frontend**: React SPA (UI)
-- **9 Backend Services**:
-  - `producer` - Message production
-  - `consumer` - Basic message consumption
-  - `converter` - Data format conversion
-  - `filter` - Message filtering
-  - `management-api` - Tenant and integration management
-  - `file-consumer` - File-based message source
-  - `file-producer` - File-based message destination
-  - `postgres-consumer` - PostgreSQL CDC consumer
-  - `postgres-producer` - PostgreSQL message sink
+| Group | Images | Rolled out by |
+|---|---|---|
+| core | `management-api`, `ui`, `data-filter`, `data-converter`, `alert-responder` | `deploy-core-azure.sh`, by digest |
+| connectors | `sitoo`, `front-systems`, `business-central`, `visma`, `brightpearl` and `sap-s4hana`, each as `-consumer` and `-producer`; `api-consumer`, `webhook-consumer`, `file-consumer`, `db-consumer`, `tenant-consumer`, `cloud-storage-consumer`, `sftp-consumer`, `kafka-consumer`, `rabbitmq-consumer`, `salesforce-consumer`, `remote-agent`; `http-producer`, `db-producer`, `file-producer`, `cloud-storage-producer`, `sftp-producer`, `kafka-producer`, `rabbitmq-producer`, `salesforce-producer` | `deploy-connectors-azure.sh`, or a restart of the deployment |
 
-### Container Registry
+The UI is built from `ui/Dockerfile`, every other image from
+`src/cmd/<name>/Dockerfile`. The UI runs in namespace `vrsky-ui`; the other
+core services and all connectors run in `vrsky-platform`, as
+`vrsky-<name>`.
 
-All images are pushed to **GitHub Container Registry (GHCR)**:
+Four directories under `src/cmd` have a Dockerfile but no image in ACR:
+`postgres-consumer`, `postgres-producer`, `mock-sap` (a fake SAP endpoint
+for the local stack) and `vrsky-cli`.
 
-```
-ghcr.io/ValueRetail/vrsky/<service>:<tag>
-```
-
-### Image Naming Convention
-
-- **Development**: `vrsky/<service>:latest` (local builds)
-- **Production**: `ghcr.io/ValueRetail/vrsky/<service>:latest` (GHCR)
-- **Versioned**: `ghcr.io/ValueRetail/vrsky/<service>:v1.2.3` (semver tags)
-- **Commit Hash**: `ghcr.io/ValueRetail/vrsky/<service>:sha-a1b2c3d4` (branch builds)
+!!! note "postgres-consumer / postgres-producer are not built here"
+    `postgres-consumer` (CDC, configured from `POSTGRES_INPUT_*`) and
+    `postgres-producer` (a writer, `POSTGRES_OUTPUT_*`) predate the
+    connection-config model. No connector type claims them, so no tenant
+    pipeline can use them. `postgres-consumer` is a load-harness fixture
+    (`tests/load/`), and `docker compose` builds both from source, so no
+    published image is needed.
 
 ---
 
-## Local Development
+## Local development
 
 ### Prerequisites
 
-- Docker 24.0+
-- Docker Compose 2.20+
-- Node.js 20+
-- Go 1.22+
+- Docker with Compose v2 (the `docker compose` subcommand)
+- Node.js 20 and Go 1.26 if you build or test outside containers
 - Git
 
-### Building Locally
+### Running locally
+
+The local stack is `docker-compose.yml` at the repo root. It runs on
+built-in development defaults. To set your own `ENCRYPTION_KEY`, copy
+`.env.example` to `.env` at the repo root and fill it in. The database
+passwords are fixed dev values in `docker-compose.yml`; `.env` doesn't
+change them ([Install](operator/install.md) lists what matters).
 
 #### Option 1: Build UI Only (Dev Mode)
 
 ```bash
 # Serves UI on http://localhost:5173 with hot reload
-docker-compose -f docker-compose.ui.yml up -d --profile dev ui
+docker compose -f docker-compose.ui.yml --profile dev up -d ui
 ```
 
 #### Option 2: Build UI Production Image
 
 ```bash
 # Builds optimized production image
-docker-compose -f docker-compose.ui.yml up -d --profile prod ui-prod
+docker compose -f docker-compose.ui.yml --profile prod up -d --build ui-prod
 
 # Access on http://localhost:80
 ```
@@ -84,481 +84,345 @@ docker-compose -f docker-compose.ui.yml up -d --profile prod ui-prod
 #### Option 3: Build All Services (Current Flow)
 
 ```bash
-# Build full stack from current docker-compose.yml
-docker-compose build
-docker-compose up -d
+# Build and start the full stack from docker-compose.yml
+docker compose build
+docker compose up -d
 ```
 
-### Manual Docker Build Commands
+The full stack is large. `make up-core` starts the smaller set a laptop
+can run (`docker compose up -d --build` with a fixed service list; see the
+root `Makefile`).
+
+### Building One Image by Hand
+
+There is no make target that only builds backend images (`make up-core`
+builds the core set as part of starting it).
+
+Every Dockerfile uses the repo root as its build context, so run these from
+the repo root:
 
 ```bash
-# Build UI image locally
-cd vrsky
-docker build -t vrsky/ui:latest -f ui/Dockerfile .
+# A backend service, the way the local stack builds it
+docker compose build http-producer
 
-# Build individual backend service
+# The same with plain docker
 docker build -t vrsky/http-producer:latest -f src/cmd/http-producer/Dockerfile .
 
-# Use Makefile for convenience
-cd src
-make docker-build-ui
-make docker-push-ui
+# The UI (not part of docker-compose.yml)
+docker build -t vrsky/ui:latest -f ui/Dockerfile .
 ```
 
-### Makefile Commands
-
-The `src/Makefile` provides convenient targets:
-
-```bash
-# Build UI
-make docker-build-ui
-
-# Push UI to registry
-make docker-push-ui
-
-# Build backend services
-make docker-build              # Producer (default)
-make docker-build-consumer
-make docker-build-filter
-make docker-build-converter
-
-# Push backend services
-make docker-push
-make docker-push-consumer
-make docker-push-filter
-make docker-push-converter
-```
+The service names are the ones in `docker-compose.yml`; `docker compose
+config --services` lists them.
 
 ---
 
-## Docker Image Building
+## What the Dockerfiles do
 
-### Multi-Stage Build Strategy
+### Go services
 
-All images use multi-stage builds to minimize final size:
+This holds for every Go image in ACR. Two of the four Dockerfiles outside
+ACR differ: `mock-sap` has no health check, and `vrsky-cli` has none either
+and runs on `postgres:18-alpine`.
 
-#### Backend Services (Go)
+- Build stage `golang:1.26-alpine`: `go mod download` (up to three attempts),
+  then a static `linux/amd64` binary (`CGO_ENABLED=0`).
+- Runtime stage `alpine:3.18` or `alpine:3.19` with `ca-certificates` and
+  `curl`, and a `HEALTHCHECK` on the service's health port. The Go images
+  set no `USER`, so they run as root unless the manifest overrides it:
+  `management-api`, `data-filter` and `data-converter` run as UID 1000 on
+  Kubernetes.
+- `management-api` also builds the Windows remote agent into the image,
+  stamped with the `AGENT_VERSION` build argument (`dev` unless the ACR
+  build passes `git describe`), and bundles `infrastructure/migrations`
+  with `golang-migrate`, which applies them on every start.
 
-```dockerfile
-# Stage 1: Build
-FROM golang:1.21-alpine
-# ... compile binary ...
+### UI
 
-# Stage 2: Runtime
-FROM alpine:3.21
-# Copy binary from stage 1
-# Minimal dependencies
-```
+- Build stage `node:20-alpine`: `npm ci`, then `npm run build`. No tests
+  run during the image build; CI runs them (below).
+- Runtime stage `nginx:1.27-alpine`, serving the bundle as the `nginx`
+  user with `ui/nginx.conf` and `ui/nginx.default.conf`.
 
-#### Frontend (React + Nginx)
+### Build context
 
-```dockerfile
-# Stage 1: Build
-FROM node:20-alpine
-# ... npm build ...
-
-# Stage 2: Runtime
-FROM nginx:1.27-alpine
-# Copy built artifacts from stage 1
-# Optimized for static serving
-```
-
-### Docker Ignore
-
-Critical for build performance:
-
-- **ui/.dockerignore**: Excludes node_modules, coverage, dist (but keeps package-lock.json)
-- Prevents large context transfers
-- Speeds up builds with Docker BuildKit cache
-
-### Build Process
-
-1. Tests run during image build (Go: `go test` + backend tests)
-2. UI tests run in Docker: all 279 tests must pass
-3. Production artifacts built: Go binaries, Vite bundle
-4. Minimal runtime image created with only necessary files
-5. Non-root user enforced (security best practice)
+The context is always the repo root, and the root `.dockerignore` is the
+only one in the repo. It excludes everything, then lets back in `src/go.mod`,
+`src/go.sum`, `src/cmd`, `src/pkg`, `src/internal`, `ui` and
+`infrastructure/migrations`. Under `ui` it still drops `node_modules`,
+`dist`, test coverage, `.env*` files, logs and editor files. A plain
+`.dockerignore` under `ui/` or `src/` is ignored. BuildKit does read a
+`<Dockerfile>.dockerignore` next to the Dockerfile (for example
+`ui/Dockerfile.dockerignore`) instead of the root file, so don't add one
+unless it repeats the root allowlist.
 
 ---
 
-## GitHub Actions CI/CD Pipeline
+## CI/CD pipeline
 
-### Workflow: `.github/workflows/build-push.yml`
+`.github/workflows/build-push.yml` runs on pushes to `main`, `develop` and
+`feature/**`, on tags matching `v*`, and on pull requests to `main` and
+`develop`. Only a push to `main` builds images; everything else runs the
+tests and stops.
 
-**Triggers**:
-- Push to `main`, `develop`, `feature/**` branches
-- Tags matching `v*` (semantic versioning)
-- Pull requests to `main`, `develop`
+| Job | Runs | What it does |
+|---|---|---|
+| Detect changed paths | always | Decides whether `ui/**` changed |
+| Test UI | when `ui/**` changed | `npm ci`, `npm run test:coverage` (thresholds in `ui/vitest.config.ts`), `npm run build` |
+| Go Tests | pushes and PRs | `promtool` on the alert rules, `gofmt`, `go test -v -race -cover ./...` against a Postgres service, the `pkg/io` state-store tests, `golangci-lint`, the OpenAPI and tenant-filter lints |
+| Remote agent on Windows | pushes and PRs | Agent tests and the install script on a Windows runner |
+| Build remote agent binaries | pushes and PRs | `make build-agent`, uploaded as the `vrsky-agent` artifact |
+| Plan the rollout | pushes to `main`, once the jobs above passed or were skipped | Feeds the merge's changed paths to `affected.sh` |
+| Build `<image>` in ACR | one runner per image the plan named | `az acr build --registry vrskyprodacr --image vrsky/<image>:latest` with the image's Dockerfile and the repo root as context |
+| Deploy to production | after the builds | Rolls out what the plan named, then the smoke check |
 
-### Build Matrix
-
-The workflow builds these services in parallel:
-
-| Service | Path | Image Registry |
-|---------|------|----------------|
-| management-api | src/cmd/management-api | ghcr.io/ValueRetail/vrsky/management-api |
-| data-filter | src/cmd/data-filter | ghcr.io/ValueRetail/vrsky/data-filter |
-| data-converter | src/cmd/data-converter | ghcr.io/ValueRetail/vrsky/data-converter |
-| file-consumer | src/cmd/file-consumer | ghcr.io/ValueRetail/vrsky/file-consumer |
-| file-producer | src/cmd/file-producer | ghcr.io/ValueRetail/vrsky/file-producer |
-| ui | ui | ghcr.io/ValueRetail/vrsky/ui |
-
-!!! note "postgres-consumer / postgres-producer are not built here"
-    They are CDC workers configured from `POSTGRES_INPUT_*` environment
-    variables, predating the connection-config model, and `postgres` is not a
-    node type — no tenant can build a pipeline that uses them. They remain as a
-    load-harness fixture (`tests/load/`), and `docker-compose` builds them
-    locally from source, so no published image is needed.
-
-### Image Tags
-
-Each build creates **multiple tags**:
-
-```
-ghcr.io/ValueRetail/vrsky/<service>:latest        # Always latest from main
-ghcr.io/ValueRetail/vrsky/<service>:v1.2.3        # Semantic version (on tags)
-ghcr.io/ValueRetail/vrsky/<service>:sha-a1b2c3d4  # Commit hash (on branches)
-```
-
-### Cache Strategy
-
-- Uses GitHub Actions Docker Cache (`type=gha`)
-- Caches each layer for faster rebuilds
-- Parallelizes builds for all services
-- Typical build time: 5-15 minutes for all services
-
-### Running Tests in CI
-
-```yaml
-test:
-  # UI tests (Node.js)
-  - npm ci
-  - npm run test  # All 279 tests
-  - npm run build
-
-go-tests:
-  # Go tests with race detector
-  - go test -v -race -cover ./...
-  - golangci-lint run
-```
+`az acr build` runs in the registry: the runner uploads the build context
+and ACR builds it for `linux/amd64`. There is no layer cache on the GitHub
+side. What a merge deploys, how the deploy job reaches the cluster and what
+happens while the cluster is parked are all in
+[Deploying](operator/deploy.md).
 
 ---
 
-## Kubernetes Deployment
+## Building and deploying by hand
 
-### Namespace Structure
+A merge to `main` does all of this for you. By hand is for a rollback in a
+hurry, the UI's nginx config and Ingress (the deploy job doesn't apply
+`infrastructure/kubernetes/ui/`), and a first bring-up on an empty cluster,
+which has its own section below. Run the scripts from a repo checkout,
+signed in with `az login` to an account that can build in `vrskyprodacr`;
+the deploy scripts also run `kubectl`, so they need a kubeconfig for
+`vrsky-prod` from an address the API server accepts.
+[How the job reaches Azure](operator/deploy.md#how-the-job-reaches-azure)
+explains that limit.
 
-```
-vrsky-ui                    # UI frontend (NEW in PHASE 12)
-vrsky-platform              # Existing backend services
-vrsky-monitoring            # Prometheus, Grafana
-vrsky-messaging             # NATS platform
-vrsky-tenants               # Per-tenant NATS accounts
-```
-
-### UI Deployment Manifests
-
-All UI manifests in `infrastructure/kubernetes/ui/`:
-
-#### 1. **namespace.yaml**
-
-Isolates UI in `vrsky-ui` namespace with labels.
-
-#### 2. **configmap.yaml**
-
-Configuration for UI environment:
-- `VITE_API_BASE_URL` - Backend API endpoint
-- Feature flags (metrics, logging, etc.)
-- Performance settings
-
-#### 3. **deployment.yaml**
-
-- **Replicas**: 3 (HA configuration)
-- **Image**: `ghcr.io/ValueRetail/vrsky/ui:latest`
-- **Resources**: 
-  - Request: 100m CPU, 128Mi memory
-  - Limit: 500m CPU, 256Mi memory
-- **Probes**: Liveness (port 80/health) + Readiness (port 80/index.html)
-- **Security**: Non-root user (UID 101), read-only root, no privileges
-- **Volumes**: emptyDir for cache, /tmp, /var/run
-
-#### 4. **service.yaml**
-
-ClusterIP service exposing port 80 internally.
-
-#### 5. **ingress.yaml**
-
-Routes external traffic:
-- Hosts: `ui.vrsky.local`, `ui.valueretalgroup.no`
-- TLS termination (cert-manager)
-- NGINX ingress controller
-
-#### 6. **hpa.yaml**
-
-Horizontal Pod Autoscaling:
-- **Min replicas**: 2
-- **Max replicas**: 5
-- **Triggers**:
-  - CPU > 70%
-  - Memory > 80%
-- **Scaling behavior**: Fast scale-up (30s), gradual scale-down (300s)
-
-#### 7. **pdb.yaml**
-
-Pod Disruption Budget:
-- **Min available**: 1 pod (maintains availability during cluster updates)
-
-### Deploying to k3d (Local)
+From anywhere else, `infrastructure/azure/in-cluster.sh` runs a script
+inside the cluster, but only the ones written for its runtime, which has no
+`az`, `sed` or `perl`: `deploy-core-azure.sh` with `DIGESTS_FILE` (digests
+resolved beforehand, as the deploy job does), `deploy-connectors-azure.sh`,
+`install-monitoring.sh` and `smoke-prod.sh`. `deploy-azure.sh` and
+`deploy-ui-azure.sh` can't run through it.
 
 ```bash
-# Create k3d cluster (already exists from PHASE 11)
-k3d cluster create vrsky-k3d --config infrastructure/kubernetes/k3d-config.yaml
+# Build in ACR: core, connectors, or all (the default)
+infrastructure/azure/build-push-acr.sh core
 
-# Deploy UI namespace
-kubectl apply -f infrastructure/kubernetes/ui/namespace.yaml
+# Roll the core services to what :latest points at now
+DRY_RUN=1 infrastructure/azure/deploy-core-azure.sh   # show what would change
+infrastructure/azure/deploy-core-azure.sh             # all five
+infrastructure/azure/deploy-core-azure.sh ui          # or a subset
 
-# Deploy UI components
-kubectl apply -f infrastructure/kubernetes/ui/
-
-# Verify deployment
-kubectl get pods -n vrsky-ui
-kubectl logs -f -n vrsky-ui deployment/vrsky-ui
-
-# Port-forward for testing
-kubectl port-forward -n vrsky-ui svc/vrsky-ui 8080:80
-# Access: http://localhost:8080
+# Regenerate and apply the connector manifest, then restart the fleet
+infrastructure/azure/deploy-connectors-azure.sh
 ```
 
-### Deploying to K3s Production (Oslo)
+`deploy-core-azure.sh` reads each digest from ACR, refuses anything that
+isn't a `sha256:` digest, sets the image, waits for the rollout and reads
+the deployment back to check what landed. It only updates deployments that
+already exist.
 
-!!! danger "Not the AKS cluster (`vrsky-prod`)"
+To change the UI's nginx config, Service, PDB or Ingress on a running
+cluster, re-run `bash infrastructure/azure/deploy-ui-azure.sh`. It applies
+the deployment with `ui:latest` rather than a digest, so run
+`deploy-core-azure.sh ui` afterwards to pin it again. It also applies
+`ui/ingress.yaml`, whose header says to diff it against the live object
+first.
 
-    On AKS, use `infrastructure/azure/deploy-core-azure.sh`. Do **not**
-    `kubectl apply -f infrastructure/kubernetes/ui/` there: those manifests are
-    shared with the local k3d path and name `ghcr.io` images AKS cannot pull, so
-    an apply produces `ImagePullBackOff`. The AKS deployments are also pinned by
-    digest, which means `kubectl rollout restart` changes no image and silently
-    redeploys the running one.
+### First bring-up
 
-    The script resolves each digest from ACR, validates it, rolls out, and then
-    re-reads the cluster to confirm what landed. Run `build-push-acr.sh` first.
+Only on an empty cluster, in this order:
 
-Same manifests work for production K3s cluster:
+1. `infrastructure/azure/deploy-azure.sh`: NATS, Postgres, MinIO, the
+   transforms and the management API, from a copy of
+   `infrastructure/kubernetes/` with the image references rewritten to ACR,
+   plus the `acr-pull` pull secret. Never run it, or
+   `infrastructure/kubernetes/deploy-vrsky-platform.sh` which it wraps,
+   against production (see the warning below).
+2. `bash infrastructure/azure/deploy-ui-azure.sh`: the UI and the public
+   Ingress (below). The file isn't executable, hence `bash`.
+3. `infrastructure/azure/deploy-connectors-azure.sh`: the connectors.
+4. `PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`:
+   monitoring and the alert rules. It stops unless the `vrsky-monitoring`
+   namespace and its `alerts-webhook-token` and `grafana-admin` Secrets
+   exist; "Azure profile (prod)" in
+   `infrastructure/kubernetes/monitoring/README.md` lists what to create
+   first.
 
-```bash
-# Set kubeconfig to production
-export KUBECONFIG=~/.kube/vrsky-production.yaml
+Then by hand:
 
-# Deploy (same commands as k3d)
-kubectl apply -f infrastructure/kubernetes/ui/
+- The alert responder: its secrets and a `kubectl apply` of its manifest,
+  as [Alert responder](operator/alert-responder.md) describes.
+  `deploy-core-azure.sh` updates it afterwards but can't create it, so on a
+  cluster without it, a run over all five core services reports it missing
+  and exits 1.
+- The webhook and remote-agent Ingresses,
+  `infrastructure/kubernetes/ingress/webhooks-ingress.yaml` and
+  `agent-ingress.yaml`; read each file's header before applying it.
 
-# Verify rolling deployment
-kubectl rollout status deployment/vrsky-ui -n vrsky-ui
-```
+None of the Azure scripts installs ingress-nginx or cert-manager. The UI's
+Ingress assumes both, with a `letsencrypt-prod` ClusterIssuer
+(`infrastructure/kubernetes/ingress/cert-issuers.yaml`;
+`install-cert-manager.sh` next to it installs cert-manager, and
+`infrastructure/kubernetes/ingress/README.md` has the `helm` command for
+ingress-nginx).
 
-### Blue-Green Deployment (Optional)
+`deploy-azure.sh` starts on the committed development secrets; replace them
+before any real connection (the script's closing message says which).
 
-For zero-downtime updates:
+!!! danger "On a running cluster, use `deploy-core-azure.sh` and `deploy-ui-azure.sh`"
 
-```bash
-# Update image in deployment.
-# On AKS this is what deploy-core-azure.sh does for you, with the digest read
-# from ACR rather than typed — hand-copying it has gone wrong more than once.
-kubectl set image deployment/vrsky-ui \
-  ui=ghcr.io/ValueRetail/vrsky/ui:v1.2.3 \
-  -n vrsky-ui
+    Don't re-run `deploy-azure.sh` or `deploy-vrsky-platform.sh` on
+    production. Without a local `secret.yaml` they apply
+    `secret.example.yaml`, which overwrites the `postgres-credentials`
+    Secret in `vrsky-platform` (`connection_string`, `encryption_key`) with
+    the committed development values: stored credentials stop decrypting
+    and the management API loses its database.
 
-# Monitor rollout
-kubectl rollout status deployment/vrsky-ui -n vrsky-ui
+    Don't `kubectl apply` the core and UI manifests either.
+    `infrastructure/kubernetes/{management-api,data-filter,data-converter,ui}/`
+    are shared with the local k3d path and name `ghcr.io` images that AKS
+    cannot pull, so the pods end up in `ImagePullBackOff`
+    (`InvalidImageName` for the UI, whose reference has capital letters).
+    `deploy-ui-azure.sh` applies the UI manifests from a rewritten copy.
 
-# Rollback if needed
-kubectl rollout undo deployment/vrsky-ui -n vrsky-ui
-```
+    And don't `kubectl rollout restart` a core deployment to ship a new
+    image: it is pinned by digest, so a restart redeploys the image it
+    already runs. `deploy-core-azure.sh` sets the new digest.
 
 ---
 
-## Versioning Strategy
+## Kubernetes manifests
 
-### Semantic Versioning (SemVer)
+### The UI manifests
 
-VRSky follows semantic versioning: **MAJOR.MINOR.PATCH**
+`infrastructure/kubernetes/ui/` holds the UI's manifests.
+`deploy-ui-azure.sh` uses them like this:
 
-Example: `v1.2.3`
+| File | On AKS |
+|---|---|
+| `namespace.yaml` | Not applied; the script creates `vrsky-ui` itself and copies the `acr-pull` secret into it |
+| `configmap.yaml` | Applied. Its `VITE_*` values have no effect; the file's header explains why |
+| `deployment.yaml` | Applied from a copy: image `vrskyprodacr.azurecr.io/vrsky/ui:latest`, `imagePullPolicy: Always`, 2 replicas, and the `vrsky-ui-nginx` ConfigMap mounted as the nginx config, which proxies `/api` and `/ws` to the management API |
+| `service.yaml` | Applied: ClusterIP `vrsky-ui`, port 80 |
+| `pdb.yaml` | Applied: at least one replica stays up during a drain |
+| `ingress.yaml` | Applied: Ingress `vrsky` for `vrsky.valueretail.no` and `20.251.107.2.sslip.io`, class `nginx`, certificate from cert-manager (`letsencrypt-prod`) in secret `vrsky-tls` |
+| `hpa.yaml` | Not applied by any script |
 
-### Git Tag Strategy
+After that first run, `deploy-core-azure.sh` only changes the UI
+deployment's image, pinned to a digest.
 
-```bash
-# Create a release tag
-git tag -a v1.2.3 -m "Release v1.2.3: Add UI deployment"
-git push origin v1.2.3
+### Local cluster (k3d)
 
-# GitHub Actions automatically builds and pushes:
-# - ghcr.io/ValueRetail/vrsky/ui:latest
-# - ghcr.io/ValueRetail/vrsky/ui:v1.2.3
-# - ... (all 10 services)
-```
+`infrastructure/scripts/local-up.sh` creates the k3d cluster `vrsky-dev`
+from `infrastructure/kubernetes/k3d-config.yaml`, and
+`infrastructure/kubernetes/deploy-vrsky-platform.sh` deploys the platform
+onto it. The cluster can't pull the registries the manifests name, so
+`infrastructure/scripts/k3d-load-images.sh [core|connectors|all]` builds
+images from your checkout and imports them into the cluster.
 
-### Image Version Resolution
+Only `management-api` lines up today. The script imports `data-filter` and
+`data-converter` as `localhost:5000/vrsky/...` while their manifests pull
+`ghcr.io/valueretail/vrsky/...`. The `connectors` scope imports nine
+connectors as `localhost:5000/vrsky/...`, which nothing on k3d deploys (the
+connector manifest names ACR and only `deploy-connectors-azure.sh` applies
+it). And the UI doesn't run on k3d at all: the
+script loads no UI image, and the manifest's
+`ghcr.io/ValueRetail/vrsky/ui:latest` has capital letters, which Docker and
+Kubernetes reject in an image reference. Use the compose options above for
+the UI.
 
-The workflow uses `scripts/get-version.sh`:
+---
 
-```bash
-#!/bin/bash
-# Returns git tag (v1.2.3) or commit hash (sha-a1b2c3d4)
+## Tags and digests
 
-VERSION=$(git describe --exact-match --tags 2>/dev/null || \
-          echo "sha-$(git rev-parse --short HEAD)")
-echo "$VERSION"
-```
+Images carry one tag, `:latest`. Git tags and branches add none, and
+nothing reads `scripts/get-version.sh`.
 
-### Deployment by Version
-
-```bash
-# Deploy latest (always works)
-kubectl set image deployment/vrsky-ui \
-  ui=ghcr.io/ValueRetail/vrsky/ui:latest \
-  -n vrsky-ui
-
-# Deploy specific version
-kubectl set image deployment/vrsky-ui \
-  ui=ghcr.io/ValueRetail/vrsky/ui:v1.2.3 \
-  -n vrsky-ui
-
-# Deploy specific commit
-kubectl set image deployment/vrsky-ui \
-  ui=ghcr.io/ValueRetail/vrsky/ui:sha-a1b2c3d4 \
-  -n vrsky-ui
-```
+- Core services run by digest:
+  `vrskyprodacr.azurecr.io/vrsky/<name>@sha256:…`, set by
+  `deploy-core-azure.sh`. What runs only changes when that script (or the
+  deploy job, or Catch up, which call it) sets a new digest.
+- Connectors run `vrskyprodacr.azurecr.io/vrsky/<name>:latest` with
+  `imagePullPolicy: Always`, so a restart pulls whatever `:latest` is.
+- Rolling back means getting an older build into `:latest` and rolling it
+  out. Normally that is a revert merged to `main`; see
+  [Rolling back](operator/deploy.md#rolling-back).
+- **Production check** (`drift-check.yml`) compares what each container
+  runs with the registry's `:latest` and catches up when they differ; see
+  [Deploying](operator/deploy.md#while-the-cluster-is-parked).
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+### `npm ci` fails in the UI image build
 
-#### Build Fails: "npm ci requires package-lock.json"
-
-**Solution**: Ensure `.dockerignore` doesn't exclude `package-lock.json`
+The UI image copies `ui/package*.json` from the repo root, so build with
+the repo root as context. `docker build ui/` fails at the first `COPY`.
 
 ```bash
-# Check .dockerignore
-grep -n package-lock.json ui/.dockerignore  # Should be empty
+# package-lock.json must not be excluded by the root .dockerignore
+grep -n 'package-lock' .dockerignore   # should print nothing
 
-# Remove if present and rebuild
-docker build -t vrsky/ui:latest ui/
+docker build -t vrsky/ui:latest -f ui/Dockerfile .
 ```
 
-#### Image Build Runs Tests Inside Container
+### UI tests
 
-**Expected behavior**: Tests run during build (Stage 1).
+They don't run in the image build. Run them in `ui/` the way CI does:
 
 ```bash
-# To skip tests, modify Dockerfile temporarily:
-# Comment out: RUN npm run test
-
-# To verify tests passed in build:
-docker build -t vrsky/ui:latest ui/ 2>&1 | grep "✓.*tests"
+cd ui && npm ci && npm run test:coverage
 ```
 
-#### Kubernetes Pod Stays in "Pending"
+### A pod stays `Pending`
 
 ```bash
-# Check resource availability
 kubectl describe pod -n vrsky-ui <pod-name>
-
-# Check node resources
 kubectl describe nodes | grep -A 5 "Allocated resources"
-
-# Reduce resource requests in deployment.yaml and reapply
-kubectl apply -f infrastructure/kubernetes/ui/deployment.yaml
 ```
 
-#### Liveness Probe Fails
+Resource requests are set in the manifests; `plans/cpu-request-headroom.md`
+explains how they were sized.
+
+### The UI's probes fail
+
+The liveness and readiness probes fetch `/index.html` on port 80.
 
 ```bash
-# Check endpoint manually
 kubectl port-forward -n vrsky-ui svc/vrsky-ui 8080:80
-curl -f http://localhost:8080/health
-
-# View logs
+curl -f http://localhost:8080/index.html
 kubectl logs -n vrsky-ui deployment/vrsky-ui -f
 ```
 
-#### Image Pull Errors in K8s
+### Image pull errors on AKS
+
+Pods pull from ACR with the `acr-pull` secret on the `default` service
+account of `vrsky-platform`, `vrsky-storage` and `vrsky-ui`, and on the
+management API's own `vrsky-management-api` service account. An image
+reference that names `ghcr.io` means a manifest was applied without the
+rewrite (see the warning above). A tag ACR doesn't
+have means the image was never built: check with
+`az acr repository show-tags -n vrskyprodacr --repository vrsky/<name>`.
+
+### A rollout succeeded but the old version is still served
+
+A digest-pinned deployment was restarted instead of updated. Run
+`deploy-core-azure.sh` for that service; it sets the current digest and
+checks it landed. To see which UI bundle is actually served:
 
 ```bash
-# Verify GHCR credentials
-kubectl create secret docker-registry ghcr-secret \
-  --docker-server=ghcr.io \
-  --docker-username=<github-username> \
-  --docker-password=<github-token> \
-  -n vrsky-ui
-
-# Update deployment.yaml imagePullSecrets:
-# - name: ghcr-secret
+kubectl -n vrsky-ui exec deploy/vrsky-ui -- ls /usr/share/nginx/html/assets
 ```
 
-### Debugging Commands
+### Debugging commands
 
 ```bash
-# View build logs
-docker build -t vrsky/ui:latest ui/ 2>&1 | tail -100
-
-# Inspect running image
-docker run -it vrsky/ui:latest /bin/sh
-
-# Check K8s events
 kubectl get events -n vrsky-ui --sort-by='.lastTimestamp'
-
-# Describe deployment issues
 kubectl describe deployment vrsky-ui -n vrsky-ui
-
-# Stream logs
 kubectl logs -n vrsky-ui deployment/vrsky-ui -f --all-containers
-
-# SSH into pod
-kubectl exec -it -n vrsky-ui pod/<pod-name> -- /bin/sh
+kubectl exec -it -n vrsky-ui deploy/vrsky-ui -- /bin/sh
 ```
-
----
-
-## Summary - PHASE 12 Deliverables
-
-| Item | File | Status |
-|------|------|--------|
-| Dockerfile | `ui/Dockerfile` | ✅ Created |
-| .dockerignore | `ui/.dockerignore` | ✅ Created |
-| Nginx Config | `ui/nginx.conf` | ✅ Created |
-| Nginx Default | `ui/nginx.default.conf` | ✅ Created |
-| CI/CD Workflow | `.github/workflows/build-push.yml` | ✅ Created |
-| Version Script | `scripts/get-version.sh` | ✅ Created |
-| K8s Namespace | `infrastructure/kubernetes/ui/namespace.yaml` | ✅ Created |
-| K8s ConfigMap | `infrastructure/kubernetes/ui/configmap.yaml` | ✅ Created |
-| K8s Deployment | `infrastructure/kubernetes/ui/deployment.yaml` | ✅ Created |
-| K8s Service | `infrastructure/kubernetes/ui/service.yaml` | ✅ Created |
-| K8s Ingress | `infrastructure/kubernetes/ui/ingress.yaml` | ✅ Created |
-| K8s HPA | `infrastructure/kubernetes/ui/hpa.yaml` | ✅ Created |
-| K8s PDB | `infrastructure/kubernetes/ui/pdb.yaml` | ✅ Created |
-| Docker Compose UI | `docker-compose.ui.yml` | ✅ Created |
-| Makefile Updates | `src/Makefile` | ✅ Updated |
-| Deployment Guide | `docs/DEPLOYMENT_GUIDE.md` | ✅ Created |
-
----
-
-## Next Steps
-
-1. ✅ All 13 deliverables created
-2. ✅ Local Docker build tested (279 tests pass)
-3. 🔄 Push changes to git (5 commits)
-4. 🔄 GitHub Actions workflow validation
-5. 🔄 K8s deployment testing (k3d + K3s)
-6. ✅ PHASE 12 Complete
-
----
-
-**Last Updated**: February 24, 2026  
-**PHASE**: 12 - Docker Deployment  
-**Status**: Implementation Complete ✅
 
 ---
 
