@@ -163,7 +163,11 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.activePipelines[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.activePipelines[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("Pipeline already running or starting", "connection_id", connectionID)
 		return
@@ -196,9 +200,13 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 		return
 	}
 
-	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() {
+		if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	go s.pollConnection(ctx, ac, connectionID, tenantID, apiConfig)
 }
@@ -217,15 +225,17 @@ type activeConn struct {
 //
 // It reports whether the entry was own. Only then may the poller write its
 // final status; otherwise the newer start has written "running" and owns the
-// status too (#456).
-func (s *apiConsumer) dropActive(connectionID string, own *activeConn) bool {
+// status too (#456). The write goes through the returned StatusWrite, taken
+// in the same critical section, so it cannot land over the "running" of a
+// start that activates after the drop (#423).
+func (s *apiConsumer) dropActive(connectionID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.activePipelines[connectionID] != own {
-		return false
+		return sdk.StatusWrite{}, false
 	}
 	delete(s.activePipelines, connectionID)
-	return true
+	return s.starts.StopStatusLocked(connectionID), true
 }
 
 // handleStopCommand processes a stop command from NATS
@@ -246,6 +256,14 @@ func (s *apiConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 
 	if !exists {
@@ -257,9 +275,11 @@ func (s *apiConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	stopped.Write(func() {
+		if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	s.logger.Info("Pipeline stopped", "connection_id", cmd.ConnectionID)
 }

@@ -166,7 +166,11 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := c.starts.Reserve(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := c.starts.ReserveOrRetry(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("RabbitMQ consumer already running or starting")
 		return
@@ -191,7 +195,9 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
-	_ = c.updateConnectionStatus(connectionID, tenantID, "running")
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() { _ = c.updateConnectionStatus(connectionID, tenantID, "running") })
 
 	logger.Info("Starting RabbitMQ consumer", "queue", cfg.Queue, "exchange", cfg.Exchange)
 	go c.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
@@ -211,12 +217,20 @@ func (c *rabbitConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := c.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = c.starts.StopStatusLocked(cmd.ConnectionID)
+	}
 	c.mu.Unlock()
 	if starting {
 		c.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
 	}
 	if exists {
-		_ = c.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
+		stopped.Write(func() { _ = c.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped") })
 		c.logger.Info("RabbitMQ consumer stopped", "connection_id", cmd.ConnectionID)
 	}
 }

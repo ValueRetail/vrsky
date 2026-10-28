@@ -193,7 +193,11 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("cloud-storage poller already running or starting")
 		return
@@ -229,7 +233,9 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
-	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() { _ = s.updateConnectionStatus(connectionID, tenantID, "running") })
 
 	if cfg.Mode == "event" {
 		logger.Info("Starting cloud-storage event loop",
@@ -256,15 +262,17 @@ type activeConn struct {
 //
 // It reports whether the entry was own. Only then may the poller write its
 // final status; otherwise the newer start has written "running" and owns the
-// status too (#456).
-func (s *cloudConsumer) dropActive(connID string, own *activeConn) bool {
+// status too (#456). The write goes through the returned StatusWrite, taken
+// in the same critical section, so it cannot land over the "running" of a
+// start that activates after the drop (#423).
+func (s *cloudConsumer) dropActive(connID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active[connID] != own {
-		return false
+		return sdk.StatusWrite{}, false
 	}
 	delete(s.active, connID)
-	return true
+	return s.starts.StopStatusLocked(connID), true
 }
 
 func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
@@ -281,12 +289,20 @@ func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 	if starting {
 		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
 	}
 	if exists {
-		_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
+		stopped.Write(func() { _ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped") })
 		s.logger.Info("cloud-storage poller stopped", "connection_id", cmd.ConnectionID)
 	}
 }
@@ -494,12 +510,13 @@ func (s *cloudConsumer) fetchAndPublish(ctx context.Context, connID, tenantID st
 // status, unless a newer start owns the entry, and with it the status, by now
 // (#408, #456).
 func (s *cloudConsumer) finishConn(own *activeConn, connID, tenantID, status string) {
-	if !s.dropActive(connID, own) {
+	write, ok := s.dropActive(connID, own)
+	if !ok {
 		s.logger.Info("A newer start owns the connection; leaving its status alone",
 			"connection_id", connID, "status", status)
 		return
 	}
-	_ = s.updateConnectionStatus(connID, tenantID, status)
+	write.Write(func() { _ = s.updateConnectionStatus(connID, tenantID, status) })
 }
 
 // afterAction applies the configured post-ingest action to a fetched object.

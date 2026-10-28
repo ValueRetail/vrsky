@@ -118,11 +118,12 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 // the connection "error", unless a newer start owns the entry, and with it the
 // status, by now (#408, #456).
 func (s *tenantConsumer) failBridge(own *activeConn, connectionID, tenantID string, logger *slog.Logger) {
-	if !s.dropActive(connectionID, own) {
+	failed, ok := s.dropActive(connectionID, own)
+	if !ok {
 		logger.Info("A newer start owns the connection; leaving its status alone")
 		return
 	}
-	_ = s.updateConnectionStatus(connectionID, tenantID, "error")
+	failed.Write(func() { _ = s.updateConnectionStatus(connectionID, tenantID, "error") })
 }
 
 // handleSourceMessage processes a message from the source tenant and republishes it.

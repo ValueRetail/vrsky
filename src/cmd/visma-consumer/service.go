@@ -156,7 +156,11 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := c.starts.Reserve(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := c.starts.ReserveOrRetry(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		return
 	}

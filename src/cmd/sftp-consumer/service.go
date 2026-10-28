@@ -186,7 +186,11 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("SFTP poller already running or starting")
 		return
@@ -219,7 +223,9 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
-	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() { _ = s.updateConnectionStatus(connectionID, tenantID, "running") })
 
 	logger.Info("Starting SFTP poller", "host", cfg.Host, "remote_dir", cfg.RemoteDir, "after_action", cfg.AfterAction)
 	go s.runPoller(ctx, ac, connectionID, tenantID, cfg)
@@ -239,15 +245,17 @@ type activeConn struct {
 //
 // It reports whether the entry was own. Only then may the poller write its
 // final status; otherwise the newer start has written "running" and owns the
-// status too (#456).
-func (s *sftpConsumer) dropActive(connID string, own *activeConn) bool {
+// status too (#456). The write goes through the returned StatusWrite, taken
+// in the same critical section, so it cannot land over the "running" of a
+// start that activates after the drop (#423).
+func (s *sftpConsumer) dropActive(connID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active[connID] != own {
-		return false
+		return sdk.StatusWrite{}, false
 	}
 	delete(s.active, connID)
-	return true
+	return s.starts.StopStatusLocked(connID), true
 }
 
 func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
@@ -264,12 +272,20 @@ func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 	if starting {
 		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
 	}
 	if exists {
-		_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
+		stopped.Write(func() { _ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped") })
 		s.logger.Info("SFTP poller stopped", "connection_id", cmd.ConnectionID)
 	}
 }
@@ -289,11 +305,12 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 		logger.Info("SFTP one-shot poll complete")
 		// Mark it stopped only if no newer start owns the entry, and with it
 		// the status, by now (#408, #456).
-		if !s.dropActive(connID, own) {
+		stopped, mine := s.dropActive(connID, own)
+		if !mine {
 			logger.Info("A newer start owns the connection; leaving its status alone")
 			return
 		}
-		_ = s.updateConnectionStatus(connID, tenantID, "stopped")
+		stopped.Write(func() { _ = s.updateConnectionStatus(connID, tenantID, "stopped") })
 		return
 	}
 

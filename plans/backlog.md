@@ -186,15 +186,15 @@ Last updated 2026-10-28.
     so each consumer gets it once. Until then the comment on
     `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during
     the scan is harmless holds only for the file consumer. Found during #375.
-36. **A stop just after a file connection becomes active can leave the
-    database saying `running`** (`src/cmd/file-consumer/service.go`,
+36. ~~**A stop just after a file connection becomes active can leave the
+    database saying `running`**~~ (#423) (`src/cmd/file-consumer/service.go`,
     `startConnection`). The `running` status write comes after the
     connection is in `activeConnections`. A stop landing in between cancels
     the watcher and writes `stopped`, then the start writes `running`. Older
     than #375, which closed the same gap for a stop that lands earlier in
     the start. Found during #375.
-37. **A start refused while another start is in flight is lost if that one
-    fails** (`src/cmd/file-consumer/service.go`, `startConnection`). Since
+37. ~~**A start refused while another start is in flight is lost if that one
+    fails**~~ (#424) (`src/cmd/file-consumer/service.go`, `startConnection`). Since
     #375 a second start for a connection that is already starting returns
     at once. If the first then fails (say a transient database error during
     boot restore), the second start, which might have succeeded, is not
@@ -332,7 +332,11 @@ Last updated 2026-10-28.
     around 312-315 and 397-400) and runs each start on its own goroutine,
     so two start commands can race and leak the overwritten session's
     subscription; its fingerprint/replace model doesn't fit `StartGuard`
-    as is. Found during #397 and its review.
+    as is. Found during #397 and its review. Items 36 and 37 are fixed in
+    the guard (#423, #424), but the Sitoo consumer still calls `Reserve`
+    rather than `ReserveOrRetry`, so a refused start there is still lost if
+    the start in flight fails; switching it is a one-line change, held back
+    while another branch works on the Sitoo connector.
 54. ~~**`affected.sh` ignores `src/internal`.**~~ (#410) Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
@@ -586,7 +590,7 @@ Last updated 2026-10-28.
     `docs/DR.md`) and no CNPG cluster. Either say so in both headers and the
     README, or plan the move to CNPG with its own backup. Manifests: PR plus
     `agent:needs-human`. Found during #427.
-91. **A late status write can still land over a newer start's `running`.**
+91. ~~**A late status write can still land over a newer start's `running`.**~~ (#423)
     #456 left a window in api, sftp, cloud-storage and tenant: with the
     6-connection DB pool saturated, a new start's lookup and its `running`
     UPDATE can both get a connection before an old poller's `stopped` or

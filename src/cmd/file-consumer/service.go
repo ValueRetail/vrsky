@@ -339,7 +339,11 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	// goroutines. The check and the claim are one critical section, so a
 	// second start for the same connection stops here instead of starting a
 	// second watcher (#375).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("File watcher already active or starting", "connection_id", connectionID)
 		return
@@ -438,9 +442,13 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	}
 	s.saveKnown(ctx, ac, s.logger.With("connection_id", connectionID, "watch_dir", watchDir))
 
-	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() {
+		if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	// Start directory watch goroutine (only tracks additions/deletions, no auto-processing)
 	go s.watchDirectory(ctx, ac)
@@ -469,6 +477,14 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	// the stop and leave a watcher running (#375). It is removed, not only
 	// marked, so a start that comes after this stop is not refused.
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 
 	if !exists {
@@ -482,9 +498,11 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	stopped.Write(func() {
+		if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	s.logger.Info("File watcher stopped", "connection_id", cmd.ConnectionID)
 }
