@@ -165,7 +165,7 @@ Last updated 2026-10-28.
     (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
     and say so next to the `openssl rand -hex 32` advice. Found in review of
     #381.
-34. **No way to mount a Windows home folder for the file connectors.**
+34. ~~**No way to mount a Windows home folder for the file connectors.**~~ (#422)
     `docker-compose.yml` mounts `${HOME:-./data/input}` at
     `${HOME:-/data/input}` for `file-consumer` and `file-producer`, the same
     path on both sides. A Windows path can't be a target in the Linux
@@ -498,6 +498,13 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
+79. **The file destination's host folder is fixed to `data/output`.**
+    #422 lets `.env` pick the host folder behind `/data/input`
+    (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
+    repository's `data/output`, so a Windows user can read from their home
+    folder and not write to it. A second variable for `/data/output`, with
+    the same fixed target and the guard in
+    `compose_files_mount_guard_test.go`, would close that. Found in #422.
 
 ## Human
 
