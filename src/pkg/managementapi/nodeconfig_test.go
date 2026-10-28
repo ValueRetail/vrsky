@@ -1081,11 +1081,21 @@ func needsList(v any) []string {
 // and returns its targets.
 func affected(t *testing.T, paths ...string) []string {
 	t.Helper()
+	return affectedEnv(t, nil, paths...)
+}
+
+// affectedEnv is affected with extra environment, e.g. AFFECTED_GO.
+func affectedEnv(t *testing.T, env []string, paths ...string) []string {
+	t.Helper()
 	cmd := exec.Command("bash", filepath.Join("..", "..", "..", "infrastructure", "azure", "affected.sh"))
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n") + "\n")
-	out, err := cmd.CombinedOutput()
+	// Targets go to stdout; stderr carries warnings (e.g. the fail-safe).
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("affected.sh: %v\n%s", err, out)
+		t.Fatalf("affected.sh: %v\n%s%s", err, out, stderr.String())
 	}
 	var targets []string
 	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -1098,8 +1108,8 @@ func affected(t *testing.T, paths ...string) []string {
 
 // The deploy job rolls what a merge touched and nothing else
 // (plans/auto-deploy.md): a UI change rolls the UI, a connector change its
-// connector, a shared-package change every Go image, a rules change the
-// monitoring stack, and a docs change nothing at all.
+// connector, a shared-package change the images that import it, a rules
+// change the monitoring stack, and a docs change nothing at all.
 func TestAffectedServices(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1150,42 +1160,150 @@ func TestAffectedServices(t *testing.T) {
 			}
 		})
 	}
-	// A shared package: every Go image, core and connector, but not the UI.
-	// src/internal is shared code too, and a test file next to real code
-	// does not make the real change test-only.
-	for _, paths := range [][]string{
-		{"src/pkg/sdk/restore.go"},
-		{"src/pkg/sdk/restore_test.go", "src/pkg/sdk/restore.go"},
-		{"src/internal/config/config.go"},
-		{"src/internal/config/config_test.go", "src/internal/config/config.go"},
+	// A shared package (#437): only the images whose main package imports it,
+	// as `go list` sees it for linux/amd64. vrsky-agent is Windows-only and
+	// ships inside management-api. The UI never.
+	for _, tc := range []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		// pkg/idempotency: webhook-consumer only.
+		{"one connector imports it", []string{"src/pkg/idempotency/store.go"},
+			[]string{"connector webhook-consumer", "image webhook-consumer"}},
+		{"its test next to it still counts", []string{"src/pkg/idempotency/store_test.go", "src/pkg/idempotency/store.go"},
+			[]string{"connector webhook-consumer", "image webhook-consumer"}},
+		{"management-api only", []string{"src/pkg/promquery/promquery.go"},
+			[]string{"core management-api", "image management-api"}},
+		// pkg/oauthcc: the BC, Visma and SAP connectors, both directions.
+		{"a few connectors", []string{"src/pkg/oauthcc/x.go"}, []string{
+			"connector business-central-consumer", "connector business-central-producer",
+			"connector sap-s4hana-consumer", "connector sap-s4hana-producer",
+			"connector visma-consumer", "connector visma-producer",
+			"image business-central-consumer", "image business-central-producer",
+			"image sap-s4hana-consumer", "image sap-s4hana-producer",
+			"image visma-consumer", "image visma-producer",
+		}},
+		// pkg/agent: only the Windows agent, so only management-api, and a
+		// windows-only file in it as well.
+		{"windows agent package", []string{"src/pkg/agent/runner.go"},
+			[]string{"core management-api", "image management-api"}},
+		{"windows-only file", []string{"src/pkg/agent/service_windows.go"},
+			[]string{"core management-api", "image management-api"}},
+		// Imported by no image: nothing to rebuild.
+		{"no image imports it", []string{"src/pkg/testdb/testdb.go"}, nil},
+		{"src/internal no image imports", []string{"src/internal/config/config.go"}, nil},
+		{"src/internal with its test", []string{"src/internal/config/config_test.go", "src/internal/config/config.go"}, nil},
 	} {
-		got := affected(t, paths...)
-		images, coreUI := 0, false
-		for _, g := range got {
-			if strings.HasPrefix(g, "image ") {
-				images++
+		t.Run("go deps/"+tc.name, func(t *testing.T) {
+			got := affected(t, tc.paths...)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("paths %v\n got %v\nwant %v", tc.paths, got, tc.want)
 			}
-			if g == "core ui" || g == "image ui" {
-				coreUI = true
+		})
+	}
+
+	every := everyGoImageTarget(t)
+	// Each image's own code marks that image, whatever its place in the
+	// lists: a name at a line break in CONNECTORS counts like any other.
+	for _, e := range every {
+		name, ok := strings.CutPrefix(e, "image ")
+		if !ok {
+			continue
+		}
+		var want []string
+		for _, w := range every {
+			if strings.HasSuffix(w, " "+name) {
+				want = append(want, w)
 			}
 		}
-		if images < 30 || coreUI {
-			t.Errorf("%v: %d images (want every Go image), ui included=%v:\n%s", paths, images, coreUI, strings.Join(got, "\n"))
+		t.Run("own code/"+name, func(t *testing.T) {
+			p := "src/cmd/" + name + "/main.go"
+			if got := affected(t, p); strings.Join(got, "|") != strings.Join(want, "|") {
+				t.Fatalf("%s\n got %v\nwant %v", p, got, want)
+			}
+		})
+	}
+	// No package is imported by all 36 Go images (alert-responder and
+	// vrsky-cli skip the messaging stack), so take the widest one,
+	// pkg/envelope: most images, never the UI, and not the fail-safe set.
+	t.Run("go deps/widest package", func(t *testing.T) {
+		for _, paths := range [][]string{
+			{"src/pkg/envelope/x.go"},
+			{"src/pkg/envelope/x_test.go", "src/pkg/envelope/x.go"},
+		} {
+			got := affected(t, paths...)
+			images := 0
+			for _, g := range got {
+				if strings.HasPrefix(g, "image ") {
+					images++
+				}
+				if g == "core ui" || g == "image ui" {
+					t.Errorf("%v: %q; a Go change never rolls the UI", paths, g)
+				}
+			}
+			if images < 30 || len(got) >= len(every) {
+				t.Errorf("%v: %d images, %d targets (fail-safe is %d); want most images but not all:\n%s",
+					paths, images, len(got), len(every), strings.Join(got, "\n"))
+			}
 		}
+	})
+
+	// Fail-safe: when the module, a Dockerfile or an embedded asset changes,
+	// or `go list` can't answer, every Go image is rebuilt (never the UI).
+	failing := filepath.Join(t.TempDir(), "go")
+	if err := os.WriteFile(failing, []byte("#!/bin/sh\necho 'github.com/ValueRetail/vrsky/cmd/webhook-consumer github.com/ValueRetail/vrsky/pkg/idempotency'\nexit 3\n"), 0o755); err != nil { //nolint:gosec // test helper must be executable
+		t.Fatal(err)
 	}
-	// Same size as a plain src/pkg change, so src/internal really is every image.
-	if a, b := len(affected(t, "src/internal/config/config.go")), len(affected(t, "src/pkg/sdk/restore.go")); a != b {
-		t.Errorf("src/internal change gives %d targets, src/pkg change %d; want the same", a, b)
+	for _, tc := range []struct {
+		name  string
+		env   []string
+		paths []string
+	}{
+		{"go.mod", nil, []string{"src/go.mod"}},
+		{"go.sum", nil, []string{"src/go.sum"}},
+		{"a Dockerfile", nil, []string{"src/cmd/file-consumer/Dockerfile"}},
+		{"embedded asset", nil, []string{"src/pkg/managementapi/agent_install.ps1"}},
+		{"embedded asset in src/internal", nil, []string{"src/internal/config/defaults.yaml"}},
+		{"unknown package", nil, []string{"src/pkg/doesnotexist/x.go"}},
+		{"unknown package next to a known one", nil, []string{"src/pkg/idempotency/store.go", "src/pkg/doesnotexist/x.go"}},
+		{"helper is false", []string{"AFFECTED_GO=false"}, []string{"src/pkg/idempotency/store.go"}},
+		{"helper fails after partial output", []string{"AFFECTED_GO=" + failing}, []string{"src/pkg/idempotency/store.go"}},
+		{"helper missing", []string{"AFFECTED_GO=/nonexistent/go"}, []string{"src/pkg/testdb/testdb.go"}},
+		{"go.mod without a helper", []string{"AFFECTED_GO=false"}, []string{"src/go.mod"}},
+	} {
+		t.Run("fail-safe/"+tc.name, func(t *testing.T) {
+			got := affectedEnv(t, tc.env, tc.paths...)
+			if strings.Join(got, "|") != strings.Join(every, "|") {
+				t.Fatalf("paths %v env %v\n got %v\nwant every Go image %v", tc.paths, tc.env, got, every)
+			}
+		})
 	}
-	for _, p := range []string{"src/go.mod", "src/cmd/file-consumer/Dockerfile"} {
-		if n := len(affected(t, p)); n < 60 {
-			t.Fatalf("%s: %d targets, want every Go image rebuilt", p, n)
-		}
+
+	// Paths that never need the helper decide the same without it.
+	for _, tc := range []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{"shared package test", []string{"src/pkg/sdk/restore_test.go"}, nil},
+		{"shared package testdata", []string{"src/pkg/managementapi/testdata/driver_snapshot.json"}, nil},
+		{"docs", []string{"docs/a.md"}, nil},
+		{"rules", []string{"infrastructure/prometheus-rules.yml"}, []string{"monitoring"}},
+	} {
+		t.Run("no helper/"+tc.name, func(t *testing.T) {
+			got := affectedEnv(t, []string{"AFFECTED_GO=false"}, tc.paths...)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("paths %v with AFFECTED_GO=false\n got %v\nwant %v", tc.paths, got, tc.want)
+			}
+		})
 	}
-	// vrsky-cli links the same shared packages (crypto above all: a dump
-	// encrypted by a stale CLI must still decrypt), so every shared change
-	// rebuilds it too. It is an image only, never a core service or connector.
-	for _, p := range []string{"src/pkg/crypto/x.go", "src/internal/config/config.go", "src/go.mod", "src/go.sum", "src/cmd/file-consumer/Dockerfile", "src/cmd/vrsky-cli/Dockerfile"} {
+
+	// vrsky-cli links shared packages (crypto above all: a dump encrypted by
+	// a stale CLI must still decrypt), so a change to one it imports, or any
+	// fail-safe change, rebuilds it. It is an image only, never a core
+	// service or connector.
+	for _, p := range []string{"src/pkg/crypto/x.go", "src/go.mod", "src/go.sum", "src/cmd/file-consumer/Dockerfile", "src/cmd/vrsky-cli/Dockerfile"} {
 		got := affected(t, p)
 		found := false
 		for _, g := range got {
@@ -1200,6 +1318,37 @@ func TestAffectedServices(t *testing.T) {
 			t.Errorf("%s: no `image vrsky-cli`; the backup Job would keep running a CLI built from older shared code", p)
 		}
 	}
+}
+
+// everyGoImageTarget is the fail-safe output: every Go image in affected.sh
+// (CORE except ui, CONNECTORS, TOOLS) with whatever rolls it, sorted.
+func everyGoImageTarget(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "infrastructure", "azure", "affected.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func(name string) []string {
+		m := regexp.MustCompile(`(?s)\b` + name + `="([^"]*)"`).FindStringSubmatch(string(b))
+		if m == nil {
+			t.Fatalf("no %s=\"…\" in affected.sh", name)
+		}
+		return strings.Fields(m[1])
+	}
+	var out []string
+	for _, n := range list("CORE") {
+		if n != "ui" {
+			out = append(out, "image "+n, "core "+n)
+		}
+	}
+	for _, n := range list("CONNECTORS") {
+		out = append(out, "image "+n, "connector "+n)
+	}
+	for _, n := range list("TOOLS") {
+		out = append(out, "image "+n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // affected.sh carries its own copy of the service lists; they must equal
