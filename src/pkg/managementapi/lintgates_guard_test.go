@@ -15,6 +15,8 @@ import (
 // lands in a job nothing waits for. This checks that every check still runs on
 // pushes and pull requests, cannot be ignored (no continue-on-error), and sits
 // in a job that both the "Go Tests" aggregator and the rollout plan need.
+// Steps are matched on their commands with shell comments removed (#462), so
+// a commented-out command does not count as a check that runs.
 func TestEveryLintCheckStillGates(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	body, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "build-push.yml")) //nolint:gosec // fixed path inside the repo
@@ -52,6 +54,7 @@ func TestEveryLintCheckStillGates(t *testing.T) {
 		{"golangci-lint", func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") }},
 		{"OpenAPI lint", func(s step) bool { return strings.Contains(s.Run, "./cmd/lint-openapi") }},
 		{"tenant-filter lint", func(s step) bool { return strings.Contains(s.Run, "make lint-tenant") }},
+		{"connector lint", func(s step) bool { return strings.Contains(s.Run, "make lint-connector") }},
 		{"promtool check rules", func(s step) bool {
 			return strings.Contains(s.Run, "promtool") && strings.Contains(s.Run, "check rules /cfg/prometheus-rules.yml")
 		}},
@@ -75,6 +78,7 @@ func TestEveryLintCheckStillGates(t *testing.T) {
 		found := 0
 		for jobID, j := range wf.Jobs {
 			for _, s := range j.Steps {
+				s.Run = stripShellComments(s.Run)
 				if !c.match(s) {
 					continue
 				}

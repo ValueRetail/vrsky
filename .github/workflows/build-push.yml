@@ -350,6 +350,13 @@ jobs:
         working-directory: src
         run: make lint-tenant
 
+      # Fail the build if an SDK connector never calls sdk.Run* or imports
+      # pkg/messaging around the SDK (#98). `make lint` ran it but CI did not
+      # until #462. Standard library only: about 2 s cold, 0.3 s warm.
+      - name: Lint connectors
+        working-directory: src
+        run: make lint-connector
+
   # One "Go Tests" result for everything above, as before the split: green
   # only when every shard and both lint jobs passed. Branch protection does
   # not require it today; it keeps a single check to point at, and the plan
