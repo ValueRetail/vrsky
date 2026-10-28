@@ -380,8 +380,8 @@ Last updated 2026-10-28.
     `auth-tls-*` with the CA check moved to the edge. Then update the
     whitepaper §4 and `docs/connectors/http.md`. Ingress and manifests: PR
     plus `agent:needs-human`. Found in #407.
-60. **The File watcher panel's `connected` event shows the full volume
-    path** (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
+60. ~~**The File watcher panel's `connected` event shows the full volume
+    path**~~ (#455) (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
     /data/input/<tenant-id>/orders". It's the tenant's own folder, but the
     mount layout and tenant id are internals. Use `folderLabel` (the path
     relative to the tenant root), as the error events from #409 do. Found
@@ -644,6 +644,15 @@ Last updated 2026-10-28.
     `agent:needs-human`. Since #423 the status order is already keyed by
     tenant and connection, so such a stop can't reorder the real tenant's
     writes. Found in review of #487.
+96. **Two more file-consumer messages show the path on the volume.** A
+    watched file that fails to ingest sends an `error` event with the raw
+    Go error (`src/cmd/file-consumer/service.go`, the `ingErr` event in
+    `pollOnce`), and `os.Stat`, `os.ReadFile` and `os.Open` put
+    `/data/input/<tenant-id>/…` in it. The sample-data endpoint returns
+    `pickSampleFile`'s errors as they are ("directory does not exist:
+    /data/input/<tenant-id>/…", or `os.ReadDir`'s own text). Name the
+    folder with `folderLabel` and keep only the operating system's reason,
+    as `readFailureMessage` does since #409. Found in review of #455.
 
 ## Human
 
