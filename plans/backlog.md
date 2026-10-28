@@ -129,7 +129,7 @@ Last updated 2026-10-28.
     whether any backup runs in prod. The encryption table says TLS
     terminates at Traefik; production runs ingress-nginx. Fix both (and
     `docs/DR.md` if it says the same). Found in review of #376.
-29. **A watched file replaced under the same name is never published again**
+29. ~~**A watched file replaced under the same name is never published again**~~ (#420)
     (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
     the name only: once `orders.csv` is published, a writer that overwrites
     it or renames a new `orders.csv` over it is ignored, unless the name

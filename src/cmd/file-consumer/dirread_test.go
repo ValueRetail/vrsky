@@ -252,10 +252,17 @@ func (d *dirRig) active() *ActiveConnection {
 }
 
 // seed writes a checkpoint for the current folder, as a previous lifetime
-// would have left it. It is not counted as a save.
+// would have left it: since #420 with the stamp of each name that is in the
+// folder. It is not counted as a save.
 func (d *dirRig) seed(names ...string) {
 	d.t.Helper()
-	state, err := json.Marshal(knownState{WatchDir: d.dir(), Known: names})
+	files := make(map[string]savedStamp)
+	for _, name := range names {
+		if st, ok := statStamp(d.dir(), name); ok {
+			files[name] = savedStamp{Size: st.size, MTime: st.mtimeSec, MTimeNsec: st.mtimeNsec}
+		}
+	}
+	state, err := json.Marshal(knownState{WatchDir: d.dir(), Known: names, Files: files})
 	if err != nil {
 		d.t.Fatal(err)
 	}
@@ -724,6 +731,17 @@ func TestDirRead_MissingFolderDuringPoll(t *testing.T) {
 	d.requireTotal("before the folder goes", 2)
 
 	f := d.freeze()
+	// A remount brings the same files back with their mtimes. Since #420 a
+	// file with another mtime is a new file under that name, so the copies
+	// written below get the originals' mtimes.
+	mtimes := make(map[string]time.Time)
+	for _, name := range []string{"a.json", "b.json"} {
+		info, err := os.Stat(d.dir() + string(os.PathSeparator) + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mtimes[name] = info.ModTime()
+	}
 	if err := os.RemoveAll(d.dir()); err != nil {
 		t.Fatal(err)
 	}
@@ -738,6 +756,11 @@ func TestDirRead_MissingFolderDuringPoll(t *testing.T) {
 	// The folder comes back with the same files (a remount).
 	d.write("a.json", a)
 	d.write("b.json", b)
+	for name, mt := range mtimes {
+		if err := os.Chtimes(d.dir()+string(os.PathSeparator)+name, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
 	d.polls(3)
 	d.requireOnce("folder back", "a.json", a)
 	d.requireOnce("folder back", "b.json", b)
