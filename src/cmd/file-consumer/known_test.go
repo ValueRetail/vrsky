@@ -42,7 +42,9 @@ func newKnownWatcher(t *testing.T, dir string, store *lockedStore, publish sdk.P
 		checkpoints:  store,
 	}
 	ac := &ActiveConnection{ConnectionID: knownConn, TenantID: knownTenant, WatchDir: dir, NodeID: knownNode, Cancel: func() {}}
-	c.loadKnown(context.Background(), ac)
+	if err := c.loadKnown(context.Background(), ac); err != nil {
+		t.Fatalf("loadKnown: %v", err)
+	}
 	c.saveKnown(context.Background(), ac, c.logger)
 	return &knownWatcher{c: c, ac: ac, clock: clock}
 }

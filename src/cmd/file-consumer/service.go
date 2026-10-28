@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,6 +72,12 @@ type fileConsumer struct {
 	// now is the watcher's clock; nil means time.Now. Tests inject one to
 	// drive the stability window without sleeping.
 	now func() time.Time
+	// readDir lists a watch folder; nil means os.ReadDir. Tests inject one
+	// that fails on demand (#398).
+	readDir func(dir string) ([]os.DirEntry, error)
+	// startReadBackoff is the wait after a start's first failed folder read,
+	// doubled after each later one; zero means defaultStartReadBackoff.
+	startReadBackoff time.Duration
 
 	// Event subscribers: connectionId → list of channels
 	eventSubs   map[string][]chan FileEvent
@@ -173,6 +180,9 @@ type ActiveConnection struct {
 	knownFiles map[string]bool
 	pending    map[string]fileState
 	dirty      bool
+	// readFailures counts polls in a row whose folder read failed (#398), so
+	// only the first is logged as a warning. Watcher goroutine only.
+	readFailures int
 }
 
 // startReservation marks one start in progress (#375). stopped is set, under
@@ -405,7 +415,16 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 		WatchDir:     watchDir,
 		NodeID:       s.fileNodeID(conn),
 	}
-	s.loadKnown(ctx, ac)
+	if err := s.loadKnownWithRetry(ctx, ac, res); err != nil {
+		if ctx.Err() != nil || s.startStopped(res) {
+			s.logger.Info("Start abandoned while retrying the watch folder read",
+				"error", err, "connection_id", connectionID)
+			return
+		}
+		s.logger.Error("Refusing to start: could not read the watch folder",
+			"error", err, "connection_id", connectionID, "watch_dir", watchDir)
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ac.Cancel = cancel
@@ -470,6 +489,55 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 
 	s.logger.Info("File watcher stopped", "connection_id", cmd.ConnectionID)
+}
+
+// startReadAttempts is how many times a start tries to read its folder
+// before it gives up (#398).
+const startReadAttempts = 4
+
+// defaultStartReadBackoff is the wait after a start's first failed folder
+// read; it doubles after each later one (1 + 2 + 4 s at most).
+const defaultStartReadBackoff = time.Second
+
+// loadKnownWithRetry runs loadKnown until the folder read works, up to
+// startReadAttempts times. It gives up early if ctx ends or a stop took the
+// reservation back (#375). A failed read changes nothing, so giving up
+// leaves no baseline and no checkpoint write behind (#398).
+func (s *fileConsumer) loadKnownWithRetry(ctx context.Context, ac *ActiveConnection, res *startReservation) error {
+	wait := s.startReadBackoff
+	if wait <= 0 {
+		wait = defaultStartReadBackoff
+	}
+	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
+	for attempt := 1; ; attempt++ {
+		err := s.loadKnown(ctx, ac)
+		if err == nil {
+			return nil
+		}
+		if attempt == startReadAttempts {
+			return err
+		}
+		logger.Warn("Could not read the watch folder at start; trying again",
+			"error", err, "attempt", attempt, "retry_in", wait.String())
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("start cancelled while retrying the folder read: %w", err)
+		case <-timer.C:
+		}
+		if s.startStopped(res) {
+			return fmt.Errorf("stopped while retrying the folder read: %w", err)
+		}
+		wait *= 2
+	}
+}
+
+// startStopped reports whether a stop took this start's reservation back.
+func (s *fileConsumer) startStopped(res *startReservation) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return res.stopped
 }
 
 // reserveStart claims connectionID for a start. It fails if the connection is
@@ -577,7 +645,29 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		ac.pending = make(map[string]fileState)
 	}
 
-	currentFiles := s.listFiles(ac.WatchDir)
+	currentFiles, err := s.listFiles(ac.WatchDir)
+	if err != nil {
+		// Skip the poll. Read as an empty folder, a share that blipped for one
+		// poll dropped every known name and the next good read published the
+		// whole folder again (#398). The done set, pending files and the
+		// checkpoint stay as they are; a folder that is really gone holds no
+		// files, and the first good read prunes what went with it.
+		ac.readFailures++
+		msg := "Could not read the watch folder; skipping this poll"
+		if errors.Is(err, fs.ErrNotExist) {
+			msg = "Watch folder is missing; skipping this poll"
+		}
+		if ac.readFailures == 1 {
+			logger.Warn(msg, "error", err)
+		} else {
+			logger.Debug(msg, "error", err, "failed_polls", ac.readFailures)
+		}
+		return
+	}
+	if ac.readFailures > 0 {
+		logger.Info("Watch folder readable again", "skipped_polls", ac.readFailures)
+		ac.readFailures = 0
+	}
 	refreshed := false
 
 	// Detect new files and ingest them into the pipeline. Previously this only
@@ -681,11 +771,17 @@ func isTempName(name string) bool {
 	return strings.HasSuffix(lower, ".tmp") || strings.HasSuffix(lower, ".part")
 }
 
-// listFiles returns a set of non-directory filenames in a directory.
-func (s *fileConsumer) listFiles(dir string) map[string]bool {
-	entries, err := os.ReadDir(dir)
+// listFiles returns the set of non-directory file names in dir. A failed
+// read, a missing folder included, is an error and never an empty set: the
+// callers would take every known name as deleted (#398).
+func (s *fileConsumer) listFiles(dir string) (map[string]bool, error) {
+	readDir := s.readDir
+	if readDir == nil {
+		readDir = os.ReadDir
+	}
+	entries, err := readDir(dir)
 	if err != nil {
-		return make(map[string]bool)
+		return nil, err
 	}
 	files := make(map[string]bool)
 	for _, entry := range entries {
@@ -693,7 +789,7 @@ func (s *fileConsumer) listFiles(dir string) map[string]bool {
 			files[entry.Name()] = true
 		}
 	}
-	return files
+	return files, nil
 }
 
 func detectContentType(filename string, data []byte) string {

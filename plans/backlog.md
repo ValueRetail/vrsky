@@ -241,7 +241,7 @@ Last updated 2026-10-27.
     every 5 s per connection that is publishing, and past jsonb's size
     limit the save fails. Store it incrementally (a row per name, or only
     the changes) or save less often. Found in review of #391.
-42. **One failed directory read republishes the whole folder**
+42. ~~**One failed directory read republishes the whole folder**~~ (#398)
     (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
     set when `os.ReadDir` fails, so `pollOnce` drops every known name as
     deleted and publishes them all again on the next good read. Older than

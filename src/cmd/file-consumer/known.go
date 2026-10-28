@@ -84,15 +84,20 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (nam
 // name in the folder is done, as before. After that only the names saved as
 // done are; anything else in the folder arrived or was still settling while
 // the connection was not watching, and goes through the normal stability
-// check. A failed read falls back to the first-start rule for this run but
+// check. A failed folder read returns the error and changes nothing: no
+// baseline, no checkpoint read or write (#398). A failed checkpoint read
+// falls back to the first-start rule for this run but
 // does not save it: that would overwrite the saved history with "everything
 // present is done", and another watcher re-reading it could then skip a file
 // it should publish. The first real change saves.
-func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) {
-	current := s.listFiles(ac.WatchDir)
+func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) error {
+	current, err := s.listFiles(ac.WatchDir)
+	if err != nil {
+		return err
+	}
 	ac.knownFiles = current
 	if s.checkpoints == nil {
-		return
+		return nil
 	}
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	saved, found, err := s.loadSaved(ctx, ac)
@@ -117,6 +122,7 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) {
 		logger.Info("Resuming: files that arrived while stopped will be published",
 			"already_done", len(known), "new", len(current)-len(known))
 	}
+	return nil
 }
 
 // mergeSaved adds to ac.knownFiles every name in current that the checkpoint
