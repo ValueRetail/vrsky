@@ -498,6 +498,22 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
+79. **Rename and `each` leave a dotted source in place.** With the node's
+    `drop_unmapped` off, both read `source` as a path but remove it with
+    `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
+    `rename` and `each` cases), which only deletes a top-level key. So
+    `order.items` → `lines` keeps `order.items` next to the new `lines`.
+    Either delete along the path (a behaviour change for existing
+    pipelines, so say so in the PR) or document it. The editor's `each`
+    help text says so since #458. Found in #458.
+80. **Converter editor accessibility.** Nested mapping rows repeat the
+    accessible names "Mapping type" and "Remove mapping" with no row
+    context, so a screen reader can't tell rows apart, and a row's
+    warnings aren't tied to its inputs with `aria-describedby`
+    (`ui/src/components/Pipeline/ConverterMappingsEditor.tsx`). Name rows
+    by position or target ("Remove mapping 2", "Item mapping type for
+    lineObjectNumber") and point the inputs at the warning list. Found in
+    #458.
 
 ## Human
 

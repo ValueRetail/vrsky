@@ -6,7 +6,8 @@
  *   mapping is skipped;
  * - every type but remove writes `target`; without it the value lands under
  *   an empty key;
- * - remove deletes a top-level key only, so a dotted source removes nothing;
+ * - remove deletes a top-level key only, so a dotted source removes only a
+ *   top-level field with exactly that name (a literal key, not a path);
  * - a template needs an expression;
  * - an unknown type is skipped; an empty or missing type is a rename;
  * - an `each` with drop_unmapped on and no item mappings turns every item
@@ -25,8 +26,12 @@ const SOURCE = /source/i
 const TARGET = /target/i
 const TEMPLATE = /template/i
 const UNKNOWN = /frobnicate/
-const EMPTY_ITEMS = /drop unmapped|empty/i
-const TOP_LEVEL = /top-level|dotted|nested/i
+// Names the item-level box: the node-level one is "Drop unmapped fields",
+// and pointing at it would send the user to the wrong checkbox.
+const EMPTY_ITEMS = /"Drop unmapped item fields"/
+// delete(result, "customer.email") removes a literal top-level key of that
+// name, so the warning must not claim it removes nothing.
+const TOP_LEVEL = /only a top-level field with exactly this name/i
 
 describe('converterMappingWarnings: valid mappings', () => {
   it.each<[string, ConverterMapping]>([
@@ -79,7 +84,7 @@ describe('converterMappingWarnings: mappings the converter skips or mis-writes',
     ['rename with neither', { type: 'rename', source: '', target: '' }, [SOURCE, TARGET]],
 
     // remove deletes a top-level key only (delete(result, m.Source)), so a
-    // dotted path removes nothing.
+    // dotted path is a literal key name, never a path.
     ['remove with a dotted source', { type: 'remove', source: 'customer.email' }, [TOP_LEVEL]],
     ['remove with a deeply dotted source', { type: 'remove', source: 'a.b.c' }, [TOP_LEVEL]],
 

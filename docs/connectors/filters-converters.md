@@ -85,8 +85,9 @@ tick **Split records** under the mappings.
 
 The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the
-converter does not know, a `remove` with a dotted path (it only deletes
-top-level fields), and an `each` that drops unmapped fields with no item
+converter does not know, a `remove` with a dotted path (it removes only a
+top-level field with exactly that name), and an `each` that drops unmapped
+item fields with no item
 mappings (every item becomes `{}`). Nothing checks this when the pipeline is
 saved, so a warning does not stop you saving. The **Test Transform** preview
 does not split records; it shows the whole result.

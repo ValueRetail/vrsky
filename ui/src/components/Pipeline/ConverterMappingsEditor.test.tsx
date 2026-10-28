@@ -124,6 +124,16 @@ describe('each row', () => {
     expect(within(group).getByLabelText('Value')).toHaveValue('Item')
   })
 
+  // delete(result, m.Source) only removes a top-level key, so with a dotted
+  // source and node drop_unmapped off the original array stays next to the
+  // new one. The help text must not promise it is replaced.
+  it('does not claim a dotted source array is replaced', () => {
+    renderEditor(templateConfig())
+    const [group] = itemGroups()
+    expect(group.textContent).not.toMatch(/replaces it/i)
+    expect(group.textContent).toMatch(/dotted source[^.]*stays in place/i)
+  })
+
   it('edits an item mapping field', () => {
     const { last } = renderEditor(templateConfig())
     const [group] = itemGroups()
@@ -290,8 +300,8 @@ describe('warnings', () => {
     ['a copy without a target', { type: 'copy', source: 'a' }, /target/i],
     ['a template without an expression', { type: 'template', target: 'b' }, /template/i],
     ['an unknown type', { type: 'frobnicate', source: 'a', target: 'b' }, /frobnicate/],
-    ['a remove with a dotted source', { type: 'remove', source: 'customer.email' }, /top-level|dotted|nested/i],
-    ['an each with drop unmapped and no item mappings', { type: 'each', source: 'items', target: 'lines', drop_unmapped: true, mappings: [] }, /drop unmapped|empty/i],
+    ['a remove with a dotted source', { type: 'remove', source: 'customer.email' }, /only a top-level field with exactly this name/i],
+    ['an each with drop unmapped and no item mappings', { type: 'each', source: 'items', target: 'lines', drop_unmapped: true, mappings: [] }, /"Drop unmapped item fields" is on/],
   ])('flags %s', (_name, mapping, re) => {
     renderEditor({ mappings: [mapping] })
     const lists = warningLists()

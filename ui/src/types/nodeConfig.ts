@@ -174,16 +174,17 @@ export function converterMappingWarnings(m: ConverterMapping): string[] {
   if (type !== 'remove' && blank(m.target)) {
     out.push('Target is required: without it the value is written to a field with no name.')
   }
-  // remove deletes a top-level key (delete(result, m.Source)); a dotted path
-  // names no key, so nothing is removed.
+  // remove deletes a top-level key (delete(result, m.Source)): a dotted path
+  // is taken as one literal key name (a CSV header can be "customer.email"),
+  // never as a path into a nested object.
   if (type === 'remove' && m.source?.includes('.')) {
-    out.push('Remove only deletes top-level fields: a dotted path like this removes nothing.')
+    out.push('Remove does not follow dotted paths: it removes only a top-level field with exactly this name.')
   }
   if (type === 'template' && !m.expression) {
     out.push('Template is required: without it the converter skips this mapping.')
   }
   if (type === 'each' && m.drop_unmapped && (m.mappings?.length ?? 0) === 0) {
-    out.push('Each item becomes an empty object: "Drop unmapped fields" is on and there are no item mappings.')
+    out.push('Each item becomes an empty object: "Drop unmapped item fields" is on and there are no item mappings.')
   }
   return out
 }
