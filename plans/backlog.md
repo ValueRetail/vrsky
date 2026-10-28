@@ -346,8 +346,8 @@ Last updated 2026-10-28.
     512Mi limit or more gets the Job OOM-killed. Fine for today's small
     management DB. Stream pg_dump through gzip and encryption into
     `PutStream`, or at least alert on the dump size. Found in review of #404.
-56. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
-    a backup change.** `deploy-backup-azure.sh` copies it from
+56. ~~**The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+    a backup change.**~~ (#431) `deploy-backup-azure.sh` copies it from
     `vrsky-platform`, and nothing else runs that script. After an ACR
     password rotation the backup Job can't pull until the next Catch up.
     Run the copy wherever `acr-pull` is rotated, or give the script a step
@@ -596,6 +596,14 @@ Last updated 2026-10-28.
     ending and stop writes add `AND started_at = $n`. Or route the writes
     through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
     Found in review of #456.
+92. **The `acr-pull` copy in `vrsky-ui` never refreshes.**
+    `deploy-ui-azure.sh` copies it from `vrsky-platform` once, and only a
+    human runs that script; the deploy job rolls the UI with
+    `deploy-core-azure.sh`, which doesn't copy. After an ACR password
+    rotation the next UI rollout can't pull. Add `vrsky-ui` to
+    `copy-acr-pull.sh` (#431), which already runs on every deploy. There
+    is also no written runbook for rotating the ACR password itself.
+    `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in #431.
 
 ## Human
 
