@@ -2463,8 +2463,11 @@ to the command subjects: it reads the connections the database says are
 start path a command would. <code>TestConsumersRestoreRunningOnBoot</code> fails for a
 consumer that does not. Restore and a start command can run that path for the
 same connection at once, so it claims the connection with <code>sdk.StartGuard</code>
-before any slow work (#375, #397). A connector rollout therefore no longer needs any
-redeploy afterwards.</p>
+before any slow work (#375, #397). A start refused because another is in flight
+runs again if that one fails, and the start's <code>running</code> write and a stop's
+<code>stopped</code> write go through the guard in the order of the start and the stop, so
+a stop just after a start cannot leave the database saying <code>running</code> (#423,</p>
+<h1 id="424-a-connector-rollout-therefore-no-longer-needs-any-redeploy-afterwards">424). A connector rollout therefore no longer needs any redeploy afterwards.<a class="headerlink" href="#424-a-connector-rollout-therefore-no-longer-needs-any-redeploy-afterwards" title="Permanent link">&para;</a></h1>
 <h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
 <p><strong>Fix the generic workers instead.</strong> Teach <code>cmd/consumer</code>/<code>cmd/producer</code> to read
 <code>type</code>, publish on <code>vrsky.data.*</code>, and speak JetStream. This rebuilds, per node
