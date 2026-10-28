@@ -188,8 +188,9 @@ func TestKnown_FailedReadDoesNotOverwriteSavedSet(t *testing.T) {
 		t.Fatalf("new.json published %d times, want 1 (%s)", len(envs), describe(f.probe.published()))
 	}
 	assertWatchEnvelope(t, envs[0], "new.json", content)
-	if got := store.saves.Load(); got != 1 {
-		t.Errorf("%d checkpoint saves after the publish, want 1", got)
+	// One save: a snapshot and the empty changes row on it (#426).
+	if got := store.saves.Load(); got != 2 {
+		t.Errorf("%d checkpoint row writes after the publish, want 2 (one snapshot, its changes row)", got)
 	}
 }
 

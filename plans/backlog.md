@@ -234,8 +234,8 @@ Last updated 2026-10-28.
     narrows this, but only `strategy: Recreate` (or a per-connection lease)
     closes it. Manifest change: PR plus `agent:needs-human`. Found during
     #391.
-41. **The file consumer's saved done set is rewritten and re-read in full
-    on every busy poll** (`src/cmd/file-consumer/known.go`, `saveKnown`
+41. ~~**The file consumer's saved done set is rewritten and re-read in full
+    on every busy poll**~~ (#426) (`src/cmd/file-consumer/known.go`, `saveKnown`
     and `mergeSaved`). The whole name list is one jsonb value in
     `connection_node_checkpoints.state`: about 3 MB per 100 000 names,
     every 5 s per connection that is publishing, and past jsonb's size

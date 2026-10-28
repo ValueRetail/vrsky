@@ -177,12 +177,17 @@ type ActiveConnection struct {
 	// one at the next poll, without publishing. pending holds names seen but
 	// not yet stable, with the size and mtime from the last poll (#374).
 	// dirty means knownFiles or knownStamps changed since the last save
-	// (#391). All four are touched only by the watcher goroutine after
-	// startConnection returns.
+	// (#391). savedGen is the Gen of the snapshot this watcher saved last, ""
+	// before its first; changed holds the names whose entry changed since
+	// that snapshot, which a save writes as the changes row (#426). All of
+	// these are touched only by the watcher goroutine after startConnection
+	// returns.
 	knownFiles  map[string]bool
 	knownStamps map[string]fileStamp
 	pending     map[string]fileState
 	dirty       bool
+	savedGen    string
+	changed     map[string]bool
 	// readFailures counts folder reads in a row that failed (#398), so only
 	// the first is logged as a warning. baselineDeferred means the start could
 	// not read the folder: knownFiles is not set yet, and each poll tries
@@ -527,6 +532,7 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 	for {
 		select {
 		case <-ctx.Done():
+			s.flushKnown(ctx, ac, logger)
 			logger.Info("Directory watch stopped")
 			return
 		case <-timer.C:
@@ -621,7 +627,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 				// Done with no stamp yet (a checkpoint from before #420, or
 				// a failed stat): take this one, publish nothing.
 				ac.knownStamps[name] = stamp
-				ac.dirty = true
+				ac.touch(name)
 				continue
 			}
 			if done == stamp {
@@ -657,7 +663,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		delete(ac.pending, name)
 		ac.knownFiles[name] = true
 		ac.knownStamps[name] = stamp
-		ac.dirty = true
+		ac.touch(name)
 
 		logger.Info("File added", "file", name)
 		env, size, streamed, ingErr := s.ingestWatchedFile(ctx, ac, name, path)
@@ -700,7 +706,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			logger.Info("File deleted", "file", name)
 			delete(ac.knownFiles, name)
 			delete(ac.knownStamps, name)
-			ac.dirty = true
+			ac.touch(name)
 			s.emitEvent(ac.ConnectionID, FileEvent{
 				Type: "deleted", Filename: name,
 				Time: time.Now().UTC().Format(time.RFC3339),
