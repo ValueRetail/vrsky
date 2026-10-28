@@ -180,3 +180,111 @@ groups:
         annotations:
           summary: "disk usage above 80% on {{ $labels.mountpoint }}"
           description: "Filesystem {{ $labels.mountpoint }} ({{ $labels.device }}) is over 80% full."
+
+  # Not a vrsky-* group on purpose: smoke-alerts.sh fails a deploy on any
+  # firing vrsky-* alert above info, and a failing backup is neither caused
+  # nor fixed by a code deploy. It still reaches Teams through Alertmanager
+  # like every platform alert (no tenant_id).
+  - name: backup
+    rules:
+      # The management-DB backup CronJob (#395, infrastructure/kubernetes/
+      # backup/cronjob.yaml) has not produced a backup on two weekdays the
+      # cluster ran. kube-state-metrics; the CronJob runs weekdays at 12:00
+      # Oslo and only while the cluster is up, so it creates at most one Job
+      # per running weekday.
+      #
+      # (a) Two or more of its Jobs failed after the last successful one
+      #     finished (after the CronJob was created, if none ever did).
+      #     Counting Jobs rather than hours means parked days don't count.
+      #     kube_job_status_completion_time is set on success only.
+      # (b) Nothing has happened for over 98 hours (Thursday's run to Monday
+      #     afternoon): no scheduled run and no successful Job, a manual
+      #     `kubectl create job --from=cronjob/...` included (that sets no
+      #     lastScheduleTime). Checked Monday to Friday from 12:00 UTC, after
+      #     the noon run, and only when the CronJob has been active for the
+      #     98 hours (no false alarm right after it is unsuspended). A start
+      #     any time before the 16:00 park still runs the day's dump
+      #     (startingDeadlineSeconds 4h), so a late start is no excuse.
+      #     Catches a CronJob that stopped firing.
+      # (c) Backstop: the same, over 7 days, with no weekday or hour gate, so
+      #     a cluster that is only ever up outside the gate is not silent.
+      # "Active" in (b) and (c) is suspended for under 1% of the window's
+      # samples, not "never suspended": one stray suspended sample must not
+      # mute the alert for days. Activation after a long suspend is still
+      # quiet until the window has (nearly) passed.
+      # Suspended (no vrsky-backup-config yet, or paused by hand): silent.
+      - alert: MgmtBackupMissing
+        expr: |
+          (
+            label_replace(
+              count by (namespace) (
+                  (
+                      max by (namespace, job_name) (kube_job_status_start_time{namespace="vrsky-database"})
+                    * on (namespace, job_name) group_left ()
+                      max by (namespace, job_name) (kube_job_owner{namespace="vrsky-database", owner_kind="CronJob", owner_name="vrsky-mgmt-backup"})
+                  )
+                > on (namespace) group_left ()
+                  (
+                      max by (namespace) (
+                          max by (namespace, job_name) (kube_job_status_completion_time{namespace="vrsky-database"})
+                        * on (namespace, job_name) group_left ()
+                          max by (namespace, job_name) (kube_job_owner{namespace="vrsky-database", owner_kind="CronJob", owner_name="vrsky-mgmt-backup"})
+                      )
+                    or
+                      max by (namespace) (kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"})
+                  )
+                and on (namespace, job_name)
+                  (max by (namespace, job_name) (kube_job_failed{namespace="vrsky-database", condition="true"}) == 1)
+              ) >= 2,
+              "cronjob", "vrsky-mgmt-backup", "", ""
+            )
+            or
+            (
+                time() - max by (namespace, cronjob) (
+                    label_replace(kube_cronjob_status_last_schedule_time{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "schedule", "", "")
+                  or
+                    label_replace(kube_cronjob_status_last_successful_time{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "success", "", "")
+                  or
+                    label_replace(label_replace(
+                      max by (namespace) (
+                          max by (namespace, job_name) (kube_job_status_completion_time{namespace="vrsky-database"})
+                        * on (namespace, job_name) group_left ()
+                          max by (namespace, job_name) (kube_job_owner{namespace="vrsky-database", owner_kind="CronJob", owner_name="vrsky-mgmt-backup"})
+                      ),
+                      "cronjob", "vrsky-mgmt-backup", "", ""), "fresh", "job", "", "")
+                  or
+                    label_replace(kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "created", "", "")
+                ) > 352800
+              and on () (day_of_week() >= 1 and day_of_week() <= 5 and hour() >= 12)
+              and on (namespace, cronjob)
+                (max by (namespace, cronjob) (avg_over_time(kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}[98h])) < 0.01)
+            )
+            or
+            (
+                time() - max by (namespace, cronjob) (
+                    label_replace(kube_cronjob_status_last_schedule_time{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "schedule", "", "")
+                  or
+                    label_replace(kube_cronjob_status_last_successful_time{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "success", "", "")
+                  or
+                    label_replace(label_replace(
+                      max by (namespace) (
+                          max by (namespace, job_name) (kube_job_status_completion_time{namespace="vrsky-database"})
+                        * on (namespace, job_name) group_left ()
+                          max by (namespace, job_name) (kube_job_owner{namespace="vrsky-database", owner_kind="CronJob", owner_name="vrsky-mgmt-backup"})
+                      ),
+                      "cronjob", "vrsky-mgmt-backup", "", ""), "fresh", "job", "", "")
+                  or
+                    label_replace(kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}, "fresh", "created", "", "")
+                ) > 604800
+              and on (namespace, cronjob)
+                (max by (namespace, cronjob) (avg_over_time(kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}[7d])) < 0.01)
+            )
+          )
+          and on (namespace, cronjob)
+            (max by (namespace, cronjob) (kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}) == 0)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful management-DB backup in two running weekdays"
+          description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."

@@ -1,13 +1,23 @@
-# Phase 3C (#86): daily encrypted backup of the management Postgres.
+# Encrypted logical backup of the management Postgres (#86, #395).
 #
-# Runs vrsky-cli backup once a day → pg_dump (custom format) → gzip → encrypt
-# (AES-256-GCM with the shared ENCRYPTION_KEY) → upload to object storage.
-# Daily schedule gives RPO ≤ 24h. Restore is a deliberate, documented manual
-# step (see docs/DR.md), not automated.
+# vrsky-cli backup: pg_dump (custom format) -> gzip -> AES-256-GCM with the
+# shared ENCRYPTION_KEY -> upload to Azure Blob storage (container
+# vrsky-backups) as mgmt-backups/management_db-<UTC timestamp>.dump.gz.enc.
 #
-# Before applying: create the `vrsky-backup-config` Secret with the management
-# DB URL (BACKUP_DB_URL), the object-store bucket + credentials, and the
-# ENCRYPTION_KEY (see README.md) — all backup config is sourced from that Secret.
+# Weekdays at 12:00 Oslo time, while the cluster runs (it is parked 16:00 to
+# 07:00 and at weekends; nothing changes then). startingDeadlineSeconds is 4h:
+# a cluster started any time before the 16:00 park still runs that day's dump,
+# and a start the next morning does not run yesterday's.
+#
+# Applied by infrastructure/azure/deploy-backup-azure.sh (the deploy job and
+# Catch up). It is suspended here and stays suspended until the
+# `vrsky-backup-config` Secret exists in vrsky-database; that Secret is created
+# by a human with `kubectl create secret generic` (README.md) and never comes
+# from the repo. Every setting below that is not a credential lives in the
+# manifest; every credential comes from that Secret.
+#
+# The image pulls :latest at every run, so a rebuilt vrsky-cli needs no
+# re-apply. Alert: MgmtBackupMissing (infrastructure/prometheus-rules.yml).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -16,27 +26,50 @@ metadata:
   labels:
     app: vrsky-mgmt-backup
 spec:
-  schedule: "0 2 * * *" # 02:00 UTC daily
+  schedule: "0 12 * * 1-5"
+  timeZone: Europe/Oslo
+  startingDeadlineSeconds: 14400
   concurrencyPolicy: Forbid
+  suspend: true # deploy-backup-azure.sh sets false once vrsky-backup-config exists
+  # The alert counts failed Jobs since the last success, so keep enough of both.
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600 # cap a single backup run at 1h (catch a hung pg_dump/upload)
+      activeDeadlineSeconds: 3600 # cap one run at 1h (a hung pg_dump or upload)
       template:
         metadata:
           labels:
             app: vrsky-mgmt-backup
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: acr-pull
+          securityContext:
+            # uid/gid 70 is the `postgres` user of the postgres:18-alpine base.
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: backup
-              image: ghcr.io/valueretail/vrsky/vrsky-cli:latest
+              image: vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest
+              imagePullPolicy: Always
               args: ["backup"]
               envFrom:
                 - secretRef:
                     name: vrsky-backup-config
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: "100m"
@@ -44,3 +77,7 @@ spec:
                 limits:
                   cpu: "500m"
                   memory: "512Mi"
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 256Mi
