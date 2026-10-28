@@ -52,8 +52,15 @@ access logged.
 
 ## Transport & gateway
 
-The UI and API share an origin behind a gateway (Traefik) that applies
-**per-tenant rate limiting** keyed to the subscription plan. Session auth uses
+The UI and API share an origin. In production, TLS terminates at the
+ingress (ingress-nginx, with a Let's Encrypt certificate from cert-manager);
+inside the cluster, services talk over the cluster's private network without
+TLS. A gateway (Traefik) that applies **per-tenant rate limiting** keyed to
+the subscription plan exists for the Docker Compose stack but is not part of
+the production deployment. Production relies on the limits built into the
+services: plan quotas, failed-attempt limits on login, sign-up and
+remote-agent registration, and a per-connection rate limit on data
+ingestion. Session auth uses
 `SameSite` cookies; service-to-service calls (e.g. the OAuth token endpoint) use
 a shared service token.
 
