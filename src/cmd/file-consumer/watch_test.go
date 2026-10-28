@@ -83,12 +83,16 @@ func newWatchFixture(t *testing.T, setup func(dir string)) *watchFixture {
 		pollInterval: watchInterval,
 		now:          func() time.Time { return f.clock },
 	}
+	baseline, err := c.listFiles(dir)
+	if err != nil {
+		t.Fatalf("list %s: %v", dir, err)
+	}
 	ac := &ActiveConnection{
 		ConnectionID: "conn-watch",
 		TenantID:     "tenant-x",
 		WatchDir:     dir,
 		Cancel:       func() {},
-		knownFiles:   c.listFiles(dir),
+		knownFiles:   baseline,
 	}
 	f.c, f.ac = c, ac
 	return f

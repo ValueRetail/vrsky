@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,6 +72,9 @@ type fileConsumer struct {
 	// now is the watcher's clock; nil means time.Now. Tests inject one to
 	// drive the stability window without sleeping.
 	now func() time.Time
+	// readDir lists a watch folder; nil means os.ReadDir. Tests inject one
+	// that fails on demand (#398).
+	readDir func(dir string) ([]os.DirEntry, error)
 
 	// Event subscribers: connectionId → list of channels
 	eventSubs   map[string][]chan FileEvent
@@ -173,6 +177,13 @@ type ActiveConnection struct {
 	knownFiles map[string]bool
 	pending    map[string]fileState
 	dirty      bool
+	// readFailures counts folder reads in a row that failed (#398), so only
+	// the first is logged as a warning. baselineDeferred means the start could
+	// not read the folder: knownFiles is not set yet, and each poll tries
+	// loadKnown until a read works. Both are set by the start path before the
+	// watcher goroutine runs, then touched only by that goroutine.
+	readFailures     int
+	baselineDeferred bool
 }
 
 // fileState is what the watcher compares between polls to decide that the
@@ -396,7 +407,16 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 		WatchDir:     watchDir,
 		NodeID:       s.fileNodeID(conn),
 	}
-	s.loadKnown(ctx, ac)
+	if err := s.loadKnown(ctx, ac); err != nil {
+		// Start anyway, so the connection that shows as running is watched,
+		// and take the baseline on the first poll whose read works (#398).
+		// Nothing is published or saved before that. Refusing the start left
+		// the pipeline "running" with nothing watching the folder.
+		ac.baselineDeferred = true
+		ac.readFailures = 1
+		s.logger.Warn("Could not read the watch folder at start; watching anyway, nothing is published until a read works",
+			"error", err, "connection_id", connectionID, "watch_dir", watchDir)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ac.Cancel = cancel
@@ -513,6 +533,10 @@ func (s *fileConsumer) clock() time.Time {
 // changed the done set saves it at the end (#391).
 func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
+	if ac.baselineDeferred {
+		s.takeDeferredBaseline(ctx, ac, logger)
+		return
+	}
 	if ac.knownFiles == nil {
 		ac.knownFiles = make(map[string]bool)
 	}
@@ -520,7 +544,20 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		ac.pending = make(map[string]fileState)
 	}
 
-	currentFiles := s.listFiles(ac.WatchDir)
+	currentFiles, err := s.listFiles(ac.WatchDir)
+	if err != nil {
+		// Skip the poll. Read as an empty folder, a share that blipped for one
+		// poll dropped every known name and the next good read published the
+		// whole folder again (#398). The done set, pending files and the
+		// checkpoint stay as they are; a folder that is really gone holds no
+		// files, and the first good read prunes what went with it.
+		s.noteReadFailure(ac, err, logger)
+		return
+	}
+	if ac.readFailures > 0 {
+		logger.Info("Watch folder readable again", "skipped_polls", ac.readFailures)
+		ac.readFailures = 0
+	}
 	refreshed := false
 
 	// Detect new files and ingest them into the pipeline. Previously this only
@@ -613,6 +650,42 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	s.saveKnown(ctx, ac, logger)
 }
 
+// takeDeferredBaseline is a poll for a connection whose start could not read
+// its folder (#398). It tries loadKnown again; the first read that works sets
+// the baseline exactly as a start would (the saved set, or first-start rules)
+// and saves it if that changed anything. Nothing is published in this poll,
+// as nothing is in a start: new files go through the stability check from
+// the next poll on.
+func (s *fileConsumer) takeDeferredBaseline(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
+	if ctx.Err() != nil {
+		return
+	}
+	if err := s.loadKnown(ctx, ac); err != nil {
+		s.noteReadFailure(ac, err, logger)
+		return
+	}
+	logger.Info("Watch folder readable; baseline taken, publishing from here",
+		"skipped_polls", ac.readFailures, "files", len(ac.knownFiles))
+	ac.baselineDeferred = false
+	ac.readFailures = 0
+	s.saveKnown(ctx, ac, logger)
+}
+
+// noteReadFailure logs a failed folder read: at Warn for the first in a run,
+// then at Debug, so a share that stays down does not log every poll.
+func (s *fileConsumer) noteReadFailure(ac *ActiveConnection, err error, logger *slog.Logger) {
+	ac.readFailures++
+	msg := "Could not read the watch folder; skipping this poll"
+	if errors.Is(err, fs.ErrNotExist) {
+		msg = "Watch folder is missing; skipping this poll"
+	}
+	if ac.readFailures == 1 {
+		logger.Warn(msg, "error", err)
+	} else {
+		logger.Debug(msg, "error", err, "failed_polls", ac.readFailures)
+	}
+}
+
 // isTempName reports whether a file name looks like one a writer is still
 // filling and will rename when done: dotfiles, ~ prefixes, and .tmp or .part
 // suffixes in any case.
@@ -624,11 +697,17 @@ func isTempName(name string) bool {
 	return strings.HasSuffix(lower, ".tmp") || strings.HasSuffix(lower, ".part")
 }
 
-// listFiles returns a set of non-directory filenames in a directory.
-func (s *fileConsumer) listFiles(dir string) map[string]bool {
-	entries, err := os.ReadDir(dir)
+// listFiles returns the set of non-directory file names in dir. A failed
+// read, a missing folder included, is an error and never an empty set: the
+// callers would take every known name as deleted (#398).
+func (s *fileConsumer) listFiles(dir string) (map[string]bool, error) {
+	readDir := s.readDir
+	if readDir == nil {
+		readDir = os.ReadDir
+	}
+	entries, err := readDir(dir)
 	if err != nil {
-		return make(map[string]bool)
+		return nil, err
 	}
 	files := make(map[string]bool)
 	for _, entry := range entries {
@@ -636,7 +715,7 @@ func (s *fileConsumer) listFiles(dir string) map[string]bool {
 			files[entry.Name()] = true
 		}
 	}
-	return files
+	return files, nil
 }
 
 func detectContentType(filename string, data []byte) string {

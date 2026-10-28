@@ -10,15 +10,15 @@ Last updated 2026-10-27.
 
 ## Agent
 
-1. **Stop the cluster at 16:00 from inside the cluster.** GitHub fires only
+1. ~~**Stop the cluster at 16:00 from inside the cluster.**~~ (#352) GitHub fires only
    5–6 of Park's 32 daily runs and the first lands hours late (2026-10-22:
    20:28 Oslo). A Kubernetes CronJob with `timeZone: Europe/Oslo` at 16:00
    calls `az aks stop` through a managed identity with workload identity;
    Park stays as the backstop. Plan first (`plans/cost-cap.md` has the
    context). Touches manifests and Azure identity: PR plus
    `agent:needs-human`, never merged by an agent.
-2. **`messaging.ensure` updates every existing stream on every connector
-   start** (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
+2. ~~**`messaging.ensure` updates every existing stream on every connector
+   start**~~ (#353) (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
    existing config already matches; it was the trigger for the nats-server
    race fixed in #339 and is log noise. NATS stream configuration: PR plus
    `agent:needs-human`.
@@ -122,7 +122,7 @@ Last updated 2026-10-27.
     builds it, but no workflow or script builds `vrsky-cli` into any
     registry. Find out whether the CronJob runs on AKS; if it does, it can't
     pull. Manifests: PR plus `agent:needs-human`. Found in #371.
-28. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
+28. ~~**Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.**~~ (#386) #371
     rewrote the guide down to "Encryption at rest" and left the rest alone.
     "Disaster Recovery" says the management Postgres "is backed up daily",
     but the backup CronJob's image is built nowhere (item 27), so check
@@ -210,7 +210,7 @@ Last updated 2026-10-27.
     `testdata/`) there and in the `src/cmd/*` case. The script is under
     `infrastructure/azure/**`, so the fix is a PR labelled
     `agent:needs-human`, not an agent merge. Found during #375.
-39. **The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**
+39. ~~**The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**~~ (#399)
     The axios client (`ui/src/services/api.ts`) always sends relative
     `/api/...` requests, and Vite's proxy in `ui/vite.config.ts` forwards
     them to a hardcoded `http://localhost:3000`. Inside the container that
@@ -241,13 +241,79 @@ Last updated 2026-10-27.
     every 5 s per connection that is publishing, and past jsonb's size
     limit the save fails. Store it incrementally (a row per name, or only
     the changes) or save less often. Found in review of #391.
-42. **One failed directory read republishes the whole folder**
+42. ~~**One failed directory read republishes the whole folder**~~ (#398)
     (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
     set when `os.ReadDir` fails, so `pollOnce` drops every known name as
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
-43. **An ending poller can drop a newer poller's map entry.** api
+43. **The management-api README still places it behind Traefik.**
+    `infrastructure/kubernetes/management-api/README.md` says the replicas
+    run "behind the Service / Traefik gateway" and advises sticky sessions
+    for SSE "at Traefik". Production runs ingress-nginx, and the browser
+    reaches the API through the UI pod's nginx (`deploy-ui-azure.sh`
+    proxies `/api` and `/ws`), so affinity set on the ingress wouldn't pin a
+    client to one management-api replica. Rework the advice for the real
+    path. Production runs one replica today (`deploy-azure.sh`), so nothing
+    is broken yet. Found in #386.
+44. **The backup Secret example names the wrong database for AKS.**
+    `infrastructure/kubernetes/backup/README.md` builds `BACKUP_DB_URL` as
+    `postgres://postgres:…/management_db`, but on AKS the database and its
+    user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
+    `infrastructure/azure/rotate-secrets.sh`). Fix it together with item 27,
+    and have `docs/DR.md` use the same names. Found in #386.
+45. **The encryption-at-rest table reads as if every layer is in place.**
+    `docs/DEPLOYMENT_GUIDE.md` lists an encrypted StorageClass and MinIO
+    SSE through KES, but on AKS `deploy-azure.sh` uses `managed-csi`, and no
+    script or workflow applies `infrastructure/kubernetes/encryption/`. Say
+    which layers production has (Azure disks are encrypted at rest by the
+    platform; whether with a customer key can't be told from the repo) and
+    which are optional overlays. Found in #386.
+46. **The whitepaper promises inbound mTLS for webhooks that production
+    can't do.** `docs/security/whitepaper.md` section 4 says a webhook
+    consumer can require a client certificate. That needs the worker's TLS
+    listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
+    webhook Ingress has no SSL passthrough or `auth-tls` annotations, so
+    ingress-nginx terminates TLS and the worker never sees a client cert.
+    Either wire it up or say it's compose-only for now. Found in review of
+    #386.
+47. **The encryption-at-rest checklist says `sslmode=require`; production
+    uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
+    to use TLS to the databases in production, but the AKS connection
+    strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
+    `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
+    on TLS for Postgres or make the checklist say where production stands.
+    Found in review of #386.
+48. **The CNPG manifest calls the restore drill a backup.** The comment in
+    `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
+    are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
+    in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
+    manifest, so PR plus `agent:needs-human`. Found in review of #386.
+49. **`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
+    exists only for it.** It opens an `EventSource` on
+    `${config.wsUrl}/api/v1/connections/{id}/metrics/stream`, default
+    `http://localhost:3000`: a cross-origin URL in dev that wouldn't carry
+    the session cookie, and a wrong host in production. Delete the file and
+    `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
+    the docs), or, if something should use the stream, make it relative
+    like `api.ts`. Found during #399.
+50. **A file folder that can't be read only shows up in the log**
+    (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
+    connection shows as `running` while its folder is unreadable, and the
+    only sign is one Warn in the file-consumer log. `noteReadFailure` could
+    emit a `FileEvent{Type: "error"}` on each failed poll. The File watcher
+    panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
+    and `emitEvent` only reaches live subscribers, so it costs nothing
+    when no panel is open. Found in review of #398.
+51. **A failed checkpoint read during a deferred baseline loses files**
+    (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
+    not read the folder (#398), the first good read calls `loadKnown`. If
+    the checkpoint read fails then, it falls back to "everything present is
+    done", and that set is saved on the first real change, so files that
+    landed during the outage are never published. `takeDeferredBaseline`
+    already retries every poll, so it could stay deferred on a checkpoint
+    error instead. Found in review of #398.
+52. **An ending poller can drop a newer poller's map entry.** api
     (`pollConnection` one-shot), sftp (one-shot `runPoller`), cloud-storage
     (`finishConn`) and tenant (`runBridge` error paths) delete their
     connection from the active map without checking the entry is still
@@ -255,13 +321,18 @@ Last updated 2026-10-27.
     the new one's entry; the next start then runs a second poller beside
     it. Older than #397. Delete only when the stored value is this
     poller's own (compare a pointer). Found during #397.
-44. **Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
-    and two consumers are not on it yet.** Since #397 all command-driven
+53. **Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
+    and three consumers are not on it yet.** Since #397 all command-driven
     consumers refuse a start while one is in flight (37) and write
     `running` after activating (36), like the file consumer. The webhook
     consumer still checks and inserts in two steps (a double start only
     overwrites the map entry, but a stop mid-start is lost) and the Front
-    Systems consumer can register its webhooks twice. Found during #397.
+    Systems consumer can register its webhooks twice. The remote agent
+    checks and inserts in two steps too (`src/cmd/remote-agent/service.go`
+    around 312-315 and 397-400) and runs each start on its own goroutine,
+    so two start commands can race and leak the overwritten session's
+    subscription; its fingerprint/replace model doesn't fit `StartGuard`
+    as is. Found during #397 and its review.
 
 ## Human
 

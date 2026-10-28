@@ -145,10 +145,10 @@ the file consumer's own seam (its #375 tests use it). Its seven
   ownership check (api `pollConnection` one-shot, sftp one-shot,
   cloud-storage `finishConn`, tenant `runBridge` errors). After a stop and a
   new start, the old poller ending can drop the new poller's entry; a third
-  start then runs a second poller. Older than this change. New item 43.
+  start then runs a second poller. Older than this change. New item 52.
 - Items 36 (stop just after activation leaves `running`) and 37 (a refused
   start is dropped if the in-flight one fails) now apply to every consumer
-  that uses the guard, not only the file consumer. New item 44.
+  that uses the guard, not only the file consumer. New item 53.
 - webhook-consumer (check-then-insert, but no poller: a double start only
   overwrites the map entry) and front-systems-consumer (no state) are not
   in the issue's list. A stop mid-start is still lost there. Part of 44.
@@ -195,5 +195,5 @@ From `src/`:
 - Exported `AfterReserve` test hook on the SDK type, nil in production,
   rather than a hook per consumer.
 - File consumer migrated too, so the reservation lives once.
-- Backlog items 43 and 44 follow main's 42; other open PRs may also take
+- Backlog items 52 and 53 follow main's 51 (renumbered at merge); other open PRs may also take
   numbers from 43.

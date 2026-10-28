@@ -67,10 +67,23 @@ change them ([Install](operator/install.md) lists what matters).
 
 #### Option 1: Build UI Only (Dev Mode)
 
+Start the core stack first (`make up-core` or `docker compose up -d`). The
+dev container joins its `vrsky-network` and Vite proxies `/api` to
+`http://management-api:3000` there; without the stack, `up` stops with
+"network vrsky-network declared as external, but could not be found".
+
 ```bash
 # Serves UI on http://localhost:5173 with hot reload
 docker compose -f docker-compose.ui.yml --profile dev up -d ui
 ```
+
+Stop it (`docker compose -f docker-compose.ui.yml --profile dev down`)
+before you take the core stack down, or the stack's `down` can't remove
+`vrsky-network` while the UI container is still on it.
+
+Running `npm run dev` on the host instead needs no container: the proxy
+defaults to `http://localhost:3000`, where the stack publishes the API. Set
+`API_PROXY_TARGET` to point it at another API.
 
 #### Option 2: Build UI Production Image
 
@@ -437,7 +450,7 @@ encryption of every stateful component. The layers below are stacked:
 | Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. |
 | Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, KES key store | Encrypted StorageClass (cloud KMS) or LUKS on bare metal. |
 | Object storage | MinIO bucket contents | SSE-S3 via KES sidecar wrapping a KMS data key. |
-| Transit | All HTTP between services | TLS terminated at Traefik, internal mTLS via the cluster mesh (cluster-trust CA). |
+| Transit | Client traffic to the public host | TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer `letsencrypt-prod`, secret `vrsky-tls`, set on the `vrsky` Ingress in `infrastructure/kubernetes/ui/ingress.yaml`). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over `http://`, Postgres URLs use `sslmode=disable`, the NATS manifests set no TLS). |
 
 ### Per-target setup
 
@@ -544,9 +557,22 @@ control families.
 ## Disaster Recovery
 
 The management Postgres (tenants, connections, secrets, OAuth grants,
-notification targets, audit log) is backed up daily and its restore path is
-tested in CI. See **[`docs/DR.md`](DR.md)** for the full runbook — backup flow,
-the `vrsky-cli backup`/`restore`/`list` commands, RPO ≤ 24h / RTO ≤ 1h, the
-critical `ENCRYPTION_KEY` caveat, and the step-by-step recovery procedure. The
-backup CronJob + its config Secret are documented in
+notification targets, audit log) has backup and restore tooling, but as far as
+this repo shows, no scheduled backup runs in production:
+
+- `vrsky-cli backup`/`list`/`restore` exist, and the
+  [DR drill](DR.md#the-ci-restore-drill) proves backup and restore against
+  throwaway databases in CI.
+- A daily CronJob is defined in `infrastructure/kubernetes/backup/cronjob.yaml`,
+  but no script or workflow applies it, and its image
+  (`ghcr.io/valueretail/vrsky/vrsky-cli:latest`) is built nowhere. AKS can't
+  pull `ghcr.io` images anyway (see the warning above). Item 27 in
+  `plans/backlog.md` tracks this.
+- No script or workflow snapshots the Postgres volume.
+
+The repo can't tell whether someone applied the CronJob by hand or set up
+backups on the Azure side. Until one of those is confirmed, treat production
+as having no backups. See **[`docs/DR.md`](DR.md)** for the runbook: the
+backup flow, the RPO/RTO targets, the `ENCRYPTION_KEY` caveat and the recovery
+procedure. The CronJob and its config Secret are described in
 [`infrastructure/kubernetes/backup/README.md`](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md).
