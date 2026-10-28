@@ -55,6 +55,9 @@ The cost-12 work comes from two places the fixtures don't control:
 `auth_reset_test.go`:
 
 - `resetRepo.UpdateUserPassword` remembers which user it changed.
+  `resetEnv.change` clears that before each request, and a 200 that stored
+  nothing fails the test, so re-storing can't hide a skipped store (review
+  finding; a "skip the store on the second call" mutation now fails).
 - `resetEnv.change`: after a 200, the first change in a test keeps the
   hash `ChangePassword` stored. Every later one re-stores the new password
   for that user at `bcrypt.MinCost`. So each test still logs in at least
