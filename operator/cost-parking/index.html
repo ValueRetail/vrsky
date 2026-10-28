@@ -1049,6 +1049,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-1600-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 16:00 stop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The 16:00 stop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-time-setup-a-human-with-owner-on-the-subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-time setup (a human, with Owner on the subscription)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2436,6 +2464,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-1600-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 16:00 stop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The 16:00 stop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-time-setup-a-human-with-owner-on-the-subscription" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-time setup (a human, with Owner on the subscription)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2522,17 +2578,98 @@ cluster looks exactly like an outage from the outside.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>stop<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
 <p>Takes a few minutes. Every pod is evicted; nothing is deleted.</p>
-<p><strong>It happens by itself outside working hours.</strong> The <em>Park</em> workflow
-(<code>.github/workflows/park.yml</code>) is scheduled every half hour from 16:00 to
-07:00 Oslo time, at :07 and :37 past the hour because GitHub drops runs at
-:00 and :30 when it is busy; each run that lands in that window queues behind any
-deploy or catch-up in progress and stops a Running cluster, a stopped one
-is left alone. GitHub runs schedules hours late on this repository (the
-first evening, a single 16:00 cron fired at 20:10 and stopped nothing),
-which is why it is a window with many crons and not one o'clock: expect
-the stop somewhere between 16:00 and 20:00. Still working in the evening?
-Start it again; the next run stops it again. A stop from anywhere, any
+<p><strong>It happens by itself at 16:00.</strong> The cluster stops itself: a CronJob in
+the cluster (see <a href="#the-1600-stop">The 16:00 stop</a>) asks Azure to stop it at
+16:00 Oslo time, every day it is running. The nodes are gone a few minutes
+later.</p>
+<p>The <em>Park</em> workflow (<code>.github/workflows/park.yml</code>) is the backstop. It is
+scheduled every half hour from 16:00 to 07:00 Oslo time, at :07 and :37
+past the hour because GitHub drops runs at :00 and :30 when it is busy;
+each run that lands in that window queues behind any deploy or catch-up in
+progress and stops a Running cluster, a stopped one is left alone. GitHub
+runs schedules hours late on this repository (2026-10-22: the first run
+landed at 20:28), so Park alone means a stop somewhere between 16:00 and
+21:00; it catches the evenings the CronJob did not run or failed. Still
+working in the evening? Start it again; the CronJob has had its run for
+the day, and Park's next run stops it again. A stop from anywhere, any
 hour: Actions → <strong>Park</strong> → <em>Run workflow</em>.</p>
+<h2 id="the-1600-stop">The 16:00 stop<a class="headerlink" href="#the-1600-stop" title="Permanent link">&para;</a></h2>
+<p><code>infrastructure/kubernetes/park/cronjob.yaml</code>: namespace <code>vrsky-park</code>,
+service account <code>cluster-park</code>, CronJob <code>cluster-park</code> at <code>0 16 * * *</code>,
+<code>timeZone: Europe/Oslo</code>. The job logs in with AKS workload identity as the
+managed identity <code>vrsky-cluster-park</code>, reads the power state and, when it
+is Running, runs <code>az aks stop --no-wait</code> (the job runs on the nodes it is
+stopping, so it does not wait for them). The identity has one custom role,
+<em>VRSky cluster park</em>, on the cluster alone: read it and stop it, nothing
+else. <code>TestClusterParkCronJob</code> pins the schedule, the time zone, the
+concurrency policy, the deadlines below and that the job runs no other
+<code>az</code> command against any other cluster.</p>
+<p>The CronJob drops a run it could not start within ten minutes of 16:00. A
+cluster started the next morning would otherwise run the missed 16:00 job
+straight away and stop again.</p>
+<p>Unlike Park, the CronJob does not queue behind a deploy: GitHub's
+<code>production</code> concurrency group means nothing inside the cluster. A deploy
+or catch-up still rolling out at 16:00 is cut off by the stop; after the
+next start the Production check sees production behind <code>main</code> and runs
+Catch up, as after any stop.</p>
+<p>Did today's run work?</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>get<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>-n<span class="w"> </span>vrsky-park
+kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-park<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>cluster-park<span class="w"> </span>--tail<span class="o">=</span><span class="m">20</span>
+</code></pre></div>
+<h3 id="one-time-setup-a-human-with-owner-on-the-subscription">One-time setup (a human, with Owner on the subscription)<a class="headerlink" href="#one-time-setup-a-human-with-owner-on-the-subscription" title="Permanent link">&para;</a></h3>
+<p>Not applied by the deploy scripts. Creating a role and assigning it needs
+Owner or User Access Administrator.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">SUB</span><span class="o">=</span>8c020b54-b237-4d6e-82ba-190f6a415d1d
+
+<span class="c1"># 0. OIDC issuer and workload identity. Both were on on 2026-10-27. Unless</span>
+<span class="c1">#    this prints "True  True", run the update below.</span>
+az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--query<span class="w"> </span><span class="s1">'[oidcIssuerProfile.enabled, securityProfile.workloadIdentity.enabled]'</span><span class="w"> </span>-o<span class="w"> </span>tsv
+<span class="c1"># az aks update -g vrsky-prod -n vrsky-prod --enable-oidc-issuer --enable-workload-identity</span>
+
+<span class="c1"># 1. The identity.</span>
+az<span class="w"> </span>identity<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-cluster-park<span class="w"> </span>-l<span class="w"> </span>norwayeast
+
+<span class="c1"># 2. Trust the CronJob's service account, and nothing else.</span>
+az<span class="w"> </span>identity<span class="w"> </span>federated-credential<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>--identity-name<span class="w"> </span>vrsky-cluster-park<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>vrsky-park-cluster-park<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--issuer<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>oidcIssuerProfile.issuerUrl<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--subject<span class="w"> </span>system:serviceaccount:vrsky-park:cluster-park<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--audiences<span class="w"> </span>api://AzureADTokenExchange
+
+<span class="c1"># 3. A role that can read and stop a cluster, assigned on vrsky-prod only.</span>
+az<span class="w"> </span>role<span class="w"> </span>definition<span class="w"> </span>create<span class="w"> </span>--role-definition<span class="w"> </span><span class="s2">"{</span>
+<span class="s2">  \"Name\": \"VRSky cluster park\",</span>
+<span class="s2">  \"Description\": \"Read and stop the vrsky-prod AKS cluster.\",</span>
+<span class="s2">  \"Actions\": [\"Microsoft.ContainerService/managedClusters/read\",</span>
+<span class="s2">                \"Microsoft.ContainerService/managedClusters/stop/action\"],</span>
+<span class="s2">  \"NotActions\": [],</span>
+<span class="s2">  \"AssignableScopes\": [\"/subscriptions/</span><span class="nv">$SUB</span><span class="s2">/resourceGroups/vrsky-prod\"]</span>
+<span class="s2">}"</span>
+<span class="c1"># A new role takes a minute or two to be usable; retry if this says it does not exist.</span>
+az<span class="w"> </span>role<span class="w"> </span>assignment<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--assignee-object-id<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>identity<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-cluster-park<span class="w"> </span>--query<span class="w"> </span>principalId<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--assignee-principal-type<span class="w"> </span>ServicePrincipal<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--role<span class="w"> </span><span class="s2">"VRSky cluster park"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--scope<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>aks<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span>
+
+<span class="c1"># 4. Apply the manifest with the identity's client id filled in, against</span>
+<span class="c1">#    the production cluster. Always apply it this way: applying the file as</span>
+<span class="c1">#    it is in the repo puts the placeholder back and the next run fails.</span>
+az<span class="w"> </span>aks<span class="w"> </span>get-credentials<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
+<span class="nv">CLIENT_ID</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>identity<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-cluster-park<span class="w"> </span>--query<span class="w"> </span>clientId<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+sed<span class="w"> </span><span class="s2">"s/REPLACE_WITH_CLUSTER_PARK_IDENTITY_CLIENT_ID/</span><span class="nv">$CLIENT_ID</span><span class="s2">/"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>infrastructure/kubernetes/park/cronjob.yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-
+kubectl<span class="w"> </span>get<span class="w"> </span>cronjob<span class="w"> </span>-n<span class="w"> </span>vrsky-park
+</code></pre></div>
+<p>The built-in <em>Azure Kubernetes Service Contributor Role</em> would also do,
+but it grants <code>Microsoft.ContainerService/managedClusters/*</code>: delete,
+scale, upgrade and the admin kubeconfig as well. The custom role grants
+the two actions the job uses.</p>
+<p>To try it, on an evening when the cluster may stop (it stops it):</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>job<span class="w"> </span>--from<span class="o">=</span>cronjob/cluster-park<span class="w"> </span>-n<span class="w"> </span>vrsky-park<span class="w"> </span>park-now
+kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>vrsky-park<span class="w"> </span>job/park-now<span class="w"> </span>-f
+</code></pre></div>
 <h2 id="start">Start<a class="headerlink" href="#start" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>-n<span class="w"> </span>vrsky-prod
 </code></pre></div>
