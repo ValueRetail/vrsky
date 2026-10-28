@@ -284,7 +284,7 @@ groups:
             (max by (namespace, cronjob) (kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}) == 0)
         for: 30m
         labels:
-          severity: warning
+          severity: critical
         annotations:
           summary: "No successful management-DB backup in two running weekdays"
           description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
