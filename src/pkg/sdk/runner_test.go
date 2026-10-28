@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -296,6 +298,145 @@ func TestRun_CallsConnectorStop(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&p.stopped); got != 1 {
 		t.Errorf("connector Stop should be called once on shutdown; got %d", got)
+	}
+}
+
+// heldProducer blocks Deliver until the test releases it, then reports what
+// its context said at that point and returns ctx.Err(), the way a connector
+// that honours its context aborts an in-flight send.
+type heldProducer struct {
+	sdk.BaseProducer
+	calls   int64
+	started chan struct{} // cap 1: the first Deliver has begun
+	release chan struct{} // closed by the test
+	ctxErr  chan error    // cap 1: ctx.Err() seen by the first Deliver
+}
+
+func (p *heldProducer) Configure(ctx context.Context, res *sdk.Resources) error { return nil }
+func (p *heldProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
+	atomic.AddInt64(&p.calls, 1)
+	select {
+	case p.started <- struct{}{}:
+	default:
+	}
+	<-p.release
+	err := ctx.Err()
+	select {
+	case p.ctxErr <- err:
+	default:
+	}
+	return err
+}
+
+// TestProducer_ShutdownDoesNotCancelInFlightDelivery guards #459. run()
+// cancels runCtx and only then calls the subscriber's Stop. That order is
+// harmless only because the context the SDK hands Deliver does not derive
+// from runCtx. If it ever did, a shutdown would cancel the in-flight Deliver,
+// the message would be NAK'd, and (as #444 showed for another caller) the
+// dispatch loop could re-fetch it until it was dead-lettered. The test pins
+// that a delivery in flight at shutdown keeps a live context, runs once and
+// is acked, with nothing left on the durable and nothing in the DLQ.
+func TestProducer_ShutdownDoesNotCancelInFlightDelivery(t *testing.T) {
+	nc, js, cleanup := harness.StartEmbeddedJetStream(t)
+	defer cleanup()
+	if err := messaging.EnsureStreams(js); err != nil {
+		t.Fatalf("ensure streams: %v", err)
+	}
+
+	const name = "held-producer"
+	p := &heldProducer{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		ctxErr:  make(chan error, 1),
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(p.release)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- sdk.RunProducer(ctx, name, p, sdk.WithNATSConn(nc), sdk.WithoutHealthServer())
+	}()
+
+	env := envelope.New()
+	env.ID = "held-1"
+	env.TenantID = "tenant-held"
+	env.IntegrationID = "conn-held"
+	env.Payload = []byte("held")
+	body, err := envelope.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	if err := messaging.NewPublisher(js).Publish(context.Background(), env.TenantID, env.IntegrationID, env.ID, body); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	select {
+	case <-p.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Deliver never started")
+	}
+
+	// Shut the runner down while Deliver is in flight. Cancelling ctx cancels
+	// runCtx synchronously. The short pause only lets run() reach Stop (Halt)
+	// before Deliver returns, so the loop doesn't sit in a 2s Fetch; the
+	// assertions hold either way.
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	released = true
+	close(p.release)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunProducer did not return after ctx cancel")
+	}
+
+	select {
+	case err := <-p.ctxErr:
+		if err != nil {
+			t.Errorf("Deliver's context was cancelled by the shutdown: %v", err)
+		}
+	default:
+		t.Fatal("Deliver did not record its context state")
+	}
+	if got := atomic.LoadInt64(&p.calls); got != 1 {
+		t.Errorf("Deliver ran %d times, want 1", got)
+	}
+
+	// The ack is sent asynchronously; give the server a moment to apply it.
+	var info *nats.ConsumerInfo
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		info, err = js.ConsumerInfo(messaging.MainStreamName, name)
+		if err != nil {
+			t.Fatalf("consumer info: %v", err)
+		}
+		if info.NumPending == 0 && info.NumAckPending == 0 && info.NumRedelivered == 0 ||
+			time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if info.NumPending != 0 || info.NumAckPending != 0 || info.NumRedelivered != 0 {
+		t.Errorf("durable %q after shutdown: pending=%d ack_pending=%d redelivered=%d, want all 0",
+			name, info.NumPending, info.NumAckPending, info.NumRedelivered)
+	}
+	if info.Delivered.Consumer != 1 {
+		t.Errorf("durable %q delivered %d times, want 1", name, info.Delivered.Consumer)
+	}
+
+	dlq, err := js.StreamInfo(messaging.DLQStreamName)
+	if err != nil {
+		t.Fatalf("DLQ info: %v", err)
+	}
+	if dlq.State.Msgs != 0 {
+		t.Errorf("shutdown dead-lettered the in-flight message: %d in the DLQ", dlq.State.Msgs)
 	}
 }
 

@@ -410,7 +410,7 @@ Last updated 2026-10-28.
     `split_records` not at all. Saving keeps both (`updateMapping` spreads
     the old mapping), but picking another type in that select drops the
     lines. Show them, read-only at least. Found during #435.
-64. **Check the other `messaging.Subscribe` callers for cancel-before-Stop.**
+64. ~~**Check the other `messaging.Subscribe` callers for cancel-before-Stop.**~~ (#459)
     #444 found the remote-agent gateway cancelling what its handlers wait
     on before stopping the subscriber, so the loop re-fetched the NAK'd
     message until it was dead-lettered. `Subscriber.Halt` now exists for
