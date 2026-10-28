@@ -135,7 +135,7 @@ Last updated 2026-10-27.
     it or renames a new `orders.csv` over it is ignored, unless the name
     disappeared for at least one poll in between. Decide whether a changed
     size or mtime on a known name means a new file. Found during #374.
-30. **Files still settling at a stop or restart are never published**
+30. ~~**Files still settling at a stop or restart are never published**~~ (#391)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
     taken at start counts every name in the directory as already there, so
     a file that landed before a stop or restart but had not been published
@@ -224,6 +224,29 @@ Last updated 2026-10-27.
     `vrsky-network`, and set the target to `http://management-api:3000`.
     Or drop the dev service and point "Option 1" in
     `docs/DEPLOYMENT_GUIDE.md` at `npm run dev`. Found in #392.
+40. **Two file-consumer pods watch the same folders during a deploy.**
+    The file-consumer Deployment (`infrastructure/kubernetes/connectors/connectors.yaml`)
+    has one replica and the default RollingUpdate strategy, so the new pod
+    starts and restores every running file connection before the old one
+    stops. For those seconds both pods poll the same folders on the shared
+    volume, and a file that lands then can be published by both. #391 has
+    each watcher re-read the saved done set before publishing, which
+    narrows this, but only `strategy: Recreate` (or a per-connection lease)
+    closes it. Manifest change: PR plus `agent:needs-human`. Found during
+    #391.
+41. **The file consumer's saved done set is rewritten and re-read in full
+    on every busy poll** (`src/cmd/file-consumer/known.go`, `saveKnown`
+    and `mergeSaved`). The whole name list is one jsonb value in
+    `connection_node_checkpoints.state`: about 3 MB per 100 000 names,
+    every 5 s per connection that is publishing, and past jsonb's size
+    limit the save fails. Store it incrementally (a row per name, or only
+    the changes) or save less often. Found in review of #391.
+42. **One failed directory read republishes the whole folder**
+    (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
+    set when `os.ReadDir` fails, so `pollOnce` drops every known name as
+    deleted and publishes them all again on the next good read. Older than
+    #391, which now also saves that empty set. A failed read should skip
+    the poll. Found in review of #391.
 
 ## Human
 

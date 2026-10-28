@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/ValueRetail/vrsky/pkg/tenantpath"
@@ -30,10 +31,14 @@ import (
 type fileConsumer struct {
 	sdk.BaseConsumer
 
-	db      *sql.DB
-	nc      *nats.Conn
-	publish sdk.PublishFunc // injected by the runner; the one data-emit path
-	logger  *slog.Logger
+	db *sql.DB
+	nc *nats.Conn
+	// checkpoints keeps each watcher's done set across restarts (#391, known.go).
+	// Configure sets the Postgres store unless a test set one; nil means
+	// nothing is kept and every start takes the whole folder as done.
+	checkpoints checkpoint.Store
+	publish     sdk.PublishFunc // injected by the runner; the one data-emit path
+	logger      *slog.Logger
 
 	// publishStream is non-nil only when the SDK selected the streaming path
 	// (ADR 0001) — i.e. this worker has a payload store. When it is available a
@@ -155,15 +160,19 @@ type ActiveConnection struct {
 	ConnectionID string
 	TenantID     string
 	WatchDir     string
-	Cancel       context.CancelFunc
+	// NodeID is the file consumer node's id, the key of its checkpoint.
+	NodeID string
+	Cancel context.CancelFunc
 
-	// knownFiles holds names that are done: the baseline taken at start and
-	// every name published (or failed) since. They are not ingested again
-	// while the name exists. pending holds names seen but not yet stable,
-	// with the size and mtime from the last poll (#374). Both are touched only
-	// by the watcher goroutine after startConnection returns.
+	// knownFiles holds names that are done: what loadKnown took as done at
+	// start and every name published (or failed) since. They are not
+	// ingested again while the name exists. pending holds names seen but not
+	// yet stable, with the size and mtime from the last poll (#374). dirty
+	// means knownFiles changed since it was last saved (#391). All three are
+	// touched only by the watcher goroutine after startConnection returns.
 	knownFiles map[string]bool
 	pending    map[string]fileState
+	dirty      bool
 }
 
 // startReservation marks one start in progress (#375). stopped is set, under
@@ -190,6 +199,9 @@ func (s *fileConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	}
 	s.db = res.DB
 	s.nc = res.NATS
+	if s.checkpoints == nil {
+		s.checkpoints = checkpoint.NewPostgresStore(res.DB)
+	}
 	s.logger = res.Logger
 	s.inlineMax = res.InlineMaxBytes()
 	// Under the lock like every other access: the map is read from NATS
@@ -309,7 +321,6 @@ func (s *fileConsumer) handleStartCommand(msg *nats.Msg) {
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
 func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
 	// The boot restore and the start-command handler run on different
@@ -382,25 +393,29 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Take the baseline (files already there, never ingested) before the
-	// connection shows as active or running. Taken later, in the watcher
-	// goroutine, a file dropped in between was counted as already there and
-	// silently never published (#362).
+	// Decide which files in the folder are done before the connection shows
+	// as active or running. Decided later, in the watcher goroutine, a file
+	// dropped in between was counted as already there and silently never
+	// published (#362). On the first start that is every file in the folder;
+	// after that, only those saved as published, so a file that landed just
+	// before a stop or restart is still published (#391).
 	ac := &ActiveConnection{
 		ConnectionID: connectionID,
 		TenantID:     tenantID,
 		WatchDir:     watchDir,
-		Cancel:       cancel,
-		knownFiles:   s.listFiles(watchDir),
+		NodeID:       s.fileNodeID(conn),
 	}
+	s.loadKnown(ctx, ac)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ac.Cancel = cancel
 
 	if !s.activateStart(connectionID, res, ac) {
 		cancel()
 		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
 		return
 	}
+	s.saveKnown(ctx, ac, s.logger.With("connection_id", connectionID, "watch_dir", watchDir))
 
 	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
@@ -517,7 +532,7 @@ func (s *fileConsumer) watchDirectory(ctx context.Context, ac *ActiveConnection)
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
 
-	// ac.knownFiles already holds the baseline startConnection took.
+	// ac.knownFiles already holds what startConnection took as done.
 	for {
 		select {
 		case <-ctx.Done():
@@ -551,7 +566,8 @@ func (s *fileConsumer) clock() time.Time {
 // poll interval has passed between the two looks, so a file still being
 // written is not read half-way. Until #374 it was read on the first poll that
 // saw its name, and the finished file was then never published. Temp names
-// are left alone until they are renamed to their final name.
+// are left alone until they are renamed to their final name. A poll that
+// changed the done set saves it at the end (#391).
 func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	if ac.knownFiles == nil {
@@ -562,11 +578,16 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	}
 
 	currentFiles := s.listFiles(ac.WatchDir)
+	refreshed := false
 
 	// Detect new files and ingest them into the pipeline. Previously this only
 	// emitted a UI "added" event and never published the file's contents, so
 	// the directory-watch source silently did nothing downstream (#143).
 	for name := range currentFiles {
+		if ctx.Err() != nil {
+			// Stopping. What is left is published by the next start (#391).
+			break
+		}
 		if ac.knownFiles[name] {
 			continue
 		}
@@ -592,12 +613,29 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			// from a slow writer. Keep the first sighting and wait.
 			continue
 		}
+		if !refreshed {
+			// Once per poll, before the first publish: another watcher for
+			// this connection may have published it since this one started.
+			refreshed = true
+			s.mergeSaved(ctx, ac, currentFiles, logger)
+			if ac.knownFiles[name] {
+				continue
+			}
+		}
 		delete(ac.pending, name)
 		ac.knownFiles[name] = true
+		ac.dirty = true
 
 		logger.Info("File added", "file", name)
 		env, size, streamed, ingErr := s.ingestWatchedFile(ctx, ac, name, path)
 		if ingErr != nil {
+			if ctx.Err() != nil {
+				// Cut off by a stop, not a bad file: leave it for the next
+				// start instead of saving it as done.
+				delete(ac.knownFiles, name)
+				logger.Info("Stopped while publishing a file; it is published again on the next start", "file", name)
+				break
+			}
 			logger.Error("Failed to ingest detected file", "file", name, "error", ingErr)
 			s.emitEvent(ac.ConnectionID, FileEvent{
 				Type: "error", Filename: name, Size: size, Message: ingErr.Error(),
@@ -617,6 +655,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		if !currentFiles[name] {
 			logger.Info("File deleted", "file", name)
 			delete(ac.knownFiles, name)
+			ac.dirty = true
 			s.emitEvent(ac.ConnectionID, FileEvent{
 				Type: "deleted", Filename: name,
 				Time: time.Now().UTC().Format(time.RFC3339),
@@ -628,6 +667,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			delete(ac.pending, name)
 		}
 	}
+	s.saveKnown(ctx, ac, logger)
 }
 
 // isTempName reports whether a file name looks like one a writer is still
