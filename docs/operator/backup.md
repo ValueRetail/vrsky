@@ -43,7 +43,7 @@ access to the cluster. Agents don't run them.
 
 ### Layer 1: backup vault for the Postgres disk
 
-The commands are in `plans/prod-backup.md` (Layer 1; PR #396 until it merges). Use a daily schedule
+The commands are in `plans/prod-backup.md` (Layer 1). Use a daily schedule
 and a retention of `P7D`, with no weekly rule. Take one manual snapshot first.
 
 ### Layer 2: storage account, container, lifecycle
