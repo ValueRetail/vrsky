@@ -21,17 +21,18 @@ for confirmation.
    plans under `plans/`, and the last ~20 merged PRs for conventions:
    branch names `fix/…`, `feat/…`, `ci/…`, `chore/…`, `test/…`;
    conventional commits; a `plans/<task>.md` per non-trivial change, linked
-   from the PR. `AGENTS.md` predates the code (it still says "no code
-   exists yet"); trust the code and the recent PRs over it.
+   from the PR. `AGENTS.md` was rewritten from the code in #357; where it
+   and the code disagree, trust the code and fix `AGENTS.md`.
 2. Read `.github/workflows`. What matters:
    - `build-push.yml` runs Go tests (with `-race`), UI tests with coverage
      thresholds, the remote-agent builds, then builds images in ACR and
      **deploys to production on every merge to main** (deploy job, smoke
      check). A merge is a production deploy.
    - Also on main: `integration.yml`, `vuln-scan.yml`, `docs.yml`;
-     scheduled: Production check (`drift-check.yml`), Park, the nightly
-     end-to-end and the DR drill. `ci-failure-alert.yml` opens an issue
-     when any of them goes red on main.
+     scheduled: Production check (`drift-check.yml`), Park and the nightly
+     end-to-end. The DR drill (`dr-drill.yml`) runs only on path changes
+     and by hand until #395 gives it a schedule. `ci-failure-alert.yml`
+     opens an issue when any of them goes red on main.
    - While the cluster is parked (stopped 16:00–07:00 and often longer),
      the deploy job builds images and skips the rollout, green; the
      Production check rolls production forward after the next start.
