@@ -153,11 +153,21 @@ vrsky-cli restore --target-db-url 'postgres://…/vrsky' --confirm \
 since the last good backup, or when neither a scheduled run nor a successful
 Job (a manual one counts) has happened for over four days of being active
 (checked weekday afternoons), or for over seven days at any time. It is
-silent while the CronJob is suspended and right after it is unsuspended. A
-CronJob left suspended is silent too, so check `SUSPEND` after any manual
-pause. It sits outside the
-`vrsky-*` rule groups, so it reaches Teams but doesn't fail a deploy's smoke
-check. A single failed Job also shows up as the chart's `KubeJobFailed`.
+silent while the CronJob is suspended and right after it is unsuspended.
+
+`MgmtBackupSuspended` (warning) covers the suspend that is never undone: it
+fires when the CronJob has been suspended for over 7 days while
+`vrsky-backup-config` exists and is over 7 days old. A restore that suspends
+it for a few hours doesn't count, and nights the cluster is parked count as
+suspended. Unsuspend it (above) or run Catch up. If it is suspended again
+after that, the deploy log names the key the Secret is missing. Before the
+Secret exists the CronJob is suspended on purpose and this alert is silent.
+It reads the Secret's age from kube-state-metrics (`kube_secret_created`),
+so recreating the Secret starts the 7 days again.
+
+Both sit outside the `vrsky-*` rule groups, so they reach Teams but don't
+fail a deploy's smoke check. A single failed Job also shows up as the
+chart's `KubeJobFailed`.
 
 ## Restore drill
 

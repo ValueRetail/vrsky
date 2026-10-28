@@ -72,7 +72,9 @@ The CronJob runs as uid 70 with a read-only root filesystem, pulls `:latest`
 at every run, and is watched by the alert `MgmtBackupMissing`: two failed
 Jobs since the last good backup, or no scheduled run and no successful Job
 for over four days of being active (seven at weekends and outside the
-afternoon check), while it isn't suspended.
+afternoon check), while it isn't suspended. `MgmtBackupSuspended` fires
+when it has been suspended for over 7 days while `vrsky-backup-config` has
+existed for over 7 days.
 
 ## Restore from a disk snapshot
 
@@ -99,7 +101,9 @@ STAMP=$(date +%Y%m%d)
    out of the way (`kubectl -n vrsky-database get secret vrsky-backup-config
    -o json | jq '.metadata.name="vrsky-backup-config-paused" | del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp)' | kubectl apply -f -`,
    then delete the original) and rename it back at the end, or expect the
-   CronJob to resume. Then record the replica counts and scale the platform
+   CronJob to resume. A suspend that outlasts 7 days with the Secret in
+   place raises `MgmtBackupSuspended`; with the Secret renamed it stays
+   quiet. Then record the replica counts and scale the platform
    and Postgres down:
    ```bash
    kubectl -n vrsky-platform get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.replicas}{"\n"}{end}' > replicas.txt

@@ -353,7 +353,7 @@ Last updated 2026-10-28.
     Run the copy wherever `acr-pull` is rotated, or give the script a step
     in every deploy. Workflow change: PR plus `agent:needs-human`. Found in
     review of #404.
-57. **A backup CronJob left suspended is silent.** `MgmtBackupMissing` is
+57. ~~**A backup CronJob left suspended is silent.**~~ (#432) `MgmtBackupMissing` is
     quiet while `vrsky-mgmt-backup` is suspended, by design, so a CronJob
     suspended by hand (or never re-enabled after a restore) and left that
     way for more than 7 days after `vrsky-backup-config` exists pages
@@ -521,6 +521,14 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
+82. **A deleted backup CronJob is silent.** If `vrsky-mgmt-backup` is
+    deleted (by hand, or a failed re-apply), its kube-state-metrics series
+    end, and both `MgmtBackupMissing` and `MgmtBackupSuspended` match
+    nothing, so no backups run and nobody is paged. An `absent()` rule on
+    `kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}`
+    while `vrsky-backup-config` exists would catch it; mind the parked
+    nights (no samples at all then). Alert rules only. Found in review of
+    #473.
 
 ## Human
 
