@@ -26,7 +26,7 @@ type dataConnectionInfo struct {
 }
 
 // runBridge subscribes to the source tenant's NATS topic and republishes to the target tenant's pipeline
-func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID string, config *TenantConsumerConfig) {
+func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connectionID, tenantID string, config *TenantConsumerConfig) {
 	logger := s.logger.With(
 		"connection_id", connectionID,
 		"tenant_id", tenantID,
@@ -38,9 +38,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 	if err != nil {
 		logger.Error("No approved data connection found", "error", err)
 		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.mu.Lock()
-		delete(s.activeBridges, connectionID)
-		s.mu.Unlock()
+		s.dropActive(connectionID, own)
 		return
 	}
 
@@ -58,9 +56,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 				"source_connection_id", config.SourceConnectionID,
 				"shared_ids", dcInfo.SharedConnectionIDs)
 			_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-			s.mu.Lock()
-			delete(s.activeBridges, connectionID)
-			s.mu.Unlock()
+			s.dropActive(connectionID, own)
 			return
 		}
 	}
@@ -83,9 +79,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 	if jsErr != nil {
 		logger.Error("JetStream context", "error", jsErr)
 		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.mu.Lock()
-		delete(s.activeBridges, connectionID)
-		s.mu.Unlock()
+		s.dropActive(connectionID, own)
 		return
 	}
 	// Each bridge gets its own durable consumer with a FilterSubject set
@@ -105,9 +99,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, connectionID, tenantID s
 	if err != nil {
 		logger.Error("Failed to subscribe to source topic", "error", err, "topic", topic)
 		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.mu.Lock()
-		delete(s.activeBridges, connectionID)
-		s.mu.Unlock()
+		s.dropActive(connectionID, own)
 		return
 	}
 

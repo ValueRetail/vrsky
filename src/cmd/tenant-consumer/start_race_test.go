@@ -95,7 +95,7 @@ func newSRFixture(t *testing.T) *srFixture {
 		db:            db,
 		nc:            nc,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		activeBridges: make(map[string]context.CancelFunc),
+		activeBridges: make(map[string]*activeConn),
 		publish:       func(context.Context, *envelope.Envelope) error { return nil },
 	}
 	t.Cleanup(func() {

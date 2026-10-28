@@ -48,7 +48,7 @@ type sftpConsumer struct {
 	// inject a fake so the poller runs without a live server.
 	dial dialFunc
 
-	active map[string]context.CancelFunc
+	active map[string]*activeConn
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
@@ -98,7 +98,7 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.nc = res.NATS
 	s.logger = res.Logger
 	s.inlineMax = res.InlineMaxBytes()
-	s.active = make(map[string]context.CancelFunc)
+	s.active = make(map[string]*activeConn)
 	if s.dial == nil {
 		s.dial = realDial
 	}
@@ -153,11 +153,11 @@ func (s *sftpConsumer) Stop(ctx context.Context) error {
 		_ = s.stopSub.Unsubscribe()
 	}
 	s.mu.Lock()
-	for id, cancel := range s.active {
+	for id, ac := range s.active {
 		s.logger.Info("Stopping SFTP poller", "connection_id", id)
-		cancel()
+		ac.cancel()
 	}
-	s.active = make(map[string]context.CancelFunc)
+	s.active = make(map[string]*activeConn)
 	// A start still in flight must not leave a poller nobody will cancel.
 	s.starts.StopAllLocked()
 	s.mu.Unlock()
@@ -212,8 +212,9 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ac := &activeConn{cancel: cancel}
 	// A stop that arrived during the work above has taken the claim back and wins.
-	if !claim.Activate(func() { s.active[connectionID] = cancel }) {
+	if !claim.Activate(func() { s.active[connectionID] = ac }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
@@ -221,7 +222,26 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting SFTP poller", "host", cfg.Host, "remote_dir", cfg.RemoteDir, "after_action", cfg.AfterAction)
-	go s.runPoller(ctx, connectionID, tenantID, cfg)
+	go s.runPoller(ctx, ac, connectionID, tenantID, cfg)
+}
+
+// activeConn is one start's entry in the active map. The poller gets the same
+// pointer, so when it ends on its own it can tell whether the entry is still
+// its own (#408).
+type activeConn struct {
+	cancel context.CancelFunc
+}
+
+// dropActive removes connID from the active map if the entry is still own.
+// After a stop and a new start it belongs to the newer poller, and an old
+// poller finishing must leave it alone, or the next start runs a second poller
+// beside the new one (#408).
+func (s *sftpConsumer) dropActive(connID string, own *activeConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active[connID] == own {
+		delete(s.active, connID)
+	}
 }
 
 func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
@@ -231,9 +251,9 @@ func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	s.mu.Lock()
-	cancel, exists := s.active[cmd.ConnectionID]
+	ac, exists := s.active[cmd.ConnectionID]
 	if exists {
-		cancel()
+		ac.cancel()
 		delete(s.active, cmd.ConnectionID)
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
@@ -250,7 +270,7 @@ func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
 
 // runPoller fetches once immediately then on the configured interval. Each
 // cycle opens a fresh connection (natural reconnection) with bounded backoff.
-func (s *sftpConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg *SFTPConfig) {
+func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, tenantID string, cfg *SFTPConfig) {
 	logger := s.logger.With("connection_id", connID)
 	// processed tracks filenames already published this session, so an
 	// after_action=none directory does not re-publish the same file every tick.
@@ -262,9 +282,7 @@ func (s *sftpConsumer) runPoller(ctx context.Context, connID, tenantID string, c
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("SFTP one-shot poll complete")
 		_ = s.updateConnectionStatus(connID, tenantID, "stopped")
-		s.mu.Lock()
-		delete(s.active, connID)
-		s.mu.Unlock()
+		s.dropActive(connID, own)
 		return
 	}
 
