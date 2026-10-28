@@ -3795,25 +3795,20 @@ control families.</p>
 <hr />
 <h2 id="disaster-recovery">Disaster Recovery<a class="headerlink" href="#disaster-recovery" title="Permanent link">&para;</a></h2>
 <p>The management Postgres (tenants, connections, secrets, OAuth grants,
-notification targets, audit log) has backup and restore tooling, but as far as
-this repo shows, no scheduled backup runs in production:</p>
+notification targets, audit log) is meant to have two backup layers in
+production, and both need a one-time human setup before they run:</p>
 <ul>
-<li><code>vrsky-cli backup</code>/<code>list</code>/<code>restore</code> exist, and the
-  <a href="../DR/#the-ci-restore-drill">DR drill</a> proves backup and restore against
-  throwaway databases in CI.</li>
-<li>A daily CronJob is defined in <code>infrastructure/kubernetes/backup/cronjob.yaml</code>,
-  but no script or workflow applies it, and its image
-  (<code>ghcr.io/valueretail/vrsky/vrsky-cli:latest</code>) is built nowhere. AKS can't
-  pull <code>ghcr.io</code> images anyway (see the warning above). Item 27 in
-  <code>plans/backlog.md</code> tracks this.</li>
-<li>No script or workflow snapshots the Postgres volume.</li>
+<li>Azure Disk Backup of the Postgres disk, daily, kept 7 days. A human sets
+  up the vault; the repo has no part in it.</li>
+<li>An encrypted logical dump, weekdays at 12:00 Oslo, from the CronJob
+  <code>vrsky-mgmt-backup</code> to Azure Blob storage, kept 14 days. CI builds its
+  image into ACR and the deploy job applies it, suspended until a human has
+  created its storage account and the <code>vrsky-backup-config</code> Secret.</li>
 </ul>
-<p>The repo can't tell whether someone applied the CronJob by hand or set up
-backups on the Azure side. Until one of those is confirmed, treat production
-as having no backups. See <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> for the runbook: the
-backup flow, the RPO/RTO targets, the <code>ENCRYPTION_KEY</code> caveat and the recovery
-procedure. The CronJob and its config Secret are described in
-<a href="https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md"><code>infrastructure/kubernetes/backup/README.md</code></a>.</p>
+<p>The repo can't show whether those human steps are done. Check before you
+rely on a backup. <strong><a href="../DR/"><code>docs/DR.md</code></a></strong> has the state, retention, the
+<code>ENCRYPTION_KEY</code> caveat and both restore runbooks; the setup is in
+<a href="../operator/backup/">Backup &amp; restore</a>.</p>
 
 
 

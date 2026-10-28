@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#disaster-recovery-management-database-phase-3c-86" class="md-skip">
+        <a href="#disaster-recovery-management-database-86-395" class="md-skip">
           Skip to content
         </a>
       
@@ -1290,10 +1290,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-a-backup-works" class="md-nav__link">
+  <a href="#how-a-logical-backup-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How a backup works
+        How a logical backup works
       
     </span>
   </a>
@@ -1301,10 +1301,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#restoring-the-recovery-procedure" class="md-nav__link">
+  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Restoring (the recovery procedure)
+        Restore from a disk snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore-from-a-logical-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a logical dump
       
     </span>
   </a>
@@ -2403,10 +2414,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-a-backup-works" class="md-nav__link">
+  <a href="#how-a-logical-backup-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How a backup works
+        How a logical backup works
       
     </span>
   </a>
@@ -2414,10 +2425,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#restoring-the-recovery-procedure" class="md-nav__link">
+  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Restoring (the recovery procedure)
+        Restore from a disk snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore-from-a-logical-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a logical dump
       
     </span>
   </a>
@@ -2463,28 +2485,54 @@
 
 
 
-<h1 id="disaster-recovery-management-database-phase-3c-86">Disaster Recovery — management database (Phase 3C, #86)<a class="headerlink" href="#disaster-recovery-management-database-phase-3c-86" title="Permanent link">&para;</a></h1>
-<p>This is the runbook for backing up and restoring the <strong>management Postgres</strong> —
+<h1 id="disaster-recovery-management-database-86-395">Disaster Recovery — management database (#86, #395)<a class="headerlink" href="#disaster-recovery-management-database-86-395" title="Permanent link">&para;</a></h1>
+<p>This is the runbook for backing up and restoring the <strong>management Postgres</strong>,
 the database that holds every tenant, connection/pipeline definition, encrypted
 secret reference, OAuth provider/grant, notification target, and the audit log.
 Losing it loses the platform's control plane.</p>
+<blockquote>
+<p><strong>Scope:</strong> the management DB only. Tenant <em>data in flight</em> lives in NATS
+JetStream (72h limit, by design) and large payloads in object storage for
+minutes; neither is a system of record.</p>
+</blockquote>
 <h2 id="what-runs-today">What runs today<a class="headerlink" href="#what-runs-today" title="Permanent link">&para;</a></h2>
-<p>As far as this repo shows, <strong>no scheduled backup of the production database
-runs</strong>:</p>
-<ul>
-<li>The daily CronJob in <code>infrastructure/kubernetes/backup/cronjob.yaml</code>
-  (02:00 UTC) is not applied by any script or workflow.</li>
-<li>Its image, <code>ghcr.io/valueretail/vrsky/vrsky-cli:latest</code>, is built by no
-  workflow or script, and AKS can't pull from <code>ghcr.io</code>. Applied as it is, the
-  CronJob's pods would fail to pull. Item 27 in <code>plans/backlog.md</code> tracks this.</li>
-<li>No script or workflow snapshots the Postgres volume (an Azure disk through
-  the <code>managed-csi</code> storage class).</li>
-<li>The <a href="#the-ci-restore-drill">CI restore drill</a> tests the backup and restore
-  commands, not a production backup.</li>
-</ul>
-<p>The repo can't show whether someone applied the CronJob by hand or set up
-backups on the Azure side. Until one of those is confirmed, assume there are
-none.</p>
+<p>Production has two backup layers. The repo sets up part of the second; the
+rest is a one-time human setup in
+<a href="../operator/backup/#one-time-setup-human">Backup &amp; restore</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What</th>
+<th>Set up by</th>
+<th>Retention</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Azure Disk Backup</td>
+<td>Daily incremental snapshot of the Postgres disk (<code>pvc-152a98c3-…</code>, node resource group) by the vault <code>vrsky-backup</code></td>
+<td>Human</td>
+<td>7 days, no weekly copies</td>
+</tr>
+<tr>
+<td>2. Logical dump</td>
+<td>CronJob <code>vrsky-mgmt-backup</code>: <code>vrsky-cli backup</code>, weekdays 12:00 Oslo, encrypted, to the Blob container <code>vrsky-backups</code></td>
+<td>Repo (image, CronJob, alert) plus human (storage account, Secret)</td>
+<td>14 days (lifecycle rule)</td>
+</tr>
+</tbody>
+</table>
+<p>From the repo side, CI builds <code>vrskyprodacr.azurecr.io/vrsky/vrsky-cli</code>, and
+the deploy job and Catch up apply the CronJob with
+<code>infrastructure/azure/deploy-backup-azure.sh</code>. The CronJob stays <strong>suspended</strong>
+until the <code>vrsky-backup-config</code> Secret exists, so no backup runs before the
+human setup is done. Whether it has been done can't be told from the repo:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>get<span class="w"> </span>cronjob<span class="w"> </span>vrsky-mgmt-backup<span class="w">          </span><span class="c1"># SUSPEND False, LAST SCHEDULE recent</span>
+az<span class="w"> </span>dataprotection<span class="w"> </span>backup-instance<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>--vault-name<span class="w"> </span>vrsky-backup<span class="w"> </span>-o<span class="w"> </span>table
+</code></pre></div>
+<p>There is no copy in a second region. Geo-redundant storage or object
+replication to Norway West is a later option.</p>
 <table>
 <thead>
 <tr>
@@ -2497,98 +2545,199 @@ none.</p>
 <tr>
 <td><strong>RPO</strong> (max data loss)</td>
 <td><strong>≤ 24h</strong></td>
-<td>Not met while no backup runs. The CronJob would meet it once it can pull an image, its <code>vrsky-backup-config</code> Secret exists with a correct database URL, and it is applied.</td>
+<td>Layer 1 once the vault runs (daily). Layer 2 once its Secret exists: the last weekday noon; nothing changes while the cluster is parked. Not measured yet.</td>
 </tr>
 <tr>
 <td><strong>RTO</strong> (max time to restore)</td>
 <td><strong>≤ 1h</strong></td>
-<td>Depends on having a backup. With one, a single <code>vrsky-cli restore</code> of the small management dump into a fresh DB should run in minutes. That is an estimate: it hasn't been measured on a production-sized dump.</td>
+<td>An estimate: a restore of the small management dump runs in minutes in the CI drill. Not measured on a production-sized dump or from a snapshot.</td>
 </tr>
 </tbody>
 </table>
+<p>Replace the Status column with measured numbers after the first real restore
+from each layer.</p>
 <blockquote>
-<p><strong>Scope:</strong> the management DB only. Tenant <em>data in flight</em> lives in NATS
-JetStream (durable, replicated) and large payloads in object storage; those
-have their own durability and are out of scope here.</p>
+<p><strong>The <code>ENCRYPTION_KEY</code> is not in the backup.</strong> The dumps are encrypted with
+it, and the dump's <code>*_secret_id</code> ciphertext only decrypts with it. Keep a
+copy outside Azure, in a password manager. <strong>Without it the dumps are
+useless.</strong> A disk snapshot holds the same ciphertext, so it needs the same
+key once the cluster's own Secrets are gone.</p>
 </blockquote>
-<h2 id="how-a-backup-works">How a backup works<a class="headerlink" href="#how-a-backup-works" title="Permanent link">&para;</a></h2>
-<p><code>vrsky-cli backup</code> (source in <code>src/cmd/vrsky-cli/</code>; its image is built from
-the <code>Dockerfile</code> there, which today only the compose <code>backup</code> profile does):
-1. <code>pg_dump --format=custom</code> of the management DB,
-2. gzip,
-3. encrypt with <strong>AES-256-GCM</strong> using the platform <code>ENCRYPTION_KEY</code> (the same
-   master key that protects the secrets vault — see <code>SECURITY.md</code>),
-4. upload to object storage (S3 / Azure / GCS via <code>pkg/objectstore</code>) as
-   <code>mgmt-backups/management_db-&lt;UTC-timestamp&gt;.dump.gz.enc</code>.</p>
-<p>Config is environment-driven (<code>BACKUP_DB_URL</code>, <code>ENCRYPTION_KEY</code>,
-<code>BACKUP_PROVIDER</code>/<code>BACKUP_BUCKET</code>/<code>BACKUP_ENDPOINT</code>/<code>BACKUP_REGION</code>/
-<code>BACKUP_ACCESS_KEY_ID</code>/<code>BACKUP_SECRET_ACCESS_KEY</code>, or the Azure/GCS equivalents).
-Deployment + the Secret are documented in
+<h2 id="how-a-logical-backup-works">How a logical backup works<a class="headerlink" href="#how-a-logical-backup-works" title="Permanent link">&para;</a></h2>
+<p><code>vrsky-cli backup</code> (<code>src/cmd/vrsky-cli/</code>, image built from its <code>Dockerfile</code>
+on a <code>postgres:18-alpine</code> base, so <code>pg_dump</code> matches the server):</p>
+<ol>
+<li><code>pg_dump --format=custom</code> of the management DB,</li>
+<li>gzip,</li>
+<li>encrypt with <strong>AES-256-GCM</strong> using the platform <code>ENCRYPTION_KEY</code> (the same
+   master key that protects the secrets vault, see <code>SECURITY.md</code>),</li>
+<li>upload to object storage (Azure in production; S3 and GCS also work, via
+   <code>pkg/objectstore</code>) as
+   <code>mgmt-backups/management_db-&lt;UTC-timestamp&gt;.dump.gz.enc</code>.</li>
+</ol>
+<p>Config is environment-driven: <code>BACKUP_DB_URL</code>, <code>ENCRYPTION_KEY</code>,
+<code>BACKUP_PROVIDER</code>, <code>BACKUP_BUCKET</code>, and <code>BACKUP_AZURE_ACCOUNT_NAME</code> +
+<code>BACKUP_AZURE_ACCOUNT_KEY</code> or <code>BACKUP_AZURE_CONNECTION_STRING</code> (the S3 and GCS
+equivalents otherwise). The CronJob takes them from the <code>vrsky-backup-config</code>
+Secret; see
 <a href="https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/backup/README.md"><code>infrastructure/kubernetes/backup/README.md</code></a>.</p>
-<blockquote>
-<p>⚠️ <strong>The <code>ENCRYPTION_KEY</code> is NOT in the backup</strong> — and it can't be: the dump is
-encrypted with it, and the dump's <code>*_secret_id</code> ciphertext is only decryptable
-with it. Store the key in a separate secret manager / sealed secret. <strong>A backup
-without the key is unrecoverable.</strong> This is the one thing object-store
-versioning can't protect you from, so guard the key independently.</p>
-</blockquote>
-<h2 id="restoring-the-recovery-procedure">Restoring (the recovery procedure)<a class="headerlink" href="#restoring-the-recovery-procedure" title="Permanent link">&para;</a></h2>
+<p>The CronJob runs as uid 70 with a read-only root filesystem, pulls <code>:latest</code>
+at every run, and is watched by the alert <code>MgmtBackupMissing</code>: two failed
+Jobs since the last good backup, or no scheduled run and no successful Job
+for over four days of being active (seven at weekends and outside the
+afternoon check), while it isn't suspended.</p>
+<h2 id="restore-from-a-disk-snapshot">Restore from a disk snapshot<a class="headerlink" href="#restore-from-a-disk-snapshot" title="Permanent link">&para;</a></h2>
+<p>Use this when the disk is lost or corrupted, or after a bad migration, and
+the cluster still exists. It brings back the whole database as of the
+snapshot. <strong>Not yet rehearsed</strong>: run it once against a scratch namespace
+before you rely on it, and fix this page where reality differs.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">SUB</span><span class="o">=</span>8c020b54-b237-4d6e-82ba-190f6a415d1d
+<span class="nv">NRG</span><span class="o">=</span>MC_vrsky-prod_vrsky-prod_norwayeast
+<span class="nv">STAMP</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%Y%m%d<span class="k">)</span>
+</code></pre></div>
 <ol>
-<li>
-<p><strong>Stand up a fresh, empty Postgres</strong> (the new management DB) of the <strong>same
-   major version as the backed-up server, or newer</strong> — a dump does not restore
-   cleanly into an <em>older</em> major (e.g. a PG 18 dump won't fully apply to PG 16) —
-   and make sure the <strong>same <code>ENCRYPTION_KEY</code></strong> as the lost instance is available.</p>
-</li>
-<li>
-<p><strong>Find the backup to restore:</strong>
-   <div class="highlight"><pre><span></span><code>vrsky-cli<span class="w"> </span>list<span class="w">      </span><span class="c1"># prints keys, sizes, ages — pick the most recent good one</span>
-</code></pre></div></p>
-</li>
-<li>
-<p><strong>Restore into the new database:</strong>
-   <div class="highlight"><pre><span></span><code>vrsky-cli<span class="w"> </span>restore<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--target-db-url<span class="w"> </span><span class="s1">'postgres://postgres:PASSWORD@NEW-HOST:5432/management_db?sslmode=disable'</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--confirm<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>mgmt-backups/management_db-20260610T020000Z.dump.gz.enc
+<li><strong>Stop everything that writes, the backup CronJob included.</strong> A dump taken
+   mid-restore is worse than none, and it would push a good dump out of the
+   14 days sooner. Suspend the CronJob first:
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>patch<span class="w"> </span>cronjob<span class="w"> </span>vrsky-mgmt-backup<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"spec":{"suspend":true}}'</span>
 </code></pre></div>
-   <code>restore</code> downloads → decrypts → gunzips → <code>pg_restore --clean --if-exists</code>.
-   It <strong>requires</strong> <code>--target-db-url</code> and <code>--confirm</code> (restore is destructive), and
-   refuses to overwrite the configured source DB unless you also pass
-   <code>--allow-source-db</code>.</p>
-</li>
-<li>
-<p><strong>Bring migrations up to date.</strong> A backup is a point-in-time snapshot at
-   whatever migration version was live then. After restoring, run the migrations
-   so the schema matches the current code:
-   <div class="highlight"><pre><span></span><code>migrate<span class="w"> </span>-path<span class="w"> </span>infrastructure/migrations<span class="w"> </span>-database<span class="w"> </span><span class="s2">"</span><span class="nv">$TARGET_DB_URL</span><span class="s2">"</span><span class="w"> </span>up
+   The next deploy that touches the backup, and every Catch up, set
+   <code>suspend</code> from the <code>vrsky-backup-config</code> Secret again and would turn it
+   back on. For a restore that may span one of those, rename the Secret
+   out of the way (<code>kubectl -n vrsky-database get secret vrsky-backup-config
+   -o json | jq '.metadata.name="vrsky-backup-config-paused" | del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp)' | kubectl apply -f -</code>,
+   then delete the original) and rename it back at the end, or expect the
+   CronJob to resume. Then record the replica counts and scale the platform
+   and Postgres down:
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>get<span class="w"> </span>deploy<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{range .items[*]}{.metadata.name} {.spec.replicas}{"\n"}{end}'</span><span class="w"> </span>&gt;<span class="w"> </span>replicas.txt
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>scale<span class="w"> </span>deploy<span class="w"> </span>--all<span class="w"> </span>--replicas<span class="o">=</span><span class="m">0</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>scale<span class="w"> </span>statefulset<span class="w"> </span>postgresql<span class="w"> </span>--replicas<span class="o">=</span><span class="m">0</span>
+</code></pre></div></li>
+<li><strong>Keep the old disk.</strong> The dynamic PV deletes its disk when its claim goes,
+   so switch it to Retain first:
+   <div class="highlight"><pre><span></span><code><span class="nv">OLD_PV</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>get<span class="w"> </span>pvc<span class="w"> </span>postgres-data-postgresql-0<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.spec.volumeName}'</span><span class="k">)</span>
+kubectl<span class="w"> </span>patch<span class="w"> </span>pv<span class="w"> </span><span class="s2">"</span><span class="nv">$OLD_PV</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'</span>
+</code></pre></div></li>
+<li><strong>Make a disk from the restore point.</strong> From the vault (pick the point,
+   restore as a new disk into the node resource group):
+   <div class="highlight"><pre><span></span><code>az<span class="w"> </span>dataprotection<span class="w"> </span>recovery-point<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>--vault-name<span class="w"> </span>vrsky-backup<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backup-instance-name<span class="w"> </span>&lt;instance&gt;<span class="w"> </span>-o<span class="w"> </span>table
+az<span class="w"> </span>dataprotection<span class="w"> </span>backup-instance<span class="w"> </span>restore<span class="w"> </span>initialize-for-data-recovery<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--datasource-type<span class="w"> </span>AzureDisk<span class="w"> </span>--restore-location<span class="w"> </span>norwayeast<span class="w"> </span>--source-datastore<span class="w"> </span>OperationalStore<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--recovery-point-id<span class="w"> </span>&lt;id&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target-resource-id<span class="w"> </span><span class="s2">"/subscriptions/</span><span class="nv">$SUB</span><span class="s2">/resourceGroups/</span><span class="nv">$NRG</span><span class="s2">/providers/Microsoft.Compute/disks/postgres-restored-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span>restore.json
+az<span class="w"> </span>dataprotection<span class="w"> </span>backup-instance<span class="w"> </span>restore<span class="w"> </span>trigger<span class="w"> </span>-g<span class="w"> </span>vrsky-prod<span class="w"> </span>--vault-name<span class="w"> </span>vrsky-backup<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backup-instance-name<span class="w"> </span>&lt;instance&gt;<span class="w"> </span>--restore-request-object<span class="w"> </span>restore.json
 </code></pre></div>
-   (The management-api also runs migrations on boot, so simply starting the new
-   management-api against the restored DB achieves the same.)</p>
-</li>
-<li>
-<p><strong>Point the platform at the restored DB</strong> (update <code>MGMT_API_DB_URL</code>) and start
-   the management-api. Verify: log in, list connections, confirm secrets decrypt
-   (they will, given the matching <code>ENCRYPTION_KEY</code>).</p>
-</li>
+   Or from a plain snapshot:
+   <div class="highlight"><pre><span></span><code>az<span class="w"> </span>disk<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"postgres-restored-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span>--sku<span class="w"> </span>StandardSSD_ZRS<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--source<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>snapshot<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span>&lt;snapshot&gt;<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span>
+</code></pre></div></li>
+<li><strong>Bind it to the Postgres claim.</strong> Delete the old claim, create a PV for
+   the new disk that is reserved for <code>postgres-data-postgresql-0</code>; the
+   StatefulSet recreates the claim and it binds to this PV:
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>delete<span class="w"> </span>pvc<span class="w"> </span>postgres-data-postgresql-0
+<span class="nv">DISK_ID</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>disk<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"postgres-restored-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+<span class="s">apiVersion: v1</span>
+<span class="s">kind: PersistentVolume</span>
+<span class="s">metadata:</span>
+<span class="s">  name: postgres-restored-$STAMP</span>
+<span class="s">spec:</span>
+<span class="s">  capacity: { storage: 50Gi }</span>
+<span class="s">  accessModes: [ReadWriteOnce]</span>
+<span class="s">  persistentVolumeReclaimPolicy: Retain</span>
+<span class="s">  storageClassName: managed-csi</span>
+<span class="s">  claimRef: { namespace: vrsky-database, name: postgres-data-postgresql-0 }</span>
+<span class="s">  csi: { driver: disk.csi.azure.com, volumeHandle: "$DISK_ID" }</span>
+<span class="s">EOF</span>
+</code></pre></div></li>
+<li><strong>Start Postgres, check, then the platform.</strong> Postgres replays its WAL like
+   after a power cut.
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>scale<span class="w"> </span>statefulset<span class="w"> </span>postgresql<span class="w"> </span>--replicas<span class="o">=</span><span class="m">1</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>statefulset<span class="w"> </span>postgresql
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>postgresql-0<span class="w"> </span>--<span class="w"> </span>psql<span class="w"> </span>-U<span class="w"> </span>vrsky<span class="w"> </span>-d<span class="w"> </span>vrsky<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"SELECT t.slug, count(c.id) FROM tenants t LEFT JOIN connections c ON c.tenant_id = t.id::text GROUP BY t.slug ORDER BY 1"</span>
+<span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>d<span class="w"> </span>n<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-platform<span class="w"> </span>scale<span class="w"> </span>deploy<span class="w"> </span><span class="s2">"</span><span class="nv">$d</span><span class="s2">"</span><span class="w"> </span>--replicas<span class="o">=</span><span class="s2">"</span><span class="nv">$n</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">done</span><span class="w"> </span>&lt;<span class="w"> </span>replicas.txt
+</code></pre></div></li>
+<li>Re-point the vault's backup instance at the new disk (it protects the old
+   disk ID), and delete the old disk once you're sure.</li>
+<li>Resume the dumps: rename the Secret back if you moved it, then run Catch
+   up or <code>kubectl -n vrsky-database patch cronjob vrsky-mgmt-backup --type merge -p '{"spec":{"suspend":false}}'</code>.</li>
 </ol>
+<h2 id="restore-from-a-logical-dump">Restore from a logical dump<a class="headerlink" href="#restore-from-a-logical-dump" title="Permanent link">&para;</a></h2>
+<p>Use this when the cluster or its resource group is gone, to restore into a
+different server, or to recover one tenant's rows by hand. The target must be
+Postgres 18 (a dump does not restore cleanly into an older major), and you
+need the <strong>same <code>ENCRYPTION_KEY</code></strong> as when the dump was taken.</p>
+<ol>
+<li><strong>Stand up an empty Postgres 18.</strong> In the cluster, or anywhere <code>vrsky-cli</code>
+   can reach. For a rehearsal, a scratch pod is enough:
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>pg-restore-test<span class="w"> </span>--image<span class="o">=</span>postgres:18-alpine<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--env<span class="w"> </span><span class="nv">POSTGRES_USER</span><span class="o">=</span>vrsky<span class="w"> </span>--env<span class="w"> </span><span class="nv">POSTGRES_DB</span><span class="o">=</span>vrsky<span class="w"> </span>--env<span class="w"> </span><span class="nv">POSTGRES_PASSWORD</span><span class="o">=</span>&lt;scratch<span class="w"> </span>password&gt;<span class="w"> </span>--port<span class="w"> </span><span class="m">5432</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>expose<span class="w"> </span>pod<span class="w"> </span>pg-restore-test<span class="w"> </span>--port<span class="w"> </span><span class="m">5432</span>
+</code></pre></div></li>
+<li><strong>Pick the dump:</strong>
+   <div class="highlight"><pre><span></span><code><span class="nv">IMAGE</span><span class="o">=</span>vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-list<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["list"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
+</code></pre></div></li>
+<li><strong>Restore into it:</strong>
+   <div class="highlight"><pre><span></span><code><span class="nv">TARGET</span><span class="o">=</span><span class="s1">'postgres://vrsky:&lt;scratch password&gt;@pg-restore-test.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable'</span>
+<span class="nv">KEY</span><span class="o">=</span>mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-restore<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["restore","--target-db-url","'</span><span class="s2">"</span><span class="nv">$TARGET</span><span class="s2">"</span><span class="s1">'","--confirm","'</span><span class="s2">"</span><span class="nv">$KEY</span><span class="s2">"</span><span class="s1">'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
+</code></pre></div>
+   <code>restore</code> downloads, decrypts, gunzips and runs
+   <code>pg_restore --clean --if-exists</code>. It requires <code>--target-db-url</code> and
+   <code>--confirm</code>, and refuses to overwrite <code>BACKUP_DB_URL</code> unless you also pass
+   <code>--allow-source-db</code>.</li>
+</ol>
+<p>Without the cluster, run the same image anywhere with Docker and the
+   environment from the <a href="../operator/backup/#layer-2-the-vrsky-backup-config-secret">Secret</a>,
+   with <code>ENCRYPTION_KEY</code> from the password manager:
+   <code>docker run --rm -e ENCRYPTION_KEY -e BACKUP_PROVIDER=azure -e BACKUP_BUCKET=vrsky-backups -e BACKUP_AZURE_ACCOUNT_NAME -e BACKUP_AZURE_ACCOUNT_KEY -e BACKUP_DB_URL=&lt;any URL other than the target&gt; vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest restore --target-db-url &lt;url&gt; --confirm &lt;key&gt;</code>.
+4. <strong>Check row counts per tenant</strong> against what you expect (the live
+   database, if it still exists):
+   <div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span><span class="p">,</span><span class="w"> </span><span class="s1">'connections'</span><span class="p">,</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="k">c</span><span class="p">.</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">tenants</span><span class="w"> </span><span class="n">t</span>
+<span class="w">  </span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">connections</span><span class="w"> </span><span class="k">c</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">tenant_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">id</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span>
+<span class="k">UNION</span><span class="w"> </span><span class="k">ALL</span>
+<span class="k">SELECT</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span><span class="p">,</span><span class="w"> </span><span class="s1">'secrets'</span><span class="p">,</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="n">s</span><span class="p">.</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">tenants</span><span class="w"> </span><span class="n">t</span>
+<span class="w">  </span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">secrets</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">tenant_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span>
+<span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+</code></pre></div>
+5. <strong>Bring the schema up to date.</strong> A dump is at whatever migration version
+   was live when it was taken. The management-api runs the migrations on
+   boot, so starting it against the restored database is enough.
+6. <strong>Switch the platform to it.</strong> Update <code>connection_string</code> in the
+   <code>postgres-credentials</code> Secrets (<code>vrsky-database</code> and <code>vrsky-platform</code>) to
+   the restored database, restart the management-api and the connectors, and
+   check: log in, list connections, open a connection's credentials (they
+   decrypt only with the matching <code>ENCRYPTION_KEY</code>).</p>
+<p>Clean up a rehearsal with
+<code>kubectl -n vrsky-database delete pod,svc pg-restore-test</code>.</p>
 <h2 id="the-ci-restore-drill">The CI restore drill<a class="headerlink" href="#the-ci-restore-drill" title="Permanent link">&para;</a></h2>
-<p><code>.github/workflows/dr-drill.yml</code> runs on pushes and pull requests to <code>main</code> or
-<code>develop</code> that change <code>src/cmd/vrsky-cli/</code>, <code>src/pkg/crypto/</code>, <code>src/pkg/objectstore/</code>,
-<code>infrastructure/migrations/</code> or the workflow itself, and can be started by
-hand. It has no schedule. It:</p>
+<p><code>.github/workflows/dr-drill.yml</code> runs every Wednesday at 06:00 UTC, on
+pushes and pull requests to <code>main</code> or <code>develop</code> that change
+<code>src/cmd/vrsky-cli/</code>, <code>src/pkg/crypto/</code>, <code>src/pkg/objectstore/</code>,
+<code>infrastructure/migrations/</code> or the workflow, and by hand. It:</p>
 <ol>
-<li>builds <code>vrsky-cli</code> from source with <code>go build</code>,</li>
-<li>starts two <code>postgres:16-alpine</code> databases and a MinIO in the runner,</li>
-<li>seeds the source with one table and two sentinel rows,</li>
-<li>runs <code>vrsky-cli backup</code> to MinIO, then <code>vrsky-cli restore</code> into the
-   separate target,</li>
-<li>checks that both rows arrived.</li>
+<li>builds the <code>vrsky-cli</code> image from its Dockerfile,</li>
+<li>starts two <code>postgres:18-alpine</code> databases (<code>vrsky</code>/<code>vrsky</code>, like AKS) and
+   Azurite, an Azure Blob emulator, with the container <code>vrsky-backups</code>,</li>
+<li>applies every migration in <code>infrastructure/migrations</code> to the source and
+   seeds users, tenants, connections and secrets for two tenants,</li>
+<li>runs <code>vrsky-cli backup</code> with <code>BACKUP_PROVIDER=azure</code>, then
+   <code>vrsky-cli restore</code> into the separate target, both as uid 70 with a
+   read-only root filesystem, like the CronJob,</li>
+<li>compares row counts per tenant on the target with the source and the seed.</li>
 </ol>
-<p>A green run shows the backup format and the restore command work end to end.
-It doesn't cover the CronJob, its image or its Secret, the real schema and
-migrations, Postgres 18 (what production runs), or any production storage, and
-it says nothing about whether a production backup exists.</p>
+<p>A green run shows the image, the real schema, the Azure upload and the
+restore work end to end. It doesn't touch the production storage account,
+uses a connection string where production may use an account key, and says
+nothing about whether a production backup exists. A red run on main opens an
+issue (<code>ci-failure-alert.yml</code>).</p>
 <h2 id="local-dry-run-compose">Local dry-run (compose)<a class="headerlink" href="#local-dry-run-compose" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>postgres-management<span class="w"> </span>minio-test<span class="w"> </span>minio-init
 docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>backup<span class="w">            </span><span class="c1"># backup the local mgmt DB → MinIO</span>

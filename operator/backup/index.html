@@ -1010,10 +1010,104 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#production-aks-two-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production (AKS): two layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-human" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-time setup (human)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="One-time setup (human)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layer-1-backup-vault-for-the-postgres-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: backup vault for the Postgres disk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-storage-account-container-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: storage account, container, lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-the-vrsky-backup-config-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: the vrsky-backup-config Secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activate-and-try-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activate and try it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-encryption_key-outside-azure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the ENCRYPTION_KEY outside Azure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tooling" class="md-nav__link">
     <span class="md-ellipsis">
       
         Tooling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring
       
     </span>
   </a>
@@ -2381,10 +2475,104 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#production-aks-two-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production (AKS): two layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-time-setup-human" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-time setup (human)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="One-time setup (human)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layer-1-backup-vault-for-the-postgres-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: backup vault for the Postgres disk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-storage-account-container-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: storage account, container, lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-the-vrsky-backup-config-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: the vrsky-backup-config Secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activate-and-try-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activate and try it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-encryption_key-outside-azure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the ENCRYPTION_KEY outside Azure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tooling" class="md-nav__link">
     <span class="md-ellipsis">
       
         Tooling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring
       
     </span>
   </a>
@@ -2438,7 +2626,7 @@ JetStream is in-flight data and is bounded/replayable, not a backup target.</p>
 </tr>
 <tr>
 <td><code>ENCRYPTION_KEY</code></td>
-<td>Without it, encrypted secrets in the DB are unrecoverable</td>
+<td>Without it, encrypted secrets in the DB and the logical dumps are unrecoverable</td>
 </tr>
 <tr>
 <td>Per-tenant source/target DBs</td>
@@ -2446,30 +2634,152 @@ JetStream is in-flight data and is bounded/replayable, not a backup target.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="production-aks-two-layers">Production (AKS): two layers<a class="headerlink" href="#production-aks-two-layers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What</th>
+<th>Runs</th>
+<th>Kept</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Azure Disk Backup</td>
+<td>Incremental snapshot of the Postgres disk, by a backup vault</td>
+<td>Daily, on Azure's side, also while the cluster is parked</td>
+<td>7 days, no weekly copies</td>
+</tr>
+<tr>
+<td>2. Logical dump</td>
+<td><code>vrsky-cli backup</code> from the CronJob <code>vrsky-mgmt-backup</code>, encrypted, to Blob storage</td>
+<td>Weekdays 12:00 Oslo, while the cluster runs</td>
+<td>14 days (lifecycle rule)</td>
+</tr>
+</tbody>
+</table>
+<p>Layer 1 covers a lost or corrupted disk and a bad migration. Snapshots live in
+the node resource group, so deleting the cluster deletes them too. Layer 2
+lives in a storage account outside that group, so it survives losing the whole
+cluster, and a dump can be restored into any Postgres 18.</p>
+<p>There is no copy in a second region. Geo-redundant storage or object
+replication to Norway West is a later option.</p>
+<p>What the repo sets up for layer 2: CI builds <code>vrsky-cli</code> into ACR, and the
+deploy job applies the CronJob through
+<code>infrastructure/azure/deploy-backup-azure.sh</code>. The CronJob stays suspended
+until the <code>vrsky-backup-config</code> Secret below exists. Everything else is the
+one-time human setup in the next section. The repo can't show whether that
+setup has been done; check with <code>kubectl -n vrsky-database get cronjob
+vrsky-mgmt-backup</code> (SUSPEND) and <code>az dataprotection backup-instance list -g
+vrsky-prod --vault-name vrsky-backup -o table</code>.</p>
+<h2 id="one-time-setup-human">One-time setup (human)<a class="headerlink" href="#one-time-setup-human" title="Permanent link">&para;</a></h2>
+<p>These need Owner (or User Access Administrator) on the subscription and
+access to the cluster. Agents don't run them.</p>
+<h3 id="layer-1-backup-vault-for-the-postgres-disk">Layer 1: backup vault for the Postgres disk<a class="headerlink" href="#layer-1-backup-vault-for-the-postgres-disk" title="Permanent link">&para;</a></h3>
+<p>The commands are in <code>plans/prod-backup.md</code> (Layer 1). Use a daily schedule
+and a retention of <code>P7D</code>, with no weekly rule. Take one manual snapshot first.</p>
+<h3 id="layer-2-storage-account-container-lifecycle">Layer 2: storage account, container, lifecycle<a class="headerlink" href="#layer-2-storage-account-container-lifecycle" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nv">RG</span><span class="o">=</span>vrsky-prod
+<span class="nv">SA</span><span class="o">=</span>&lt;storage<span class="w"> </span>account<span class="w"> </span>name&gt;<span class="w">   </span><span class="c1"># 3-24 lowercase letters and digits, globally unique</span>
+
+az<span class="w"> </span>storage<span class="w"> </span>account<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$RG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="nv">$SA</span><span class="s2">"</span><span class="w"> </span>-l<span class="w"> </span>norwayeast<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kind<span class="w"> </span>StorageV2<span class="w"> </span>--sku<span class="w"> </span>Standard_ZRS<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--allow-blob-public-access<span class="w"> </span><span class="nb">false</span><span class="w"> </span>--min-tls-version<span class="w"> </span>TLS1_2
+
+<span class="c1"># Soft delete and versioning, so an overwrite or delete can be undone for 7 days</span>
+az<span class="w"> </span>storage<span class="w"> </span>account<span class="w"> </span>blob-service-properties<span class="w"> </span>update<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$RG</span><span class="s2">"</span><span class="w"> </span>--account-name<span class="w"> </span><span class="s2">"</span><span class="nv">$SA</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable-delete-retention<span class="w"> </span><span class="nb">true</span><span class="w"> </span>--delete-retention-days<span class="w"> </span><span class="m">7</span><span class="w"> </span>--enable-versioning<span class="w"> </span><span class="nb">true</span>
+
+<span class="c1"># The private container the CronJob writes to</span>
+az<span class="w"> </span>storage<span class="w"> </span>container<span class="w"> </span>create<span class="w"> </span>--account-name<span class="w"> </span><span class="s2">"</span><span class="nv">$SA</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span>vrsky-backups<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--public-access<span class="w"> </span>off<span class="w"> </span>--auth-mode<span class="w"> </span>key
+
+<span class="c1"># Delete dumps (and their old versions) 14 days after they were written</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span>lifecycle.json<span class="w"> </span><span class="s">&lt;&lt;'JSON'</span>
+<span class="s">{"rules": [{"enabled": true, "name": "delete-dumps-after-14-days", "type": "Lifecycle",</span>
+<span class="s">  "definition": {</span>
+<span class="s">    "filters": {"blobTypes": ["blockBlob"], "prefixMatch": ["vrsky-backups/mgmt-backups/"]},</span>
+<span class="s">    "actions": {</span>
+<span class="s">      "baseBlob": {"delete": {"daysAfterModificationGreaterThan": 14}},</span>
+<span class="s">      "version":  {"delete": {"daysAfterCreationGreaterThan": 14}}}}}]}</span>
+<span class="s">JSON</span>
+az<span class="w"> </span>storage<span class="w"> </span>account<span class="w"> </span>management-policy<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$RG</span><span class="s2">"</span><span class="w"> </span>--account-name<span class="w"> </span><span class="s2">"</span><span class="nv">$SA</span><span class="s2">"</span><span class="w"> </span>--policy<span class="w"> </span>@lifecycle.json
+</code></pre></div>
+<p>A time-based immutability policy on the container would stop a leaked account
+key from deleting the backups. If you add one, keep its period at or below the
+14 days, or the lifecycle rule can't delete.</p>
+<p>Access to this account is access to every tenant's data, including the
+encrypted connector credentials. Keep it as tight as access to the database.</p>
+<h3 id="layer-2-the-vrsky-backup-config-secret">Layer 2: the <code>vrsky-backup-config</code> Secret<a class="headerlink" href="#layer-2-the-vrsky-backup-config-secret" title="Permanent link">&para;</a></h3>
+<p>Paste each value at a silent prompt, so none of them lands in your shell
+history or on screen, and never put them in a file in the repo:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>DB_URL<span class="p">;</span><span class="w">  </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># postgres://vrsky:&lt;DB_PASSWORD&gt;@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable</span>
+<span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>ENC_KEY<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># the platform ENCRYPTION_KEY, 64 hex characters</span>
+<span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>SA_NAME<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># the storage account name</span>
+<span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>SA_KEY<span class="p">;</span><span class="w">  </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># az storage account keys list -g vrsky-prod -n &lt;account&gt; --query "[0].value" -o tsv</span>
+
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>vrsky-backup-config<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">BACKUP_DB_URL</span><span class="o">=</span><span class="s2">"</span><span class="nv">$DB_URL</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">ENCRYPTION_KEY</span><span class="o">=</span><span class="s2">"</span><span class="nv">$ENC_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">BACKUP_PROVIDER</span><span class="o">=</span>azure<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">BACKUP_BUCKET</span><span class="o">=</span>vrsky-backups<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">BACKUP_AZURE_ACCOUNT_NAME</span><span class="o">=</span><span class="s2">"</span><span class="nv">$SA_NAME</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">BACKUP_AZURE_ACCOUNT_KEY</span><span class="o">=</span><span class="s2">"</span><span class="nv">$SA_KEY</span><span class="s2">"</span>
+
+<span class="nb">unset</span><span class="w"> </span>DB_URL<span class="w"> </span>ENC_KEY<span class="w"> </span>SA_NAME<span class="w"> </span>SA_KEY
+</code></pre></div>
+<ul>
+<li><code>BACKUP_DB_URL</code> is the <code>connection_string</code> of the <code>postgres-credentials</code>
+  Secret in <code>vrsky-database</code>.</li>
+<li><code>ENCRYPTION_KEY</code> is the <code>encryption_key</code> of <code>postgres-credentials</code> in
+  <code>vrsky-platform</code>. The two copies must match. If the key is ever rotated,
+  update this Secret too.</li>
+<li><code>BACKUP_AZURE_CONNECTION_STRING</code> can replace the account name and key.</li>
+</ul>
+<h3 id="activate-and-try-it">Activate and try it<a class="headerlink" href="#activate-and-try-it" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Unsuspend (or run Catch up, which does the same)</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>patch<span class="w"> </span>cronjob<span class="w"> </span>vrsky-mgmt-backup<span class="w"> </span>--type<span class="w"> </span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"spec":{"suspend":false}}'</span>
+
+<span class="c1"># One backup now, then read its log</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>create<span class="w"> </span>job<span class="w"> </span>--from<span class="o">=</span>cronjob/vrsky-mgmt-backup<span class="w"> </span>backup-manual-<span class="k">$(</span>date<span class="w"> </span>+%s<span class="k">)</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>job/&lt;that<span class="w"> </span>job&gt;
+</code></pre></div>
+<p>The log ends with <code>backup complete: mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc</code>.
+Then restore that dump once into a scratch Postgres 18 and compare row counts
+per tenant (<a href="../../DR/#restore-from-a-logical-dump">runbook</a>). A backup nobody
+has restored is not yet a backup.</p>
+<h3 id="keep-the-encryption_key-outside-azure">Keep the <code>ENCRYPTION_KEY</code> outside Azure<a class="headerlink" href="#keep-the-encryption_key-outside-azure" title="Permanent link">&para;</a></h3>
+<p>Store a copy in a password manager. The dumps are encrypted with it, and the
+connector credentials inside the database are too. If the cluster and its
+Secrets are lost and the key isn't somewhere else, the dumps are useless.</p>
 <h2 id="tooling">Tooling<a class="headerlink" href="#tooling" title="Permanent link">&para;</a></h2>
-<p><code>vrsky-cli</code> provides <code>backup</code> / <code>list</code> / <code>restore</code>. Backups are encrypted
-(<code>pkg/crypto</code> <code>EncryptBytes</code>/<code>DecryptBytes</code>). The bucket, credentials and
-source database come from <code>BACKUP_*</code> environment variables and
-<code>ENCRYPTION_KEY</code>, not from flags (see the <a href="../../DR/">disaster-recovery guide</a>).</p>
+<p><code>vrsky-cli</code> provides <code>backup</code> / <code>list</code> / <code>restore</code>. The bucket, credentials
+and source database come from <code>BACKUP_*</code> environment variables and
+<code>ENCRYPTION_KEY</code>, not from flags.</p>
 <div class="highlight"><pre><span></span><code>vrsky-cli<span class="w"> </span>backup<span class="w">     </span><span class="c1"># dump, encrypt, upload as mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc</span>
 vrsky-cli<span class="w"> </span>list<span class="w">       </span><span class="c1"># keys, sizes, ages</span>
-vrsky-cli<span class="w"> </span>restore<span class="w"> </span>--target-db-url<span class="w"> </span><span class="s1">'postgres://…/management_db'</span><span class="w"> </span>--confirm<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>mgmt-backups/management_db-20260610T020000Z.dump.gz.enc
+vrsky-cli<span class="w"> </span>restore<span class="w"> </span>--target-db-url<span class="w"> </span><span class="s1">'postgres://…/vrsky'</span><span class="w"> </span>--confirm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>mgmt-backups/management_db-20261029T110000Z.dump.gz.enc
 </code></pre></div>
-<p>A Dockerfile (<code>src/cmd/vrsky-cli/Dockerfile</code>) and a daily Kubernetes CronJob
-(<code>infrastructure/kubernetes/backup/</code>) exist, but nothing in CI builds or
-publishes the image (only the compose <code>backup</code> profile builds it locally) and
-nothing applies the CronJob. As far as the repo shows, no
-scheduled backup runs in production; the
-<a href="../../DR/#what-runs-today">disaster-recovery guide</a> has the details.</p>
+<h2 id="monitoring">Monitoring<a class="headerlink" href="#monitoring" title="Permanent link">&para;</a></h2>
+<p><code>MgmtBackupMissing</code> (warning) fires when two of the CronJob's Jobs have failed
+since the last good backup, or when neither a scheduled run nor a successful
+Job (a manual one counts) has happened for over four days of being active
+(checked weekday afternoons), or for over seven days at any time. It is
+silent while the CronJob is suspended and right after it is unsuspended. A
+CronJob left suspended is silent too, so check <code>SUSPEND</code> after any manual
+pause. It sits outside the
+<code>vrsky-*</code> rule groups, so it reaches Teams but doesn't fail a deploy's smoke
+check. A single failed Job also shows up as the chart's <code>KubeJobFailed</code>.</p>
 <h2 id="restore-drill">Restore drill<a class="headerlink" href="#restore-drill" title="Permanent link">&para;</a></h2>
-<p>A restore is only real if it's been tested. CI runs a <strong>restore drill</strong>
-(<code>.github/workflows/dr-drill.yml</code>) when the backup code changes: it backs up a
-seeded test database to a MinIO in the runner, restores into a second
-database, and checks the rows arrived. It tests the commands, not your backup
-target or a production backup, so rehearse a restore against your own target
-before you rely on it.</p>
-<p>Full procedures, RPO/RTO targets and what the drill leaves out are in the
+<p><code>.github/workflows/dr-drill.yml</code> runs weekly and on changes to the backup
+code. It builds the <code>vrsky-cli</code> image, applies the real migrations to a
+Postgres 18, seeds two tenants, backs up to an Azure Blob emulator, restores
+into a second Postgres 18, and compares row counts per tenant. It tests the
+image and the commands, not the production storage account or a production
+backup.</p>
+<p>Full procedures, RPO/RTO and both restore runbooks are in the
 <a href="../../DR/">disaster-recovery guide</a>.</p>
 
 
