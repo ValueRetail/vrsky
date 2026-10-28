@@ -179,7 +179,7 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := k.starts.ReserveOrRetry(&k.mu, connectionID, func() bool { _, ok := k.active[connectionID]; return ok },
+	claim, ok := k.starts.ReserveOrRetry(&k.mu, tenantID, connectionID, func() bool { _, ok := k.active[connectionID]; return ok },
 		func() { k.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Kafka consumer already running or starting")
@@ -233,7 +233,7 @@ func (k *kafkaConsumer) handleStopCommand(msg *nats.Msg) {
 	// the database first (#423).
 	var stopped sdk.StatusWrite
 	if exists {
-		stopped = k.starts.StopStatusLocked(cmd.ConnectionID)
+		stopped = k.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
 	}
 	k.mu.Unlock()
 	if starting {

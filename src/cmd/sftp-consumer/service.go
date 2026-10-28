@@ -189,7 +189,7 @@ func (s *sftpConsumer) startConnection(ctx context.Context, connectionID, tenant
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("SFTP poller already running or starting")
@@ -248,14 +248,14 @@ type activeConn struct {
 // status too (#456). The write goes through the returned StatusWrite, taken
 // in the same critical section, so it cannot land over the "running" of a
 // start that activates after the drop (#423).
-func (s *sftpConsumer) dropActive(connID string, own *activeConn) (sdk.StatusWrite, bool) {
+func (s *sftpConsumer) dropActive(connID, tenantID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active[connID] != own {
 		return sdk.StatusWrite{}, false
 	}
 	delete(s.active, connID)
-	return s.starts.StopStatusLocked(connID), true
+	return s.starts.StopStatusLocked(tenantID, connID), true
 }
 
 func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
@@ -278,7 +278,7 @@ func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
 	// the database first (#423).
 	var stopped sdk.StatusWrite
 	if exists {
-		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
 	}
 	s.mu.Unlock()
 	if starting {
@@ -305,7 +305,7 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 		logger.Info("SFTP one-shot poll complete")
 		// Mark it stopped only if no newer start owns the entry, and with it
 		// the status, by now (#408, #456).
-		stopped, mine := s.dropActive(connID, own)
+		stopped, mine := s.dropActive(connID, tenantID, own)
 		if !mine {
 			logger.Info("A newer start owns the connection; leaving its status alone")
 			return

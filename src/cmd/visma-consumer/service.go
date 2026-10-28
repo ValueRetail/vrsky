@@ -159,7 +159,7 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		return

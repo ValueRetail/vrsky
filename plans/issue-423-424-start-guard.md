@@ -51,7 +51,7 @@ every command-driven consumer:
 ### #424: `ReserveOrRetry`
 
 ```go
-func (g *StartGuard) ReserveOrRetry(mu sync.Locker, connectionID string,
+func (g *StartGuard) ReserveOrRetry(mu sync.Locker, tenantID, connectionID string,
     active func() bool, retry func()) (*StartClaim, bool)
 ```
 
@@ -74,7 +74,7 @@ goroutine, so nothing outlives `Stop`.
 ```go
 type StatusWrite struct{ /* guard, connection ID, sequence number */ }
 func (c *StartClaim) RunningStatus() StatusWrite
-func (g *StartGuard) StopStatusLocked(connectionID string) StatusWrite
+func (g *StartGuard) StopStatusLocked(tenantID, connectionID string) StatusWrite
 func (w StatusWrite) Write(write func()) bool
 ```
 
@@ -145,6 +145,16 @@ connector right now), `src/cmd/remote-agent`, `.github/workflows`,
   also returns a `StopStatusLocked` ticket taken in the same critical
   section, and the ending write goes through it, so that window is closed
   and item 91 is struck. No DB write runs under `s.mu`, as #456 required.
+- The status order, lanes and pending retries are keyed by tenant and
+  connection, not connection alone (coordinator, on review of #487).
+  `ReserveOrRetry` and `StopStatusLocked` take the tenant the command
+  names, the one its UPDATE filters on. A stop or start carrying the wrong
+  tenant then lands in its own order: it can't skip or reorder the real
+  tenant's writes, and its retry can't displace the real tenant's. Both
+  functions are new in this PR, so this changes no released API. The stop
+  handlers still cancel by connection ID whatever tenant the command names;
+  that is older than this change and goes to backlog item 92 for a human,
+  since it is a tenant-isolation change to every consumer.
 - Sitoo is left on `Reserve` for now (it writes no status, so #423 does not
   apply); switching it is a one-line follow-up, noted in the backlog.
 

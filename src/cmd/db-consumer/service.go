@@ -186,7 +186,7 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("DB consumer already active or starting", "connection_id", connectionID)
@@ -298,7 +298,7 @@ func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {
 	// the database first (#423).
 	var stopped sdk.StatusWrite
 	if exists {
-		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
 	}
 	s.mu.Unlock()
 	if starting {

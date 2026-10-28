@@ -35,7 +35,7 @@ func (s *apiConsumer) pollConnection(ctx context.Context, own *activeConn, conne
 		logger.Info("One-time-only mode: data retrieval complete")
 		// Remove from active pipelines and mark it stopped, unless a newer
 		// start owns the entry, and with it the status, by now (#408, #456).
-		stopped, mine := s.dropActive(connectionID, own)
+		stopped, mine := s.dropActive(connectionID, tenantID, own)
 		if !mine {
 			logger.Info("A newer start owns the connection; leaving its status alone")
 			return

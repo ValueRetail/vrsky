@@ -600,6 +600,17 @@ Last updated 2026-10-28.
     ending and stop writes add `AND started_at = $n`. Or route the writes
     through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
     Found in review of #456.
+92. **A stop command cancels a connection whatever tenant it names.** Every
+    command-driven consumer's `handleStopCommand` looks the connection up in
+    its active map by ID alone and cancels it; only the `stopped` UPDATE
+    filters on the command's `tenant_id`. A stop carrying the wrong tenant
+    (it would have to be published on internal NATS; the management API
+    sends the right one) stops another tenant's poller and leaves its row
+    saying `running`. Keep the tenant on each active entry and ignore a stop
+    whose tenant doesn't match. Tenant isolation: PR plus
+    `agent:needs-human`. Since #423 the status order is already keyed by
+    tenant and connection, so such a stop can't reorder the real tenant's
+    writes. Found in review of #487.
 
 ## Human
 

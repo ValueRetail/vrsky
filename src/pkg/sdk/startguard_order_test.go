@@ -49,7 +49,14 @@ type orderOwner struct {
 	polls   map[string][]context.Context // every poller started, by connection
 	pollWG  sync.WaitGroup
 	retries sync.Map // connection ID -> *atomic.Int32: retries run
+
+	tenantRetries sync.Map       // tenant + "|" + connection ID -> *atomic.Int32: retries run
+	noRow         map[string]int // status writes naming another tenant than the connection's: match no row
 }
+
+// ownerTenant is the tenant that owns connection id in the orderOwner's
+// "database": its lookup and its status UPDATE filter on it.
+func ownerTenant(id string) string { return "tenant-of-" + id }
 
 func newOrderOwner() *orderOwner {
 	o := &orderOwner{
@@ -58,6 +65,7 @@ func newOrderOwner() *orderOwner {
 		status: make(map[string]string),
 		log:    make(map[string][]string),
 		polls:  make(map[string][]context.Context),
+		noRow:  make(map[string]int),
 	}
 	o.starts.AfterReserve = func(id string) {
 		o.holdMu.Lock()
@@ -96,21 +104,37 @@ func (o *orderOwner) retryCounter(id string) *atomic.Int32 {
 // retriesRun is how many refused starts of id were run again.
 func (o *orderOwner) retriesRun(id string) int { return int(o.retryCounter(id).Load()) }
 
-// start is the consumer's startConnection: fail stands for any error in the
-// slow part. A refused start leaves itself, the same start again, as retry.
+// tenantRetriesRun is how many refused starts of id naming tenant were run
+// again.
+func (o *orderOwner) tenantRetriesRun(tenant, id string) int {
+	v, _ := o.tenantRetries.LoadOrStore(tenant+"|"+id, new(atomic.Int32))
+	return int(v.(*atomic.Int32).Load())
+}
+
+// start is the consumer's startConnection for the connection's own tenant:
+// fail stands for any error in the slow part. A refused start leaves itself,
+// the same start again, as retry.
 func (o *orderOwner) start(ctx context.Context, id string, fail error) bool {
-	claim, ok := o.starts.ReserveOrRetry(&o.mu, id,
+	return o.startAs(ctx, ownerTenant(id), id, fail)
+}
+
+// startAs is a start naming tenant. A tenant other than the connection's
+// fails its tenant-scoped lookup, like the consumers' do.
+func (o *orderOwner) startAs(ctx context.Context, tenant, id string, fail error) bool {
+	claim, ok := o.starts.ReserveOrRetry(&o.mu, tenant, id,
 		func() bool { _, ok := o.active[id]; return ok },
 		func() {
 			o.retryCounter(id).Add(1)
-			o.start(ctx, id, fail)
+			v, _ := o.tenantRetries.LoadOrStore(tenant+"|"+id, new(atomic.Int32))
+			v.(*atomic.Int32).Add(1)
+			o.startAs(ctx, tenant, id, fail)
 		})
 	if !ok {
 		return false
 	}
 	defer claim.Release()
 
-	if fail != nil {
+	if fail != nil || tenant != ownerTenant(id) {
 		return false
 	}
 
@@ -143,9 +167,16 @@ func (o *orderOwner) record(id, status string) {
 	o.log[id] = append(o.log[id], status)
 }
 
-// stopLocked is the stop handler's critical section. It returns whether the
-// connection was active and the stop's place in the status order.
+// stopLocked is the stop handler's critical section for a stop naming the
+// connection's own tenant. It returns whether the connection was active and
+// the stop's place in the status order.
 func (o *orderOwner) stopLocked(id string) (bool, StatusWrite) {
+	return o.stopLockedAs(ownerTenant(id), id)
+}
+
+// stopLockedAs is stopLocked for a stop naming tenant. Like the consumers' stop
+// handlers it cancels by connection ID whatever tenant the stop names.
+func (o *orderOwner) stopLockedAs(tenant, id string) (bool, StatusWrite) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	cancel, wasActive := o.active[id]
@@ -154,7 +185,21 @@ func (o *orderOwner) stopLocked(id string) (bool, StatusWrite) {
 		delete(o.active, id)
 	}
 	o.starts.StopLocked(id)
-	return wasActive, o.starts.StopStatusLocked(id)
+	return wasActive, o.starts.StopStatusLocked(tenant, id)
+}
+
+// writeStoppedAs is the status write of a stop naming tenant: its UPDATE
+// matches no row unless tenant owns the connection.
+func (o *orderOwner) writeStoppedAs(tenant, id string, w StatusWrite) bool {
+	return w.Write(func() {
+		if tenant != ownerTenant(id) {
+			o.statusMu.Lock()
+			o.noRow[id]++
+			o.statusMu.Unlock()
+			return
+		}
+		o.record(id, "stopped")
+	})
 }
 
 // writeStopped is the stop handler's status write after unlocking.
@@ -634,11 +679,11 @@ func TestStartGuardOrder_DroppedRetryNotKept(t *testing.T) {
 			var g StartGuard
 			var mu sync.Mutex
 			var ran atomic.Int32
-			c, ok := g.ReserveOrRetry(&mu, id, never, nil)
+			c, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, nil)
 			if !ok {
 				t.Fatal("first reserve refused")
 			}
-			if _, ok := g.ReserveOrRetry(&mu, id, never, func() { ran.Add(1) }); ok {
+			if _, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, func() { ran.Add(1) }); ok {
 				t.Fatal("second reserve not refused")
 			}
 			mu.Lock()
@@ -807,7 +852,7 @@ func TestStartGuardOrder_NoWriteWithoutActivate(t *testing.T) {
 		{"claim not activated", func(t *testing.T) StatusWrite {
 			var g StartGuard
 			var mu sync.Mutex
-			c, ok := g.ReserveOrRetry(&mu, id, never, nil)
+			c, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, nil)
 			if !ok {
 				t.Fatal("reserve refused")
 			}
@@ -817,7 +862,7 @@ func TestStartGuardOrder_NoWriteWithoutActivate(t *testing.T) {
 		{"claim released without activating", func(t *testing.T) StatusWrite {
 			var g StartGuard
 			var mu sync.Mutex
-			c, ok := g.ReserveOrRetry(&mu, id, never, nil)
+			c, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, nil)
 			if !ok {
 				t.Fatal("reserve refused")
 			}
@@ -827,7 +872,7 @@ func TestStartGuardOrder_NoWriteWithoutActivate(t *testing.T) {
 		{"Activate refused by a stop", func(t *testing.T) StatusWrite {
 			var g StartGuard
 			var mu sync.Mutex
-			c, ok := g.ReserveOrRetry(&mu, id, never, nil)
+			c, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, nil)
 			if !ok {
 				t.Fatal("reserve refused")
 			}
@@ -853,7 +898,7 @@ func TestStartGuardOrder_NoWriteWithoutActivate(t *testing.T) {
 	t.Run("activated claim writes", func(t *testing.T) {
 		var g StartGuard
 		var mu sync.Mutex
-		c, ok := g.ReserveOrRetry(&mu, id, never, nil)
+		c, ok := g.ReserveOrRetry(&mu, ownerTenant(id), id, never, nil)
 		if !ok {
 			t.Fatal("reserve refused")
 		}
@@ -871,7 +916,7 @@ func TestStartGuardOrder_NoWriteWithoutActivate(t *testing.T) {
 		var g StartGuard
 		var mu sync.Mutex
 		mu.Lock()
-		w := g.StopStatusLocked(id)
+		w := g.StopStatusLocked(ownerTenant(id), id)
 		mu.Unlock()
 		ran := false
 		if !w.Write(func() { ran = true }) || !ran {
@@ -1048,7 +1093,7 @@ func waitLaneUsers(t *testing.T, g *StartGuard, id string, n int) {
 	for {
 		g.statusMu.Lock()
 		users := 0
-		if l := g.lanes[id]; l != nil {
+		if l := g.lanes[statusKey{ownerTenant(id), id}]; l != nil {
 			users = l.users
 		}
 		g.statusMu.Unlock()
@@ -1071,7 +1116,7 @@ func TestStartGuardOrder_StatusWriteLanes(t *testing.T) {
 	// running activates id and returns its "running" write.
 	running := func(t *testing.T, g *StartGuard, mu *sync.Mutex, id string) StatusWrite {
 		t.Helper()
-		c, ok := g.ReserveOrRetry(mu, id, never, nil)
+		c, ok := g.ReserveOrRetry(mu, ownerTenant(id), id, never, nil)
 		if !ok {
 			t.Fatalf("reserve %s refused", id)
 		}
@@ -1084,7 +1129,7 @@ func TestStartGuardOrder_StatusWriteLanes(t *testing.T) {
 	stopped := func(g *StartGuard, mu *sync.Mutex, id string) StatusWrite {
 		mu.Lock()
 		defer mu.Unlock()
-		return g.StopStatusLocked(id)
+		return g.StopStatusLocked(ownerTenant(id), id)
 	}
 
 	t.Run("held write for one connection does not block another", func(t *testing.T) {
@@ -1170,6 +1215,227 @@ func TestStartGuardOrder_StatusWriteLanes(t *testing.T) {
 			if !h.ran.Load() {
 				t.Error("first write did not run")
 			}
+		})
+	}
+}
+
+// --- tenant isolation ----------------------------------------------------------
+
+// otherTenant names a tenant that does not own the connection: a stop or start
+// command carrying the wrong tenant for it.
+const otherTenant = "tenant-other"
+
+// A stop for connection X naming tenant B, while X runs for its own tenant A,
+// takes its place in B's status order, not A's. A's writes are neither skipped
+// by it nor do they wait for it; A's own stop still orders against A's start.
+// The stops here go to the guard alone (no cancel), to isolate the ordering.
+func TestStartGuardOrder_CrossTenantStatusOrder(t *testing.T) {
+	const x = "conn-x"
+
+	// wrongStop takes and writes a stop for x naming otherTenant.
+	wrongStop := func(o *orderOwner) bool {
+		o.mu.Lock()
+		w := o.starts.StopStatusLocked(otherTenant, x)
+		o.mu.Unlock()
+		return o.writeStoppedAs(otherTenant, x, w)
+	}
+	// ownStop takes and writes a stop for x naming its own tenant, without
+	// cancelling: only its place in the order matters here.
+	ownStop := func(o *orderOwner) bool {
+		o.mu.Lock()
+		w := o.starts.StopStatusLocked(ownerTenant(x), x)
+		o.mu.Unlock()
+		return o.writeStoppedAs(ownerTenant(x), x, w)
+	}
+
+	cases := []struct {
+		name string
+		// inWindow runs between A's Activate and A's "running" write.
+		inWindow   func(t *testing.T, o *orderOwner)
+		wantStatus string
+		wantNoRow  int // writes that matched no row (the wrong tenant's)
+	}{
+		{
+			name: "wrong-tenant stop written first: A's running still writes",
+			inWindow: func(t *testing.T, o *orderOwner) {
+				if !wrongStop(o) {
+					t.Error("wrong-tenant stop's write skipped; it is the latest in its own order")
+				}
+			},
+			wantStatus: "running", wantNoRow: 1,
+		},
+		{
+			name: "several wrong-tenant stops: A's running still writes",
+			inWindow: func(t *testing.T, o *orderOwner) {
+				for i := 0; i < 3; i++ {
+					wrongStop(o)
+				}
+			},
+			wantStatus: "running", wantNoRow: 3,
+		},
+		{
+			name: "own stop after a wrong-tenant stop still beats A's running",
+			inWindow: func(t *testing.T, o *orderOwner) {
+				wrongStop(o)
+				if !ownStop(o) {
+					t.Error("own stop's write skipped")
+				}
+			},
+			wantStatus: "stopped", wantNoRow: 1,
+		},
+		{
+			name: "own stop before a wrong-tenant stop still beats A's running",
+			inWindow: func(t *testing.T, o *orderOwner) {
+				ownStop(o)
+				wrongStop(o)
+			},
+			wantStatus: "stopped", wantNoRow: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOrderOwner()
+			o.setStatus(x, "stopped")
+			var ranRunning atomic.Bool
+			o.onRunningWrite = func(string) { ranRunning.Store(true) }
+			o.onActivate = once(x, func() { tc.inWindow(t, o) })
+			if !result(t, o.goStart(x, nil), "A's start") {
+				t.Fatal("A's start did not start")
+			}
+			if got := o.statusOf(x); got != tc.wantStatus {
+				t.Errorf("status = %q, want %q (A's running write ran: %v)", got, tc.wantStatus, ranRunning.Load())
+			}
+			o.statusMu.Lock()
+			noRow := o.noRow[x]
+			o.statusMu.Unlock()
+			if noRow != tc.wantNoRow {
+				t.Errorf("wrong-tenant writes = %d, want %d", noRow, tc.wantNoRow)
+			}
+			o.cleanup(t)
+		})
+	}
+
+	// The reverse: the wrong tenant's write is held in flight while A writes.
+	// A's write must neither wait for it nor be skipped after it.
+	t.Run("wrong-tenant write held: A's writes go ahead", func(t *testing.T) {
+		var g StartGuard
+		var mu sync.Mutex
+		never := func() bool { return false }
+
+		c, ok := g.ReserveOrRetry(&mu, ownerTenant(x), x, never, nil)
+		if !ok {
+			t.Fatal("reserve refused")
+		}
+		defer c.Release()
+		if !c.Activate(func() {}) {
+			t.Fatal("activate refused")
+		}
+		mu.Lock()
+		wb := g.StopStatusLocked(otherTenant, x)
+		mu.Unlock()
+
+		h := holdWrite(t, wb)
+		waitFor(t, h.in, "the wrong tenant's write to start")
+
+		// A's "running", taken before the wrong tenant's stop.
+		if !result(t, goWrite(c.RunningStatus(), func() {}), "A's running write while the wrong tenant's is held") {
+			t.Error("A's running write skipped")
+		}
+		// A's own stop, taken after it.
+		mu.Lock()
+		wa := g.StopStatusLocked(ownerTenant(x), x)
+		mu.Unlock()
+		if !result(t, goWrite(wa, func() {}), "A's stop write while the wrong tenant's is held") {
+			t.Error("A's stop write skipped")
+		}
+		if h.done.Load() {
+			t.Fatal("the wrong tenant's write returned before it was released")
+		}
+		h.release()
+		waitFor(t, h.out, "the wrong tenant's write to return")
+		if !h.ran.Load() {
+			t.Error("the wrong tenant's write did not run")
+		}
+	})
+
+	// A lane held for (B, X) does not block (A, X), and the reverse.
+	t.Run("lanes are per tenant", func(t *testing.T) {
+		for _, held := range []string{otherTenant, ownerTenant(x)} {
+			other := ownerTenant(x)
+			if held == other {
+				other = otherTenant
+			}
+			t.Run("held "+held, func(t *testing.T) {
+				var g StartGuard
+				var mu sync.Mutex
+				mu.Lock()
+				wHeld := g.StopStatusLocked(held, x)
+				wOther := g.StopStatusLocked(other, x)
+				mu.Unlock()
+
+				h := holdWrite(t, wHeld)
+				waitFor(t, h.in, "the held write to start")
+				if !result(t, goWrite(wOther, func() {}), "the other tenant's write while one is held") {
+					t.Error("the other tenant's write skipped")
+				}
+				h.release()
+				waitFor(t, h.out, "the held write to return")
+				if !h.ran.Load() {
+					t.Error("the held write did not run")
+				}
+			})
+		}
+	})
+}
+
+// Starts refused while another is in flight are kept per tenant: a refused
+// start naming the wrong tenant does not displace the right tenant's, and
+// each runs when the start in flight gives up. The right one activates; the
+// wrong one fails its lookup or finds the connection active, harmlessly.
+func TestStartGuardOrder_RetryPerTenant(t *testing.T) {
+	const x = "conn-x"
+	own := ownerTenant(x)
+
+	cases := []struct {
+		name    string
+		refused []string // tenants of the starts refused while the first is in flight, in order
+	}{
+		{"own tenant refused first, then the wrong one", []string{own, otherTenant}},
+		{"wrong tenant refused first, then the own one", []string{otherTenant, own}},
+		{"own tenant refused twice around the wrong one", []string{own, otherTenant, own}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOrderOwner()
+			o.setStatus(x, "stopped")
+			h := o.hold(x)
+			first := o.goStart(x, errSlowPart)
+			waitFor(t, h.reached, "first start to reserve")
+			for _, tenant := range tc.refused {
+				if o.startAs(context.Background(), tenant, x, nil) {
+					t.Fatalf("start naming %s not refused while the first is in flight", tenant)
+				}
+			}
+			close(h.release)
+			result(t, first, "first start and the retries it runs")
+
+			if n := o.tenantRetriesRun(own, x); n != 1 {
+				t.Errorf("own tenant's retries run = %d, want 1", n)
+			}
+			if n := o.tenantRetriesRun(otherTenant, x); n != 1 {
+				t.Errorf("wrong tenant's retries run = %d, want 1 (refused or failing harmlessly)", n)
+			}
+			o.requireState(t, x, "running", 1, 1)
+			o.statusMu.Lock()
+			noRow := o.noRow[x]
+			o.statusMu.Unlock()
+			if noRow != 0 {
+				t.Errorf("wrong-tenant status writes = %d, want 0", noRow)
+			}
+			if n := o.claimsLeft(); n != 0 {
+				t.Errorf("claims left = %d, want 0", n)
+			}
+			o.cleanup(t)
 		})
 	}
 }

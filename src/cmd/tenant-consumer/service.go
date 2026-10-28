@@ -132,7 +132,7 @@ func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tena
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := s.starts.ReserveOrRetry(&s.mu, connectionID, func() bool { _, ok := s.activeBridges[connectionID]; return ok },
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeBridges[connectionID]; return ok },
 		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Bridge already running or starting")
@@ -192,14 +192,14 @@ type activeConn struct {
 // status too (#456). The write goes through the returned StatusWrite, taken
 // in the same critical section, so it cannot land over the "running" of a
 // start that activates after the drop (#423).
-func (s *tenantConsumer) dropActive(connectionID string, own *activeConn) (sdk.StatusWrite, bool) {
+func (s *tenantConsumer) dropActive(connectionID, tenantID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.activeBridges[connectionID] != own {
 		return sdk.StatusWrite{}, false
 	}
 	delete(s.activeBridges, connectionID)
-	return s.starts.StopStatusLocked(connectionID), true
+	return s.starts.StopStatusLocked(tenantID, connectionID), true
 }
 
 // handleStopCommand processes a stop command
@@ -226,7 +226,7 @@ func (s *tenantConsumer) handleStopCommand(msg *nats.Msg) {
 	// the database first (#423).
 	var stopped sdk.StatusWrite
 	if exists {
-		stopped = s.starts.StopStatusLocked(cmd.ConnectionID)
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
 	}
 	s.mu.Unlock()
 	if starting {

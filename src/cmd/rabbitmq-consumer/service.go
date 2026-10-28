@@ -169,7 +169,7 @@ func (c *rabbitConsumer) startConnection(ctx context.Context, connectionID, tena
 	// A start refused while another is in flight is not lost: it runs again if
 	// that one gives up without activating (#424). The refused call returns
 	// right away, so the retry gets its caller's ctx, before any reassignment.
-	claim, ok := c.starts.ReserveOrRetry(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
+	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID, func() bool { _, ok := c.active[connectionID]; return ok },
 		func() { c.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("RabbitMQ consumer already running or starting")
@@ -223,7 +223,7 @@ func (c *rabbitConsumer) handleStopCommand(msg *nats.Msg) {
 	// the database first (#423).
 	var stopped sdk.StatusWrite
 	if exists {
-		stopped = c.starts.StopStatusLocked(cmd.ConnectionID)
+		stopped = c.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
 	}
 	c.mu.Unlock()
 	if starting {
