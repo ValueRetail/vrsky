@@ -171,7 +171,9 @@ meanwhile. Every consumer now calls `sdk.RestoreRunning` after subscribing
 to the command subjects: it reads the connections the database says are
 `running` whose graph mentions the consumer's node type and runs the same
 start path a command would. `TestConsumersRestoreRunningOnBoot` fails for a
-consumer that does not. A connector rollout therefore no longer needs any
+consumer that does not. Restore and a start command can run that path for the
+same connection at once, so it claims the connection with `sdk.StartGuard`
+before any slow work (#375, #397). A connector rollout therefore no longer needs any
 redeploy afterwards.
 
 ## Alternatives considered

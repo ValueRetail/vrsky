@@ -175,8 +175,8 @@ Last updated 2026-10-28.
     variable mounted at a fixed Linux path, with `HOST_HOME` translating
     editor paths), plus a check that a Unix-style shell's
     `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
-35. **The other consumers have the start race #375 fixed in the file
-    consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
+35. ~~**The other consumers have the start race #375 fixed in the file
+    consumer.**~~ (#397) db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
     visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
     check "already active" under `RLock`, release it, do the slow work and
     insert later, while `sdk.RestoreRunning` runs alongside the
@@ -313,20 +313,40 @@ Last updated 2026-10-28.
     landed during the outage are never published. `takeDeferredBaseline`
     already retries every poll, so it could stay deferred on a checkpoint
     error instead. Found in review of #398.
-52. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+52. **An ending poller can drop a newer poller's map entry.** api
+    (`pollConnection` one-shot), sftp (one-shot `runPoller`), cloud-storage
+    (`finishConn`) and tenant (`runBridge` error paths) delete their
+    connection from the active map without checking the entry is still
+    theirs. After a stop and a new start, the old poller finishing removes
+    the new one's entry; the next start then runs a second poller beside
+    it. Older than #397. Delete only when the stored value is this
+    poller's own (compare a pointer). Found during #397.
+53. **Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
+    and three consumers are not on it yet.** Since #397 all command-driven
+    consumers refuse a start while one is in flight (37) and write
+    `running` after activating (36), like the file consumer. The webhook
+    consumer still checks and inserts in two steps (a double start only
+    overwrites the map entry, but a stop mid-start is lost) and the Front
+    Systems consumer can register its webhooks twice. The remote agent
+    checks and inserts in two steps too (`src/cmd/remote-agent/service.go`
+    around 312-315 and 397-400) and runs each start on its own goroutine,
+    so two start commands can race and leak the overwritten session's
+    subscription; its fingerprint/replace model doesn't fit `StartGuard`
+    as is. Found during #397 and its review.
+54. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
     to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
     `agent:needs-human`. Found in #395.
-53. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+55. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
     output, the gzipped copy and the encrypted copy all sit in byte slices
     (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
     `EncryptBytes` call), so a dump of roughly a third of the CronJob's
     512Mi limit or more gets the Job OOM-killed. Fine for today's small
     management DB. Stream pg_dump through gzip and encryption into
     `PutStream`, or at least alert on the dump size. Found in review of #404.
-54. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+56. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
     a backup change.** `deploy-backup-azure.sh` copies it from
     `vrsky-platform`, and nothing else runs that script. After an ACR
     password rotation the backup Job can't pull until the next Catch up.

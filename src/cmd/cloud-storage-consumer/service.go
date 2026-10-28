@@ -51,6 +51,8 @@ type cloudConsumer struct {
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
+	// starts holds the claim of each start in progress (#397); guarded by mu.
+	starts sdk.StartGuard
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -163,6 +165,8 @@ func (s *cloudConsumer) Stop(ctx context.Context) error {
 		cancel()
 	}
 	s.active = make(map[string]context.CancelFunc)
+	// A start still in flight must not leave a poller nobody will cancel.
+	s.starts.StopAllLocked()
 	s.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -186,13 +190,16 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	_ = ctx
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
-	s.mu.RLock()
-	_, exists := s.active[connectionID]
-	s.mu.RUnlock()
-	if exists {
-		logger.Warn("cloud-storage poller already running")
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of starting a second poller (#397).
+	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok })
+	if !ok {
+		logger.Warn("cloud-storage poller already running or starting")
 		return
 	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 
 	cfg, ok := s.getConfig(connectionID, tenantID)
 	if !ok {
@@ -215,9 +222,12 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	s.mu.Lock()
-	s.active[connectionID] = cancel
-	s.mu.Unlock()
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { s.active[connectionID] = cancel }) {
+		cancel()
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		return
+	}
 	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
 	if cfg.Mode == "event" {
@@ -243,7 +253,12 @@ func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
 		cancel()
 		delete(s.active, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of finishing after the stop (#397).
+	starting := s.starts.StopLocked(cmd.ConnectionID)
 	s.mu.Unlock()
+	if starting {
+		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+	}
 	if exists {
 		_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
 		s.logger.Info("cloud-storage poller stopped", "connection_id", cmd.ConnectionID)
