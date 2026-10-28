@@ -152,7 +152,7 @@ func TestGoTestShardsCoverEveryPackage(t *testing.T) {
 		t.Fatal(`no go-tests job named "Go Tests"`)
 	}
 	aggNeeds := strings.Join(needsList(agg.Needs), " ")
-	for _, j := range []string{"go-test-shards", "go-lint"} {
+	for _, j := range []string{"go-test-shards", "go-lint", "alert-rules"} {
 		if !strings.Contains(aggNeeds, j) {
 			t.Errorf("Go Tests does not need %s", j)
 		}
@@ -161,7 +161,7 @@ func TestGoTestShardsCoverEveryPackage(t *testing.T) {
 		t.Errorf("Go Tests has no always(); a failed shard would skip it instead of failing it: %q", agg.If)
 	}
 	planNeeds := needsList(wf.Jobs["plan"].Needs)
-	for _, j := range []string{"go-tests", "go-test-shards", "go-lint"} {
+	for _, j := range []string{"go-tests", "go-test-shards", "go-lint", "alert-rules"} {
 		found := false
 		for _, n := range planNeeds {
 			if n == j {
