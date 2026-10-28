@@ -11,6 +11,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 )
 
@@ -34,11 +36,48 @@ const checkpointTimeout = 5 * time.Second
 // previous version, which reads only Known, sees the same done set after a
 // rollback or as the old pod of a rolling deploy. A checkpoint from before
 // #420 has no Files: its names have no stamp until loadKnown adopts one.
+//
+// This row is the snapshot: the whole set, written at the first save after a
+// start, when the changes since it pile up, and when the watcher stops. Gen
+// is a new random id at each write; empty in a row from before #426 or one
+// the previous version wrote. Between snapshots a busy poll writes only the
+// changes, to a second row (changesState), because rewriting every name each
+// time cost about 11 MB per 100 000 names every 5 s (#426).
 type knownState struct {
 	WatchDir string                `json:"watch_dir"`
+	Gen      string                `json:"gen,omitempty"`
 	Known    []string              `json:"known"`
 	Files    map[string]savedStamp `json:"files,omitempty"`
 }
+
+// changesState is the second checkpoint row of the file node (node id
+// changesNodeID): every name whose entry changed since the snapshot whose Gen
+// is Base, as it is now. Files are done names with their stamp, Known done
+// names with none, Gone names that are no longer done. It is rewritten whole
+// at each save until the next snapshot, so it stays small. A changes row whose
+// Base is not the snapshot's Gen is stale (a newer snapshot was written, or
+// the previous version rewrote the snapshot) and is never applied. The
+// previous version never reads it.
+type changesState struct {
+	WatchDir string                `json:"watch_dir"`
+	Base     string                `json:"base"`
+	Files    map[string]savedStamp `json:"files,omitempty"`
+	Known    []string              `json:"known,omitempty"`
+	Gone     []string              `json:"gone,omitempty"`
+}
+
+// changesSuffix turns the file node's id into the id of its changes row.
+const changesSuffix = "#changes"
+
+// maxNodeIDLen is the width of connection_node_checkpoints.node_id. A node
+// id too long to take changesSuffix only ever gets snapshots.
+const maxNodeIDLen = 255
+
+// maxChanges is how many changed names the changes row holds before the next
+// save writes a snapshot instead. Near the square root of twice the set size
+// at 100 000 names, which keeps the bytes per busy poll lowest; a set smaller
+// than twice this gets a snapshot once half of it changed.
+const maxChanges = 512
 
 // savedStamp is a fileStamp as stored in the checkpoint.
 type savedStamp struct {
@@ -89,6 +128,51 @@ func stampAll(dir string, names map[string]bool) map[string]fileStamp {
 type savedSet struct {
 	names  map[string]bool
 	stamps map[string]fileStamp
+	// inChanges means part of it came from a changes row, not the snapshot
+	// (#426).
+	inChanges bool
+}
+
+// touch records that name's entry in the done set changed, for the next save.
+func (ac *ActiveConnection) touch(name string) {
+	if ac.changed == nil {
+		ac.changed = make(map[string]bool)
+	}
+	ac.changed[name] = true
+	ac.dirty = true
+}
+
+// changesNodeID is the node id of ac's changes row, or "" if the file node's
+// id is too long to make one.
+func changesNodeID(ac *ActiveConnection) string {
+	id := ac.NodeID + changesSuffix
+	if len(id) > maxNodeIDLen {
+		return ""
+	}
+	return id
+}
+
+// loadChanges reads ac's changes row. found is false when there is none, or
+// it is for another folder.
+func (s *fileConsumer) loadChanges(ctx context.Context, ac *ActiveConnection) (ch changesState, found bool, err error) {
+	id := changesNodeID(ac)
+	if id == "" {
+		return changesState{}, false, nil
+	}
+	cp, err := s.checkpoints.Get(ctx, ac.TenantID, ac.ConnectionID, id)
+	if err != nil {
+		return changesState{}, false, err
+	}
+	if cp == nil || len(cp.State) == 0 {
+		return changesState{}, false, nil
+	}
+	if err := json.Unmarshal(cp.State, &ch); err != nil {
+		return changesState{}, false, fmt.Errorf("decode saved file name changes: %w", err)
+	}
+	if ch.WatchDir != ac.WatchDir || ch.Base == "" {
+		return changesState{}, false, nil
+	}
+	return ch, true, nil
 }
 
 // fileNodeID returns the id of the connection's file consumer node, the key of
@@ -112,9 +196,11 @@ func (s *fileConsumer) fileNodeID(conn *Connection) string {
 	return fallbackNodeID
 }
 
-// loadSaved reads the done set saved for ac's folder. found is false when
-// there is no checkpoint for this folder yet. Both formats load: names only
-// (before #420), and names with stamps.
+// loadSaved reads the done set saved for ac's folder: the snapshot, and the
+// changes row on top of it when that row's Base is the snapshot's Gen. found
+// is false when there is no checkpoint for this folder yet. Every format
+// loads: names only (before #420), names with stamps, with or without a
+// changes row (#426).
 func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (saved savedSet, found bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancel()
@@ -141,9 +227,41 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (sav
 	}
 	for name, f := range st.Files {
 		saved.names[name] = true
-		saved.stamps[name] = fileStamp{size: f.Size, mtimeSec: f.MTime, mtimeNsec: f.MTimeNsec}
+		saved.stamps[name] = f.stamp()
 	}
+	if st.Gen == "" {
+		return saved, true, nil
+	}
+	ch, chFound, err := s.loadChanges(ctx, ac)
+	if err != nil {
+		return savedSet{}, false, err
+	}
+	if !chFound || ch.Base != st.Gen {
+		// None yet, or stale: written on an older snapshot.
+		return saved, true, nil
+	}
+	for name, f := range ch.Files {
+		saved.names[name] = true
+		saved.stamps[name] = f.stamp()
+	}
+	for _, name := range ch.Known {
+		saved.names[name] = true
+		delete(saved.stamps, name)
+	}
+	for _, name := range ch.Gone {
+		delete(saved.names, name)
+		delete(saved.stamps, name)
+	}
+	saved.inChanges = len(ch.Files)+len(ch.Known)+len(ch.Gone) > 0
 	return saved, true, nil
+}
+
+func (f savedStamp) stamp() fileStamp {
+	return fileStamp{size: f.Size, mtimeSec: f.MTime, mtimeNsec: f.MTimeNsec}
+}
+
+func toSaved(st fileStamp) savedStamp {
+	return savedStamp{Size: st.size, MTime: st.mtimeSec, MTimeNsec: st.mtimeNsec}
 }
 
 // errCheckpointRead marks a loadKnown that could read the folder but not the
@@ -183,6 +301,12 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 	}
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	saved, found, err := s.loadSaved(ctx, ac)
+	if err == nil || !requireSaved {
+		// This watcher has no snapshot of its own yet: its first save writes
+		// one (#426).
+		ac.savedGen = ""
+		ac.changed = nil
+	}
 	switch {
 	case err != nil && requireSaved:
 		return fmt.Errorf("%w: %w", errCheckpointRead, err)
@@ -223,7 +347,10 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 		// quiet folder kept a name-only row, and a file replaced while
 		// stopped was adopted again at each start and never published.
 		// Once a row has stamps nothing is adopted, so this is one save.
-		ac.dirty = len(known) != len(saved.names) || adopted > 0
+		// A set partly read from a changes row (the last watcher did not
+		// stop cleanly) is saved as a snapshot too, so the previous version
+		// finds all of it after a rollback (#426).
+		ac.dirty = len(known) != len(saved.names) || adopted > 0 || saved.inChanges
 		logger.Info("Resuming: files that arrived or changed while stopped will be published",
 			"already_done", len(known), "new", len(current)-len(known), "stamped_now", adopted)
 	}
@@ -238,17 +365,36 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 // watcher sees a newer version than the one published and goes on (#420). A
 // name saved without a stamp (by a pod from before #420) counts only for a
 // name this watcher does not know yet, as it did before.
-func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, current map[string]bool, logger *slog.Logger) {
+//
+// Only the small changes row is read while it is still on the snapshot this
+// watcher wrote last (ownsSaved): nobody else has saved since (#426).
+// Anything else (no snapshot of its own yet, or the changes row is missing or
+// on another snapshot) means another writer may have saved: the whole set is
+// read, as before, and the next save writes a new snapshot, since changes on
+// the old one would no longer be read. It reports false if the saved set
+// could not be read.
+func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, current map[string]bool, logger *slog.Logger) bool {
 	if s.checkpoints == nil {
-		return
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
+	defer cancel()
+	mine, err := s.ownsSaved(ctx, ac)
+	if err != nil {
+		logger.Warn("Could not re-read which files were already published", "error", err)
+		return false
+	}
+	if mine {
+		return true
 	}
 	saved, found, err := s.loadSaved(ctx, ac)
 	if err != nil {
 		logger.Warn("Could not re-read which files were already published", "error", err)
-		return
+		return false
 	}
+	ac.savedGen = ""
 	if !found {
-		return
+		return true
 	}
 	for name := range saved.names {
 		if !current[name] {
@@ -259,7 +405,7 @@ func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, cur
 			if !ac.knownFiles[name] {
 				ac.knownFiles[name] = true
 				delete(ac.pending, name)
-				ac.dirty = true
+				ac.touch(name)
 			}
 			continue
 		}
@@ -272,43 +418,165 @@ func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, cur
 		ac.knownFiles[name] = true
 		ac.knownStamps[name] = theirs
 		delete(ac.pending, name)
-		ac.dirty = true
+		ac.touch(name)
 	}
+	return true
+}
+
+// ownsSaved reports whether the saved set is still this watcher's: its
+// changes row is on the snapshot this watcher wrote last. Only the watcher
+// that wrote a snapshot writes changes on it, and saveKnown checks this before
+// each such write, so then nobody else has saved since. It reads only the
+// changes row.
+func (s *fileConsumer) ownsSaved(ctx context.Context, ac *ActiveConnection) (bool, error) {
+	if ac.savedGen == "" {
+		return false, nil
+	}
+	ch, found, err := s.loadChanges(ctx, ac)
+	if err != nil {
+		return false, err
+	}
+	return found && ch.Base == ac.savedGen, nil
 }
 
 // saveKnown writes ac.knownFiles to the checkpoint if it changed since the
-// last successful save. It runs on a context detached from the watcher's, so
-// a watcher being stopped still records what it published; a failure keeps
-// the set dirty for the next poll to retry.
+// last successful save: only the changes since this watcher's snapshot while
+// they are few, otherwise a new snapshot (#426). It runs on a context detached
+// from the watcher's, so a watcher being stopped still records what it
+// published; a failure keeps the set dirty for the next poll to retry.
+//
+// Changes are only written while the saved set is still this watcher's
+// (ownsSaved). If another watcher wrote a snapshot since, changes on this
+// one's would be ignored by every reader, and this watcher's own re-reads
+// would take that row as proof nobody else saved. So it merges what the other
+// one saved, as a poll does before publishing, and writes a snapshot instead.
+// If that can't be read, the snapshot is written as it is, as before #426.
 func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
 	if s.checkpoints == nil || !ac.dirty {
 		return
 	}
+	if ac.savedGen == "" || changesNodeID(ac) == "" ||
+		len(ac.changed) > min(maxChanges, len(ac.knownFiles)/2) {
+		s.saveSnapshotOrLog(ctx, ac, logger)
+		return
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
+	mine, err := s.ownsSaved(readCtx, ac)
+	cancel()
+	if err != nil || !mine {
+		if err == nil {
+			s.mergeSaved(context.WithoutCancel(ctx), ac, s.currentOrKnown(ac), logger)
+		}
+		ac.savedGen = ""
+		s.saveSnapshotOrLog(ctx, ac, logger)
+		return
+	}
+	ch := changesState{WatchDir: ac.WatchDir, Base: ac.savedGen, Files: make(map[string]savedStamp)}
+	for name := range ac.changed {
+		switch st, stamped := ac.knownStamps[name]; {
+		case !ac.knownFiles[name]:
+			ch.Gone = append(ch.Gone, name)
+		case stamped:
+			ch.Files[name] = toSaved(st)
+		default:
+			ch.Known = append(ch.Known, name)
+		}
+	}
+	sort.Strings(ch.Gone)
+	sort.Strings(ch.Known)
+	if err := s.writeState(ctx, ac, changesNodeID(ac), ch); err != nil {
+		logger.Error("Could not save which files were published; retrying next poll", "error", err)
+		return
+	}
+	ac.dirty = false
+}
+
+func (s *fileConsumer) saveSnapshotOrLog(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
+	if err := s.saveSnapshot(ctx, ac, logger); err != nil {
+		logger.Error("Could not save which files were published; retrying next poll", "error", err)
+	}
+}
+
+// currentOrKnown is the names in ac's folder, or the names ac knows if the
+// folder can't be read: only those can be merged then.
+func (s *fileConsumer) currentOrKnown(ac *ActiveConnection) map[string]bool {
+	current, err := s.listFiles(ac.WatchDir)
+	if err != nil {
+		return ac.knownFiles
+	}
+	return current
+}
+
+// saveSnapshot writes the whole done set under a new Gen, then an empty
+// changes row on it. The snapshot goes first: until the changes row follows,
+// the one there is on an older snapshot and is ignored, so a crash in between
+// loses nothing. If only the changes row fails, the set stays dirty and the
+// next save writes it. It returns the error of the snapshot write, which
+// leaves everything as it was.
+func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) error {
 	names := make([]string, 0, len(ac.knownFiles))
 	files := make(map[string]savedStamp, len(ac.knownStamps))
 	for name := range ac.knownFiles {
 		names = append(names, name)
 		if st, ok := ac.knownStamps[name]; ok {
-			files[name] = savedStamp{Size: st.size, MTime: st.mtimeSec, MTimeNsec: st.mtimeNsec}
+			files[name] = toSaved(st)
 		}
 	}
 	sort.Strings(names)
-	state, err := json.Marshal(knownState{WatchDir: ac.WatchDir, Known: names, Files: files})
-	if err != nil {
-		logger.Error("Could not encode the published file names", "error", err)
+	gen := uuid.NewString()
+	if err := s.writeState(ctx, ac, ac.NodeID, knownState{WatchDir: ac.WatchDir, Gen: gen, Known: names, Files: files}); err != nil {
+		return err
+	}
+	ac.savedGen = gen
+	ac.changed = nil
+	ac.dirty = false
+	id := changesNodeID(ac)
+	if id == "" {
+		return nil
+	}
+	if err := s.writeState(ctx, ac, id, changesState{WatchDir: ac.WatchDir, Base: gen}); err != nil {
+		// Readers ignore the old changes row: it is on an older snapshot.
+		logger.Warn("Saved which files were published, but could not reset the list of changes; the next save does",
+			"error", err)
+		ac.dirty = true
+	}
+	return nil
+}
+
+// flushKnown writes a snapshot when the watcher stops with changes not in
+// one yet, so the previous version, which reads only the snapshot, finds the
+// whole set after a rollback (#426). It merges what another watcher saved
+// first, as a poll does before publishing: written blind, the snapshot would
+// drop a name the other one published since, and the next start would
+// publish it again. If the saved set can't be read it writes nothing; the
+// changes row still holds what the snapshot lacks.
+func (s *fileConsumer) flushKnown(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
+	if s.checkpoints == nil || ac.baselineDeferred || (len(ac.changed) == 0 && !ac.dirty) {
 		return
+	}
+	if !s.mergeSaved(context.WithoutCancel(ctx), ac, s.currentOrKnown(ac), logger) {
+		return
+	}
+	if err := s.saveSnapshot(ctx, ac, logger); err != nil {
+		logger.Error("Could not save the full list of published files at stop; the next start reads the list of changes",
+			"error", err)
+	}
+}
+
+// writeState saves state as the checkpoint row nodeID of ac's connection, on
+// a context detached from ctx.
+func (s *fileConsumer) writeState(ctx context.Context, ac *ActiveConnection, nodeID string, state any) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkpointTimeout)
 	defer cancel()
-	if err := s.checkpoints.Save(ctx, &checkpoint.Checkpoint{
+	return s.checkpoints.Save(ctx, &checkpoint.Checkpoint{
 		TenantID:        ac.TenantID,
 		ConnectionID:    ac.ConnectionID,
-		NodeID:          ac.NodeID,
+		NodeID:          nodeID,
 		LastProcessedAt: time.Now().UTC(),
-		State:           state,
-	}); err != nil {
-		logger.Error("Could not save which files were published; retrying next poll", "error", err)
-		return
-	}
-	ac.dirty = false
+		State:           data,
+	})
 }

@@ -38,3 +38,10 @@ JetStream.
 Roll the images back and, only if a migration is incompatible, apply its `down`
 (after restoring the backup if data shape changed). Most migrations are additive
 and need no down-migration to roll code back.
+
+The file consumer keeps its list of published files as a full copy plus the
+recent changes (#426); a file-consumer image from before that reads only the
+full copy. A file consumer that stops normally writes the full copy first, so
+rolling back after a normal deploy republishes nothing. If the pod crashed
+instead, the older image republishes the files published since the last full
+copy, at most 512 per pipeline.

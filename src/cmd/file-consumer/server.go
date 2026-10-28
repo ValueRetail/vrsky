@@ -249,9 +249,11 @@ func (s *fileConsumer) handleEvents() http.HandlerFunc {
 		ch, unsub := s.subscribeEvents(connectionID)
 		defer unsub()
 
-		// Send initial connected event. Marshal rather than interpolate — the
-		// watch dir may contain quotes/control chars that would break the JSON.
-		connected, _ := json.Marshal(map[string]string{"type": "connected", "message": "Watching " + ac.WatchDir})
+		// Send initial connected event. It names the folder as the workspace
+		// sees it, like the error events (#409): the path on the volume holds
+		// the mount layout and the tenant id (#455). Marshal rather than
+		// interpolate: the name may contain quotes or control characters.
+		connected, _ := json.Marshal(map[string]string{"type": "connected", "message": fmt.Sprintf("Watching %q", s.folderLabel(ac))})
 		fmt.Fprintf(w, "data: %s\n\n", connected)
 		flusher.Flush()
 

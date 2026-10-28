@@ -42,7 +42,7 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 	// Start: read, save the first-start state. Publish: re-read, save (#391).
-	expectCheckpoints(mock, connID, tenant, 2, 2)
+	expectCheckpoints(mock, connID, tenant, 2, 2, 1, 2)
 
 	// A file is published on the second poll that sees it unchanged (#374);
 	// a short interval keeps that well inside the deadline below.

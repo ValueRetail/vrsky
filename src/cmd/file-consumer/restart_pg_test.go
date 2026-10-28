@@ -118,12 +118,15 @@ func TestRestartPG_DoneSetSurvivesRestartPerTenant(t *testing.T) {
 			a.requireTotal("x sighted before the stop", 1)
 			a.shutdown(mode)
 
-			if got := e.savedRows(connA); len(got) != 1 || got[0] != tenantA {
-				t.Fatalf("saved rows for A = %v, want one row for tenant %s", got, tenantA)
+			// The snapshot and its changes row (#426), both tenant A's.
+			if got := e.savedRows(connA); len(got) != 2 || got[0] != tenantA || got[1] != tenantA {
+				t.Fatalf("saved rows for A = %v, want two rows for tenant %s", got, tenantA)
 			}
 			store := checkpoint.NewPostgresStore(e.db)
-			if cp, err := store.Get(e.ctx, tenantB, connA, "c1"); err != nil || cp != nil {
-				t.Fatalf("A's state readable as tenant B: %+v, %v", cp, err)
+			for _, node := range []string{"c1", "c1" + changesSuffix} {
+				if cp, err := store.Get(e.ctx, tenantB, connA, node); err != nil || cp != nil {
+					t.Fatalf("A's state (%s) readable as tenant B: %+v, %v", node, cp, err)
+				}
 			}
 
 			// B: first start with p, x and y already in its folder. A's state
@@ -156,8 +159,8 @@ func TestRestartPG_DoneSetSurvivesRestartPerTenant(t *testing.T) {
 			if got := e.savedRows(connA); len(got) != 0 {
 				t.Fatalf("saved rows for A after deleting the connection = %v, want none", got)
 			}
-			if got := e.savedRows(connB); len(got) != 1 || got[0] != tenantB {
-				t.Fatalf("saved rows for B after deleting A = %v, want one row for tenant %s", got, tenantB)
+			if got := e.savedRows(connB); len(got) != 2 || got[0] != tenantB || got[1] != tenantB {
+				t.Fatalf("saved rows for B after deleting A = %v, want two rows for tenant %s", got, tenantB)
 			}
 
 			// B still has its own state.
