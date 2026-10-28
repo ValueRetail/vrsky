@@ -39,8 +39,8 @@ type apiConsumer struct {
 	// be injected.
 	oauthTokens *oauthtoken.Client
 
-	// Active pipelines: connectionId → cancel function
-	activePipelines map[string]context.CancelFunc
+	// Active pipelines: connectionId → this start's entry
+	activePipelines map[string]*activeConn
 	mu              sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
@@ -59,7 +59,7 @@ func (s *apiConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	s.db = res.DB
 	s.nc = res.NATS
 	s.logger = res.Logger
-	s.activePipelines = make(map[string]context.CancelFunc)
+	s.activePipelines = make(map[string]*activeConn)
 
 	s.pollTimeout = envDuration("API_CONSUMER_POLL_TIMEOUT", 30*time.Second)
 	s.defaultPollInterval = envDuration("API_CONSUMER_DEFAULT_POLL_INTERVAL", 60*time.Second)
@@ -121,11 +121,11 @@ func (s *apiConsumer) Stop(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
-	for connId, cancel := range s.activePipelines {
+	for connId, ac := range s.activePipelines {
 		s.logger.Info("Stopping pipeline", "connection_id", connId)
-		cancel()
+		ac.cancel()
 	}
-	s.activePipelines = make(map[string]context.CancelFunc)
+	s.activePipelines = make(map[string]*activeConn)
 	// A start still in flight must not leave a poller nobody will cancel.
 	s.starts.StopAllLocked()
 	s.mu.Unlock()
@@ -187,9 +187,10 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ac := &activeConn{cancel: cancel}
 
 	// A stop that arrived during the work above has taken the claim back and wins.
-	if !claim.Activate(func() { s.activePipelines[connectionID] = cancel }) {
+	if !claim.Activate(func() { s.activePipelines[connectionID] = ac }) {
 		cancel()
 		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
 		return
@@ -199,7 +200,26 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 		s.logger.Error("Failed to update connection status", "error", err)
 	}
 
-	go s.pollConnection(ctx, connectionID, tenantID, apiConfig)
+	go s.pollConnection(ctx, ac, connectionID, tenantID, apiConfig)
+}
+
+// activeConn is one start's entry in activePipelines. The poller gets the same
+// pointer, so when it ends on its own it can tell whether the entry is still
+// its own (#408).
+type activeConn struct {
+	cancel context.CancelFunc
+}
+
+// dropActive removes connectionID from activePipelines if the entry is still
+// own. After a stop and a new start it belongs to the newer poller, and an old
+// poller finishing must leave it alone, or the next start runs a second poller
+// beside the new one (#408).
+func (s *apiConsumer) dropActive(connectionID string, own *activeConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activePipelines[connectionID] == own {
+		delete(s.activePipelines, connectionID)
+	}
 }
 
 // handleStopCommand processes a stop command from NATS
@@ -213,9 +233,9 @@ func (s *apiConsumer) handleStopCommand(msg *nats.Msg) {
 	s.logger.Info("Received stop command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
 
 	s.mu.Lock()
-	cancel, exists := s.activePipelines[cmd.ConnectionID]
+	ac, exists := s.activePipelines[cmd.ConnectionID]
 	if exists {
-		cancel()
+		ac.cancel()
 		delete(s.activePipelines, cmd.ConnectionID)
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).

@@ -89,7 +89,7 @@ func newSRFixture(t *testing.T) *srFixture {
 	f.c = &apiConsumer{
 		db:              db,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
-		activePipelines: make(map[string]context.CancelFunc),
+		activePipelines: make(map[string]*activeConn),
 		publish: func(context.Context, *envelope.Envelope) error {
 			f.published.Add(1)
 			return nil

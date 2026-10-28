@@ -15,7 +15,7 @@ import (
 )
 
 // pollConnection runs the main polling loop for an API consumer
-func (s *apiConsumer) pollConnection(ctx context.Context, connectionID, tenantID string, config *APIConsumerConfig) {
+func (s *apiConsumer) pollConnection(ctx context.Context, own *activeConn, connectionID, tenantID string, config *APIConsumerConfig) {
 	logger := s.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 	logger.Info("Starting API polling",
 		"base_url", config.BaseURL,
@@ -37,10 +37,8 @@ func (s *apiConsumer) pollConnection(ctx context.Context, connectionID, tenantID
 		if err := s.updateConnectionStatus(connectionID, tenantID, "stopped"); err != nil {
 			logger.Error("Failed to update connection status after one-time poll", "error", err)
 		}
-		// Remove from active pipelines
-		s.mu.Lock()
-		delete(s.activePipelines, connectionID)
-		s.mu.Unlock()
+		// Remove from active pipelines, unless a newer start owns the entry by now
+		s.dropActive(connectionID, own)
 		return
 	}
 

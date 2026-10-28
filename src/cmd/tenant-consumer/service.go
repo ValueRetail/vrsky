@@ -26,7 +26,7 @@ type tenantConsumer struct {
 	publish sdk.PublishFunc // injected by the runner; the one data-emit path
 	logger  *slog.Logger
 
-	activeBridges map[string]context.CancelFunc
+	activeBridges map[string]*activeConn
 	mu            sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
@@ -49,7 +49,7 @@ func (s *tenantConsumer) Configure(ctx context.Context, res *sdk.Resources) erro
 	s.db = res.DB
 	s.nc = res.NATS
 	s.logger = res.Logger
-	s.activeBridges = make(map[string]context.CancelFunc)
+	s.activeBridges = make(map[string]*activeConn)
 	res.Health.SetReady(true)
 	return nil
 }
@@ -93,11 +93,11 @@ func (s *tenantConsumer) Stop(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
-	for connID, cancel := range s.activeBridges {
+	for connID, ac := range s.activeBridges {
 		s.logger.Info("Stopping bridge", "connection_id", connID)
-		cancel()
+		ac.cancel()
 	}
-	s.activeBridges = make(map[string]context.CancelFunc)
+	s.activeBridges = make(map[string]*activeConn)
 	// A start still in flight must not leave a poller nobody will cancel.
 	s.starts.StopAllLocked()
 	s.mu.Unlock()
@@ -156,8 +156,9 @@ func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tena
 		"source_connection_id", tcConfig.SourceConnectionID)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ac := &activeConn{cancel: cancel}
 	// A stop that arrived during the work above has taken the claim back and wins.
-	if !claim.Activate(func() { s.activeBridges[connectionID] = cancel }) {
+	if !claim.Activate(func() { s.activeBridges[connectionID] = ac }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
@@ -165,7 +166,26 @@ func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tena
 
 	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
 
-	go s.runBridge(ctx, connectionID, tenantID, tcConfig)
+	go s.runBridge(ctx, ac, connectionID, tenantID, tcConfig)
+}
+
+// activeConn is one start's entry in activeBridges. The bridge goroutine gets
+// the same pointer, so when it ends on its own it can tell whether the entry is
+// still its own (#408).
+type activeConn struct {
+	cancel context.CancelFunc
+}
+
+// dropActive removes connectionID from activeBridges if the entry is still own.
+// After a stop and a new start it belongs to the newer bridge, and an old one
+// failing must leave it alone, or the next start runs a second bridge beside
+// the new one (#408).
+func (s *tenantConsumer) dropActive(connectionID string, own *activeConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeBridges[connectionID] == own {
+		delete(s.activeBridges, connectionID)
+	}
 }
 
 // handleStopCommand processes a stop command
@@ -179,9 +199,9 @@ func (s *tenantConsumer) handleStopCommand(msg *nats.Msg) {
 	s.logger.Info("Received stop command", "connection_id", cmd.ConnectionID)
 
 	s.mu.Lock()
-	cancel, exists := s.activeBridges[cmd.ConnectionID]
+	ac, exists := s.activeBridges[cmd.ConnectionID]
 	if exists {
-		cancel()
+		ac.cancel()
 		delete(s.activeBridges, cmd.ConnectionID)
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).

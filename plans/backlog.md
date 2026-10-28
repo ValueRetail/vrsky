@@ -313,7 +313,7 @@ Last updated 2026-10-28.
     landed during the outage are never published. `takeDeferredBaseline`
     already retries every poll, so it could stay deferred on a checkpoint
     error instead. Found in review of #398.
-52. **An ending poller can drop a newer poller's map entry.** api
+52. ~~**An ending poller can drop a newer poller's map entry.**~~ (#408) api
     (`pollConnection` one-shot), sftp (one-shot `runPoller`), cloud-storage
     (`finishConn`) and tenant (`runBridge` error paths) delete their
     connection from the active map without checking the entry is still
@@ -361,6 +361,15 @@ Last updated 2026-10-28.
     (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
     Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
     in review of #404.
+58. **An old poller still writes its final status after a newer start.**
+    Since #408 an old poller ending late leaves the newer poller's map entry
+    alone, but it still writes status `stopped` (one-shot done) or `error`
+    (setup failed) after the new start wrote `running`. api
+    (`pollConnection`), sftp (`runPoller`), cloud-storage (`finishConn`) and
+    tenant (`runBridge`) do it, so the UI and the boot restore can see a
+    running connection as stopped. Write the status only when the entry was
+    still this poller's own (`dropActive` could report it). Found during
+    #408.
 
 ## Human
 
