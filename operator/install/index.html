@@ -2474,6 +2474,10 @@ as no <code>.env</code>. To override one, set it in <code>.env</code> (or in the
   losing it makes them unrecoverable. In production it is required, with the
   same value on the management-API and every worker that resolves secrets.
   See the <a href="../encryption-at-rest/">encryption-at-rest checklist</a>.</li>
+<li><strong><code>VRSKY_FILES_HOST_DIR</code></strong>: the host folder file pipelines read from,
+  mounted at <code>/data/input</code> in the file connectors. Empty means the
+  repository's <code>data/input</code>. Any path style works, Windows ones included;
+  see <a href="../../connectors/file/#notes">File connector</a>.</li>
 <li>Database passwords and any object-storage credentials. In the local compose
   stack these are fixed dev values written into <code>docker-compose.yml</code>, not
   read from <code>.env</code>; the stack binds its ports to <code>127.0.0.1</code> for that reason.</li>

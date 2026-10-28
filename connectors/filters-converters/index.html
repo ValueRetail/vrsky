@@ -2509,8 +2509,10 @@ and apply conversion functions as needed. For the available conversion
 functions, see <a href="../converter/"><code>docs/converter/</code></a>.</p>
 <h3 id="nested-lines-and-one-message-per-record">Nested lines and one message per record<a class="headerlink" href="#nested-lines-and-one-message-per-record" title="Permanent link">&para;</a></h3>
 <p>Two settings for records that carry lines, like a receipt with its items
-(added for the Sitoo ⇄ Business Central templates, #435). Neither is in the
-editor yet; set them in the node config.</p>
+(added for the Sitoo ⇄ Business Central templates, #435). Both are in the
+converter editor (#458): pick <strong>Each (map array items)</strong> as a mapping's type
+to get its item mappings and its own "Drop unmapped item fields" box, and
+tick <strong>Split records</strong> under the mappings.</p>
 <ul>
 <li>
 <p><strong><code>each</code> mapping</strong> maps every object of an array field with its own nested
@@ -2541,6 +2543,14 @@ editor yet; set them in the node config.</p>
 </li>
 </ul>
 <p><code>to_string</code> writes numbers in plain decimal (<code>1000000</code>, not <code>1e+06</code>).</p>
+<p>The editor warns about a mapping the converter would skip or write wrongly:
+a missing source or target, a template with no expression, a type the
+converter does not know, a <code>remove</code> with a dotted path (it removes only a
+top-level field with exactly that name), and an <code>each</code> that drops unmapped
+item fields with no item
+mappings (every item becomes <code>{}</code>). Nothing checks this when the pipeline is
+saved, so a warning does not stop you saving. The <strong>Test Transform</strong> preview
+does not split records; it shows the whole result.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Both node types carry their detailed configuration (rules and mappings) in

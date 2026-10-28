@@ -1300,50 +1300,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restore from a disk snapshot
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#restore-from-a-logical-dump" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restore from a logical dump
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-ci-restore-drill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The CI restore drill
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-dry-run-compose" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local dry-run (compose)
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2424,50 +2380,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restore from a disk snapshot
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#restore-from-a-logical-dump" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restore from a logical dump
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-ci-restore-drill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The CI restore drill
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-dry-run-compose" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local dry-run (compose)
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2575,6 +2487,24 @@ on a <code>postgres:18-alpine</code> base, so <code>pg_dump</code> matches the s
    <code>pkg/objectstore</code>) as
    <code>mgmt-backups/management_db-&lt;UTC-timestamp&gt;.dump.gz.enc</code>.</li>
 </ol>
+<p>The four steps are one stream (#430): nothing holds the whole dump, so the
+Job's memory stays at a few MiB plus the storage SDK's upload buffers
+whatever the size of the database. The archive is encrypted in 64 KiB
+chunks, each its own GCM seal with a counter and a last-chunk flag in the
+nonce, behind a <code>VRSKYBK1</code> header. The chunks are sealed under a key made
+for that archive alone, HKDF-SHA256 of the <code>ENCRYPTION_KEY</code> with a random
+salt stored in the header, so the backups never use the secrets vault's key
+directly (the format is documented in <code>src/cmd/vrsky-cli/stream.go</code>). A
+cut-off, reordered or edited archive fails to decrypt; it never restores as
+a shorter dump. If <code>pg_dump</code> fails, the upload is aborted before the last
+chunk is written.</p>
+<p><code>vrsky-cli restore</code> reads both this format and the archives made before</p>
+<h1 id="430-one-gcm-seal-under-the-encryption_key-over-the-whole-gzipped-dump">430 (one GCM seal under the <code>ENCRYPTION_KEY</code> over the whole gzipped dump).<a class="headerlink" href="#430-one-gcm-seal-under-the-encryption_key-over-the-whole-gzipped-dump" title="Permanent link">&para;</a></h1>
+<p>New archives are streamed into <code>pg_restore</code>; old ones are read into memory
+to decrypt, as before. A damaged new archive would only be caught while
+<code>pg_restore</code> runs, so run <code>vrsky-cli backup verify &lt;key&gt;</code> first, as the
+runbook below does: it reads the whole archive and fails on any damage
+without touching a database.</p>
 <p>Config is environment-driven: <code>BACKUP_DB_URL</code>, <code>ENCRYPTION_KEY</code>,
 <code>BACKUP_PROVIDER</code>, <code>BACKUP_BUCKET</code>, and <code>BACKUP_AZURE_ACCOUNT_NAME</code> +
 <code>BACKUP_AZURE_ACCOUNT_KEY</code> or <code>BACKUP_AZURE_CONNECTION_STRING</code> (the S3 and GCS
@@ -2683,22 +2613,38 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
 kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-list<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["list"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
 </code></pre></div></li>
+<li><strong>Verify the dump before you restore it:</strong>
+   <div class="highlight"><pre><span></span><code><span class="nv">KEY</span><span class="o">=</span>mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc
+kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-verify<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["backup","verify","'</span><span class="s2">"</span><span class="nv">$KEY</span><span class="s2">"</span><span class="s1">'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
+</code></pre></div>
+   <code>backup verify</code> downloads the dump and decrypts and gunzips it without
+   writing anything, then prints <code>backup ok: &lt;key&gt; (&lt;n&gt; bytes of dump)</code>. A
+   non-zero exit means the dump is damaged, cut off or under another
+   <code>ENCRYPTION_KEY</code>: pick another one. Don't skip this. <code>restore</code> would
+   notice a damaged dump only partway through and roll back, so you'd find
+   out later and with less detail.</li>
 <li><strong>Restore into it:</strong>
    <div class="highlight"><pre><span></span><code><span class="nv">TARGET</span><span class="o">=</span><span class="s1">'postgres://vrsky:&lt;scratch password&gt;@pg-restore-test.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable'</span>
-<span class="nv">KEY</span><span class="o">=</span>mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc
 kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-restore<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["restore","--target-db-url","'</span><span class="s2">"</span><span class="nv">$TARGET</span><span class="s2">"</span><span class="s1">'","--confirm","'</span><span class="s2">"</span><span class="nv">$KEY</span><span class="s2">"</span><span class="s1">'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
 </code></pre></div>
    <code>restore</code> downloads, decrypts, gunzips and runs
-   <code>pg_restore --clean --if-exists</code>. It requires <code>--target-db-url</code> and
+   <code>pg_restore --clean --if-exists --single-transaction</code>. The single
+   transaction makes it all or nothing: if the download breaks off, the
+   archive turns out damaged (say it was replaced after you verified it) or
+   any statement fails, everything rolls back, the <code>--clean</code> drops included,
+   and the target is left as it was. It requires <code>--target-db-url</code> and
    <code>--confirm</code>, and refuses to overwrite <code>BACKUP_DB_URL</code> unless you also pass
    <code>--allow-source-db</code>.</li>
 </ol>
 <p>Without the cluster, run the same image anywhere with Docker and the
    environment from the <a href="../operator/backup/#layer-2-the-vrsky-backup-config-secret">Secret</a>,
-   with <code>ENCRYPTION_KEY</code> from the password manager:
+   with <code>ENCRYPTION_KEY</code> from the password manager. Verify first with the
+   same command ending in <code>backup verify &lt;key&gt;</code> (it needs no
+   <code>BACKUP_DB_URL</code>), then restore:
    <code>docker run --rm -e ENCRYPTION_KEY -e BACKUP_PROVIDER=azure -e BACKUP_BUCKET=vrsky-backups -e BACKUP_AZURE_ACCOUNT_NAME -e BACKUP_AZURE_ACCOUNT_KEY -e BACKUP_DB_URL=&lt;any URL other than the target&gt; vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest restore --target-db-url &lt;url&gt; --confirm &lt;key&gt;</code>.
-4. <strong>Check row counts per tenant</strong> against what you expect (the live
+5. <strong>Check row counts per tenant</strong> against what you expect (the live
    database, if it still exists):
    <div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span><span class="p">,</span><span class="w"> </span><span class="s1">'connections'</span><span class="p">,</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="k">c</span><span class="p">.</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">tenants</span><span class="w"> </span><span class="n">t</span>
 <span class="w">  </span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">connections</span><span class="w"> </span><span class="k">c</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">tenant_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">id</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span>
@@ -2707,10 +2653,10 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
 <span class="w">  </span><span class="k">LEFT</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">secrets</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">tenant_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">t</span><span class="p">.</span><span class="n">slug</span>
 <span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
 </code></pre></div>
-5. <strong>Bring the schema up to date.</strong> A dump is at whatever migration version
+6. <strong>Bring the schema up to date.</strong> A dump is at whatever migration version
    was live when it was taken. The management-api runs the migrations on
    boot, so starting it against the restored database is enough.
-6. <strong>Switch the platform to it.</strong> Update <code>connection_string</code> in the
+7. <strong>Switch the platform to it.</strong> Update <code>connection_string</code> in the
    <code>postgres-credentials</code> Secrets (<code>vrsky-database</code> and <code>vrsky-platform</code>) to
    the restored database, restart the management-api and the connectors, and
    check: log in, list connections, open a connection's credentials (they
