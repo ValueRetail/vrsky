@@ -8,14 +8,13 @@
 #   1. Copy the acr-pull secret from vrsky-platform into vrsky-database, so the
 #      Job can pull vrsky-cli from ACR. Copied on every run, so a rotated ACR
 #      password follows. No credential is in this script.
-#   2. Apply infrastructure/kubernetes/backup/cronjob.yaml (suspended in the
-#      file).
-#   3. Unsuspend it only when the vrsky-backup-config Secret exists with the
-#      keys a backup needs: REQUIRED below, plus Azure credentials (account
-#      name and key, or a connection string). Otherwise it stays suspended
-#      and this says why:
-#      a Job that fails every weekday until someone creates the Secret helps
-#      nobody.
+#   2. Decide `suspend`: false only when the vrsky-backup-config Secret exists
+#      with the keys a backup needs (REQUIRED below, plus Azure credentials:
+#      account name and key, or a connection string). Otherwise it stays
+#      suspended and this says why: a Job that fails every weekday until
+#      someone creates the Secret helps nobody.
+#   3. Apply infrastructure/kubernetes/backup/cronjob.yaml (suspended in the
+#      file) with that value, in one apply.
 #
 # vrsky-backup-config is created by a human with `kubectl create secret
 # generic` (infrastructure/kubernetes/backup/README.md). This script reads its
@@ -38,10 +37,7 @@ printf '%s' "$pull" \
                         metadata: {name: "acr-pull", namespace: $ns}}' \
   | kubectl apply -f -
 
-# --- 2. the CronJob -----------------------------------------------------------
-kubectl apply -f "$MANIFEST"
-
-# --- 3. suspended unless the config Secret is complete ------------------------
+# --- 2. suspended unless the config Secret is complete ------------------------
 # Key names only; the values never leave the API server.
 missing=""
 if keys="$(kubectl get secret "$CONFIG" -n "$NS" -o json 2>/dev/null | jq -r '.data // {} | keys[]')"; then
@@ -60,11 +56,19 @@ else
   reason="Secret $NS/$CONFIG does not exist"
 fi
 
-if [ -z "$missing" ]; then
-  kubectl patch cronjob "$CRONJOB" -n "$NS" --type merge -p '{"spec":{"suspend":false}}'
+suspend=true
+[ -n "$missing" ] || suspend=false
+
+# --- 3. the CronJob, with its final suspend value -----------------------------
+# One apply. Applying the file (suspend: true) and patching afterwards would
+# suspend a live CronJob for a moment on every deploy, and that one sample
+# would mute MgmtBackupMissing. `patch --local` edits the manifest client-side.
+kubectl patch --local -f "$MANIFEST" --type merge -p "{\"spec\":{\"suspend\":$suspend}}" -o yaml \
+  | kubectl apply -f -
+
+if [ "$suspend" = false ]; then
   echo "backup CronJob $NS/$CRONJOB applied and active (weekdays 12:00 Europe/Oslo)"
 else
-  kubectl patch cronjob "$CRONJOB" -n "$NS" --type merge -p '{"spec":{"suspend":true}}'
   echo "backup CronJob $NS/$CRONJOB applied SUSPENDED: $reason."
   echo "  Create it as in infrastructure/kubernetes/backup/README.md, then run Catch up"
   echo "  (or this script) to activate the backups."

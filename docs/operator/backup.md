@@ -151,9 +151,11 @@ vrsky-cli restore --target-db-url 'postgres://…/vrsky' --confirm \
 
 `MgmtBackupMissing` (warning) fires when two of the CronJob's Jobs have failed
 since the last good backup, or when neither a scheduled run nor a successful
-Job (a manual one counts) has happened for over four days of being active.
-It is silent while the CronJob is suspended, right after it is unsuspended,
-and after a cluster start too late for that day's run. It sits outside the
+Job (a manual one counts) has happened for over four days of being active
+(checked weekday afternoons), or for over seven days at any time. It is
+silent while the CronJob is suspended and right after it is unsuspended. A
+CronJob left suspended is silent too, so check `SUSPEND` after any manual
+pause. It sits outside the
 `vrsky-*` rule groups, so it reaches Teams but doesn't fail a deploy's smoke
 check. A single failed Job also shows up as the chart's `KubeJobFailed`.
 

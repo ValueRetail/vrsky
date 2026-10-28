@@ -2579,9 +2579,13 @@ func TestBackupCronJobManifest(t *testing.T) {
 	if spec.TimeZone != "Europe/Oslo" {
 		t.Errorf("timeZone %q, want Europe/Oslo; without it the schedule is the controller's UTC", spec.TimeZone)
 	}
-	if d := spec.StartingDeadlineSeconds; d == nil || *d <= 0 || *d > 3600 {
-		t.Errorf("startingDeadlineSeconds %v, want set and in (0, 3600]: without it a run missed while parked "+
-			"fires whenever the cluster starts", d)
+	// At least 4h, so a cluster started any time before the 16:00 park still
+	// runs that day's noon dump (a shorter deadline let a daily late start go
+	// without dumps, review of #404). Under 19h, so a start at 07:00 doesn't
+	// run the previous day's.
+	if d := spec.StartingDeadlineSeconds; d == nil || *d < 4*3600 || *d >= 19*3600 {
+		t.Errorf("startingDeadlineSeconds %v, want set and in [14400, 68400): a start before 16:00 must still "+
+			"run the noon dump, and a start the next morning must not", d)
 	}
 	if spec.ConcurrencyPolicy != "Forbid" {
 		t.Errorf("concurrencyPolicy %q, want Forbid: two dumps at once double the load and race on the object name", spec.ConcurrencyPolicy)
@@ -2872,10 +2876,27 @@ case "$verb" in
     exit 0 ;;
   apply)
     if [[ "$args" == *" -f - "* || "$args" == *" --filename=- "* || "$args" == *" -f=- "* || "$args" == *" --filename - "* ]]; then
-      cat > "$d/stdin-$$"; exit 0
+      cat > "$d/stdin-$$"
+      if grep -q 'kind: CronJob' "$d/stdin-$$" && [ -f "$d/fail-cronjob-apply" ]; then
+        echo 'error: the server rejected the CronJob' >&2; exit 1
+      fi
+      exit 0
     fi
     if [[ "$args" == *kubernetes/backup* && -f "$d/fail-cronjob-apply" ]]; then
       echo 'error: the server rejected the CronJob' >&2; exit 1
+    fi
+    exit 0 ;;
+  patch)
+    # patch --local -f <file> -p '{"spec":{"suspend":X}}' -o yaml: the file
+    # with suspend set to X, as kubectl would print it. Touches no cluster.
+    if [[ "$args" == *" --local "* ]]; then
+      f=""; p=""; prev=""
+      for a in "$@"; do
+        case "$prev" in -f|--filename) f="$a" ;; -p|--patch) p="$a" ;; esac
+        prev="$a"
+      done
+      s="$(printf '%s' "$p" | grep -oE '"suspend" *: *(true|false)' | grep -oE 'true|false')"
+      sed -E "s/^(  suspend:) (true|false)/\1 $s/" "$f"
     fi
     exit 0 ;;
   *) exit 0 ;;
@@ -3042,9 +3063,23 @@ func TestDeployBackupScript(t *testing.T) {
 					t.Errorf("call %d %v does more than read vrsky-backup-config", i, argv)
 				}
 			}
+			// The CronJob applied through stdin refers to the Secret (envFrom);
+			// what must never go through is the Secret itself.
 			for i, in := range r.stdins {
-				if strings.Contains(in, "vrsky-backup-config") {
-					t.Errorf("call %d applies something naming vrsky-backup-config:\n%s", i, in)
+				dec := yaml.NewDecoder(strings.NewReader(in))
+				for {
+					var doc struct {
+						Kind     string `yaml:"kind"`
+						Metadata struct {
+							Name string `yaml:"name"`
+						} `yaml:"metadata"`
+					}
+					if err := dec.Decode(&doc); err != nil {
+						break
+					}
+					if doc.Metadata.Name == "vrsky-backup-config" || (doc.Kind != "CronJob" && strings.Contains(in, "vrsky-backup-config")) {
+						t.Errorf("call %d applies something naming vrsky-backup-config:\n%s", i, in)
+					}
 				}
 			}
 
@@ -3060,14 +3095,20 @@ func TestDeployBackupScript(t *testing.T) {
 
 			// acr-pull, copied into vrsky-database without the source's identity.
 			var acrDoc map[string]any
-			cronAt := -1
+			// Every apply of the CronJob and the suspend value it carries. A
+			// file apply carries the file's suspend: true.
+			type cronApply struct {
+				at      int
+				suspend bool
+			}
+			var applies []cronApply
 			for i, argv := range r.calls {
 				if kubectlVerb(argv) != "apply" {
 					continue
 				}
 				for _, a := range argv {
 					if strings.Contains(a, "kubernetes/backup") {
-						cronAt = i
+						applies = append(applies, cronApply{i, true})
 					}
 				}
 				in, ok := r.stdins[i]
@@ -3085,7 +3126,9 @@ func TestDeployBackupScript(t *testing.T) {
 					case doc["kind"] == "Secret" && meta["name"] == "acr-pull":
 						acrDoc = doc
 					case doc["kind"] == "CronJob" && meta["name"] == "vrsky-mgmt-backup":
-						cronAt = i
+						spec, _ := doc["spec"].(map[string]any)
+						s, _ := spec["suspend"].(bool) // absent means false
+						applies = append(applies, cronApply{i, s})
 					}
 				}
 			}
@@ -3111,10 +3154,21 @@ func TestDeployBackupScript(t *testing.T) {
 
 			// The CronJob, then its suspend flag. Applying the file after the
 			// patch would put suspend: true back.
-			if cronAt < 0 {
+			if len(applies) == 0 {
 				t.Fatalf("the CronJob was never applied\n%s", logs)
 			}
-			suspended, lastPatch := true, -1 // the file says suspend: true
+			// With the Secret ready, no apply may carry suspend: true, not even
+			// for a moment before a patch: kube-state-metrics would record a
+			// suspended sample, and that mutes MgmtBackupMissing for days.
+			if !tc.wantSuspended {
+				for _, a := range applies {
+					if a.suspend {
+						t.Errorf("call %d applies the CronJob with suspend: true although vrsky-backup-config is ready: %v\n%s", a.at, r.calls[a.at], logs)
+					}
+				}
+			}
+			cronAt := applies[len(applies)-1].at
+			suspended, lastPatch := applies[len(applies)-1].suspend, -1
 			for i, argv := range r.calls {
 				joined := strings.Join(argv, " ")
 				if kubectlVerb(argv) != "patch" || !strings.Contains(joined, "vrsky-mgmt-backup") {

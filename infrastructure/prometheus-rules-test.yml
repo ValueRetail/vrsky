@@ -559,20 +559,22 @@ tests:
   # 11f. MgmtBackupMissing (b) only on weekday afternoons. Last schedule
   #      Thursday 00:01 UTC of the first day, so from Monday 02:01 on it is
   #      always more than 98 hours old; what decides is the day and the hour.
-  - interval: 1m
+  #      Scraped every 5 minutes: the 7-day backstop over two weeks of
+  #      1-minute samples is more than promtool's per-query sample limit.
+  - interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '0x13800'
+        values: '0x2760'
       - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '60x13800'
+        values: '60x2760'
       - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '60x13800'
+        values: '60x2760'
       - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
-        values: '1x13800'
+        values: '1x2760'
       - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1"}'
-        values: '60x13800'
+        values: '60x2760'
       - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1"}'
-        values: '_x2 120x13798'
+        values: '_x1 120x2759'
     alert_rule_test:
       # Monday 11:00 UTC: stale for 107 hours, but before the noon run.
       - eval_time: 6420m
@@ -602,7 +604,48 @@ tests:
             exp_annotations:
               summary: "No successful management-DB backup in two running weekdays"
               description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
-      # Saturday 14:00 UTC of the next week: no run is due on a weekend.
+      # Saturday 14:00 UTC of the next week: (b) is off at weekends, but
+      # nothing has happened for over 7 days, so the backstop (c) pages.
+      # The weekend gate of (b) alone is 11n.
+      - eval_time: 13800m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11o. MgmtBackupMissing (c) right after activation. Created at t=0,
+  #      suspended until the second Saturday 00:00 UTC, then activated. Nine
+  #      days old and never scheduled, but active for two hours: the backstop
+  #      must stay quiet as (b) does in 11h.
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '1x2591 0x30'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x2621'
+    alert_rule_test:
+      - eval_time: 13080m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11n. MgmtBackupMissing (b) is off at weekends. Last run Tuesday 11:00 UTC
+  #      (day 5); the next Saturday 14:00 UTC is 99 hours later, past (b)'s
+  #      98 but well under the backstop's 7 days. Quiet.
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x2770'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x2770'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x1571 471600x1198'
+    alert_rule_test:
       - eval_time: 13800m
         alertname: MgmtBackupMissing
         exp_alerts: []
@@ -630,12 +673,14 @@ tests:
   #      created-time fallback alone would page within 30 minutes. It must
   #      stay quiet until the CronJob has been active for 98 hours with
   #      nothing happening, and page then.
-  - interval: 1m
+  #      Scraped every 5 minutes: the 7-day backstop over 1-minute samples
+  #      is more than promtool's per-query sample limit.
+  - interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '1x6509 0x6000'
+        values: '1x1301 0x1200'
       - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '0x12510'
+        values: '0x2502'
     alert_rule_test:
       # Monday 13:30 and 14:30 UTC, one and two hours after activation.
       - eval_time: 6570m
@@ -684,10 +729,10 @@ tests:
         exp_alerts: []
 
   # 11j. MgmtBackupMissing (b) after a late start. The cluster was parked
-  #      from before Thursday's run until Monday 12:30 UTC (13:30 Oslo),
-  #      after that day's noon run and its one-hour deadline. Nothing was
-  #      missed by fault, so the stale schedule must not page before the
-  #      cluster parks again.
+  #      from before Thursday's run until Monday 12:30 UTC (13:30 Oslo).
+  #      startingDeadlineSeconds is 4h, so the CronJob runs Monday's noon
+  #      dump at start-up and lastScheduleTime moves to Monday 11:00 UTC.
+  #      Quiet.
   - interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
@@ -695,7 +740,7 @@ tests:
       - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '_x6509 60x200'
       - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
-        values: '_x6509 39600x200'
+        values: '_x6509 39600 385200x199'
     alert_rule_test:
       # Monday 14:00 and 15:00 UTC (15:00 and 16:00 Oslo).
       - eval_time: 6600m
@@ -704,3 +749,89 @@ tests:
       - eval_time: 6660m
         alertname: MgmtBackupMissing
         exp_alerts: []
+
+  # 11k. MgmtBackupMissing (b) with a cluster started late every day and a
+  #      CronJob that never runs. Up 12:30-15:00 UTC (13:30-16:00 Oslo) on
+  #      Thursday, Friday and Monday, nothing ever scheduled. Before the
+  #      review fix an `offset 3h` gate kept this silent for good; now it
+  #      pages on the first weekday afternoon past 98 hours.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x750 0x150 _x1289 0x150 _x4169 0x150'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x750 0x150 _x1289 0x150 _x4169 0x150'
+    alert_rule_test:
+      # Friday 14:00 UTC: 38 hours, quiet.
+      - eval_time: 2280m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      # Monday 14:00 UTC: 110 hours, an hour and a half after the start.
+      - eval_time: 6600m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11l. MgmtBackupMissing (c), the 7-day backstop, outside the weekday and
+  #      hour gate. Active since t=0 and never scheduled. On the second
+  #      Saturday at 02:00 UTC (b) is gated off; only (c) keeps it firing.
+  #      One suspended sample at Saturday 01:00 UTC (a flicker) must not
+  #      mute the backstop for a week either.
+  #      Scraped every 5 minutes: a week of 1-minute samples is more than
+  #      promtool's per-query sample limit.
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x2579 1 0x40'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x2620'
+    alert_rule_test:
+      - eval_time: 13080m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11m. MgmtBackupMissing (b) after a one-sample suspend flicker. As 11e,
+  #      but a single suspend=1 sample at Monday 12:00 UTC (an old deploy
+  #      that applied the file before patching). It must not mute the alert
+  #      for 98 hours: 11e's page still comes at Monday 14:00 UTC.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x6479 1 0x220'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x6700'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x660 39600x6040'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x660 1x6040'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660"}'
+        values: '_x660 39600x6040'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660"}'
+        values: '_x670 40200x6030'
+    alert_rule_test:
+      - eval_time: 6600m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."

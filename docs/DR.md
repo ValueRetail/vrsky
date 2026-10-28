@@ -71,7 +71,8 @@ Secret; see
 The CronJob runs as uid 70 with a read-only root filesystem, pulls `:latest`
 at every run, and is watched by the alert `MgmtBackupMissing`: two failed
 Jobs since the last good backup, or no scheduled run and no successful Job
-for over four days of being active, while it isn't suspended.
+for over four days of being active (seven at weekends and outside the
+afternoon check), while it isn't suspended.
 
 ## Restore from a disk snapshot
 

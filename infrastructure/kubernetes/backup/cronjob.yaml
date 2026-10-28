@@ -5,9 +5,9 @@
 # vrsky-backups) as mgmt-backups/management_db-<UTC timestamp>.dump.gz.enc.
 #
 # Weekdays at 12:00 Oslo time, while the cluster runs (it is parked 16:00 to
-# 07:00 and at weekends; nothing changes then). startingDeadlineSeconds keeps a
-# run missed while parked from firing hours late at start-up; a start within
-# the hour after noon still gets that day's run.
+# 07:00 and at weekends; nothing changes then). startingDeadlineSeconds is 4h:
+# a cluster started any time before the 16:00 park still runs that day's dump,
+# and a start the next morning does not run yesterday's.
 #
 # Applied by infrastructure/azure/deploy-backup-azure.sh (the deploy job and
 # Catch up). It is suspended here and stays suspended until the
@@ -28,7 +28,7 @@ metadata:
 spec:
   schedule: "0 12 * * 1-5"
   timeZone: Europe/Oslo
-  startingDeadlineSeconds: 3600
+  startingDeadlineSeconds: 14400
   concurrencyPolicy: Forbid
   suspend: true # deploy-backup-azure.sh sets false once vrsky-backup-config exists
   # The alert counts failed Jobs since the last success, so keep enough of both.

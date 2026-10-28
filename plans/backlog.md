@@ -353,6 +353,14 @@ Last updated 2026-10-28.
     Run the copy wherever `acr-pull` is rotated, or give the script a step
     in every deploy. Workflow change: PR plus `agent:needs-human`. Found in
     review of #404.
+57. **A backup CronJob left suspended is silent.** `MgmtBackupMissing` is
+    quiet while `vrsky-mgmt-backup` is suspended, by design, so a CronJob
+    suspended by hand (or never re-enabled after a restore) and left that
+    way for more than 7 days after `vrsky-backup-config` exists pages
+    nobody. Add a rule for "suspended over 7 days while the Secret exists"
+    (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
+    Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
+    in review of #404.
 
 ## Human
 

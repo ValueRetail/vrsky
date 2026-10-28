@@ -20,8 +20,9 @@ container `vrsky-backups` as
   or shared Go code changes.
 - weekdays at 12:00 `Europe/Oslo`, while the cluster runs. It is parked
   16:00 to 07:00 and at weekends, and nothing changes then.
-  `startingDeadlineSeconds: 3600` stops a run missed while parked from firing
-  hours late at start-up.
+  `startingDeadlineSeconds: 14400` (4h): a cluster started any time before
+  the 16:00 park still runs that day's dump, and a start the next morning
+  doesn't run yesterday's.
 - `concurrencyPolicy: Forbid`, one run at most an hour, two retries.
 - runs as uid 70 (`postgres` in the image) with a read-only root filesystem
   and an `emptyDir` at `/tmp`.
@@ -102,8 +103,9 @@ the next Catch up; both set `suspend` from the Secret again.
 The alert `MgmtBackupMissing` (`infrastructure/prometheus-rules.yml`) fires
 when two of its Jobs have failed since the last good backup, or when neither a
 scheduled run nor a successful Job has happened for over four days of being
-active. It stays quiet while the CronJob is suspended, right after it is
-unsuspended, and after a start too late for that day's run.
+active (checked weekday afternoons), or for over seven days at any time. It
+stays quiet while the CronJob is suspended and right after it is
+unsuspended.
 
 > **The `ENCRYPTION_KEY` is not in the backup.** The dump is encrypted with
 > it, and the connector credentials inside it are too. Keep a copy outside

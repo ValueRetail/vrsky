@@ -28,7 +28,7 @@ None. The three in `plans/prod-backup.md` were answered on 2026-10-28
 2. `infrastructure/kubernetes/backup/cronjob.yaml`:
    - image `vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest`, `imagePullPolicy: Always`
    - `schedule: "0 12 * * 1-5"`, `timeZone: Europe/Oslo`
-   - `startingDeadlineSeconds: 3600`, `concurrencyPolicy: Forbid`
+   - `startingDeadlineSeconds: 14400` (raised from 3600 in review), `concurrencyPolicy: Forbid`
    - `suspend: true` in the file (the deploy step decides the live value)
    - `imagePullSecrets: [acr-pull]`
    - pod: `runAsNonRoot`, uid/gid 70 (the `postgres` user of the alpine
