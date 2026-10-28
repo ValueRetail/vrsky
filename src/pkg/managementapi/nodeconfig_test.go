@@ -558,6 +558,112 @@ func TestUIDeployRewritesMatchManifest(t *testing.T) {
 	}
 }
 
+// The manifests under infrastructure/kubernetes/ that name a ghcr.io image are
+// the ones the local k3d path deploys. The cluster can't pull from ghcr.io, so
+// k3d-load-images.sh builds each image and imports it under a ref, and a pod
+// with imagePullPolicy: IfNotPresent only finds it when the manifest names
+// exactly that ref. Until #419 the script imported data-filter and
+// data-converter as localhost:5000/... (the pods then tried ghcr.io and
+// failed), loaded no UI image, and the UI manifest's ghcr.io/ValueRetail/...
+// was no valid reference at all.
+//
+// This pins loader → manifest both ways: every core entry in the script names
+// its manifest's image, every ghcr.io manifest has a core entry, and each such
+// image is a valid (lowercase) reference that k3d will use as imported.
+func TestK3dImagesMatchManifests(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	script, err := os.ReadFile(filepath.Join(root, "infrastructure", "scripts", "k3d-load-images.sh"))
+	if err != nil {
+		t.Skipf("k3d-load-images.sh not available (%v) — k3d image guard skipped", err)
+	}
+
+	block := regexp.MustCompile(`(?s)\nCORE=\(\n(.*?)\n\)`).FindSubmatch(script)
+	if block == nil {
+		t.Fatal("no CORE=( ... ) array in k3d-load-images.sh — update this test")
+	}
+	loaded := map[string]string{} // manifest directory → ref the script imports
+	for _, m := range regexp.MustCompile(`(?m)^\s*"(\S+)\s+(\S+)"\s*$`).FindAllStringSubmatch(string(block[1]), -1) {
+		loaded[m[2]] = m[1]
+	}
+	if len(loaded) == 0 {
+		t.Fatal("no entries in k3d-load-images.sh's CORE array — update this test")
+	}
+
+	manifests, err := filepath.Glob(filepath.Join(root, "infrastructure", "kubernetes", "*", "deployment.yaml"))
+	if err != nil || len(manifests) == 0 {
+		t.Fatalf("no infrastructure/kubernetes/*/deployment.yaml found (%v)", err)
+	}
+	type container struct {
+		Image           string `yaml:"image"`
+		ImagePullPolicy string `yaml:"imagePullPolicy"`
+	}
+	type deployment struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []container `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+	onK3d := map[string]container{} // manifest directory → its ghcr.io container
+	for _, path := range manifests {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var d deployment
+		if err := yaml.Unmarshal(raw, &d); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, c := range d.Spec.Template.Spec.Containers {
+			if strings.HasPrefix(strings.ToLower(c.Image), "ghcr.io/") {
+				onK3d[filepath.Base(filepath.Dir(path))] = c
+			}
+		}
+	}
+	if len(onK3d) == 0 {
+		t.Fatal("no deployment.yaml names a ghcr.io image any more — the k3d path changed; update this test")
+	}
+
+	// Path components of an image reference are lowercase; Docker and
+	// Kubernetes reject anything else (InvalidImageName).
+	component := `[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*`
+	validRef := regexp.MustCompile(`^[A-Za-z0-9.-]+(?::[0-9]+)?/` + component + `(?:/` + component + `)*:[\w][\w.-]{0,127}$`)
+
+	names := make([]string, 0, len(onK3d))
+	for name := range onK3d {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		c := onK3d[name]
+		if !validRef.MatchString(c.Image) {
+			t.Errorf("infrastructure/kubernetes/%s/deployment.yaml: %q is no valid image reference "+
+				"(repository path must be lowercase) — k3d and AKS both refuse it", name, c.Image)
+		}
+		if c.ImagePullPolicy != "IfNotPresent" && c.ImagePullPolicy != "Never" {
+			t.Errorf("infrastructure/kubernetes/%s/deployment.yaml: imagePullPolicy %q makes k3d pull "+
+				"from ghcr.io instead of using the imported image", name, c.ImagePullPolicy)
+		}
+		ref, ok := loaded[name]
+		switch {
+		case !ok:
+			t.Errorf("k3d-load-images.sh loads no image for infrastructure/kubernetes/%s "+
+				"(pulls %s): add it to CORE", name, c.Image)
+		case ref != c.Image:
+			t.Errorf("k3d-load-images.sh imports %s as %q but infrastructure/kubernetes/%s/deployment.yaml "+
+				"pulls %q — the pod would never find the imported image", name, ref, name, c.Image)
+		}
+	}
+	for name, ref := range loaded {
+		if _, ok := onK3d[name]; !ok {
+			t.Errorf("k3d-load-images.sh imports %q for %s, but infrastructure/kubernetes/%s/deployment.yaml "+
+				"names no ghcr.io image to match it", ref, name, name)
+		}
+	}
+}
+
 // deploy-core-azure.sh rolls the core images onto AKS by digest. It carries its
 // own table of which four they are, and that table is only correct as long as
 // build-push-acr.sh's build_core publishes exactly those images.

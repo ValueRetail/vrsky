@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # k3d-load-images.sh — build VRSky service images from THIS checkout and load
 # them into the local k3d cluster, so the k8s manifests (which reference private
-# GHCR / a localhost:5000 registry the cluster can't reach) run with locally
-# built images. The deployments use imagePullPolicy: IfNotPresent, so an
-# imported image with a matching tag is used without any registry pull.
+# GHCR, a registry the cluster can't reach) run with locally built images. The
+# deployments use imagePullPolicy: IfNotPresent, so an imported image with a
+# matching tag is used without any registry pull.
 #
 # Usage:
 #   infrastructure/scripts/k3d-load-images.sh [core|connectors|all] [cluster-name]
 #
-#   core       (default) management-api + the shared transforms — what
-#              deploy-vrsky-platform.sh needs
+#   core       (default) management-api and the shared transforms, which
+#              deploy-vrsky-platform.sh deploys, and the UI
+#              (infrastructure/kubernetes/ui/)
 #   connectors the standing connector services that run pipeline source and
 #              destination nodes
 #   all        core + connectors
@@ -26,14 +27,20 @@ CLUSTER="${2:-vrsky-dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# image-ref  cmd-dir  — refs match exactly what the k8s manifests pull.
+# image-ref  name — the ref is exactly what infrastructure/kubernetes/<name>/
+# deployment.yaml pulls, and the image builds from src/cmd/<name>/Dockerfile
+# (ui/Dockerfile for the UI). TestK3dImagesMatchManifests keeps the refs equal
+# to the manifests'.
 CORE=(
   "ghcr.io/valueretail/vrsky/management-api:latest  management-api"
-  "localhost:5000/vrsky/data-filter:latest          data-filter"
-  "localhost:5000/vrsky/data-converter:latest       data-converter"
+  "ghcr.io/valueretail/vrsky/data-filter:latest     data-filter"
+  "ghcr.io/valueretail/vrsky/data-converter:latest  data-converter"
+  "ghcr.io/valueretail/vrsky/ui:latest              ui"
 )
 # Standing connector services: one per source/destination node type. These are
-# what actually run a pipeline's edges (#205).
+# what actually run a pipeline's edges (#205). Nothing on k3d deploys them yet:
+# the connector manifest names ACR with imagePullPolicy: Always, and only
+# deploy-connectors-azure.sh applies it.
 CONNECTORS=(
   "localhost:5000/vrsky/file-consumer:latest           file-consumer"
   "localhost:5000/vrsky/webhook-consumer:latest        webhook-consumer"
@@ -49,6 +56,9 @@ CONNECTORS=(
 build_and_import() {
   local ref="$1" dir="$2"
   local dockerfile="src/cmd/${dir}/Dockerfile"
+  # The UI is no Go service. Its Dockerfile builds from the repo root, as in
+  # build-push.yml.
+  if [ "$dir" = ui ]; then dockerfile="ui/Dockerfile"; fi
   if [ ! -f "$dockerfile" ]; then
     echo "  ✗ no Dockerfile at $dockerfile — skipping $ref" >&2
     return 1
