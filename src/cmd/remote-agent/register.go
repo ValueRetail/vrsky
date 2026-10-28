@@ -182,7 +182,12 @@ func (s *gateway) handleAnnounce(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	// A machine that just (re)announced may have joined a group or gained a
 	// folder: refresh its tenant's group sessions now, not at the next tick.
-	go s.reconcileTenant(context.Background(), id.TenantID)
+	go func() {
+		// Bounded: a stop of one of these sessions waits for the reconcile.
+		ctx, cancel := context.WithTimeout(context.Background(), reconcileTimeout)
+		defer cancel()
+		s.reconcileTenant(ctx, id.TenantID)
+	}()
 	w.WriteHeader(http.StatusNoContent)
 }
 
