@@ -247,6 +247,22 @@ Last updated 2026-10-27.
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
+43. **A file folder that can't be read only shows up in the log**
+    (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
+    connection shows as `running` while its folder is unreadable, and the
+    only sign is one Warn in the file-consumer log. `noteReadFailure` could
+    emit a `FileEvent{Type: "error"}` on each failed poll. The File watcher
+    panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
+    and `emitEvent` only reaches live subscribers, so it costs nothing
+    when no panel is open. Found in review of #398.
+44. **A failed checkpoint read during a deferred baseline loses files**
+    (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
+    not read the folder (#398), the first good read calls `loadKnown`. If
+    the checkpoint read fails then, it falls back to "everything present is
+    done", and that set is saved on the first real change, so files that
+    landed during the outage are never published. `takeDeferredBaseline`
+    already retries every poll, so it could stay deferred on a checkpoint
+    error instead. Found in review of #398.
 
 ## Human
 
