@@ -443,16 +443,22 @@ kubectl exec -it -n vrsky-ui deploy/vrsky-ui -- /bin/sh
 
 VRSky processes credentials, user data, and cross-tenant payloads. Customer
 compliance reviews (SOC 2 CC6.1, ISO 27001 A.10.1, GDPR Art. 32) require
-encryption of every stateful component. The layers below are stacked:
+encryption of every stateful component. The table says what production on AKS
+has at each layer, and which layers are optional overlays that nothing in the
+repo applies:
 
 | Layer | What's encrypted | Implementation |
 |-------|------------------|----------------|
-| Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. |
-| Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, KES key store | Encrypted StorageClass (cloud KMS) or LUKS on bare metal. |
-| Object storage | MinIO bucket contents | SSE-S3 via KES sidecar wrapping a KMS data key. |
+| Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. In production. |
+| Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, the connectors' shared file volume, monitoring data | Production: `deploy-azure.sh` puts every PVC on the built-in `managed-csi` class (the file volume on `azurefile-csi`). Azure encrypts managed disks and Azure Files at rest by default, with platform-managed keys. The repo sets no customer-managed key; whether one was added outside the repo can't be told from here. Optional overlay, not applied in production: the `vrsky-encrypted` StorageClass (customer-managed key) or LUKS on bare metal, below. |
+| Object storage | MinIO bucket contents | Production: no object-level encryption; MinIO's data sits on the encrypted disk above. Optional overlay, not applied in production: SSE-S3 via a KES sidecar wrapping a KMS data key, below. |
 | Transit | Client traffic to the public host | TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer `letsencrypt-prod`, secret `vrsky-tls`, set on the `vrsky` Ingress in `infrastructure/kubernetes/ui/ingress.yaml`). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over `http://`, Postgres URLs use `sslmode=disable`, the NATS manifests set no TLS). |
 
 ### Per-target setup
+
+The LUKS, customer-key StorageClass and KES steps below are optional
+overlays. No script or workflow applies `infrastructure/kubernetes/encryption/`,
+and production doesn't use them today.
 
 #### Docker Compose (development only)
 
@@ -521,7 +527,8 @@ mc cat --metadata s3/test/Makefile | grep -i sse
 
 #### Postgres native encryption
 
-The management Postgres deployment uses `local-path` by default. Once the
+The management Postgres deployment uses `local-path` by default, and
+`managed-csi` on AKS (platform-encrypted, see the table). Once the
 underlying StorageClass is encrypted (any of the steps above), Postgres
 runs unmodified. No `pgcrypto` config or per-column encryption is needed
 at this layer — the secrets table from #66 takes care of column-level
@@ -534,7 +541,10 @@ provider's native at-rest encryption with a customer-managed key. Point
 
 ### Compliance verification checklist
 
-Before claiming "encryption at rest" to an auditor:
+Go through this list before claiming "encryption at rest" with a
+customer-managed key to an auditor. Production on AKS doesn't meet the first four items today: it has no
+`vrsky-encrypted` class and no KES, only Azure's platform encryption (see the
+table).
 
 - [ ] `kubectl get sc vrsky-encrypted -o yaml` shows your KMS key.
 - [ ] `kubectl get pvc -A -o wide | grep -v vrsky-encrypted` returns

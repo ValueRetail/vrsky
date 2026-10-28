@@ -123,5 +123,5 @@ Config reference:
 ## Notes
 
 - **Secrets.** Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.
-- **mTLS port.** Connections using `tls.client_ca_secret_id` listen on the worker's dedicated TLS port (`9101` locally), separate from the standard webhook ingress.
+- **mTLS port.** Connections using `tls.client_ca_secret_id` listen on the worker's dedicated TLS port (`9101` locally), separate from the standard webhook ingress. The hosted service at `vrsky.valueretail.no` doesn't expose that port yet, so there a connection with `tls.client_ca_secret_id` rejects every request. Use `http.signature` for inbound webhooks on the hosted service. Outbound mTLS (the producer's `http.tls`) works everywhere.
 - **Example flow.** A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.

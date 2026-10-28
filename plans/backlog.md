@@ -247,7 +247,7 @@ Last updated 2026-10-28.
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
-43. **The management-api README still places it behind Traefik.**
+43. ~~**The management-api README still places it behind Traefik.**~~ (#407)
     `infrastructure/kubernetes/management-api/README.md` says the replicas
     run "behind the Service / Traefik gateway" and advises sticky sessions
     for SSE "at Traefik". Production runs ingress-nginx, and the browser
@@ -262,23 +262,23 @@ Last updated 2026-10-28.
     user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
     `infrastructure/azure/rotate-secrets.sh`). Fix it together with item 27,
     and have `docs/DR.md` use the same names. Found in #386.
-45. **The encryption-at-rest table reads as if every layer is in place.**
+45. ~~**The encryption-at-rest table reads as if every layer is in place.**~~ (#407)
     `docs/DEPLOYMENT_GUIDE.md` lists an encrypted StorageClass and MinIO
     SSE through KES, but on AKS `deploy-azure.sh` uses `managed-csi`, and no
     script or workflow applies `infrastructure/kubernetes/encryption/`. Say
     which layers production has (Azure disks are encrypted at rest by the
     platform; whether with a customer key can't be told from the repo) and
     which are optional overlays. Found in #386.
-46. **The whitepaper promises inbound mTLS for webhooks that production
-    can't do.** `docs/security/whitepaper.md` section 4 says a webhook
+46. ~~**The whitepaper promises inbound mTLS for webhooks that production
+    can't do.**~~ (#407) `docs/security/whitepaper.md` section 4 says a webhook
     consumer can require a client certificate. That needs the worker's TLS
     listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
     webhook Ingress has no SSL passthrough or `auth-tls` annotations, so
     ingress-nginx terminates TLS and the worker never sees a client cert.
     Either wire it up or say it's compose-only for now. Found in review of
     #386.
-47. **The encryption-at-rest checklist says `sslmode=require`; production
-    uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
+47. ~~**The encryption-at-rest checklist says `sslmode=require`; production
+    uses `disable`.**~~ (#407) `docs/operator/encryption-at-rest.md` tells operators
     to use TLS to the databases in production, but the AKS connection
     strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
     `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
@@ -361,6 +361,21 @@ Last updated 2026-10-28.
     (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
     Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
     in review of #404.
+58. **Production talks to Postgres without TLS.** The AKS connection
+    strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`)
+    and the in-cluster Postgres has no certificate. Turn on TLS for it (a
+    cert-manager certificate, `ssl = on`, `sslmode=verify-full` in the
+    Secrets) or move to a managed Postgres. Then drop the "doesn't yet" notes
+    in `docs/operator/encryption-at-rest.md` and the whitepaper. Manifests
+    and secrets: PR plus `agent:needs-human`. Found in #407.
+59. **Inbound webhook mTLS can't reach production.** No manifest sets
+    `WORKER_MTLS_PORT`, and the webhook Ingress terminates TLS, so the
+    worker never sees a client certificate. Wiring it up needs the TLS port
+    on the webhook-consumer Service plus SSL passthrough (or a separate
+    LoadBalancer) for those connections, or a switch to ingress-nginx
+    `auth-tls-*` with the CA check moved to the edge. Then update the
+    whitepaper §4 and `docs/connectors/http.md`. Ingress and manifests: PR
+    plus `agent:needs-human`. Found in #407.
 
 ## Human
 
