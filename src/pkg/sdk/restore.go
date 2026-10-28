@@ -18,10 +18,13 @@ import (
 // typeHint is the consumer's node type ("http", "file", "business_central");
 // rows whose graph does not mention it are skipped without being read in
 // full. start is the same function the start command runs, with its own
-// "not mine" and "already active" checks, so restoring is idempotent and a
-// start command arriving during the scan is harmless. Call it after the
-// command subscriptions are in place, so nothing published meanwhile is
-// missed. Returns how many rows were offered to start.
+// "not mine" check. start runs on the caller's goroutine while the
+// start-command subscription can call it for the same connection at the same
+// time, so start must claim the connection with a StartGuard before its slow
+// part (#375, #397): then restoring is idempotent, a start command arriving
+// during the scan starts nothing twice, and a stop during either start wins.
+// Call it after the command subscriptions are in place, so nothing published
+// meanwhile is missed. Returns how many rows were offered to start.
 func RestoreRunning(ctx context.Context, db *sql.DB, logger *slog.Logger, typeHint string,
 	start func(ctx context.Context, connectionID, tenantID string)) int {
 	if db == nil {

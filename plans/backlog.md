@@ -175,8 +175,8 @@ Last updated 2026-10-27.
     variable mounted at a fixed Linux path, with `HOST_HOME` translating
     editor paths), plus a check that a Unix-style shell's
     `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
-35. **The other consumers have the start race #375 fixed in the file
-    consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
+35. ~~**The other consumers have the start race #375 fixed in the file
+    consumer.**~~ (#397) db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
     visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
     check "already active" under `RLock`, release it, do the slow work and
     insert later, while `sdk.RestoreRunning` runs alongside the
@@ -247,6 +247,21 @@ Last updated 2026-10-27.
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
+43. **An ending poller can drop a newer poller's map entry.** api
+    (`pollConnection` one-shot), sftp (one-shot `runPoller`), cloud-storage
+    (`finishConn`) and tenant (`runBridge` error paths) delete their
+    connection from the active map without checking the entry is still
+    theirs. After a stop and a new start, the old poller finishing removes
+    the new one's entry; the next start then runs a second poller beside
+    it. Older than #397. Delete only when the stored value is this
+    poller's own (compare a pointer). Found during #397.
+44. **Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
+    and two consumers are not on it yet.** Since #397 all command-driven
+    consumers refuse a start while one is in flight (37) and write
+    `running` after activating (36), like the file consumer. The webhook
+    consumer still checks and inserts in two steps (a double start only
+    overwrites the map entry, but a stop mid-start is lost) and the Front
+    Systems consumer can register its webhooks twice. Found during #397.
 
 ## Human
 
