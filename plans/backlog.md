@@ -297,7 +297,7 @@ Last updated 2026-10-28.
     `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
     the docs), or, if something should use the stream, make it relative
     like `api.ts`. Found during #399.
-50. **A file folder that can't be read only shows up in the log**
+50. ~~**A file folder that can't be read only shows up in the log**~~ (#409)
     (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
     connection shows as `running` while its folder is unreadable, and the
     only sign is one Warn in the file-consumer log. `noteReadFailure` could
@@ -305,7 +305,7 @@ Last updated 2026-10-28.
     panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
     and `emitEvent` only reaches live subscribers, so it costs nothing
     when no panel is open. Found in review of #398.
-51. **A failed checkpoint read during a deferred baseline loses files**
+51. ~~**A failed checkpoint read during a deferred baseline loses files**~~ (#409)
     (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
     not read the folder (#398), the first good read calls `loadKnown`. If
     the checkpoint read fails then, it falls back to "everything present is
@@ -361,6 +361,12 @@ Last updated 2026-10-28.
     (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
     Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
     in review of #404.
+58. **The File watcher panel's `connected` event shows the full volume
+    path** (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
+    /data/input/<tenant-id>/orders". It's the tenant's own folder, but the
+    mount layout and tenant id are internals. Use `folderLabel` (the path
+    relative to the tenant root), as the error events from #409 do. Found
+    during #409.
 
 ## Human
 
