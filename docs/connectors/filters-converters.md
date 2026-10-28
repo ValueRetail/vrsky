@@ -48,8 +48,10 @@ functions, see [`docs/converter/`](../converter/).
 ### Nested lines and one message per record
 
 Two settings for records that carry lines, like a receipt with its items
-(added for the Sitoo ⇄ Business Central templates, #435). Neither is in the
-editor yet; set them in the node config.
+(added for the Sitoo ⇄ Business Central templates, #435). Both are in the
+converter editor (#458): pick **Each (map array items)** as a mapping's type
+to get its item mappings and its own "Drop unmapped item fields" box, and
+tick **Split records** under the mappings.
 
 - **`each` mapping** maps every object of an array field with its own nested
   mappings and writes the new array to `target`:
@@ -80,6 +82,15 @@ editor yet; set them in the node config.
   cannot be split and go to the DLQ.
 
 `to_string` writes numbers in plain decimal (`1000000`, not `1e+06`).
+
+The editor warns about a mapping the converter would skip or write wrongly:
+a missing source or target, a template with no expression, a type the
+converter does not know, a `remove` with a dotted path (it removes only a
+top-level field with exactly that name), and an `each` that drops unmapped
+item fields with no item
+mappings (every item becomes `{}`). Nothing checks this when the pipeline is
+saved, so a warning does not stop you saving. The **Test Transform** preview
+does not split records; it shows the whole result.
 
 ## Notes
 

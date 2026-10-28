@@ -82,7 +82,7 @@ else in them changes.
   write races a new start the same way. Before this change the window was
   the whole time between a restart and the old poller ending. The full
   fix (conditional UPDATE on `started_at`, or the StatusWrite ordering
-  from #423/#424) is backlog item 82.
+  from #423/#424) is backlog item 89.
 - During shutdown `Stop()` empties the active map, so a one-shot or setup
   failure that ends then no longer writes `stopped`/`error`. The DB keeps
   `running` and RestoreRunning re-runs it on the next boot, so sftp and

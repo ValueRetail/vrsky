@@ -486,12 +486,15 @@ services:
       # (UI connects here). Health is on 8080 (HEALTH_PORT).
       WORKER_HTTP_PORT: "9200"
       FILE_CONSUMER_BASE_DIR: "/data/input"
-      HOST_HOME: "${HOME:-/data/input}"
+      # "~" in a node path means the mounted folder below (#422).
+      HOST_HOME: "/data/input"
     ports:
       - "127.0.0.1:9200:9200"
     volumes:
-      - ./data/input:/data/input
-      - "${HOME:-./data/input}:${HOME:-/data/input}"
+      # Host folder behind /data/input, set in .env (any OS's path style).
+      # The target stays a fixed Linux path: a Windows path such as
+      # C:\Users\you can be a mount source but never a target (#422).
+      - "${VRSKY_FILES_HOST_DIR:-./data/input}:/data/input"
     depends_on:
       nats:
         condition: service_healthy
@@ -647,7 +650,7 @@ services:
       FILE_OUTPUT_SUBSCRIBE_SUBJECT: "vrsky.data.*.pipeline.*"
       FILE_OUTPUT_DIR: "/data/output"
       FILE_PRODUCER_HTTP_PORT: "9900"
-      HOST_HOME: "${HOME:-/data/input}"
+      HOST_HOME: "/data/input"
     depends_on:
       nats:
         condition: service_healthy
@@ -656,7 +659,9 @@ services:
     ports:
       - "127.0.0.1:9900:9900"
     volumes:
-      - "${HOME:-./data/input}:${HOME:-/data/input}"
+      # Same folder and fixed target as file-consumer (#422). Read-only: the
+      # producer only stats it (HOST_HOME) and writes to /data/output.
+      - "${VRSKY_FILES_HOST_DIR:-./data/input}:/data/input:ro"
       - ./data/output:/data/output
     networks:
       - vrsky-network

@@ -122,6 +122,73 @@ export const CONVERTER_MAPPING_TYPES: readonly string[] = [
   'rename', 'copy', 'static', 'remove', 'template', 'to_string', 'to_number', 'each',
 ]
 
+/** What the converter editor's type select shows for each mapping type. */
+export const CONVERTER_MAPPING_LABELS: Record<string, string> = {
+  rename: 'Rename',
+  copy: 'Copy',
+  remove: 'Remove',
+  static: 'Static Value',
+  template: 'Template',
+  to_string: 'To String',
+  to_number: 'To Number',
+  each: 'Each (map array items)',
+}
+
+/**
+ * One entry of a converter's `mappings` (FieldMapping in
+ * src/cmd/data-converter/main.go). An empty or missing `type` is a rename.
+ * `mappings` and `drop_unmapped` belong to `each`: they are applied to every
+ * object of the `source` array and the result is written to `target`.
+ */
+export type ConverterMapping = {
+  source?: string
+  target?: string
+  type?: string
+  value?: unknown
+  expression?: string
+  mappings?: ConverterMapping[]
+  drop_unmapped?: boolean
+}
+
+/**
+ * Why the data-converter would skip or mis-write a mapping, mirroring
+ * applyMappings. The management API does not check mappings when a pipeline
+ * is saved, so these are warnings, not errors: the editor saves what the
+ * server accepts. Empty when the mapping does what it says.
+ */
+export function converterMappingWarnings(m: ConverterMapping): string[] {
+  const type = m.type || 'rename'
+  if (!CONVERTER_MAPPING_TYPES.includes(type)) {
+    return [`The converter does not know the type "${type}" and skips this mapping.`]
+  }
+  const blank = (s: string | undefined) => !s || s.trim() === ''
+  const out: string[] = []
+  // getNestedField finds nothing under an empty path, so the mapping is skipped.
+  const readsSource = type !== 'static' && type !== 'template'
+  if (readsSource && blank(m.source)) {
+    out.push(type === 'each'
+      ? 'Source is required: name the array field whose items are mapped.'
+      : 'Source is required: without it the converter skips this mapping.')
+  }
+  // setNestedField with an empty path writes the value under the key "".
+  if (type !== 'remove' && blank(m.target)) {
+    out.push('Target is required: without it the value is written to a field with no name.')
+  }
+  // remove deletes a top-level key (delete(result, m.Source)): a dotted path
+  // is taken as one literal key name (a CSV header can be "customer.email"),
+  // never as a path into a nested object.
+  if (type === 'remove' && m.source?.includes('.')) {
+    out.push('Remove does not follow dotted paths: it removes only a top-level field with exactly this name.')
+  }
+  if (type === 'template' && !m.expression) {
+    out.push('Template is required: without it the converter skips this mapping.')
+  }
+  if (type === 'each' && m.drop_unmapped && (m.mappings?.length ?? 0) === 0) {
+    out.push('Each item becomes an empty object: "Drop unmapped item fields" is on and there are no item mappings.')
+  }
+  return out
+}
+
 /** The CONNECTOR_KEYS entry for a node, or undefined when the table lacks it. */
 export function connectorKeysFor(nodeType: string, config: Record<string, unknown>): ConnectorKeys | undefined {
   if (nodeType === 'converter' || nodeType === 'filter') return CONNECTOR_KEYS[nodeType]
