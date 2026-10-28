@@ -430,6 +430,23 @@ Last updated 2026-10-28.
     already-cancelled context and NAKs until the lock at `:~252` halts it
     (older than #447, tiny window). Add a seam right after the cancel and a
     reconcile test. Found in review of #447.
+67. **CI never runs `make lint-connector`.** `make lint` runs it beside
+    lint-tenant and lint-openapi, but the Go lint job in `build-push.yml`
+    does not, so a connector that bypasses the SDK passes CI. Add it as a
+    step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
+    Found during #446.
+68. **golangci-lint's caches barely help.** On main the action restores a
+    1.4 MB `golangci-lint.cache-…` entry and still spends 2 m 18 s, and
+    setup-go's Go build cache uses one key for every Go job, so whichever
+    job saves first (a `-race` test shard) wins and the lint job's own
+    build output is never kept. A lint-specific `GOCACHE` entry could take
+    a minute off; measure before and after. Off the critical path since
+    #446. Found during #446.
+69. **`promtool test rules` takes four minutes** because the backup alert
+    tests (#404) evaluate up to ten days at one-minute steps. If the
+    Alert rules job ever becomes the slowest before a deploy, name the
+    test groups and split them over matrix legs with `--run`, with a guard
+    that every group runs in exactly one leg. Found during #446.
 
 ## Human
 
