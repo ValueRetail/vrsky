@@ -414,15 +414,15 @@ Last updated 2026-10-28.
     `cmd/data-converter` and `cmd/tenant-consumer/bridge.go` for a handler
     that returns an error once a context is cancelled ahead of `Stop`.
     Found in #444.
-65. **Two remote-agent tests sit on fixed 4 s waits.**
+65. ~~**Two remote-agent tests sit on fixed 4 s waits.**~~ (#460)
     `TestOutput_HoldsWhileAgentOffline_NoRedeliveryCount` sleeps four
     AckWaits and `TestOutput_TakesOnlyItsPredecessorsMessage` polls for 4 s
     to prove a message never comes; with cleanup each takes ~6 s. The
     second could wait for the consumer's ack floor to pass both messages
     instead. Not flaky, just slow. Found in #444.
 
-66. **The remote agent's stop tests don't pin cancel-after-halt, and a
-    reconcile can start a member on a cancelled context.** The test seam
+66. ~~**The remote agent's stop tests don't pin cancel-after-halt, and a
+    reconcile can start a member on a cancelled context.**~~ (#461) The test seam
     in `src/cmd/remote-agent/service.go` (`afterCancel`) fires after the
     halts, so moving `sess.cancel()` back to the top of `endSession`
     passes both stop tests. Separately, if `endSession` runs during a group
@@ -447,6 +447,14 @@ Last updated 2026-10-28.
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
+70. **A subscriber's `Stop` waits out its fetch.** `Subscriber.loop` in
+    `pkg/messaging` fetches with `MaxWait(2s)` and `Halt` cannot cut that
+    short, so every stop takes up to 2 s even when nothing is held. It is
+    most of what the remote-agent tests still spend (a stop in each
+    cleanup) and it slows every pipeline stop and redeploy. A fetch that
+    also ends on the stop channel (a context-aware `Fetch`) would make
+    `Stop` return at once. Shared code: every connector's subscriber.
+    Found during #460.
 
 ## Human
 
