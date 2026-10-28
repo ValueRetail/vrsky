@@ -19,6 +19,10 @@ The UI dev server runs separately:
 cd ui && npm install && npm run dev   # http://localhost:5173
 ```
 
+Vite proxies `/api` to `http://localhost:3000`; set `API_PROXY_TARGET` to
+use another API. To run the dev server in a container instead, see "Option 1"
+in the [deployment guide](../DEPLOYMENT_GUIDE.md#option-1-build-ui-only-dev-mode).
+
 Core endpoints (local): Management API `http://localhost:3000`, gateway
 (Traefik) `http://localhost:8090`, Grafana `http://localhost:3001`,
 Prometheus `http://localhost:9099`, webhook ingress `http://localhost:9100`.
