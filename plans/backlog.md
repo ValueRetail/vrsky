@@ -399,7 +399,7 @@ Last updated 2026-10-28.
     stored in `connection_node_checkpoints` like the BC consumer's) would
     send each receipt once. The `resource` key can't carry a query string
     today: the poller appends `?start=…`. Found during #435.
-63. **The converter editor doesn't know `each` or `split_records`**
+63. ~~**The converter editor doesn't know `each` or `split_records`**~~ (#458)
     (`ui/src/components/Pipeline/PropertyEditor.tsx`). A retail template's
     converter opened in the builder shows the `each` mapping as "Rename"
     (the type select has no `each` option) without its nested mappings, and
