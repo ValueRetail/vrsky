@@ -30,7 +30,6 @@ var apiRoutes = []apiRoute{
 	// --- Connections ---
 	{"POST /api/v1/connections", "post", "/api/v1/connections", "Connections", "Create a connection", tof(CreateConnectionRequest{}), tof(Connection{})},
 	{"GET /api/v1/connections", "get", "/api/v1/connections", "Connections", "List connections", nil, tof(ListResponse{})},
-	{"GET /api/v1/connections/{id}", "get", "/api/v1/connections/{id}", "Connections", "Get a connection", nil, tof(Connection{})},
 	{"PUT /api/v1/connections/{id}", "put", "/api/v1/connections/{id}", "Connections", "Update a connection", tof(CreateConnectionRequest{}), tof(Connection{})},
 	{"DELETE /api/v1/connections/{id}", "delete", "/api/v1/connections/{id}", "Connections", "Delete a connection", nil, nil},
 	{"POST /api/v1/connections/{id}/start", "post", "/api/v1/connections/{id}/start", "Connections", "Start (deploy) a connection", nil, tof(Connection{})},
