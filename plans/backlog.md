@@ -339,7 +339,7 @@ Last updated 2026-10-28.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
     to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
     `agent:needs-human`. Found in #395.
-55. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+55. ~~**`vrsky-cli backup` holds the whole dump in memory.**~~ (#430) `pg_dump`'s
     output, the gzipped copy and the encrypted copy all sit in byte slices
     (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
     `EncryptBytes` call), so a dump of roughly a third of the CronJob's
@@ -521,6 +521,33 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
+82. **GCS `PutStream` commits a partial object when the body fails.**
+    `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
+    which finalises the upload; aborting needs the writer's context
+    cancelled instead. S3 and Azure abort. A failed `vrsky-cli backup` on
+    GCS can leave a cut-off archive that fails restore loudly (no final
+    chunk) but still looks like a backup in `list`. Found during #430.
+83. **`pgRestore` in `vrsky-cli` has no unit test.** Its error precedence
+    (an archive read error wins over pg_restore's exit status) and the
+    drain after pg_restore exits, which is where a chunked archive's final
+    chunk and the gzip checksum get checked, are only exercised by the DR
+    drill's happy path. Test them with a fake `pg_restore` script first on
+    `PATH`: one that exits 0 early, one that fails, one that reads all of
+    stdin, each against a good and a damaged archive. Found in review of
+    #471.
+84. **A backup archive isn't bound to its object key.** Anyone who can
+    write to the bucket can copy an older valid archive over the newest
+    key, and `verify` and `restore` accept it. Put the stamp (and the key
+    name) in the `VRSKYBK1` header, so it is part of every chunk's AAD,
+    and have `backup verify` and `restore` check it against the key they
+    were given. Changes the format (`VRSKYBK2`; keep reading v1 until it
+    ages out). Found in review of #471.
+82. **Delete the legacy single-seal restore path** in `vrsky-cli`
+    (`openArchive`'s `crypto.DecryptBytes` branch) once the 14-day
+    retention holds only chunked archives, i.e. 14 days after #471 reaches
+    production and the CronJob has run on it. Until then restore still
+    opens archives sealed directly under `ENCRYPTION_KEY`; removing it
+    finishes the key separation. Found in review of #471.
 
 ## Human
 

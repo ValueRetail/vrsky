@@ -138,11 +138,15 @@ Secrets are lost and the key isn't somewhere else, the dumps are useless.
 
 `vrsky-cli` provides `backup` / `list` / `restore`. The bucket, credentials
 and source database come from `BACKUP_*` environment variables and
-`ENCRYPTION_KEY`, not from flags.
+`ENCRYPTION_KEY`, not from flags. Backup and restore stream the dump, so the
+CronJob's 512Mi limit doesn't cap the database size. Restore also reads
+archives made before that change (#430); see
+[how a logical backup works](../DR.md#how-a-logical-backup-works).
 
 ```bash
 vrsky-cli backup     # dump, encrypt, upload as mgmt-backups/management_db-<timestamp>.dump.gz.enc
 vrsky-cli list       # keys, sizes, ages
+vrsky-cli backup verify mgmt-backups/management_db-20261029T110000Z.dump.gz.enc   # decrypt to nowhere; non-zero exit on damage
 vrsky-cli restore --target-db-url 'postgres://…/vrsky' --confirm \
   mgmt-backups/management_db-20261029T110000Z.dump.gz.enc
 ```
