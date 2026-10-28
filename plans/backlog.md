@@ -122,7 +122,7 @@ Last updated 2026-10-27.
     builds it, but no workflow or script builds `vrsky-cli` into any
     registry. Find out whether the CronJob runs on AKS; if it does, it can't
     pull. Manifests: PR plus `agent:needs-human`. Found in #371.
-28. **Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.** #371
+28. ~~**Two out-of-date claims left in `docs/DEPLOYMENT_GUIDE.md`.**~~ (#386) #371
     rewrote the guide down to "Encryption at rest" and left the rest alone.
     "Disaster Recovery" says the management Postgres "is backed up daily",
     but the backup CronJob's image is built nowhere (item 27), so check
@@ -247,6 +247,48 @@ Last updated 2026-10-27.
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
+43. **The management-api README still places it behind Traefik.**
+    `infrastructure/kubernetes/management-api/README.md` says the replicas
+    run "behind the Service / Traefik gateway" and advises sticky sessions
+    for SSE "at Traefik". Production runs ingress-nginx, and the browser
+    reaches the API through the UI pod's nginx (`deploy-ui-azure.sh`
+    proxies `/api` and `/ws`), so affinity set on the ingress wouldn't pin a
+    client to one management-api replica. Rework the advice for the real
+    path. Production runs one replica today (`deploy-azure.sh`), so nothing
+    is broken yet. Found in #386.
+44. **The backup Secret example names the wrong database for AKS.**
+    `infrastructure/kubernetes/backup/README.md` builds `BACKUP_DB_URL` as
+    `postgres://postgres:…/management_db`, but on AKS the database and its
+    user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
+    `infrastructure/azure/rotate-secrets.sh`). Fix it together with item 27,
+    and have `docs/DR.md` use the same names. Found in #386.
+45. **The encryption-at-rest table reads as if every layer is in place.**
+    `docs/DEPLOYMENT_GUIDE.md` lists an encrypted StorageClass and MinIO
+    SSE through KES, but on AKS `deploy-azure.sh` uses `managed-csi`, and no
+    script or workflow applies `infrastructure/kubernetes/encryption/`. Say
+    which layers production has (Azure disks are encrypted at rest by the
+    platform; whether with a customer key can't be told from the repo) and
+    which are optional overlays. Found in #386.
+46. **The whitepaper promises inbound mTLS for webhooks that production
+    can't do.** `docs/security/whitepaper.md` section 4 says a webhook
+    consumer can require a client certificate. That needs the worker's TLS
+    listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
+    webhook Ingress has no SSL passthrough or `auth-tls` annotations, so
+    ingress-nginx terminates TLS and the worker never sees a client cert.
+    Either wire it up or say it's compose-only for now. Found in review of
+    #386.
+47. **The encryption-at-rest checklist says `sslmode=require`; production
+    uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
+    to use TLS to the databases in production, but the AKS connection
+    strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
+    `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
+    on TLS for Postgres or make the checklist say where production stands.
+    Found in review of #386.
+48. **The CNPG manifest calls the restore drill a backup.** The comment in
+    `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
+    are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
+    in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
+    manifest, so PR plus `agent:needs-human`. Found in review of #386.
 
 ## Human
 

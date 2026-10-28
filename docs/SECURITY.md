@@ -350,7 +350,16 @@ unaffected.
 - Compose: `traefik` fronts the API on host `:8090`; base config in
   `infrastructure/traefik/`; the shared dir is `infrastructure/traefik/dynamic/`.
 - Kubernetes: `Middleware` CRDs in `infrastructure/kubernetes/traefik/`; the same
-  generated `tenants.yml` is written to a shared file-provider volume.
+  generated `tenants.yml` is written to a shared file-provider volume. These
+  manifests aren't wired up: no script applies them, and the Kubernetes
+  management-api manifests don't set `TRAEFIK_DYNAMIC_DIR`. Production (AKS)
+  runs ingress-nginx, not Traefik, so it has no per-plan gateway rate limit.
+  The limits in the services themselves still apply there: the application
+  quotas, the failed-attempt limits on login and sign-up (on by default,
+  `src/pkg/managementapi/auth_limit.go`), the failed-attempt limit on
+  remote-agent registration (`src/cmd/remote-agent/register.go`), and the
+  per-connection rate limit on the tenant data endpoint
+  (`ConnectionRateLimiter`, `src/pkg/managementapi/rate_limiter.go`).
 
 ### Observability
 Traefik exposes Prometheus metrics (scrape job `traefik` →

@@ -3,20 +3,39 @@
 This is the runbook for backing up and restoring the **management Postgres** —
 the database that holds every tenant, connection/pipeline definition, encrypted
 secret reference, OAuth provider/grant, notification target, and the audit log.
-Losing it loses the platform's control plane, so it is backed up daily and the
-restore path is tested in CI.
+Losing it loses the platform's control plane.
 
-| Objective | Target | How it's met |
-|-----------|--------|--------------|
-| **RPO** (max data loss) | **≤ 24h** | Daily backup CronJob (`infrastructure/kubernetes/backup/cronjob.yaml`, 02:00 UTC) |
-| **RTO** (max time to restore) | **≤ 1h** | A single `vrsky-cli restore` of the (small) management dump into a fresh DB runs in minutes; the procedure below + the CI restore drill keep it exercised |
+## What runs today
+
+As far as this repo shows, **no scheduled backup of the production database
+runs**:
+
+- The daily CronJob in `infrastructure/kubernetes/backup/cronjob.yaml`
+  (02:00 UTC) is not applied by any script or workflow.
+- Its image, `ghcr.io/valueretail/vrsky/vrsky-cli:latest`, is built by no
+  workflow or script, and AKS can't pull from `ghcr.io`. Applied as it is, the
+  CronJob's pods would fail to pull. Item 27 in `plans/backlog.md` tracks this.
+- No script or workflow snapshots the Postgres volume (an Azure disk through
+  the `managed-csi` storage class).
+- The [CI restore drill](#the-ci-restore-drill) tests the backup and restore
+  commands, not a production backup.
+
+The repo can't show whether someone applied the CronJob by hand or set up
+backups on the Azure side. Until one of those is confirmed, assume there are
+none.
+
+| Objective | Target | Status |
+|-----------|--------|--------|
+| **RPO** (max data loss) | **≤ 24h** | Not met while no backup runs. The CronJob would meet it once it can pull an image, its `vrsky-backup-config` Secret exists with a correct database URL, and it is applied. |
+| **RTO** (max time to restore) | **≤ 1h** | Depends on having a backup. With one, a single `vrsky-cli restore` of the small management dump into a fresh DB should run in minutes. That is an estimate: it hasn't been measured on a production-sized dump. |
 
 > **Scope:** the management DB only. Tenant *data in flight* lives in NATS
 > JetStream (durable, replicated) and large payloads in object storage; those
 > have their own durability and are out of scope here.
 
 ## How a backup works
-`vrsky-cli backup` (shipped in the `vrsky-cli` image):
+`vrsky-cli backup` (source in `src/cmd/vrsky-cli/`; its image is built from
+the `Dockerfile` there, which today only the compose `backup` profile does):
 1. `pg_dump --format=custom` of the management DB,
 2. gzip,
 3. encrypt with **AES-256-GCM** using the platform `ENCRYPTION_KEY` (the same
@@ -74,11 +93,22 @@ Deployment + the Secret are documented in
    (they will, given the matching `ENCRYPTION_KEY`).
 
 ## The CI restore drill
-`.github/workflows/dr-drill.yml` proves this path on every change to the backup
-tooling: it seeds a source Postgres, runs `vrsky-cli backup` to MinIO, runs
-`vrsky-cli restore` into a *separate* target Postgres, and asserts the sentinel
-rows survived. A green run is the standing guarantee that the backup format and
-restore command actually work — not just that they compile.
+`.github/workflows/dr-drill.yml` runs on pushes and pull requests to `main` or
+`develop` that change `src/cmd/vrsky-cli/`, `src/pkg/crypto/`, `src/pkg/objectstore/`,
+`infrastructure/migrations/` or the workflow itself, and can be started by
+hand. It has no schedule. It:
+
+1. builds `vrsky-cli` from source with `go build`,
+2. starts two `postgres:16-alpine` databases and a MinIO in the runner,
+3. seeds the source with one table and two sentinel rows,
+4. runs `vrsky-cli backup` to MinIO, then `vrsky-cli restore` into the
+   separate target,
+5. checks that both rows arrived.
+
+A green run shows the backup format and the restore command work end to end.
+It doesn't cover the CronJob, its image or its Secret, the real schema and
+migrations, Postgres 18 (what production runs), or any production storage, and
+it says nothing about whether a production backup exists.
 
 ## Local dry-run (compose)
 ```sh
