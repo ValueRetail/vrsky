@@ -498,6 +498,16 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
+79. **A late status write can still land over a newer start's `running`.**
+    #456 left a window in api, sftp, cloud-storage and tenant: with the
+    6-connection DB pool saturated, a new start's lookup and its `running`
+    UPDATE can both get a connection before an old poller's `stopped` or
+    `error` UPDATE does, and the old write lands last. `handleStopCommand`'s
+    `stopped` write races a new start's `running` the same way. Fix with a
+    conditional UPDATE: the `running` write returns `started_at`, and the
+    ending and stop writes add `AND started_at = $n`. Or route the writes
+    through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
+    Found in review of #456.
 
 ## Human
 

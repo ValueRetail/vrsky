@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"database/sql/driver"
 	"errors"
-	"sync"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -19,32 +18,11 @@ import (
 //
 // sqlmock does not report unexpected calls: an unexpected Exec only returns an
 // error to the caller, and the consumers ignore that error. So the stale-write
-// tests register a catch-all status write as the last expectation, after
-// checking that everything before it was met, and fail if anything reached it.
-
-// ssStatusArg matches any status value and records it, so a test can say which
-// status a stale poller wrote.
-type ssStatusArg struct {
-	mu  sync.Mutex
-	got []string
-}
-
-func (a *ssStatusArg) Match(v driver.Value) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	s, _ := v.(string)
-	a.got = append(a.got, s)
-	return true
-}
-
-func (a *ssStatusArg) writes() []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return append([]string(nil), a.got...)
-}
+// tests register a catch-all Exec as the last expectation, after checking that
+// everything before it was met, and fail if anything reached it.
 
 // ssAllMet fails the test unless every expectation so far was met, so that a
-// catch-all registered next is the only one a later status write can match.
+// catch-all registered next is the only one a later write can match.
 func (f *srFixture) ssAllMet(t *testing.T, when string) {
 	t.Helper()
 	if err := f.mock.ExpectationsWereMet(); err != nil {
@@ -52,14 +30,32 @@ func (f *srFixture) ssAllMet(t *testing.T, when string) {
 	}
 }
 
-// ssCatchStatusWrite registers a status write of any value for any connection
-// as the next expectation and returns the recorder for its status argument.
-func (f *srFixture) ssCatchStatusWrite() *ssStatusArg {
-	catch := &ssStatusArg{}
-	f.mock.ExpectExec("UPDATE connections SET status").
-		WithArgs(catch, sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	return catch
+// ssCatchAllSQL is the catch-all's SQL pattern: any statement.
+const ssCatchAllSQL = "."
+
+// ssCatchAnyExec registers, as the next expectation, an Exec of any SQL with
+// any number of arguments (no WithArgs means sqlmock checks none). It has to be
+// this broad. An Exec whose SQL or argument count doesn't match the next
+// expectation is not counted against it: sqlmock just returns an error, which
+// the consumers drop. A catch-all narrower than the ending write's exact SQL
+// and argument count would then stay unmet and the test would pass vacuously.
+func (f *srFixture) ssCatchAnyExec() {
+	f.mock.ExpectExec(ssCatchAllSQL).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+// ssNoLateExec fails the test if any Exec reached the catch-all from
+// ssCatchAnyExec, i.e. the late ending wrote to the database at all. It also
+// fails if the catch-all is not the one unmet expectation: in order, an earlier
+// one left unmet would keep any write from reaching it.
+func (f *srFixture) ssNoLateExec(t *testing.T, what string) {
+	t.Helper()
+	err := f.mock.ExpectationsWereMet()
+	switch {
+	case err == nil:
+		t.Errorf(`%s wrote to the database over B's "running" (an Exec reached the catch-all), want no write`, what)
+	case !strings.Contains(err.Error(), "matches sql: '"+ssCatchAllSQL+"'"):
+		t.Errorf("%s left an earlier expectation unmet, so the catch-all could not see a write: %v", what, err)
+	}
 }
 
 // ssFailOpeners makes the store factory fail for peFailBucket and the event
@@ -150,7 +146,7 @@ func TestStaleStatus_OldEndWritesNoStatus(t *testing.T) {
 
 				// The last write is B's "running"; anything A writes now lands here.
 				f.ssAllMet(t, `after start B wrote "running"`)
-				catch := f.ssCatchStatusWrite()
+				f.ssCatchAnyExec()
 
 				ctx, cancel := context.WithCancel(context.Background())
 				if cancelled {
@@ -160,9 +156,7 @@ func TestStaleStatus_OldEndWritesNoStatus(t *testing.T) {
 				}
 				f.ssEnd(ctx, a, tc.cfg, tc.event)
 
-				if got := catch.writes(); len(got) != 0 {
-					t.Errorf(`A's late end wrote status %q over B's "running", want no write (would have been %q)`, got, tc.status)
-				}
+				f.ssNoLateExec(t, "A's late end (status "+tc.status+")")
 				if got := f.entry(); got != b {
 					t.Errorf("entry after A's end = %p, want B's %p", got, b)
 				}

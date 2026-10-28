@@ -55,7 +55,11 @@ Written by a separate test author from the criteria above, in
 `stale_status_test.go` per package, on the sqlmock fixtures the #408
 tests use. sqlmock does not report unexpected calls, so the stale-write
 tests check every earlier expectation was met, then register a catch-all
-status write and fail if anything reaches it. The tenant JetStream-context
+Exec and fail if anything reaches it. The catch-all matches any SQL with
+any argument count: sqlmock ignores an Exec that doesn't match the next
+expectation's SQL and argument count, so a narrower one could miss the
+ending write and pass vacuously. The check also fails if an earlier
+expectation was left unmet, since then nothing could reach the catch-all. The tenant JetStream-context
 path is not covered: `nc.JetStream()` on the harness connection never
 fails.
 
@@ -71,12 +75,19 @@ else in them changes.
   would stall every connection on that consumer. Rejected.
 - Residual window, accepted: between the drop and the write, a new start
   could reserve, look the connection up, activate and write `running`
-  before the old poller's single `UPDATE` lands. The old poller's write is
-  already on its way when the new start begins, and the start needs a
-  lookup and a write of its own, so this needs a start command to arrive
-  within a few milliseconds of an old poller ending. Before this change
-  the window was the whole time between a stop plus restart and the old
-  poller ending, which for a one-shot poll can be the length of a poll.
+  before the old poller's single `UPDATE` lands. Normally that needs a
+  start command within a few milliseconds of an old poller ending, but
+  with the 6-connection DB pool saturated the new start's lookup and
+  write can both get a connection first. The stop command's `stopped`
+  write races a new start the same way. Before this change the window was
+  the whole time between a restart and the old poller ending. The full
+  fix (conditional UPDATE on `started_at`, or the StatusWrite ordering
+  from #423/#424) is backlog item 79.
+- During shutdown `Stop()` empties the active map, so a one-shot or setup
+  failure that ends then no longer writes `stopped`/`error`. The DB keeps
+  `running` and RestoreRunning re-runs it on the next boot, so sftp and
+  cloud-storage with `after_action=none` can re-publish a one-shot that a
+  deploy cut short.
 - Before this change the write came before the drop. Swapping them means
   a stop arriving in between (entry still A's, stop removes it and writes
   `stopped`) leaves A's own `stopped` write out. Same final status.
