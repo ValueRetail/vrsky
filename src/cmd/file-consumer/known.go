@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -79,6 +80,10 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (nam
 	return names, true, nil
 }
 
+// errCheckpointRead marks a loadKnown that could read the folder but not the
+// saved set, when the caller asked for the saved set (#409).
+var errCheckpointRead = errors.New("could not read which files were already published")
+
 // loadKnown sets ac.knownFiles at start, before the connection shows as
 // active (#366). On the first start (no checkpoint for this folder) every
 // name in the folder is done, as before. After that only the names saved as
@@ -87,28 +92,38 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (nam
 // check. A failed folder read returns the error and changes nothing: no
 // baseline, no checkpoint read or write (#398). The start then watches with
 // the baseline deferred, and the first poll whose read works calls this
-// again. A failed checkpoint read falls back to the first-start rule for this
-// run but does not save it: that would overwrite the saved history with
-// "everything present is done", and another watcher re-reading it could then
-// skip a file it should publish. The first real change saves.
-func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) error {
+// again.
+//
+// A failed checkpoint read depends on requireSaved. Without it (the start)
+// it falls back to the first-start rule for this run but does not save it:
+// that would overwrite the saved history with "everything present is done",
+// and another watcher re-reading it could then skip a file it should
+// publish. The first real change saves. With it (a deferred baseline) it
+// returns an error wrapping errCheckpointRead and changes nothing, so the
+// baseline stays deferred and the next poll tries again: falling back there
+// would count every file that landed during the outage as done (#409).
+func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requireSaved bool) error {
 	current, err := s.listFiles(ac.WatchDir)
 	if err != nil {
 		return err
 	}
-	ac.knownFiles = current
 	if s.checkpoints == nil {
+		ac.knownFiles = current
 		return nil
 	}
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	saved, found, err := s.loadSaved(ctx, ac)
 	switch {
+	case err != nil && requireSaved:
+		return fmt.Errorf("%w: %w", errCheckpointRead, err)
 	case err != nil:
+		ac.knownFiles = current
 		logger.Error("Could not read which files were already published; treating every file in the folder as done",
 			"error", err)
 	case !found:
 		// Saved once the start is active, so a first start is recorded even
 		// if nothing is ever published.
+		ac.knownFiles = current
 		ac.dirty = true
 		logger.Info("First start for this folder: files already in it are not published", "files", len(current))
 	default:

@@ -153,7 +153,7 @@ const contentSniffBytes = 512
 
 // FileEvent represents an activity event for the UI
 type FileEvent struct {
-	Type     string `json:"type"` // "added", "deleted", "uploaded", "error", "connected"
+	Type     string `json:"type"` // "added", "deleted", "uploaded", "error", "info", "connected"
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
 	Time     string `json:"time"`
@@ -184,6 +184,10 @@ type ActiveConnection struct {
 	// watcher goroutine runs, then touched only by that goroutine.
 	readFailures     int
 	baselineDeferred bool
+	// readErrorEventAt is when (on the watcher clock) the last "error" event
+	// of the current run of failed reads went to the File watcher panel; zero
+	// means none yet (#409). Touched only by the watcher goroutine.
+	readErrorEventAt time.Time
 }
 
 // fileState is what the watcher compares between polls to decide that the
@@ -407,7 +411,7 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 		WatchDir:     watchDir,
 		NodeID:       s.fileNodeID(conn),
 	}
-	if err := s.loadKnown(ctx, ac); err != nil {
+	if err := s.loadKnown(ctx, ac, false); err != nil {
 		// Start anyway, so the connection that shows as running is watched,
 		// and take the baseline on the first poll whose read works (#398).
 		// Nothing is published or saved before that. Refusing the start left
@@ -556,7 +560,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	}
 	if ac.readFailures > 0 {
 		logger.Info("Watch folder readable again", "skipped_polls", ac.readFailures)
-		ac.readFailures = 0
+		s.noteReadRecovered(ac)
 	}
 	refreshed := false
 
@@ -651,32 +655,44 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 }
 
 // takeDeferredBaseline is a poll for a connection whose start could not read
-// its folder (#398). It tries loadKnown again; the first read that works sets
-// the baseline exactly as a start would (the saved set, or first-start rules)
-// and saves it if that changed anything. Nothing is published in this poll,
-// as nothing is in a start: new files go through the stability check from
-// the next poll on.
+// its folder (#398). It tries loadKnown again; the first poll in which both
+// the folder and the saved set can be read sets the baseline exactly as a
+// start would (the saved set, or first-start rules) and saves it if that
+// changed anything. A failed checkpoint read keeps the baseline deferred
+// (#409). Nothing is published in this poll, as nothing is in a start: new
+// files go through the stability check from the next poll on.
 func (s *fileConsumer) takeDeferredBaseline(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
 	if ctx.Err() != nil {
 		return
 	}
-	if err := s.loadKnown(ctx, ac); err != nil {
+	if err := s.loadKnown(ctx, ac, true); err != nil {
 		s.noteReadFailure(ac, err, logger)
 		return
 	}
 	logger.Info("Watch folder readable; baseline taken, publishing from here",
 		"skipped_polls", ac.readFailures, "files", len(ac.knownFiles))
 	ac.baselineDeferred = false
-	ac.readFailures = 0
+	s.noteReadRecovered(ac)
 	s.saveKnown(ctx, ac, logger)
 }
 
-// noteReadFailure logs a failed folder read: at Warn for the first in a run,
-// then at Debug, so a share that stays down does not log every poll.
+// readErrorEventEvery is the least time between two "error" events for one
+// run of failed reads. The panel keeps the last 50 events; one every poll (5
+// s) would push everything else out within four minutes.
+const readErrorEventEvery = 30 * time.Second
+
+// noteReadFailure records a poll skipped because the folder, or during a
+// deferred baseline the saved set, could not be read. It logs at Warn for the
+// first in a run, then at Debug, so a share that stays down does not log
+// every poll. It also tells the File watcher panel (#409): an "error" event on
+// the first failure, then at most one every readErrorEventEvery.
 func (s *fileConsumer) noteReadFailure(ac *ActiveConnection, err error, logger *slog.Logger) {
 	ac.readFailures++
 	msg := "Could not read the watch folder; skipping this poll"
-	if errors.Is(err, fs.ErrNotExist) {
+	switch {
+	case errors.Is(err, errCheckpointRead):
+		msg = "Could not read which files were already published; the baseline stays deferred"
+	case errors.Is(err, fs.ErrNotExist):
 		msg = "Watch folder is missing; skipping this poll"
 	}
 	if ac.readFailures == 1 {
@@ -684,6 +700,70 @@ func (s *fileConsumer) noteReadFailure(ac *ActiveConnection, err error, logger *
 	} else {
 		logger.Debug(msg, "error", err, "failed_polls", ac.readFailures)
 	}
+
+	now := s.clock()
+	if !ac.readErrorEventAt.IsZero() && now.Sub(ac.readErrorEventAt) < readErrorEventEvery {
+		return
+	}
+	ac.readErrorEventAt = now
+	s.emitEvent(ac.ConnectionID, FileEvent{
+		Type:    "error",
+		Message: s.readFailureMessage(ac, err),
+		Time:    time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// noteReadRecovered ends a run of failed reads. If the panel was told about
+// it, it is also told that the folder can be read again, so its newest line
+// is not a stale error.
+func (s *fileConsumer) noteReadRecovered(ac *ActiveConnection) {
+	if !ac.readErrorEventAt.IsZero() {
+		s.emitEvent(ac.ConnectionID, FileEvent{
+			Type:    "info",
+			Message: fmt.Sprintf("Watch folder %q can be read again; files are picked up", s.folderLabel(ac)),
+			Time:    time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+	ac.readFailures = 0
+	ac.readErrorEventAt = time.Time{}
+}
+
+// readFailureMessage is the panel's text for a failed read. It names the
+// folder as the workspace sees it and gives only the operating system's
+// reason, never the path on the volume. The database error behind a failed
+// checkpoint read stays in the log.
+func (s *fileConsumer) readFailureMessage(ac *ActiveConnection, err error) string {
+	folder := s.folderLabel(ac)
+	var msg string
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, errCheckpointRead):
+		msg = fmt.Sprintf("Could not load which files in %q were already published; nothing is picked up until that works", folder)
+	case errors.Is(err, fs.ErrNotExist):
+		msg = fmt.Sprintf("Watch folder %q is missing; nothing is picked up until it is back", folder)
+	case errors.As(err, &pathErr):
+		msg = fmt.Sprintf("Could not read watch folder %q: %s; nothing is picked up until it can be read", folder, pathErr.Err)
+	default:
+		msg = fmt.Sprintf("Could not read watch folder %q; nothing is picked up until it can be read", folder)
+	}
+	if ac.readFailures > 1 {
+		msg += fmt.Sprintf(" (%d polls skipped)", ac.readFailures)
+	}
+	return msg
+}
+
+// folderLabel is ac.WatchDir relative to the tenant's root, as the workspace
+// knows it: "orders/in", or "." for the root itself. If that can't be worked
+// out, only the last path segment.
+func (s *fileConsumer) folderLabel(ac *ActiveConnection) string {
+	root, err := tenantpath.Root(s.baseDir, ac.TenantID)
+	if err == nil {
+		rel, relErr := filepath.Rel(root, ac.WatchDir)
+		if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Base(ac.WatchDir)
 }
 
 // isTempName reports whether a file name looks like one a writer is still
