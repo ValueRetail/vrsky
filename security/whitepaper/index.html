@@ -2548,18 +2548,33 @@ management API never returns secret values.</p>
 <p>The master key (<code>ENCRYPTION_KEY</code>, 256-bit) encrypts all secrets and <code>vrsky-cli</code>
 backups. Operators store it in a secret manager and can rotate it by re-wrapping
 without downtime. The <a href="../../operator/encryption-at-rest/">encryption-at-rest checklist</a>
-covers go-live verification (ciphertext-only storage, key backup, TLS to the DB).</p>
+covers go-live verification (ciphertext-only storage, key backup, TLS to the DB
+where the deployment supports it).</p>
+<p>On the hosted service, the database, message store and object storage keep
+their data on Azure managed disks, which Azure encrypts at rest with
+platform-managed keys. Traffic to the database stays on the cluster's private
+network and isn't TLS-encrypted (see <a href="#transport-gateway">Transport &amp; gateway</a>).</p>
 <h2 id="3-audit-log">3. Audit log<a class="headerlink" href="#3-audit-log" title="Permanent link">&para;</a></h2>
 <p>Privileged and security-relevant actions (secret create/rotate/delete, role
 changes, connection lifecycle, plan changes) are recorded in an append-only,
 per-tenant audit log, queryable and exportable (JSONL) by tenant admins.</p>
 <h2 id="4-mutual-tls-for-high-security-connectors">4. Mutual TLS for high-security connectors<a class="headerlink" href="#4-mutual-tls-for-high-security-connectors" title="Permanent link">&para;</a></h2>
-<p>HTTP connectors support <strong>worker-terminated mutual TLS</strong>. A webhook consumer can
-require an inbound client certificate that chains to a per-connection CA
-(rejecting otherwise, including on the plain port); an HTTP producer can present
-a client certificate to an mTLS-required endpoint. Cert material rides the same
-encrypted-secret path. Rejections are observable
-(<code>webhook_client_cert_failures_total</code>). See <a href="../../connectors/http/">HTTP &amp; webhooks</a>.</p>
+<p>HTTP connectors support mutual TLS. Certificate material rides the same
+encrypted-secret path as other credentials.</p>
+<ul>
+<li><strong>Outbound.</strong> An HTTP producer can present a client certificate to an
+  endpoint that requires one. This works on the hosted service and on
+  self-hosted deployments.</li>
+<li><strong>Inbound.</strong> A webhook consumer can require a client certificate that chains
+  to a per-connection CA. The check runs in the worker, on its own TLS port,
+  so that port has to be reachable from outside. The Docker Compose stack
+  opens it; the Kubernetes manifests don't yet. The hosted service doesn't
+  expose it either: TLS for webhooks ends at the ingress. A webhook connection set to require a client certificate there
+  refuses every request rather than accepting one without a certificate. For
+  inbound webhooks on the hosted service, use HMAC request signing.</li>
+</ul>
+<p>Rejections are observable (<code>webhook_client_cert_failures_total</code>). See
+<a href="../../connectors/http/">HTTP &amp; webhooks</a>.</p>
 <h2 id="5-tenant-isolation">5. Tenant isolation<a class="headerlink" href="#5-tenant-isolation" title="Permanent link">&para;</a></h2>
 <p>Every resource is scoped to a tenant (workspace). API requests carry the active
 tenant; data-store queries filter by <code>tenant_id</code>, and a custom CI linter

@@ -2493,7 +2493,7 @@ page: a sender behind one cannot deliver, and sees only a TLS certificate
 error — nothing that points at DNS. See
 <a href="../../operator/troubleshooting/">Troubleshooting</a>.</p>
 </div>
-<p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.</p>
+<p>You can optionally verify request signatures with HMAC and require client certificates with mutual TLS. Inbound mutual TLS works only where the worker's TLS port is exposed (the Docker Compose stack); the hosted service at <code>vrsky.valueretail.no</code> doesn't expose it yet, so use HMAC signatures there.</p>
 <h3 id="the-url-is-stable">The URL is stable<a class="headerlink" href="#the-url-is-stable" title="Permanent link">&para;</a></h3>
 <p>The connection id in the URL survives Stop/Start, Deploy from the builder
 (which updates the connection in place) and restarts of the webhook service
@@ -2533,7 +2533,7 @@ the header means. Requests without the header behave exactly as before.</p>
 <li><code>secret_secret_id</code> — reference to the shared signing secret (minted from the plaintext secret you enter in the editor).</li>
 </ul>
 </li>
-<li><code>tls.client_ca_secret_id</code> — optional mutual TLS (#89). When set, the connection is reachable on the worker's dedicated TLS port (<code>9101</code> locally) and clients must present a certificate signed by this CA.</li>
+<li><code>tls.client_ca_secret_id</code> — optional mutual TLS (#89). When set, the connection is reachable on the worker's dedicated TLS port (<code>9101</code> locally) and clients must present a certificate signed by this CA. Not available on the hosted service yet: there the TLS port isn't exposed, so such a connection rejects every request.</li>
 </ul>
 <p>Other request handling options not listed here are set via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
@@ -2588,7 +2588,7 @@ the header means. Requests without the header behave exactly as before.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Secrets.</strong> Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with <code>&lt;field&gt;_secret_id</code> references. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
-<li><strong>mTLS port.</strong> Connections using <code>tls.client_ca_secret_id</code> listen on the worker's dedicated TLS port (<code>9101</code> locally), separate from the standard webhook ingress.</li>
+<li><strong>mTLS port.</strong> Connections using <code>tls.client_ca_secret_id</code> listen on the worker's dedicated TLS port (<code>9101</code> locally), separate from the standard webhook ingress. The hosted service at <code>vrsky.valueretail.no</code> doesn't expose that port yet, so there a connection with <code>tls.client_ca_secret_id</code> rejects every request. Use <code>http.signature</code> for inbound webhooks on the hosted service. Outbound mTLS (the producer's <code>http.tls</code>) works everywhere.</li>
 <li><strong>Example flow.</strong> A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.</li>
 </ul>
 

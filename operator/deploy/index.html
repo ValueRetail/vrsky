@@ -2512,7 +2512,11 @@ Red stays red: a failed build, rollout or smoke check fails the run, and the
 <td>that service's image; a core service is rolled by digest, a connector is restarted</td>
 </tr>
 <tr>
-<td><code>src/pkg/**</code>, <code>src/go.mod</code>, <code>src/go.sum</code>, any <code>src/cmd/*/Dockerfile</code></td>
+<td><code>infrastructure/migrations/**</code>, <code>src/cmd/vrsky-agent/**</code></td>
+<td>the management API image and rollout (it runs the migrations at start and serves the Windows agent)</td>
+</tr>
+<tr>
+<td><code>src/pkg/**</code>, <code>src/internal/**</code>, <code>src/go.mod</code>, <code>src/go.sum</code>, any <code>src/cmd/*/Dockerfile</code></td>
 <td>every Go image, core and connectors</td>
 </tr>
 <tr>
@@ -2524,7 +2528,11 @@ Red stays red: a failed build, rollout or smoke check fails the run, and the
 <td>the full connector manifest and a fleet restart</td>
 </tr>
 <tr>
-<td>anything else (docs, plans, workflows, tests only)</td>
+<td><code>*_test.go</code> and <code>testdata/**</code> under <code>src/</code>, on their own</td>
+<td>nothing (#410); a rename counts both paths, so moving code into a <code>_test.go</code> file still deploys</td>
+</tr>
+<tr>
+<td>anything else (docs, plans, workflows)</td>
 <td>nothing; the job runs and reports "no targets"</td>
 </tr>
 </tbody>

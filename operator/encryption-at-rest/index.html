@@ -2434,7 +2434,12 @@ the <code>ENCRYPTION_KEY</code> environment variable. This checklist keeps that 
       workers can't decrypt and pipelines fail at runtime.</li>
 <li>[ ] <strong>Confirm ciphertext, not plaintext, is stored.</strong> Create a secret, then
       check the DB: the value column is <code>aes256:&lt;base64…&gt;</code>, never the raw value.</li>
-<li>[ ] <strong>Use TLS to the databases</strong> in production (<code>sslmode=require</code> or better).</li>
+<li>[ ] <strong>Use TLS to the databases</strong> where you can (<code>sslmode=require</code> or better).
+      Production on AKS doesn't yet: Postgres runs inside the cluster, the
+      connection strings use <code>sslmode=disable</code>
+      (<code>infrastructure/azure/rotate-secrets.sh</code>), and that traffic crosses the
+      cluster's private network unencrypted. A managed Postgres, or TLS on the
+      in-cluster one, would close this.</li>
 <li>[ ] <strong>Back up the key</strong> alongside (but stored separately from) the database
       backup — a DB restore is useless without the key. See
       <a href="../backup/">Backup &amp; restore</a>.</li>
