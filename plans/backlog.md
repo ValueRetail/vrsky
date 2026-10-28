@@ -41,7 +41,7 @@ Last updated 2026-10-28.
 13. ~~**`TestFileConsumer_WatchRoundTrip` looks flaky**~~ (#362) (`src/cmd/file-consumer`).
     It failed once in a full `go test -race ./...` ("no matching envelope
     within 12s") and passed alone. Make it deterministic.
-14. **Fix the stale comment on `messaging.MainRetention`**
+14. ~~**Fix the stale comment on `messaging.MainRetention`**~~ (#363)
     (`src/pkg/messaging/messaging.go`). It says WorkQueue retention removes
     acked messages at once, but `VRSKY_DATA` uses Limits retention and an
     ack deletes nothing. Comment only; it misled the first draft of #354.
