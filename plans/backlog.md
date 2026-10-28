@@ -435,18 +435,25 @@ Last updated 2026-10-28.
     does not, so a connector that bypasses the SDK passes CI. Add it as a
     step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
     Found during #446.
-68. **golangci-lint's caches barely help.** On main the action restores a
+68. ~~**golangci-lint's caches barely help.**~~ (#463) On main the action restores a
     1.4 MB `golangci-lint.cache-…` entry and still spends 2 m 18 s, and
     setup-go's Go build cache uses one key for every Go job, so whichever
     job saves first (a `-race` test shard) wins and the lint job's own
     build output is never kept. A lint-specific `GOCACHE` entry could take
     a minute off; measure before and after. Off the critical path since
     #446. Found during #446.
-69. **`promtool test rules` takes four minutes** because the backup alert
+69. ~~**`promtool test rules` takes four minutes**~~ (#464) because the backup alert
     tests (#404) evaluate up to ten days at one-minute steps. If the
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
+70. **`TestEveryLintCheckStillGates` matches raw step text**
+    (`src/pkg/managementapi/lintgates_guard_test.go`), so a commented-out
+    `gofmt -l .`, `make lint-tenant` or `check rules` line still satisfies
+    it. Strip shell comments first, as the shard guard does since #443
+    (`stripShellComments` in `gotestshards_guard_test.go`). The alert-rules
+    step is already covered by running it (`TestRuleTestGroupsRunOnce`).
+    Found during #443.
 
 ## Human
 

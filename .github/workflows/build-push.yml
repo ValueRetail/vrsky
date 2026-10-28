@@ -362,9 +362,14 @@ jobs:
           SHARDS: ${{ needs.go-test-shards.result }}
           LINT: ${{ needs.go-lint.result }}
           RULES: ${{ needs.alert-rules.result }}
+        # One check per line, each exiting itself: a `&&` chain fails the
+        # step only while it is the last line (#443).
+        # TestGoTestsAggregatorFailsWhenANeededJobDid runs this script.
         run: |
           echo "shards: $SHARDS, lint: $LINT, alert rules: $RULES"
-          [ "$SHARDS" = success ] && [ "$LINT" = success ] && [ "$RULES" = success ]
+          [ "$SHARDS" = success ] || exit 1
+          [ "$LINT" = success ] || exit 1
+          [ "$RULES" = success ] || exit 1
 
   # The remote agent (#266) runs on customer Windows machines. The Windows-only
   # code — the credential's ACL, atomic rename over a locked file, the service
