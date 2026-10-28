@@ -82,11 +82,21 @@ copy .env.example .env
 For a quick try, `.env` works as it is: empty values fall back to the
 defaults in `docker-compose.yml`, and the database passwords are fixed dev
 values there. Before you store real credentials, set `ENCRYPTION_KEY` in
-`.env` to 64 hex characters and back it up. To generate a key in PowerShell:
+`.env` to 64 hex characters and back it up. To generate a key in PowerShell
+(works in Windows PowerShell 5.1 and PowerShell 7):
 
 ```powershell
--join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+-join ($bytes | ForEach-Object { '{0:x2}' -f $_ })
 ```
+
+This is the PowerShell version of `openssl rand -hex 32`, which you can also
+run as is from WSL or Git Bash. Don't build the key with `Get-Random`: it
+isn't a cryptographic random generator, and this key protects every stored
+credential.
 
 !!! danger "Back that key up somewhere else, now"
 

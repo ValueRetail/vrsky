@@ -50,7 +50,15 @@ type fileConsumer struct {
 	uploadOrigin string // FILE_CONSUMER_ALLOWED_ORIGIN; the only origin given CORS access
 
 	activeConnections map[string]*ActiveConnection
-	mu                sync.RWMutex
+	// starting holds connections whose start has passed the "already active"
+	// check and is not yet in activeConnections (#375). Both maps are guarded
+	// by mu; a connection is in at most one of them.
+	starting map[string]*startReservation
+	mu       sync.RWMutex
+
+	// beforeStartWork, when set, runs once a start holds its reservation and
+	// before the database lookup. Tests use it to line up concurrent starts.
+	beforeStartWork func(connectionID string)
 
 	// pollInterval is how often a watched directory is scanned; zero means
 	// defaultPollInterval. Tests shorten it.
@@ -158,6 +166,12 @@ type ActiveConnection struct {
 	pending    map[string]fileState
 }
 
+// startReservation marks one start in progress (#375). stopped is set, under
+// fileConsumer.mu, by a stop that arrives before the start is active.
+type startReservation struct {
+	stopped bool
+}
+
 // fileState is what the watcher compares between polls to decide that the
 // writer has finished with a file. seenAt is when size and modTime were first
 // seen with these values; it is not part of the comparison.
@@ -263,6 +277,11 @@ func (s *fileConsumer) Stop(ctx context.Context) error {
 		ac.Cancel()
 	}
 	s.activeConnections = make(map[string]*ActiveConnection)
+	// A start still in flight must not leave a watcher nobody will cancel.
+	for _, res := range s.starting {
+		res.stopped = true
+	}
+	s.starting = nil
 	s.mu.Unlock()
 
 	select {
@@ -293,12 +312,20 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 	_ = ctx
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
-	s.mu.RLock()
-	_, exists := s.activeConnections[connectionID]
-	s.mu.RUnlock()
-	if exists {
-		s.logger.Warn("File watcher already active", "connection_id", connectionID)
+	// The boot restore and the start-command handler run on different
+	// goroutines. The check and the claim are one critical section, so a
+	// second start for the same connection stops here instead of starting a
+	// second watcher (#375).
+	res, ok := s.reserveStart(connectionID)
+	if !ok {
+		s.logger.Warn("File watcher already active or starting", "connection_id", connectionID)
 		return
+	}
+	// Frees the claim on every early return below, so a later start can try
+	// again. A no-op once activateStart has moved it to activeConnections.
+	defer s.releaseStart(connectionID, res)
+	if s.beforeStartWork != nil {
+		s.beforeStartWork(connectionID)
 	}
 
 	conn, err := s.getConnection(connectionID, tenantID)
@@ -369,9 +396,11 @@ func (s *fileConsumer) startConnection(ctx context.Context, connectionID, tenant
 		knownFiles:   s.listFiles(watchDir),
 	}
 
-	s.mu.Lock()
-	s.activeConnections[connectionID] = ac
-	s.mu.Unlock()
+	if !s.activateStart(connectionID, res, ac) {
+		cancel()
+		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
+		return
+	}
 
 	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
@@ -400,9 +429,23 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 		ac.Cancel()
 		delete(s.activeConnections, cmd.ConnectionID)
 	}
+	// A start still in progress is told to give up rather than finish after
+	// the stop and leave a watcher running (#375). It is removed, not only
+	// marked, so a start that comes after this stop is not refused.
+	res, starting := s.starting[cmd.ConnectionID]
+	if starting {
+		res.stopped = true
+		delete(s.starting, cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 
 	if !exists {
+		if starting {
+			// No status write: the management API already set "stopped", and
+			// the start may yet have turned out not to be a file connection.
+			s.logger.Info("Stop arrived while the file watcher was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+			return
+		}
 		s.logger.Warn("File watcher not active", "connection_id", cmd.ConnectionID)
 		return
 	}
@@ -412,6 +455,50 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 
 	s.logger.Info("File watcher stopped", "connection_id", cmd.ConnectionID)
+}
+
+// reserveStart claims connectionID for a start. It fails if the connection is
+// already active or another start holds the claim.
+func (s *fileConsumer) reserveStart(connectionID string) (*startReservation, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, active := s.activeConnections[connectionID]; active {
+		return nil, false
+	}
+	if _, busy := s.starting[connectionID]; busy {
+		return nil, false
+	}
+	if s.starting == nil {
+		s.starting = make(map[string]*startReservation)
+	}
+	res := &startReservation{}
+	s.starting[connectionID] = res
+	return res, true
+}
+
+// activateStart turns the claim into an active connection in one critical
+// section. It returns false, and changes nothing, if a stop took the claim
+// back first.
+func (s *fileConsumer) activateStart(connectionID string, res *startReservation, ac *ActiveConnection) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if res.stopped {
+		return false
+	}
+	s.activeConnections[connectionID] = ac
+	if s.starting[connectionID] == res {
+		delete(s.starting, connectionID)
+	}
+	return true
+}
+
+// releaseStart drops the claim if it is still this start's.
+func (s *fileConsumer) releaseStart(connectionID string, res *startReservation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.starting[connectionID] == res {
+		delete(s.starting, connectionID)
+	}
 }
 
 // defaultPollInterval is how often a watched directory is scanned.
