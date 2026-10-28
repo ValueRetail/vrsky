@@ -17,8 +17,8 @@ Last updated 2026-10-27.
    Park stays as the backstop. Plan first (`plans/cost-cap.md` has the
    context). Touches manifests and Azure identity: PR plus
    `agent:needs-human`, never merged by an agent.
-2. **`messaging.ensure` updates every existing stream on every connector
-   start** (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
+2. ~~**`messaging.ensure` updates every existing stream on every connector
+   start**~~ (#353) (`src/pkg/messaging/messaging.go`). Skip `UpdateStream` when the
    existing config already matches; it was the trigger for the nats-server
    race fixed in #339 and is log noise. NATS stream configuration: PR plus
    `agent:needs-human`.
