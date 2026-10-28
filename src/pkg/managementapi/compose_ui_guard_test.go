@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -283,5 +284,137 @@ func TestComposeUIProdPidDirWritable(t *testing.T) {
 			"nginx runs as uid %d and the image's %s is not writable by it, so the container exits at start (#377). "+
 			"Mount a tmpfs there, e.g. `tmpfs: [\"%s:uid=%d,gid=%d\"]`, as production does with an emptyDir.",
 			pid, err, nginxUID, dir, dir, nginxUID, nginxUID)
+	}
+}
+
+// getEnvName matches the names ui/src/config/env.ts reads, e.g.
+// `getEnv('VITE_LOG_LEVEL', 'info')`.
+var getEnvName = regexp.MustCompile(`getEnv\(\s*['"](VITE_[A-Z0-9_]+)['"]`)
+
+// composeEnvKeys returns the variable names a compose service sets under
+// `environment:`, in either the map form (`KEY: value`) or the list form
+// (`- KEY=value`).
+func composeEnvKeys(svc map[string]any) ([]string, error) {
+	var keys []string
+	switch env := svc["environment"].(type) {
+	case nil:
+	case map[string]any:
+		for k := range env {
+			keys = append(keys, k)
+		}
+	case []any:
+		for _, e := range env {
+			s, ok := e.(string)
+			if !ok {
+				return nil, fmt.Errorf("environment entry %v is not a string", e)
+			}
+			k, _, _ := strings.Cut(s, "=")
+			keys = append(keys, k)
+		}
+	default:
+		return nil, fmt.Errorf("environment has unexpected type %T", env)
+	}
+	return keys, nil
+}
+
+// checkUIComposeEnv returns one message per VITE_* variable a service in
+// docker-compose.ui.yml sets that can't reach the UI. In `ui` (Vite's dev
+// server) a VITE_* name works only if env.ts reads it. In `ui-prod` none
+// works: the bundle is built in the image, so Vite has already fixed every
+// VITE_* value and nginx reads no environment.
+func checkUIComposeEnv(services map[string]map[string]any, read map[string]bool) []string {
+	var bad []string
+	for _, name := range []string{"ui", "ui-prod"} {
+		keys, err := composeEnvKeys(services[name])
+		if err != nil {
+			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
+			continue
+		}
+		for _, k := range keys {
+			if !strings.HasPrefix(k, "VITE_") {
+				continue
+			}
+			switch {
+			case name == "ui-prod":
+				bad = append(bad, fmt.Sprintf("ui-prod sets %s, but the image's bundle was built with every VITE_* value already fixed; runtime env can't change it", k))
+			case !read[k]:
+				bad = append(bad, fmt.Sprintf("ui sets %s, which ui/src/config/env.ts never reads", k))
+			}
+		}
+	}
+	sort.Strings(bad)
+	return bad
+}
+
+// TestCheckUIComposeEnv checks checkUIComposeEnv on small cases, so the guard
+// below can't pass for the wrong reason.
+func TestCheckUIComposeEnv(t *testing.T) {
+	read := map[string]bool{"VITE_API_URL": true}
+	cases := []struct {
+		name string
+		yaml string
+		bad  int
+	}{
+		{"no environment", "ui: {}\nui-prod: {}", 0},
+		{"dev sets a name env.ts reads", "ui:\n  environment:\n    VITE_API_URL: x", 0},
+		{"dev sets it in list form", "ui:\n  environment:\n    - VITE_API_URL=x", 0},
+		{"dev sets a non-VITE name", "ui:\n  environment:\n    NODE_ENV: development", 0},
+		{"dev sets an unread name", "ui:\n  environment:\n    VITE_API_BASE_URL: x", 1},
+		{"dev sets an unread name in list form", "ui:\n  environment:\n    - VITE_ENVIRONMENT=development", 1},
+		{"prod sets a name env.ts reads", "ui-prod:\n  environment:\n    VITE_API_URL: x", 1},
+		{"prod sets a non-VITE name", "ui-prod:\n  environment:\n    TZ: UTC", 0},
+		{"both wrong", "ui:\n  environment:\n    VITE_ENVIRONMENT: d\nui-prod:\n  environment:\n    VITE_ENVIRONMENT: p", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var services map[string]map[string]any
+			if err := yaml.Unmarshal([]byte(tc.yaml), &services); err != nil {
+				t.Fatalf("bad test yaml: %v", err)
+			}
+			if got := checkUIComposeEnv(services, read); len(got) != tc.bad {
+				t.Errorf("got %d problems %q; want %d", len(got), got, tc.bad)
+			}
+		})
+	}
+}
+
+// TestComposeUIEnvIsRead guards issue #392: docker-compose.ui.yml set
+// VITE_API_BASE_URL and VITE_ENVIRONMENT, names the UI never read, which made
+// it look like the API URL could be configured there. The names come from
+// ui/src/config/env.ts, so reading a new variable there is enough to allow it
+// on the dev service.
+func TestComposeUIEnvIsRead(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+
+	src, err := os.ReadFile(filepath.Join(root, "ui", "src", "config", "env.ts"))
+	if err != nil {
+		t.Fatalf("read ui/src/config/env.ts: %v", err)
+	}
+	read := map[string]bool{}
+	for _, m := range getEnvName.FindAllStringSubmatch(string(src), -1) {
+		read[m[1]] = true
+	}
+	if len(read) == 0 {
+		t.Fatal("found no getEnv('VITE_…') calls in ui/src/config/env.ts; this guard needs them to know which names the UI reads")
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "docker-compose.ui.yml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.ui.yml: %v", err)
+	}
+	var compose struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &compose); err != nil {
+		t.Fatalf("parse docker-compose.ui.yml: %v", err)
+	}
+	for _, name := range []string{"ui", "ui-prod"} {
+		if _, ok := compose.Services[name]; !ok {
+			t.Fatalf("docker-compose.ui.yml has no services.%s", name)
+		}
+	}
+
+	for _, msg := range checkUIComposeEnv(compose.Services, read) {
+		t.Errorf("docker-compose.ui.yml: %s", msg)
 	}
 }
