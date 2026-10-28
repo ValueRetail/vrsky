@@ -129,7 +129,11 @@ func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tena
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.activeBridges[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeBridges[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Bridge already running or starting")
 		return
@@ -164,7 +168,9 @@ func (s *tenantConsumer) startConnection(ctx context.Context, connectionID, tena
 		return
 	}
 
-	_ = s.updateConnectionStatus(connectionID, tenantID, "running")
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() { _ = s.updateConnectionStatus(connectionID, tenantID, "running") })
 
 	go s.runBridge(ctx, ac, connectionID, tenantID, tcConfig)
 }
@@ -183,15 +189,17 @@ type activeConn struct {
 //
 // It reports whether the entry was own. Only then may the bridge write its
 // final status; otherwise the newer start has written "running" and owns the
-// status too (#456).
-func (s *tenantConsumer) dropActive(connectionID string, own *activeConn) bool {
+// status too (#456). The write goes through the returned StatusWrite, taken
+// in the same critical section, so it cannot land over the "running" of a
+// start that activates after the drop (#423).
+func (s *tenantConsumer) dropActive(connectionID, tenantID string, own *activeConn) (sdk.StatusWrite, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.activeBridges[connectionID] != own {
-		return false
+		return sdk.StatusWrite{}, false
 	}
 	delete(s.activeBridges, connectionID)
-	return true
+	return s.starts.StopStatusLocked(tenantID, connectionID), true
 }
 
 // handleStopCommand processes a stop command
@@ -212,13 +220,21 @@ func (s *tenantConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 	if starting {
 		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
 	}
 
 	if exists {
-		_ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
+		stopped.Write(func() { _ = s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped") })
 		s.logger.Info("Bridge stopped", "connection_id", cmd.ConnectionID)
 	}
 }

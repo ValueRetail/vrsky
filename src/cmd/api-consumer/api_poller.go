@@ -35,13 +35,16 @@ func (s *apiConsumer) pollConnection(ctx context.Context, own *activeConn, conne
 		logger.Info("One-time-only mode: data retrieval complete")
 		// Remove from active pipelines and mark it stopped, unless a newer
 		// start owns the entry, and with it the status, by now (#408, #456).
-		if !s.dropActive(connectionID, own) {
+		stopped, mine := s.dropActive(connectionID, tenantID, own)
+		if !mine {
 			logger.Info("A newer start owns the connection; leaving its status alone")
 			return
 		}
-		if err := s.updateConnectionStatus(connectionID, tenantID, "stopped"); err != nil {
-			logger.Error("Failed to update connection status after one-time poll", "error", err)
-		}
+		stopped.Write(func() {
+			if err := s.updateConnectionStatus(connectionID, tenantID, "stopped"); err != nil {
+				logger.Error("Failed to update connection status after one-time poll", "error", err)
+			}
+		})
 		return
 	}
 

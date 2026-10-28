@@ -183,7 +183,11 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		s.logger.Warn("DB consumer already active or starting", "connection_id", connectionID)
 		return
@@ -252,9 +256,13 @@ func (s *dbConsumer) startConnection(ctx context.Context, connectionID, tenantID
 		return
 	}
 
-	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() {
+		if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	s.emitEvent(connectionID, DBEvent{
 		Type: "connected", Message: fmt.Sprintf("Connected to %s@%s:%d/%s", dbConfig.User, dbConfig.Host, dbConfig.Port, dbConfig.Database),
@@ -284,6 +292,14 @@ func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 	if starting {
 		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
@@ -298,9 +314,11 @@ func (s *dbConsumer) handleStopCommand(msg *nats.Msg) {
 		Time: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	stopped.Write(func() {
+		if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 }
 
 func (s *dbConsumer) runConsumer(ctx context.Context, ac *ActiveDBConnection) {

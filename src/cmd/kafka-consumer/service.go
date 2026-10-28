@@ -176,7 +176,11 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := k.starts.Reserve(&k.mu, connectionID, func() bool { _, ok := k.active[connectionID]; return ok })
+	// A start refused while another is in flight is not lost: it runs again if
+	// that one gives up without activating (#424). The refused call returns
+	// right away, so the retry gets its caller's ctx, before any reassignment.
+	claim, ok := k.starts.ReserveOrRetry(&k.mu, tenantID, connectionID, func() bool { _, ok := k.active[connectionID]; return ok },
+		func() { k.startConnection(ctx, connectionID, tenantID) })
 	if !ok {
 		logger.Warn("Kafka consumer already running or starting")
 		return
@@ -201,7 +205,9 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
-	_ = k.updateConnectionStatus(connectionID, tenantID, "running")
+	// Through the guard's status order: a stop that cancelled the connection
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() { _ = k.updateConnectionStatus(connectionID, tenantID, "running") })
 
 	logger.Info("Starting Kafka consumer", "brokers", cfg.Brokers, "topic", cfg.Topic, "group", cfg.ConsumerGroup, "auth", cfg.AuthType)
 	go k.consumeLoop(ctx, connectionID, tenantID, cfg, logger)
@@ -221,12 +227,20 @@ func (k *kafkaConsumer) handleStopCommand(msg *nats.Msg) {
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
 	starting := k.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write: of this
+	// "stopped" write and a start's "running" write, only the one for the later
+	// of the stop and the start's Activate is left standing, whichever reaches
+	// the database first (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = k.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
+	}
 	k.mu.Unlock()
 	if starting {
 		k.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
 	}
 	if exists {
-		_ = k.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
+		stopped.Write(func() { _ = k.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped") })
 		k.logger.Info("Kafka consumer stopped", "connection_id", cmd.ConnectionID)
 	}
 }

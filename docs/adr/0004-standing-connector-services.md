@@ -173,8 +173,11 @@ to the command subjects: it reads the connections the database says are
 start path a command would. `TestConsumersRestoreRunningOnBoot` fails for a
 consumer that does not. Restore and a start command can run that path for the
 same connection at once, so it claims the connection with `sdk.StartGuard`
-before any slow work (#375, #397). A connector rollout therefore no longer needs any
-redeploy afterwards.
+before any slow work (#375, #397). A start refused because another is in flight
+runs again if that one fails, and the start's `running` write and a stop's
+`stopped` write go through the guard in the order of the start and the stop, so
+a stop just after a start cannot leave the database saying `running` (#423,
+#424). A connector rollout therefore no longer needs any redeploy afterwards.
 
 ## Alternatives considered
 
