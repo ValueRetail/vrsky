@@ -18,9 +18,21 @@ src/*
 !src/internal
 
 # --- UI: all source except installed deps / build output ---
+# The rest used to sit in ui/.dockerignore, which a repo-root build never
+# reads. ui/Dockerfile copies none of it: local test output, env files
+# (which may hold secrets), logs and editor droppings.
 !ui
 ui/node_modules
 ui/dist
+ui/coverage
+ui/.nyc_output
+ui/**/*.lcov
+ui/.env*
+ui/**/*.log
+ui/**/*-debug.log*
+ui/**/yarn-error.log*
+ui/.eslintcache
+ui/**/.DS_Store
 
 # --- DB migrations are bundled into the management-api image ---
 !infrastructure

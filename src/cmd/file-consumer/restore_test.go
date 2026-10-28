@@ -41,12 +41,16 @@ func TestFileConsumer_RestoresOnBoot(t *testing.T) {
 			AddRow(connID, tenant, "Files", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
+	// Start: read, save the first-start state. Publish: re-read, save (#391).
+	expectCheckpoints(mock, connID, tenant, 2, 2)
 
-	c := &fileConsumer{}
+	// A file is published on the second poll that sees it unchanged (#374);
+	// a short interval keeps that well inside the deadline below.
+	c := &fileConsumer{pollInterval: 200 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
-	// Configure runs on the harness goroutine and allocates the active map;
-	// give it the moment the other tests give it before reading that map.
-	time.Sleep(200 * time.Millisecond)
+	// Configure allocates the active map under c.mu, so polling it before the
+	// runner gets that far is safe; no head start needed (#362). The baseline
+	// is taken before the connection shows here, so the file below is new.
 	harness.Eventually(t, 5*time.Second, "watcher restored from the database", func() bool {
 		c.mu.RLock()
 		defer c.mu.RUnlock()

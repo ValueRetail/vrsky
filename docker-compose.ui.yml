@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ui:
     build:
@@ -9,9 +7,6 @@ services:
     container_name: vrsky-ui-dev
     ports:
       - "5173:5173"
-    environment:
-      VITE_API_BASE_URL: "http://localhost:8080/api"
-      VITE_ENVIRONMENT: "development"
     volumes:
       - ./ui:/app
       - /app/node_modules
@@ -24,15 +19,18 @@ services:
 
   ui-prod:
     build:
-      context: ./ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ui/Dockerfile
       target: nginx
     container_name: vrsky-ui-prod
     ports:
       - "80:80"
-    environment:
-      VITE_API_BASE_URL: "http://localhost:8080/api"
-      VITE_ENVIRONMENT: "production"
+    # The image runs nginx as the nginx user (uid/gid 101), which can't
+    # create /var/run/nginx.pid on the image's own /var/run. Production
+    # mounts an emptyDir there (infrastructure/kubernetes/ui/deployment.yaml).
+    # The uid is needed: a bare tmpfs takes the image's root-owned 755 /run.
+    tmpfs:
+      - /var/run:uid=101,gid=101
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/index.html"]
       interval: 30s

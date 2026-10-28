@@ -3,7 +3,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION } from './deployPipeline'
+import {
+  deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION, deployPlan, deployCanvas,
+} from './deployPipeline'
 import builderSource from '../pages/PipelineBuilder.tsx?raw'
 
 const post = vi.fn()
@@ -99,17 +101,162 @@ describe('deployIdentity', () => {
   })
 })
 
-describe('the builder names its deploy through deployIdentity', () => {
-  // The page is a large canvas component; this pins the one wiring that
-  // matters here: the payload's name comes from deployIdentity and nowhere
-  // else, so the old `Pipeline <time>` literal cannot come back on updates.
-  it('buildConnectionPayload spreads deployIdentity and builds no name itself', () => {
-    const src = builderSource
-    const start = src.indexOf('const buildConnectionPayload')
-    const body = src.slice(start, src.indexOf('\n  }\n', start))
-    expect(start, 'buildConnectionPayload not found').toBeGreaterThan(0)
-    expect(body).toContain('...deployIdentity(')
-    expect(body).not.toMatch(/name:\s*`Pipeline/)
-    expect(body).not.toMatch(/description:\s*'/)
+// #355: the canvas's connection was deleted on the server. The first deploy
+// finds it gone and the page asks; "Deploy as new" must create exactly one
+// connection, named like a create, and link the canvas to it, without going
+// back to the deleted id.
+describe('deploy as new after the connection is gone', () => {
+  const now = new Date('2026-10-27T09:00:00Z')
+  const canvas = { name: 'Edit: Orders to ERP', deployedConnectionId: 'gone-1', deployedName: 'Orders to ERP' }
+
+  it('creates one connection named after the tab and links the canvas to it', async () => {
+    post.mockImplementation((url: string) => {
+      if (url === '/api/v1/connections/gone-1/stop') return Promise.reject(httpErr(404))
+      if (url === '/api/v1/connections') return Promise.resolve({ data: { data: { id: 'new-1' } } })
+      return Promise.resolve({ data: {} })
+    })
+    put.mockImplementation((url: string) =>
+      url === '/api/v1/connections/gone-1' ? Promise.reject(httpErr(404)) : Promise.resolve({ data: {} }))
+    const link = vi.fn()
+
+    const first = deployPlan(canvas, false, now)
+    const err = await deployCanvas(client, { ...first.identity }, first.previousConnectionId, link).catch((e) => e)
+    expect(err).toBeInstanceOf(ConnectionGone)
+    expect(link).toHaveBeenCalledTimes(1)
+    expect(link).toHaveBeenCalledWith(null)
+
+    const postsBefore = post.mock.calls.length
+    const putsBefore = put.mock.calls.length
+    link.mockClear()
+
+    const again = deployPlan(canvas, true, now)
+    const payload = { ...again.identity, nodes: [], edges: [] }
+    await expect(deployCanvas(client, payload, again.previousConnectionId, link))
+      .resolves.toEqual({ connectionId: 'new-1', created: true })
+
+    const creates = post.mock.calls.filter(([url]) => url === '/api/v1/connections')
+    expect(creates).toHaveLength(1)
+    const toGone = [...post.mock.calls.slice(postsBefore), ...put.mock.calls.slice(putsBefore)]
+      .filter(([url]) => String(url).startsWith('/api/v1/connections/gone-1'))
+    expect(toGone).toEqual([])
+    expect(creates[0][1]).toMatchObject({ name: 'Orders to ERP', description: NEW_PIPELINE_DESCRIPTION })
+    expect(link).toHaveBeenCalledTimes(1)
+    expect(link).toHaveBeenCalledWith('new-1', 'Orders to ERP')
+  })
+})
+
+describe('deployPlan', () => {
+  const now = new Date('2026-10-27T09:00:00Z')
+  const linked = { name: 'Edit: Orders to ERP', deployedConnectionId: 'c1', deployedName: 'Orders to ERP' }
+  const renamed = { name: 'Edit: Orders v2', deployedConnectionId: 'c1', deployedName: 'Orders to ERP' }
+  const unlinked = { name: 'Edit: Orders to ERP' }
+  const asCreate = { name: 'Orders to ERP', description: NEW_PIPELINE_DESCRIPTION }
+
+  it.each([
+    ['a linked canvas updates its connection, keeping the server name', linked, false,
+      { previousConnectionId: 'c1', identity: {} }],
+    ['a linked, renamed canvas updates and sends only the new name', renamed, false,
+      { previousConnectionId: 'c1', identity: { name: 'Orders v2' } }],
+    ['"deploy as new" on a linked canvas creates, named like a create', linked, true,
+      { previousConnectionId: undefined, identity: asCreate }],
+    ['"deploy as new" on a renamed canvas creates under the tab name', renamed, true,
+      { previousConnectionId: undefined, identity: { name: 'Orders v2', description: NEW_PIPELINE_DESCRIPTION } }],
+    ['an unlinked canvas creates', unlinked, false, { previousConnectionId: undefined, identity: asCreate }],
+    ['an unlinked canvas creates with asNew too', unlinked, true, { previousConnectionId: undefined, identity: asCreate }],
+  ])('%s', (_, canvas, asNew, want) => {
+    expect(deployPlan(canvas, asNew, now)).toEqual(want)
+  })
+
+  it('without asNew the identity is deployIdentity of the canvas', () => {
+    const canvases = [linked, renamed, unlinked, { name: 'Tenant 1', deployedConnectionId: 'c1' }, { name: 'Tenant 1' }]
+    for (const canvas of canvases) {
+      expect(deployPlan(canvas, false, now).identity).toEqual(deployIdentity(canvas, now))
+    }
+  })
+})
+
+describe('deployCanvas keeps the canvas link in step', () => {
+  it('a create links the new id with the name sent', async () => {
+    post.mockResolvedValue({ data: { data: { id: 'new-1' } } })
+    const link = vi.fn()
+    await deployCanvas(client, { name: 'Orders' }, undefined, link)
+    expect(link).toHaveBeenCalledTimes(1)
+    expect(link).toHaveBeenCalledWith('new-1', 'Orders')
+  })
+
+  it('an update that sent a name records it', async () => {
+    post.mockResolvedValue({})
+    put.mockResolvedValue({})
+    const link = vi.fn()
+    await expect(deployCanvas(client, { name: 'Renamed' }, 'c1', link))
+      .resolves.toEqual({ connectionId: 'c1', created: false })
+    expect(link).toHaveBeenCalledTimes(1)
+    expect(link).toHaveBeenCalledWith('c1', 'Renamed')
+  })
+
+  it('an update that sent no name leaves the link alone', async () => {
+    post.mockResolvedValue({})
+    put.mockResolvedValue({})
+    const link = vi.fn()
+    await expect(deployCanvas(client, {}, 'c1', link)).resolves.toEqual({ connectionId: 'c1', created: false })
+    expect(link).not.toHaveBeenCalled()
+  })
+
+  it('a gone connection unlinks the canvas and is rethrown', async () => {
+    post.mockRejectedValue(httpErr(404))
+    const link = vi.fn()
+    const err = await deployCanvas(client, {}, 'c1', link).catch((e) => e)
+    expect(err).toBeInstanceOf(ConnectionGone)
+    expect(link).toHaveBeenCalledTimes(1)
+    expect(link).toHaveBeenCalledWith(null)
+  })
+
+  it('any other failure is rethrown and leaves the link alone', async () => {
+    post.mockResolvedValue({})
+    put.mockRejectedValue(vrskyErr(400))
+    const link = vi.fn()
+    await expect(deployCanvas(client, { name: 'x' }, 'c1', link)).rejects.toThrow('HTTP Error 400')
+    expect(link).not.toHaveBeenCalled()
+  })
+})
+
+describe('the builder deploys through deployPlan and deployCanvas', () => {
+  // The page is a large canvas component that the coverage gate keeps out of
+  // the suite; these pin its few lines of deploy wiring instead.
+  const src = builderSource
+  const bodyOf = (marker: string) => {
+    const start = src.indexOf(marker)
+    expect(start, `${marker} not found`).toBeGreaterThan(0)
+    return src.slice(start, src.indexOf('\n  }\n', start))
+  }
+
+  // The payload's name and description come from the plan and nowhere else,
+  // so the old `Pipeline <time>` literal cannot come back on updates.
+  it('buildConnectionPayload spreads the plan identity and builds no name itself', () => {
+    const body = bodyOf('const buildConnectionPayload')
+    expect(body).toContain('...identity')
+    expect(body).not.toMatch(/\bname:/)
+    expect(body).not.toMatch(/\bdescription:/)
+  })
+
+  it('deployPipeline takes its identity and target from deployPlan', () => {
+    const body = bodyOf('const deployPipeline = async')
+    expect(body).toMatch(/deployPlan\(/)
+    expect(body).toContain('buildConnectionPayload(plan.identity)')
+    expect(body).toMatch(/deployCanvas\(apiClient, payload, plan\.previousConnectionId,/)
+    expect(src).not.toMatch(/deployIdentity\(/)
+  })
+
+  it('"Deploy as new" redeploys with asNew', () => {
+    const body = bodyOf('const deployPipeline = async')
+    const start = body.indexOf('onConfirm:')
+    expect(start, 'onConfirm not found').toBeGreaterThan(0)
+    const onConfirm = body.slice(start, body.indexOf('onCancel:', start))
+    expect(onConfirm).toContain('deployPipeline(true)')
+  })
+
+  it('the Deploy button does not pass its click event as asNew', () => {
+    expect(src).not.toMatch(/onClick=\{deployPipeline\}/)
+    expect(src).toContain('onClick={() => deployPipeline()}')
   })
 })
