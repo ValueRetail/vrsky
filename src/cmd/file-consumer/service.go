@@ -170,13 +170,19 @@ type ActiveConnection struct {
 
 	// knownFiles holds names that are done: what loadKnown took as done at
 	// start and every name published (or failed) since. They are not
-	// ingested again while the name exists. pending holds names seen but not
-	// yet stable, with the size and mtime from the last poll (#374). dirty
-	// means knownFiles changed since it was last saved (#391). All three are
-	// touched only by the watcher goroutine after startConnection returns.
-	knownFiles map[string]bool
-	pending    map[string]fileState
-	dirty      bool
+	// ingested again while the name exists with the same stamp. knownStamps
+	// holds, for names in knownFiles, the size and mtime the file had when it
+	// was published or taken as done; a different stamp is a new file under
+	// that name (#420). A known name with no stamp takes the file's current
+	// one at the next poll, without publishing. pending holds names seen but
+	// not yet stable, with the size and mtime from the last poll (#374).
+	// dirty means knownFiles or knownStamps changed since the last save
+	// (#391). All four are touched only by the watcher goroutine after
+	// startConnection returns.
+	knownFiles  map[string]bool
+	knownStamps map[string]fileStamp
+	pending     map[string]fileState
+	dirty       bool
 	// readFailures counts folder reads in a row that failed (#398), so only
 	// the first is logged as a warning. baselineDeferred means the start could
 	// not read the folder: knownFiles is not set yet, and each poll tries
@@ -533,8 +539,10 @@ func (s *fileConsumer) clock() time.Time {
 // poll interval has passed between the two looks, so a file still being
 // written is not read half-way. Until #374 it was read on the first poll that
 // saw its name, and the finished file was then never published. Temp names
-// are left alone until they are renamed to their final name. A poll that
-// changed the done set saves it at the end (#391).
+// are left alone until they are renamed to their final name. A known name
+// whose size or mtime differs from when it was published, overwritten or
+// renamed over, is a new file and goes through the same check (#420). A poll
+// that changed the done set saves it at the end (#391).
 func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	if ac.baselineDeferred {
@@ -543,6 +551,9 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	}
 	if ac.knownFiles == nil {
 		ac.knownFiles = make(map[string]bool)
+	}
+	if ac.knownStamps == nil {
+		ac.knownStamps = make(map[string]fileStamp)
 	}
 	if ac.pending == nil {
 		ac.pending = make(map[string]fileState)
@@ -572,11 +583,10 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			// Stopping. What is left is published by the next start (#391).
 			break
 		}
-		if ac.knownFiles[name] {
-			continue
-		}
 		if isTempName(name) {
-			logger.Debug("Skipping temp file name until it is renamed", "file", name)
+			if !ac.knownFiles[name] {
+				logger.Debug("Skipping temp file name until it is renamed", "file", name)
+			}
 			continue
 		}
 		path := filepath.Join(ac.WatchDir, name)
@@ -585,6 +595,23 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			// Gone or unreadable since the listing; look again next poll.
 			delete(ac.pending, name)
 			continue
+		}
+		stamp := stampOf(info)
+		if ac.knownFiles[name] {
+			done, stamped := ac.knownStamps[name]
+			if !stamped {
+				// Done with no stamp yet (a checkpoint from before #420, or
+				// a failed stat): take this one, publish nothing.
+				ac.knownStamps[name] = stamp
+				ac.dirty = true
+				continue
+			}
+			if done == stamp {
+				delete(ac.pending, name)
+				continue
+			}
+			// Overwritten or renamed over since it was published: a new
+			// file under the same name (#420).
 		}
 		now := fileState{size: info.Size(), modTime: info.ModTime(), seenAt: s.clock()}
 		prev, seen := ac.pending[name]
@@ -602,12 +629,16 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			// this connection may have published it since this one started.
 			refreshed = true
 			s.mergeSaved(ctx, ac, currentFiles, logger)
-			if ac.knownFiles[name] {
+			if done, stamped := ac.knownStamps[name]; ac.knownFiles[name] && (!stamped || done == stamp) {
 				continue
 			}
 		}
+		// What to put back if a stop cuts the publish off.
+		wasKnown := ac.knownFiles[name]
+		prevStamp, hadStamp := ac.knownStamps[name]
 		delete(ac.pending, name)
 		ac.knownFiles[name] = true
+		ac.knownStamps[name] = stamp
 		ac.dirty = true
 
 		logger.Info("File added", "file", name)
@@ -615,8 +646,19 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		if ingErr != nil {
 			if ctx.Err() != nil {
 				// Cut off by a stop, not a bad file: leave it for the next
-				// start instead of saving it as done.
-				delete(ac.knownFiles, name)
+				// start instead of saving it as done. A replaced file goes
+				// back to its old stamp, so the next start still sees the
+				// change.
+				if wasKnown {
+					ac.knownFiles[name] = true
+				} else {
+					delete(ac.knownFiles, name)
+				}
+				if hadStamp {
+					ac.knownStamps[name] = prevStamp
+				} else {
+					delete(ac.knownStamps, name)
+				}
 				logger.Info("Stopped while publishing a file; it is published again on the next start", "file", name)
 				break
 			}
@@ -639,6 +681,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		if !currentFiles[name] {
 			logger.Info("File deleted", "file", name)
 			delete(ac.knownFiles, name)
+			delete(ac.knownStamps, name)
 			ac.dirty = true
 			s.emitEvent(ac.ConnectionID, FileEvent{
 				Type: "deleted", Filename: name,

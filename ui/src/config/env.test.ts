@@ -78,11 +78,42 @@ describe('defaults', () => {
     expect(keys.filter((k) => /^file(Producer|Consumer)/.test(k))).toEqual([])
   })
 
+  it('exposes no separate stream URL: streams use the API origin', async () => {
+    // config.wsUrl (VITE_WS_URL, default http://localhost:3000) fed only the
+    // dead services/websocket.ts (#428). A stream on another origin carries
+    // no session cookie in dev and points at the wrong host in production,
+    // so live streams go through apiUrl like services/workerEvents.ts does.
+    const { config } = await loadConfig({})
+    expect(Object.keys(config).filter((k) => /^ws/i.test(k))).toEqual([])
+  })
+
   it('applies the documented defaults when nothing is set', async () => {
     const { config } = await loadConfig({})
     expect(config.tenantId).toBeTruthy()
     expect(config.docsUrl).toContain('valueretail.github.io')
     expect(['debug', 'info', 'warn', 'error']).toContain(config.logLevel)
+  })
+})
+
+describe('VITE_WS_URL is gone (#428)', () => {
+  // Every UI source file and the example env, as text. Test files are left
+  // out because this one has to name the variable to look for it.
+  const sources = import.meta.glob(
+    ['../**/*.{ts,tsx}', '!../**/*.test.{ts,tsx}', '../../.env.example'],
+    { query: '?raw', import: 'default', eager: true },
+  ) as Record<string, string>
+
+  it('reads at least the files it means to check', () => {
+    // A glob that matched nothing would make the checks below pass vacuously.
+    expect(Object.keys(sources)).toContain('./env.ts')
+    expect(Object.keys(sources)).toContain('../../.env.example')
+  })
+
+  it('no source file or example env mentions VITE_WS_URL', () => {
+    const offenders = Object.entries(sources)
+      .filter(([, text]) => text.includes('VITE_WS_URL'))
+      .map(([file]) => file)
+    expect(offenders).toEqual([])
   })
 })
 

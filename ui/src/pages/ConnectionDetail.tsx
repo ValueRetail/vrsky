@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
+import { useConnectionsStore } from '../store/connectionsStore'
 import { connectionService } from '../services/connectionService'
 import type { Connection } from '../types/models'
 import { isAPIError, getErrorMessage } from '../utils/errors'
@@ -18,6 +19,8 @@ export default function ConnectionDetail() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const { addNotification, showConfirmDialog, hideConfirmDialog } = useUIStore()
+  // Keeps the header badge and the sidebar counts in step after a change here.
+  const refreshSummary = useConnectionsStore((s) => s.load)
   
   // Use metrics hook for real-time SSE updates (only if connection is running)
   const metrics = useMetrics(id || '', {
@@ -62,6 +65,7 @@ export default function ConnectionDetail() {
       setActionLoading(true)
       const updated = await connectionService.start(connection.id)
       setConnection(updated)
+      void refreshSummary()
       addNotification({
         type: 'success',
         title: 'Success',
@@ -86,6 +90,7 @@ export default function ConnectionDetail() {
       setActionLoading(true)
       const updated = await connectionService.stop(connection.id)
       setConnection(updated)
+      void refreshSummary()
       addNotification({
         type: 'success',
         title: 'Success',
@@ -116,6 +121,7 @@ export default function ConnectionDetail() {
         edges: connection.edges,
       }
       const newConnection = await connectionService.create(clonePayload as unknown)
+      void refreshSummary()
       addNotification({ type: 'success', title: 'Cloned', message: `"${newConnection.name}" created` })
       navigate(`/connections/${newConnection.id}`)
     } catch (error) {
