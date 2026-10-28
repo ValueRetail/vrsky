@@ -58,8 +58,14 @@ export async function listConnections(
   const queryString = params.toString()
   const url = queryString ? `/api/v1/connections?${queryString}` : '/api/v1/connections'
 
-  const response = await apiClient.get<ListConnectionsResponse>(url)
-  return response.data
+  // The API answers { data, total, limit, offset } (ListResponse in
+  // src/pkg/managementapi/handler.go); the pages read `connections`. Without
+  // this mapping the Connections list showed "No connections yet" for every
+  // workspace (#450).
+  const response = await apiClient.get<ListConnectionsResponse & { data?: GetConnectionResponse[] }>(url)
+  const { data, ...body } = response.data
+  const connections = body.connections ?? data ?? []
+  return { ...body, connections, total: body.total ?? connections.length }
 }
 
 /**
