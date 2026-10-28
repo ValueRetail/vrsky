@@ -430,7 +430,7 @@ Last updated 2026-10-28.
     already-cancelled context and NAKs until the lock at `:~252` halts it
     (older than #447, tiny window). Add a seam right after the cancel and a
     reconcile test. Found in review of #447.
-67. **CI never runs `make lint-connector`.** `make lint` runs it beside
+67. ~~**CI never runs `make lint-connector`.**~~ (#462) `make lint` runs it beside
     lint-tenant and lint-openapi, but the Go lint job in `build-push.yml`
     does not, so a connector that bypasses the SDK passes CI. Add it as a
     step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
@@ -498,7 +498,7 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
-79. **`TestEveryLintCheckStillGates` matches raw step text**
+79. ~~**`TestEveryLintCheckStillGates` matches raw step text**~~ (#462)
     (`src/pkg/managementapi/lintgates_guard_test.go`), so a commented-out
     `gofmt -l .`, `make lint-tenant` or `check rules` line still satisfies
     it. Strip shell comments first, as the shard guard does since #443
