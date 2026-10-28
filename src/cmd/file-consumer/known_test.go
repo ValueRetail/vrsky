@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
@@ -120,5 +124,68 @@ func TestKnown_PublishCutOffByStopIsPublishedByNextStart(t *testing.T) {
 			t.Fatalf("%s published %d times after the restart, want 1 (%s)", name, len(envs), describe(probe.published()))
 		}
 		assertWatchEnvelope(t, envs[0], name, content)
+	}
+}
+
+// failingReadStore fails every read and counts saves.
+type failingReadStore struct {
+	*lockedStore
+	saves atomic.Int32
+}
+
+func (s *failingReadStore) Get(context.Context, string, string, string) (*checkpoint.Checkpoint, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func (s *failingReadStore) Save(ctx context.Context, cp *checkpoint.Checkpoint) error {
+	s.saves.Add(1)
+	return s.lockedStore.Save(ctx, cp)
+}
+
+// A start whose checkpoint read fails falls back to "everything present is
+// done" for this run, but must not save that: it would overwrite the saved
+// history, and another watcher re-reading it could skip a file it should
+// publish. The first real change saves.
+func TestKnown_FailedReadDoesNotOverwriteSavedSet(t *testing.T) {
+	f := newRaceFixture(t)
+	if err := os.MkdirAll(f.inbox, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.inbox, "old.json"), []byte(`{"old":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &failingReadStore{lockedStore: newLockedStore()}
+	clock := newFakeClock()
+	f.c.checkpoints = store
+	f.c.now = clock.now
+	f.c.pollInterval = time.Hour // the background watcher never polls; the test does
+
+	f.c.startConnection(context.Background(), raceConnID, raceTenant)
+	ac := f.c.getActiveConnection(raceConnID)
+	if ac == nil {
+		t.Fatal("connection not active after startConnection")
+	}
+	if got := store.saves.Load(); got != 0 {
+		t.Fatalf("%d checkpoint saves at start after a failed read, want 0", got)
+	}
+
+	content := []byte(`{"new":1}`)
+	if err := os.WriteFile(filepath.Join(f.inbox, "new.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		clock.advance(time.Hour)
+		f.c.pollOnce(context.Background(), ac)
+	}
+	if got := len(f.probe.forName("old.json")); got != 0 {
+		t.Errorf("old.json published %d times, want 0 (the fallback treats it as done)", got)
+	}
+	envs := f.probe.forName("new.json")
+	if len(envs) != 1 {
+		t.Fatalf("new.json published %d times, want 1 (%s)", len(envs), describe(f.probe.published()))
+	}
+	assertWatchEnvelope(t, envs[0], "new.json", content)
+	if got := store.saves.Load(); got != 1 {
+		t.Errorf("%d checkpoint saves after the publish, want 1", got)
 	}
 }

@@ -113,8 +113,10 @@ published names next to them.
     folder. Everything else in the folder is new and goes through the
     normal stability check. Dirty if names were pruned.
   - Read error or unreadable state: log, fall back to today's baseline,
-    dirty. A transient database error then costs what it costs today rather
-    than keeping the pipeline down.
+    not dirty. A transient database error then costs what it costs today
+    rather than keeping the pipeline down, and the fallback is not saved
+    over the good history (review: another watcher re-reading it could
+    skip a file). The first real change saves.
   - After `activateStart`, before the watcher starts: save if dirty.
 - `pollOnce`:
   - Before the first publish in a poll, re-read the checkpoint and add any
@@ -181,8 +183,11 @@ tenant path resolution or the upload path.
     and the two sqlmock round trips fail.
   - a cancelled publish kept as done:
     `TestKnown_PublishCutOffByStopIsPublishedByNextStart` fails.
-- Not tested: a failing checkpoint read or save (falls back to the old
-  rule, or retries next poll); logged only.
+- Review round: a failed read no longer saves the fallback set.
+  `TestKnown_FailedReadDoesNotOverwriteSavedSet` asserts no save at start;
+  with `dirty = true` put back on the error path it fails ("1 checkpoint
+  saves at start after a failed read, want 0").
+- Not tested: a failing save (retried next poll, logged).
 
 ## Risks
 

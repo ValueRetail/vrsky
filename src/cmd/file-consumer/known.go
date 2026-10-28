@@ -84,7 +84,10 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (nam
 // name in the folder is done, as before. After that only the names saved as
 // done are; anything else in the folder arrived or was still settling while
 // the connection was not watching, and goes through the normal stability
-// check. A failed read falls back to the first-start rule.
+// check. A failed read falls back to the first-start rule for this run but
+// does not save it: that would overwrite the saved history with "everything
+// present is done", and another watcher re-reading it could then skip a file
+// it should publish. The first real change saves.
 func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) {
 	current := s.listFiles(ac.WatchDir)
 	ac.knownFiles = current
@@ -92,15 +95,15 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) {
 		return
 	}
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
-	// Whatever happens below, the set is saved once the start is active, so a
-	// first start is recorded even if nothing is ever published.
-	ac.dirty = true
 	saved, found, err := s.loadSaved(ctx, ac)
 	switch {
 	case err != nil:
 		logger.Error("Could not read which files were already published; treating every file in the folder as done",
 			"error", err)
 	case !found:
+		// Saved once the start is active, so a first start is recorded even
+		// if nothing is ever published.
+		ac.dirty = true
 		logger.Info("First start for this folder: files already in it are not published", "files", len(current))
 	default:
 		known := make(map[string]bool, len(saved))
