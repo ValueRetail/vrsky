@@ -25,6 +25,7 @@ package messaging
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -129,7 +130,7 @@ func EnsureStreams(js nats.JetStreamContext) error {
 }
 
 func ensure(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
-	_, err := js.StreamInfo(cfg.Name)
+	info, err := js.StreamInfo(cfg.Name)
 	if errors.Is(err, nats.ErrStreamNotFound) {
 		_, err = js.AddStream(cfg)
 		return err
@@ -137,9 +138,78 @@ func ensure(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
 	if err != nil {
 		return err
 	}
-	// Stream exists. Try a best-effort reconciliation; JS rejects changes
-	// that would silently re-deliver, which is fine — log + carry on at
-	// the caller's discretion.
+	// Every connector and core service calls this at start. Updating a stream
+	// that already matches is noise, and a fleet restart's dozens of
+	// concurrent updates were what triggered the nats-server race fixed in
+	// #339 (plans/nats-server-race.md). So update only on drift.
+	if len(streamDrift(info.Config, *cfg)) == 0 {
+		return nil
+	}
+	// Stream exists and differs. Try a best-effort reconciliation; JS rejects
+	// changes that would silently re-deliver, which is fine — log + carry on
+	// at the caller's discretion.
 	_, _ = js.UpdateStream(cfg)
 	return nil
+}
+
+// streamDrift names the fields on which an existing stream differs from what
+// EnsureStreams wants. It compares exactly the fields EnsureStreams sets; a
+// field newly set there must be added here, or a change to it is never
+// applied to an existing stream.
+//
+// An unset field on the wanted side is compared against the value
+// nats-server fills in for it (checkStreamCfg in server/stream.go). Where
+// that guess could be wrong, say an account limit lowering the duplicates
+// window, the field reports as drifted and the stream is updated as it was
+// before this check existed: a wrong guess costs an update, never a skipped
+// one.
+func streamDrift(have, want nats.StreamConfig) []string {
+	var out []string
+	if !slices.Equal(have.Subjects, want.Subjects) {
+		out = append(out, "subjects")
+	}
+	if have.Retention != want.Retention {
+		out = append(out, "retention")
+	}
+	if have.Storage != want.Storage {
+		out = append(out, "storage")
+	}
+	if have.MaxAge != want.MaxAge {
+		out = append(out, "max_age")
+	}
+	if have.MaxBytes != unlimitedIfUnset(want.MaxBytes) {
+		out = append(out, "max_bytes")
+	}
+	if have.MaxMsgs != unlimitedIfUnset(want.MaxMsgs) {
+		out = append(out, "max_msgs")
+	}
+	if have.Discard != want.Discard {
+		out = append(out, "discard")
+	}
+	if have.Duplicates != duplicatesWindow(want) {
+		out = append(out, "duplicates")
+	}
+	return out
+}
+
+// unlimitedIfUnset mirrors the server: 0 or anything below -1 means -1,
+// unlimited.
+func unlimitedIfUnset(v int64) int64 {
+	if v == 0 || v < -1 {
+		return -1
+	}
+	return v
+}
+
+// duplicatesWindow mirrors the server's default for an unset window: two
+// minutes, or the max age when that is set and shorter.
+func duplicatesWindow(cfg nats.StreamConfig) time.Duration {
+	if cfg.Duplicates != 0 {
+		return cfg.Duplicates
+	}
+	const serverDefault = 2 * time.Minute
+	if cfg.MaxAge != 0 && cfg.MaxAge < serverDefault {
+		return cfg.MaxAge
+	}
+	return serverDefault
 }
