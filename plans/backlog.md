@@ -477,6 +477,18 @@ Last updated 2026-10-28.
     the API total, so a workspace with more than 100 shows a badge that
     disagrees with the running/stopped/error cards. Count by status on the
     server, or label the cards as a sample. Found in review of #450 (#466).
+76. **A file-consumer pod can adopt a replacement without publishing it.**
+    If a pod's stat of a known name fails at load (so it has no stamp),
+    another pod saved stamp S, and the file is now a newer S', `mergeSaved`
+    leaves it alone and the next poll adopts S' as done. Needs a stat
+    failure, two pods and a replacement at once. Skip adoption in
+    `pollOnce` when the saved row has a different stamp. Found in review of
+    #420 (#465).
+77. **Every file-consumer poll stats every file in the folder.** Since
+    #420 known files are checked for replacement too, so a share with
+    thousands of files costs one SMB round trip per file per poll. Consider
+    a cheaper change signal (directory mtime, or stat known files less
+    often). Related to #426. Found in review of #420 (#465).
 
 ## Human
 
