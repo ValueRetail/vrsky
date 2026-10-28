@@ -11,6 +11,13 @@
 #   backup                the backup CronJob or its deploy script changed:
 #                         deploy-backup-azure.sh
 #
+# Shared Go code (src/pkg, src/internal, go.mod, go.sum, any Dockerfile)
+# rebuilds every Go image. A _test.go file or anything under a testdata/
+# directory below src/ marks nothing on its own (#410). The deploy job feeds
+# it `git diff --no-renames`, so a code file renamed to _test.go still
+# counts. src/cmd/vrsky-agent and infrastructure/migrations are baked into
+# the management-api image.
+#
 # TOOLS are images with nothing to roll: the backup CronJob pulls
 # vrsky-cli:latest at every run, so a rebuild is the whole deploy.
 #
@@ -39,8 +46,15 @@ while IFS= read -r p; do
   [ -z "$p" ] && continue
   case "$p" in
     ui/*)                                   out+=("image ui" "core ui") ;;
-    src/pkg/*|src/go.mod|src/go.sum)        all_go=1 ;;
+    # Tests and their fixtures never reach a binary: no rebuild, no restart.
+    # `*` crosses `/` in a case pattern, so this holds at any depth.
+    src/*_test.go|src/*/testdata/*)         ;;
+    src/pkg/*|src/internal/*|src/go.mod|src/go.sum) all_go=1 ;;
     src/cmd/*/Dockerfile)                   all_go=1 ;;
+    # The management-api image bakes in the Windows agent it serves for
+    # download and the SQL migrations it runs at start (see its Dockerfile).
+    src/cmd/vrsky-agent/*|infrastructure/migrations/*)
+                                            out+=("image management-api" "core management-api") ;;
     src/cmd/*)
       name="${p#src/cmd/}"; name="${name%%/*}"
       if has "$CORE" "$name"; then out+=("image $name" "core $name")

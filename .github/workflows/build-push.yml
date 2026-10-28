@@ -72,16 +72,32 @@ jobs:
         working-directory: ui
         run: npm run build
 
-  go-tests:
-    name: Go Tests
+  # The Go tests, split over parallel runners (#436). One job running
+  # `go test -race ./...` took 15 minutes, most of it pkg/managementapi, and
+  # every image build waited for it. .github/scripts/go-test-shards.sh maps a
+  # shard to its packages: the slow ones by name, and `rest` is whatever
+  # `go list ./...` finds that no named shard holds, so a new package is
+  # tested without anyone listing it. TestGoTestShardsCoverEveryPackage keeps
+  # this matrix and the script in step and checks every package is covered
+  # once (plans/issue-436-shard-go-tests.md).
+  go-test-shards:
+    name: Go Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
+    strategy:
+      # Report every shard's failures, as the single job did, rather than
+      # cancelling the others at the first red one.
+      fail-fast: false
+      matrix:
+        shard: [managementapi, messaging, agents, rest]
 
     # A real Postgres for the tests that need one (src/pkg/testdb): tenant
     # isolation as the database enforces it, the advisory lock, registration
     # under a race, driver behaviour. Everything else runs on sqlmock, which
     # checks SQL text and nothing more. Each such test creates and drops its
     # own database. Throwaway credentials for a server that lives for one job.
+    # Every shard gets one: database tests live in several packages, and the
+    # skip check below must hold wherever they land.
     services:
       postgres:
         image: postgres:16-alpine
@@ -95,6 +111,67 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
+          cache-dependency-path: src/go.sum
+
+      # `go test` fetches modules as it compiles, one attempt each. On
+      # 2026-10-05 proxy.golang.org dropped a single download mid-stream and 41
+      # packages ended in "setup failed" before a test had run: main went red
+      # on a merge that changed no code path (#299, run 37309549541). Fetch
+      # everything first instead, with retries (.github/actions/go-modules).
+      - name: Download Go modules
+        uses: ./.github/actions/go-modules
+
+      # GOPROXY=off: every module is in the cache by now. If this step ever
+      # needs one that is not, it says so on every run, instead of working
+      # until the day the proxy hiccups.
+      - name: Run Go tests
+        working-directory: src
+        env:
+          GOPROXY: "off"
+          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+        run: |
+          set -o pipefail
+          pkgs="$(../.github/scripts/go-test-shards.sh "${{ matrix.shard }}")"
+          echo "shard ${{ matrix.shard }}: $(echo "$pkgs" | wc -l) packages"
+          # shellcheck disable=SC2086 # one argument per package
+          go test -v -race -cover $pkgs 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          # The database tests skip themselves when the variable is missing,
+          # and a skip is invisible: three of them went unrun in CI for
+          # months because nothing set the variable they waited for. Here a
+          # skip can only mean the variable or the service above was lost.
+          if grep -q "VRSKY_TEST_POSTGRES_URL not set" "$RUNNER_TEMP/go-test.log"; then
+            echo "::error::a database test was skipped in CI — VRSKY_TEST_POSTGRES_URL or the postgres service is missing"
+            exit 1
+          fi
+
+      # The Postgres worker's state store (pkg/io), on a real database. These
+      # sit behind the integration build tag, which the main run does not set,
+      # and unlike the tests above they fail rather than skip without one.
+      # pkg/io is in the `rest` shard, so they run there.
+      - name: Run pkg/io state-store tests
+        if: matrix.shard == 'rest'
+        working-directory: src
+        env:
+          GOPROXY: "off"
+          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -tags=integration -race -count=1 ./pkg/io/ -run PostgresStateStore
+
+  # The checks that are not `go test`, beside the shards instead of after
+  # them (#436): before, golangci-lint alone added two minutes to the end of
+  # the single test job.
+  go-lint:
+    name: Go lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha)
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -118,8 +195,7 @@ jobs:
       # default linter set (errcheck, gosimple, govet, ineffassign, staticcheck,
       # unused). So nothing was checking formatting at all, which is how
       # cmd/sap-s4hana-producer/service.go sat unformatted on main until #236.
-      # Cheap, and first, so a formatting nit fails in seconds rather than after
-      # the race-enabled test run.
+      # Cheap, and first, so a formatting nit fails in seconds.
       - name: Check gofmt
         working-directory: src
         run: |
@@ -133,43 +209,8 @@ jobs:
           fi
           echo "all files are gofmt-clean"
 
-      # `go test` fetches modules as it compiles, one attempt each. On
-      # 2026-10-05 proxy.golang.org dropped a single download mid-stream and 41
-      # packages ended in "setup failed" before a test had run: main went red
-      # on a merge that changed no code path (#299, run 37309549541). Fetch
-      # everything first instead, with retries (.github/actions/go-modules).
       - name: Download Go modules
         uses: ./.github/actions/go-modules
-
-      # GOPROXY=off: every module is in the cache by now. If this step ever
-      # needs one that is not, it says so on every run, instead of working
-      # until the day the proxy hiccups.
-      - name: Run Go tests
-        working-directory: src
-        env:
-          GOPROXY: "off"
-          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-        run: |
-          set -o pipefail
-          go test -v -race -cover ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
-          # The database tests skip themselves when the variable is missing,
-          # and a skip is invisible: three of them went unrun in CI for
-          # months because nothing set the variable they waited for. Here a
-          # skip can only mean the variable or the service above was lost.
-          if grep -q "VRSKY_TEST_POSTGRES_URL not set" "$RUNNER_TEMP/go-test.log"; then
-            echo "::error::a database test was skipped in CI — VRSKY_TEST_POSTGRES_URL or the postgres service is missing"
-            exit 1
-          fi
-
-      # The Postgres worker's state store (pkg/io), on a real database. These
-      # sit behind the integration build tag, which the main run does not set,
-      # and unlike the tests above they fail rather than skip without one.
-      - name: Run pkg/io state-store tests
-        working-directory: src
-        env:
-          GOPROXY: "off"
-          VRSKY_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
-        run: go test -tags=integration -race -count=1 ./pkg/io/ -run PostgresStateStore
 
       # v2, and the action must move to v8 with it. v1.64.8 was itself built
       # with Go 1.24 and refused to target 1.26 ("the Go language version used
@@ -201,6 +242,24 @@ jobs:
       - name: Lint tenant filters
         working-directory: src
         run: make lint-tenant
+
+  # One "Go Tests" result for everything above, as before the split: green
+  # only when every shard and the lint job passed. Branch protection does not
+  # require it today; it keeps a single check to point at, and the plan job
+  # needs it as well as the jobs themselves.
+  go-tests:
+    name: Go Tests
+    needs: [go-test-shards, go-lint]
+    if: always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.sha))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard and the lint job passed
+        env:
+          SHARDS: ${{ needs.go-test-shards.result }}
+          LINT: ${{ needs.go-lint.result }}
+        run: |
+          echo "shards: $SHARDS, lint: $LINT"
+          [ "$SHARDS" = success ] && [ "$LINT" = success ]
 
   # The remote agent (#266) runs on customer Windows machines. The Windows-only
   # code — the credential's ACL, atomic rename over a locked file, the service
@@ -298,7 +357,7 @@ jobs:
   # secret is stored. TestDeployJobGatesOnTests keeps the gates in place.
   plan:
     name: Plan the rollout
-    needs: [changes, test, go-tests, agent-windows, agent-binaries]
+    needs: [changes, test, go-tests, go-test-shards, go-lint, agent-windows, agent-binaries]
     # `test` is skipped on a merge that did not touch the UI; a skipped gate
     # is fine, a failed or cancelled one is not.
     if: >-
@@ -320,7 +379,9 @@ jobs:
       - name: Map the merge's paths to targets
         id: plan
         run: |
-          git diff --name-only HEAD^ HEAD > changed.txt
+          # --no-renames lists both sides of a rename, so `git mv x.go
+          # x_test.go` still counts the code that left the image (#410).
+          git diff --name-only --no-renames HEAD^ HEAD > changed.txt
           infrastructure/azure/affected.sh < changed.txt > targets.txt
           echo "changed paths:"; sed 's/^/  /' changed.txt
           echo "targets:";       sed 's/^/  /' targets.txt

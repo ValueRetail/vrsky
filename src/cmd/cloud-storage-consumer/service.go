@@ -49,7 +49,7 @@ type cloudConsumer struct {
 	// in Configure; tests inject a fake.
 	newEvents eventSourceFactory
 
-	active map[string]context.CancelFunc
+	active map[string]*activeConn
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
 	starts sdk.StartGuard
@@ -102,7 +102,7 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	s.nc = res.NATS
 	s.logger = res.Logger
 	s.inlineMax = res.InlineMaxBytes()
-	s.active = make(map[string]context.CancelFunc)
+	s.active = make(map[string]*activeConn)
 	if s.newStore == nil {
 		s.newStore = objectstore.New
 	}
@@ -160,11 +160,11 @@ func (s *cloudConsumer) Stop(ctx context.Context) error {
 		_ = s.stopSub.Unsubscribe()
 	}
 	s.mu.Lock()
-	for id, cancel := range s.active {
+	for id, ac := range s.active {
 		s.logger.Info("Stopping cloud-storage poller", "connection_id", id)
-		cancel()
+		ac.cancel()
 	}
-	s.active = make(map[string]context.CancelFunc)
+	s.active = make(map[string]*activeConn)
 	// A start still in flight must not leave a poller nobody will cancel.
 	s.starts.StopAllLocked()
 	s.mu.Unlock()
@@ -222,8 +222,9 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ac := &activeConn{cancel: cancel}
 	// A stop that arrived during the work above has taken the claim back and wins.
-	if !claim.Activate(func() { s.active[connectionID] = cancel }) {
+	if !claim.Activate(func() { s.active[connectionID] = ac }) {
 		cancel()
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
@@ -233,12 +234,31 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 	if cfg.Mode == "event" {
 		logger.Info("Starting cloud-storage event loop",
 			"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "event_target", cfg.eventTarget())
-		go s.runEventLoop(ctx, connectionID, tenantID, cfg)
+		go s.runEventLoop(ctx, ac, connectionID, tenantID, cfg)
 		return
 	}
 	logger.Info("Starting cloud-storage poller",
 		"provider", cfg.providerOrDefault(), "bucket", cfg.Bucket, "prefix", cfg.Prefix, "after_action", cfg.AfterAction)
-	go s.runPoller(ctx, connectionID, tenantID, cfg)
+	go s.runPoller(ctx, ac, connectionID, tenantID, cfg)
+}
+
+// activeConn is one start's entry in the active map. The poller gets the same
+// pointer, so when it ends on its own it can tell whether the entry is still
+// its own (#408).
+type activeConn struct {
+	cancel context.CancelFunc
+}
+
+// dropActive removes connID from the active map if the entry is still own.
+// After a stop and a new start it belongs to the newer poller, and an old
+// poller finishing must leave it alone, or the next start runs a second poller
+// beside the new one (#408).
+func (s *cloudConsumer) dropActive(connID string, own *activeConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active[connID] == own {
+		delete(s.active, connID)
+	}
 }
 
 func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
@@ -248,9 +268,9 @@ func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	s.mu.Lock()
-	cancel, exists := s.active[cmd.ConnectionID]
+	ac, exists := s.active[cmd.ConnectionID]
 	if exists {
-		cancel()
+		ac.cancel()
 		delete(s.active, cmd.ConnectionID)
 	}
 	// A start still in progress gives up instead of finishing after the stop (#397).
@@ -267,13 +287,13 @@ func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
 
 // runPoller opens the store once, fetches immediately, then on the configured
 // interval. List/Get errors are logged and retried on the next tick.
-func (s *cloudConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg *cloudConfig) {
+func (s *cloudConsumer) runPoller(ctx context.Context, own *activeConn, connID, tenantID string, cfg *cloudConfig) {
 	logger := s.logger.With("connection_id", connID)
 
 	store, err := s.newStore(ctx, &cfg.Config)
 	if err != nil {
 		logger.Error("open cloud-storage backend failed", "error", err)
-		s.finishConn(connID, tenantID, "error")
+		s.finishConn(own, connID, tenantID, "error")
 		return
 	}
 
@@ -286,7 +306,7 @@ func (s *cloudConsumer) runPoller(ctx context.Context, connID, tenantID string, 
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("cloud-storage one-shot poll complete")
-		s.finishConn(connID, tenantID, "stopped")
+		s.finishConn(own, connID, tenantID, "stopped")
 		return
 	}
 
@@ -336,19 +356,19 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 // runEventLoop drives event-driven ingestion: long-poll the event source,
 // ingest each referenced object, and ack the message only after a successful
 // publish (at-least-once). Runs until ctx is cancelled (stop command/shutdown).
-func (s *cloudConsumer) runEventLoop(ctx context.Context, connID, tenantID string, cfg *cloudConfig) {
+func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connID, tenantID string, cfg *cloudConfig) {
 	logger := s.logger.With("connection_id", connID, "mode", "event")
 
 	store, err := s.newStore(ctx, &cfg.Config)
 	if err != nil {
 		logger.Error("open cloud-storage backend failed", "error", err)
-		s.finishConn(connID, tenantID, "error")
+		s.finishConn(own, connID, tenantID, "error")
 		return
 	}
 	src, err := s.newEvents(ctx, cfg)
 	if err != nil {
 		logger.Error("open event source failed", "error", err)
-		s.finishConn(connID, tenantID, "error")
+		s.finishConn(own, connID, tenantID, "error")
 		return
 	}
 
@@ -465,12 +485,10 @@ func (s *cloudConsumer) fetchAndPublish(ctx context.Context, connID, tenantID st
 }
 
 // finishConn marks the connection's terminal status and removes it from the
-// active set.
-func (s *cloudConsumer) finishConn(connID, tenantID, status string) {
+// active set, unless a newer start owns the entry by now (#408).
+func (s *cloudConsumer) finishConn(own *activeConn, connID, tenantID, status string) {
 	_ = s.updateConnectionStatus(connID, tenantID, status)
-	s.mu.Lock()
-	delete(s.active, connID)
-	s.mu.Unlock()
+	s.dropActive(connID, own)
 }
 
 // afterAction applies the configured post-ingest action to a fetched object.

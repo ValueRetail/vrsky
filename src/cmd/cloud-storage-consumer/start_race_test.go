@@ -81,7 +81,7 @@ func newSRFixture(t *testing.T) *srFixture {
 	f.c = &cloudConsumer{
 		db:      db,
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		active:  make(map[string]context.CancelFunc),
+		active:  make(map[string]*activeConn),
 		publish: func(context.Context, *envelope.Envelope) error { return nil },
 		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) {
 			f.polls.Add(1)

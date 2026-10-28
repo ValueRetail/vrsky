@@ -104,7 +104,7 @@ Last updated 2026-10-28.
     `ui/.env.example`), and `docker-compose.yml` has defaults for every
     variable. Add the file with the variables that matter or change the
     docs. Found in #371.
-25. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
+25. ~~**`infrastructure/azure/deploy-ui-azure.sh` isn't executable**~~ (#418) (mode
     100644; every other script there is 100755). The guide now says `bash
     ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
     #371.
@@ -201,7 +201,7 @@ Last updated 2026-10-28.
     retried and the connection stays down until someone starts it again.
     A "start again" flag on the reservation would cover it. Found by the
     test author on #375.
-38. **A test-only change rebuilds every Go image**
+38. ~~**A test-only change rebuilds every Go image**~~ (#410)
     (`infrastructure/azure/affected.sh`, the `src/pkg/*` case around line
     36). Any change under `src/pkg/`, `_test.go` files included, marks all
     Go images as affected, so a PR that only adds a test (#379's guard test,
@@ -247,7 +247,7 @@ Last updated 2026-10-28.
     deleted and publishes them all again on the next good read. Older than
     #391, which now also saves that empty set. A failed read should skip
     the poll. Found in review of #391.
-43. **The management-api README still places it behind Traefik.**
+43. ~~**The management-api README still places it behind Traefik.**~~ (#407)
     `infrastructure/kubernetes/management-api/README.md` says the replicas
     run "behind the Service / Traefik gateway" and advises sticky sessions
     for SSE "at Traefik". Production runs ingress-nginx, and the browser
@@ -262,23 +262,23 @@ Last updated 2026-10-28.
     user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
     `infrastructure/azure/rotate-secrets.sh`). Fix it together with item 27,
     and have `docs/DR.md` use the same names. Found in #386.
-45. **The encryption-at-rest table reads as if every layer is in place.**
+45. ~~**The encryption-at-rest table reads as if every layer is in place.**~~ (#407)
     `docs/DEPLOYMENT_GUIDE.md` lists an encrypted StorageClass and MinIO
     SSE through KES, but on AKS `deploy-azure.sh` uses `managed-csi`, and no
     script or workflow applies `infrastructure/kubernetes/encryption/`. Say
     which layers production has (Azure disks are encrypted at rest by the
     platform; whether with a customer key can't be told from the repo) and
     which are optional overlays. Found in #386.
-46. **The whitepaper promises inbound mTLS for webhooks that production
-    can't do.** `docs/security/whitepaper.md` section 4 says a webhook
+46. ~~**The whitepaper promises inbound mTLS for webhooks that production
+    can't do.**~~ (#407) `docs/security/whitepaper.md` section 4 says a webhook
     consumer can require a client certificate. That needs the worker's TLS
     listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
     webhook Ingress has no SSL passthrough or `auth-tls` annotations, so
     ingress-nginx terminates TLS and the worker never sees a client cert.
     Either wire it up or say it's compose-only for now. Found in review of
     #386.
-47. **The encryption-at-rest checklist says `sslmode=require`; production
-    uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
+47. ~~**The encryption-at-rest checklist says `sslmode=require`; production
+    uses `disable`.**~~ (#407) `docs/operator/encryption-at-rest.md` tells operators
     to use TLS to the databases in production, but the AKS connection
     strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
     `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
@@ -297,7 +297,7 @@ Last updated 2026-10-28.
     `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
     the docs), or, if something should use the stream, make it relative
     like `api.ts`. Found during #399.
-50. **A file folder that can't be read only shows up in the log**
+50. ~~**A file folder that can't be read only shows up in the log**~~ (#409)
     (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
     connection shows as `running` while its folder is unreadable, and the
     only sign is one Warn in the file-consumer log. `noteReadFailure` could
@@ -305,7 +305,7 @@ Last updated 2026-10-28.
     panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
     and `emitEvent` only reaches live subscribers, so it costs nothing
     when no panel is open. Found in review of #398.
-51. **A failed checkpoint read during a deferred baseline loses files**
+51. ~~**A failed checkpoint read during a deferred baseline loses files**~~ (#409)
     (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
     not read the folder (#398), the first good read calls `loadKnown`. If
     the checkpoint read fails then, it falls back to "everything present is
@@ -313,7 +313,7 @@ Last updated 2026-10-28.
     landed during the outage are never published. `takeDeferredBaseline`
     already retries every poll, so it could stay deferred on a checkpoint
     error instead. Found in review of #398.
-52. **An ending poller can drop a newer poller's map entry.** api
+52. ~~**An ending poller can drop a newer poller's map entry.**~~ (#408) api
     (`pollConnection` one-shot), sftp (one-shot `runPoller`), cloud-storage
     (`finishConn`) and tenant (`runBridge` error paths) delete their
     connection from the active map without checking the entry is still
@@ -333,7 +333,7 @@ Last updated 2026-10-28.
     so two start commands can race and leak the overwritten session's
     subscription; its fingerprint/replace model doesn't fit `StartGuard`
     as is. Found during #397 and its review.
-54. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+54. ~~**`affected.sh` ignores `src/internal`.**~~ (#410) Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
@@ -361,6 +361,36 @@ Last updated 2026-10-28.
     (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
     Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
     in review of #404.
+58. **Production talks to Postgres without TLS.** The AKS connection
+    strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`)
+    and the in-cluster Postgres has no certificate. Turn on TLS for it (a
+    cert-manager certificate, `ssl = on`, `sslmode=verify-full` in the
+    Secrets) or move to a managed Postgres. Then drop the "doesn't yet" notes
+    in `docs/operator/encryption-at-rest.md` and the whitepaper. Manifests
+    and secrets: PR plus `agent:needs-human`. Found in #407.
+59. **Inbound webhook mTLS can't reach production.** No manifest sets
+    `WORKER_MTLS_PORT`, and the webhook Ingress terminates TLS, so the
+    worker never sees a client certificate. Wiring it up needs the TLS port
+    on the webhook-consumer Service plus SSL passthrough (or a separate
+    LoadBalancer) for those connections, or a switch to ingress-nginx
+    `auth-tls-*` with the CA check moved to the edge. Then update the
+    whitepaper §4 and `docs/connectors/http.md`. Ingress and manifests: PR
+    plus `agent:needs-human`. Found in #407.
+60. **The File watcher panel's `connected` event shows the full volume
+    path** (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
+    /data/input/<tenant-id>/orders". It's the tenant's own folder, but the
+    mount layout and tenant id are internals. Use `folderLabel` (the path
+    relative to the tenant root), as the error events from #409 do. Found
+    during #409.
+61. **An old poller still writes its final status after a newer start.**
+    Since #408 an old poller ending late leaves the newer poller's map entry
+    alone, but it still writes status `stopped` (one-shot done) or `error`
+    (setup failed) after the new start wrote `running`. api
+    (`pollConnection`), sftp (`runPoller`), cloud-storage (`finishConn`) and
+    tenant (`runBridge`) do it, so the UI and the boot restore can see a
+    running connection as stopped. Write the status only when the entry was
+    still this poller's own (`dropActive` could report it). Found during
+    #408.
 
 ## Human
 

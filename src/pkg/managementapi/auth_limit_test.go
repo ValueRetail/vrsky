@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +80,29 @@ func (r *loginRepo) auditCount(eventType, status string) int {
 	return n
 }
 
+// testDummyHash stands in for loginDummyHash in the login tests: a hash of a
+// password nobody knows, at bcrypt.MinCost.
+var testDummyHash = sync.OnceValue(func() string {
+	h, err := bcrypt.GenerateFromPassword([]byte("a password nobody sends in a test"), bcrypt.MinCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(h)
+})
+
+// cheapDummyVerify is the verify seam newLoginEnv installs. An unknown email
+// is still verified once, against the dummy hash, but at bcrypt.MinCost: the
+// real dummy hash is cost 12, which takes seconds per login under -race and
+// these tests send dozens. None of them measure time;
+// TestLogin_UnknownEmailStillVerifiesAPassword replaces this seam and checks
+// the real dummy hash and its cost. Every other hash is verified as is.
+func cheapDummyVerify(hash, password string) error {
+	if hash == loginDummyHash() {
+		hash = testDummyHash()
+	}
+	return auth.VerifyPassword(hash, password)
+}
+
 // loginEnv is a handler with a fixed clock and a captured default log.
 type loginEnv struct {
 	h    *Handler
@@ -92,6 +116,7 @@ func newLoginEnv(t *testing.T) *loginEnv {
 	e := &loginEnv{repo: newLoginRepo(), now: time.Unix(1_760_000_000, 0), logs: &bytes.Buffer{}}
 	e.h = NewHandler(e.repo, NewValidator())
 	e.h.authLimits.now = func() time.Time { return e.now }
+	e.h.verifyPassword = cheapDummyVerify
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(e.logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })

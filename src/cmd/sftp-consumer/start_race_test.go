@@ -80,7 +80,7 @@ func newSRFixture(t *testing.T) *srFixture {
 	f.c = &sftpConsumer{
 		db:      db,
 		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		active:  make(map[string]context.CancelFunc),
+		active:  make(map[string]*activeConn),
 		publish: func(context.Context, *envelope.Envelope) error { return nil },
 		dial:    func(*SFTPConfig) (sftpConn, error) { f.polls.Add(1); return &fakeSFTP{}, nil },
 	}
