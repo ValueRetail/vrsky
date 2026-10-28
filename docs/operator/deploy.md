@@ -29,8 +29,30 @@ see [mail](mail.md) and [billing](billing.md)), node pools and other Azure
 resources. Database migrations run when the management API starts, so they
 ride along with its image as they always have.
 
+After the smoke check, every deploy that reaches a running cluster copies
+`acr-pull` from `vrsky-platform` into `vrsky-database`
+(`copy-acr-pull.sh`), so the backup Job keeps pulling after an ACR password
+rotation. It touches only that Secret ([backup](backup.md)).
+
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
+
+Most connectors roll: the new pod starts before the old one stops. The file
+consumer doesn't (#425). It uses the `Recreate` strategy, so the old pod
+stops first and nothing watches the file folders for the few seconds until
+the new one is up. Files that land in that gap are published by the new
+pod's first checks; uploads from the editor fail until it is up. With a
+rolling update both pods watched the same folders for a moment, and a file
+could be published twice. As a safeguard, `deploy-connectors-azure.sh`
+switches a live Deployment that is still on RollingUpdate before it applies
+the manifest. A plain `kubectl apply` handles the switch on its own; the
+patch is the one Grafana needed under helm (see [monitoring](monitoring.md))
+and does nothing once the Deployment is Recreate.
+
+One case loses a file that a rolling update would have caught: a file that
+lands in the gap while the new pod can't read the saved list of published
+files at start (a database error, logged at Error). It counts as already
+there and is never published.
 
 ## Watching a deploy
 

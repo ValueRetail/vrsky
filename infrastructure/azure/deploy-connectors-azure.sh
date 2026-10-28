@@ -229,6 +229,17 @@ emit() {  # $1=name  $2=role  $3=port ("-" for none)
               topologyKey: kubernetes.io/hostname"
   fi
 
+  # file-consumer is Recreate (#425). A rolling update starts the new pod,
+  # which restores every file pipeline and polls the shared folders, before
+  # the old one stops, so for a few seconds both can publish the same file.
+  # Recreate stops the old pod first. Files that land in the gap aren't in
+  # the saved done set, so the new pod's first polls publish them; /upload
+  # fails for those seconds. On a live cluster drop_rolling_update (below)
+  # also switches it before the apply, as a safeguard.
+  local strategy=""
+  [ "$name" = file-consumer ] && strategy="  strategy:
+    type: Recreate"
+
   cat <<EOF
 ---
 apiVersion: apps/v1
@@ -242,7 +253,8 @@ metadata:
     role: $role
 spec:
   replicas: $replicas
-  selector:
+${strategy:+$strategy
+}  selector:
     matchLabels:
       app: vrsky-$name
   template:
@@ -389,6 +401,27 @@ ensure_file_api_secret
 
 echo ">>> validating $MANIFEST"
 kubectl apply --dry-run=client -f "$MANIFEST" >/dev/null
+
+# drop_rolling_update <deployment> — switch a live RollingUpdate Deployment to
+# Recreate before the apply. A safeguard, not a requirement: the client-side
+# apply below already drops the server-defaulted rollingUpdate block, since
+# DeploymentSpec.strategy merges with retainKeys. Grafana's switch failed on
+# that block ("rollingUpdate: Forbidden", kubernetes/kubernetes#24198, #320),
+# but through helm. This is the same patch install-monitoring.sh runs, so the
+# outcome doesn't depend on which apply path is used. A no-op once the
+# Deployment is Recreate, and on a fresh cluster. The pod template is
+# unchanged, so the patch restarts nothing; the restart below does, already
+# as Recreate.
+drop_rolling_update() {
+  if [ "$(kubectl -n "$NS" get deploy "$1" -o jsonpath='{.spec.strategy.type}' 2>/dev/null)" = RollingUpdate ]; then
+    echo "==> switching $1 from RollingUpdate to Recreate"
+    [ -n "${DRY_RUN:-}" ] && return
+    kubectl -n "$NS" patch deploy "$1" --type merge \
+      -p '{"spec":{"strategy":{"rollingUpdate":null,"type":"Recreate"}}}'
+  fi
+}
+drop_rolling_update vrsky-file-consumer
+
 echo ">>> applying"
 kubectl apply -f "$MANIFEST"
 

@@ -32,6 +32,8 @@ Files already in the folder the first time the pipeline starts are not ingested.
 
 Stopping a pipeline pauses it: files that arrive while it is stopped are published when it starts. To skip them, move them out of the folder before starting.
 
+During a deploy the old file consumer stops before the new one starts, so only one ever watches a folder. For those few seconds nothing is watching: files that land then are published a little later, by the new one's first checks, and an upload from the editor fails and can be retried. The exception: if the new one can't read its list of published files when it starts (a database error, logged at Error in the file-consumer log), it counts everything in the folder as already there, so a file that landed in the gap is never published.
+
 Move or delete files once they have been processed. The list of published files is kept for every file still in the folder, so it grows with the folder; a folder that only ever fills up makes every check slower.
 
 Changing the folder in the pipeline's config counts as a first start for the new folder, so what is already in it is not ingested.
