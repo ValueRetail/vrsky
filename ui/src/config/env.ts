@@ -42,7 +42,6 @@ const getEnv = (key: string, defaultValue?: string): string => {
 // the UI against a remote API that doesn't share an origin.
 export const config = {
   apiUrl: getEnv('VITE_API_URL', ''),
-  wsUrl: getEnv('VITE_WS_URL', 'http://localhost:3000'),
   tenantId: getEnv('VITE_TENANT_ID', 'tenant-1'),
   logLevel: (getEnv('VITE_LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error'),
   isDev: import.meta.env.DEV,

@@ -289,8 +289,8 @@ Last updated 2026-10-28.
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
     manifest, so PR plus `agent:needs-human`. Found in review of #386.
-49. **`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
-    exists only for it.** It opens an `EventSource` on
+49. ~~**`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
+    exists only for it.**~~ (#428) It opens an `EventSource` on
     `${config.wsUrl}/api/v1/connections/{id}/metrics/stream`, default
     `http://localhost:3000`: a cross-origin URL in dev that wouldn't carry
     the session cookie, and a wrong host in production. Delete the file and
@@ -447,6 +447,15 @@ Last updated 2026-10-28.
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
+70. **Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
+    any more.** Its only client was `ui/src/services/websocket.ts`, deleted
+    in #428 without ever being imported. `HandleMetricsSSE` is still
+    mounted (`src/pkg/managementapi/handler.go`) and listed in the OpenAPI
+    registry, and `infrastructure/scripts/e2e-test.sh` probes it. Either
+    wire the builder's live metrics to it through a relative URL, the way
+    `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
+    a public API change, so that PR gets `agent:needs-human`. Found in
+    #428.
 
 ## Human
 

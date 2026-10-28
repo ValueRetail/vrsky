@@ -11,7 +11,7 @@ The two remaining live streams in management-api stay alive past the server's
 
 | Stream | Handler | Used by |
 |---|---|---|
-| `GET /api/v1/connections/{id}/metrics/stream` | `HandleMetricsSSE` (`websocket.go`) | builder live metrics (`ui/src/services/websocket.ts`) |
+| `GET /api/v1/connections/{id}/metrics/stream` | `HandleMetricsSSE` (`websocket.go`) | no UI caller since #428 deleted the unused `ui/src/services/websocket.ts` |
 | `GET /api/v1/tenants/{tenant_id}/status/stream` | `HandleTenantStatusSSE` (`tenant_sse.go`) | workspace provisioning progress |
 
 ## What is wrong (checked in the code, 2026-09-30)
