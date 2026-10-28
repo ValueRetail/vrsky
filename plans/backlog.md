@@ -382,7 +382,7 @@ Last updated 2026-10-28.
     mount layout and tenant id are internals. Use `folderLabel` (the path
     relative to the tenant root), as the error events from #409 do. Found
     during #409.
-61. **An old poller still writes its final status after a newer start.**
+61. ~~**An old poller still writes its final status after a newer start.**~~ (#456)
     Since #408 an old poller ending late leaves the newer poller's map entry
     alone, but it still writes status `stopped` (one-shot done) or `error`
     (setup failed) after the new start wrote `running`. api
@@ -586,6 +586,16 @@ Last updated 2026-10-28.
     `docs/DR.md`) and no CNPG cluster. Either say so in both headers and the
     README, or plan the move to CNPG with its own backup. Manifests: PR plus
     `agent:needs-human`. Found during #427.
+91. **A late status write can still land over a newer start's `running`.**
+    #456 left a window in api, sftp, cloud-storage and tenant: with the
+    6-connection DB pool saturated, a new start's lookup and its `running`
+    UPDATE can both get a connection before an old poller's `stopped` or
+    `error` UPDATE does, and the old write lands last. `handleStopCommand`'s
+    `stopped` write races a new start's `running` the same way. Fix with a
+    conditional UPDATE: the `running` write returns `started_at`, and the
+    ending and stop writes add `AND started_at = $n`. Or route the writes
+    through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
+    Found in review of #456.
 
 ## Human
 

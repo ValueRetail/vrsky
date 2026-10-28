@@ -180,12 +180,18 @@ type activeConn struct {
 // After a stop and a new start it belongs to the newer bridge, and an old one
 // failing must leave it alone, or the next start runs a second bridge beside
 // the new one (#408).
-func (s *tenantConsumer) dropActive(connectionID string, own *activeConn) {
+//
+// It reports whether the entry was own. Only then may the bridge write its
+// final status; otherwise the newer start has written "running" and owns the
+// status too (#456).
+func (s *tenantConsumer) dropActive(connectionID string, own *activeConn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.activeBridges[connectionID] == own {
-		delete(s.activeBridges, connectionID)
+	if s.activeBridges[connectionID] != own {
+		return false
 	}
+	delete(s.activeBridges, connectionID)
+	return true
 }
 
 // handleStopCommand processes a stop command
