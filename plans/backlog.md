@@ -85,7 +85,7 @@ Last updated 2026-10-27.
     (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
     (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
     the image can write, would make it run. Found in #370.
-22. **The Dockerfile guard test doesn't apply `.dockerignore`**
+22. ~~**The Dockerfile guard test doesn't apply `.dockerignore`**~~ (#385)
     (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
     COPY/ADD source in `ui/Dockerfile` exists under the build context, but
     not that the root `.dockerignore` lets it through. Changing `!ui` to

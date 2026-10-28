@@ -238,8 +238,9 @@ func TestRootMakefileHelpOutputListsDocumentedTargets(t *testing.T) {
 // failed at the first COPY. This runs `make -n docker-build-ui` in src/,
 // resolves the Dockerfile and the context the printed `docker build` uses,
 // and checks every COPY and ADD source (other than `--from` stage copies)
-// matches a file under that context. It doesn't need Docker, and it doesn't
-// apply the root .dockerignore (plans/backlog.md item 22).
+// matches a file under that context. It doesn't need Docker. Whether the
+// root .dockerignore lets those sources through is
+// TestDockerignoreKeepsDockerfileSources's job.
 func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 	makeBin, err := exec.LookPath("make")
 	if err != nil {
@@ -301,54 +302,20 @@ func TestMakefileDockerBuildUIContextHoldsDockerfileSources(t *testing.T) {
 		dockerfile = filepath.Join(srcDir, dockerfile)
 	}
 
-	df, err := os.ReadFile(dockerfile)
-	if err != nil {
-		t.Fatalf("read the Dockerfile `docker build` names: %v", err)
-	}
-	copies := 0
-	for _, line := range strings.Split(string(df), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 || (!strings.EqualFold(fields[0], "COPY") && !strings.EqualFold(fields[0], "ADD")) {
-			continue
-		}
-		// ADD is checked like COPY. Two forms this parser can't read get a
-		// hard stop instead of a silent pass: a COPY/ADD continued on the
-		// next line, and an ADD that fetches a URL rather than a context path.
-		if strings.HasSuffix(strings.TrimSpace(line), `\`) {
-			t.Fatalf("%s has a %s split over several lines (%q); update this test", dockerfile, fields[0], line)
-		}
-		if len(fields) < 3 {
-			continue
-		}
-		var srcs []string
-		fromStage := false
-		for _, f := range fields[1 : len(fields)-1] { // the last field is the destination
-			if strings.HasPrefix(f, "--from=") {
-				fromStage = true
-			}
-			if !strings.HasPrefix(f, "--") {
-				srcs = append(srcs, f)
-			}
-		}
-		if fromStage {
-			continue
-		}
-		for _, s := range srcs {
-			if strings.Contains(s, "://") || strings.HasPrefix(s, "git@") {
-				t.Fatalf("%s has %s from a remote source (%q); update this test", dockerfile, fields[0], s)
-			}
-			copies++
-			matches, err := filepath.Glob(filepath.Join(buildCtx, s))
-			if err != nil {
-				t.Fatalf("bad COPY pattern %q in %s: %v", s, dockerfile, err)
-			}
-			if len(matches) == 0 {
-				t.Errorf("%s copies %q, but the build context `make docker-build-ui` uses (%s) has nothing there",
-					dockerfile, s, buildCtx)
-			}
-		}
-	}
-	if copies == 0 {
+	// ADD is checked like COPY; see dockerfileCopySources
+	// (dockerignore_guard_test.go) for what it leaves out or stops on.
+	srcs := dockerfileCopySources(t, dockerfile)
+	if len(srcs) == 0 {
 		t.Fatalf("found no COPY sources in %s; the format changed, update this test", dockerfile)
+	}
+	for _, s := range srcs {
+		matches, err := filepath.Glob(filepath.Join(buildCtx, s))
+		if err != nil {
+			t.Fatalf("bad COPY pattern %q in %s: %v", s, dockerfile, err)
+		}
+		if len(matches) == 0 {
+			t.Errorf("%s copies %q, but the build context `make docker-build-ui` uses (%s) has nothing there",
+				dockerfile, s, buildCtx)
+		}
 	}
 }
