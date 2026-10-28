@@ -210,7 +210,7 @@ Last updated 2026-10-28.
     `testdata/`) there and in the `src/cmd/*` case. The script is under
     `infrastructure/azure/**`, so the fix is a PR labelled
     `agent:needs-human`, not an agent merge. Found during #375.
-39. **The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**
+39. ~~**The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**~~ (#399)
     The axios client (`ui/src/services/api.ts`) always sends relative
     `/api/...` requests, and Vite's proxy in `ui/vite.config.ts` forwards
     them to a hardcoded `http://localhost:3000`. Inside the container that
@@ -289,7 +289,15 @@ Last updated 2026-10-28.
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
     manifest, so PR plus `agent:needs-human`. Found in review of #386.
-49. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+49. **`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
+    exists only for it.** It opens an `EventSource` on
+    `${config.wsUrl}/api/v1/connections/{id}/metrics/stream`, default
+    `http://localhost:3000`: a cross-origin URL in dev that wouldn't carry
+    the session cookie, and a wrong host in production. Delete the file and
+    `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
+    the docs), or, if something should use the stream, make it relative
+    like `api.ts`. Found during #399.
+50. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case

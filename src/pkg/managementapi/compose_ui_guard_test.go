@@ -3,6 +3,7 @@ package managementapi
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -415,6 +416,300 @@ func TestComposeUIEnvIsRead(t *testing.T) {
 	}
 
 	for _, msg := range checkUIComposeEnv(compose.Services, read) {
+		t.Errorf("docker-compose.ui.yml: %s", msg)
+	}
+}
+
+// apiProxyEnv is the variable ui/vite.config.ts reads for its /api proxy
+// target. It has no VITE_ prefix on purpose: only the dev server reads it,
+// and Vite would hand any VITE_* value to the browser bundle.
+const apiProxyEnv = "API_PROXY_TARGET"
+
+// apiService is the docker-compose.yml service the dev UI's proxy must reach.
+const apiService = "management-api"
+
+// viteReadsProxyEnv matches `process.env.API_PROXY_TARGET` in vite.config.ts.
+var viteReadsProxyEnv = regexp.MustCompile(`process\.env\.` + apiProxyEnv + `\b`)
+
+// composeFile is the part of a compose file the dev-proxy guard reads.
+type composeFile struct {
+	Services map[string]map[string]any `yaml:"services"`
+	Networks map[string]map[string]any `yaml:"networks"`
+}
+
+// composeEnvValue returns the value a compose service sets for key under
+// `environment:`, in map or list form.
+func composeEnvValue(svc map[string]any, key string) (string, bool) {
+	switch env := svc["environment"].(type) {
+	case map[string]any:
+		v, ok := env[key]
+		if !ok {
+			return "", false
+		}
+		if v == nil {
+			return "", true
+		}
+		return fmt.Sprint(v), true
+	case []any:
+		for _, e := range env {
+			s, _ := e.(string)
+			if k, v, _ := strings.Cut(s, "="); k == key {
+				return v, true
+			}
+		}
+	}
+	return "", false
+}
+
+// composeServiceNetworks returns the network keys a service joins, from the
+// list form (`- net`) or the map form (`net: {aliases: …}`).
+func composeServiceNetworks(svc map[string]any) []string {
+	var nets []string
+	switch n := svc["networks"].(type) {
+	case []any:
+		for _, e := range n {
+			if s, ok := e.(string); ok {
+				nets = append(nets, s)
+			}
+		}
+	case map[string]any:
+		for k := range n {
+			nets = append(nets, k)
+		}
+	}
+	sort.Strings(nets)
+	return nets
+}
+
+// dockerNetworkName returns the Docker name of a network a compose file
+// declares under key: its `name:` if set, else the key for an external
+// network. A non-external network without `name:` gets a project prefix, so
+// another project can't count on its name; that returns "".
+func dockerNetworkName(key string, def map[string]any) string {
+	if n, ok := def["name"].(string); ok && n != "" {
+		return n
+	}
+	if ext, _ := def["external"].(bool); ext {
+		return key
+	}
+	return ""
+}
+
+// checkDevUIProxy returns what stops the dev `ui` service in
+// docker-compose.ui.yml from reaching the API through Vite's proxy: the
+// target must be http://<apiService>:<its listen port>, and `ui` must join,
+// as an external network, a network apiService is on in docker-compose.yml.
+func checkDevUIProxy(uiFile, core composeFile) []string {
+	var bad []string
+	ui, ok := uiFile.Services["ui"]
+	if !ok {
+		return []string{"docker-compose.ui.yml has no services.ui"}
+	}
+	api, ok := core.Services[apiService]
+	if !ok {
+		return []string{"docker-compose.yml has no services." + apiService}
+	}
+
+	target, ok := composeEnvValue(ui, apiProxyEnv)
+	if !ok {
+		bad = append(bad, fmt.Sprintf("ui doesn't set %s, so Vite proxies /api to localhost:3000, which inside the container is the container itself", apiProxyEnv))
+	} else {
+		listen, _ := composeEnvValue(api, "MGMT_API_LISTEN")
+		_, port, err := net.SplitHostPort(listen)
+		if err != nil || port == "" {
+			bad = append(bad, fmt.Sprintf("docker-compose.yml: %s sets no MGMT_API_LISTEN port to check %s against", apiService, apiProxyEnv))
+		} else if want := "http://" + apiService + ":" + port; strings.TrimRight(target, "/") != want {
+			bad = append(bad, fmt.Sprintf("ui sets %s=%q; want %q (%s's service name and MGMT_API_LISTEN port)", apiProxyEnv, target, want, apiService))
+		}
+	}
+
+	apiNets := map[string]bool{}
+	for _, k := range composeServiceNetworks(api) {
+		if n := dockerNetworkName(k, core.Networks[k]); n != "" {
+			apiNets[n] = true
+		}
+	}
+	shared := false
+	for _, k := range composeServiceNetworks(ui) {
+		def := uiFile.Networks[k]
+		if ext, _ := def["external"].(bool); ext && apiNets[dockerNetworkName(k, def)] {
+			shared = true
+		}
+	}
+	if !shared {
+		bad = append(bad, fmt.Sprintf("ui joins no external network that %s is on in docker-compose.yml, so it can't resolve %s", apiService, apiService))
+	}
+	return bad
+}
+
+// TestCheckDevUIProxy checks checkDevUIProxy on small compose files, so the
+// guard below can't pass for the wrong reason.
+func TestCheckDevUIProxy(t *testing.T) {
+	core := `
+services:
+  management-api:
+    environment:
+      MGMT_API_LISTEN: ":3000"
+    networks:
+      - vrsky-network
+networks:
+  vrsky-network:
+    name: vrsky-network
+`
+	good := `
+services:
+  ui:
+    environment:
+      API_PROXY_TARGET: http://management-api:3000
+    networks:
+      - core
+networks:
+  core:
+    external: true
+    name: vrsky-network
+`
+	cases := []struct {
+		name string
+		ui   string
+		core string
+		bad  int
+	}{
+		{"service name, port and external network", good, core, 0},
+		{"list-form env and map-form networks", `
+services:
+  ui:
+    environment:
+      - API_PROXY_TARGET=http://management-api:3000/
+    networks:
+      vrsky-network: {}
+networks:
+  vrsky-network:
+    external: true
+`, core, 0},
+		{"no target", `
+services:
+  ui:
+    networks: [core]
+networks:
+  core: {external: true, name: vrsky-network}
+`, core, 1},
+		{"localhost target", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://localhost:3000"}
+    networks: [core]
+networks:
+  core: {external: true, name: vrsky-network}
+`, core, 1},
+		{"wrong port", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://management-api:8080"}
+    networks: [core]
+networks:
+  core: {external: true, name: vrsky-network}
+`, core, 1},
+		{"container name instead of service name", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://vrsky-management-api:3000"}
+    networks: [core]
+networks:
+  core: {external: true, name: vrsky-network}
+`, core, 1},
+		{"own bridge network", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://management-api:3000"}
+    networks: [vrsky]
+networks:
+  vrsky: {driver: bridge}
+`, core, 1},
+		{"same key but not external", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://management-api:3000"}
+    networks: [vrsky-network]
+networks:
+  vrsky-network: {driver: bridge}
+`, core, 1},
+		{"external network the API isn't on", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://management-api:3000"}
+    networks: [other]
+networks:
+  other: {external: true, name: some-other-network}
+`, core, 1},
+		{"no networks at all", `
+services:
+  ui:
+    environment: {API_PROXY_TARGET: "http://management-api:3000"}
+`, core, 1},
+		{"API listens elsewhere", good, `
+services:
+  management-api:
+    environment: {MGMT_API_LISTEN: ":4000"}
+    networks: [vrsky-network]
+networks:
+  vrsky-network: {name: vrsky-network}
+`, 1},
+		{"API network has a project-prefixed name", good, `
+services:
+  management-api:
+    environment: {MGMT_API_LISTEN: ":3000"}
+    networks: [vrsky-network]
+networks:
+  vrsky-network: {driver: bridge}
+`, 1},
+		{"no ui service", "services: {}", core, 1},
+		{"no API service", good, "services: {}", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var ui, c composeFile
+			if err := yaml.Unmarshal([]byte(tc.ui), &ui); err != nil {
+				t.Fatalf("bad ui yaml: %v", err)
+			}
+			if err := yaml.Unmarshal([]byte(tc.core), &c); err != nil {
+				t.Fatalf("bad core yaml: %v", err)
+			}
+			if got := checkDevUIProxy(ui, c); len(got) != tc.bad {
+				t.Errorf("got %d problems %q; want %d", len(got), got, tc.bad)
+			}
+		})
+	}
+}
+
+// TestComposeUIDevReachesAPI guards issue #399: the dev `ui` service ran Vite
+// with its /api proxy hardcoded to http://localhost:3000, which inside the
+// container is the container itself, on its own bridge network, so every API
+// call failed. vite.config.ts now reads the target from API_PROXY_TARGET, and
+// the service must point it at the management API on the core stack's
+// network.
+func TestComposeUIDevReachesAPI(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+
+	vite, err := os.ReadFile(filepath.Join(root, "ui", "vite.config.ts"))
+	if err != nil {
+		t.Fatalf("read ui/vite.config.ts: %v", err)
+	}
+	if !viteReadsProxyEnv.Match(vite) {
+		t.Errorf("ui/vite.config.ts doesn't read process.env.%s, so setting it in docker-compose.ui.yml changes nothing", apiProxyEnv)
+	}
+
+	read := func(name string) composeFile {
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		var f composeFile
+		if err := yaml.Unmarshal(raw, &f); err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		return f
+	}
+	for _, msg := range checkDevUIProxy(read("docker-compose.ui.yml"), read("docker-compose.yml")) {
 		t.Errorf("docker-compose.ui.yml: %s", msg)
 	}
 }

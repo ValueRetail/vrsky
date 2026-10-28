@@ -12,10 +12,16 @@ services:
       - /app/node_modules
       - /app/dist
     command: npm run dev -- --host 0.0.0.0
+    # Vite proxies /api to this address (ui/vite.config.ts). localhost would
+    # be this container, so it joins the core stack's network and uses the
+    # management API's service name. Start the stack (docker-compose.yml)
+    # first; it creates vrsky-network.
+    environment:
+      API_PROXY_TARGET: http://management-api:3000
     profiles:
       - dev
     networks:
-      - vrsky
+      - vrsky-network
 
   ui-prod:
     build:
@@ -45,3 +51,6 @@ services:
 networks:
   vrsky:
     driver: bridge
+  vrsky-network:
+    external: true
+    name: vrsky-network
