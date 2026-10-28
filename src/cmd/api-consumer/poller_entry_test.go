@@ -51,7 +51,7 @@ func TestPollerEntry_OldOneShotEndKeepsNewEntry(t *testing.T) {
 			f.expectStatus("stopped") // stop A
 			f.expectLookup(nil)       // start B
 			f.expectRunning()
-			f.expectStatus("stopped") // A's one-shot ending path
+			// A's one-shot ending path writes no status: B owns it (#456).
 
 			f.c.startConnection(context.Background(), srConn, srTenant)
 			a := f.entry()

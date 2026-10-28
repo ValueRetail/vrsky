@@ -382,7 +382,7 @@ Last updated 2026-10-28.
     mount layout and tenant id are internals. Use `folderLabel` (the path
     relative to the tenant root), as the error events from #409 do. Found
     during #409.
-61. **An old poller still writes its final status after a newer start.**
+61. ~~**An old poller still writes its final status after a newer start.**~~ (#456)
     Since #408 an old poller ending late leaves the newer poller's map entry
     alone, but it still writes status `stopped` (one-shot done) or `error`
     (setup failed) after the new start wrote `running`. api

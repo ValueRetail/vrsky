@@ -88,7 +88,7 @@ func TestPollerEntry_OldEndKeepsNewEntry(t *testing.T) {
 			f.expectStatus("stopped") // stop A
 			f.expectLookup(nil)       // start B
 			f.expectRunning()
-			f.expectStatus(tc.status) // A's ending path
+			// A's ending path writes no status: B owns it (#456).
 
 			f.c.startConnection(context.Background(), srConn, srTenant)
 			a := f.entry()

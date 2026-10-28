@@ -119,7 +119,7 @@ func TestPollerEntry_OldBridgeErrorKeepsNewEntry(t *testing.T) {
 
 			// A's bridge fails late, holding A's entry.
 			tc.expect(f.mock)
-			f.expectStatus("error")
+			// No status write from A: B owns it (#456).
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel() // A's context, cancelled by the stop
 			cfg := tc.cfg

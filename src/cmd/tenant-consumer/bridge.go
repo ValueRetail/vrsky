@@ -37,8 +37,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 	dcInfo, err := s.getDataConnectionInfo(tenantID, config.SourceTenantID)
 	if err != nil {
 		logger.Error("No approved data connection found", "error", err)
-		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.dropActive(connectionID, own)
+		s.failBridge(own, connectionID, tenantID, logger)
 		return
 	}
 
@@ -55,8 +54,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 			logger.Error("Source connection not in shared list",
 				"source_connection_id", config.SourceConnectionID,
 				"shared_ids", dcInfo.SharedConnectionIDs)
-			_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-			s.dropActive(connectionID, own)
+			s.failBridge(own, connectionID, tenantID, logger)
 			return
 		}
 	}
@@ -78,8 +76,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 	js, jsErr := s.nc.JetStream()
 	if jsErr != nil {
 		logger.Error("JetStream context", "error", jsErr)
-		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.dropActive(connectionID, own)
+		s.failBridge(own, connectionID, tenantID, logger)
 		return
 	}
 	// Each bridge gets its own durable consumer with a FilterSubject set
@@ -98,8 +95,7 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 	})
 	if err != nil {
 		logger.Error("Failed to subscribe to source topic", "error", err, "topic", topic)
-		_ = s.updateConnectionStatus(connectionID, tenantID, "error")
-		s.dropActive(connectionID, own)
+		s.failBridge(own, connectionID, tenantID, logger)
 		return
 	}
 
@@ -116,6 +112,17 @@ func (s *tenantConsumer) runBridge(ctx context.Context, own *activeConn, connect
 	<-ctx.Done()
 	sub.Stop()
 	logger.Info("Bridge stopped")
+}
+
+// failBridge removes a bridge whose setup failed from activeBridges and marks
+// the connection "error", unless a newer start owns the entry, and with it the
+// status, by now (#408, #456).
+func (s *tenantConsumer) failBridge(own *activeConn, connectionID, tenantID string, logger *slog.Logger) {
+	if !s.dropActive(connectionID, own) {
+		logger.Info("A newer start owns the connection; leaving its status alone")
+		return
+	}
+	_ = s.updateConnectionStatus(connectionID, tenantID, "error")
 }
 
 // handleSourceMessage processes a message from the source tenant and republishes it.
