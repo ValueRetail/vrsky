@@ -3425,12 +3425,17 @@ tests and stops.</p>
 <tr>
 <td>Go lint</td>
 <td>pushes and PRs</td>
-<td><code>promtool</code> on the alert rules, <code>gofmt</code>, <code>golangci-lint</code>, the OpenAPI and tenant-filter lints, beside the shards</td>
+<td><code>gofmt</code>, <code>golangci-lint</code>, the OpenAPI and tenant-filter lints, beside the shards</td>
+</tr>
+<tr>
+<td>Alert rules (promtool)</td>
+<td>pushes and PRs</td>
+<td><code>promtool check rules</code> and <code>promtool test rules</code> on the alert rules, beside Go lint (#446)</td>
 </tr>
 <tr>
 <td>Go Tests</td>
 <td>pushes and PRs</td>
-<td>Green when every shard and Go lint passed</td>
+<td>Green when every shard, Go lint and the alert rules passed</td>
 </tr>
 <tr>
 <td>Remote agent on Windows</td>

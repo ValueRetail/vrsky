@@ -1707,6 +1707,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#templates-sitoo-business-central-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Templates: Sitoo ⇄ Business Central (beta)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2470,6 +2481,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#templates-sitoo-business-central-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Templates: Sitoo ⇄ Business Central (beta)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2574,7 +2596,10 @@ them, so do not set it on a pipeline whose destination is Sitoo.</p>
 <p>A <code>sitoo</code> producer node writes each incoming message into a Sitoo REST resource
 (e.g. updating warehouse stock, prices, or products) with HTTP Basic auth —
 completing two-way sync. The message payload is sent as the request body, so an
-upstream converter/filter should shape it to the target resource's schema.</p>
+upstream converter/filter should shape it to the target resource's schema.
+The producer writes only what its predecessor in the pipeline sends: with a
+converter in front, the source's raw page (which every node sees) is skipped
+and the converted one is written.</p>
 <ul>
 <li><code>account_id</code> / <code>site_id</code> / <code>api_id</code> / <code>api_password_secret_id</code> — as above.</li>
 <li><code>resource</code> — the target collection (default <code>warehouseitems</code>; e.g. <code>prices</code>).</li>
@@ -2597,6 +2622,43 @@ upstream converter/filter should shape it to the target resource's schema.</p>
 and <code>5xx</code>/network errors are retried (with the rate-limit backoff hint); <code>4xx</code>
 (bad request/data) and <code>401</code>/<code>403</code> (auth) are treated as poison and sent to the
 DLQ rather than retried forever.</p>
+<h2 id="templates-sitoo-business-central-beta">Templates: Sitoo ⇄ Business Central (beta)<a class="headerlink" href="#templates-sitoo-business-central-beta" title="Permanent link">&para;</a></h2>
+<p>The onboarding gallery has two templates between Sitoo and Business Central.
+Both are <strong>beta</strong>: their field mapping is tested against the converter, not
+yet against live Sitoo and BC tenants. Try them on a test company and a test
+warehouse first. The full field tables and the assumptions behind them are in
+<code>plans/issue-435-sitoo-bc-mapping.md</code>.</p>
+<p><strong>POS sales → ERP.</strong> Polls Sitoo <code>transactions</code> every 5 minutes and creates
+one draft BC sales invoice per receipt, one line per item. The wizard asks
+for:</p>
+<ul>
+<li>Sitoo account number, site id, API id and password</li>
+<li>BC Entra tenant id, environment, company id, client id and secret</li>
+<li>the BC customer number every invoice is created for</li>
+</ul>
+<p>What to know before you use it:</p>
+<ul>
+<li>The Sitoo <code>sku</code> must equal the BC item number. Item variants are not
+  handled.</li>
+<li>Sitoo prices include VAT, so the BC customer needs <em>Prices Including VAT</em>
+  turned on.</li>
+<li>The receipt number goes to <code>externalDocumentNumber</code>, which is how a receipt
+  already in BC is skipped, posted or not. The poller re-reads every receipt
+  on each poll, one BC lookup each, so keep it to a test site with few
+  receipts until the poller gets a cursor.</li>
+<li>Use one Sitoo site per pipeline: receipt numbers from two sites could
+  collide.</li>
+<li>Currency and posting date are not sent. BC takes them from the customer
+  and the work date.</li>
+</ul>
+<p><strong>ERP inventory → POS.</strong> Reads every BC inventory item every 15 minutes and
+sends <code>[{sku, decimaltotal}]</code> to <code>warehouses/&lt;id&gt;/warehouseitems</code>. The wizard
+asks for the BC and Sitoo credentials and that path with your warehouse id in
+it. BC's item <code>inventory</code> is the total over all locations, and prices are not
+synced.</p>
+<p>Running both together: a draft invoice does not lower BC stock until it is
+posted, so until then the stock push sends Sitoo the level from before the
+sale.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Incremental polling</strong> — the current poller does a full paged fetch each

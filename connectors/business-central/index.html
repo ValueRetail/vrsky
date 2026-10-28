@@ -1741,6 +1741,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#templates-sitoo-business-central-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Templates: Sitoo ⇄ Business Central (beta)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2426,6 +2437,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#templates-sitoo-business-central-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Templates: Sitoo ⇄ Business Central (beta)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2646,6 +2668,26 @@ with <code>PATCH</code> — updates send <code>If-Match: *</code>).</p>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
 and <code>503</code>/<code>5xx</code>/network errors retry; <code>4xx</code> bad-data and <code>401</code>/<code>403</code> auth are
 poison and go to the DLQ.</p>
+<h2 id="templates-sitoo-business-central-beta">Templates: Sitoo ⇄ Business Central (beta)<a class="headerlink" href="#templates-sitoo-business-central-beta" title="Permanent link">&para;</a></h2>
+<p>Two onboarding templates connect Business Central to Sitoo POS through a
+converter node. Both are beta until tested against live tenants; see
+<a href="../sitoo/#templates-sitoo-business-central-beta">Sitoo</a> for what the wizard
+asks and the assumptions they make.</p>
+<ul>
+<li><strong>POS sales → ERP</strong> posts one draft <code>salesInvoices</code> record per Sitoo
+  receipt, lines inline (<code>salesInvoiceLines</code> with <code>lineType: Item</code>,
+  <code>lineObjectNumber</code> = Sitoo SKU, <code>quantity</code>, <code>unitPrice</code> incl. VAT), for one
+  customer number you choose. <code>dedupe_fields: ["externalDocumentNumber"]</code>
+  keeps a receipt from becoming two invoices. Invoices rather than orders
+  because <code>salesInvoices</code> lists posted invoices too, while a posted order
+  drops out of <code>salesOrders</code> and the dedupe lookup would no longer find it.</li>
+<li><strong>ERP inventory → POS</strong> reads <code>items</code> filtered on <code>type eq 'Inventory'</code>,
+  500 per page, every 15 minutes, and not incrementally: an item's
+  <code>lastModifiedDateTime</code> does not change when its stock does.</li>
+</ul>
+<p>A Business Central destination writes only what its predecessor in the
+pipeline sends: with a converter in front, the source's raw page (which every
+node sees) is skipped and the converted record is written.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>On-prem / sandbox</strong> — set <code>api_base_url</code>, <code>token_url</code>, and <code>scope</code> overrides

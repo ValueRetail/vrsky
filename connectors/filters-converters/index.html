@@ -1889,6 +1889,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Converter node">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nested-lines-and-one-message-per-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested lines and one message per record
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2400,6 +2417,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Converter node">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nested-lines-and-one-message-per-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested lines and one message per record
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2473,6 +2507,40 @@ to align a source schema with what the destination expects.</p>
 pipeline editor (Property panel): connect source fields to destination fields
 and apply conversion functions as needed. For the available conversion
 functions, see <a href="../converter/"><code>docs/converter/</code></a>.</p>
+<h3 id="nested-lines-and-one-message-per-record">Nested lines and one message per record<a class="headerlink" href="#nested-lines-and-one-message-per-record" title="Permanent link">&para;</a></h3>
+<p>Two settings for records that carry lines, like a receipt with its items
+(added for the Sitoo ⇄ Business Central templates, #435). Neither is in the
+editor yet; set them in the node config.</p>
+<ul>
+<li>
+<p><strong><code>each</code> mapping</strong> maps every object of an array field with its own nested
+  mappings and writes the new array to <code>target</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"each"</span><span class="p">,</span><span class="w"> </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"items"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"salesInvoiceLines"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"drop_unmapped"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"mappings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rename"</span><span class="p">,</span><span class="w"> </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sku"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lineObjectNumber"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"to_number"</span><span class="p">,</span><span class="w"> </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"priceeach"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unitPrice"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Elements that are not objects are kept as they are. A missing or non-array
+<code>source</code> is left alone.</p>
+</li>
+<li>
+<p><strong><code>split_records: true</code></strong> on the node publishes each record of an array
+  result as its own message, for a destination whose API takes one record per
+  request (Business Central's <code>POST salesInvoices</code>). Sources publish a page
+  of records per message, so without it the destination gets the whole page.
+  If publishing fails part-way the input is retried and every record is sent
+  again, so give the destination a way to skip records it has
+  (<code>dedupe_fields</code> on a Business Central destination). A quick redelivery is
+  dropped by JetStream itself, because a part's message id is derived from
+  the input and its position. Payloads over the rehydrate cap (128 MB)
+  cannot be split and go to the DLQ.</p>
+</li>
+</ul>
+<p><code>to_string</code> writes numbers in plain decimal (<code>1000000</code>, not <code>1e+06</code>).</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Both node types carry their detailed configuration (rules and mappings) in
