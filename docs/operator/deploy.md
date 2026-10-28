@@ -32,6 +32,17 @@ ride along with its image as they always have.
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
 
+Most connectors roll: the new pod starts before the old one stops. The file
+consumer doesn't (#425). It uses the `Recreate` strategy, so the old pod
+stops first and nothing watches the file folders for the few seconds until
+the new one is up. Files that land in that gap are published by the new
+pod's first checks; uploads from the editor fail until it is up. With a
+rolling update both pods watched the same folders for a moment, and a file
+could be published twice. `deploy-connectors-azure.sh` switches a live
+Deployment that is still on RollingUpdate before it applies the manifest,
+since Kubernetes rejects the plain apply (the same fix as Grafana's, see
+[monitoring](monitoring.md)).
+
 ## Watching a deploy
 
 GitHub → Actions → the run for the merge. The *Plan the rollout* job lists

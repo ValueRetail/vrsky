@@ -224,7 +224,7 @@ Last updated 2026-10-28.
     `vrsky-network`, and set the target to `http://management-api:3000`.
     Or drop the dev service and point "Option 1" in
     `docs/DEPLOYMENT_GUIDE.md` at `npm run dev`. Found in #392.
-40. **Two file-consumer pods watch the same folders during a deploy.**
+40. ~~**Two file-consumer pods watch the same folders during a deploy.**~~ (#425)
     The file-consumer Deployment (`infrastructure/kubernetes/connectors/connectors.yaml`)
     has one replica and the default RollingUpdate strategy, so the new pod
     starts and restores every running file connection before the old one
@@ -571,6 +571,20 @@ Last updated 2026-10-28.
     by position or target ("Remove mapping 2", "Item mapping type for
     lineObjectNumber") and point the inputs at the warning list. Found in
     #458.
+89. **The SFTP and cloud-storage consumers forget what they published on
+    every restart.** Their done set is the in-memory `processed` map in
+    `runPoller` (`src/cmd/sftp-consumer/service.go`,
+    `src/cmd/cloud-storage-consumer/service.go`, poll mode). With `after_action:
+    none`, every restart or deploy publishes every file still in the
+    remote folder or bucket again. With `delete` or `move` they also have
+    #425's overlap: during a rolling update both pods list the same file
+    and both can publish it before one removes it. `strategy: Recreate`
+    alone would only fix the second, so port the file consumer's saved
+    done set (#391, `src/cmd/file-consumer/known.go`) first, then decide on
+    Recreate. The other polling consumers (api, db, salesforce, the ERP
+    and retail ones, tenant) were not checked for the overlap; each one's
+    cursor handling decides whether two pods for a few seconds can publish
+    twice. Found in #425.
 
 ## Human
 
