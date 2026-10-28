@@ -184,8 +184,8 @@ tests and stops.
 | Test UI | when `ui/**` changed | `npm ci`, `npm run test:coverage` (thresholds in `ui/vitest.config.ts`), `npm run build` |
 | Go Tests (`<shard>`) | pushes and PRs | `go test -v -race -cover` on one shard's packages against a Postgres service, in parallel: `managementapi`, `messaging`, `agents` and `rest` (every package the others don't name; `.github/scripts/go-test-shards.sh`). The `rest` shard also runs the `pkg/io` state-store tests |
 | Go lint | pushes and PRs | `gofmt`, `golangci-lint`, the OpenAPI and tenant-filter lints, beside the shards |
-| Alert rules (promtool) | pushes and PRs | `promtool check rules` and `promtool test rules` on the alert rules, beside Go lint (#446) |
-| Go Tests | pushes and PRs | Green when every shard, Go lint and the alert rules passed |
+| Alert rules (promtool `1/4` … `4/4`) | pushes and PRs | `promtool check rules`, then `promtool test rules` on the test groups that leg lists, beside Go lint (#446, #464). The four legs together run every group once |
+| Go Tests | pushes and PRs | Green when every shard, Go lint and every alert-rules leg passed. Make this the required check in branch protection, not the shard or leg names, which change when the split does |
 | Remote agent on Windows | pushes and PRs | Agent tests and the install script on a Windows runner |
 | Build remote agent binaries | pushes and PRs | `make build-agent`, uploaded as the `vrsky-agent` artifact |
 | Plan the rollout | pushes to `main`, once the jobs above passed or were skipped | Feeds the merge's changed paths to `affected.sh` |
