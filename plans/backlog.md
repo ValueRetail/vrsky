@@ -346,8 +346,8 @@ Last updated 2026-10-28.
     512Mi limit or more gets the Job OOM-killed. Fine for today's small
     management DB. Stream pg_dump through gzip and encryption into
     `PutStream`, or at least alert on the dump size. Found in review of #404.
-56. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
-    a backup change.** `deploy-backup-azure.sh` copies it from
+56. ~~**The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+    a backup change.**~~ (#431) `deploy-backup-azure.sh` copies it from
     `vrsky-platform`, and nothing else runs that script. After an ACR
     password rotation the backup Job can't pull until the next Catch up.
     Run the copy wherever `acr-pull` is rotated, or give the script a step
@@ -610,6 +610,25 @@ Last updated 2026-10-28.
     and retail ones, tenant) were not checked for the overlap; each one's
     cursor handling decides whether two pods for a few seconds can publish
     twice. Found in #425.
+93. **The `acr-pull` copy in `vrsky-ui` never refreshes.**
+    `deploy-ui-azure.sh` copies it from `vrsky-platform` once, and only a
+    human runs that script; the deploy job rolls the UI with
+    `deploy-core-azure.sh`, which doesn't copy. After an ACR password
+    rotation the next UI rollout can't pull. Add `vrsky-ui` to
+    `copy-acr-pull.sh` (#431), which already runs on every deploy. There
+    is also no written runbook for rotating the ACR password itself.
+    `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in #431.
+94. **A failed `acr-pull` apply can print the registry password.**
+    `deploy-backup-azure.sh` pipes the copied Secret into a bare
+    `kubectl apply -f -`. On an existing object a failed apply can print
+    "error when applying patch:" with the patch, new `.dockerconfigjson`
+    included, into the deploy log, which anyone with repo access can read.
+    Capture the output and print only a generic line and the exit code, as
+    `copy-acr-pull.sh` does since #431, with a stub test like
+    `TestCopyACRPullScript`'s "apply fails". `deploy-ui-azure.sh`'s copy
+    into `vrsky-ui` has the same leak; fix it with item 92.
+    `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in review
+    of #431.
 
 ## Human
 

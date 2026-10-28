@@ -29,6 +29,11 @@ see [mail](mail.md) and [billing](billing.md)), node pools and other Azure
 resources. Database migrations run when the management API starts, so they
 ride along with its image as they always have.
 
+After the smoke check, every deploy that reaches a running cluster copies
+`acr-pull` from `vrsky-platform` into `vrsky-database`
+(`copy-acr-pull.sh`), so the backup Job keeps pulling after an ACR password
+rotation. It touches only that Secret ([backup](backup.md)).
+
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
 

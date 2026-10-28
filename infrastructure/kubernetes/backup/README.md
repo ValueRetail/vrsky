@@ -44,6 +44,11 @@ directory or the script changes) and from Catch up. It:
 The script reads the Secret's key names only. It never creates, changes or
 prints the Secret.
 
+Every deploy also runs `infrastructure/azure/copy-acr-pull.sh`, which does
+step 1 and nothing else, so a rotated ACR password reaches `vrsky-database`
+without a Catch up. It never touches the CronJob or its `suspend`, and does
+nothing on a cluster without `acr-pull` in `vrsky-platform`.
+
 ## The Secret (a human creates it)
 
 Values come from you, pasted at a silent prompt so they stay out of shell
