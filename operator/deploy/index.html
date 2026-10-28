@@ -2542,8 +2542,27 @@ variables and secrets on the management API (<code>kubectl set env</code> / a pa
 see <a href="../mail/">mail</a> and <a href="../billing/">billing</a>), node pools and other Azure
 resources. Database migrations run when the management API starts, so they
 ride along with its image as they always have.</p>
+<p>After the smoke check, every deploy that reaches a running cluster copies
+<code>acr-pull</code> from <code>vrsky-platform</code> into <code>vrsky-database</code>
+(<code>copy-acr-pull.sh</code>), so the backup Job keeps pulling after an ACR password
+rotation. It touches only that Secret (<a href="../backup/">backup</a>).</p>
 <p>Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.</p>
+<p>Most connectors roll: the new pod starts before the old one stops. The file
+consumer doesn't (#425). It uses the <code>Recreate</code> strategy, so the old pod
+stops first and nothing watches the file folders for the few seconds until
+the new one is up. Files that land in that gap are published by the new
+pod's first checks; uploads from the editor fail until it is up. With a
+rolling update both pods watched the same folders for a moment, and a file
+could be published twice. As a safeguard, <code>deploy-connectors-azure.sh</code>
+switches a live Deployment that is still on RollingUpdate before it applies
+the manifest. A plain <code>kubectl apply</code> handles the switch on its own; the
+patch is the one Grafana needed under helm (see <a href="../monitoring/">monitoring</a>)
+and does nothing once the Deployment is Recreate.</p>
+<p>One case loses a file that a rolling update would have caught: a file that
+lands in the gap while the new pod can't read the saved list of published
+files at start (a database error, logged at Error). It counts as already
+there and is never published.</p>
 <h2 id="watching-a-deploy">Watching a deploy<a class="headerlink" href="#watching-a-deploy" title="Permanent link">&para;</a></h2>
 <p>GitHub → Actions → the run for the merge. The <em>Plan the rollout</em> job lists
 the changed paths and the targets; <em>Build … in ACR</em> runs one image per

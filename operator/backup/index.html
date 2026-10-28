@@ -2669,7 +2669,15 @@ replication to Norway West is a later option.</p>
 deploy job applies the CronJob through
 <code>infrastructure/azure/deploy-backup-azure.sh</code>. The CronJob stays suspended
 until the <code>vrsky-backup-config</code> Secret below exists. Everything else is the
-one-time human setup in the next section. The repo can't show whether that
+one-time human setup in the next section.</p>
+<p>The Job pulls <code>vrsky-cli</code> with a copy of the <code>acr-pull</code> Secret from
+<code>vrsky-platform</code>. Every deploy with the cluster up refreshes that copy
+(<code>infrastructure/azure/copy-acr-pull.sh</code>), and so does every Catch up, so
+after an ACR password rotation you only update <code>acr-pull</code> in
+<code>vrsky-platform</code>; the next deploy or Catch up carries it over. The copy step
+touches that one Secret and never the CronJob, so a CronJob you suspended
+for a restore stays suspended. The backup script itself still runs only on a
+backup change and on Catch up, because it decides <code>suspend</code> again each time. The repo can't show whether that
 setup has been done; check with <code>kubectl -n vrsky-database get cronjob
 vrsky-mgmt-backup</code> (SUSPEND) and <code>az dataprotection backup-instance list -g
 vrsky-prod --vault-name vrsky-backup -o table</code>.</p>
