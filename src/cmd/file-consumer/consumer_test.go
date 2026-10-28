@@ -49,8 +49,9 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 			AddRow(connID, tenant, "File Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
-	// First start: no saved state, the empty folder is saved as done (#391).
-	expectCheckpoints(mock, connID, tenant, 1, 1)
+	// First start: no saved state, the empty folder is saved as done (#391),
+	// as a snapshot and an empty changes row (#426).
+	expectCheckpoints(mock, connID, tenant, 1, 1, 0, 1)
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
@@ -125,7 +126,7 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
 	// Start: read, save the first-start state. Publish: re-read, save (#391).
-	expectCheckpoints(mock, connID, tenant, 2, 2)
+	expectCheckpoints(mock, connID, tenant, 2, 2, 1, 2)
 
 	// A file is published on the second poll that sees it unchanged (#374);
 	// a short interval keeps that well inside the deadline below.
@@ -239,17 +240,23 @@ func TestStartConnection_BaselineTakenBeforeActive(t *testing.T) {
 }
 
 // expectCheckpoints adds the file node's checkpoint reads (no saved state) and
-// saves, all for this tenant, connection and node "c1" (#391). Without them
-// the checkpoint calls fail on the mock and the consumer quietly falls back to
-// the first-start rule, so these tests would not run the restart path at all.
-func expectCheckpoints(mock sqlmock.Sqlmock, connID, tenant string, gets, saves int) {
-	for i := 0; i < gets; i++ {
-		mock.ExpectQuery("FROM connection_node_checkpoints").WithArgs(tenant, connID, "c1").
-			WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}))
-	}
-	for i := 0; i < saves; i++ {
-		mock.ExpectExec("INSERT INTO connection_node_checkpoints").
-			WithArgs(tenant, connID, "c1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
-			WillReturnResult(sqlmock.NewResult(0, 1))
+// saves, all for this tenant, connection and node "c1" (#391), and those of
+// its changes row "c1#changes" (#426). Without them the checkpoint calls fail
+// on the mock and the consumer quietly falls back to the first-start rule, so
+// these tests would not run the restart path at all. The mock keeps nothing,
+// so every read finds no row: a re-read before a publish finds no changes
+// row, so it reads the snapshot row too, and the save after it is a new
+// snapshot (both rows).
+func expectCheckpoints(mock sqlmock.Sqlmock, connID, tenant string, gets, saves, changesGets, changesSaves int) {
+	for node, n := range map[string][2]int{"c1": {gets, saves}, "c1" + changesSuffix: {changesGets, changesSaves}} {
+		for i := 0; i < n[0]; i++ {
+			mock.ExpectQuery("FROM connection_node_checkpoints").WithArgs(tenant, connID, node).
+				WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}))
+		}
+		for i := 0; i < n[1]; i++ {
+			mock.ExpectExec("INSERT INTO connection_node_checkpoints").
+				WithArgs(tenant, connID, node, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+		}
 	}
 }

@@ -274,10 +274,22 @@ func (d *dirRig) seed(names ...string) {
 	}
 }
 
-// saved is the checkpoint state as stored right now, nil if there is none.
+// saved is the checkpoint state as stored right now: the snapshot row, then
+// the changes row (#426) after a newline. nil if there is neither.
 func (d *dirRig) saved() []byte {
 	d.t.Helper()
-	cp, err := d.store.Get(context.Background(), d.tenant, d.connID, dirNode)
+	snap, changes := d.savedRow(dirNode), d.savedRow(dirNode+changesSuffix)
+	if snap == nil && changes == nil {
+		return nil
+	}
+	return append(append(append([]byte(nil), snap...), '\n'), changes...)
+}
+
+// savedRow is the state of one checkpoint row of the connection, nil if there
+// is none.
+func (d *dirRig) savedRow(nodeID string) []byte {
+	d.t.Helper()
+	cp, err := d.store.Get(context.Background(), d.tenant, d.connID, nodeID)
 	if err != nil {
 		d.t.Fatal(err)
 	}
@@ -287,10 +299,11 @@ func (d *dirRig) saved() []byte {
 	return cp.State
 }
 
-// savedNames decodes the stored done set.
+// savedNames decodes the stored done set: the snapshot, with the changes row
+// applied when it is on that snapshot (#426).
 func (d *dirRig) savedNames() map[string]bool {
 	d.t.Helper()
-	raw := d.saved()
+	raw := d.savedRow(dirNode)
 	if raw == nil {
 		d.t.Fatal("no checkpoint saved")
 	}
@@ -304,6 +317,24 @@ func (d *dirRig) savedNames() map[string]bool {
 	out := make(map[string]bool, len(st.Known))
 	for _, n := range st.Known {
 		out[n] = true
+	}
+	var ch changesState
+	if rawCh := d.savedRow(dirNode + changesSuffix); rawCh != nil && st.Gen != "" {
+		if err := json.Unmarshal(rawCh, &ch); err != nil {
+			d.t.Fatalf("decode changes row: %v", err)
+		}
+	}
+	if ch.Base != st.Gen || ch.WatchDir != d.dir() {
+		return out
+	}
+	for n := range ch.Files {
+		out[n] = true
+	}
+	for _, n := range ch.Known {
+		out[n] = true
+	}
+	for _, n := range ch.Gone {
+		delete(out, n)
 	}
 	return out
 }
