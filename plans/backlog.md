@@ -104,7 +104,7 @@ Last updated 2026-10-28.
     `ui/.env.example`), and `docker-compose.yml` has defaults for every
     variable. Add the file with the variables that matter or change the
     docs. Found in #371.
-25. **`infrastructure/azure/deploy-ui-azure.sh` isn't executable** (mode
+25. ~~**`infrastructure/azure/deploy-ui-azure.sh` isn't executable**~~ (#418) (mode
     100644; every other script there is 100755). The guide now says `bash
     ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
     #371.
