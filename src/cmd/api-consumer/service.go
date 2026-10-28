@@ -214,12 +214,18 @@ type activeConn struct {
 // own. After a stop and a new start it belongs to the newer poller, and an old
 // poller finishing must leave it alone, or the next start runs a second poller
 // beside the new one (#408).
-func (s *apiConsumer) dropActive(connectionID string, own *activeConn) {
+//
+// It reports whether the entry was own. Only then may the poller write its
+// final status; otherwise the newer start has written "running" and owns the
+// status too (#456).
+func (s *apiConsumer) dropActive(connectionID string, own *activeConn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.activePipelines[connectionID] == own {
-		delete(s.activePipelines, connectionID)
+	if s.activePipelines[connectionID] != own {
+		return false
 	}
+	delete(s.activePipelines, connectionID)
+	return true
 }
 
 // handleStopCommand processes a stop command from NATS

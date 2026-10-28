@@ -253,12 +253,18 @@ type activeConn struct {
 // After a stop and a new start it belongs to the newer poller, and an old
 // poller finishing must leave it alone, or the next start runs a second poller
 // beside the new one (#408).
-func (s *cloudConsumer) dropActive(connID string, own *activeConn) {
+//
+// It reports whether the entry was own. Only then may the poller write its
+// final status; otherwise the newer start has written "running" and owns the
+// status too (#456).
+func (s *cloudConsumer) dropActive(connID string, own *activeConn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active[connID] == own {
-		delete(s.active, connID)
+	if s.active[connID] != own {
+		return false
 	}
+	delete(s.active, connID)
+	return true
 }
 
 func (s *cloudConsumer) handleStopCommand(msg *nats.Msg) {
@@ -484,11 +490,16 @@ func (s *cloudConsumer) fetchAndPublish(ctx context.Context, connID, tenantID st
 	return env.PayloadSize, true, nil
 }
 
-// finishConn marks the connection's terminal status and removes it from the
-// active set, unless a newer start owns the entry by now (#408).
+// finishConn removes the connection from the active set and marks its terminal
+// status, unless a newer start owns the entry, and with it the status, by now
+// (#408, #456).
 func (s *cloudConsumer) finishConn(own *activeConn, connID, tenantID, status string) {
+	if !s.dropActive(connID, own) {
+		s.logger.Info("A newer start owns the connection; leaving its status alone",
+			"connection_id", connID, "status", status)
+		return
+	}
 	_ = s.updateConnectionStatus(connID, tenantID, status)
-	s.dropActive(connID, own)
 }
 
 // afterAction applies the configured post-ingest action to a fetched object.

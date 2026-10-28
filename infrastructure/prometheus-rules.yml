@@ -213,6 +213,7 @@ groups:
       # mute the alert for days. Activation after a long suspend is still
       # quiet until the window has (nearly) passed.
       # Suspended (no vrsky-backup-config yet, or paused by hand): silent.
+      # MgmtBackupSuspended below covers a suspend that is left in place.
       - alert: MgmtBackupMissing
         expr: |
           (
@@ -288,3 +289,45 @@ groups:
         annotations:
           summary: "No successful management-DB backup in two running weekdays"
           description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+      # The same CronJob has been suspended for over 7 days although
+      # vrsky-backup-config has existed for over 7 days (#432). The deploy
+      # script unsuspends it only when the Secret is complete, and a human
+      # may suspend it during a restore; MgmtBackupMissing is silent while it
+      # is suspended, so a suspend that is never undone would stop backups
+      # without a sound.
+      # Not `for: 7d`: Prometheus runs in the cluster, which is parked every
+      # night, and a pending alert's `for` clock resets after an outage over
+      # an hour. Instead every kube_cronjob_spec_suspend sample of the last
+      # 7 days must be 1 (min_over_time), so a single active sample, a
+      # restore that suspends for a few hours included, keeps it quiet for
+      # 7 days. Parked time has no samples and counts as suspended, since
+      # nothing can unsuspend it then. The instant `== 1` makes it resolve
+      # as soon as the CronJob is unsuspended or deleted.
+      # `min by`, not `max by`: the series carry kube-state-metrics' pod and
+      # instance, so a replaced pod (an upgrade, an eviction, a morning
+      # start) begins a new series that holds only the latest samples. Its
+      # window would be all 1 after a few hours of suspend; the old pod's
+      # series still holds the active samples and must win. The instant
+      # check takes `min` too, so one series that says active is enough.
+      # The Secret's age comes from kube_secret_created (kube-state-metrics'
+      # secrets collector, on in the chart defaults): the series only exists
+      # while the Secret does. A CronJob that waits for its first Secret is
+      # silent, and a Secret created today gives its owner 7 days to
+      # unsuspend. If the secrets collector were ever turned off, this rule
+      # would go quiet, as it was before.
+      - alert: MgmtBackupSuspended
+        expr: |
+          (
+              min by (namespace, cronjob) (min_over_time(kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}[7d])) == 1
+            and on (namespace, cronjob)
+              min by (namespace, cronjob) (kube_cronjob_spec_suspend{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}) == 1
+          )
+          and on (namespace)
+            (time() - max by (namespace) (kube_secret_created{namespace="vrsky-database", secret="vrsky-backup-config"}) > 604800)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Management-DB backup CronJob suspended for over 7 days"
+          description: "The vrsky-mgmt-backup CronJob in vrsky-database has been suspended for over 7 days while the vrsky-backup-config Secret exists, so no backups are being taken. If no restore is in progress, unsuspend it or run Catch up (docs/operator/backup.md). If the deploy keeps it suspended, its log names the key the Secret is missing."

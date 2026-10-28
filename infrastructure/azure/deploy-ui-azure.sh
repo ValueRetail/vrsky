@@ -62,7 +62,7 @@ kubectl apply -f infrastructure/kubernetes/ui/service.yaml
 # 4. UI deployment: ACR image, 1 replica (small nodes), mount the nginx config
 WORKUI="$(mktemp -d)/ui-deployment.yaml"
 cp infrastructure/kubernetes/ui/deployment.yaml "$WORKUI"
-perl -pi -e 's{ghcr\.io/[Vv]alue[Rr]etail/vrsky/ui:latest}{'"$ACR_LOGIN"'/vrsky/ui:latest}g;' "$WORKUI"
+perl -pi -e 's{ghcr\.io/valueretail/vrsky/ui:latest}{'"$ACR_LOGIN"'/vrsky/ui:latest}g;' "$WORKUI"
 # The manifest carries imagePullPolicy: IfNotPresent, which is correct for the
 # k3d path it is shared with (images are side-loaded, there is no registry to
 # pull from — see infrastructure/scripts/k3d-load-images.sh). On AKS with a

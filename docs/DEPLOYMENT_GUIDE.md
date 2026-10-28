@@ -297,8 +297,7 @@ before any real connection (the script's closing message says which).
     Don't `kubectl apply` the core and UI manifests either.
     `infrastructure/kubernetes/{management-api,data-filter,data-converter,ui}/`
     are shared with the local k3d path and name `ghcr.io` images that AKS
-    cannot pull, so the pods end up in `ImagePullBackOff`
-    (`InvalidImageName` for the UI, whose reference has capital letters).
+    cannot pull, so the pods end up in `ImagePullBackOff`.
     `deploy-ui-azure.sh` applies the UI manifests from a rewritten copy.
 
     And don't `kubectl rollout restart` a core deployment to ship a new
@@ -336,16 +335,19 @@ onto it. The cluster can't pull the registries the manifests name, so
 `infrastructure/scripts/k3d-load-images.sh [core|connectors|all]` builds
 images from your checkout and imports them into the cluster.
 
-Only `management-api` lines up today. The script imports `data-filter` and
-`data-converter` as `localhost:5000/vrsky/...` while their manifests pull
-`ghcr.io/valueretail/vrsky/...`. The `connectors` scope imports nine
-connectors as `localhost:5000/vrsky/...`, which nothing on k3d deploys (the
-connector manifest names ACR and only `deploy-connectors-azure.sh` applies
-it). And the UI doesn't run on k3d at all: the
-script loads no UI image, and the manifest's
-`ghcr.io/ValueRetail/vrsky/ui:latest` has capital letters, which Docker and
-Kubernetes reject in an image reference. Use the compose options above for
-the UI.
+The `core` scope imports `management-api`, `data-filter`, `data-converter`
+and `ui` as `ghcr.io/valueretail/vrsky/<name>:latest`, exactly what their
+manifests pull with `imagePullPolicy: IfNotPresent`.
+`TestK3dImagesMatchManifests` fails when a ref drifts. The `connectors` scope
+imports nine connectors as `localhost:5000/vrsky/...`, which nothing on k3d
+deploys (the connector manifest names ACR and only
+`deploy-connectors-azure.sh` applies it).
+
+`deploy-vrsky-platform.sh` doesn't deploy the UI; apply
+`infrastructure/kubernetes/ui/` yourself. The pod then runs the image's own
+nginx config, which serves the SPA but doesn't proxy `/api` to the management
+API (on AKS `deploy-ui-azure.sh` mounts one that does). For a UI that talks
+to the API, use the compose options above.
 
 ---
 
