@@ -3556,8 +3556,7 @@ and the management API loses its database.</p>
 <p>Don't <code>kubectl apply</code> the core and UI manifests either.
 <code>infrastructure/kubernetes/{management-api,data-filter,data-converter,ui}/</code>
 are shared with the local k3d path and name <code>ghcr.io</code> images that AKS
-cannot pull, so the pods end up in <code>ImagePullBackOff</code>
-(<code>InvalidImageName</code> for the UI, whose reference has capital letters).
+cannot pull, so the pods end up in <code>ImagePullBackOff</code>.
 <code>deploy-ui-azure.sh</code> applies the UI manifests from a rewritten copy.</p>
 <p>And don't <code>kubectl rollout restart</code> a core deployment to ship a new
 image: it is pinned by digest, so a restart redeploys the image it
@@ -3615,16 +3614,18 @@ from <code>infrastructure/kubernetes/k3d-config.yaml</code>, and
 onto it. The cluster can't pull the registries the manifests name, so
 <code>infrastructure/scripts/k3d-load-images.sh [core|connectors|all]</code> builds
 images from your checkout and imports them into the cluster.</p>
-<p>Only <code>management-api</code> lines up today. The script imports <code>data-filter</code> and
-<code>data-converter</code> as <code>localhost:5000/vrsky/...</code> while their manifests pull
-<code>ghcr.io/valueretail/vrsky/...</code>. The <code>connectors</code> scope imports nine
-connectors as <code>localhost:5000/vrsky/...</code>, which nothing on k3d deploys (the
-connector manifest names ACR and only <code>deploy-connectors-azure.sh</code> applies
-it). And the UI doesn't run on k3d at all: the
-script loads no UI image, and the manifest's
-<code>ghcr.io/ValueRetail/vrsky/ui:latest</code> has capital letters, which Docker and
-Kubernetes reject in an image reference. Use the compose options above for
-the UI.</p>
+<p>The <code>core</code> scope imports <code>management-api</code>, <code>data-filter</code>, <code>data-converter</code>
+and <code>ui</code> as <code>ghcr.io/valueretail/vrsky/&lt;name&gt;:latest</code>, exactly what their
+manifests pull with <code>imagePullPolicy: IfNotPresent</code>.
+<code>TestK3dImagesMatchManifests</code> fails when a ref drifts. The <code>connectors</code> scope
+imports nine connectors as <code>localhost:5000/vrsky/...</code>, which nothing on k3d
+deploys (the connector manifest names ACR and only
+<code>deploy-connectors-azure.sh</code> applies it).</p>
+<p><code>deploy-vrsky-platform.sh</code> doesn't deploy the UI; apply
+<code>infrastructure/kubernetes/ui/</code> yourself. The pod then runs the image's own
+nginx config, which serves the SPA but doesn't proxy <code>/api</code> to the management
+API (on AKS <code>deploy-ui-azure.sh</code> mounts one that does). For a UI that talks
+to the API, use the compose options above.</p>
 <hr />
 <h2 id="tags-and-digests">Tags and digests<a class="headerlink" href="#tags-and-digests" title="Permanent link">&para;</a></h2>
 <p>Images carry one tag, <code>:latest</code>. Git tags and branches add none, and

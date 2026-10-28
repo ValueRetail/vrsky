@@ -2771,11 +2771,19 @@ vrsky-cli<span class="w"> </span>restore<span class="w"> </span>--target-db-url<
 since the last good backup, or when neither a scheduled run nor a successful
 Job (a manual one counts) has happened for over four days of being active
 (checked weekday afternoons), or for over seven days at any time. It is
-silent while the CronJob is suspended and right after it is unsuspended. A
-CronJob left suspended is silent too, so check <code>SUSPEND</code> after any manual
-pause. It sits outside the
-<code>vrsky-*</code> rule groups, so it reaches Teams but doesn't fail a deploy's smoke
-check. A single failed Job also shows up as the chart's <code>KubeJobFailed</code>.</p>
+silent while the CronJob is suspended and right after it is unsuspended.</p>
+<p><code>MgmtBackupSuspended</code> (warning) covers the suspend that is never undone: it
+fires when the CronJob has been suspended for over 7 days while
+<code>vrsky-backup-config</code> exists and is over 7 days old. A restore that suspends
+it for a few hours doesn't count, and nights the cluster is parked count as
+suspended. Unsuspend it (above) or run Catch up. If it is suspended again
+after that, the deploy log names the key the Secret is missing. Before the
+Secret exists the CronJob is suspended on purpose and this alert is silent.
+It reads the Secret's age from kube-state-metrics (<code>kube_secret_created</code>),
+so recreating the Secret starts the 7 days again.</p>
+<p>Both sit outside the <code>vrsky-*</code> rule groups, so they reach Teams but don't
+fail a deploy's smoke check. A single failed Job also shows up as the
+chart's <code>KubeJobFailed</code>.</p>
 <h2 id="restore-drill">Restore drill<a class="headerlink" href="#restore-drill" title="Permanent link">&para;</a></h2>
 <p><code>.github/workflows/dr-drill.yml</code> runs weekly and on changes to the backup
 code. It builds the <code>vrsky-cli</code> image, applies the real migrations to a
