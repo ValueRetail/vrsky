@@ -1,9 +1,12 @@
 package managementapi
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -881,8 +885,10 @@ func TestGoJobsRetryModuleDownloads(t *testing.T) {
 		}
 	}
 	sort.Strings(checked)
-	if len(checked) < 7 {
-		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are Go Tests, Remote agent on Windows, Build remote agent binaries, govulncheck, the DR drill, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
+	// The DR drill left this list in #395: it builds the vrsky-cli image, and
+	// the Dockerfile's own retry loop covers it (TestDockerfilesRetryModuleDownload).
+	if len(checked) < 6 {
+		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are Go Tests, Remote agent on Windows, Build remote agent binaries, govulncheck, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
 	}
 }
 
@@ -909,16 +915,20 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 		f, _ := strconv.ParseFloat(v, 64)
 		return int(f * 1000)
 	}
-	// The manifests production runs (deploy-vrsky-platform.sh, deploy-azure.sh
-	// and deploy-connectors-azure.sh). Everything else under
-	// infrastructure/kubernetes — the per-tenant NATS template, Loki and
+	// The manifests production runs (deploy-vrsky-platform.sh, deploy-azure.sh,
+	// deploy-connectors-azure.sh and deploy-backup-azure.sh). Everything else
+	// under infrastructure/kubernetes — the per-tenant NATS template, Loki and
 	// promtail, KES, MinIO's 4-replica layout, Traefik — is lab-only or
-	// created on demand and is not counted.
+	// created on demand and is not counted. The backup CronJob's pod runs a
+	// few minutes a day, but while it runs its request is reserved like any
+	// other, so it counts as one replica.
 	manifests := []string{
 		"platform-nats/statefulset.yaml", "postgresql/statefulset.yaml", "minio/deployment.yaml",
 		"management-api/deployment.yaml", "ui/deployment.yaml", "data-filter/deployment.yaml",
 		"data-converter/deployment.yaml", "alert-responder/deployment.yaml", "connectors/connectors.yaml",
+		"backup/cronjob.yaml",
 	}
+	backupCounted := false
 	for _, rel := range manifests {
 		path := filepath.Join(root, "kubernetes", rel)
 		body, err := os.ReadFile(path) //nolint:gosec // fixed paths inside the repo
@@ -927,28 +937,34 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 		}
 		dec := yaml.NewDecoder(strings.NewReader(string(body)))
 		for {
+			type podTemplate struct {
+				Spec struct {
+					Containers []struct {
+						Resources struct {
+							Requests map[string]string `yaml:"requests"`
+						} `yaml:"resources"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			}
 			var doc struct {
 				Kind     string `yaml:"kind"`
 				Metadata struct {
 					Name string `yaml:"name"`
 				} `yaml:"metadata"`
 				Spec struct {
-					Replicas *int `yaml:"replicas"`
-					Template struct {
+					Replicas    *int        `yaml:"replicas"`
+					Template    podTemplate `yaml:"template"`
+					JobTemplate struct {
 						Spec struct {
-							Containers []struct {
-								Resources struct {
-									Requests map[string]string `yaml:"requests"`
-								} `yaml:"resources"`
-							} `yaml:"containers"`
+							Template podTemplate `yaml:"template"`
 						} `yaml:"spec"`
-					} `yaml:"template"`
+					} `yaml:"jobTemplate"`
 				} `yaml:"spec"`
 			}
 			if err := dec.Decode(&doc); err != nil {
 				break
 			}
-			if doc.Kind != "Deployment" && doc.Kind != "StatefulSet" && doc.Kind != "DaemonSet" {
+			if doc.Kind != "Deployment" && doc.Kind != "StatefulSet" && doc.Kind != "DaemonSet" && doc.Kind != "CronJob" {
 				continue
 			}
 			replicas := 1
@@ -958,12 +974,19 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 			if doc.Kind == "DaemonSet" {
 				replicas = 2 // one per production node
 			}
+			pod := doc.Spec.Template
+			if doc.Kind == "CronJob" {
+				pod = doc.Spec.JobTemplate.Spec.Template // concurrencyPolicy Forbid: one pod at a time
+			}
 			sum := 0
-			for _, c := range doc.Spec.Template.Spec.Containers {
+			for _, c := range pod.Spec.Containers {
 				sum += millis(c.Resources.Requests["cpu"])
 			}
 			if sum > 0 {
 				items = append(items, item{filepath.Base(filepath.Dir(path)) + "/" + doc.Metadata.Name + " x" + strconv.Itoa(replicas), sum * replicas})
+				if doc.Kind == "CronJob" && doc.Metadata.Name == "vrsky-mgmt-backup" {
+					backupCounted = true
+				}
 			}
 		}
 	}
@@ -992,6 +1015,10 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 	}
 	if len(items) < 20 {
 		t.Fatalf("only %d request entries found (%v); the manifest layout probably moved", len(items), top)
+	}
+	if !backupCounted {
+		t.Fatal("backup/cronjob.yaml has no CronJob vrsky-mgmt-backup with a CPU request under " +
+			"spec.jobTemplate.spec.template; its pod would reserve CPU this budget never sees")
 	}
 	if total > budgetMillicores {
 		t.Fatalf("CPU requests in the repo add up to %dm, over the %dm budget; largest: %s", total, budgetMillicores, strings.Join(top, ", "))
@@ -1079,7 +1106,13 @@ func TestAffectedServices(t *testing.T) {
 		{"ui", []string{"ui/src/App.tsx", "ui/package.json"}, []string{"core ui", "image ui"}},
 		{"one connector", []string{"src/cmd/webhook-consumer/server.go"}, []string{"connector webhook-consumer", "image webhook-consumer"}},
 		{"a core service", []string{"src/cmd/management-api/main.go"}, []string{"core management-api", "image management-api"}},
-		{"a service nobody deploys", []string{"src/cmd/mock-sap/main.go", "src/cmd/vrsky-cli/main.go"}, nil},
+		{"a service nobody deploys", []string{"src/cmd/mock-sap/main.go"}, nil},
+		// The backup CronJob runs vrsky-cli:latest from ACR (#395): the image
+		// is rebuilt, but there is no Deployment to roll; the next Job pulls it.
+		{"the backup CLI", []string{"src/cmd/vrsky-cli/main.go"}, []string{"image vrsky-cli"}},
+		{"backup manifest", []string{"infrastructure/kubernetes/backup/cronjob.yaml"}, []string{"backup"}},
+		{"backup readme", []string{"infrastructure/kubernetes/backup/README.md"}, []string{"backup"}},
+		{"backup deploy script", []string{"infrastructure/azure/deploy-backup-azure.sh"}, []string{"backup"}},
 		{"rules", []string{"infrastructure/prometheus-rules.yml"}, []string{"monitoring"}},
 		{"monitoring values", []string{"infrastructure/kubernetes/monitoring/grafana-values.azure.yaml"}, []string{"monitoring"}},
 		{"connector manifest", []string{"infrastructure/azure/deploy-connectors-azure.sh"}, []string{"connectors-manifest"}},
@@ -1111,6 +1144,24 @@ func TestAffectedServices(t *testing.T) {
 	for _, p := range []string{"src/go.mod", "src/cmd/file-consumer/Dockerfile"} {
 		if n := len(affected(t, p)); n < 60 {
 			t.Fatalf("%s: %d targets, want every Go image rebuilt", p, n)
+		}
+	}
+	// vrsky-cli links the same shared packages (crypto above all: a dump
+	// encrypted by a stale CLI must still decrypt), so every shared change
+	// rebuilds it too. It is an image only, never a core service or connector.
+	for _, p := range []string{"src/pkg/crypto/x.go", "src/go.mod", "src/go.sum", "src/cmd/file-consumer/Dockerfile", "src/cmd/vrsky-cli/Dockerfile"} {
+		got := affected(t, p)
+		found := false
+		for _, g := range got {
+			if g == "image vrsky-cli" {
+				found = true
+			}
+			if g == "core vrsky-cli" || g == "connector vrsky-cli" {
+				t.Errorf("%s: %q; vrsky-cli is a tool image, nothing deploys it as a service", p, g)
+			}
+		}
+		if !found {
+			t.Errorf("%s: no `image vrsky-cli`; the backup Job would keep running a CLI built from older shared code", p)
 		}
 	}
 }
@@ -1157,6 +1208,47 @@ func TestAffectedServicesKnowsEveryImage(t *testing.T) {
 	sort.Strings(wantCore)
 	if strings.Join(gotCore, " ") != strings.Join(wantCore, " ") {
 		t.Errorf("affected.sh CORE differs from deploy-core-azure.sh:\n got %v\nwant %v", gotCore, wantCore)
+	}
+
+	// Tool images (#395): built into ACR, run by something other than a
+	// Deployment. TOOLS must equal what build_tools builds, include vrsky-cli
+	// (the backup CronJob's image), and `all` must build them, or a release
+	// leaves the CronJob pulling a CLI nobody rebuilt.
+	build := read("build-push-acr.sh")
+	gotTools := listIn(aff, "TOOLS")
+	var wantTools []string
+	if m := regexp.MustCompile(`(?s)build_tools\(\) \{(.*?)\n\}`).FindStringSubmatch(build); m != nil {
+		for _, b := range regexp.MustCompile(`build\s+vrsky/([a-z0-9-]+):latest`).FindAllStringSubmatch(m[1], -1) {
+			wantTools = append(wantTools, b[1])
+		}
+	}
+	if len(wantTools) == 0 {
+		t.Fatal("parsed no images from build_tools in build-push-acr.sh; it is missing or changed shape")
+	}
+	sort.Strings(gotTools)
+	sort.Strings(wantTools)
+	if strings.Join(gotTools, " ") != strings.Join(wantTools, " ") {
+		t.Errorf("affected.sh TOOLS differ from what build_tools builds:\n got %v\nwant %v", gotTools, wantTools)
+	}
+	hasCLI := false
+	for _, n := range gotTools {
+		if n == "vrsky-cli" {
+			hasCLI = true
+		}
+	}
+	if !hasCLI {
+		t.Errorf("affected.sh TOOLS %v lacks vrsky-cli, the backup CronJob's image", gotTools)
+	}
+	all := regexp.MustCompile(`(?m)^\s*all\)(.*)$`).FindStringSubmatch(build)
+	if all == nil || !regexp.MustCompile(`\bbuild_tools\b`).MatchString(all[1]) {
+		t.Errorf("build-push-acr.sh's all) branch does not run build_tools: %q", all)
+	}
+	if !regexp.MustCompile(`(?m)^\s*tools\)\s*build_tools\b`).MatchString(build) {
+		t.Error("build-push-acr.sh has no `tools) build_tools` group")
+	}
+	// The build-push.yml matrix builds an image from src/cmd/<img>/Dockerfile.
+	if _, err := os.Stat(filepath.Join("..", "..", "..", "src", "cmd", "vrsky-cli", "Dockerfile")); err != nil {
+		t.Errorf("no src/cmd/vrsky-cli/Dockerfile for the build matrix to build: %v", err)
 	}
 }
 
@@ -1464,6 +1556,11 @@ func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
 	}
 	if len(scripts) < 4 {
 		t.Fatalf("found only %d scripts run in-cluster (%v); the workflow layout probably moved", len(scripts), scripts)
+	}
+	// The backup deploy copies acr-pull with kubectl and jq precisely
+	// because the runtime has no sed; make sure it is among those checked.
+	if !scripts["infrastructure/azure/deploy-backup-azure.sh"] {
+		t.Errorf("deploy-backup-azure.sh is not run in-cluster by any workflow, so its tools go unchecked (found %v)", scripts)
 	}
 	for ref := range scripts {
 		body, err := os.ReadFile(filepath.Join("..", "..", "..", ref)) //nolint:gosec // paths come from the repo's own workflows
@@ -2122,4 +2219,665 @@ func TestPersistentVolumesStayWithinBudget(t *testing.T) {
 		t.Fatalf("persistent volumes add up to %dGi, over the %dGi budget; largest: %s", total, budgetGiB, strings.Join(top, ", "))
 	}
 	t.Logf("persistent volumes: %dGi of %dGi; %s", total, budgetGiB, strings.Join(top, ", "))
+}
+
+// --- management-DB backup (#395) --------------------------------------------
+
+type backupContainer struct {
+	Name            string `yaml:"name"`
+	Image           string `yaml:"image"`
+	ImagePullPolicy string `yaml:"imagePullPolicy"`
+	EnvFrom         []struct {
+		SecretRef *struct {
+			Name string `yaml:"name"`
+		} `yaml:"secretRef"`
+	} `yaml:"envFrom"`
+	Env []struct {
+		Name      string  `yaml:"name"`
+		Value     *string `yaml:"value"`
+		ValueFrom any     `yaml:"valueFrom"`
+	} `yaml:"env"`
+	SecurityContext struct {
+		ReadOnlyRootFilesystem   *bool `yaml:"readOnlyRootFilesystem"`
+		AllowPrivilegeEscalation *bool `yaml:"allowPrivilegeEscalation"`
+		Capabilities             struct {
+			Drop []string `yaml:"drop"`
+		} `yaml:"capabilities"`
+	} `yaml:"securityContext"`
+	VolumeMounts []struct {
+		Name      string `yaml:"name"`
+		MountPath string `yaml:"mountPath"`
+	} `yaml:"volumeMounts"`
+}
+
+// backupCronJob is the part of infrastructure/kubernetes/backup/cronjob.yaml
+// the guards look at.
+type backupCronJob struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Schedule                   string `yaml:"schedule"`
+		TimeZone                   string `yaml:"timeZone"`
+		StartingDeadlineSeconds    *int   `yaml:"startingDeadlineSeconds"`
+		ConcurrencyPolicy          string `yaml:"concurrencyPolicy"`
+		Suspend                    *bool  `yaml:"suspend"`
+		SuccessfulJobsHistoryLimit *int   `yaml:"successfulJobsHistoryLimit"`
+		FailedJobsHistoryLimit     *int   `yaml:"failedJobsHistoryLimit"`
+		JobTemplate                struct {
+			Spec struct {
+				TTLSecondsAfterFinished *int `yaml:"ttlSecondsAfterFinished"`
+				Template                struct {
+					Spec struct {
+						AutomountServiceAccountToken *bool `yaml:"automountServiceAccountToken"`
+						ImagePullSecrets             []struct {
+							Name string `yaml:"name"`
+						} `yaml:"imagePullSecrets"`
+						SecurityContext struct {
+							RunAsNonRoot   *bool  `yaml:"runAsNonRoot"`
+							RunAsUser      *int64 `yaml:"runAsUser"`
+							RunAsGroup     *int64 `yaml:"runAsGroup"`
+							SeccompProfile struct {
+								Type string `yaml:"type"`
+							} `yaml:"seccompProfile"`
+						} `yaml:"securityContext"`
+						Volumes []struct {
+							Name     string `yaml:"name"`
+							EmptyDir any    `yaml:"emptyDir"`
+						} `yaml:"volumes"`
+						InitContainers []backupContainer `yaml:"initContainers"`
+						Containers     []backupContainer `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		} `yaml:"jobTemplate"`
+	} `yaml:"spec"`
+}
+
+// The backup CronJob (#395, plans/issue-395-backup-layer2.md criterion 2).
+// It runs pg_dump against the management database with the platform's
+// ENCRYPTION_KEY in its environment, so it gets the tightest pod the image
+// allows, takes every setting from the Secret the human creates, and carries
+// no credential in the repo. Its schedule settings decide what a parked
+// cluster does: a noon run missed while stopped must not fire hours later at
+// start-up, and two runs must never overlap.
+func TestBackupCronJobManifest(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "infrastructure", "kubernetes", "backup", "cronjob.yaml")
+	raw, err := os.ReadFile(path) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatalf("read backup/cronjob.yaml: %v", err)
+	}
+
+	var cjs []backupCronJob
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	for {
+		var node yaml.Node
+		if err := dec.Decode(&node); err != nil {
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("parse backup/cronjob.yaml: %v", err)
+			}
+			break
+		}
+		var head struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := node.Decode(&head); err != nil {
+			t.Fatalf("parse backup/cronjob.yaml: %v", err)
+		}
+		switch head.Kind {
+		case "Secret":
+			t.Error("backup/cronjob.yaml contains a Secret; vrsky-backup-config is created by hand, never from the repo")
+		case "CronJob":
+			var cj backupCronJob
+			if err := node.Decode(&cj); err != nil {
+				t.Fatalf("parse the CronJob: %v", err)
+			}
+			cjs = append(cjs, cj)
+		}
+	}
+	if len(cjs) != 1 {
+		t.Fatalf("backup/cronjob.yaml has %d CronJobs, want exactly 1", len(cjs))
+	}
+	cj := cjs[0]
+	spec := cj.Spec
+	pod := spec.JobTemplate.Spec.Template.Spec
+
+	if cj.Metadata.Name != "vrsky-mgmt-backup" || cj.Metadata.Namespace != "vrsky-database" {
+		t.Errorf("CronJob is %s/%s, want vrsky-database/vrsky-mgmt-backup (the alert and the deploy script name it)",
+			cj.Metadata.Namespace, cj.Metadata.Name)
+	}
+	if spec.Schedule != "0 12 * * 1-5" {
+		t.Errorf("schedule %q, want \"0 12 * * 1-5\" (noon on weekdays, while the cluster runs)", spec.Schedule)
+	}
+	if spec.TimeZone != "Europe/Oslo" {
+		t.Errorf("timeZone %q, want Europe/Oslo; without it the schedule is the controller's UTC", spec.TimeZone)
+	}
+	if d := spec.StartingDeadlineSeconds; d == nil || *d <= 0 || *d > 3600 {
+		t.Errorf("startingDeadlineSeconds %v, want set and in (0, 3600]: without it a run missed while parked "+
+			"fires whenever the cluster starts", d)
+	}
+	if spec.ConcurrencyPolicy != "Forbid" {
+		t.Errorf("concurrencyPolicy %q, want Forbid: two dumps at once double the load and race on the object name", spec.ConcurrencyPolicy)
+	}
+	if spec.Suspend == nil || !*spec.Suspend {
+		t.Errorf("suspend %v in the file, want true: the deploy script unsuspends it only when vrsky-backup-config is complete", spec.Suspend)
+	}
+	// The alert counts failed Jobs since the last success; Kubernetes keeps
+	// one failed Job by default, so two failures could never be seen.
+	if l := spec.FailedJobsHistoryLimit; l == nil || *l < 2 {
+		t.Errorf("failedJobsHistoryLimit %v, want at least 2: MgmtBackupMissing counts two failed Jobs, the default keeps one", l)
+	}
+	if l := spec.SuccessfulJobsHistoryLimit; l != nil && *l < 1 {
+		t.Errorf("successfulJobsHistoryLimit %d: with no successful Job kept, old failures look current to the alert", *l)
+	}
+	if ttl := spec.JobTemplate.Spec.TTLSecondsAfterFinished; ttl != nil && *ttl < 7*24*3600 {
+		t.Errorf("ttlSecondsAfterFinished %d deletes finished Jobs before the alert can count two weekdays of failures", *ttl)
+	}
+
+	pullSecret := false
+	for _, s := range pod.ImagePullSecrets {
+		if s.Name == "acr-pull" {
+			pullSecret = true
+		}
+	}
+	if !pullSecret {
+		t.Error("the pod has no imagePullSecrets acr-pull; it could not pull from ACR in vrsky-database")
+	}
+	sc := pod.SecurityContext
+	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Error("pod securityContext lacks runAsNonRoot: true")
+	}
+	// uid/gid 70 is the alpine postgres user, the one the DR drill proves
+	// pg_dump works as with a read-only root filesystem.
+	if sc.RunAsUser == nil || *sc.RunAsUser != 70 {
+		t.Errorf("pod runAsUser %v, want 70 (the image's postgres user, as in the DR drill)", sc.RunAsUser)
+	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 70 {
+		t.Errorf("pod runAsGroup %v, want 70", sc.RunAsGroup)
+	}
+	if sc.SeccompProfile.Type != "RuntimeDefault" {
+		t.Errorf("pod seccompProfile %q, want RuntimeDefault", sc.SeccompProfile.Type)
+	}
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Error("the pod mounts a service-account token; the backup never talks to the API server")
+	}
+
+	if len(pod.Containers) == 0 {
+		t.Fatal("the CronJob has no containers")
+	}
+	emptyDirs := map[string]bool{}
+	for _, v := range pod.Volumes {
+		if v.EmptyDir != nil {
+			emptyDirs[v.Name] = true
+		}
+	}
+	image := regexp.MustCompile(`^vrskyprodacr\.azurecr\.io/vrsky/vrsky-cli(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$`)
+	credential := regexp.MustCompile(`(?i)(KEY|PASSWORD|PASSWD|SECRET|TOKEN|URL|URI|DSN|CONNECTION_STRING|CREDENTIAL)`)
+	for _, c := range append(append([]backupContainer{}, pod.InitContainers...), pod.Containers...) {
+		if !image.MatchString(c.Image) {
+			t.Errorf("container %s image %q, want vrskyprodacr.azurecr.io/vrsky/vrsky-cli (what build-push-acr.sh pushes)", c.Name, c.Image)
+		}
+		if c.ImagePullPolicy != "Always" {
+			t.Errorf("container %s imagePullPolicy %q, want Always so each run takes the CLI ACR has now", c.Name, c.ImagePullPolicy)
+		}
+		fromSecret := false
+		for _, ef := range c.EnvFrom {
+			if ef.SecretRef != nil && ef.SecretRef.Name == "vrsky-backup-config" {
+				fromSecret = true
+			}
+		}
+		if !fromSecret {
+			t.Errorf("container %s has no envFrom secretRef vrsky-backup-config", c.Name)
+		}
+		for _, e := range c.Env {
+			if e.Value != nil && credential.MatchString(e.Name) {
+				t.Errorf("container %s sets %s inline; credentials come from vrsky-backup-config only", c.Name, e.Name)
+			}
+		}
+		csc := c.SecurityContext
+		if csc.ReadOnlyRootFilesystem == nil || !*csc.ReadOnlyRootFilesystem {
+			t.Errorf("container %s: readOnlyRootFilesystem is not true", c.Name)
+		}
+		if csc.AllowPrivilegeEscalation == nil || *csc.AllowPrivilegeEscalation {
+			t.Errorf("container %s: allowPrivilegeEscalation is not false", c.Name)
+		}
+		dropsAll := false
+		for _, d := range csc.Capabilities.Drop {
+			if d == "ALL" {
+				dropsAll = true
+			}
+		}
+		if !dropsAll {
+			t.Errorf("container %s does not drop ALL capabilities", c.Name)
+		}
+		tmp := false
+		for _, m := range c.VolumeMounts {
+			if m.MountPath == "/tmp" && emptyDirs[m.Name] {
+				tmp = true
+			}
+		}
+		if !tmp {
+			t.Errorf("container %s has no emptyDir at /tmp; with a read-only root the dump has nowhere to write", c.Name)
+		}
+	}
+
+	for _, leak := range []*regexp.Regexp{
+		regexp.MustCompile(`postgres(ql)?://[^\s/@:'"]+:[^\s/@'"]+@`),
+		regexp.MustCompile(`(?i)AccountKey=`),
+	} {
+		if m := leak.Find(raw); m != nil {
+			t.Errorf("backup/cronjob.yaml contains what looks like a credential: %q", m)
+		}
+	}
+}
+
+// backupWorkflow is the part of a workflow the backup wiring guard reads;
+// workflowFile has no outputs or env.
+type backupWorkflow struct {
+	Jobs map[string]struct {
+		Outputs map[string]any `yaml:"outputs"`
+		Env     map[string]any `yaml:"env"`
+		Steps   []struct {
+			Name string         `yaml:"name"`
+			If   string         `yaml:"if"`
+			Run  string         `yaml:"run"`
+			Env  map[string]any `yaml:"env"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+// A merge that touches the backup reaches the cluster the way every other
+// in-cluster change does (#395 criterion 4): the plan job says so, the
+// staged files include the manifest, and the deploy job runs the script
+// through in-cluster.sh, only when the cluster is up and only when the
+// backup changed. Catch up runs it too, so a merge made while parked lands
+// at the next start and a Secret created by hand unsuspends the CronJob.
+func TestBackupDeployWiring(t *testing.T) {
+	cpBackup := regexp.MustCompile(`(?m)^.*\bcp\b.*\binfrastructure/kubernetes/backup(/|\s|$)`)
+	for _, tc := range []struct {
+		workflow, job string
+		gated         bool
+	}{
+		{"build-push.yml", "deploy", true},
+		{"catch-up.yml", "catch-up", false},
+	} {
+		t.Run(tc.workflow, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", tc.workflow)) //nolint:gosec // fixed path inside the repo
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wf backupWorkflow
+			if err := yaml.Unmarshal(body, &wf); err != nil {
+				t.Fatalf("parse %s: %v", tc.workflow, err)
+			}
+			job, ok := wf.Jobs[tc.job]
+			if !ok {
+				t.Fatalf("%s has no %s job", tc.workflow, tc.job)
+			}
+			stageAt, backupAt := -1, -1
+			for i, st := range job.Steps {
+				if strings.Contains(st.Run, "mkdir -p stage") {
+					stageAt = i
+					if !cpBackup.MatchString(st.Run) {
+						t.Errorf("the stage step %q does not copy infrastructure/kubernetes/backup; the script would find no manifest in-cluster", st.Name)
+					}
+				}
+				if strings.Contains(st.Run, "in-cluster.sh") && strings.Contains(st.Run, "infrastructure/azure/deploy-backup-azure.sh") {
+					backupAt = i
+					if tc.gated {
+						if !strings.Contains(st.If, "steps.cluster.outputs.state == 'Running'") {
+							t.Errorf("backup step %q is not gated on the cluster running: if=%q", st.Name, st.If)
+						}
+						flag := strings.Contains(st.If, "needs.plan.outputs.backup == 'true'")
+						if strings.Contains(st.If, "env.BACKUP == 'true'") {
+							src := fmt.Sprint(job.Env["BACKUP"])
+							if v, ok := st.Env["BACKUP"]; ok {
+								src = fmt.Sprint(v)
+							}
+							flag = flag || strings.Contains(src, "needs.plan.outputs.backup")
+						}
+						if !flag {
+							t.Errorf("backup step %q is not gated on the plan's backup output (env BACKUP from needs.plan.outputs.backup == 'true'): if=%q", st.Name, st.If)
+						}
+					}
+				}
+			}
+			if stageAt < 0 {
+				t.Fatalf("%s job %s has no stage step (mkdir -p stage)", tc.workflow, tc.job)
+			}
+			if backupAt < 0 {
+				t.Fatalf("%s job %s never runs deploy-backup-azure.sh through in-cluster.sh", tc.workflow, tc.job)
+			}
+			if backupAt < stageAt {
+				t.Errorf("%s runs deploy-backup-azure.sh before the files are staged", tc.workflow)
+			}
+		})
+	}
+
+	// The plan job publishes the flag the deploy step reads.
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "build-push.yml")) //nolint:gosec // fixed path inside the repo
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf backupWorkflow
+	if err := yaml.Unmarshal(body, &wf); err != nil {
+		t.Fatal(err)
+	}
+	plan := wf.Jobs["plan"]
+	if out := fmt.Sprint(plan.Outputs["backup"]); plan.Outputs["backup"] == nil || !strings.Contains(out, "backup") {
+		t.Errorf("the plan job has no `backup` output (got %q)", out)
+	}
+	writes := false
+	for _, st := range plan.Steps {
+		if strings.Contains(st.Run, "backup=") {
+			writes = true
+		}
+	}
+	if !writes {
+		t.Error("no plan step writes backup=… to GITHUB_OUTPUT")
+	}
+}
+
+// deployBackupRun is one run of deploy-backup-azure.sh against the stub.
+type deployBackupRun struct {
+	out    string
+	err    error
+	calls  [][]string     // argv per kubectl call, in order
+	stdins map[int]string // what each `apply -f -` call (by index) read
+}
+
+// stubKubectl answers the handful of calls deploy-backup-azure.sh makes,
+// logs every argv (one call per line: its PID, then the args, tab-separated)
+// and keeps what each `apply -f -` read on stdin in stdin-<PID>. Both ends
+// of a `kubectl get | jq | kubectl apply -f -` pipeline run at once, so each
+// line goes out in a single write and stdin is keyed by PID, not by line.
+const stubKubectl = `#!/usr/bin/env bash
+d="$STUB_DIR"
+line="$$"
+for a in "$@"; do line+=$'\t'"$a"; done
+printf '%s\n' "$line" >> "$d/calls.log"
+verb=""
+for a in "$@"; do
+  case "$a" in
+    get|apply|patch|create|delete|edit|label|annotate|replace|set|rollout|wait|describe|logs|scale) verb="$a"; break ;;
+  esac
+done
+args=" $* "
+ignore=0; [[ "$args" == *" --ignore-not-found"* ]] && ignore=1
+notfound() { [ "$ignore" = 1 ] && exit 0; echo "Error from server (NotFound): secrets \"$1\" not found" >&2; exit 1; }
+case "$verb" in
+  get)
+    if [[ "$args" == *acr-pull* ]]; then
+      if [[ "$args" == *vrsky-platform* && -f "$d/acr.json" ]]; then cat "$d/acr.json"; exit 0; fi
+      notfound acr-pull
+    fi
+    if [[ "$args" == *vrsky-backup-config* ]]; then
+      if [[ "$args" == *vrsky-database* && -f "$d/config.json" ]]; then cat "$d/config.json"; exit 0; fi
+      notfound vrsky-backup-config
+    fi
+    exit 0 ;;
+  apply)
+    if [[ "$args" == *" -f - "* || "$args" == *" --filename=- "* || "$args" == *" -f=- "* || "$args" == *" --filename - "* ]]; then
+      cat > "$d/stdin-$$"; exit 0
+    fi
+    if [[ "$args" == *kubernetes/backup* && -f "$d/fail-cronjob-apply" ]]; then
+      echo 'error: the server rejected the CronJob' >&2; exit 1
+    fi
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+
+func runDeployBackup(t *testing.T, acr bool, config map[string]string, failCronApply bool) deployBackupRun {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "infrastructure", "azure", "deploy-backup-azure.sh")); err != nil {
+		t.Fatalf("deploy-backup-azure.sh: %v", err)
+	}
+	dir := t.TempDir()
+	write := func(name, body string, mode os.FileMode) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("kubectl", stubKubectl, 0o755) //nolint:gosec // the stub must be executable
+	if acr {
+		write("acr.json", `{"apiVersion":"v1","kind":"Secret","type":"kubernetes.io/dockerconfigjson",`+
+			`"metadata":{"name":"acr-pull","namespace":"vrsky-platform","uid":"6f1c2a9e-0000-4000-8000-000000000001",`+
+			`"resourceVersion":"123456","creationTimestamp":"2026-09-20T10:00:00Z"},`+
+			`"data":{".dockerconfigjson":"e30="}}`, 0o600)
+	}
+	if config != nil {
+		data := map[string]string{}
+		for k, v := range config {
+			data[k] = base64.StdEncoding.EncodeToString([]byte(v))
+		}
+		secret, _ := json.Marshal(map[string]any{
+			"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+			"metadata": map[string]any{
+				"name": "vrsky-backup-config", "namespace": "vrsky-database",
+				"uid": "6f1c2a9e-0000-4000-8000-000000000002", "resourceVersion": "654321",
+				"creationTimestamp": "2026-10-28T09:00:00Z",
+			},
+			"data": data,
+		})
+		write("config.json", string(secret), 0o600)
+	}
+	if failCronApply {
+		write("fail-cronjob-apply", "", 0o600)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "infrastructure/azure/deploy-backup-azure.sh")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "STUB_DIR="+dir)
+	out, runErr := cmd.CombinedOutput()
+
+	run := deployBackupRun{out: string(out), err: runErr, stdins: map[int]string{}}
+	log, _ := os.ReadFile(filepath.Join(dir, "calls.log")) //nolint:gosec // our own temp dir
+	for _, line := range strings.Split(strings.TrimRight(string(log), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		if b, err := os.ReadFile(filepath.Join(dir, "stdin-"+f[0])); err == nil { //nolint:gosec // our own temp dir
+			run.stdins[len(run.calls)] = string(b)
+		}
+		run.calls = append(run.calls, f[1:])
+	}
+	return run
+}
+
+// kubectlVerb is the first argument that is a kubectl subcommand.
+func kubectlVerb(argv []string) string {
+	for _, a := range argv {
+		switch a {
+		case "get", "apply", "patch", "create", "delete", "edit", "label", "annotate", "replace", "set", "rollout", "wait", "describe", "logs", "scale":
+			return a
+		}
+	}
+	return ""
+}
+
+// The backup deploy script (#395 criterion 3), driven against a stub kubectl
+// because it only ever runs in-cluster. What matters is the outcome: the
+// CronJob ends up suspended unless vrsky-backup-config has every required
+// key; acr-pull lands in vrsky-database clean of the source's identity;
+// the Secret the human made is read, never changed, and its values never
+// reach the log (the deploy log is public to anyone with repo access).
+func TestDeployBackupScript(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not on PATH; the in-cluster runtime has it, this machine does not")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	const sentinel = "SENTINEL-DO-NOT-PRINT"
+	full := map[string]string{
+		"BACKUP_DB_URL":                  "postgres://vrsky:" + sentinel + "@vrsky-postgresql.vrsky-database:5432/vrsky?sslmode=disable",
+		"ENCRYPTION_KEY":                 sentinel,
+		"BACKUP_PROVIDER":                "azure",
+		"BACKUP_BUCKET":                  "vrsky-backups",
+		"BACKUP_AZURE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=vrskybackup;AccountKey=" + sentinel + ";EndpointSuffix=core.windows.net",
+	}
+	only := func(keys ...string) map[string]string {
+		m := map[string]string{}
+		for _, k := range keys {
+			m[k] = full[k]
+		}
+		return m
+	}
+	forbidden := []string{sentinel}
+	for _, k := range []string{"BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_AZURE_CONNECTION_STRING"} {
+		forbidden = append(forbidden, base64.StdEncoding.EncodeToString([]byte(full[k])))
+	}
+
+	cases := []struct {
+		name          string
+		acr           bool
+		config        map[string]string
+		failCronApply bool
+		wantErr       bool
+		wantSuspended bool
+		wantSaid      []string // the log must say why it stays suspended
+	}{
+		{name: "secret present", acr: true, config: full, wantSuspended: false},
+		{name: "required keys only", acr: true, config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET"), wantSuspended: false},
+		{name: "secret missing", acr: true, config: nil, wantSuspended: true, wantSaid: []string{"vrsky-backup-config"}},
+		{name: "secret partial", acr: true, config: only("BACKUP_DB_URL", "ENCRYPTION_KEY"), wantSuspended: true,
+			wantSaid: []string{"vrsky-backup-config", "BACKUP_PROVIDER", "BACKUP_BUCKET"}},
+		{name: "no acr-pull to copy", acr: false, config: full, wantErr: true},
+		{name: "CronJob apply fails", acr: true, config: full, failCronApply: true, wantErr: true},
+	}
+	suspendRe := regexp.MustCompile(`"suspend"\s*:\s*(true|false)`)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := runDeployBackup(t, tc.acr, tc.config, tc.failCronApply)
+			logs := fmt.Sprintf("output:\n%s\ncalls:\n%v", r.out, r.calls)
+
+			// Never leak, never touch the human's Secret: true in every case.
+			for _, f := range forbidden {
+				if strings.Contains(r.out, f) {
+					t.Errorf("the script printed a value from vrsky-backup-config (%.12s…)\n%s", f, r.out)
+				}
+				for _, argv := range r.calls {
+					if strings.Contains(strings.Join(argv, " "), f) {
+						t.Errorf("a kubectl argv carries a value from vrsky-backup-config: %v", argv)
+					}
+				}
+			}
+			for i, argv := range r.calls {
+				if strings.Contains(strings.Join(argv, " "), "vrsky-backup-config") && kubectlVerb(argv) != "get" {
+					t.Errorf("call %d %v does more than read vrsky-backup-config", i, argv)
+				}
+			}
+			for i, in := range r.stdins {
+				if strings.Contains(in, "vrsky-backup-config") {
+					t.Errorf("call %d applies something naming vrsky-backup-config:\n%s", i, in)
+				}
+			}
+
+			if tc.wantErr {
+				if r.err == nil {
+					t.Fatalf("want a non-zero exit\n%s", logs)
+				}
+				return
+			}
+			if r.err != nil {
+				t.Fatalf("exit: %v (a missing or partial Secret is not an error)\n%s", r.err, logs)
+			}
+
+			// acr-pull, copied into vrsky-database without the source's identity.
+			var acrDoc map[string]any
+			cronAt := -1
+			for i, argv := range r.calls {
+				if kubectlVerb(argv) != "apply" {
+					continue
+				}
+				for _, a := range argv {
+					if strings.Contains(a, "kubernetes/backup") {
+						cronAt = i
+					}
+				}
+				in, ok := r.stdins[i]
+				if !ok {
+					continue
+				}
+				dec := yaml.NewDecoder(strings.NewReader(in))
+				for {
+					var doc map[string]any
+					if err := dec.Decode(&doc); err != nil {
+						break
+					}
+					meta, _ := doc["metadata"].(map[string]any)
+					switch {
+					case doc["kind"] == "Secret" && meta["name"] == "acr-pull":
+						acrDoc = doc
+					case doc["kind"] == "CronJob" && meta["name"] == "vrsky-mgmt-backup":
+						cronAt = i
+					}
+				}
+			}
+			if acrDoc == nil {
+				t.Fatalf("no acr-pull Secret applied through stdin\n%s", logs)
+			}
+			meta, _ := acrDoc["metadata"].(map[string]any)
+			if meta["namespace"] != "vrsky-database" {
+				t.Errorf("acr-pull applied to namespace %v, want vrsky-database", meta["namespace"])
+			}
+			for _, k := range []string{"uid", "resourceVersion", "creationTimestamp"} {
+				if _, ok := meta[k]; ok {
+					t.Errorf("acr-pull still carries metadata.%s from vrsky-platform; apply would conflict or refuse it", k)
+				}
+			}
+			if acrDoc["type"] != "kubernetes.io/dockerconfigjson" {
+				t.Errorf("acr-pull type %v, want kubernetes.io/dockerconfigjson", acrDoc["type"])
+			}
+			data, _ := acrDoc["data"].(map[string]any)
+			if data[".dockerconfigjson"] != "e30=" || len(data) != 1 {
+				t.Errorf("acr-pull data %v, want the source's {.dockerconfigjson: e30=}", data)
+			}
+
+			// The CronJob, then its suspend flag. Applying the file after the
+			// patch would put suspend: true back.
+			if cronAt < 0 {
+				t.Fatalf("the CronJob was never applied\n%s", logs)
+			}
+			suspended, lastPatch := true, -1 // the file says suspend: true
+			for i, argv := range r.calls {
+				joined := strings.Join(argv, " ")
+				if kubectlVerb(argv) != "patch" || !strings.Contains(joined, "vrsky-mgmt-backup") {
+					continue
+				}
+				m := suspendRe.FindStringSubmatch(joined)
+				if m == nil {
+					continue
+				}
+				lastPatch = i
+				if i > cronAt {
+					suspended = m[1] == "true"
+				}
+				if tc.wantSuspended && m[1] == "false" {
+					t.Errorf("call %d unsuspends the CronJob though the Secret is not complete: %v", i, argv)
+				}
+			}
+			if lastPatch >= 0 && lastPatch < cronAt {
+				t.Errorf("the suspend patch (call %d) comes before the CronJob apply (call %d), which resets it", lastPatch, cronAt)
+			}
+			if suspended != tc.wantSuspended {
+				t.Errorf("CronJob suspended=%v after the run, want %v\n%s", suspended, tc.wantSuspended, logs)
+			}
+			for _, s := range tc.wantSaid {
+				if !strings.Contains(r.out, s) {
+					t.Errorf("the output does not mention %s; nobody reading the deploy log would know why the backup is off\n%s", s, r.out)
+				}
+			}
+		})
+	}
 }

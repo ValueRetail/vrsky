@@ -1,8 +1,9 @@
 # promtool unit tests for the VRSky default alert ruleset (#84).
 # Run: docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool \
 #        prom/prometheus:latest test rules /cfg/prometheus-rules-test.yml
-# All 9 rules are driven to FIRING — the "staged test" acceptance
-# criterion, deterministic and CI-runnable.
+# 11 of the 12 rules are driven to FIRING (all but
+# NATSInstanceApproachingCapacity) — the "staged test" acceptance criterion,
+# deterministic and CI-runnable.
 
 rule_files:
   - prometheus-rules.yml
@@ -305,3 +306,319 @@ tests:
             exp_annotations:
               summary: "node n0 has 90% of its CPU reserved"
               description: "CPU requests on n0 have exceeded 85% of allocatable for an hour. Right-size requests (plans/cpu-request-headroom.md) before adding a node; usage is usually a fraction of this."
+
+  # 11. MgmtBackupMissing (a) — failed backup Jobs since the last success.
+  #     The clock starts at Thursday 00:00 UTC; every eval here is Thursday
+  #     morning, and the last schedule time stays fresh, so only the
+  #     failed-Job branch can fire. Jobs: a success at minute 10 (done at
+  #     20), a failure started at 60 (failed at 70), a failure started at
+  #     180 (failed at 190), then a success started at 300 (done at 310).
+  #     KSM emits kube_job_status_completion_time only for a Job that
+  #     succeeded and kube_job_failed only once the Job has a Failed
+  #     condition.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x340'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x340'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x10 600x49 3600x119 10800x119 18000x40'
+      # success, minute 10-20
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x10 1x330'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x10 600x330'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x20 1200x320'
+      # failure, minute 60-70
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x60 1x280'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60"}'
+        values: '_x60 3600x280'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="true"}'
+        values: '_x70 1x270'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="false"}'
+        values: '_x70 0x270'
+      # failure, minute 180-190
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x180 1x160'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180"}'
+        values: '_x180 10800x160'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",condition="true"}'
+        values: '_x190 1x150'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",condition="false"}'
+        values: '_x190 0x150'
+      # success, minute 300-310
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-300",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x300 1x40'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-300"}'
+        values: '_x300 18000x40'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-300"}'
+        values: '_x310 18600x30'
+    alert_rule_test:
+      # One failure since the last success: one weekday lost, not two.
+      - eval_time: 120m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      # Two failures, but still inside the 30-minute hold.
+      - eval_time: 200m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 225m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+      # The next run succeeded: the two failures are before it and stop counting.
+      - eval_time: 330m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11b. MgmtBackupMissing (a) while suspended — the same two failures, but
+  #      the CronJob is suspended (the state it ships in until the human
+  #      creates vrsky-backup-config). Thursday morning UTC.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '1x340'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x340'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x10 600x49 3600x119 10800x160'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x10 1x330'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x10 600x330'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x20 1200x320'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x60 1x280'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60"}'
+        values: '_x60 3600x280'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="true"}'
+        values: '_x70 1x270'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x180 1x160'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180"}'
+        values: '_x180 10800x160'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",condition="true"}'
+        values: '_x190 1x150'
+    alert_rule_test:
+      - eval_time: 225m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 330m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11c. MgmtBackupMissing (a) when no backup ever succeeded — the count
+  #      starts at the CronJob's creation instead. Thursday morning UTC.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x340'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x340'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x60 3600x119 10800x160'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x60 1x280'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60"}'
+        values: '_x60 3600x280'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="true"}'
+        values: '_x70 1x270'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="false"}'
+        values: '_x70 0x270'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x180 1x160'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180"}'
+        values: '_x180 10800x160'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",condition="true"}'
+        values: '_x190 1x150'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-180",condition="false"}'
+        values: '_x190 0x150'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 225m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11d. MgmtBackupMissing (a) counts only its own Jobs. The backup has one
+  #      failure since its last success; next to it in vrsky-database a
+  #      different CronJob has two failed Jobs and a hand-made Job with no
+  #      owner failed too. Neither may count towards the backup, and the
+  #      other CronJob is not this alert's business. Thursday morning UTC.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x340'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x340'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x10 600x49 3600x280'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x10 1x330'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x10 600x330'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-10"}'
+        values: '_x20 1200x320'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x60 1x280'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60"}'
+        values: '_x60 3600x280'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-60",condition="true"}'
+        values: '_x70 1x270'
+      # the other CronJob: unsuspended, two failures
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-other"}'
+        values: '0x340'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-other"}'
+        values: '60x340'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-other"}'
+        values: '_x120 7200x59 10800x160'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-120",owner_kind="CronJob",owner_name="vrsky-other",owner_is_controller="true"}'
+        values: '_x120 1x220'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-120"}'
+        values: '_x120 7200x220'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-120",condition="true"}'
+        values: '_x130 1x210'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-180",owner_kind="CronJob",owner_name="vrsky-other",owner_is_controller="true"}'
+        values: '_x180 1x160'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-180"}'
+        values: '_x180 10800x160'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-other-180",condition="true"}'
+        values: '_x190 1x150'
+      # a Job made by hand, no owner
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="manual-restore-check",owner_kind="<none>",owner_name="<none>",owner_is_controller="<none>"}'
+        values: '_x150 1x190'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="manual-restore-check"}'
+        values: '_x150 9000x190'
+      - series: 'kube_job_failed{job="kube-state-metrics",namespace="vrsky-database",job_name="manual-restore-check",condition="true"}'
+        values: '_x160 1x180'
+    alert_rule_test:
+      - eval_time: 225m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 330m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11e. MgmtBackupMissing (b) — the CronJob stopped being scheduled. The
+  #      last run was Thursday 11:00 UTC (noon in Oslo, winter time) and
+  #      succeeded; nothing is scheduled after it. 98 hours later is
+  #      Monday 13:00 UTC.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x6700'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x6700'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x660 39600x6040'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x660 1x6040'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660"}'
+        values: '_x660 39600x6040'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-660"}'
+        values: '_x670 40200x6030'
+    alert_rule_test:
+      # Monday 12:30 UTC: after noon on a weekday, but 97.5 hours since the
+      # last schedule, under the 98.
+      - eval_time: 6510m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      # Monday 14:00 UTC: 99 hours, past the threshold and the 30-minute hold.
+      - eval_time: 6600m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11f. MgmtBackupMissing (b) only on weekday afternoons. Last schedule
+  #      Thursday 00:01 UTC of the first day, so from Monday 02:01 on it is
+  #      always more than 98 hours old; what decides is the day and the hour.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x13800'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x13800'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x13800'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '1x13800'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1"}'
+        values: '60x13800'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="vrsky-mgmt-backup-1"}'
+        values: '_x2 120x13798'
+    alert_rule_test:
+      # Monday 11:00 UTC: stale for 107 hours, but before the noon run.
+      - eval_time: 6420m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      # Monday 13:00 UTC: weekday afternoon, fires.
+      - eval_time: 6540m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+      # Friday of the next week, 13:00 UTC: still a weekday afternoon.
+      - eval_time: 12300m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+      # Saturday 14:00 UTC of the next week: no run is due on a weekend.
+      - eval_time: 13800m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11g. MgmtBackupMissing (b) while suspended: as 11f at Monday 13:00 UTC,
+  #      but the CronJob is suspended. A suspended CronJob is never
+  #      scheduled, so its stale schedule time must not page.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '1x6600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x6600'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x6600'
+    alert_rule_test:
+      - eval_time: 6540m
+        alertname: MgmtBackupMissing
+        exp_alerts: []

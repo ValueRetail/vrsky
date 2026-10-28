@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# deploy-backup-azure.sh — apply the management-DB backup CronJob (#395).
+#
+# Runs inside the cluster through in-cluster.sh (the deploy job and Catch up),
+# from a directory that holds infrastructure/ with its paths intact. The
+# runtime has bash, jq and kubectl; no sed, no az.
+#
+#   1. Copy the acr-pull secret from vrsky-platform into vrsky-database, so the
+#      Job can pull vrsky-cli from ACR. Copied on every run, so a rotated ACR
+#      password follows. No credential is in this script.
+#   2. Apply infrastructure/kubernetes/backup/cronjob.yaml (suspended in the
+#      file).
+#   3. Unsuspend it only when the vrsky-backup-config Secret exists with the
+#      keys a backup needs. Otherwise it stays suspended and this says why:
+#      a Job that fails every weekday until someone creates the Secret helps
+#      nobody.
+#
+# vrsky-backup-config is created by a human with `kubectl create secret
+# generic` (infrastructure/kubernetes/backup/README.md). This script reads its
+# key names and nothing else: it never creates, changes or prints it.
+set -euo pipefail
+
+NS=vrsky-database
+CRONJOB=vrsky-mgmt-backup
+CONFIG=vrsky-backup-config
+MANIFEST=infrastructure/kubernetes/backup/cronjob.yaml
+REQUIRED="BACKUP_DB_URL ENCRYPTION_KEY BACKUP_PROVIDER BACKUP_BUCKET"
+
+# --- 1. acr-pull ------------------------------------------------------------
+if ! pull="$(kubectl get secret acr-pull -n vrsky-platform -o json)"; then
+  echo "ERROR: no acr-pull secret in vrsky-platform to copy; the backup Job could not pull its image" >&2
+  exit 1
+fi
+printf '%s' "$pull" \
+  | jq --arg ns "$NS" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
+                        metadata: {name: "acr-pull", namespace: $ns}}' \
+  | kubectl apply -f -
+
+# --- 2. the CronJob -----------------------------------------------------------
+kubectl apply -f "$MANIFEST"
+
+# --- 3. suspended unless the config Secret is complete ------------------------
+# Key names only; the values never leave the API server.
+missing=""
+if keys="$(kubectl get secret "$CONFIG" -n "$NS" -o json 2>/dev/null | jq -r '.data // {} | keys[]')"; then
+  nl=$'\n'
+  for k in $REQUIRED; do
+    case "$nl$keys$nl" in *"$nl$k$nl"*) ;; *) missing="$missing $k" ;; esac
+  done
+  [ -z "$missing" ] || reason="Secret $NS/$CONFIG lacks:$missing"
+else
+  missing=all
+  reason="Secret $NS/$CONFIG does not exist"
+fi
+
+if [ -z "$missing" ]; then
+  kubectl patch cronjob "$CRONJOB" -n "$NS" --type merge -p '{"spec":{"suspend":false}}'
+  echo "backup CronJob $NS/$CRONJOB applied and active (weekdays 12:00 Europe/Oslo)"
+else
+  kubectl patch cronjob "$CRONJOB" -n "$NS" --type merge -p '{"spec":{"suspend":true}}'
+  echo "backup CronJob $NS/$CRONJOB applied SUSPENDED: $reason."
+  echo "  Create it as in infrastructure/kubernetes/backup/README.md, then run Catch up"
+  echo "  (or this script) to activate the backups."
+fi

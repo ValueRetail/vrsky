@@ -5,7 +5,8 @@
 # `az aks start`, this one click rolls every core service to its current
 # :latest digest (a no-op for anything already there), restarts the
 # connector fleet so it picks up its :latest images, applies the monitoring
-# values and rules, and runs the smoke check. Same scripts, same in-cluster
+# values and rules, applies the backup CronJob (active only once its Secret
+# exists), and runs the smoke check. Same scripts, same in-cluster
 # path as the deploy job (plans/deploy-while-parked.md).
 name: Catch up
 
@@ -48,7 +49,7 @@ jobs:
       - name: Stage the deploy files
         run: |
           mkdir -p stage
-          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/prometheus-rules.yml stage/
+          cp --parents -r infrastructure/azure infrastructure/kubernetes/connectors infrastructure/kubernetes/monitoring infrastructure/kubernetes/backup infrastructure/prometheus-rules.yml stage/
           for n in management-api ui data-filter data-converter alert-responder; do
             d=$(az acr repository show -n vrskyprodacr --image "vrsky/$n:latest" --query digest -o tsv)
             echo "$n $d" >> stage/digests.txt
@@ -61,6 +62,10 @@ jobs:
         run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-connectors-azure.sh"
       - name: Monitoring values and alert rules
         run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
+      # A backup change merged while parked, and the suspend flag after a
+      # human created vrsky-backup-config (#395).
+      - name: Backup CronJob
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"
       - name: Smoke check
         run: |
           consumers=""

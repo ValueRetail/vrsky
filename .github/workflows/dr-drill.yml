@@ -1,9 +1,19 @@
 name: DR Restore Drill
 
-# Phase 3C (#86): proves the backup→restore path end to end. Seeds a source
-# Postgres, runs `vrsky-cli backup` to MinIO, restores into a SEPARATE target
-# Postgres with `vrsky-cli restore`, and asserts the sentinel data survived.
-# This is the "restore drill passes in CI" acceptance criterion.
+# Proves the backup -> restore path end to end, as close to production as CI
+# gets (#86, #395):
+#   - Postgres 18, database and user `vrsky`, like the management DB on AKS
+#   - the real schema: every infrastructure/migrations/*.up.sql, then rows for
+#     two tenants
+#   - the vrsky-cli image built from its Dockerfile, run as uid 70 with a
+#     read-only root filesystem and a tmpfs at /tmp, like the CronJob
+#     (infrastructure/kubernetes/backup/cronjob.yaml)
+#   - BACKUP_PROVIDER=azure into the container `vrsky-backups`, on Azurite
+#   - restore into a separate Postgres 18 and compare row counts per tenant
+#
+# Weekly as well as on changes, so a drift in the base image or the schema
+# shows up even when nobody touches the backup code. A red run on main opens
+# an issue (ci-failure-alert.yml).
 
 on:
   push:
@@ -22,110 +32,148 @@ on:
       - 'src/pkg/objectstore/**'
       - 'infrastructure/migrations/**'
       - '.github/workflows/dr-drill.yml'
+  schedule:
+    - cron: "0 6 * * 3" # Wednesdays 06:00 UTC; the drill needs no cluster
   workflow_dispatch:
 
 jobs:
   restore-drill:
     name: Backup + restore drill
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     env:
+      # Throwaway values for a run that lives for one job. The Azurite account
+      # and key are the emulator's published defaults, not a credential.
       ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-      # MinIO (S3) target
-      BACKUP_PROVIDER: s3
-      BACKUP_BUCKET: dr-drill
+      BACKUP_PROVIDER: azure
+      BACKUP_BUCKET: vrsky-backups
       BACKUP_PREFIX: "mgmt-backups/"
-      BACKUP_ENDPOINT: "http://localhost:9000"
-      BACKUP_REGION: us-east-1
-      BACKUP_ACCESS_KEY_ID: minioadmin
-      BACKUP_SECRET_ACCESS_KEY: minioadmin
-      # Source DB to back up; target DB to restore into.
-      SOURCE_DB_URL: "postgres://postgres:postgres@localhost:5432/management_db?sslmode=disable"
-      TARGET_DB_URL: "postgres://postgres:postgres@localhost:5433/management_db?sslmode=disable"
+      BACKUP_AZURE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+      SOURCE_DB_URL: "postgres://vrsky:vrsky@localhost:5432/vrsky?sslmode=disable"
+      TARGET_DB_URL: "postgres://vrsky:vrsky@localhost:5433/vrsky?sslmode=disable"
+      # Rows the seed step writes, per tenant and table, in the order the
+      # count query prints them.
+      EXPECTED_COUNTS: |-
+        drill-a|connections|3
+        drill-a|secrets|4
+        drill-b|connections|2
+        drill-b|secrets|1
 
     services:
       source-db:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_DB: management_db
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vrsky
+          POSTGRES_USER: vrsky
+          POSTGRES_PASSWORD: vrsky
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-cmd "pg_isready -U vrsky" --health-interval 5s
           --health-timeout 5s --health-retries 10
       target-db:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
-          POSTGRES_DB: management_db
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vrsky
+          POSTGRES_USER: vrsky
+          POSTGRES_PASSWORD: vrsky
         ports: ["5433:5432"]
         options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-cmd "pg_isready -U vrsky" --health-interval 5s
           --health-timeout 5s --health-retries 10
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-          check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
-          cache-dependency-path: src/go.sum
+      # The image production runs, not a `go build` on the runner: pg_dump and
+      # pg_restore come from its postgres:18-alpine base.
+      - name: Build the vrsky-cli image
+        run: docker build -f src/cmd/vrsky-cli/Dockerfile -t vrsky-cli:drill .
 
-      - name: Download Go modules
-        uses: ./.github/actions/go-modules
-      - name: Install postgres client + build vrsky-cli
-        env:
-          GOPROXY: "off"
+      - name: Start Azurite + create the container
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          cd src && go build -o /usr/local/bin/vrsky-cli ./cmd/vrsky-cli
-
-      - name: Start MinIO + create bucket
-        # The minio image needs the `server` command, which GitHub service
-        # containers can't supply — so run it as a step. pgsty/* is the pinned
-        # community fork; MinIO's own images were deleted (docs/operator/
-        # troubleshooting.md).
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:3.34.0 \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; break; fi
-            echo "waiting for minio… [$i/30]"; sleep 2
+            if az storage container create --name "$BACKUP_BUCKET" \
+                 --connection-string "$BACKUP_AZURE_CONNECTION_STRING" -o none 2>/dev/null; then
+              echo "container $BACKUP_BUCKET ready"; exit 0
+            fi
+            echo "waiting for azurite… [$i/30]"; sleep 2
           done
-          docker run --rm --network host --entrypoint sh pgsty/mc:RELEASE.2026-09-16T00-00-00Z -c \
-            "until mc alias set local http://localhost:9000 minioadmin minioadmin; do sleep 1; done; mc mb -p local/dr-drill"
+          echo "Azurite did not come up"; docker logs azurite; exit 1
 
-      - name: Seed the source database
+      - name: Apply the migrations to the source database
         run: |
-          export PGPASSWORD=postgres
-          # Minimal schema + sentinel rows (no migrate binary needed — the dump
-          # captures whatever's there; we just need recognisable data).
-          psql "$SOURCE_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE TABLE dr_sentinel (id serial PRIMARY KEY, name text NOT NULL);
-          INSERT INTO dr_sentinel (name) VALUES ('acme-tenant'), ('globex-tenant');
+          docker run --rm --network host -e SOURCE_DB_URL \
+            -v "$PWD/infrastructure/migrations":/migrations:ro \
+            --entrypoint sh vrsky-cli:drill -c '
+              set -e
+              for f in /migrations/*.up.sql; do
+                echo "apply $(basename "$f")"
+                psql "$SOURCE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+              done'
+
+      - name: Seed two tenants
+        run: |
+          docker run --rm -i --network host -e SOURCE_DB_URL --entrypoint sh vrsky-cli:drill \
+            -c 'psql "$SOURCE_DB_URL" -v ON_ERROR_STOP=1 -q' <<'SQL'
+          INSERT INTO users (id, email, password_hash, status) VALUES
+            ('00000000-0000-0000-0000-0000000000a1', 'owner-a@drill.test', 'x', 'active'),
+            ('00000000-0000-0000-0000-0000000000b1', 'owner-b@drill.test', 'x', 'active');
+          INSERT INTO tenants (id, name, slug, owner_id) VALUES
+            ('aaaaaaaa-0000-0000-0000-000000000001', 'Drill A', 'drill-a', '00000000-0000-0000-0000-0000000000a1'),
+            ('bbbbbbbb-0000-0000-0000-000000000001', 'Drill B', 'drill-b', '00000000-0000-0000-0000-0000000000b1');
+          INSERT INTO connections (tenant_id, name)
+            SELECT 'aaaaaaaa-0000-0000-0000-000000000001', 'a-conn-' || g FROM generate_series(1, 3) g;
+          INSERT INTO connections (tenant_id, name)
+            SELECT 'bbbbbbbb-0000-0000-0000-000000000001', 'b-conn-' || g FROM generate_series(1, 2) g;
+          INSERT INTO secrets (tenant_id, name, ciphertext)
+            SELECT 'aaaaaaaa-0000-0000-0000-000000000001', 'a-secret-' || g, 'aes256:drill' FROM generate_series(1, 4) g;
+          INSERT INTO secrets (tenant_id, name, ciphertext)
+            SELECT 'bbbbbbbb-0000-0000-0000-000000000001', 'b-secret-' || g, 'aes256:drill' FROM generate_series(1, 1) g;
           SQL
 
-      - name: Backup (source → MinIO)
+      # Same settings as the CronJob's pod: uid 70, read-only root, /tmp only.
+      - name: Backup (source -> Azurite)
         run: |
-          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli backup --stamp drill
-          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli list
+          cli() {
+            docker run --rm --network host --user 70:70 --read-only --tmpfs /tmp \
+              -e ENCRYPTION_KEY -e BACKUP_PROVIDER -e BACKUP_BUCKET -e BACKUP_PREFIX \
+              -e BACKUP_AZURE_CONNECTION_STRING -e BACKUP_DB_URL="$SOURCE_DB_URL" \
+              vrsky-cli:drill "$@"
+          }
+          cli backup --stamp drill
+          cli list
 
-      - name: Restore (MinIO → target)
+      - name: Restore (Azurite -> target)
         run: |
-          BACKUP_DB_URL="$SOURCE_DB_URL" vrsky-cli restore \
-            --target-db-url "$TARGET_DB_URL" --confirm \
+          docker run --rm --network host --user 70:70 --read-only --tmpfs /tmp \
+            -e ENCRYPTION_KEY -e BACKUP_PROVIDER -e BACKUP_BUCKET -e BACKUP_PREFIX \
+            -e BACKUP_AZURE_CONNECTION_STRING -e BACKUP_DB_URL="$SOURCE_DB_URL" \
+            vrsky-cli:drill restore --target-db-url "$TARGET_DB_URL" --confirm \
             "mgmt-backups/management_db-drill.dump.gz.enc"
 
-      - name: Assert sentinel data restored
+      - name: Row counts per tenant match
+        env:
+          COUNT_QUERY: >-
+            SELECT t.slug, 'connections', count(c.id) FROM tenants t
+            LEFT JOIN connections c ON c.tenant_id = t.id::text GROUP BY t.slug
+            UNION ALL
+            SELECT t.slug, 'secrets', count(s.id) FROM tenants t
+            LEFT JOIN secrets s ON s.tenant_id = t.id GROUP BY t.slug
+            ORDER BY 1, 2
         run: |
-          export PGPASSWORD=postgres
-          count=$(psql "$TARGET_DB_URL" -tAc "SELECT count(*) FROM dr_sentinel WHERE name LIKE '%-tenant'")
-          echo "restored sentinel rows: $count"
-          test "$count" = "2" || { echo "DR DRILL FAILED: expected 2 rows, got $count"; exit 1; }
-          echo "DR drill passed ✅"
+          counts() {
+            docker run --rm --network host -e DB="$1" -e COUNT_QUERY --entrypoint sh vrsky-cli:drill \
+              -c 'psql "$DB" -v ON_ERROR_STOP=1 -tA -c "$COUNT_QUERY"'
+          }
+          source=$(counts "$SOURCE_DB_URL")
+          target=$(counts "$TARGET_DB_URL")
+          echo "expected:"; echo "$EXPECTED_COUNTS" | sed 's/^/  /'
+          echo "source:";   echo "$source" | sed 's/^/  /'
+          echo "target:";   echo "$target" | sed 's/^/  /'
+          [ "$source" = "$EXPECTED_COUNTS" ] || { echo "::error::the seed did not write the expected rows"; exit 1; }
+          [ "$target" = "$EXPECTED_COUNTS" ] || { echo "::error::DR drill failed: restored row counts differ from the source"; exit 1; }
+          echo "DR drill passed: per-tenant row counts survived backup and restore"

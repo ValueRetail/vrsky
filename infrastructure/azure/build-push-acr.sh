@@ -9,7 +9,7 @@
 #
 # Usage:
 #   infrastructure/azure/build-push-acr.sh [group]
-#     group = core | connectors | all   (default: all)
+#     group = core | connectors | tools | all   (default: all)
 #
 #   REG=myregistry infrastructure/azure/build-push-acr.sh core   # override ACR name
 #
@@ -19,6 +19,9 @@
 #              Business Central, Visma, Brightpearl) and generic (file, HTTP,
 #              database, cloud storage, SFTP, Kafka, RabbitMQ, Salesforce,
 #              webhook, API, tenant). Deploy them with deploy-connectors-azure.sh.
+#   tools      images that run as Jobs, not services: vrsky-cli, which the
+#              management-DB backup CronJob runs (deploy-backup-azure.sh, #395).
+#              Nothing to roll: the CronJob pulls :latest at every run.
 #
 # There is no "workers" group any more: since #201 (transforms) and #205 (edges)
 # the orchestrator spawns no per-connection worker pods, so the vrsky-consumer /
@@ -79,6 +82,10 @@ build_connectors() {
   done
 }
 
+build_tools() {
+  build vrsky/vrsky-cli:latest src/cmd/vrsky-cli/Dockerfile
+}
+
 echo "Registry : $REG"
 echo "Group    : $GROUP"
 echo "Context  : $REPO_ROOT (trimmed by .dockerignore)"
@@ -86,8 +93,9 @@ echo "Context  : $REPO_ROOT (trimmed by .dockerignore)"
 case "$GROUP" in
   core)       build_core ;;
   connectors) build_connectors ;;
-  all)        build_core; build_connectors ;;
-  *) echo "unknown group '$GROUP' (use: core | connectors | all)" >&2; exit 2 ;;
+  tools)      build_tools ;;
+  all)        build_core; build_connectors; build_tools ;;
+  *) echo "unknown group '$GROUP' (use: core | connectors | tools | all)" >&2; exit 2 ;;
 esac
 
 echo ""
