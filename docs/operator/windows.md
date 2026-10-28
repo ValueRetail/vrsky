@@ -162,14 +162,22 @@ container exits reporting that a file which plainly exists cannot be found. If
 you cloned before that file existed, `git rm --cached -r . && git reset --hard`
 re-normalises.
 
-**File pipelines use `data/input` in the repository.** On macOS and Linux
-the file connectors mount your home directory, so a path typed in the editor
-means the same thing inside the container. PowerShell doesn't set `HOME`, so
-on Windows they mount the repository's `data/input` instead, and file
-pipelines read and write there. Don't set `HOME` in `.env` to get your home
-folder: compose uses it as both the source and the target of the mount, and
-Docker rejects a Windows path like `C:/Users/you` as a target, so the file
-connectors won't start.
+**File pipelines read from `data/input` in the repository** unless you pick
+another folder. To use one in your home folder, set it in `.env`:
+
+```
+VRSKY_FILES_HOST_DIR=C:\Users\you\vrsky-files
+```
+
+Compose mounts that folder at `/data/input` inside the file connectors, so
+paths in the editor stay Linux paths (`/data/input/...`, or `~/...` in a
+source, which means the same folder). Each workspace gets its own subfolder,
+`C:\Users\you\vrsky-files\<workspace id>\`, created on first use. The value
+is only ever a mount source; the target is fixed, because Docker rejects a
+Windows path as a target. That's also why setting `HOME` no longer does
+anything here, and why Git Bash, which hands Docker its `HOME` converted to
+`C:\Users\you`, isn't a problem either (#422). Written files still go to the
+repository's `data/output`.
 
 **Ports.** The core set binds 3000, 4222, 5434, 8080, 8222, 9100, 9101, 9310,
 9400, 9600, 9700 and 9900 on loopback. `netstat -ano | findstr :3000` finds a

@@ -165,7 +165,7 @@ Last updated 2026-10-28.
     (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
     and say so next to the `openssl rand -hex 32` advice. Found in review of
     #381.
-34. **No way to mount a Windows home folder for the file connectors.**
+34. ~~**No way to mount a Windows home folder for the file connectors.**~~ (#422)
     `docker-compose.yml` mounts `${HOME:-./data/input}` at
     `${HOME:-/data/input}` for `file-consumer` and `file-producer`, the same
     path on both sides. A Windows path can't be a target in the Linux
@@ -339,7 +339,7 @@ Last updated 2026-10-28.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
     to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
     `agent:needs-human`. Found in #395.
-55. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+55. ~~**`vrsky-cli backup` holds the whole dump in memory.**~~ (#430) `pg_dump`'s
     output, the gzipped copy and the encrypted copy all sit in byte slices
     (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
     `EncryptBytes` call), so a dump of roughly a third of the CronJob's
@@ -399,7 +399,7 @@ Last updated 2026-10-28.
     stored in `connection_node_checkpoints` like the BC consumer's) would
     send each receipt once. The `resource` key can't carry a query string
     today: the poller appends `?start=…`. Found during #435.
-63. **The converter editor doesn't know `each` or `split_records`**
+63. ~~**The converter editor doesn't know `each` or `split_records`**~~ (#458)
     (`ui/src/components/Pipeline/PropertyEditor.tsx`). A retail template's
     converter opened in the builder shows the `each` mapping as "Rename"
     (the type select has no `each` option) without its nested mappings, and
@@ -521,6 +521,56 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
+82. **GCS `PutStream` commits a partial object when the body fails.**
+    `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
+    which finalises the upload; aborting needs the writer's context
+    cancelled instead. S3 and Azure abort. A failed `vrsky-cli backup` on
+    GCS can leave a cut-off archive that fails restore loudly (no final
+    chunk) but still looks like a backup in `list`. Found during #430.
+83. **`pgRestore` in `vrsky-cli` has no unit test.** Its error precedence
+    (an archive read error wins over pg_restore's exit status) and the
+    drain after pg_restore exits, which is where a chunked archive's final
+    chunk and the gzip checksum get checked, are only exercised by the DR
+    drill's happy path. Test them with a fake `pg_restore` script first on
+    `PATH`: one that exits 0 early, one that fails, one that reads all of
+    stdin, each against a good and a damaged archive. Found in review of
+    #471.
+84. **A backup archive isn't bound to its object key.** Anyone who can
+    write to the bucket can copy an older valid archive over the newest
+    key, and `verify` and `restore` accept it. Put the stamp (and the key
+    name) in the `VRSKYBK1` header, so it is part of every chunk's AAD,
+    and have `backup verify` and `restore` check it against the key they
+    were given. Changes the format (`VRSKYBK2`; keep reading v1 until it
+    ages out). Found in review of #471.
+85. **Delete the legacy single-seal restore path** in `vrsky-cli`
+    (`openArchive`'s `crypto.DecryptBytes` branch) once the 14-day
+    retention holds only chunked archives, i.e. 14 days after #471 reaches
+    production and the CronJob has run on it. Until then restore still
+    opens archives sealed directly under `ENCRYPTION_KEY`; removing it
+    finishes the key separation. Found in review of #471.
+86. **The file destination's host folder is fixed to `data/output`.**
+    #422 lets `.env` pick the host folder behind `/data/input`
+    (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
+    repository's `data/output`, so a Windows user can read from their home
+    folder and not write to it. A second variable for `/data/output`, with
+    the same fixed target and the guard in
+    `compose_files_mount_guard_test.go`, would close that. Found in #422.
+87. **Rename and `each` leave a dotted source in place.** With the node's
+    `drop_unmapped` off, both read `source` as a path but remove it with
+    `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
+    `rename` and `each` cases), which only deletes a top-level key. So
+    `order.items` → `lines` keeps `order.items` next to the new `lines`.
+    Either delete along the path (a behaviour change for existing
+    pipelines, so say so in the PR) or document it. The editor's `each`
+    help text says so since #458. Found in #458.
+88. **Converter editor accessibility.** Nested mapping rows repeat the
+    accessible names "Mapping type" and "Remove mapping" with no row
+    context, so a screen reader can't tell rows apart, and a row's
+    warnings aren't tied to its inputs with `aria-describedby`
+    (`ui/src/components/Pipeline/ConverterMappingsEditor.tsx`). Name rows
+    by position or target ("Remove mapping 2", "Item mapping type for
+    lineObjectNumber") and point the inputs at the warning list. Found in
+    #458.
 
 ## Human
 

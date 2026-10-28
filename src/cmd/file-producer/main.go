@@ -890,31 +890,55 @@ func mkdirAllAndChown(path string) error {
 	return nil
 }
 
+// getHostOwner returns the uid/gid written files should belong to, or -1, -1
+// for "leave them as they are".
 func getHostOwner() (int, int) {
-	uidStr := os.Getenv("FILE_OWNER_UID")
-	gidStr := os.Getenv("FILE_OWNER_GID")
+	return hostOwner(os.Getenv("FILE_OWNER_UID"), os.Getenv("FILE_OWNER_GID"), probeHostHomeOwner)
+}
+
+// probeHostHomeOwner reports who owns HOST_HOME, the host folder mounted into
+// the container.
+func probeHostHomeOwner() (uid, gid int, ok bool) {
+	hostHome := os.Getenv("HOST_HOME")
+	if hostHome == "" {
+		return 0, 0, false
+	}
+	info, err := os.Stat(hostHome)
+	if err != nil {
+		return 0, 0, false
+	}
+	st, isStat := info.Sys().(*syscall.Stat_t)
+	if !isStat {
+		return 0, 0, false
+	}
+	return int(st.Uid), int(st.Gid), true
+}
+
+// hostOwner decides the owner from FILE_OWNER_UID/GID and the owner of the
+// mounted host folder (probe). The probe wins when it differs, because compose
+// falls back to 1000 when the shell doesn't export UID (macOS users are 501).
+//
+// A root-owned folder is never taken as the host user, though. dockerd creates
+// a missing bind-mount source as root:root on Linux, so on a fresh clone
+// HOST_HOME's folder is root's, and following it made every output root-owned,
+// needing sudo to delete (#422 review). Then FILE_OWNER_UID/GID stand.
+func hostOwner(uidStr, gidStr string, probe func() (int, int, bool)) (int, int) {
+	pUID, pGID, probed := probe()
+	if probed && pUID == 0 {
+		probed = false
+	}
 	if uidStr != "" && gidStr != "" {
 		uid, err1 := strconv.Atoi(uidStr)
 		gid, err2 := strconv.Atoi(gidStr)
 		if err1 == nil && err2 == nil {
-			if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
-				if info, err := os.Stat(hostHome); err == nil {
-					if st, ok := info.Sys().(*syscall.Stat_t); ok {
-						if int(st.Uid) != uid {
-							return int(st.Uid), int(st.Gid)
-						}
-					}
-				}
+			if probed && pUID != uid {
+				return pUID, pGID
 			}
 			return uid, gid
 		}
 	}
-	if hostHome := os.Getenv("HOST_HOME"); hostHome != "" {
-		if info, err := os.Stat(hostHome); err == nil {
-			if st, ok := info.Sys().(*syscall.Stat_t); ok {
-				return int(st.Uid), int(st.Gid)
-			}
-		}
+	if probed {
+		return pUID, pGID
 	}
 	return -1, -1
 }
