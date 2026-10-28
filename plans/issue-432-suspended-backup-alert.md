@@ -108,7 +108,7 @@ for: 30m
   groups instead of one per case; locally the run went from 92 s to about
   135 s (a first draft with seven groups took 195 s).
 - A deleted CronJob is silent here and in `MgmtBackupMissing`; backlog
-  item 82.
+  item 89.
 
 ## Verification
 
