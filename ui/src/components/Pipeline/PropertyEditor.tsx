@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import type { FileCfg, HttpCfg } from '@/types/nodeConfig'
+import type { ConverterMapping, FileCfg, HttpCfg } from '@/types/nodeConfig'
 import { useNodeEditorState } from './useNodeEditorState'
 import {
   DndContext,
@@ -26,6 +26,7 @@ import { onKeyActivate, treeNodeKeyDown } from '../../utils/a11y'
 import TestConnectionButton from './TestConnectionButton'
 import { StyledInput, StyledSelect } from './StyledFields'
 import RemoteAgentConfigEditor from './RemoteAgentConfigEditor'
+import ConverterMappingsEditor from './ConverterMappingsEditor'
 import { config as appConfig } from '../../config/env'
 
 // The cloudflared quick tunnel is a LOCAL DEVELOPMENT affordance: it gives a
@@ -2483,7 +2484,7 @@ function ConverterConfig({
   const textTemplate = (config.text_template as string) || ''
   const xmlRootTag = (config.xml_root_tag as string) || 'records'
   const xmlRowTag = (config.xml_row_tag as string) || 'record'
-  const mappings = (config.mappings as Array<{ source: string; target: string; type: string; value?: unknown; expression?: string }>) || []
+  const mappings = (config.mappings as ConverterMapping[] | undefined) || []
   const dropUnmapped = (config.drop_unmapped as boolean) || false
   const [previewInput, setPreviewInput] = useState('')
   const [previewOutput, setPreviewOutput] = useState('')
@@ -2682,13 +2683,6 @@ function ConverterConfig({
     setConfig({ ...config, mappings: newMappings })
   }
 
-  const addMapping = () => {
-    setConfig({
-      ...config,
-      mappings: [...mappings, { source: '', target: '', type: 'rename' }],
-    })
-  }
-
   const runDiscoverSchema = async () => {
     setDiscovering(true)
     setSchemaError('')
@@ -2736,13 +2730,6 @@ function ConverterConfig({
         updateMapping(idx, { source: field.path, target: mappings[idx]?.target || field.name })
       }
     }
-  }
-
-  const removeMapping = (index: number) => {
-    setConfig({
-      ...config,
-      mappings: mappings.filter((_, i) => i !== index),
-    })
   }
 
   const runPreview = async () => {
@@ -2883,62 +2870,14 @@ function ConverterConfig({
         )}
       </div>
 
-      {/* Field Mappings - optional, applied before format conversion */}
-      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-          Field Mappings <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional, applied before format conversion)</span>
-        </div>
-
-        {mappings.map((m, i) => (
-          <DroppableMapping key={i} index={i}>
-          <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
-              <select
-                value={m.type || 'rename'}
-                onChange={(e) => updateMapping(i, { type: e.target.value })}
-                style={{ fontSize: '11px', padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: '4px', backgroundColor: '#fff' }}
-              >
-                <option value="rename">Rename</option>
-                <option value="copy">Copy</option>
-                <option value="remove">Remove</option>
-                <option value="static">Static Value</option>
-                <option value="template">Template</option>
-                <option value="to_string">To String</option>
-                <option value="to_number">To Number</option>
-              </select>
-              <div style={{ flex: 1 }} />
-              <button onClick={() => removeMapping(i)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>×</button>
-            </div>
-            {m.type !== 'static' && m.type !== 'template' && (
-              <StyledInput label="Source Field" placeholder="e.g. name or user.email" value={m.source} onChange={(v) => updateMapping(i, { source: v })} />
-            )}
-            {m.type !== 'remove' && (
-              <StyledInput label="Target Field" placeholder="e.g. full_name" value={m.target} onChange={(v) => updateMapping(i, { target: v })} />
-            )}
-            {m.type === 'static' && (
-              <StyledInput label="Value" placeholder="e.g. default_value" value={String(m.value || '')} onChange={(v) => updateMapping(i, { value: v })} />
-            )}
-            {m.type === 'template' && (
-              <StyledInput label="Template" placeholder="e.g. {first_name} {last_name}" value={m.expression || ''} onChange={(v) => updateMapping(i, { expression: v })} />
-            )}
-          </div>
-          </DroppableMapping>
-        ))}
-
-        <DropToAddMapping>
-          <button
-            onClick={addMapping}
-            style={{ width: '100%', padding: '6px 12px', fontSize: '12px', fontWeight: 600, backgroundColor: '#f3f4f6', color: '#374151', border: '1px dashed #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
-          >
-            + Add Mapping
-          </button>
-        </DropToAddMapping>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', marginTop: '8px' }}>
-          <input type="checkbox" checked={dropUnmapped} onChange={(e) => setConfig({ ...config, drop_unmapped: e.target.checked })} />
-          Drop unmapped fields
-        </label>
-      </div>
+      {/* Field Mappings - optional, applied before format conversion. Top-level
+          rows and the add button are drop targets for schema fields. */}
+      <ConverterMappingsEditor
+        config={config}
+        setConfig={setConfig}
+        wrapRow={(i, row) => <DroppableMapping index={i}>{row}</DroppableMapping>}
+        wrapAdd={(button) => <DropToAddMapping>{button}</DropToAddMapping>}
+      />
 
       {/* Preview */}
       <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' }}>

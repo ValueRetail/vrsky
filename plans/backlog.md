@@ -399,7 +399,7 @@ Last updated 2026-10-28.
     stored in `connection_node_checkpoints` like the BC consumer's) would
     send each receipt once. The `resource` key can't carry a query string
     today: the poller appends `?start=…`. Found during #435.
-63. **The converter editor doesn't know `each` or `split_records`**
+63. ~~**The converter editor doesn't know `each` or `split_records`**~~ (#458)
     (`ui/src/components/Pipeline/PropertyEditor.tsx`). A retail template's
     converter opened in the builder shows the `each` mapping as "Rename"
     (the type select has no `each` option) without its nested mappings, and
@@ -555,6 +555,22 @@ Last updated 2026-10-28.
     folder and not write to it. A second variable for `/data/output`, with
     the same fixed target and the guard in
     `compose_files_mount_guard_test.go`, would close that. Found in #422.
+86. **Rename and `each` leave a dotted source in place.** With the node's
+    `drop_unmapped` off, both read `source` as a path but remove it with
+    `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
+    `rename` and `each` cases), which only deletes a top-level key. So
+    `order.items` → `lines` keeps `order.items` next to the new `lines`.
+    Either delete along the path (a behaviour change for existing
+    pipelines, so say so in the PR) or document it. The editor's `each`
+    help text says so since #458. Found in #458.
+87. **Converter editor accessibility.** Nested mapping rows repeat the
+    accessible names "Mapping type" and "Remove mapping" with no row
+    context, so a screen reader can't tell rows apart, and a row's
+    warnings aren't tied to its inputs with `aria-describedby`
+    (`ui/src/components/Pipeline/ConverterMappingsEditor.tsx`). Name rows
+    by position or target ("Remove mapping 2", "Item mapping type for
+    lineObjectNumber") and point the inputs at the warning list. Found in
+    #458.
 
 ## Human
 
