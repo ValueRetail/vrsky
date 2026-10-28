@@ -11,10 +11,13 @@
  * producer pointed at a Slack incoming-webhook URL (a Slack webhook is just an
  * HTTP POST), so it needs no dedicated Slack connector.
  *
- * Not in the catalog (plans/template-fields.md): Sitoo ⇄ Business Central. Both
- * directions need a tested field mapping between the two systems' records; a
- * template that wires them straight together deploys, runs, and has every
- * message rejected by the target API.
+ * The two retail templates (Sitoo ⇄ Business Central) put a data-converter
+ * between the systems, because a Sitoo receipt is not a BC sales invoice and a
+ * BC item is not a Sitoo warehouse item. Their mappings are written out field
+ * by field in plans/issue-435-sitoo-bc-mapping.md and tested in Go against the
+ * real converter with the same config (./testdata/, kept equal to the configs
+ * below by templates.test.ts). They are marked beta until a live run against
+ * the BC trial and a Sitoo sandbox.
  */
 
 export type TemplateNode = {
@@ -63,6 +66,32 @@ export type PipelineTemplate = {
   webhookSource?: boolean
   /** Body POSTed by the "send sample event" button (webhook templates). */
   samplePayload?: unknown
+}
+
+// Credential fields shared by both retail templates, for the node that talks
+// to Sitoo or to Business Central.
+function sitooFields(nodeId: string): TemplateField[] {
+  return [
+    { nodeId, objectPath: 'sitoo', key: 'account_id', label: 'Sitoo account number', help: 'The number in your Sitoo API address (…/accounts/<number>/…).', numeric: true, placeholder: '12345' },
+    { nodeId, objectPath: 'sitoo', key: 'site_id', label: 'Sitoo site ID', help: 'The Sitoo site (store or webshop) to use.', numeric: true, placeholder: '1' },
+    { nodeId, objectPath: 'sitoo', key: 'api_id', label: 'Sitoo API ID', help: 'From Sitoo Backoffice → Settings → Sitoo REST API.', placeholder: 'your-api-id' },
+    { nodeId, objectPath: 'sitoo', key: 'api_password', label: 'Sitoo API password', help: 'Stored encrypted — never saved in plain text.', secret: true, placeholder: 'API password' },
+  ]
+}
+
+function businessCentralFields(nodeId: string): TemplateField[] {
+  return [
+    {
+      nodeId, objectPath: 'business_central', key: 'aad_tenant_id', label: 'Microsoft Entra tenant ID',
+      help: 'The tenant GUID or domain your Business Central runs in.',
+      link: { text: 'BC: OAuth setup', url: 'https://learn.microsoft.com/dynamics365/business-central/dev-itpro/webservices/authenticate-web-services-using-oauth' },
+      placeholder: '<tenant-guid>',
+    },
+    { nodeId, objectPath: 'business_central', key: 'environment', label: 'BC environment', help: 'The environment name in the Business Central admin center, e.g. Production or Sandbox.', placeholder: 'Production' },
+    { nodeId, objectPath: 'business_central', key: 'company_id', label: 'BC company ID (GUID)', help: 'The id of the company, from GET …/api/v2.0/companies.', placeholder: '<company-guid>' },
+    { nodeId, objectPath: 'business_central', key: 'client_id', label: 'BC app (client) ID', help: 'The Entra app registration with Business Central API.ReadWrite.All, registered in BC under Microsoft Entra Applications.', placeholder: '<app-id>' },
+    { nodeId, objectPath: 'business_central', key: 'client_secret', label: 'BC client secret', help: 'Stored encrypted — never saved in plain text.', secret: true, placeholder: 'client secret' },
+  ]
 }
 
 export const TEMPLATES: PipelineTemplate[] = [
@@ -292,6 +321,142 @@ export const TEMPLATES: PipelineTemplate[] = [
         label: 'Output folder',
         help: 'Folder each response is written to.',
         placeholder: '/data/output',
+      },
+    ],
+  },
+  // --- Retail: Sitoo POS ⇄ Business Central ERP (#435) ----------------------
+  {
+    id: 'sitoo-to-business-central',
+    name: 'POS sales → ERP (Sitoo → Business Central)',
+    summary:
+      'Beta: verify the mapping on a test company first. Creates a Business Central sales invoice for each Sitoo receipt, one line per item (SKU = BC item number, prices incl. VAT).',
+    icon: '🛒',
+    sourceLabel: 'Sitoo (POS)',
+    destLabel: 'Business Central (ERP)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        config: { type: 'sitoo', sitoo: { resource: 'transactions', poll_interval_seconds: 300 } },
+      },
+      {
+        id: 'conv',
+        type: 'converter',
+        // One Sitoo page in, one salesInvoice per receipt out (split_records),
+        // the receipt's items as salesInvoiceLines. Field table and the
+        // reasoning behind each choice: plans/issue-435-sitoo-bc-mapping.md.
+        config: {
+          drop_unmapped: true,
+          split_records: true,
+          mappings: [
+            { type: 'static', source: '', target: 'customerNumber', value: '' },
+            { type: 'rename', source: 'receiptnumber', target: 'externalDocumentNumber' },
+            {
+              type: 'each',
+              source: 'items',
+              target: 'salesInvoiceLines',
+              drop_unmapped: true,
+              mappings: [
+                { type: 'static', source: '', target: 'lineType', value: 'Item' },
+                { type: 'rename', source: 'sku', target: 'lineObjectNumber' },
+                { type: 'to_number', source: 'quantity', target: 'quantity' },
+                { type: 'to_number', source: 'priceeach', target: 'unitPrice' },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        config: {
+          type: 'business_central',
+          business_central: {
+            environment: 'Production',
+            entity: 'salesInvoices',
+            method: 'POST',
+            // The Sitoo source re-reads every receipt on each poll; this skips
+            // the ones BC already has. Invoices, not orders: salesInvoices
+            // lists drafts and posted invoices alike, while a posted order
+            // leaves salesOrders and would be created again on the next poll.
+            dedupe_fields: ['externalDocumentNumber'],
+          },
+        },
+      },
+    ],
+    edges: [
+      { source: 'src', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
+    fields: [
+      ...sitooFields('src'),
+      ...businessCentralFields('dst'),
+      {
+        nodeId: 'conv',
+        objectPath: 'mappings.0',
+        key: 'value',
+        label: 'BC customer number for POS sales',
+        help: 'Every sales invoice is created for this customer, e.g. a "Store sales" cash customer. Turn on Prices Including VAT on that customer: Sitoo prices include VAT.',
+        placeholder: 'C00010',
+      },
+    ],
+  },
+  {
+    id: 'business-central-to-sitoo',
+    name: 'ERP inventory → POS (Business Central → Sitoo)',
+    summary:
+      'Beta: verify the mapping on a test warehouse first. Sends the stock of every Business Central inventory item to a Sitoo warehouse every 15 minutes (SKU = BC item number, total over all BC locations).',
+    icon: '📦',
+    sourceLabel: 'Business Central (ERP)',
+    destLabel: 'Sitoo (POS)',
+    nodes: [
+      {
+        id: 'src',
+        type: 'consumer',
+        // Not incremental: an item's lastModifiedDateTime does not move when
+        // its stock does, so only a full read sees stock changes.
+        config: {
+          type: 'business_central',
+          business_central: {
+            environment: 'Production',
+            entity: 'items',
+            filter: "type eq 'Inventory'",
+            page_size: 500,
+            poll_interval_seconds: 900,
+          },
+        },
+      },
+      {
+        id: 'conv',
+        type: 'converter',
+        config: {
+          drop_unmapped: true,
+          mappings: [
+            { type: 'rename', source: 'number', target: 'sku' },
+            { type: 'to_string', source: 'inventory', target: 'decimaltotal' },
+          ],
+        },
+      },
+      {
+        id: 'dst',
+        type: 'producer',
+        config: { type: 'sitoo', sitoo: { resource: '', method: 'POST' } },
+      },
+    ],
+    edges: [
+      { source: 'src', target: 'conv' },
+      { source: 'conv', target: 'dst' },
+    ],
+    fields: [
+      ...businessCentralFields('src'),
+      ...sitooFields('dst'),
+      {
+        nodeId: 'dst',
+        objectPath: 'sitoo',
+        key: 'resource',
+        label: 'Sitoo warehouse stock path',
+        help: 'warehouses/<warehouse id>/warehouseitems, with the id of the Sitoo warehouse whose stock is set.',
+        placeholder: 'warehouses/1/warehouseitems',
       },
     ],
   },

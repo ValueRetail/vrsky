@@ -1,0 +1,7 @@
+{
+  "drop_unmapped": true,
+  "mappings": [
+    { "type": "rename", "source": "number", "target": "sku" },
+    { "type": "to_string", "source": "inventory", "target": "decimaltotal" }
+  ]
+}

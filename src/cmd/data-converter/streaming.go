@@ -30,6 +30,14 @@ func (s *ConverterService) streamEntry(ctx context.Context, connectionID string,
 	cfg := entry.Config
 	hasMapping := len(cfg.Mappings) > 0
 
+	// split_records publishes one message per record, which this path, built
+	// to spool one result, does not do. Decline like an unstreamable format:
+	// NAK → DLQ, replayable after raising the cap.
+	if cfg.SplitRecords {
+		return fmt.Errorf("converter node %s: split_records does not support streamed payloads (%d bytes, over the %d-byte rehydrate cap); raise %s",
+			entry.NodeID, origEnv.PayloadSize, s.rehydrateMax, claimcheck.EnvRehydrateMax)
+	}
+
 	var contentType, label string
 	switch cfg.OutputFormat {
 	case "":

@@ -28,6 +28,18 @@ connector reads, which is how the drift went unnoticed.
    own task (the BC trial and a Sitoo sandbox are what it needs).
    Alternative: keep them with a converter node and a best-guess mapping,
    which would look finished and fail on the first real order.
+
+   **Update 2026-10-28 (#435):** both are back in the gallery, marked
+   "Beta: verify the mapping", as source → data-converter → destination.
+   The mapping is written out in `plans/issue-435-sitoo-bc-mapping.md` and
+   tested in Go against the real converter on the repo's Sitoo and BC
+   fixtures. The converter gained what it lacked for this: an `each`
+   mapping (receipt items → `salesInvoiceLines`) and `split_records` (one
+   BC sales invoice per message), and the Sitoo and BC destinations now skip
+   the raw source page a converter pipeline also delivers to them. Still
+   open: a live run against the BC trial
+   and a Sitoo sandbox, which is what the beta label stands for (backlog
+   human item 9).
 2. **CSV → Database: what turns a file into rows.** file-consumer
    publishes the whole file as raw bytes (checked: `service.go`,
    `ingestWatchedFile`); db-producer unmarshals its payload as a JSON

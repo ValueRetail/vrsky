@@ -59,11 +59,50 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     required: ['host', 'table'],
     numeric: ['port'],
   },
+  // sitoo-consumer (SitooConfig in src/cmd/sitoo-consumer/service.go). The
+  // ids are int64; api_password is replaced by api_password_secret_id at deploy.
+  'consumer/sitoo': {
+    block: 'sitoo',
+    keys: [
+      'account_id', 'site_id', 'api_id', 'api_password', 'base_url', 'resource',
+      'poll_interval_seconds', 'page_size', 'webhook_raw_event', 'webhook_id_field',
+    ],
+    required: ['account_id', 'site_id', 'api_id', 'api_password'],
+    numeric: ['account_id', 'site_id', 'poll_interval_seconds', 'page_size'],
+  },
+  // sitoo-producer (SitooProducerConfig in src/cmd/sitoo-producer/service.go)
+  'producer/sitoo': {
+    block: 'sitoo',
+    keys: ['account_id', 'site_id', 'api_id', 'api_password', 'base_url', 'resource', 'method'],
+    required: ['account_id', 'site_id', 'api_id', 'api_password'],
+    numeric: ['account_id', 'site_id'],
+  },
+  // business-central-consumer (BCConfig in src/cmd/business-central-consumer/service.go)
+  'consumer/business_central': {
+    block: 'business_central',
+    keys: [
+      'aad_tenant_id', 'environment', 'company_id', 'client_id', 'client_secret', 'entity', 'filter',
+      'incremental', 'cursor_field', 'page_size', 'api_base_url', 'token_url', 'scope',
+      'poll_interval_seconds', 'pictures',
+    ],
+    required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
+    numeric: ['page_size', 'poll_interval_seconds'],
+  },
+  // business-central-producer (BCProducerConfig in src/cmd/business-central-producer/service.go)
+  'producer/business_central': {
+    block: 'business_central',
+    keys: [
+      'aad_tenant_id', 'environment', 'company_id', 'client_id', 'client_secret', 'entity', 'method',
+      'dedupe_fields', 'api_base_url', 'token_url', 'scope',
+    ],
+    required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
+    numeric: [],
+  },
   // data-converter (ConverterNodeConfig in src/cmd/data-converter/main.go)
   converter: {
     block: '',
     keys: [
-      'mappings', 'drop_unmapped',
+      'mappings', 'drop_unmapped', 'split_records',
       'input_format', 'input_csv_delimiter', 'input_csv_no_header', 'input_csv_trim_space',
       'input_xml_record_path', 'input_xml_attr_prefix', 'input_xml_text_key',
       'output_format', 'csv_delimiter', 'csv_headers', 'text_template', 'xml_root_tag', 'xml_row_tag',
@@ -72,6 +111,16 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     numeric: [],
   },
 }
+
+/**
+ * The mapping types the data-converter implements (applyMappings in
+ * src/cmd/data-converter/main.go). Any other type is skipped without a word,
+ * so a template using one would silently drop that field. `each` maps every
+ * object of an array field with its own nested `mappings`.
+ */
+export const CONVERTER_MAPPING_TYPES: readonly string[] = [
+  'rename', 'copy', 'static', 'remove', 'template', 'to_string', 'to_number', 'each',
+]
 
 /** The CONNECTOR_KEYS entry for a node, or undefined when the table lacks it. */
 export function connectorKeysFor(nodeType: string, config: Record<string, unknown>): ConnectorKeys | undefined {

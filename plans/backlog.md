@@ -391,6 +391,21 @@ Last updated 2026-10-28.
     running connection as stopped. Write the status only when the entry was
     still this poller's own (`dropActive` could report it). Found during
     #408.
+62. **The Sitoo poller re-reads the whole collection every poll**
+    (`src/cmd/sitoo-consumer/service.go`, `fetchAndPublish`). The POS sales
+    template sends every receipt to Business Central every 5 minutes, and
+    only `dedupe_fields` keeps them from becoming duplicate invoices, at one
+    BC GET per receipt per poll. A cursor (Sitoo's modified-after filter,
+    stored in `connection_node_checkpoints` like the BC consumer's) would
+    send each receipt once. The `resource` key can't carry a query string
+    today: the poller appends `?start=…`. Found during #435.
+63. **The converter editor doesn't know `each` or `split_records`**
+    (`ui/src/components/Pipeline/PropertyEditor.tsx`). A retail template's
+    converter opened in the builder shows the `each` mapping as "Rename"
+    (the type select has no `each` option) without its nested mappings, and
+    `split_records` not at all. Saving keeps both (`updateMapping` spreads
+    the old mapping), but picking another type in that select drops the
+    lines. Show them, read-only at least. Found during #435.
 
 ## Human
 
