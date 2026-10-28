@@ -38,10 +38,16 @@ stops first and nothing watches the file folders for the few seconds until
 the new one is up. Files that land in that gap are published by the new
 pod's first checks; uploads from the editor fail until it is up. With a
 rolling update both pods watched the same folders for a moment, and a file
-could be published twice. `deploy-connectors-azure.sh` switches a live
-Deployment that is still on RollingUpdate before it applies the manifest,
-since Kubernetes rejects the plain apply (the same fix as Grafana's, see
-[monitoring](monitoring.md)).
+could be published twice. As a safeguard, `deploy-connectors-azure.sh`
+switches a live Deployment that is still on RollingUpdate before it applies
+the manifest. A plain `kubectl apply` handles the switch on its own; the
+patch is the one Grafana needed under helm (see [monitoring](monitoring.md))
+and does nothing once the Deployment is Recreate.
+
+One case loses a file that a rolling update would have caught: a file that
+lands in the gap while the new pod can't read the saved list of published
+files at start (a database error, logged at Error). It counts as already
+there and is never published.
 
 ## Watching a deploy
 

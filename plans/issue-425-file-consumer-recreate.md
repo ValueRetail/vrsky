@@ -19,12 +19,15 @@ to "both pods decide in the same poll", but doesn't close it.
    script before applying it, so a hand edit to the YAML alone would be
    overwritten at deploy time and never reach the cluster.
 3. The switch lands on a cluster where the Deployment is still
-   RollingUpdate. The API server keeps the defaulted `rollingUpdate` block,
-   and a Recreate Deployment with that block is rejected ("rollingUpdate:
-   Forbidden", kubernetes/kubernetes#24198). That already bit Grafana's
-   switch (#320, `plans/deploy-while-parked.md`), so the deploy script drops
-   the block first, the same way `install-monitoring.sh` does for Grafana.
-   A no-op once the Deployment is Recreate, and on a fresh cluster.
+   RollingUpdate. A plain client-side `kubectl apply` handles that on its
+   own: `DeploymentSpec.strategy` merges with `retainKeys`, so the apply
+   patch is `{"$retainKeys":["type"],"type":"Recreate"}` and the
+   server-defaulted `rollingUpdate` block goes with it (covered by
+   kubectl's test-cmd). Grafana's "rollingUpdate: Forbidden" (#320,
+   kubernetes/kubernetes#24198) came through helm. As a harmless
+   safeguard the deploy script still patches the Deployment first, the
+   same way `install-monitoring.sh` does for Grafana. A no-op once the
+   Deployment is Recreate, and on a fresh cluster.
 4. A guard test next to the other manifest guards
    (`src/pkg/managementapi/`) fails when file-consumer is not Recreate in
    the committed manifest or in a fresh render of the script, when the two
@@ -64,10 +67,13 @@ then starts the new one. For that time nothing watches the folders and
     publishes it once it has been seen unchanged across two polls. The
     docs already promise this for "a file that landed in the last seconds
     before a stop, restart or deploy" (`docs/connectors/file.md`).
-  - Exceptions, unchanged by this PR and the same under RollingUpdate: a
-    pipeline's first ever start takes every file in the folder as done,
-    and a failed checkpoint read at start (DB error) does the same (logged
-    at Error).
+  - Exceptions: a pipeline's first ever start takes every file in the
+    folder as done, and a failed checkpoint read at start (DB error) does
+    the same (logged at Error). The second one is worse under Recreate:
+    under RollingUpdate the old pod was still polling and published a
+    file that landed in the gap, but now a file that lands in the gap
+    while the new pod's checkpoint read fails is marked done and never
+    published. Rare (a DB error at exactly that start) and logged.
 - Uploads through the editor fail with a proxy error for those seconds;
   retrying works. Rare (deploys only) and visible to the user, unlike a
   duplicate publish.
@@ -89,9 +95,9 @@ The deploy job, with the cluster running, then runs the full
 1. regenerates `connectors.yaml` from the script,
 2. creates the `worker-file-api` secret if missing (it exists),
 3. client-side dry run,
-4. new: finds `vrsky-file-consumer` on RollingUpdate and patches it to
-   Recreate with `rollingUpdate: null` (no pod restart: the pod template
-   doesn't change),
+4. new, a safeguard: finds `vrsky-file-consumer` on RollingUpdate and
+   patches it to Recreate with `rollingUpdate: null` (no pod restart: the
+   pod template doesn't change; the apply alone would do the same),
 5. `kubectl apply` (only file-consumer's strategy differs),
 6. `kubectl rollout restart` on all 31 connector Deployments, then waits
    for each. So yes: every connector restarts, file-consumer included, and

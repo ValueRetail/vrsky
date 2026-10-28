@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -89,10 +90,11 @@ func connectorStrategies(t *testing.T, manifest []byte) map[string]connectorStra
 //     manifest from it and a hand edit to connectors.yaml alone would be
 //     overwritten at deploy time;
 //   - in the committed connectors.yaml, which must equal that render;
-//   - in the script's apply path: switching a live RollingUpdate Deployment
-//     to Recreate is rejected while its rollingUpdate block is still there
-//     (kubernetes/kubernetes#24198, what broke Grafana's switch in #320), so
-//     every Recreate connector is patched before the apply.
+//   - in the script's apply path: every Recreate connector is patched to
+//     Recreate, rollingUpdate dropped, before the apply. The client-side
+//     apply would drop that block itself (strategy merges with retainKeys);
+//     the patch is a safeguard, the one Grafana needed under helm (#320,
+//     kubernetes/kubernetes#24198), and this keeps it from rotting.
 func TestFileConsumerRecreates(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	script, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-connectors-azure.sh"))
@@ -128,7 +130,7 @@ func TestFileConsumerRecreates(t *testing.T) {
 				"two pods polling the same folders, and either can publish a file", m.name, fc.Type)
 		case fc.RollingUpdate != nil:
 			t.Errorf("%s manifest: vrsky-file-consumer is Recreate with a rollingUpdate block; the API server "+
-				"rejects that", m.name)
+				"rejects a Recreate Deployment that carries one", m.name)
 		}
 	}
 
@@ -138,9 +140,11 @@ func TestFileConsumerRecreates(t *testing.T) {
 	if apply < 0 {
 		t.Fatal(`deploy-connectors-azure.sh has no 'kubectl apply -f "$MANIFEST"' line; the layout probably moved`)
 	}
-	if !strings.Contains(body, `"rollingUpdate":null`) {
-		t.Error("deploy-connectors-azure.sh never drops a rollingUpdate block, so switching a live " +
-			"Deployment to Recreate fails with \"rollingUpdate: Forbidden\"")
+	// On a line that runs, not in a comment.
+	patch := regexp.MustCompile(`(?m)^[ \t]*[^#\s][^\n]*'\{"spec":\{"strategy":\{"rollingUpdate":null,"type":"Recreate"\}\}\}'`)
+	if !patch.MatchString(body) {
+		t.Error("deploy-connectors-azure.sh no longer patches a Deployment to Recreate with rollingUpdate " +
+			"dropped; that pre-apply safeguard is what drop_rolling_update is for")
 	}
 	for name, s := range connectorStrategies(t, rendered) {
 		if s.Type != "Recreate" {
@@ -149,8 +153,8 @@ func TestFileConsumerRecreates(t *testing.T) {
 		call := strings.Index(body, "\ndrop_rolling_update "+name+"\n")
 		if call < 0 || call > apply {
 			t.Errorf("%s is Recreate in the manifest, but deploy-connectors-azure.sh does not call "+
-				"drop_rolling_update %s before its apply; on a cluster where it is still RollingUpdate "+
-				"the apply is rejected", name, name)
+				"drop_rolling_update %s before its apply, the safeguard for a cluster where it is still "+
+				"RollingUpdate", name, name)
 		}
 	}
 }
