@@ -241,7 +241,7 @@ Last updated 2026-10-28.
     every 5 s per connection that is publishing, and past jsonb's size
     limit the save fails. Store it incrementally (a row per name, or only
     the changes) or save less often. Found in review of #391.
-42. **One failed directory read republishes the whole folder**
+42. ~~**One failed directory read republishes the whole folder**~~ (#398)
     (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
     set when `os.ReadDir` fails, so `pollOnce` drops every known name as
     deleted and publishes them all again on the next good read. Older than
@@ -297,20 +297,36 @@ Last updated 2026-10-28.
     `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
     the docs), or, if something should use the stream, make it relative
     like `api.ts`. Found during #399.
-50. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+50. **A file folder that can't be read only shows up in the log**
+    (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
+    connection shows as `running` while its folder is unreadable, and the
+    only sign is one Warn in the file-consumer log. `noteReadFailure` could
+    emit a `FileEvent{Type: "error"}` on each failed poll. The File watcher
+    panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
+    and `emitEvent` only reaches live subscribers, so it costs nothing
+    when no panel is open. Found in review of #398.
+51. **A failed checkpoint read during a deferred baseline loses files**
+    (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
+    not read the folder (#398), the first good read calls `loadKnown`. If
+    the checkpoint read fails then, it falls back to "everything present is
+    done", and that set is saved on the first real change, so files that
+    landed during the outage are never published. `takeDeferredBaseline`
+    already retries every poll, so it could stay deferred on a checkpoint
+    error instead. Found in review of #398.
+52. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
     to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
     `agent:needs-human`. Found in #395.
-51. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+53. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
     output, the gzipped copy and the encrypted copy all sit in byte slices
     (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
     `EncryptBytes` call), so a dump of roughly a third of the CronJob's
     512Mi limit or more gets the Job OOM-killed. Fine for today's small
     management DB. Stream pg_dump through gzip and encryption into
     `PutStream`, or at least alert on the dump size. Found in review of #404.
-52. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+54. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
     a backup change.** `deploy-backup-azure.sh` copies it from
     `vrsky-platform`, and nothing else runs that script. After an ACR
     password rotation the backup Job can't pull until the next Catch up.

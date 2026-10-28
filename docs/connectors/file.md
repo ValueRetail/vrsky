@@ -36,6 +36,8 @@ Move or delete files once they have been processed. The list of published files 
 
 Changing the folder in the pipeline's config counts as a first start for the new folder, so what is already in it is not ingested. A file overwritten under a name that was already published is not picked up, while running or across a restart; copy it in under a new name.
 
+If the folder can't be read for a while (a network share reconnecting, say, or the folder deleted), the checks are skipped and logged, and nothing is republished when it comes back. A pipeline that can't read its folder when it starts still starts and shows as running, with a warning in the file-consumer log. It publishes nothing until a check can read the folder. That check counts as the start: files not yet published are picked up as they would be after a restart. On the pipeline's very first start, everything in the folder at that check counts as already there.
+
 ## As a destination (producer)
 
 A producer node writes one file per incoming message to the configured directory.
