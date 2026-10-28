@@ -53,7 +53,7 @@ spec:
 
       containers:
       - name: ui
-        image: ghcr.io/ValueRetail/vrsky/ui:latest
+        image: ghcr.io/valueretail/vrsky/ui:latest
         imagePullPolicy: IfNotPresent
 
         # Static nginx: a few millicores. Requests are what the scheduler

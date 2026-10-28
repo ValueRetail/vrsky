@@ -108,7 +108,7 @@ Last updated 2026-10-28.
     100644; every other script there is 100755). The guide now says `bash
     ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
     #371.
-26. **The k3d path doesn't line up with its manifests.**
+26. ~~**The k3d path doesn't line up with its manifests.**~~ (#419)
     `k3d-load-images.sh` imports `data-filter` and `data-converter` as
     `localhost:5000/vrsky/...` while their manifests pull
     `ghcr.io/valueretail/vrsky/...`, loads no UI image, and the UI manifest's
