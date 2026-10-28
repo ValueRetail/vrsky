@@ -447,11 +447,6 @@ jobs:
       - name: Monitoring values and alert rules
         if: steps.cluster.outputs.state == 'Running' && env.MONITORING == 'true'
         run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
-      # The management-DB backup CronJob (#395). Suspended until a human has
-      # created vrsky-backup-config; the script never touches that Secret.
-      - name: Backup CronJob
-        if: steps.cluster.outputs.state == 'Running' && env.BACKUP == 'true'
-        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"
       - name: Smoke check
         if: steps.cluster.outputs.state == 'Running'
         run: |
@@ -459,3 +454,9 @@ jobs:
           for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done
           if [ "$CONNECTORS_MANIFEST" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
           infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"
+      # The management-DB backup CronJob (#395). Suspended until a human has
+      # created vrsky-backup-config; the script never touches that Secret.
+      # After the smoke check, so a failing apply can't hide its result.
+      - name: Backup CronJob
+        if: steps.cluster.outputs.state == 'Running' && env.BACKUP == 'true'
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"

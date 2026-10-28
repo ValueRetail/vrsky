@@ -2713,6 +2713,33 @@ type backupWorkflow struct {
 	} `yaml:"jobs"`
 }
 
+// The backup step runs after the smoke check in both workflows: a failing
+// backup apply must not stop the smoke check from reporting on the deploy
+// (review of #404).
+func TestBackupStepRunsAfterSmokeCheck(t *testing.T) {
+	for _, c := range []struct{ file, job string }{{"build-push.yml", "deploy"}, {"catch-up.yml", "catch-up"}} {
+		job, ok := parseWorkflow(t, c.file).Jobs[c.job]
+		if !ok {
+			t.Fatalf("%s: no %s job", c.file, c.job)
+		}
+		smoke, backup := -1, -1
+		for i, st := range job.Steps {
+			if strings.Contains(st.Run, "smoke-prod.sh") {
+				smoke = i
+			}
+			if strings.Contains(st.Run, "deploy-backup-azure.sh") {
+				backup = i
+			}
+		}
+		if smoke < 0 || backup < 0 {
+			t.Fatalf("%s: smoke step at %d, backup step at %d; both must exist", c.file, smoke, backup)
+		}
+		if backup < smoke {
+			t.Errorf("%s: the backup step (%d) runs before the smoke check (%d)", c.file, backup, smoke)
+		}
+	}
+}
+
 // A merge that touches the backup reaches the cluster the way every other
 // in-cluster change does (#395 criterion 4): the plan job says so, the
 // staged files include the manifest, and the deploy job runs the script
@@ -2950,6 +2977,8 @@ func TestDeployBackupScript(t *testing.T) {
 		"BACKUP_PROVIDER":                "azure",
 		"BACKUP_BUCKET":                  "vrsky-backups",
 		"BACKUP_AZURE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=vrskybackup;AccountKey=" + sentinel + ";EndpointSuffix=core.windows.net",
+		"BACKUP_AZURE_ACCOUNT_NAME":      "vrskybackup",
+		"BACKUP_AZURE_ACCOUNT_KEY":       sentinel + "-account-key",
 	}
 	only := func(keys ...string) map[string]string {
 		m := map[string]string{}
@@ -2959,7 +2988,7 @@ func TestDeployBackupScript(t *testing.T) {
 		return m
 	}
 	forbidden := []string{sentinel}
-	for _, k := range []string{"BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_AZURE_CONNECTION_STRING"} {
+	for _, k := range []string{"BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_AZURE_CONNECTION_STRING", "BACKUP_AZURE_ACCOUNT_KEY"} {
 		forbidden = append(forbidden, base64.StdEncoding.EncodeToString([]byte(full[k])))
 	}
 
@@ -2973,7 +3002,18 @@ func TestDeployBackupScript(t *testing.T) {
 		wantSaid      []string // the log must say why it stays suspended
 	}{
 		{name: "secret present", acr: true, config: full, wantSuspended: false},
-		{name: "required keys only", acr: true, config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET"), wantSuspended: false},
+		// The required keys plus either form of Azure credentials.
+		{name: "required keys and a connection string", acr: true,
+			config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET", "BACKUP_AZURE_CONNECTION_STRING"), wantSuspended: false},
+		{name: "required keys and account name and key", acr: true,
+			config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET", "BACKUP_AZURE_ACCOUNT_NAME", "BACKUP_AZURE_ACCOUNT_KEY"), wantSuspended: false},
+		// Without credentials every run would fail at the upload.
+		{name: "required keys, no Azure credentials", acr: true,
+			config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET"), wantSuspended: true,
+			wantSaid: []string{"vrsky-backup-config", "BACKUP_AZURE_CONNECTION_STRING"}},
+		{name: "account name without its key", acr: true,
+			config: only("BACKUP_DB_URL", "ENCRYPTION_KEY", "BACKUP_PROVIDER", "BACKUP_BUCKET", "BACKUP_AZURE_ACCOUNT_NAME"), wantSuspended: true,
+			wantSaid: []string{"BACKUP_AZURE_ACCOUNT_KEY"}},
 		{name: "secret missing", acr: true, config: nil, wantSuspended: true, wantSaid: []string{"vrsky-backup-config"}},
 		{name: "secret partial", acr: true, config: only("BACKUP_DB_URL", "ENCRYPTION_KEY"), wantSuspended: true,
 			wantSaid: []string{"vrsky-backup-config", "BACKUP_PROVIDER", "BACKUP_BUCKET"}},

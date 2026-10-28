@@ -62,12 +62,13 @@ jobs:
         run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-connectors-azure.sh"
       - name: Monitoring values and alert rules
         run: infrastructure/azure/in-cluster.sh stage "PROFILE=azure bash infrastructure/kubernetes/monitoring/install-monitoring.sh"
-      # A backup change merged while parked, and the suspend flag after a
-      # human created vrsky-backup-config (#395).
-      - name: Backup CronJob
-        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"
       - name: Smoke check
         run: |
           consumers=""
           if [ "${{ inputs.connectors }}" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
           infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"
+      # A backup change merged while parked, and the suspend flag after a
+      # human created vrsky-backup-config (#395). After the smoke check, so a
+      # failing apply can't hide its result.
+      - name: Backup CronJob
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/deploy-backup-azure.sh"

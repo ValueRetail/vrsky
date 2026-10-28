@@ -36,26 +36,39 @@ directory or the script changes) and from Catch up. It:
 1. copies `acr-pull` from `vrsky-platform` into `vrsky-database`;
 2. applies `cronjob.yaml`, which is suspended in the file;
 3. unsuspends it when `vrsky-backup-config` exists with `BACKUP_DB_URL`,
-   `ENCRYPTION_KEY`, `BACKUP_PROVIDER` and `BACKUP_BUCKET`, and otherwise
-   leaves it suspended and logs which keys are missing.
+   `ENCRYPTION_KEY`, `BACKUP_PROVIDER`, `BACKUP_BUCKET` and Azure
+   credentials (account name and key, or a connection string), and
+   otherwise leaves it suspended and logs which keys are missing.
 
 The script reads the Secret's key names only. It never creates, changes or
 prints the Secret.
 
 ## The Secret (a human creates it)
 
-Values come from you, typed or read from the existing secrets, never from a
-file in this repo. On AKS the database and its user are both `vrsky`.
+Values come from you, pasted at a silent prompt so they stay out of shell
+history, never from a file in this repo. On AKS the database and its user
+are both `vrsky`.
 
 ```sh
+read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable
+read -rs ENC_KEY; echo   # the platform ENCRYPTION_KEY, 64 hex characters
+read -rs SA_NAME; echo   # the storage account name
+read -rs SA_KEY;  echo   # the storage account key
+
 kubectl -n vrsky-database create secret generic vrsky-backup-config \
-  --from-literal=BACKUP_DB_URL='postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable' \
-  --from-literal=ENCRYPTION_KEY='<the platform ENCRYPTION_KEY, 64 hex characters>' \
+  --from-literal=BACKUP_DB_URL="$DB_URL" \
+  --from-literal=ENCRYPTION_KEY="$ENC_KEY" \
   --from-literal=BACKUP_PROVIDER=azure \
   --from-literal=BACKUP_BUCKET=vrsky-backups \
-  --from-literal=BACKUP_AZURE_ACCOUNT_NAME='<storage account name>' \
-  --from-literal=BACKUP_AZURE_ACCOUNT_KEY='<storage account key>'
+  --from-literal=BACKUP_AZURE_ACCOUNT_NAME="$SA_NAME" \
+  --from-literal=BACKUP_AZURE_ACCOUNT_KEY="$SA_KEY"
+
+unset DB_URL ENC_KEY SA_NAME SA_KEY
 ```
+
+The deploy step keeps the CronJob suspended until the Secret has the four
+required keys and either the account name and key or
+`BACKUP_AZURE_CONNECTION_STRING`.
 
 `BACKUP_AZURE_CONNECTION_STRING` can replace the account name and key. The
 database URL is the same one as `connection_string` in the
@@ -87,8 +100,10 @@ A suspend by hand lasts until the next deploy that touches this directory or
 the next Catch up; both set `suspend` from the Secret again.
 
 The alert `MgmtBackupMissing` (`infrastructure/prometheus-rules.yml`) fires
-when two of its Jobs have failed since the last good backup, or when it hasn't
-been scheduled for over four days, and stays quiet while it is suspended.
+when two of its Jobs have failed since the last good backup, or when neither a
+scheduled run nor a successful Job has happened for over four days of being
+active. It stays quiet while the CronJob is suspended, right after it is
+unsuspended, and after a start too late for that day's run.
 
 > **The `ENCRYPTION_KEY` is not in the backup.** The dump is encrypted with
 > it, and the connector credentials inside it are too. Keep a copy outside

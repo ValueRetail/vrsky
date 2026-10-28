@@ -622,3 +622,85 @@ tests:
       - eval_time: 6540m
         alertname: MgmtBackupMissing
         exp_alerts: []
+
+  # 11h. MgmtBackupMissing (b) right after activation. The CronJob was
+  #      created at t=0 and stayed suspended (no vrsky-backup-config) until
+  #      Monday 12:30 UTC, when the human created the Secret and unsuspended
+  #      it. Nothing has been scheduled yet, and the CronJob is days old: the
+  #      created-time fallback alone would page within 30 minutes. It must
+  #      stay quiet until the CronJob has been active for 98 hours with
+  #      nothing happening, and page then.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '1x6509 0x6000'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x12510'
+    alert_rule_test:
+      # Monday 13:30 and 14:30 UTC, one and two hours after activation.
+      - eval_time: 6570m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 6630m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      # Friday 15:30 UTC: active for 99 hours and never scheduled.
+      - eval_time: 12450m
+        alertname: MgmtBackupMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupMissing
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "No successful management-DB backup in two running weekdays"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 11i. MgmtBackupMissing (b) after a manual backup. As 11e, the last
+  #      scheduled run was Thursday 11:00 UTC, but an operator ran
+  #      `kubectl create job --from=cronjob/vrsky-mgmt-backup` on Monday and
+  #      it succeeded at 09:00 UTC. A manual Job sets no lastScheduleTime;
+  #      its success still counts as a fresh backup.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x6700'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '60x6700'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x660 39600x6040'
+      - series: 'kube_job_owner{job="kube-state-metrics",namespace="vrsky-database",job_name="backup-manual-1",owner_kind="CronJob",owner_name="vrsky-mgmt-backup",owner_is_controller="true"}'
+        values: '_x5810 1x890'
+      - series: 'kube_job_status_start_time{job="kube-state-metrics",namespace="vrsky-database",job_name="backup-manual-1"}'
+        values: '_x5810 348600x890'
+      - series: 'kube_job_status_completion_time{job="kube-state-metrics",namespace="vrsky-database",job_name="backup-manual-1"}'
+        values: '_x5820 349200x880'
+    alert_rule_test:
+      # Monday 14:00 UTC: 99 hours since the last schedule (11e pages here),
+      # 5 hours since the manual backup.
+      - eval_time: 6600m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+
+  # 11j. MgmtBackupMissing (b) after a late start. The cluster was parked
+  #      from before Thursday's run until Monday 12:30 UTC (13:30 Oslo),
+  #      after that day's noon run and its one-hour deadline. Nothing was
+  #      missed by fault, so the stale schedule must not page before the
+  #      cluster parks again.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x6509 0x200'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x6509 60x200'
+      - series: 'kube_cronjob_status_last_schedule_time{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x6509 39600x200'
+    alert_rule_test:
+      # Monday 14:00 and 15:00 UTC (15:00 and 16:00 Oslo).
+      - eval_time: 6600m
+        alertname: MgmtBackupMissing
+        exp_alerts: []
+      - eval_time: 6660m
+        alertname: MgmtBackupMissing
+        exp_alerts: []

@@ -70,8 +70,8 @@ Secret; see
 
 The CronJob runs as uid 70 with a read-only root filesystem, pulls `:latest`
 at every run, and is watched by the alert `MgmtBackupMissing`: two failed
-Jobs since the last good backup, or nothing scheduled for over four days,
-while it isn't suspended.
+Jobs since the last good backup, or no scheduled run and no successful Job
+for over four days of being active, while it isn't suspended.
 
 ## Restore from a disk snapshot
 
@@ -86,8 +86,20 @@ NRG=MC_vrsky-prod_vrsky-prod_norwayeast
 STAMP=$(date +%Y%m%d)
 ```
 
-1. **Stop everything that writes.** Record the replica counts, then scale the
-   platform and Postgres down:
+1. **Stop everything that writes, the backup CronJob included.** A dump taken
+   mid-restore is worse than none, and it would push a good dump out of the
+   14 days sooner. Suspend the CronJob first:
+   ```bash
+   kubectl -n vrsky-database patch cronjob vrsky-mgmt-backup --type merge -p '{"spec":{"suspend":true}}'
+   ```
+   The next deploy that touches the backup, and every Catch up, set
+   `suspend` from the `vrsky-backup-config` Secret again and would turn it
+   back on. For a restore that may span one of those, rename the Secret
+   out of the way (`kubectl -n vrsky-database get secret vrsky-backup-config
+   -o json | jq '.metadata.name="vrsky-backup-config-paused" | del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp)' | kubectl apply -f -`,
+   then delete the original) and rename it back at the end, or expect the
+   CronJob to resume. Then record the replica counts and scale the platform
+   and Postgres down:
    ```bash
    kubectl -n vrsky-platform get deploy -o jsonpath='{range .items[*]}{.metadata.name} {.spec.replicas}{"\n"}{end}' > replicas.txt
    kubectl -n vrsky-platform scale deploy --all --replicas=0
@@ -148,6 +160,8 @@ STAMP=$(date +%Y%m%d)
    ```
 6. Re-point the vault's backup instance at the new disk (it protects the old
    disk ID), and delete the old disk once you're sure.
+7. Resume the dumps: rename the Secret back if you moved it, then run Catch
+   up or `kubectl -n vrsky-database patch cronjob vrsky-mgmt-backup --type merge -p '{"spec":{"suspend":false}}'`.
 
 ## Restore from a logical dump
 

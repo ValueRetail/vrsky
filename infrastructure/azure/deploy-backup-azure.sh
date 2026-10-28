@@ -11,7 +11,9 @@
 #   2. Apply infrastructure/kubernetes/backup/cronjob.yaml (suspended in the
 #      file).
 #   3. Unsuspend it only when the vrsky-backup-config Secret exists with the
-#      keys a backup needs. Otherwise it stays suspended and this says why:
+#      keys a backup needs: REQUIRED below, plus Azure credentials (account
+#      name and key, or a connection string). Otherwise it stays suspended
+#      and this says why:
 #      a Job that fails every weekday until someone creates the Secret helps
 #      nobody.
 #
@@ -44,9 +46,14 @@ kubectl apply -f "$MANIFEST"
 missing=""
 if keys="$(kubectl get secret "$CONFIG" -n "$NS" -o json 2>/dev/null | jq -r '.data // {} | keys[]')"; then
   nl=$'\n'
+  has() { case "$nl$keys$nl" in *"$nl$1$nl"*) return 0 ;; esac; return 1; }
   for k in $REQUIRED; do
-    case "$nl$keys$nl" in *"$nl$k$nl"*) ;; *) missing="$missing $k" ;; esac
+    has "$k" || missing="$missing $k"
   done
+  # Azure credentials: an account name and key, or a connection string.
+  if ! { has BACKUP_AZURE_ACCOUNT_NAME && has BACKUP_AZURE_ACCOUNT_KEY; } && ! has BACKUP_AZURE_CONNECTION_STRING; then
+    missing="$missing BACKUP_AZURE_ACCOUNT_NAME+BACKUP_AZURE_ACCOUNT_KEY or BACKUP_AZURE_CONNECTION_STRING"
+  fi
   [ -z "$missing" ] || reason="Secret $NS/$CONFIG lacks:$missing"
 else
   missing=all

@@ -85,17 +85,24 @@ encrypted connector credentials. Keep it as tight as access to the database.
 
 ### Layer 2: the `vrsky-backup-config` Secret
 
-Type the values yourself or read them from the existing secrets. Never put
-them in a file in the repo.
+Paste each value at a silent prompt, so none of them lands in your shell
+history or on screen, and never put them in a file in the repo:
 
 ```bash
+read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable
+read -rs ENC_KEY; echo   # the platform ENCRYPTION_KEY, 64 hex characters
+read -rs SA_NAME; echo   # the storage account name
+read -rs SA_KEY;  echo   # az storage account keys list -g vrsky-prod -n <account> --query "[0].value" -o tsv
+
 kubectl -n vrsky-database create secret generic vrsky-backup-config \
-  --from-literal=BACKUP_DB_URL='postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable' \
-  --from-literal=ENCRYPTION_KEY='<the platform ENCRYPTION_KEY, 64 hex characters>' \
+  --from-literal=BACKUP_DB_URL="$DB_URL" \
+  --from-literal=ENCRYPTION_KEY="$ENC_KEY" \
   --from-literal=BACKUP_PROVIDER=azure \
   --from-literal=BACKUP_BUCKET=vrsky-backups \
-  --from-literal=BACKUP_AZURE_ACCOUNT_NAME='<storage account name>' \
-  --from-literal=BACKUP_AZURE_ACCOUNT_KEY='<key from: az storage account keys list -g vrsky-prod -n <account> --query "[0].value" -o tsv>'
+  --from-literal=BACKUP_AZURE_ACCOUNT_NAME="$SA_NAME" \
+  --from-literal=BACKUP_AZURE_ACCOUNT_KEY="$SA_KEY"
+
+unset DB_URL ENC_KEY SA_NAME SA_KEY
 ```
 
 - `BACKUP_DB_URL` is the `connection_string` of the `postgres-credentials`
@@ -143,8 +150,10 @@ vrsky-cli restore --target-db-url 'postgres://…/vrsky' --confirm \
 ## Monitoring
 
 `MgmtBackupMissing` (warning) fires when two of the CronJob's Jobs have failed
-since the last good backup, or when it hasn't been scheduled for over four
-days. It is silent while the CronJob is suspended. It sits outside the
+since the last good backup, or when neither a scheduled run nor a successful
+Job (a manual one counts) has happened for over four days of being active.
+It is silent while the CronJob is suspended, right after it is unsuspended,
+and after a cluster start too late for that day's run. It sits outside the
 `vrsky-*` rule groups, so it reaches Teams but doesn't fail a deploy's smoke
 check. A single failed Job also shows up as the chart's `KubeJobFailed`.
 

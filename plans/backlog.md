@@ -303,6 +303,20 @@ Last updated 2026-10-28.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case
     to `TestAffectedServices`. Touches `infrastructure/azure`: PR plus
     `agent:needs-human`. Found in #395.
+51. **`vrsky-cli backup` holds the whole dump in memory.** `pg_dump`'s
+    output, the gzipped copy and the encrypted copy all sit in byte slices
+    (`src/cmd/vrsky-cli/backup.go`, `pgDump`, `gzipBytes` and the
+    `EncryptBytes` call), so a dump of roughly a third of the CronJob's
+    512Mi limit or more gets the Job OOM-killed. Fine for today's small
+    management DB. Stream pg_dump through gzip and encryption into
+    `PutStream`, or at least alert on the dump size. Found in review of #404.
+52. **The copied `acr-pull` in `vrsky-database` only refreshes on Catch up or
+    a backup change.** `deploy-backup-azure.sh` copies it from
+    `vrsky-platform`, and nothing else runs that script. After an ACR
+    password rotation the backup Job can't pull until the next Catch up.
+    Run the copy wherever `acr-pull` is rotated, or give the script a step
+    in every deploy. Workflow change: PR plus `agent:needs-human`. Found in
+    review of #404.
 
 ## Human
 
