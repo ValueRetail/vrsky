@@ -67,8 +67,16 @@ spec:
   storage:
     size: 10Gi
 
-  # Continuous WAL archiving / PITR can be added here later via spec.backup
-  # (object store) — backups are otherwise covered by the vrsky-cli drill (#86).
+  # No backup is configured for this cluster. Continuous WAL archiving / PITR
+  # can be added here later via spec.backup (object store).
+  #
+  # Production runs the single-instance StatefulSet, not this cluster, and
+  # backs it up two ways: daily Azure Disk Backup snapshots plus the weekday
+  # `vrsky-mgmt-backup` CronJob's encrypted `vrsky-cli backup` dumps
+  # (docs/DR.md, docs/operator/backup.md). The snapshots target that one disk,
+  # so a move to CNPG needs its own backup set up. The restore drill
+  # (dr-drill.yml, #86) only tests the backup/restore tooling in CI against a
+  # throwaway database; it backs nothing up.
   resources:
     requests:
       cpu: "250m"

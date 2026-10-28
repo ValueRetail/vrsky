@@ -108,7 +108,7 @@ Last updated 2026-10-28.
     100644; every other script there is 100755). The guide now says `bash
     ...`. `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in
     #371.
-26. **The k3d path doesn't line up with its manifests.**
+26. ~~**The k3d path doesn't line up with its manifests.**~~ (#419)
     `k3d-load-images.sh` imports `data-filter` and `data-converter` as
     `localhost:5000/vrsky/...` while their manifests pull
     `ghcr.io/valueretail/vrsky/...`, loads no UI image, and the UI manifest's
@@ -284,7 +284,7 @@ Last updated 2026-10-28.
     `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
     on TLS for Postgres or make the checklist say where production stands.
     Found in review of #386.
-48. **The CNPG manifest calls the restore drill a backup.** The comment in
+48. ~~**The CNPG manifest calls the restore drill a backup.**~~ (#427) The comment in
     `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
@@ -353,7 +353,7 @@ Last updated 2026-10-28.
     Run the copy wherever `acr-pull` is rotated, or give the script a step
     in every deploy. Workflow change: PR plus `agent:needs-human`. Found in
     review of #404.
-57. **A backup CronJob left suspended is silent.** `MgmtBackupMissing` is
+57. ~~**A backup CronJob left suspended is silent.**~~ (#432) `MgmtBackupMissing` is
     quiet while `vrsky-mgmt-backup` is suspended, by design, so a CronJob
     suspended by hand (or never re-enabled after a restore) and left that
     way for more than 7 days after `vrsky-backup-config` exists pages
@@ -382,7 +382,7 @@ Last updated 2026-10-28.
     mount layout and tenant id are internals. Use `folderLabel` (the path
     relative to the tenant root), as the error events from #409 do. Found
     during #409.
-61. **An old poller still writes its final status after a newer start.**
+61. ~~**An old poller still writes its final status after a newer start.**~~ (#456)
     Since #408 an old poller ending late leaves the newer poller's map entry
     alone, but it still writes status `stopped` (one-shot done) or `error`
     (setup failed) after the new start wrote `running`. api
@@ -430,7 +430,7 @@ Last updated 2026-10-28.
     already-cancelled context and NAKs until the lock at `:~252` halts it
     (older than #447, tiny window). Add a seam right after the cancel and a
     reconcile test. Found in review of #447.
-67. **CI never runs `make lint-connector`.** `make lint` runs it beside
+67. ~~**CI never runs `make lint-connector`.**~~ (#462) `make lint` runs it beside
     lint-tenant and lint-openapi, but the Go lint job in `build-push.yml`
     does not, so a connector that bypasses the SDK passes CI. Add it as a
     step (and to `TestEveryLintCheckStillGates`) once it is clean on main.
@@ -498,7 +498,7 @@ Last updated 2026-10-28.
     `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
     a public API change, so that PR gets `agent:needs-human`. Found in
     #428.
-79. **`TestEveryLintCheckStillGates` matches raw step text**
+79. ~~**`TestEveryLintCheckStillGates` matches raw step text**~~ (#462)
     (`src/pkg/managementapi/lintgates_guard_test.go`), so a commented-out
     `gofmt -l .`, `make lint-tenant` or `check rules` line still satisfies
     it. Strip shell comments first, as the shard guard does since #443
@@ -571,6 +571,31 @@ Last updated 2026-10-28.
     by position or target ("Remove mapping 2", "Item mapping type for
     lineObjectNumber") and point the inputs at the warning list. Found in
     #458.
+89. **A deleted backup CronJob is silent.** If `vrsky-mgmt-backup` is
+    deleted (by hand, or a failed re-apply), its kube-state-metrics series
+    end, and both `MgmtBackupMissing` and `MgmtBackupSuspended` match
+    nothing, so no backups run and nobody is paged. An `absent()` rule on
+    `kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"}`
+    while `vrsky-backup-config` exists would catch it; mind the parked
+    nights (no samples at all then). Alert rules only. Found in review of
+    #473.
+90. **The Postgres manifests call the StatefulSet production uses
+    "dev-only".** `statefulset.yaml` opens with "DEV / SINGLE-NODE ONLY" and
+    `cnpg-cluster.yaml` says it replaces it, but production runs that
+    StatefulSet (`postgresql`, the disk Azure Disk Backup snapshots, see
+    `docs/DR.md`) and no CNPG cluster. Either say so in both headers and the
+    README, or plan the move to CNPG with its own backup. Manifests: PR plus
+    `agent:needs-human`. Found during #427.
+91. **A late status write can still land over a newer start's `running`.**
+    #456 left a window in api, sftp, cloud-storage and tenant: with the
+    6-connection DB pool saturated, a new start's lookup and its `running`
+    UPDATE can both get a connection before an old poller's `stopped` or
+    `error` UPDATE does, and the old write lands last. `handleStopCommand`'s
+    `stopped` write races a new start's `running` the same way. Fix with a
+    conditional UPDATE: the `running` write returns `started_at`, and the
+    ending and stop writes add `AND started_at = $n`. Or route the writes
+    through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
+    Found in review of #456.
 
 ## Human
 

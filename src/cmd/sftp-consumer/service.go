@@ -236,12 +236,18 @@ type activeConn struct {
 // After a stop and a new start it belongs to the newer poller, and an old
 // poller finishing must leave it alone, or the next start runs a second poller
 // beside the new one (#408).
-func (s *sftpConsumer) dropActive(connID string, own *activeConn) {
+//
+// It reports whether the entry was own. Only then may the poller write its
+// final status; otherwise the newer start has written "running" and owns the
+// status too (#456).
+func (s *sftpConsumer) dropActive(connID string, own *activeConn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active[connID] == own {
-		delete(s.active, connID)
+	if s.active[connID] != own {
+		return false
 	}
+	delete(s.active, connID)
+	return true
 }
 
 func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
@@ -281,8 +287,13 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("SFTP one-shot poll complete")
+		// Mark it stopped only if no newer start owns the entry, and with it
+		// the status, by now (#408, #456).
+		if !s.dropActive(connID, own) {
+			logger.Info("A newer start owns the connection; leaving its status alone")
+			return
+		}
 		_ = s.updateConnectionStatus(connID, tenantID, "stopped")
-		s.dropActive(connID, own)
 		return
 	}
 

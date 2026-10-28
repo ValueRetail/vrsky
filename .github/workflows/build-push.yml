@@ -212,6 +212,8 @@ jobs:
               - backup-a-own-jobs-only
               - backup-b-weekday-afternoons
               - backup-b-suspended
+              - backup-suspended-parked
+              - backup-suspended-pod-replaced
           - leg: 2/4
             groups:
               - backup-b-off-at-weekends
@@ -227,6 +229,7 @@ jobs:
               - backup-b-stopped-scheduling
               - backup-b-manual-backup
               - backup-b-suspend-flicker
+              - backup-suspended-late-secret
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -349,6 +352,13 @@ jobs:
       - name: Lint tenant filters
         working-directory: src
         run: make lint-tenant
+
+      # Fail the build if an SDK connector never calls sdk.Run* or imports
+      # pkg/messaging around the SDK (#98). `make lint` ran it but CI did not
+      # until #462. Standard library only: about 2 s cold, 0.3 s warm.
+      - name: Lint connectors
+        working-directory: src
+        run: make lint-connector
 
   # One "Go Tests" result for everything above, as before the split: green
   # only when every shard and both lint jobs passed. Branch protection does
