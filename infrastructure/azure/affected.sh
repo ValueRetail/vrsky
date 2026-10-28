@@ -11,6 +11,10 @@
 #   backup                the backup CronJob or its deploy script changed:
 #                         deploy-backup-azure.sh
 #
+# Shared Go code (src/pkg, src/internal, go.mod, go.sum, any Dockerfile)
+# rebuilds every Go image. A _test.go file or anything under a testdata/
+# directory below src/ marks nothing on its own (#410).
+#
 # TOOLS are images with nothing to roll: the backup CronJob pulls
 # vrsky-cli:latest at every run, so a rebuild is the whole deploy.
 #
@@ -39,7 +43,10 @@ while IFS= read -r p; do
   [ -z "$p" ] && continue
   case "$p" in
     ui/*)                                   out+=("image ui" "core ui") ;;
-    src/pkg/*|src/go.mod|src/go.sum)        all_go=1 ;;
+    # Tests and their fixtures never reach a binary: no rebuild, no restart.
+    # `*` crosses `/` in a case pattern, so this holds at any depth.
+    src/*_test.go|src/*/testdata/*)         ;;
+    src/pkg/*|src/internal/*|src/go.mod|src/go.sum) all_go=1 ;;
     src/cmd/*/Dockerfile)                   all_go=1 ;;
     src/cmd/*)
       name="${p#src/cmd/}"; name="${name%%/*}"

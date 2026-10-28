@@ -201,7 +201,7 @@ Last updated 2026-10-28.
     retried and the connection stays down until someone starts it again.
     A "start again" flag on the reservation would cover it. Found by the
     test author on #375.
-38. **A test-only change rebuilds every Go image**
+38. ~~**A test-only change rebuilds every Go image**~~ (#410)
     (`infrastructure/azure/affected.sh`, the `src/pkg/*` case around line
     36). Any change under `src/pkg/`, `_test.go` files included, marks all
     Go images as affected, so a PR that only adds a test (#379's guard test,
@@ -333,7 +333,7 @@ Last updated 2026-10-28.
     so two start commands can race and leak the overwritten session's
     subscription; its fingerprint/replace model doesn't fit `StartGuard`
     as is. Found during #397 and its review.
-54. **`affected.sh` ignores `src/internal`.** Seven Dockerfiles under
+54. ~~**`affected.sh` ignores `src/internal`.**~~ (#410) Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
     Treat `src/internal/*` like `src/pkg/*` (every Go image) and add a case

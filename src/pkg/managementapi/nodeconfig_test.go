@@ -1122,6 +1122,19 @@ func TestAffectedServices(t *testing.T) {
 		{"connector manifest", []string{"infrastructure/azure/deploy-connectors-azure.sh"}, []string{"connectors-manifest"}},
 		{"mixed", []string{"ui/x.ts", "src/cmd/sitoo-producer/a.go", "docs/a.md"},
 			[]string{"connector sitoo-producer", "core ui", "image sitoo-producer", "image ui"}},
+		// Tests and test fixtures never ship in an image (#410).
+		{"shared package test", []string{"src/pkg/sdk/restore_test.go"}, nil},
+		{"connector test", []string{"src/cmd/webhook-consumer/server_test.go"}, nil},
+		{"core service test", []string{"src/cmd/management-api/x_test.go"}, nil},
+		{"shared package testdata", []string{"src/pkg/managementapi/testdata/driver_snapshot.json"}, nil},
+		{"service testdata", []string{"src/cmd/webhook-consumer/testdata/payload.json"}, nil},
+		{"tests and testdata together", []string{"src/pkg/sdk/restore_test.go", "src/pkg/managementapi/testdata/a.json", "src/cmd/management-api/x_test.go"}, nil},
+		{"connector test and code", []string{"src/cmd/webhook-consumer/server_test.go", "src/cmd/webhook-consumer/server.go"},
+			[]string{"connector webhook-consumer", "image webhook-consumer"}},
+		{"core service testdata and code", []string{"src/cmd/management-api/testdata/a.json", "src/cmd/management-api/main.go"},
+			[]string{"core management-api", "image management-api"}},
+		{"test with rules", []string{"src/pkg/x/a_test.go", "infrastructure/prometheus-rules.yml"}, []string{"monitoring"}},
+		{"test with backup manifest", []string{"src/cmd/vrsky-cli/backup_test.go", "infrastructure/kubernetes/backup/cronjob.yaml"}, []string{"backup"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1132,18 +1145,31 @@ func TestAffectedServices(t *testing.T) {
 		})
 	}
 	// A shared package: every Go image, core and connector, but not the UI.
-	got := affected(t, "src/pkg/sdk/restore.go")
-	images, coreUI := 0, false
-	for _, g := range got {
-		if strings.HasPrefix(g, "image ") {
-			images++
+	// src/internal is shared code too, and a test file next to real code
+	// does not make the real change test-only.
+	for _, paths := range [][]string{
+		{"src/pkg/sdk/restore.go"},
+		{"src/pkg/sdk/restore_test.go", "src/pkg/sdk/restore.go"},
+		{"src/internal/config/config.go"},
+		{"src/internal/config/config_test.go", "src/internal/config/config.go"},
+	} {
+		got := affected(t, paths...)
+		images, coreUI := 0, false
+		for _, g := range got {
+			if strings.HasPrefix(g, "image ") {
+				images++
+			}
+			if g == "core ui" || g == "image ui" {
+				coreUI = true
+			}
 		}
-		if g == "core ui" || g == "image ui" {
-			coreUI = true
+		if images < 30 || coreUI {
+			t.Errorf("%v: %d images (want every Go image), ui included=%v:\n%s", paths, images, coreUI, strings.Join(got, "\n"))
 		}
 	}
-	if images < 30 || coreUI {
-		t.Fatalf("src/pkg change: %d images (want every Go image), ui included=%v:\n%s", images, coreUI, strings.Join(got, "\n"))
+	// Same size as a plain src/pkg change, so src/internal really is every image.
+	if a, b := len(affected(t, "src/internal/config/config.go")), len(affected(t, "src/pkg/sdk/restore.go")); a != b {
+		t.Errorf("src/internal change gives %d targets, src/pkg change %d; want the same", a, b)
 	}
 	for _, p := range []string{"src/go.mod", "src/cmd/file-consumer/Dockerfile"} {
 		if n := len(affected(t, p)); n < 60 {
@@ -1153,7 +1179,7 @@ func TestAffectedServices(t *testing.T) {
 	// vrsky-cli links the same shared packages (crypto above all: a dump
 	// encrypted by a stale CLI must still decrypt), so every shared change
 	// rebuilds it too. It is an image only, never a core service or connector.
-	for _, p := range []string{"src/pkg/crypto/x.go", "src/go.mod", "src/go.sum", "src/cmd/file-consumer/Dockerfile", "src/cmd/vrsky-cli/Dockerfile"} {
+	for _, p := range []string{"src/pkg/crypto/x.go", "src/internal/config/config.go", "src/go.mod", "src/go.sum", "src/cmd/file-consumer/Dockerfile", "src/cmd/vrsky-cli/Dockerfile"} {
 		got := affected(t, p)
 		found := false
 		for _, g := range got {
