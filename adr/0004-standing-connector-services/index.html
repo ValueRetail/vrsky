@@ -2461,7 +2461,9 @@ meanwhile. Every consumer now calls <code>sdk.RestoreRunning</code> after subscr
 to the command subjects: it reads the connections the database says are
 <code>running</code> whose graph mentions the consumer's node type and runs the same
 start path a command would. <code>TestConsumersRestoreRunningOnBoot</code> fails for a
-consumer that does not. A connector rollout therefore no longer needs any
+consumer that does not. Restore and a start command can run that path for the
+same connection at once, so it claims the connection with <code>sdk.StartGuard</code>
+before any slow work (#375, #397). A connector rollout therefore no longer needs any
 redeploy afterwards.</p>
 <h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
 <p><strong>Fix the generic workers instead.</strong> Teach <code>cmd/consumer</code>/<code>cmd/producer</code> to read
