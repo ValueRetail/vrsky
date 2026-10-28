@@ -2454,6 +2454,9 @@ docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> 
 <p>The UI dev server runs separately:</p>
 <div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>ui<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">   </span><span class="c1"># http://localhost:5173</span>
 </code></pre></div>
+<p>Vite proxies <code>/api</code> to <code>http://localhost:3000</code>; set <code>API_PROXY_TARGET</code> to
+use another API. To run the dev server in a container instead, see "Option 1"
+in the <a href="../../DEPLOYMENT_GUIDE/#option-1-build-ui-only-dev-mode">deployment guide</a>.</p>
 <p>Core endpoints (local): Management API <code>http://localhost:3000</code>, gateway
 (Traefik) <code>http://localhost:8090</code>, Grafana <code>http://localhost:3001</code>,
 Prometheus <code>http://localhost:9099</code>, webhook ingress <code>http://localhost:9100</code>.</p>

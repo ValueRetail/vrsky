@@ -3313,9 +3313,19 @@ built-in development defaults. To set your own <code>ENCRYPTION_KEY</code>, copy
 passwords are fixed dev values in <code>docker-compose.yml</code>; <code>.env</code> doesn't
 change them (<a href="../operator/install/">Install</a> lists what matters).</p>
 <h4 id="option-1-build-ui-only-dev-mode">Option 1: Build UI Only (Dev Mode)<a class="headerlink" href="#option-1-build-ui-only-dev-mode" title="Permanent link">&para;</a></h4>
+<p>Start the core stack first (<code>make up-core</code> or <code>docker compose up -d</code>). The
+dev container joins its <code>vrsky-network</code> and Vite proxies <code>/api</code> to
+<code>http://management-api:3000</code> there; without the stack, <code>up</code> stops with
+"network vrsky-network declared as external, but could not be found".</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Serves UI on http://localhost:5173 with hot reload</span>
 docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>--profile<span class="w"> </span>dev<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>ui
 </code></pre></div>
+<p>Stop it (<code>docker compose -f docker-compose.ui.yml --profile dev down</code>)
+before you take the core stack down, or the stack's <code>down</code> can't remove
+<code>vrsky-network</code> while the UI container is still on it.</p>
+<p>Running <code>npm run dev</code> on the host instead needs no container: the proxy
+defaults to <code>http://localhost:3000</code>, where the stack publishes the API. Set
+<code>API_PROXY_TARGET</code> to point it at another API.</p>
 <h4 id="option-2-build-ui-production-image">Option 2: Build UI Production Image<a class="headerlink" href="#option-2-build-ui-production-image" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><span class="c1"># Builds optimized production image</span>
 docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.ui.yml<span class="w"> </span>--profile<span class="w"> </span>prod<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build<span class="w"> </span>ui-prod
