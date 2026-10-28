@@ -1,7 +1,7 @@
 # promtool unit tests for the VRSky default alert ruleset (#84).
 # Run: docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool \
 #        prom/prometheus:latest test rules /cfg/prometheus-rules-test.yml
-# 11 of the 12 rules are driven to FIRING (all but
+# 12 of the 13 rules are driven to FIRING (all but
 # NATSInstanceApproachingCapacity) — the "staged test" acceptance criterion,
 # deterministic and CI-runnable.
 
@@ -861,3 +861,125 @@ tests:
             exp_annotations:
               summary: "No successful management-DB backup in two running weekdays"
               description: "The vrsky-mgmt-backup CronJob in vrsky-database has not completed a backup on two weekdays the cluster ran, or has stopped being scheduled. Read the last Job's log (kubectl -n vrsky-database logs job/<name>) and see docs/DR.md."
+
+  # 12. MgmtBackupSuspended (#432). Scraped every 5 minutes: a week of
+  #     1-minute samples is more than promtool's per-query sample limit, and
+  #     a longer step leaves the 5-minute lookback empty between samples.
+  #     kube_secret_created holds the Secret's creation time in seconds; 0
+  #     is the test's start. Few, long groups on purpose: every rule in the
+  #     file is evaluated each minute of each group.
+
+  # 12a. A parked cluster, up 07:00-16:00 UTC only, so no samples at night.
+  #      The Secret has been there since the start; the CronJob is suspended
+  #      by hand on day 0 at 15:00 UTC and left that way. kube-state-metrics
+  #      comes back as a new pod on day 4, so the week is split over two
+  #      series. The nights count as suspended time: quiet on day 7 at 14:00
+  #      (a week less an hour), paging at 15:40 and again the next morning
+  #      at 08:00. The CronJob is then deleted at 09:00 (its series ends): by
+  #      10:00 the alert has cleared instead of riding the 7-day window for
+  #      another week.
+  - name: backup-suspended-parked
+    interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x84 0x95 1x11 _x96 _x84 1x107 _x96 _x84 1x107 _x96 _x84 1x107 _x96'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x288 _x288 _x288 _x288 _x84 1x107 _x96 _x84 1x107 _x96 _x84 1x107 _x96 _x84 1x107 _x96 _x84 1x23'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x84 0x107 _x96 _x84 0x107 _x96 _x84 0x107 _x96 _x84 0x107 _x96'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x288 _x288 _x288 _x288 _x84 0x107 _x96 _x84 0x107 _x96 _x84 0x107 _x96 _x84 0x107 _x96 _x84 0x47'
+    alert_rule_test:
+      - eval_time: 10920m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+      - eval_time: 11020m
+        alertname: MgmtBackupSuspended
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupSuspended
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "Management-DB backup CronJob suspended for over 7 days"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has been suspended for over 7 days while the vrsky-backup-config Secret exists, so no backups are being taken. If no restore is in progress, unsuspend it or run Catch up (docs/operator/backup.md). If the deploy keeps it suspended, its log names the key the Secret is missing."
+      - eval_time: 12000m
+        alertname: MgmtBackupSuspended
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupSuspended
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "Management-DB backup CronJob suspended for over 7 days"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has been suspended for over 7 days while the vrsky-backup-config Secret exists, so no backups are being taken. If no restore is in progress, unsuspend it or run Catch up (docs/operator/backup.md). If the deploy keeps it suspended, its log names the key the Secret is missing."
+      - eval_time: 12120m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+
+  # 12b. kube-state-metrics replaced during a short suspend. Active for five
+  #      days on the old pod, suspended for a restore at 23:55 on day 4, and
+  #      at 00:05 on day 5 the pod is replaced. The new pod's series holds
+  #      only suspended samples, but the CronJob has been suspended for two
+  #      and a half hours, not 7 days: quiet. (With `max by` the new series
+  #      alone decided and this paged.)
+  - name: backup-suspended-pod-replaced
+    interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '0x1430 1x10'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x1441 1x30'
+      - series: 'kube_secret_created{job="kube-state-metrics",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '-1000000x1471'
+    alert_rule_test:
+      - eval_time: 7350m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+
+  # 12c. The Secret arrives late, then a restore. Suspended since the start
+  #      (the state the CronJob ships in until the human setup). Another,
+  #      older Secret in the namespace (acr-pull) doesn't count: quiet on day
+  #      1, before vrsky-backup-config exists. The human creates it on day 2
+  #      and forgets to unsuspend. Quiet on day 3 (the Secret is new), paging
+  #      once the Secret is over 7 days old. Unsuspended on day 9 at 02:00:
+  #      quiet. Suspended again at 04:00 for a three-hour restore: quiet
+  #      during and after, since the last 7 days hold active samples.
+  - name: backup-suspended-late-secret
+    interval: 5m
+    input_series:
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '1x2615 0x23 1x35 0x60'
+      - series: 'kube_secret_created{job="kube-state-metrics",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x576 172800x2200'
+      - series: 'kube_secret_created{job="kube-state-metrics",namespace="vrsky-database",secret="acr-pull"}'
+        values: '-1000000x2776'
+    alert_rule_test:
+      - eval_time: 1440m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+      - eval_time: 4320m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+      - eval_time: 13020m
+        alertname: MgmtBackupSuspended
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupSuspended
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "Management-DB backup CronJob suspended for over 7 days"
+              description: "The vrsky-mgmt-backup CronJob in vrsky-database has been suspended for over 7 days while the vrsky-backup-config Secret exists, so no backups are being taken. If no restore is in progress, unsuspend it or run Catch up (docs/operator/backup.md). If the deploy keeps it suspended, its log names the key the Secret is missing."
+      - eval_time: 13140m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+      - eval_time: 13290m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []
+      - eval_time: 13440m
+        alertname: MgmtBackupSuspended
+        exp_alerts: []

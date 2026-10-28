@@ -212,6 +212,8 @@ jobs:
               - backup-a-own-jobs-only
               - backup-b-weekday-afternoons
               - backup-b-suspended
+              - backup-suspended-parked
+              - backup-suspended-pod-replaced
           - leg: 2/4
             groups:
               - backup-b-off-at-weekends
@@ -227,6 +229,7 @@ jobs:
               - backup-b-stopped-scheduling
               - backup-b-manual-backup
               - backup-b-suspend-flicker
+              - backup-suspended-late-secret
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
