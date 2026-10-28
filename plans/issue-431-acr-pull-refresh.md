@@ -38,7 +38,14 @@ script.
    other in-cluster scripts.
    - No source Secret (first install): prints why and exits 0.
    - No `vrsky-database` namespace: prints why and exits 0.
-   - Any other kubectl error: exits non-zero.
+   - Any other kubectl error: exits non-zero. Each lookup is a plain
+     assignment so `set -e` sees a failure; inside `[ -z "$(…)" ]` a
+     Forbidden would pass for a missing object (review of #485).
+   - The apply's output is captured. A failed apply on an existing object
+     can print the patch, new `.dockerconfigjson` included, and the deploy
+     log is public to anyone with repo access, so on a failure the script
+     prints only a generic line and the exit code. The same leak in
+     `deploy-backup-azure.sh` and `deploy-ui-azure.sh` is backlog item 93.
    - Touches nothing but that one Secret. It never reads or applies the
      CronJob, so it can't change `suspend`. That's the reason for not just
      running `deploy-backup-azure.sh` on every deploy: it re-decides

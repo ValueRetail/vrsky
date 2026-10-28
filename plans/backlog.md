@@ -604,6 +604,17 @@ Last updated 2026-10-28.
     `copy-acr-pull.sh` (#431), which already runs on every deploy. There
     is also no written runbook for rotating the ACR password itself.
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in #431.
+93. **A failed `acr-pull` apply can print the registry password.**
+    `deploy-backup-azure.sh` pipes the copied Secret into a bare
+    `kubectl apply -f -`. On an existing object a failed apply can print
+    "error when applying patch:" with the patch, new `.dockerconfigjson`
+    included, into the deploy log, which anyone with repo access can read.
+    Capture the output and print only a generic line and the exit code, as
+    `copy-acr-pull.sh` does since #431, with a stub test like
+    `TestCopyACRPullScript`'s "apply fails". `deploy-ui-azure.sh`'s copy
+    into `vrsky-ui` has the same leak; fix it with item 92.
+    `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in review
+    of #431.
 
 ## Human
 

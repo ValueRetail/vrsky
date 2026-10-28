@@ -3174,6 +3174,7 @@ case "$verb" in
   get)
     if [ -f "$d/fail-get" ]; then echo 'error: You must be logged in to the server (Unauthorized)' >&2; exit 1; fi
     if [[ "$args" == *" namespace "* || "$args" == *" namespaces "* || "$args" == *" ns "* ]]; then
+      if [ -f "$d/fail-ns-get" ]; then echo 'Error from server (Forbidden): namespaces "vrsky-database" is forbidden' >&2; exit 1; fi
       if [[ "$args" == *vrsky-database* ]]; then
         [ -f "$d/no-database-ns" ] && notfound namespaces vrsky-database
         echo "namespace/vrsky-database"
@@ -3194,6 +3195,12 @@ case "$verb" in
       cat > "$d/stdin-$$"
       if grep -q 'kind: CronJob' "$d/stdin-$$" && [ -f "$d/fail-cronjob-apply" ]; then
         echo 'error: the server rejected the CronJob' >&2; exit 1
+      fi
+      # What a failed apply on an existing Secret prints: the patch, data
+      # and all, on both streams.
+      if grep -q '"Secret"' "$d/stdin-$$" && [ -f "$d/fail-secret-apply" ]; then
+        echo "secret/acr-pull FAKE-SECRET-SENTINEL $(tr -d '\n' < "$d/stdin-$$")"
+        echo "error when applying patch: $(tr -d '\n' < "$d/stdin-$$") FAKE-SECRET-SENTINEL" >&2; exit 1
       fi
       exit 0
     fi
@@ -3254,7 +3261,8 @@ func runDeployBackup(t *testing.T, acr bool, config map[string]string, failCronA
 
 // runWithStubKubectl runs an in-cluster script from the repo root against
 // stubKubectl. files go into the stub's directory: acr.json and config.json,
-// and the switches fail-cronjob-apply, fail-get and no-database-ns.
+// and the switches fail-cronjob-apply, fail-secret-apply, fail-get,
+// fail-ns-get and no-database-ns.
 func runWithStubKubectl(t *testing.T, script string, files map[string]string) deployBackupRun {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
@@ -3540,10 +3548,13 @@ func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
 	if !ok {
 		t.Fatal("no deploy job in build-push.yml")
 	}
-	stageAt, copyAt := -1, -1
+	stageAt, smokeAt, copyAt := -1, -1, -1
 	for i, st := range deploy.Steps {
 		if strings.Contains(st.Run, "mkdir -p stage") {
 			stageAt = i
+		}
+		if strings.Contains(st.Run, "smoke-prod.sh") {
+			smokeAt = i
 		}
 		if !strings.Contains(st.Run, "in-cluster.sh") || !strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") {
 			continue
@@ -3565,6 +3576,14 @@ func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
 	if stageAt < 0 || copyAt < stageAt {
 		t.Errorf("copy-acr-pull.sh runs at step %d, before the files are staged (step %d)", copyAt, stageAt)
 	}
+	// After the smoke check, as the backup step is: a failed copy must not
+	// stop the smoke check from reporting on the deploy.
+	if smokeAt < 0 {
+		t.Fatal("the deploy job has no smoke-prod.sh step")
+	}
+	if copyAt < smokeAt {
+		t.Errorf("copy-acr-pull.sh runs at step %d, before the smoke check (step %d)", copyAt, smokeAt)
+	}
 
 	catchUp, ok := parseWorkflow(t, "catch-up.yml").Jobs["catch-up"]
 	if !ok {
@@ -3585,7 +3604,7 @@ func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
 // copy-acr-pull.sh against the stub kubectl: it copies acr-pull into
 // vrsky-database without the source's identity, does nothing on a cluster
 // that has no source Secret or no vrsky-database yet, fails on a real
-// error, and touches nothing but that Secret. Above all it never goes near
+// error without printing the Secret, and touches nothing but that Secret. Above all it never goes near
 // the backup CronJob, whose suspend a human may have set for a restore.
 func TestCopyACRPullScript(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
@@ -3605,6 +3624,13 @@ func TestCopyACRPullScript(t *testing.T) {
 		{name: "no source Secret (first install)", files: map[string]string{}, wantSaid: "no acr-pull secret in vrsky-platform"},
 		{name: "no vrsky-database namespace", files: map[string]string{"acr.json": stubACRPull, "no-database-ns": ""}, wantSaid: "no vrsky-database namespace"},
 		{name: "kubectl get fails", files: map[string]string{"acr.json": stubACRPull, "fail-get": ""}, wantErr: true},
+		// A Forbidden or a timeout on the namespace lookup is not a missing
+		// namespace: exiting 0 would let the copy go stale unnoticed.
+		{name: "namespace lookup fails", files: map[string]string{"acr.json": stubACRPull, "fail-ns-get": ""}, wantErr: true},
+		// The apply's own output can carry the patch, data and all; the
+		// deploy log is public to anyone with repo access.
+		{name: "apply fails", files: map[string]string{"acr.json": stubACRPull, "fail-secret-apply": ""}, wantErr: true,
+			wantSaid: "apply of vrsky-database/acr-pull failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3622,8 +3648,13 @@ func TestCopyACRPullScript(t *testing.T) {
 					t.Errorf("call %d %v: %s; the copy only reads and applies", i, argv, v)
 				}
 			}
-			if strings.Contains(r.out, "e30=") {
-				t.Errorf("the script printed the Secret's data\n%s", r.out)
+			for _, leak := range []string{"e30=", "FAKE-SECRET-SENTINEL"} {
+				if strings.Contains(r.out, leak) {
+					t.Errorf("the script printed the Secret's data (%s)\n%s", leak, r.out)
+				}
+			}
+			if tc.wantSaid != "" && !strings.Contains(r.out, tc.wantSaid) {
+				t.Errorf("the output does not say %q\n%s", tc.wantSaid, logs)
 			}
 
 			if tc.wantErr {
@@ -3634,9 +3665,6 @@ func TestCopyACRPullScript(t *testing.T) {
 			}
 			if r.err != nil {
 				t.Fatalf("exit: %v\n%s", r.err, logs)
-			}
-			if tc.wantSaid != "" && !strings.Contains(r.out, tc.wantSaid) {
-				t.Errorf("the output does not say %q\n%s", tc.wantSaid, logs)
 			}
 
 			var applied []map[string]any

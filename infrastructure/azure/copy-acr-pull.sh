@@ -23,19 +23,34 @@ set -euo pipefail
 SRC_NS=vrsky-platform
 NS=vrsky-database
 
+# Each lookup is a plain assignment, so set -e stops the script when kubectl
+# fails (Forbidden, a timeout). Inside `[ -z "$(…)" ]` it would not, and a
+# failed lookup would pass for a missing object.
 pull="$(kubectl get secret acr-pull -n "$SRC_NS" -o json --ignore-not-found)"
 if [ -z "$pull" ]; then
   echo "no acr-pull secret in $SRC_NS yet; nothing to copy into $NS"
   exit 0
 fi
-if [ -z "$(kubectl get namespace "$NS" -o name --ignore-not-found)" ]; then
+ns="$(kubectl get namespace "$NS" -o name --ignore-not-found)"
+if [ -z "$ns" ]; then
   echo "no $NS namespace yet; acr-pull not copied"
   exit 0
 fi
 
 # The source's identity (uid, resourceVersion, ownerReferences, annotations)
 # stays behind: apply would refuse a foreign uid.
-printf '%s' "$pull" \
+#
+# The deploy log is public to anyone with repo access, and a failed apply on
+# an existing object can print "error when applying patch:" with the patch,
+# which holds the new .dockerconfigjson. So the output is captured, and on a
+# failure only a generic line and the exit code are printed.
+rc=0
+out="$( { printf '%s' "$pull" \
   | jq --arg ns "$NS" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
                         metadata: {name: "acr-pull", namespace: $ns}}' \
-  | kubectl apply -f -
+  | kubectl apply -f - ; } 2>&1 )" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "ERROR: apply of $NS/acr-pull failed (exit $rc); output withheld because it can contain the Secret" >&2
+  exit "$rc"
+fi
+printf '%s\n' "$out"
