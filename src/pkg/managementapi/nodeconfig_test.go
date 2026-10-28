@@ -888,7 +888,7 @@ func TestGoJobsRetryModuleDownloads(t *testing.T) {
 	// The DR drill left this list in #395: it builds the vrsky-cli image, and
 	// the Dockerfile's own retry loop covers it (TestDockerfilesRetryModuleDownload).
 	if len(checked) < 6 {
-		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are Go Tests, Remote agent on Windows, Build remote agent binaries, govulncheck, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
+		t.Fatalf("only %d jobs download Go modules (%v); the Go jobs this guard knows of are the Go Tests shards, Go lint, Remote agent on Windows, Build remote agent binaries, govulncheck, the connector integration tests and the nightly SAP end-to-end — if one was renamed or dropped, say so here", len(checked), checked)
 	}
 }
 
