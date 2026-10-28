@@ -61,6 +61,26 @@ on a `postgres:18-alpine` base, so `pg_dump` matches the server):
    `pkg/objectstore`) as
    `mgmt-backups/management_db-<UTC-timestamp>.dump.gz.enc`.
 
+The four steps are one stream (#430): nothing holds the whole dump, so the
+Job's memory stays at a few MiB plus the storage SDK's upload buffers
+whatever the size of the database. The archive is encrypted in 64 KiB
+chunks, each its own GCM seal with a counter and a last-chunk flag in the
+nonce, behind a `VRSKYBK1` header. The chunks are sealed under a key made
+for that archive alone, HKDF-SHA256 of the `ENCRYPTION_KEY` with a random
+salt stored in the header, so the backups never use the secrets vault's key
+directly (the format is documented in `src/cmd/vrsky-cli/stream.go`). A
+cut-off, reordered or edited archive fails to decrypt; it never restores as
+a shorter dump. If `pg_dump` fails, the upload is aborted before the last
+chunk is written.
+
+`vrsky-cli restore` reads both this format and the archives made before
+#430 (one GCM seal under the `ENCRYPTION_KEY` over the whole gzipped dump).
+New archives are streamed into `pg_restore`; old ones are read into memory
+to decrypt, as before. A damaged new archive would only be caught while
+`pg_restore` runs, so run `vrsky-cli backup verify <key>` first, as the
+runbook below does: it reads the whole archive and fails on any damage
+without touching a database.
+
 Config is environment-driven: `BACKUP_DB_URL`, `ENCRYPTION_KEY`,
 `BACKUP_PROVIDER`, `BACKUP_BUCKET`, and `BACKUP_AZURE_ACCOUNT_NAME` +
 `BACKUP_AZURE_ACCOUNT_KEY` or `BACKUP_AZURE_CONNECTION_STRING` (the S3 and GCS
@@ -184,23 +204,40 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
    kubectl -n vrsky-database run vrsky-cli-list --rm -it --restart=Never --image="$IMAGE" \
      --overrides='{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'"$IMAGE"'","args":["list"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
    ```
-3. **Restore into it:**
+3. **Verify the dump before you restore it:**
+   ```bash
+   KEY=mgmt-backups/management_db-<timestamp>.dump.gz.enc
+   kubectl -n vrsky-database run vrsky-cli-verify --rm -it --restart=Never --image="$IMAGE" \
+     --overrides='{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'"$IMAGE"'","args":["backup","verify","'"$KEY"'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
+   ```
+   `backup verify` downloads the dump and decrypts and gunzips it without
+   writing anything, then prints `backup ok: <key> (<n> bytes of dump)`. A
+   non-zero exit means the dump is damaged, cut off or under another
+   `ENCRYPTION_KEY`: pick another one. Don't skip this. `restore` would
+   notice a damaged dump only partway through and roll back, so you'd find
+   out later and with less detail.
+4. **Restore into it:**
    ```bash
    TARGET='postgres://vrsky:<scratch password>@pg-restore-test.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable'
-   KEY=mgmt-backups/management_db-<timestamp>.dump.gz.enc
    kubectl -n vrsky-database run vrsky-cli-restore --rm -it --restart=Never --image="$IMAGE" \
      --overrides='{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'"$IMAGE"'","args":["restore","--target-db-url","'"$TARGET"'","--confirm","'"$KEY"'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
    ```
    `restore` downloads, decrypts, gunzips and runs
-   `pg_restore --clean --if-exists`. It requires `--target-db-url` and
+   `pg_restore --clean --if-exists --single-transaction`. The single
+   transaction makes it all or nothing: if the download breaks off, the
+   archive turns out damaged (say it was replaced after you verified it) or
+   any statement fails, everything rolls back, the `--clean` drops included,
+   and the target is left as it was. It requires `--target-db-url` and
    `--confirm`, and refuses to overwrite `BACKUP_DB_URL` unless you also pass
    `--allow-source-db`.
 
    Without the cluster, run the same image anywhere with Docker and the
    environment from the [Secret](operator/backup.md#layer-2-the-vrsky-backup-config-secret),
-   with `ENCRYPTION_KEY` from the password manager:
+   with `ENCRYPTION_KEY` from the password manager. Verify first with the
+   same command ending in `backup verify <key>` (it needs no
+   `BACKUP_DB_URL`), then restore:
    `docker run --rm -e ENCRYPTION_KEY -e BACKUP_PROVIDER=azure -e BACKUP_BUCKET=vrsky-backups -e BACKUP_AZURE_ACCOUNT_NAME -e BACKUP_AZURE_ACCOUNT_KEY -e BACKUP_DB_URL=<any URL other than the target> vrskyprodacr.azurecr.io/vrsky/vrsky-cli:latest restore --target-db-url <url> --confirm <key>`.
-4. **Check row counts per tenant** against what you expect (the live
+5. **Check row counts per tenant** against what you expect (the live
    database, if it still exists):
    ```sql
    SELECT t.slug, 'connections', count(c.id) FROM tenants t
@@ -210,10 +247,10 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
      LEFT JOIN secrets s ON s.tenant_id = t.id GROUP BY t.slug
    ORDER BY 1, 2;
    ```
-5. **Bring the schema up to date.** A dump is at whatever migration version
+6. **Bring the schema up to date.** A dump is at whatever migration version
    was live when it was taken. The management-api runs the migrations on
    boot, so starting it against the restored database is enough.
-6. **Switch the platform to it.** Update `connection_string` in the
+7. **Switch the platform to it.** Update `connection_string` in the
    `postgres-credentials` Secrets (`vrsky-database` and `vrsky-platform`) to
    the restored database, restart the management-api and the connectors, and
    check: log in, list connections, open a connection's credentials (they

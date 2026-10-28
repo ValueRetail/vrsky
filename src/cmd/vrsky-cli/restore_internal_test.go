@@ -34,18 +34,3 @@ func TestSameDatabase(t *testing.T) {
 		}
 	}
 }
-
-func TestGzipRoundTrip(t *testing.T) {
-	orig := []byte("the quick brown fox dumps the lazy database")
-	gz, err := gzipBytes(orig)
-	if err != nil {
-		t.Fatalf("gzip: %v", err)
-	}
-	out, err := gunzipBytes(gz)
-	if err != nil {
-		t.Fatalf("gunzip: %v", err)
-	}
-	if string(out) != string(orig) {
-		t.Errorf("round-trip = %q, want %q", out, orig)
-	}
-}

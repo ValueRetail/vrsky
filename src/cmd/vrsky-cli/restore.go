@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -53,53 +54,89 @@ func runRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open object store: %w", err)
 	}
-	sealed, _, err := store.Get(ctx, key)
+	body, _, err := store.GetStream(ctx, key)
 	if err != nil {
 		return fmt.Errorf("download backup %q: %w", key, err)
 	}
+	defer body.Close()
 
-	gzipped, err := crypto.DecryptBytes(sealed, cfg.keyHex)
+	dump, err := openArchive(body, cfg.keyHex)
 	if err != nil {
-		return fmt.Errorf("decrypt (wrong ENCRYPTION_KEY?): %w", err)
-	}
-	dump, err := gunzipBytes(gzipped)
-	if err != nil {
-		return fmt.Errorf("gunzip: %w", err)
-	}
-
-	if err := pgRestore(ctx, *targetURL, dump); err != nil {
 		return err
 	}
-	fmt.Printf("restore complete: %s -> %s (%d bytes)\n", key, redactURL(*targetURL), len(dump))
+	n, err := pgRestore(ctx, *targetURL, dump)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("restore complete: %s -> %s (%d bytes)\n", key, redactURL(*targetURL), n)
 	return nil
+}
+
+// openArchive returns a reader of the pg_dump bytes inside a backup archive
+// read from r. Chunked archives (#430) are decrypted and gunzipped as they are
+// read, so memory stays flat; the reader returns an error rather than EOF if
+// the archive is cut off or altered, so read it to the end. Older archives are
+// one GCM seal over the whole gzipped dump and are read into memory to open,
+// as before.
+func openArchive(r io.Reader, keyHex string) (io.Reader, error) {
+	br := bufio.NewReader(r)
+	var plain io.Reader
+	if magic, err := br.Peek(len(backupMagic)); err == nil && string(magic) == backupMagic {
+		dec, err := newOpenReader(br, keyHex)
+		if err != nil {
+			return nil, fmt.Errorf("open backup: %w", err)
+		}
+		plain = dec
+	} else {
+		sealed, err := io.ReadAll(br)
+		if err != nil {
+			return nil, fmt.Errorf("download backup: %w", err)
+		}
+		gzipped, err := crypto.DecryptBytes(sealed, keyHex)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt (wrong ENCRYPTION_KEY?): %w", err)
+		}
+		plain = bytes.NewReader(gzipped)
+	}
+	gz, err := gzip.NewReader(plain)
+	if err != nil {
+		return nil, fmt.Errorf("gunzip: %w", err)
+	}
+	return gz, nil
 }
 
 // pgRestore pipes a custom-format dump into pg_restore against targetURL,
 // cleaning existing objects first (--clean --if-exists) so the restore is
-// idempotent.
-func pgRestore(ctx context.Context, targetURL string, dump []byte) error {
+// idempotent. --single-transaction makes it all or nothing: a download that
+// fails mid-stream, or a damaged archive, rolls back the --clean drops instead
+// of leaving a half-restored database. pg_restore may stop reading at the end
+// of the archive, so the rest of dump is drained afterwards: that is where a
+// chunked archive's final chunk and the gzip checksum are verified. It returns
+// the dump bytes read.
+func pgRestore(ctx context.Context, targetURL string, dump io.Reader) (int64, error) {
+	in := &countingReader{r: dump}
 	cmd := exec.CommandContext(ctx, "pg_restore",
-		"--clean", "--if-exists", "--no-owner", "--no-privileges",
+		"--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges",
 		"--dbname", targetURL)
-	cmd.Stdin = bytes.NewReader(dump)
+	cmd.Stdin = in
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if in.err != nil {
+		// The archive failed (decryption, truncation, gzip): that is the
+		// cause, whatever pg_restore made of its cut-off input.
+		return in.n, fmt.Errorf("read backup: %w", in.err)
+	}
+	if runErr != nil {
 		// A non-zero exit is a real restore failure (e.g. a version-incompatible
 		// dump, or DROP errors without --if-exists). Surface pg_restore's stderr
 		// so the operator sees exactly what failed.
-		return fmt.Errorf("pg_restore: %w: %s", err, errBuf.String())
+		return in.n, fmt.Errorf("pg_restore: %w: %s", runErr, errBuf.String())
 	}
-	return nil
-}
-
-func gunzipBytes(b []byte) ([]byte, error) {
-	r, err := gzip.NewReader(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
+	if _, err := io.Copy(io.Discard, in); err != nil {
+		return in.n, fmt.Errorf("backup archive failed verification after pg_restore finished: %w", err)
 	}
-	defer r.Close()
-	return io.ReadAll(r)
+	return in.n, nil
 }
 
 // sameDatabase reports whether two postgres URLs point at the same database —

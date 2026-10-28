@@ -35,9 +35,11 @@ import (
 //  2. --rewrap
 //  3. roll the new ENCRYPTION_KEY out to management-api and every connector
 //
-// CAVEAT the tool cannot fix: `vrsky-cli backup` seals its archives with the
-// master key too (crypto.EncryptBytes). Backups taken before a rotation are
-// readable only with the OLD key, so keep it until those backups have aged out.
+// CAVEAT the tool cannot fix: `vrsky-cli backup` seals its archives with keys
+// derived from the master key (HKDF per archive since #430; older archives
+// used the master key directly via crypto.EncryptBytes). Backups taken before
+// a rotation are readable only with the OLD key, so keep it until those
+// backups have aged out.
 
 // keyPrevEnvVar names the old key. Deliberately distinct from crypto.KeyEnvVar
 // so a rewrap can never be run with one key supplied twice.

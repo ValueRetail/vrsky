@@ -3,6 +3,7 @@
 // storage, list backups, and restore one into a target database.
 //
 //	vrsky-cli backup
+//	vrsky-cli backup verify <backup-key>
 //	vrsky-cli list
 //	vrsky-cli restore --target-db-url postgres://… --confirm <backup-key>
 //
@@ -22,6 +23,7 @@ const usage = `vrsky-cli — VRSky operator CLI
 
 Usage:
   vrsky-cli backup                 Dump the management DB, encrypt, upload to object storage
+  vrsky-cli backup verify <key>    Download and decrypt a backup without restoring it; fails on any damage
   vrsky-cli list                   List available backups (key + size + age)
   vrsky-cli restore [flags] <key>  Restore a backup into a target database
 
@@ -71,6 +73,17 @@ func backupConfigFromEnv() (*backupConfig, error) {
 	if dbURL == "" {
 		return nil, fmt.Errorf("set BACKUP_DB_URL (or MGMT_API_DB_URL) to the management database URL")
 	}
+	cfg, err := storeConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg.dbURL = dbURL
+	return cfg, nil
+}
+
+// storeConfigFromEnv is backupConfigFromEnv without the database, for
+// commands that only read backups (verify).
+func storeConfigFromEnv() (*backupConfig, error) {
 	keyHex, err := crypto.Key()
 	if err != nil {
 		return nil, fmt.Errorf("ENCRYPTION_KEY: %w", err)
@@ -94,7 +107,6 @@ func backupConfigFromEnv() (*backupConfig, error) {
 		CredentialsJSON: os.Getenv("BACKUP_GCS_CREDENTIALS_JSON"),
 	}
 	return &backupConfig{
-		dbURL:  dbURL,
 		keyHex: keyHex,
 		prefix: envOr("BACKUP_PREFIX", "mgmt-backups/"),
 		store:  store,
