@@ -25,6 +25,8 @@ import (
 // is saved over the checkpoint, and nothing already published goes out again
 // once the folder can be read again. Before the fix a failed read looked like
 // an empty folder, and the next good read published the whole folder again.
+// A start that cannot read its folder still starts, with the baseline
+// deferred to the first poll whose read works.
 //
 // Reads fail through the fileConsumer.readDir seam (or, for a missing folder,
 // by really removing it). Polls are driven by hand on the fake clock of the
@@ -41,31 +43,17 @@ const (
 
 var errInjectedRead = errors.New("injected: input/output error")
 
-// dirReader wraps os.ReadDir. It fails every call while failing is set, and
-// the next failNext calls otherwise. onCall, when set, runs on every call
-// before the result is returned (outside the lock), so a test can hold a
-// read. Safe for use from the watcher goroutine and the start path at once.
+// dirReader wraps os.ReadDir and fails every call while failing is set. Safe
+// for use from the watcher goroutine and the start path at once.
 type dirReader struct {
-	mu       sync.Mutex
-	failing  bool
-	failNext int
-	calls    int
-	onCall   func(call int)
+	mu      sync.Mutex
+	failing bool
 }
 
 func (d *dirReader) read(dir string) ([]os.DirEntry, error) {
 	d.mu.Lock()
-	d.calls++
-	call := d.calls
-	fail := d.failing || d.failNext > 0
-	if d.failNext > 0 {
-		d.failNext--
-	}
-	hook := d.onCall
+	fail := d.failing
 	d.mu.Unlock()
-	if hook != nil {
-		hook(call)
-	}
 	if fail {
 		return nil, &os.PathError{Op: "readdirent", Path: dir, Err: errInjectedRead}
 	}
@@ -76,24 +64,6 @@ func (d *dirReader) setFailing(v bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.failing = v
-}
-
-func (d *dirReader) failNextCalls(n int) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.failNext = n
-}
-
-func (d *dirReader) setOnCall(fn func(call int)) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.onCall = fn
-}
-
-func (d *dirReader) callCount() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.calls
 }
 
 // --- checkpoint store that counts saves --------------------------------------
@@ -184,9 +154,8 @@ func (h sinkHandler) WithGroup(string) slog.Handler { return h }
 
 // --- rig ---------------------------------------------------------------------
 
-// dirRig is a restartRig whose consumers list the folder through reader (or
-// through os.ReadDir when realReads is set) and retry a failed start read
-// after 1ms instead of 1s.
+// dirRig is a restartRig whose consumers list the folder through reader, or
+// through os.ReadDir when realReads is set.
 type dirRig struct {
 	*restartRig
 	reader    *dirReader
@@ -230,7 +199,6 @@ func (d *dirRig) newPod() *dirPod {
 		now:               d.clock.now,
 		checkpoints:       d.store,
 		readDir:           d.reader.read,
-		startReadBackoff:  time.Millisecond,
 	}
 	if d.realReads {
 		c.readDir = nil
@@ -376,31 +344,6 @@ func (d *dirRig) requireUnchanged(step string, f frozen) {
 	}
 }
 
-// requireFailedStart fails unless a start on p left nothing behind: not
-// active, no "running" status, no watcher, checkpoint untouched, and a
-// warning or error logged for the connection.
-func (d *dirRig) requireFailedStart(step string, p *dirPod, saved []byte, saves int32, warnsBefore int) {
-	d.t.Helper()
-	if p.c.getActiveConnection(d.connID) != nil {
-		d.t.Fatalf("%s: connection active", step)
-	}
-	if _, running, _ := p.fdb.counts(); running != 0 {
-		d.t.Errorf("%s: status running written %d times, want 0", step, running)
-	}
-	if n := p.logs.count(watchStartedMsg); n != 0 {
-		d.t.Errorf("%s: %d watchers started, want 0", step, n)
-	}
-	if got := d.store.saves.Load(); got != saves {
-		d.t.Errorf("%s: %d checkpoint saves, want %d", step, got, saves)
-	}
-	if got := d.saved(); !bytes.Equal(got, saved) {
-		d.t.Errorf("%s: checkpoint is %s, want unchanged %s", step, got, saved)
-	}
-	if d.sink.warnings(d.connID) <= warnsBefore {
-		d.t.Errorf("%s: nothing logged at Warn or above with connection_id=%s\nlogs:\n%s", step, d.connID, d.sink.dump())
-	}
-}
-
 // --- AC 1/3: a read error between two good polls -----------------------------
 
 func TestDirRead_FailedPollChangesNothing(t *testing.T) {
@@ -485,23 +428,60 @@ func TestDirRead_FailedPollChangesNothing(t *testing.T) {
 	}
 }
 
-// --- AC 2/3: a read error at start -------------------------------------------
+// --- a folder unreadable at start: the baseline is deferred ------------------
 
-func TestDirRead_FailedStartKeepsSavedSet(t *testing.T) {
+// startDeferred starts a new pod while every folder read fails. The start
+// must go ahead: active, "running" written once, a watcher running, and one
+// warning with the connection id. It returns the pod and the number of
+// warnings for the connection right after the start.
+func (d *dirRig) startDeferred() (*dirPod, int) {
+	d.t.Helper()
+	d.reader.setFailing(true)
+	warns := d.sink.warnings(d.connID)
+	pod := d.start()
+	if _, running, _ := pod.fdb.counts(); running != 1 {
+		d.t.Errorf("deferred start: status running written %d times, want 1", running)
+	}
+	after := d.sink.warnings(d.connID)
+	if after != warns+1 {
+		d.t.Errorf("deferred start: %d records at Warn or above with connection_id=%s, want 1\nlogs:\n%s",
+			after-warns, d.connID, d.sink.dump())
+	}
+	return pod, after
+}
+
+// requireCheckpoint fails unless the stored checkpoint is saved and there
+// were saves saves in all.
+func (d *dirRig) requireCheckpoint(step string, saved []byte, saves int32) {
+	d.t.Helper()
+	if got := d.store.saves.Load(); got != saves {
+		d.t.Fatalf("%s: %d checkpoint saves, want %d", step, got, saves)
+	}
+	if got := d.saved(); !bytes.Equal(got, saved) {
+		d.t.Fatalf("%s: checkpoint is %s, want unchanged %s", step, got, saved)
+	}
+}
+
+func TestDirRead_DeferredBaseline(t *testing.T) {
 	p := []byte(`{"p":"published before the stop"}`)
 	x := []byte(`{"x":"arrived while stopped"}`)
-	fresh := []byte(`{"fresh":"arrived after the failed start"}`)
+	during := []byte(`{"during":"arrived while the folder could not be read"}`)
+	later := []byte(`{"later":"arrived after the baseline"}`)
 
 	cases := []struct {
 		name    string
 		prepare func(d *dirRig)
-		// want is how often each name is published in all, by the end.
-		want map[string][]byte
-		// never are names that must never be published.
+		// resume: a checkpoint for the folder exists before the start.
+		resume bool
+		// want are the files the first good read finds new, each published
+		// once; never are names that must never be published again.
+		want  map[string][]byte
 		never []string
+		// alreadyOnce are names published once before the deferred start.
+		alreadyOnce map[string][]byte
 	}{
 		{
-			name: "saved by a previous lifetime",
+			name: "resume, saved by a previous lifetime",
 			prepare: func(d *dirRig) {
 				d.write("baseline.json", []byte(`{"baseline":true}`))
 				d.start()
@@ -511,18 +491,29 @@ func TestDirRead_FailedStartKeepsSavedSet(t *testing.T) {
 				d.shutdown(viaStopCommand)
 				d.write("x.json", x)
 			},
-			want:  map[string][]byte{"p.json": p, "x.json": x, "fresh.json": fresh},
-			never: []string{"baseline.json"},
+			resume:      true,
+			want:        map[string][]byte{"x.json": x, "during.json": during},
+			never:       []string{"baseline.json"},
+			alreadyOnce: map[string][]byte{"p.json": p},
 		},
 		{
-			name: "seeded checkpoint",
+			name: "resume, seeded checkpoint",
 			prepare: func(d *dirRig) {
 				d.write("p.json", p)
 				d.write("x.json", x)
 				d.seed("p.json")
 			},
-			want:  map[string][]byte{"x.json": x, "fresh.json": fresh},
-			never: []string{"p.json"},
+			resume: true,
+			want:   map[string][]byte{"x.json": x, "during.json": during},
+			never:  []string{"p.json"},
+		},
+		{
+			name: "first start",
+			prepare: func(d *dirRig) {
+				d.write("old-1.json", []byte(`{"old":1}`))
+				d.write("old-2.json", []byte(`{"old":2}`))
+			},
+			never: []string{"old-1.json", "old-2.json", "during.json"},
 		},
 	}
 	for _, tc := range cases {
@@ -531,102 +522,136 @@ func TestDirRead_FailedStartKeepsSavedSet(t *testing.T) {
 			tc.prepare(d)
 			published := len(d.probe.published())
 			saved, saves := d.saved(), d.store.saves.Load()
-			if saved == nil {
+			if tc.resume && saved == nil {
 				t.Fatal("setup: no checkpoint")
 			}
 
-			d.reader.setFailing(true)
-			pod := d.newPod()
-			calls := d.reader.callCount()
-			warns := d.sink.warnings(d.connID)
-			if d.startOn(pod) {
-				t.Fatal("start with every read failing made the connection active")
-			}
-			d.requireFailedStart("failed start", pod, saved, saves, warns)
-			if n := d.reader.callCount() - calls; n < 2 || n > 4 {
-				t.Errorf("failed start read the folder %d times, want a few retries (2 to 4)", n)
-			}
-			d.requireTotal("failed start", published)
+			_, warns := d.startDeferred()
+			d.requireCheckpoint("deferred start", saved, saves)
 
-			// The folder is readable again; a later start on the same pod (a
-			// start command) must not be refused and must resume normally.
-			d.write("fresh.json", fresh)
+			// Deferred: many polls with the folder unreadable publish and save
+			// nothing, and only the start's warning is at Warn.
+			d.write("during.json", during)
+			d.polls(8)
+			d.requireTotal("while deferred", published)
+			d.requireCheckpoint("while deferred", saved, saves)
+			if got := d.sink.warnings(d.connID); got != warns {
+				t.Errorf("while deferred: %d more records at Warn or above, want 0 (repeats are Debug)\nlogs:\n%s",
+					got-warns, d.sink.dump())
+			}
+
+			// The first good read takes the baseline and publishes nothing.
 			d.reader.setFailing(false)
-			if !d.startOn(pod) {
-				t.Fatalf("start after the failed start did not make the connection active\nlogs:\n%s", d.sink.dump())
+			d.poll()
+			d.requireTotal("baseline poll", published)
+			if tc.resume {
+				// Nothing saved was pruned, so the saved set stays as it was.
+				d.requireCheckpoint("baseline poll", saved, saves)
+			} else {
+				names := d.savedNames()
+				for _, n := range []string{"old-1.json", "old-2.json", "during.json"} {
+					if !names[n] {
+						t.Errorf("baseline poll: %s missing from the saved first-start set %v", n, slices.Sorted(maps.Keys(names)))
+					}
+				}
 			}
-			if _, running, _ := pod.fdb.counts(); running != 1 {
-				t.Errorf("status running written %d times, want 1", running)
-			}
-			d.polls(4)
+
+			// From the next poll on it runs normally: new files are pending on
+			// one poll and published on the next.
+			d.poll()
+			d.requireTotal("first normal poll", published)
+			d.poll()
 			for name, content := range tc.want {
-				d.requireOnce("after the good start", name, content)
+				d.requireOnce("second normal poll", name, content)
+			}
+			d.requireTotal("second normal poll", published+len(tc.want))
+
+			d.write("later.json", later)
+			d.polls(2)
+			d.requireOnce("after the baseline", "later.json", later)
+			d.polls(3)
+			for name, content := range tc.want {
+				d.requireOnce("end", name, content)
+			}
+			for name, content := range tc.alreadyOnce {
+				d.requireOnce("end", name, content)
 			}
 			for _, name := range tc.never {
-				d.requireCount("after the good start", name, 0)
+				d.requireCount("end", name, 0)
 			}
-			d.requireTotal("after the good start", len(tc.want))
+			d.requireTotal("end", published+len(tc.want)+1)
 		})
 	}
 }
 
-// --- AC 2/3: the start's read fails, then a retry works ----------------------
+// The saved set is never written while the baseline is deferred, whatever
+// happens in the folder meanwhile, including a saved name being deleted and
+// files arriving; and a pod shutdown in that state saves nothing either.
+func TestDirRead_DeferredStartNeverOverwritesSavedSet(t *testing.T) {
+	d := newDirRig(t)
+	p := []byte(`{"p":1}`)
+	q := []byte(`{"q":1}`)
+	d.start()
+	d.write("p.json", p)
+	d.write("q.json", q)
+	d.polls(2)
+	d.requireTotal("first lifetime", 2)
+	d.shutdown(viaStopCommand)
+	saved, saves := d.saved(), d.store.saves.Load()
+	if saved == nil {
+		t.Fatal("setup: no checkpoint")
+	}
 
-func TestDirRead_StartRetryRecovers(t *testing.T) {
-	for _, failFirst := range []int{1, 3} {
-		t.Run(fmt.Sprintf("resume after %d failed reads", failFirst), func(t *testing.T) {
+	d.startDeferred()
+	d.requireCheckpoint("deferred start", saved, saves)
+	for i, change := range []func(){
+		func() { d.write("new-1.json", []byte(`{"n":1}`)) },
+		func() { d.remove("q.json") },
+		func() { d.write("new-2.json", []byte(`{"n":2}`)) },
+		func() {},
+	} {
+		change()
+		d.poll()
+		d.requireCheckpoint(fmt.Sprintf("failed poll %d", i+1), saved, saves)
+	}
+	d.requireTotal("while deferred", 2)
+	d.shutdown(viaPodShutdown)
+	d.requireCheckpoint("after a pod shutdown while deferred", saved, saves)
+	d.requireTotal("after a pod shutdown while deferred", 2)
+}
+
+// A stop while the baseline is deferred is an ordinary stop: the connection
+// is no longer active, its watcher exits, and nothing is published or saved.
+// A later start with the folder readable resumes from the saved set.
+func TestDirRead_StopWhileDeferred(t *testing.T) {
+	for _, mode := range []shutdownMode{viaStopCommand, viaPodShutdown} {
+		t.Run(string(mode), func(t *testing.T) {
 			d := newDirRig(t)
 			p := []byte(`{"p":1}`)
-			x := []byte(`{"x":"arrived while stopped"}`)
-			d.write("baseline.json", []byte(`{"baseline":true}`))
 			d.start()
 			d.write("p.json", p)
 			d.polls(2)
 			d.requireOnce("first lifetime", "p.json", p)
 			d.shutdown(viaStopCommand)
-			d.write("x.json", x)
-			saved := d.saved()
+			saved, saves := d.saved(), d.store.saves.Load()
 
-			d.reader.failNextCalls(failFirst)
-			calls := d.reader.callCount()
-			pod := d.start()
-			if n := d.reader.callCount() - calls; n < failFirst+1 {
-				t.Errorf("start read the folder %d times, want at least %d", n, failFirst+1)
-			}
-			if _, running, _ := pod.fdb.counts(); running != 1 {
-				t.Errorf("status running written %d times, want 1", running)
-			}
-			if got := d.saved(); !bytes.Equal(got, saved) {
-				t.Errorf("checkpoint after the start is %s, want unchanged %s", got, saved)
-			}
-
-			d.polls(4)
-			d.requireOnce("after the start", "x.json", x)
-			d.requireOnce("after the start", "p.json", p)
-			d.requireCount("after the start", "baseline.json", 0)
-			d.requireTotal("after the start", 2)
-		})
-
-		t.Run(fmt.Sprintf("first start after %d failed reads", failFirst), func(t *testing.T) {
-			d := newDirRig(t)
-			d.write("old-1.json", []byte(`{"old":1}`))
-			d.write("old-2.json", []byte(`{"old":2}`))
-
-			d.reader.failNextCalls(failFirst)
-			d.start()
-			d.polls(4)
-			d.requireTotal("first start, existing files only", 0)
-			names := d.savedNames()
-			if !names["old-1.json"] || !names["old-2.json"] {
-				t.Errorf("first start saved %v, want the files already in the folder", slices.Sorted(maps.Keys(names)))
-			}
-
-			n := []byte(`{"new":1}`)
-			d.write("new.json", n)
-			d.polls(2)
-			d.requireOnce("after the first start", "new.json", n)
+			pod, _ := d.startDeferred()
+			q := []byte(`{"q":"arrived while deferred"}`)
+			d.write("q.json", q)
 			d.polls(3)
-			d.requireTotal("end", 1)
+			d.shutdown(mode) // waits for the watcher goroutine to exit
+			if pod.c.getActiveConnection(d.connID) != nil {
+				t.Fatal("connection still active after the stop")
+			}
+			d.requireTotal("after the stop", 1)
+			d.requireCheckpoint("after the stop", saved, saves)
+
+			d.reader.setFailing(false)
+			d.start()
+			d.polls(3)
+			d.requireOnce("after the restart", "p.json", p)
+			d.requireOnce("after the restart", "q.json", q)
+			d.requireTotal("after the restart", 2)
 		})
 	}
 }
@@ -683,87 +708,6 @@ func TestDirRead_RecoveredPollResumes(t *testing.T) {
 	assertWatchEnvelope(t, envs[1], "b.json", b2)
 	d.requireOnce("end", "a.json", a)
 	d.requireTotal("end", 4)
-}
-
-// --- a stop while the start is retrying --------------------------------------
-
-func TestDirRead_StopDuringStartRetries(t *testing.T) {
-	cases := []struct {
-		name string
-		arm  func(r *dirReader)
-	}{
-		{"later reads would work", func(r *dirReader) { r.failNextCalls(1) }},
-		{"reads keep failing", func(r *dirReader) { r.setFailing(true) }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d := newDirRig(t)
-			p := []byte(`{"p":1}`)
-			d.start()
-			d.write("p.json", p)
-			d.polls(2)
-			d.requireOnce("first lifetime", "p.json", p)
-			d.shutdown(viaStopCommand)
-			saved, saves := d.saved(), d.store.saves.Load()
-
-			pod := d.newPod()
-			base := d.reader.callCount()
-			entered, release := make(chan struct{}), make(chan struct{})
-			d.reader.setOnCall(func(call int) {
-				if call == base+1 {
-					close(entered)
-					select {
-					case <-release:
-					case <-time.After(restartWait):
-					}
-				}
-			})
-			tc.arm(d.reader)
-
-			startDone := make(chan struct{})
-			go func() {
-				defer close(startDone)
-				pod.c.startConnection(context.Background(), d.connID, d.tenant)
-			}()
-			waitDone(t, entered, "start reaching its first folder read")
-			pod.c.handleStopCommand(d.cmd())
-			close(release)
-			waitDone(t, startDone, "start after the stop")
-
-			if pod.c.getActiveConnection(d.connID) != nil {
-				t.Fatal("connection active after a stop during the start's retries")
-			}
-			if _, running, _ := pod.fdb.counts(); running != 0 {
-				t.Errorf("abandoned start wrote status running %d times, want 0", running)
-			}
-			if n := pod.logs.count(watchStartedMsg); n != 0 {
-				t.Errorf("abandoned start started %d watchers, want 0", n)
-			}
-			if n := d.reader.callCount() - base; n != 1 {
-				t.Errorf("start read the folder %d times, want 1 (no attempt after the stop)", n)
-			}
-			if got := d.store.saves.Load(); got != saves {
-				t.Errorf("%d checkpoint saves, want %d", got, saves)
-			}
-			if got := d.saved(); !bytes.Equal(got, saved) {
-				t.Errorf("checkpoint is %s, want unchanged %s", got, saved)
-			}
-
-			// A start after the stop works and resumes normally.
-			d.reader.setOnCall(nil)
-			d.reader.setFailing(false)
-			d.reader.failNextCalls(0)
-			q := []byte(`{"q":1}`)
-			d.write("q.json", q)
-			if !d.startOn(pod) {
-				t.Fatalf("start after the stop did not make the connection active\nlogs:\n%s", d.sink.dump())
-			}
-			d.polls(3)
-			d.requireOnce("after the restart", "p.json", p)
-			d.requireOnce("after the restart", "q.json", q)
-			d.requireTotal("after the restart", 2)
-		})
-	}
 }
 
 // --- a missing folder during a poll ------------------------------------------

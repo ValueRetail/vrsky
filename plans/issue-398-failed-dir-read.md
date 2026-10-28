@@ -15,7 +15,7 @@ works again.
    connection id, and `knownFiles`, `pending` and the saved checkpoint are
    left untouched.
 2. A failed read at start records no baseline and does not overwrite the
-   saved set. The start retries a few times, then fails cleanly (below).
+   saved set. The start goes ahead with the baseline deferred (below).
 3. Deterministic tests: a read error between two good polls publishes
    nothing new and saves nothing; a read error at start does not overwrite
    the saved set; a read that recovers resumes normally. Mutation: put back
@@ -75,37 +75,47 @@ gone, as today.
 - `loadKnown(ctx, ac) error` lists the folder first. On error it returns
   the error and changes nothing: no `knownFiles`, no `dirty`, no
   checkpoint read or write.
-- `startConnection`: calls `loadKnown` up to `startReadAttempts` (4)
-  times, waiting `startReadBackoff` (1 s, a field so tests can shorten
-  it) doubled after each failure: 1 + 2 + 4 = 7 s at most. Between
-  attempts it gives up if the start's context ends or a stop took the
-  reservation (`res.stopped`, read under `s.mu`). After the last failure
-  it logs Error with the connection id and returns. The deferred
-  `releaseStart` frees the claim, nothing is active, no status is
-  written, no watcher runs, and the checkpoint is untouched. A later
-  start command, or the next pod start, tries again.
+- `startConnection`: if `loadKnown` fails, the start goes ahead with
+  `ac.baselineDeferred` set. It takes the #375/#383 reservation path as
+  usual, writes `running`, and starts the watcher. It logs once at Warn
+  with the connection id, and sets `readFailures` to 1 so the polls that
+  follow log at Debug. Nothing is saved: `dirty` is false.
+- `pollOnce` while the baseline is deferred (`takeDeferredBaseline`): it
+  calls `loadKnown` again. A failed read changes nothing. The first read
+  that works sets the baseline exactly as a start would: the saved set if
+  there is one for this folder, otherwise first-start rules. It then saves
+  if that changed anything (always on a first start), logs Info, and
+  returns without publishing. From the next poll on it runs normally, so
+  a new file is pending on one poll and published on the next, the same
+  as after a normal start.
+
+## Review change: defer the baseline instead of failing the start
+
+The first version retried the read 4 times (1, 2 and 4 s apart), then
+refused the start. Review pointed out that this left the connection
+`running` in the database and the UI with nothing watching the folder.
+After a pod restart during a short share outage, files would stop flowing
+silently until someone noticed. The deferred baseline keeps the watcher
+running and needs no retry loop, so a boot restore with the volume down
+no longer costs about 7 s per connection.
 
 ## Reservation rules (#383) kept
 
-The retries happen while the start holds its reservation, the same as a
-slow database lookup does today:
-
-- A second start for the connection during the retries is refused as
-  "already starting".
-- A stop during the retries marks the reservation stopped; the start sees
-  it before the next attempt (or at `activateStart`) and gives up without
-  writing anything.
-- A failed start frees the claim (the existing `defer releaseStart`), so
-  the next start is not refused.
+The start path is the same as before apart from the deferral flag:
+reserve, look up, `activateStart` (which still gives up if a stop took the
+claim), save if dirty (never, when deferred), write status, start the
+watcher. A stop while deferred is an ordinary stop of an active
+connection: it cancels the watcher, and nothing was saved.
 
 ## Decisions
 
-- Retry then fail at start, not "start anyway and baseline later". A late
-  baseline would bring back #362 (a file dropped between "active" and the
-  first read counted as already there). A start that cannot read its
-  folder in 7 s has a mount problem an operator needs to see; the
-  connection stays as the management API left it, like the other failed
-  start paths (bad path, database error).
+- Start with the baseline deferred, not "retry then fail" (review, above).
+- Trade-off on a first start (no saved set): a file that lands while the
+  folder is unreadable is in the folder at the first good read, so it
+  counts as already there and is not published. That is #362 again, but
+  only for the window in which the folder can't be read at a pipeline's
+  very first start. With a saved set nothing is lost: a file that is not
+  in the set is published.
 - A missing folder is a failed read, not an empty folder. The poll does
   not recreate it; the start does, as before.
 - Log once per run of failures, then Debug, then Info on recovery.
@@ -115,27 +125,22 @@ slow database lookup does today:
 ## Files
 
 - `src/cmd/file-consumer/service.go`: `listFiles`, `pollOnce`,
-  `startConnection`, the `readDir`/`startReadBackoff` fields,
-  `ActiveConnection.readFailures`
+  `takeDeferredBaseline`, `noteReadFailure`, `startConnection`, the
+  `readDir` field, `ActiveConnection.readFailures` and `baselineDeferred`
 - `src/cmd/file-consumer/known.go`: `loadKnown` returns the read error
 - `src/cmd/file-consumer/watch_test.go`, `known_test.go`: the fixtures that
   call `listFiles`/`loadKnown` follow the new signatures
 - `src/cmd/file-consumer/dirread_test.go`: new tests (test author)
-- `docs/connectors/file.md`: one line on what a failed read does
+- `docs/connectors/file.md`: one paragraph on what a failed read does
 - `plans/backlog.md`: item 42 struck
 
 ## Risks
 
-- A start that fails after its retries leaves the pipeline unwatched until
-  someone starts it again or the pod restarts. Today it would start and
-  republish the folder. Logged at Error with the connection id.
-- The start can now take up to 7 s longer while holding its reservation.
-  Only when the folder cannot be read. `sdk.RestoreRunning` starts
-  connections one after another, so with the shared volume down at boot
-  20 file connections take about 2.5 minutes to restore.
-- A stop during the retries is noticed when the current wait ends (up to
-  4 s). The stop has already freed the claim, so a new start is not held
-  up by it.
+- First start with an unreadable folder: see the trade-off under
+  Decisions.
+- A connection whose folder stays unreadable shows as running and
+  publishes nothing. Its log has one Warn with the connection id, then
+  Debug lines until the read works.
 - A folder deleted and recreated while running keeps the old names as
   done until a good read shows they are gone. A file put back under an
   old name before that read is not republished; same as backlog item 29.
@@ -146,21 +151,36 @@ From `src/`:
 - `go test -race -count=20 ./cmd/file-consumer/...`
 - `go test -race ./...`, `go vet ./...`, `golangci-lint run ./...`,
   `make lint-tenant`
-- Mutation: make `listFiles` return an empty set and no error when the
-  read fails. The poll and start tests must fail. Restore.
+- Mutations, each run through `go test -overlay` so the source is never
+  edited:
+  - `listFiles` returns an empty set and no error when the read fails.
+    The poll and start tests must fail.
+  - Publish before the baseline is taken (a failed start read no longer
+    defers, so the watcher starts with an empty done set). The deferred
+    start tests must fail.
 
 ## Verification results
 
+- `go test -race -count=20 ./cmd/file-consumer/...`, `go test -race ./...`,
+  `go vet ./...`, `golangci-lint run ./...` (0 issues) and
+  `make lint-tenant`: all pass.
 - Tests in `dirread_test.go`, written by a separate test author from the
-  criteria above and the existing helpers: a failed poll (once or three
-  times, writer finishing or not) changes nothing; a failed start keeps
-  the saved set byte for byte and a later start resumes; a start whose
-  read recovers on a retry (resume and first start); a poll that recovers
-  prunes deleted names and publishes new files once; a stop during the
-  retries abandons the start; a really missing folder during a poll.
-- Mutation (empty set, no error, run with `go test -overlay` so the source
-  was never edited): all five poll and start tests fail. The stop test
-  does not depend on it; with the stop check between retries removed it
-  fails (test author's run).
-- Review: approved. Two follow-ups taken: an abandoned start logs at Info
-  instead of Error, and the restore delay is in Risks.
+  criteria and the existing helpers:
+  - a failed poll (once or three times, writer finishing or not) changes
+    nothing
+  - deferred start: resume from a previous run, resume from a seeded
+    checkpoint, and a first start
+  - a deferred start never overwrites the saved set
+  - a stop while deferred (stop command and pod shutdown)
+  - a poll that recovers prunes deleted names and publishes new files once
+  - a folder really deleted during a poll
+- Mutations, through `go test -overlay`:
+  - empty set, no error: every `TestDirRead_*` test fails
+  - a failed start read no longer defers (publish before the baseline):
+    `TestDirRead_DeferredBaseline` fails ("3 envelopes published in total,
+    want 1")
+  - the test author's runs: no `return` after the deferred baseline is
+    caught by both resume cases, and a deferred start marked dirty is
+    caught by the deferred, never-overwrites and stop tests
+- First review approved the retry-then-fail version. The coordinator's
+  review asked for the deferred baseline (see "Review change").

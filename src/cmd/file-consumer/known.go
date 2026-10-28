@@ -85,11 +85,12 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (nam
 // done are; anything else in the folder arrived or was still settling while
 // the connection was not watching, and goes through the normal stability
 // check. A failed folder read returns the error and changes nothing: no
-// baseline, no checkpoint read or write (#398). A failed checkpoint read
-// falls back to the first-start rule for this run but
-// does not save it: that would overwrite the saved history with "everything
-// present is done", and another watcher re-reading it could then skip a file
-// it should publish. The first real change saves.
+// baseline, no checkpoint read or write (#398). The start then watches with
+// the baseline deferred, and the first poll whose read works calls this
+// again. A failed checkpoint read falls back to the first-start rule for this
+// run but does not save it: that would overwrite the saved history with
+// "everything present is done", and another watcher re-reading it could then
+// skip a file it should publish. The first real change saves.
 func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection) error {
 	current, err := s.listFiles(ac.WatchDir)
 	if err != nil {
