@@ -102,7 +102,7 @@ groups:
 
       # JetStream consumer backlog (prometheus-nats-exporter -jsz).
       - alert: JetStreamLagHigh
-        expr: jetstream_consumer_num_pending > 1000
+        expr: jetstream_consumer_num_pending > 1000000
         for: 10m
         labels:
           severity: warning
