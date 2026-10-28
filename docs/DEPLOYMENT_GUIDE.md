@@ -542,9 +542,9 @@ provider's native at-rest encryption with a customer-managed key. Point
 ### Compliance verification checklist
 
 Go through this list before claiming "encryption at rest" with a
-customer-managed key to an auditor. Production on AKS doesn't meet the first four items today: it has no
-`vrsky-encrypted` class and no KES, only Azure's platform encryption (see the
-table).
+customer-managed key to an auditor. Production on AKS doesn't meet the first
+four items today: it has no `vrsky-encrypted` class and no KES, only Azure's
+platform encryption (see the table).
 
 - [ ] `kubectl get sc vrsky-encrypted -o yaml` shows your KMS key.
 - [ ] `kubectl get pvc -A -o wide | grep -v vrsky-encrypted` returns

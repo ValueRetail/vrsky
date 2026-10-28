@@ -83,8 +83,8 @@ What the repo shows:
 | Outbound client certs need no listener; the producer builds its own client | `docs/SECURITY.md:425-427` |
 
 New wording: outbound mTLS works everywhere. Inbound client-cert checks need
-the worker's own TLS port, which self-hosted deployments can expose; the hosted
-service doesn't expose it yet. A connection set to require a client cert there
+the worker's own TLS port, which the Docker Compose stack opens and the
+Kubernetes manifests don't yet; the hosted service doesn't expose it. A connection set to require a client cert there
 refuses every request rather than accepting one without a cert. Use HMAC
 signing for inbound webhooks on the hosted service. The same note goes on the
 connector page.
