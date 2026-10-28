@@ -42,6 +42,10 @@ as no `.env`. To override one, set it in `.env` (or in the shell, e.g.
   losing it makes them unrecoverable. In production it is required, with the
   same value on the management-API and every worker that resolves secrets.
   See the [encryption-at-rest checklist](encryption-at-rest.md).
+- **`VRSKY_FILES_HOST_DIR`**: the host folder file pipelines read from,
+  mounted at `/data/input` in the file connectors. Empty means the
+  repository's `data/input`. Any path style works, Windows ones included;
+  see [File connector](../connectors/file.md#notes).
 - Database passwords and any object-storage credentials. In the local compose
   stack these are fixed dev values written into `docker-compose.yml`, not
   read from `.env`; the stack binds its ports to `127.0.0.1` for that reason.

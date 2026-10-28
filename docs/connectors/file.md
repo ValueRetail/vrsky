@@ -73,6 +73,14 @@ their own names (see [Business Central → Pictures](business-central.md#picture
 
 ## Notes
 
+- **Which folder on your machine (local stack).** In `docker compose`, the
+  source reads `/data/input`, which is the repository's `data/input` unless
+  `.env` sets `VRSKY_FILES_HOST_DIR` to another folder (any path style,
+  `C:\Users\you\vrsky-files` included). A leading `~` in the source's path
+  means that same folder. The destination writes to `/data/output`, the
+  repository's `data/output`, and a leading `~` in its path means
+  `/data/output`, not the source's folder. Either way your workspace's files
+  sit in a `<workspace id>` subfolder. See [Windows](../operator/windows.md#windows-specific-things-that-bite).
 - **Uploads.** The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.
 - **CSV columns.** For `format: "csv"`, the header row defines the column names (#81).
 - **Default path.** An empty `file.path` on the producer writes to the top of your workspace's own directory.
