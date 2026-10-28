@@ -421,6 +421,16 @@ Last updated 2026-10-28.
     second could wait for the consumer's ack floor to pass both messages
     instead. Not flaky, just slow. Found in #444.
 
+66. **The remote agent's stop tests don't pin cancel-after-halt, and a
+    reconcile can start a member on a cancelled context.** The test seam
+    in `src/cmd/remote-agent/service.go` (`afterCancel`) fires after the
+    halts, so moving `sess.cancel()` back to the top of `endSession`
+    passes both stop tests. Separately, if `endSession` runs during a group
+    reconcile, a member subscribed at `groups.go:~235` starts with an
+    already-cancelled context and NAKs until the lock at `:~252` halts it
+    (older than #447, tiny window). Add a seam right after the cancel and a
+    reconcile test. Found in review of #447.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource
