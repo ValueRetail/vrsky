@@ -15,7 +15,8 @@ tests:
   #    six hours, then goes silent. A webhook source with the same shape must
   #    never fire: its silence is the sender's. This group runs at the real
   #    30 s scrape interval because the rule counts samples.
-  - interval: 30s
+  - name: pipeline-down-polled
+    interval: 30s
     input_series:
       - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c1",connector="vrsky-business-central-consumer"}'
         values: '0x59 1x59 2x59 3x59 4x59 5x59 6x59 7x59 8x59 9x59 10x59 11x59 12x240'
@@ -50,7 +51,8 @@ tests:
   #     the sample-count clause this fired five minutes after the start
   #     (2026-10-19). An hour after the start the history is complete again
   #     and a source that is still silent pages as it would any other time.
-  - interval: 30s
+  - name: pipeline-down-after-park
+    interval: 30s
     input_series:
       - series: 'vrsky_messages_published_total{tenant_id="t1",connection_id="c1",connector="vrsky-business-central-consumer"}'
         values: '0x59 1x59 2x59 3x59 4x59 5x59 _x360 0x180'
@@ -74,7 +76,8 @@ tests:
               description: "A polled source for tenant t1 published during the previous six hours and nothing in the last hour. Check the pipeline's events and the source's credentials."
 
   # 2. DLQGrowing — dead-lettered messages start arriving at minute 10.
-  - interval: 1m
+  - name: dlq-growing
+    interval: 1m
     input_series:
       - series: 'vrsky_dlq_messages_total{pipeline_id="p1",worker="db-producer"}'
         values: '0x10 0+1x20' # flat, then +1/min from minute 10
@@ -94,7 +97,8 @@ tests:
         exp_alerts: []
 
   # 3. JetStreamLagHigh — consumer backlog sits above the threshold.
-  - interval: 1m
+  - name: jetstream-lag-high
+    interval: 1m
     input_series:
       - series: 'jetstream_consumer_num_pending{stream_name="VRSKY_DATA",consumer_name="db-producer"}'
         values: '2000x30'
@@ -112,7 +116,8 @@ tests:
               description: "Pending (undelivered) messages for the consumer exceeded 1000 for 10 minutes — the worker is falling behind or down."
 
   # 4. CertExpirySoon — cert expires ~7 days from t=0 (< 14-day threshold).
-  - interval: 1m
+  - name: cert-expiry-soon
+    interval: 1m
     input_series:
       - series: 'vrsky_tls_cert_expiry_timestamp_seconds{path="/certs/tls.crt"}'
         values: '604800x180' # NotAfter = 7 days (in seconds), constant
@@ -129,7 +134,8 @@ tests:
               description: "Renew the certificate at /certs/tls.crt before it expires."
 
   # 5. MgmtAPIErrorRate — half of all requests are 500s (50% > 5%).
-  - interval: 1m
+  - name: mgmt-api-error-rate
+    interval: 1m
     input_series:
       - series: 'vrsky_mgmtapi_http_requests_total{method="GET",path="/api/v1/connections",status="500"}'
         values: '0+10x30'
@@ -147,7 +153,8 @@ tests:
               description: "More than 5% of management API requests returned a server error over the last 5 minutes."
 
   # 6. DiskUsageHigh — 90% full filesystem.
-  - interval: 1m
+  - name: disk-usage-high
+    interval: 1m
     input_series:
       - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",device="/dev/sda1"}'
         values: '10x30'
@@ -168,7 +175,8 @@ tests:
               description: "Filesystem / (/dev/sda1) is over 80% full."
 
   # 7. ConnectionInError — a pipeline sits in error; a recovered one resolves.
-  - interval: 1m
+  - name: connection-in-error
+    interval: 1m
     input_series:
       - series: 'vrsky_connections{tenant_id="t1",status="error"}'
         values: '1x15 0x15'
@@ -197,7 +205,8 @@ tests:
         exp_alerts: []
 
   # 8. RemoteAgentOffline — a till stops polling; another stays online.
-  - interval: 1m
+  - name: remote-agent-offline
+    interval: 1m
     input_series:
       - series: 'vrsky_remote_agent_online{tenant_id="t1",agent_id="a1",agent="POS-PC"}'
         values: '0x90'
@@ -223,7 +232,8 @@ tests:
 
   # 9. ConnectorUnavailable — a connector Deployment has no replica. One
   #    scaled to 0 on purpose (the parked alert responder) must stay silent.
-  - interval: 1m
+  - name: connector-unavailable
+    interval: 1m
     input_series:
       - series: 'kube_deployment_status_replicas_available{namespace="vrsky-platform",deployment="vrsky-business-central-consumer"}'
         values: '0x30'
@@ -258,7 +268,8 @@ tests:
   #     at 70% does not; the 90% node is still pending at 30 minutes. n2 is
   #     the 2026-10-22 case: 50% held by a running pod plus 50% in finished
   #     pods (Succeeded, Failed) that hold nothing — it must not fire.
-  - interval: 1m
+  - name: node-cpu-requests-high
+    interval: 1m
     input_series:
       - series: 'kube_pod_container_resource_requests{resource="cpu",unit="core",node="n0",namespace="a",pod="p1",container="c"}'
         values: '2x90'
@@ -316,7 +327,8 @@ tests:
   #     KSM emits kube_job_status_completion_time only for a Job that
   #     succeeded and kube_job_failed only once the Job has a Failed
   #     condition.
-  - interval: 1m
+  - name: backup-a-two-failures
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x340'
@@ -384,7 +396,8 @@ tests:
   # 11b. MgmtBackupMissing (a) while suspended — the same two failures, but
   #      the CronJob is suspended (the state it ships in until the human
   #      creates vrsky-backup-config). Thursday morning UTC.
-  - interval: 1m
+  - name: backup-a-suspended
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '1x340'
@@ -420,7 +433,8 @@ tests:
 
   # 11c. MgmtBackupMissing (a) when no backup ever succeeded — the count
   #      starts at the CronJob's creation instead. Thursday morning UTC.
-  - interval: 1m
+  - name: backup-a-never-succeeded
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x340'
@@ -465,7 +479,8 @@ tests:
   #      different CronJob has two failed Jobs and a hand-made Job with no
   #      owner failed too. Neither may count towards the backup, and the
   #      other CronJob is not this alert's business. Thursday morning UTC.
-  - interval: 1m
+  - name: backup-a-own-jobs-only
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x340'
@@ -523,7 +538,8 @@ tests:
   #      last run was Thursday 11:00 UTC (noon in Oslo, winter time) and
   #      succeeded; nothing is scheduled after it. 98 hours later is
   #      Monday 13:00 UTC.
-  - interval: 1m
+  - name: backup-b-stopped-scheduling
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x6700'
@@ -561,7 +577,8 @@ tests:
   #      always more than 98 hours old; what decides is the day and the hour.
   #      Scraped every 5 minutes: the 7-day backstop over two weeks of
   #      1-minute samples is more than promtool's per-query sample limit.
-  - interval: 5m
+  - name: backup-b-weekday-afternoons
+    interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x2760'
@@ -623,7 +640,8 @@ tests:
   #      suspended until the second Saturday 00:00 UTC, then activated. Nine
   #      days old and never scheduled, but active for two hours: the backstop
   #      must stay quiet as (b) does in 11h.
-  - interval: 5m
+  - name: backup-c-after-activation
+    interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '1x2591 0x30'
@@ -637,7 +655,8 @@ tests:
   # 11n. MgmtBackupMissing (b) is off at weekends. Last run Tuesday 11:00 UTC
   #      (day 5); the next Saturday 14:00 UTC is 99 hours later, past (b)'s
   #      98 but well under the backstop's 7 days. Quiet.
-  - interval: 5m
+  - name: backup-b-off-at-weekends
+    interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x2770'
@@ -653,7 +672,8 @@ tests:
   # 11g. MgmtBackupMissing (b) while suspended: as 11f at Monday 13:00 UTC,
   #      but the CronJob is suspended. A suspended CronJob is never
   #      scheduled, so its stale schedule time must not page.
-  - interval: 1m
+  - name: backup-b-suspended
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '1x6600'
@@ -675,7 +695,8 @@ tests:
   #      nothing happening, and page then.
   #      Scraped every 5 minutes: the 7-day backstop over 1-minute samples
   #      is more than promtool's per-query sample limit.
-  - interval: 5m
+  - name: backup-b-after-activation
+    interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '1x1301 0x1200'
@@ -707,7 +728,8 @@ tests:
   #      `kubectl create job --from=cronjob/vrsky-mgmt-backup` on Monday and
   #      it succeeded at 09:00 UTC. A manual Job sets no lastScheduleTime;
   #      its success still counts as a fresh backup.
-  - interval: 1m
+  - name: backup-b-manual-backup
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x6700'
@@ -733,7 +755,8 @@ tests:
   #      startingDeadlineSeconds is 4h, so the CronJob runs Monday's noon
   #      dump at start-up and lastScheduleTime moves to Monday 11:00 UTC.
   #      Quiet.
-  - interval: 1m
+  - name: backup-b-late-start
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '_x6509 0x200'
@@ -755,7 +778,8 @@ tests:
   #      Thursday, Friday and Monday, nothing ever scheduled. Before the
   #      review fix an `offset 3h` gate kept this silent for good; now it
   #      pages on the first weekday afternoon past 98 hours.
-  - interval: 1m
+  - name: backup-b-late-cluster-never-runs
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '_x750 0x150 _x1289 0x150 _x4169 0x150'
@@ -786,7 +810,8 @@ tests:
   #      mute the backstop for a week either.
   #      Scraped every 5 minutes: a week of 1-minute samples is more than
   #      promtool's per-query sample limit.
-  - interval: 5m
+  - name: backup-c-backstop
+    interval: 5m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x2579 1 0x40'
@@ -809,7 +834,8 @@ tests:
   #      but a single suspend=1 sample at Monday 12:00 UTC (an old deploy
   #      that applied the file before patching). It must not mute the alert
   #      for 98 hours: 11e's page still comes at Monday 14:00 UTC.
-  - interval: 1m
+  - name: backup-b-suspend-flicker
+    interval: 1m
     input_series:
       - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
         values: '0x6479 1 0x220'

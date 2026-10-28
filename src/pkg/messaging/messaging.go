@@ -39,9 +39,12 @@ const (
 	// DLQRetention is how long DLQ messages remain available for inspection.
 	DLQRetention = 7 * 24 * time.Hour
 
-	// MainRetention is the upper bound on age for messages in the main
-	// stream. WorkQueue retention removes acked messages immediately; this
-	// is the backstop in case a consumer is offline for a long time.
+	// MainRetention is how long a message stays in the main stream.
+	// VRSKY_DATA uses Limits retention, so an ack deletes nothing: every
+	// message, acked or not, stays until it is this old or the
+	// MainMaxBytes / MainMaxMsgs caps shed it as the oldest. It is also the
+	// longest a consumer can be away (an offline remote agent, say) and
+	// still get what was published meanwhile.
 	MainRetention = 72 * time.Hour
 
 	// SpillRetention is how long an offloaded payload (claim-check, > 256 KiB)
@@ -91,16 +94,13 @@ func DLQSubject(tenantID, connectionID string) string {
 // EnsureStreams creates the singleton main and DLQ streams if they don't
 // already exist. Safe to call from many services at boot time.
 //
-// The main stream uses WorkQueue retention: acked messages are deleted
-// straight away. **Important consequence**: every durable consumer must
-// independently ack a message before JetStream considers it processed.
-// We deliberately want this — each worker is its own consumer and the
-// stream stays small.
-//
-// Wait — WorkQueue retention requires that **all** consumers are bound to
-// the SAME subject so that a single ack deletes the message. With multiple
-// independent workers we instead use Limits policy with a TTL, so each
-// consumer maintains its own ack state.
+// Both streams use Limits retention. Each worker has its own durable
+// consumer with its own ack state, and an ack only moves that consumer
+// along; it never deletes the message. Messages leave the main stream by
+// age (MainRetention) or when the size caps shed the oldest (MainMaxBytes,
+// MainMaxMsgs), and the DLQ by age (DLQRetention). WorkQueue retention would
+// delete a message on its first ack, which doesn't fit several independent
+// consumers reading the same subjects.
 func EnsureStreams(js nats.JetStreamContext) error {
 	if err := ensure(js, &nats.StreamConfig{
 		Name:      MainStreamName,
