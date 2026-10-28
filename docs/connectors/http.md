@@ -20,7 +20,7 @@ The editor's Webhook (HTTP) source panel shows the URL for the environment you a
     error — nothing that points at DNS. See
     [Troubleshooting](../operator/troubleshooting.md).
 
-You can optionally verify request signatures with HMAC and require client certificates with mutual TLS.
+You can optionally verify request signatures with HMAC and require client certificates with mutual TLS. Inbound mutual TLS works only where the worker's TLS port is exposed (the Docker Compose stack); the hosted service at `vrsky.valueretail.no` doesn't expose it yet, so use HMAC signatures there.
 
 ### The URL is stable
 
@@ -63,7 +63,7 @@ Config reference:
     - `encoding` — signature encoding (e.g. `hex`).
     - `prefix` — optional string prepended to the signature value.
     - `secret_secret_id` — reference to the shared signing secret (minted from the plaintext secret you enter in the editor).
-- `tls.client_ca_secret_id` — optional mutual TLS (#89). When set, the connection is reachable on the worker's dedicated TLS port (`9101` locally) and clients must present a certificate signed by this CA.
+- `tls.client_ca_secret_id` — optional mutual TLS (#89). When set, the connection is reachable on the worker's dedicated TLS port (`9101` locally) and clients must present a certificate signed by this CA. Not available on the hosted service yet: there the TLS port isn't exposed, so such a connection rejects every request.
 
 Other request handling options not listed here are set via the in-app pipeline editor (Property panel).
 
@@ -123,5 +123,5 @@ Config reference:
 ## Notes
 
 - **Secrets.** Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.
-- **mTLS port.** Connections using `tls.client_ca_secret_id` listen on the worker's dedicated TLS port (`9101` locally), separate from the standard webhook ingress.
+- **mTLS port.** Connections using `tls.client_ca_secret_id` listen on the worker's dedicated TLS port (`9101` locally), separate from the standard webhook ingress. The hosted service at `vrsky.valueretail.no` doesn't expose that port yet, so there a connection with `tls.client_ca_secret_id` rejects every request. Use `http.signature` for inbound webhooks on the hosted service. Outbound mTLS (the producer's `http.tls`) works everywhere.
 - **Example flow.** A common pattern is webhook (consumer) to HTTP forward (producer): receive a signed webhook, then forward the payload to a downstream service over OAuth or mTLS.

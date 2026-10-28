@@ -11,9 +11,15 @@ and service-token issuance to workers.
 
 ## High Availability (#138)
 
-The management-api runs **N≥2 replicas** behind the Service / Traefik gateway,
-with no single point of failure. It is designed to be **horizontally scalable**:
-bump `replicas` in `deployment.yaml` (or attach an HPA) and add capacity.
+The manifest runs **2 replicas**, and the service is designed to be
+**horizontally scalable**: bump `replicas` in `deployment.yaml` (or attach an
+HPA) and add capacity.
+
+Production on AKS runs **one** replica: `infrastructure/azure/deploy-azure.sh`
+trims it to 1, and the CI deploy only swaps images, so the count stays. There
+the request path is browser → ingress-nginx (the `vrsky` Ingress) → the UI
+pod's nginx, which proxies `/api/` and `/ws` → the `vrsky-management-api`
+Service (`infrastructure/azure/deploy-ui-azure.sh`). Production runs 2 UI pods.
 
 ### Why it's safe to run multiple replicas
 
@@ -44,12 +50,19 @@ gate two timers.
   tenant/connection id).
 - **Server-Sent Events (provisioning progress, live tenant updates) are
   per-replica.** A browser connected to replica B won't receive an event
-  broadcast on replica A. Mitigate by enabling **sticky sessions** on the SSE
-  routes at Traefik (cookie-based affinity) — Service-level `sessionAffinity:
-  ClientIP` does *not* help, because behind the gateway all clients share the
-  gateway's source IP. The robust fix (fan SSE out over NATS so every replica's
-  hub sees every event) is a follow-up; the UI already reconnects/refetches, so
-  status still converges. Core CRUD/auth/token APIs are unaffected.
+  broadcast on replica A. This doesn't bite in production yet, which runs one
+  replica. Before running more, fix it one of two ways:
+  - Fan SSE out over NATS so every replica's hub sees every event. This is the
+    real fix and a follow-up.
+  - As a stopgap, pin both hops. Cookie affinity on the `vrsky` Ingress pins a
+    browser to a UI pod, and `sessionAffinity: ClientIP` on the
+    management-api Service pins that UI pod to one replica (the Service sees
+    the UI pod's IP, never the browser's). Either one alone pins nothing end to
+    end. The cost: every browser on one UI pod lands on the same replica, so
+    load spreads unevenly.
+
+  The UI already reconnects and refetches, so status still converges. Core
+  CRUD, auth and token APIs are unaffected.
 
 ### Zero-downtime rollouts
 
