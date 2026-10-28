@@ -765,3 +765,73 @@ func TestLegacyDurableGetsInactiveThreshold(t *testing.T) {
 			ci.Config.InactiveThreshold, ConsumerInactiveThreshold)
 	}
 }
+
+// --- Halt before ending what a handler waits on (#444) -------------------------
+
+// TestHaltBeforeCancelCostsOneAttempt: a handler holds its message until its
+// owner shuts down, the way the remote-agent gateway's output handler does.
+// Shutting down ends the owner, which makes the handler return an error (NAK),
+// and then calls Stop. If the dispatch loop still runs in between, it fetches
+// the NAK'd message again, the ended handler NAKs it again, and five rounds
+// later it is in the DLQ. The pause stands in for the stopping goroutine being
+// descheduled; on a loaded CI runner a couple of milliseconds was enough.
+// With Halt first, the stop costs exactly one attempt.
+func TestHaltBeforeCancelCostsOneAttempt(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+
+	ended := make(chan struct{})
+	var attempts int32
+	sub, err := Subscribe(js, SubscriberOpts{DurableName: "test-halt", MaxAckPending: 1},
+		func(context.Context, *nats.Msg) error {
+			atomic.AddInt32(&attempts, 1)
+			<-ended
+			return errors.New("owner stopped while the message was held")
+		})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if err := NewPublisher(js).Publish(context.Background(), "tenant-H", "pipeline-halt", "m-1", []byte("held")); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	waitFor(t, func() bool { return atomic.LoadInt32(&attempts) == 1 }, 5*time.Second)
+
+	sub.Halt()
+	close(ended)
+	time.Sleep(100 * time.Millisecond)
+	sub.Stop()
+
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("the stop cost %d delivery attempts, want 1", got)
+	}
+	info, err := js.StreamInfo(DLQStreamName)
+	if err != nil {
+		t.Fatalf("DLQ info: %v", err)
+	}
+	if info.State.Msgs != 0 {
+		t.Fatalf("a stop dead-lettered the message: %d in the DLQ", info.State.Msgs)
+	}
+
+	// The next subscriber on the durable gets it.
+	got := make(chan []byte, 1)
+	next, err := Subscribe(js, SubscriberOpts{DurableName: "test-halt", MaxAckPending: 1},
+		func(_ context.Context, m *nats.Msg) error {
+			select {
+			case got <- append([]byte(nil), m.Data...):
+			default:
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("resubscribe: %v", err)
+	}
+	defer next.Stop()
+	select {
+	case b := <-got:
+		if string(b) != "held" {
+			t.Fatalf("next subscriber got %q, want %q", b, "held")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the released message never reached the next subscriber")
+	}
+}

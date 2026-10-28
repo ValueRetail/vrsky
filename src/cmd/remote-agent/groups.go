@@ -177,6 +177,10 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	for id, ms := range sess.memberSubs {
 		if !desired[id] {
 			delete(sess.memberSubs, id)
+			// Halted here, under the lock that takes it out of the map:
+			// an endSession from now on doesn't see it, and its cancel
+			// must not find the loop still fetching. See endSession.
+			ms.sub.Halt()
 			toStop = append(toStop, ms)
 			if members[id] == nil {
 				// Gone or revoked: nothing must keep waiting for it.
@@ -217,7 +221,7 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	}
 	// Outside the lock: a stopping handler dequeues under it.
 	for _, ms := range toStop {
-		ms.cancel()
+		ms.cancel() // halted above
 		ms.sub.Stop()
 	}
 	for _, d := range toDelete {
@@ -248,6 +252,7 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		s.mu.Lock()
 		if s.sessions[sess.connID] != sess || sess.memberSubs[id] != nil {
 			s.mu.Unlock()
+			sub.Halt()
 			mcancel()
 			sub.Stop()
 			continue

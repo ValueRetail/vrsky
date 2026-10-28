@@ -85,6 +85,7 @@ type Subscriber struct {
 	handler Handler
 	stopCh  chan struct{}
 	doneCh  chan struct{}
+	halt    sync.Once
 }
 
 // DefaultBackoff is the per-attempt delay schedule used when SubscriberOpts.
@@ -310,9 +311,22 @@ func equalDurations(a, b []time.Duration) bool {
 // the stream. The subscription now binds to a consumer it does not own, and
 // draining a bound subscription leaves the consumer alone — see Subscribe.
 func (s *Subscriber) Stop() {
-	close(s.stopCh)
+	s.Halt()
 	<-s.doneCh
 	_ = s.sub.Drain()
+}
+
+// Halt tells the dispatch loop to fetch nothing more, and returns at once. A
+// handler already running finishes, and its message is acked or NAK'd as
+// usual; Stop still has to be called to wait for that.
+//
+// Call it before ending whatever a running handler waits on. Otherwise the
+// loop can come round between the handler returning and Stop being reached,
+// fetch the NAK'd message again, have it NAK'd again by the same ended
+// handler, and so on: each round is a delivery attempt, so a stop that is
+// descheduled for a couple of milliseconds dead-letters the message (#444).
+func (s *Subscriber) Halt() {
+	s.halt.Do(func() { close(s.stopCh) })
 }
 
 func (s *Subscriber) loop() {

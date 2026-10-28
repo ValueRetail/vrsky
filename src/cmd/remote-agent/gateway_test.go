@@ -248,6 +248,16 @@ func (e *testEnv) consumerInfo(t *testing.T, connID string) *nats.ConsumerInfo {
 	return ci
 }
 
+// dlqMsgs is how many messages the dead-letter stream holds.
+func (e *testEnv) dlqMsgs(t *testing.T) uint64 {
+	t.Helper()
+	si, err := e.js.StreamInfo(messaging.DLQStreamName)
+	if err != nil {
+		t.Fatalf("DLQ info: %v", err)
+	}
+	return si.State.Msgs
+}
+
 // waitFor polls a condition; the gateway's work happens on other goroutines.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -483,8 +493,16 @@ func TestOutput_LeaseExpiryReoffers(t *testing.T) {
 // next session delivers it; nothing is acked unconfirmed. Asserted on the
 // outcome — the message reaches the agent after a restart — rather than on
 // consumer counters, which lag the server.
+//
+// The stop is held open between cancelling the session and stopping its
+// subscriber. That window used to be a race (#444): the dispatch loop kept
+// fetching the NAK'd message and the ended handler kept NAK'ing it, so a stop
+// descheduled for a few milliseconds on a busy CI runner spent all five
+// delivery attempts and dead-lettered the message. Holding it open makes the
+// race certain instead of rare.
 func TestOutput_StopReleasesTheMessage(t *testing.T) {
 	e := newTestEnv(t)
+	e.g.afterCancel = func() { time.Sleep(100 * time.Millisecond) }
 	e.startOutputPipeline(t, "conn-stop")
 	e.publishTo(t, tenant1, "conn-stop", `{"order":5}`)
 	waitFor(t, "in flight", func() bool { return e.consumerInfo(t, "conn-stop").NumAckPending == 1 })
@@ -498,6 +516,9 @@ func TestOutput_StopReleasesTheMessage(t *testing.T) {
 	}
 	if w := e.poll(t, credA, 0); len(w.Deliveries) != 0 {
 		t.Errorf("a stopped pipeline still offers %d deliveries", len(w.Deliveries))
+	}
+	if n := e.dlqMsgs(t); n != 0 {
+		t.Fatalf("the stop dead-lettered the held message (%d in the DLQ)", n)
 	}
 
 	e.startOutputPipeline(t, "conn-stop")
