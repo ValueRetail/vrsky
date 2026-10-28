@@ -447,6 +447,36 @@ Last updated 2026-10-28.
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
+70. **An open UI tab never learns that a newer UI is deployed.** The bundle
+    is one file with no lazy chunks, so a tab left open across deploys
+    keeps running the old code against the new API. That is how #450's
+    "Pipeline 15:26:55" happened: a pre-2026-10-14 tab still sent a
+    generated name on every Deploy. Write the build's commit to a
+    `version.json` beside `index.html`, poll it (and check on focus), and
+    show a "A newer version is available, reload" banner. Found during #450.
+71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
+    Delete it, or route it if a dashboard is wanted. Found during #450.
+72. **A linked builder tab's `deployedName` never re-syncs with the
+    server.** Opening a connection whose canvas is already linked
+    (`PipelineBuilder.tsx` edit flow) only switches to it, so a name changed
+    elsewhere leaves the tab and `deployedName` agreeing with each other and
+    not with the server; Deploy then sends no name. Refresh `deployedName`
+    from the loaded connection on edit-load (and show the server's name if
+    the tab was never renamed). Found in review of #450.
+73. **A failed workspace delete leaves state as it was** although
+    `TenantSelector`'s catch says "checkAuth will refresh state
+    regardless"; it never calls checkAuth. Fix the comment or the code.
+    Found during #450.
+74. **The Connections list can show the previous workspace's rows.**
+    `ConnectionsList.tsx`'s own load effect has no latest-only or cancel
+    guard, so on a slow switch from A to B, A's answer can land after B's
+    and the list shows A's connections under B. Give it the same guard as
+    the connections store's `load()`. Found in review of #450 (#466).
+75. **The sidebar's status counts cover at most 100 connections.** They
+    come from the store's loaded items (`limit=100`), while the badge shows
+    the API total, so a workspace with more than 100 shows a badge that
+    disagrees with the running/stopped/error cards. Count by status on the
+    server, or label the cards as a sample. Found in review of #450 (#466).
 
 ## Human
 

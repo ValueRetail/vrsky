@@ -10,7 +10,7 @@ import { config } from '../../config/env'
 
 export default function Sidebar() {
   const { pathname } = useLocation()
-  const { connections = [] } = useConnectionsStore()
+  const { connections = [], total } = useConnectionsStore()
   // OAuth provider management is owner/admin-only (CRUD is admin-gated
   // server-side); hide the entry for everyone else.
   const role = useAuthStore((s) => s.currentTenant?.user_role)
@@ -54,9 +54,9 @@ export default function Sidebar() {
           <div className="flex items-center gap-3">
             <span>⚡ Connections</span>
           </div>
-          {(connections || []).length > 0 && (
+          {total > 0 && (
             <span className="px-2 py-0.5 bg-neutral-200 dark:bg-neutral-600 text-xs font-bold text-neutral-700 dark:text-neutral-300 rounded-full">
-              {(connections || []).length}
+              {total}
             </span>
           )}
         </Link>
