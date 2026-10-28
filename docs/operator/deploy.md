@@ -16,10 +16,11 @@ Red stays red: a failed build, rollout or smoke check fails the run, and the
 |---|---|
 | `ui/**` | the UI image and Deployment |
 | `src/cmd/<service>/**` | that service's image; a core service is rolled by digest, a connector is restarted |
+| `infrastructure/migrations/**`, `src/cmd/vrsky-agent/**` | the management API image and rollout (it runs the migrations at start and serves the Windows agent) |
 | `src/pkg/**`, `src/internal/**`, `src/go.mod`, `src/go.sum`, any `src/cmd/*/Dockerfile` | every Go image, core and connectors |
 | `infrastructure/prometheus-rules.yml`, `infrastructure/kubernetes/monitoring/**` | `install-monitoring.sh` (values and alert rules) |
 | `infrastructure/azure/deploy-connectors-azure.sh`, `infrastructure/kubernetes/connectors/**` | the full connector manifest and a fleet restart |
-| `*_test.go` and `testdata/**` under `src/`, on their own | nothing (#410) |
+| `*_test.go` and `testdata/**` under `src/`, on their own | nothing (#410); a rename counts both paths, so moving code into a `_test.go` file still deploys |
 | anything else (docs, plans, workflows) | nothing; the job runs and reports "no targets" |
 
 Not deployed automatically, and still done by hand as before: environment

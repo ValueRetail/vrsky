@@ -320,7 +320,9 @@ jobs:
       - name: Map the merge's paths to targets
         id: plan
         run: |
-          git diff --name-only HEAD^ HEAD > changed.txt
+          # --no-renames lists both sides of a rename, so `git mv x.go
+          # x_test.go` still counts the code that left the image (#410).
+          git diff --name-only --no-renames HEAD^ HEAD > changed.txt
           infrastructure/azure/affected.sh < changed.txt > targets.txt
           echo "changed paths:"; sed 's/^/  /' changed.txt
           echo "targets:";       sed 's/^/  /' targets.txt

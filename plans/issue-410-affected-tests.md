@@ -62,3 +62,17 @@ still marks every image through the non-test path.
   `_test.go` only; each must fail a test. Script restored after.
 - `go test -count=1 ./pkg/managementapi/...`, `go vet ./...`,
   `golangci-lint run`, `bash -n infrastructure/azure/affected.sh`.
+
+## Review follow-ups (same PR)
+
+- `build-push.yml`'s plan step runs `git diff --name-only --no-renames`.
+  With rename detection on, `git mv x.go x_test.go` printed only the new
+  path, which the test-only skip now drops, so nothing deployed.
+  `TestDeployJobGatesOnTests` asserts the flag.
+- `infrastructure/migrations/*` and `src/cmd/vrsky-agent/*` map to
+  `image management-api` and `core management-api`. Its Dockerfile bakes
+  both in; before this a migrations-only merge shipped nothing. These were
+  the only paths outside `src/pkg`, `src/internal` and an image's own
+  `src/cmd/<x>` that any Dockerfile copies.
+- Mutations: drop each mapping, map migrations to the image without the
+  rollout, drop `--no-renames`. All fail a test.

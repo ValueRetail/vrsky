@@ -1135,6 +1135,12 @@ func TestAffectedServices(t *testing.T) {
 			[]string{"core management-api", "image management-api"}},
 		{"test with rules", []string{"src/pkg/x/a_test.go", "infrastructure/prometheus-rules.yml"}, []string{"monitoring"}},
 		{"test with backup manifest", []string{"src/cmd/vrsky-cli/backup_test.go", "infrastructure/kubernetes/backup/cronjob.yaml"}, []string{"backup"}},
+		// The management-api image bakes in the migrations it runs at start
+		// and the Windows agent it serves; either alone must ship it.
+		{"migration only", []string{"infrastructure/migrations/000099_x.up.sql", "infrastructure/migrations/000099_x.down.sql"},
+			[]string{"core management-api", "image management-api"}},
+		{"windows agent", []string{"src/cmd/vrsky-agent/main.go"}, []string{"core management-api", "image management-api"}},
+		{"windows agent test", []string{"src/cmd/vrsky-agent/main_test.go"}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1312,6 +1318,26 @@ func TestDeployJobGatesOnTests(t *testing.T) {
 	plan, ok := wf.Jobs["plan"]
 	if !ok {
 		t.Fatal("no plan job")
+	}
+	// affected.sh skips _test.go paths (#410). With rename detection on,
+	// `git mv x.go x_test.go` lists only x_test.go and deploys nothing, so
+	// the diff that feeds it must list both sides of a rename.
+	feeds := 0
+	for _, st := range plan.Steps {
+		if !strings.Contains(st.Run, "affected.sh") {
+			continue
+		}
+		for _, l := range strings.Split(st.Run, "\n") {
+			if strings.Contains(l, "git diff") && !strings.HasPrefix(strings.TrimSpace(l), "#") {
+				feeds++
+				if !strings.Contains(l, "--no-renames") {
+					t.Errorf("plan job diff feeding affected.sh lacks --no-renames: %q", strings.TrimSpace(l))
+				}
+			}
+		}
+	}
+	if feeds == 0 {
+		t.Error("found no `git diff` feeding affected.sh in the plan job")
 	}
 	// Every job that runs tests must gate the plan.
 	for name, job := range wf.Jobs {
