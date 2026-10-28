@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -42,6 +44,10 @@ type sitooConsumer struct {
 	logger  *slog.Logger
 
 	httpClient *http.Client
+
+	// checkpoints keeps the incremental cursor per (tenant, connection, node).
+	// Defaulted in Configure to the Postgres store; tests inject their own.
+	checkpoints checkpoint.Store
 
 	// loadConfig loads a connection's Sitoo config. A field for the same reason
 	// as resolveTenant below: the webhook path needs it, and a test driving
@@ -80,6 +86,29 @@ type SitooConfig struct {
 	// WebhookIDField overrides the event field holding the resource id. Empty
 	// means the convention below: "transactions" -> "transactionid".
 	WebhookIDField string `json:"webhook_id_field"`
+
+	// Incremental makes each poll ask only for what changed since the last
+	// complete poll, and skip records already published. Off by default:
+	// turning it on changes what a running pipeline delivers. See
+	// incremental.go and plans/issue-457-sitoo-incremental.md.
+	Incremental bool `json:"incremental"`
+	// CursorField is the record field holding an increasing integer (a Unix
+	// timestamp or an id). Defaulted for the resources in knownCursors.
+	CursorField string `json:"cursor_field"`
+	// CursorParam is the query parameter Sitoo filters CursorField with.
+	CursorParam string `json:"cursor_param"`
+	// CursorSort is an optional `sort` value sent with incremental reads.
+	CursorSort string `json:"cursor_sort"`
+	// CursorInclusive declares that CursorParam returns records whose cursor
+	// equals the value (>=). Only then may CursorOverlap be 0.
+	CursorInclusive bool `json:"cursor_inclusive"`
+	// CursorOverlap is how far back, in cursor units, each poll re-reads.
+	// nil means defaultCursorOverlap; 0 only with an inclusive filter.
+	CursorOverlap *int64 `json:"cursor_overlap"`
+
+	// NodeID keys the checkpoint. It comes from the connection's node, not
+	// from the node's own config, so it is never carried in the stored JSON.
+	NodeID string `json:"-"`
 }
 
 // eventIDField is the event field expected to carry the resource id.
@@ -127,6 +156,9 @@ func (s *sitooConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	s.nc = res.NATS
 	s.logger = res.Logger
 	s.active = make(map[string]context.CancelFunc)
+	if s.checkpoints == nil {
+		s.checkpoints = checkpoint.NewPostgresStore(res.DB)
+	}
 	if s.httpClient == nil {
 		// No redirect following: requests carry the Sitoo Basic-auth credential,
 		// which Go would forward on a same-host redirect. We only ever call the
@@ -246,6 +278,16 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 		logger.Info("Sitoo connection is webhook-only (no poll interval configured)")
 		return
 	}
+	if err := cfg.checkResource(); err != nil {
+		logger.Error("Sitoo resource invalid", "error", err)
+		return
+	}
+	if cfg.Incremental {
+		if _, err := cfg.cursorSpec(); err != nil {
+			logger.Error("Sitoo incremental config incomplete", "error", err)
+			return
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// A stop that arrived during the work above has taken the claim back and wins.
@@ -318,8 +360,20 @@ type sitooCollection struct {
 }
 
 // fetchAndPublish pages through the configured Sitoo collection (start/num) and
-// publishes each non-empty page as one JSON-array envelope.
+// publishes each non-empty page as one JSON-array envelope. With incremental
+// on it reads only what changed since the last complete poll instead
+// (fetchIncremental).
 func (s *sitooConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, cfg *SitooConfig, logger *slog.Logger) error {
+	if err := cfg.checkResource(); err != nil {
+		return err
+	}
+	if cfg.Incremental {
+		spec, err := cfg.cursorSpec()
+		if err != nil {
+			return err
+		}
+		return s.fetchIncremental(ctx, connID, tenantID, cfg, spec, logger)
+	}
 	pageSize := cfg.PageSize
 	if pageSize <= 0 {
 		pageSize = defaultPageSize
@@ -327,10 +381,7 @@ func (s *sitooConsumer) fetchAndPublish(ctx context.Context, connID, tenantID st
 	start, page, total := 0, 0, 0
 	for {
 		page++
-		reqURL := fmt.Sprintf("%s/accounts/%d/sites/%d/%s?start=%d&num=%d",
-			cfg.effectiveBaseURL(), cfg.AccountID, cfg.SiteID, cfg.effectiveResource(), start, pageSize)
-
-		body, err := s.get(ctx, cfg, reqURL)
+		body, err := s.get(ctx, cfg, cfg.collectionURL(start, pageSize, nil))
 		if err != nil {
 			return err
 		}
@@ -448,11 +499,51 @@ func (c *SitooConfig) effectiveBaseURL() string {
 	return defaultBaseURL
 }
 
+// effectiveResource is the resource path, without any query string the
+// configured resource carries.
 func (c *SitooConfig) effectiveResource() string {
-	if c.Resource != "" {
-		return strings.Trim(c.Resource, "/")
+	r, _, _ := strings.Cut(c.Resource, "?")
+	if r = strings.Trim(r, "/"); r != "" {
+		return r
 	}
 	return defaultResource
+}
+
+// checkResource rejects a resource the URL builders would mangle: a `#` ends
+// the URL there, so everything after it (start, num, the cursor) would be
+// dropped from the request.
+func (c *SitooConfig) checkResource() error {
+	if strings.Contains(c.Resource, "#") {
+		return fmt.Errorf("resource %q must not contain '#'", c.Resource)
+	}
+	return nil
+}
+
+// resourceQuery is the query string the configured resource carries, e.g.
+// `orderstate=10` from `orders?orderstate=10`. A fresh copy on every call.
+func (c *SitooConfig) resourceQuery() url.Values {
+	_, raw, ok := strings.Cut(c.Resource, "?")
+	if !ok {
+		return url.Values{}
+	}
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		return url.Values{}
+	}
+	return q
+}
+
+// collectionURL builds a collection page URL: the resource's own query, then
+// extra (the incremental cursor and sort), then start/num, as one query string.
+func (c *SitooConfig) collectionURL(start, num int, extra url.Values) string {
+	q := c.resourceQuery()
+	for k, vs := range extra {
+		q[k] = vs
+	}
+	q.Set("start", strconv.Itoa(start))
+	q.Set("num", strconv.Itoa(num))
+	return fmt.Sprintf("%s/accounts/%d/sites/%d/%s?%s",
+		c.effectiveBaseURL(), c.AccountID, c.SiteID, c.effectiveResource(), q.Encode())
 }
 
 // --- DB helpers ---
@@ -494,6 +585,7 @@ func (s *sitooConsumer) getSitooConfig(ctx context.Context, connectionID, tenant
 			continue
 		}
 		if nc.Type == "sitoo" && nc.Sitoo != nil {
+			nc.Sitoo.NodeID = n.ID
 			return nc.Sitoo, nil
 		}
 	}

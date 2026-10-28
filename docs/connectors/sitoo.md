@@ -27,7 +27,9 @@ paging through all results, and emits each page as a JSON-array message.
 - `api_id` — the Sitoo REST API ID.
 - `api_password_secret_id` — secret reference to the API password.
 - `resource` — the collection to poll (default `transactions`; e.g.
-  `warehouseitems`, `products`).
+  `warehouseitems`, `products`). It may carry its own filters as a query
+  string, e.g. `orders?orderstate=10`; the poller adds `start`/`num` to it.
+  A `#` is refused.
 - `poll_interval_seconds` — poll cadence. Set `0` (or omit) for **webhook-only**.
 - `page_size` — Sitoo `num` (default `1000`; 1000–5000 is optimal).
 - `base_url` — optional override (default `https://api.mysitoo.com/v2`).
@@ -53,6 +55,91 @@ paging through all results, and emits each page as a JSON-array message.
 
 The connector honours Sitoo's rate limit: on HTTP `429` it waits for
 `X-Rate-Limit-Reset` / `Retry-After` and retries.
+
+### Incremental polling
+
+By default every poll reads and publishes the whole collection. Set
+`incremental: true` to read only what changed since the last complete poll:
+
+- `cursor_field` — the record field holding an increasing integer (a Unix
+  timestamp in seconds, or an id).
+- `cursor_param` — the Sitoo query parameter that filters on it. Not
+  `start`, `num` or `sort`: the poller sets those itself.
+- `cursor_sort` — the `sort` value that lists the collection ascending on
+  `cursor_field`. Required: without it a change made during a poll can be
+  lost for good.
+- `cursor_overlap` — how far back each poll re-reads, in cursor units
+  (default `60`: a minute of timestamps, or 60 ids). `0` is refused unless
+  the filter is inclusive (returns records equal to the value).
+- `cursor_inclusive` — set it when your `cursor_param` returns records equal
+  to the value (`>=`). `orderidfrom` is known to be; `datelastmodified`
+  ("modified after") is not. Left unset, the poller asks one below the
+  value, which is right for either kind.
+
+Sitoo has no common "modified since" filter, so each collection needs its own
+filter and sort. One is built in, from the Sitoo API reference:
+
+| resource | `cursor_field` | `cursor_param` | `cursor_sort` |
+|---|---|---|---|
+| `orders` | `orderid` | `orderidfrom` | `orderid` |
+
+For any other resource set `cursor_field`, `cursor_param` and `cursor_sort`,
+or the connection refuses to start. `orders` by id picks up new orders, not
+changes to existing ones. `products` has a `datelastmodified` filter but the
+API reference documents no sort for it, so there is no default; only set it
+up if Sitoo confirms a sort on `datemodified` for your account.
+
+```json
+{
+  "type": "sitoo",
+  "sitoo": {
+    "account_id": 12345,
+    "site_id": 1,
+    "api_id": "your-api-id",
+    "api_password_secret_id": "<secret-uuid>",
+    "resource": "orders",
+    "poll_interval_seconds": 300,
+    "incremental": true
+  }
+}
+```
+
+How it behaves:
+
+- The first poll reads everything and publishes it once, and so does the
+  first poll after the resource, its query string, `cursor_field` or
+  `cursor_param` changes. After that each poll starts at
+  `last cursor − cursor_overlap`.
+- It pages by cursor value, not by position: each next page asks the filter
+  for records from the previous page's last cursor value on. A record that
+  changes during the poll gets a newer value, so it lands ahead of where the
+  poll is reading and goes out in the same poll; nothing slides past it.
+- Every page is checked: ascending on `cursor_field`, and nothing below the
+  value asked for. A page that fails the check fails the poll before it is
+  published, and the cursor stays where it was. The error names
+  `cursor_sort` or `cursor_param`.
+- More records than a page sharing one cursor value (a bulk import stamped in
+  one second) are paged through by position; if that run changes while it is
+  read, it is read again from its start.
+- A poll that reads far more pages than the collection needs (three times
+  what the first page's `totalcount` implies, plus ten) stops, logs it and
+  fails without moving the cursor.
+- The highest cursor value seen is stored per connection node in
+  `connection_node_checkpoints`, so a restart or redeploy resumes there
+  instead of re-sending everything.
+- The overlap re-reads a little of what was already sent; records are
+  skipped by content, so only new or changed records go out. A record that
+  changes is published again with its new content. A record committed late
+  with a cursor value just below where the poll had got to arrives on the
+  next poll, as long as it is within the overlap.
+- The cursor only moves once every page has been published. A poll that
+  fails halfway is read again from the old cursor next time, so some records
+  can arrive twice but none are skipped.
+- A record without the cursor field is published every poll; check the
+  field name if you see that warning in the logs.
+
+Turning `incremental` on for a running pipeline sends everything once more on
+its first poll, then only changes.
 
 ### Webhook mode (real-time SPI Events)
 
@@ -142,9 +229,11 @@ What to know before you use it:
 - Sitoo prices include VAT, so the BC customer needs *Prices Including VAT*
   turned on.
 - The receipt number goes to `externalDocumentNumber`, which is how a receipt
-  already in BC is skipped, posted or not. The poller re-reads every receipt
-  on each poll, one BC lookup each, so keep it to a test site with few
-  receipts until the poller gets a cursor.
+  already in BC is skipped, posted or not. The template polls `transactions`
+  without `incremental`, so it re-reads every receipt on each poll, one BC
+  lookup each; keep it to a test site with few receipts. The template will
+  switch to incremental polling once a live Sitoo sandbox confirms which
+  collection holds receipts.
 - Use one Sitoo site per pipeline: receipt numbers from two sites could
   collide.
 - Currency and posting date are not sent. BC takes them from the customer
@@ -162,8 +251,5 @@ sale.
 
 ## Notes & roadmap
 
-- **Incremental polling** — the current poller does a full paged fetch each
-  cycle; a `modified_after`-style cursor is a straightforward enhancement for
-  high-volume order streams.
 - **Webhook signature verification** — add HMAC verification once the SPI Event
   signing scheme is confirmed for your account.
