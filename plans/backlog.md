@@ -129,7 +129,7 @@ Last updated 2026-10-28.
     whether any backup runs in prod. The encryption table says TLS
     terminates at Traefik; production runs ingress-nginx. Fix both (and
     `docs/DR.md` if it says the same). Found in review of #376.
-29. **A watched file replaced under the same name is never published again**
+29. ~~**A watched file replaced under the same name is never published again**~~ (#420)
     (`src/cmd/file-consumer/service.go`, `pollOnce`). The watcher keys on
     the name only: once `orders.csv` is published, a writer that overwrites
     it or renames a new `orders.csv` over it is ignored, unless the name
@@ -289,8 +289,8 @@ Last updated 2026-10-28.
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a
     manifest, so PR plus `agent:needs-human`. Found in review of #386.
-49. **`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
-    exists only for it.** It opens an `EventSource` on
+49. ~~**`ui/src/services/websocket.ts` is never imported, and `VITE_WS_URL`
+    exists only for it.**~~ (#428) It opens an `EventSource` on
     `${config.wsUrl}/api/v1/connections/{id}/metrics/stream`, default
     `http://localhost:3000`: a cross-origin URL in dev that wouldn't carry
     the session cookie, and a wrong host in production. Delete the file and
@@ -447,7 +447,58 @@ Last updated 2026-10-28.
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
-70. **`TestEveryLintCheckStillGates` matches raw step text**
+70. **An open UI tab never learns that a newer UI is deployed.** The bundle
+    is one file with no lazy chunks, so a tab left open across deploys
+    keeps running the old code against the new API. That is how #450's
+    "Pipeline 15:26:55" happened: a pre-2026-10-14 tab still sent a
+    generated name on every Deploy. Write the build's commit to a
+    `version.json` beside `index.html`, poll it (and check on focus), and
+    show a "A newer version is available, reload" banner. Found during #450.
+71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
+    Delete it, or route it if a dashboard is wanted. Found during #450.
+72. **A linked builder tab's `deployedName` never re-syncs with the
+    server.** Opening a connection whose canvas is already linked
+    (`PipelineBuilder.tsx` edit flow) only switches to it, so a name changed
+    elsewhere leaves the tab and `deployedName` agreeing with each other and
+    not with the server; Deploy then sends no name. Refresh `deployedName`
+    from the loaded connection on edit-load (and show the server's name if
+    the tab was never renamed). Found in review of #450.
+73. **A failed workspace delete leaves state as it was** although
+    `TenantSelector`'s catch says "checkAuth will refresh state
+    regardless"; it never calls checkAuth. Fix the comment or the code.
+    Found during #450.
+74. **The Connections list can show the previous workspace's rows.**
+    `ConnectionsList.tsx`'s own load effect has no latest-only or cancel
+    guard, so on a slow switch from A to B, A's answer can land after B's
+    and the list shows A's connections under B. Give it the same guard as
+    the connections store's `load()`. Found in review of #450 (#466).
+75. **The sidebar's status counts cover at most 100 connections.** They
+    come from the store's loaded items (`limit=100`), while the badge shows
+    the API total, so a workspace with more than 100 shows a badge that
+    disagrees with the running/stopped/error cards. Count by status on the
+    server, or label the cards as a sample. Found in review of #450 (#466).
+76. **A file-consumer pod can adopt a replacement without publishing it.**
+    If a pod's stat of a known name fails at load (so it has no stamp),
+    another pod saved stamp S, and the file is now a newer S', `mergeSaved`
+    leaves it alone and the next poll adopts S' as done. Needs a stat
+    failure, two pods and a replacement at once. Skip adoption in
+    `pollOnce` when the saved row has a different stamp. Found in review of
+    #420 (#465).
+77. **Every file-consumer poll stats every file in the folder.** Since
+    #420 known files are checked for replacement too, so a share with
+    thousands of files costs one SMB round trip per file per poll. Consider
+    a cheaper change signal (directory mtime, or stat known files less
+    often). Related to #426. Found in review of #420 (#465).
+78. **Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
+    any more.** Its only client was `ui/src/services/websocket.ts`, deleted
+    in #428 without ever being imported. `HandleMetricsSSE` is still
+    mounted (`src/pkg/managementapi/handler.go`) and listed in the OpenAPI
+    registry, and `infrastructure/scripts/e2e-test.sh` probes it. Either
+    wire the builder's live metrics to it through a relative URL, the way
+    `services/workerEvents.ts` does, or drop the endpoint. Dropping it is
+    a public API change, so that PR gets `agent:needs-human`. Found in
+    #428.
+79. **`TestEveryLintCheckStillGates` matches raw step text**
     (`src/pkg/managementapi/lintgates_guard_test.go`), so a commented-out
     `gofmt -l .`, `make lint-tenant` or `check rules` line still satisfies
     it. Strip shell comments first, as the shard guard does since #443

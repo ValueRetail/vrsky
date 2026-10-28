@@ -9,7 +9,7 @@ import TenantSelector from '../Tenants/TenantSelector'
 export default function Header() {
   const navigate = useNavigate()
   const { toggleSidebar, showConfirmDialog, hideConfirmDialog } = useUIStore()
-  const { connections = [] } = useConnectionsStore()
+  const total = useConnectionsStore((s) => s.total)
   const { user, isAuthenticated, logout } = useAuthStore()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
@@ -73,7 +73,7 @@ export default function Header() {
             <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-neutral-100 dark:bg-neutral-700 rounded-lg">
               <div className="w-2 h-2 bg-primary-500 rounded-full"></div>
               <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-                {(connections || []).length}
+                {total}
               </span>
               <span className="text-xs text-neutral-600 dark:text-neutral-400">connections</span>
             </div>

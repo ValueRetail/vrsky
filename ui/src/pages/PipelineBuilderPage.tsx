@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ReactFlowProvider } from 'reactflow'
 import PipelineBuilder from './PipelineBuilder'
-import apiClient from '../services/api'
+import { connectionService } from '../services/connectionService'
 import { useAuthStore } from '../store/authStore'
 import { isOnboarded, markOnboarded } from '../onboarding/state'
 
@@ -21,9 +21,10 @@ export default function PipelineBuilderPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const resp = await apiClient.get('/api/v1/connections', { params: { limit: 1, offset: 0 } })
-        const d = resp.data?.data ?? resp.data
-        const total = d?.total ?? (Array.isArray(d?.connections) ? d.connections.length : 0)
+        // The service maps the API's { data, total } list body (#450); reading
+        // the body here by hand got `total` wrong and sent workspaces that
+        // have connections to the wizard.
+        const { total } = await connectionService.list(1, 1)
         if (cancelled) return
         if (total === 0) {
           navigate('/welcome', { replace: true })

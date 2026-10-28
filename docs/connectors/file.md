@@ -34,9 +34,16 @@ Stopping a pipeline pauses it: files that arrive while it is stopped are publish
 
 Move or delete files once they have been processed. The list of published files is kept for every file still in the folder, so it grows with the folder; a folder that only ever fills up makes every check slower.
 
-Changing the folder in the pipeline's config counts as a first start for the new folder, so what is already in it is not ingested. A file overwritten under a name that was already published is not picked up, while running or across a restart; copy it in under a new name.
+Changing the folder in the pipeline's config counts as a first start for the new folder, so what is already in it is not ingested.
 
-If the folder can't be read for a while (a network share reconnecting, say, or the folder deleted), the checks are skipped and logged, and nothing is republished when it comes back. A pipeline that can't read its folder when it starts still starts and shows as running, with a warning in the file-consumer log. It publishes nothing until a check can read the folder. That check counts as the start: files not yet published are picked up as they would be after a restart. On the pipeline's very first start, everything in the folder at that check counts as already there.
+A file is told apart by its name, size and modification time. When a file that was already published (or was there at the first start) is overwritten, or a new file is renamed over it, its size or modification time changes and it counts as a new file: it is published once more, with the new content, after the same two unchanged checks. That holds across a restart too, so a file replaced while the pipeline was stopped is published when it starts. A file left alone is never sent again. Some things to know:
+
+- Touching a file (`touch orders.csv`) or saving it again unchanged also changes its modification time, so it is sent again. That is a way to resend a file on purpose.
+- Don't keep a file that is still growing, such as a log, in the folder: it is sent again every time it pauses for a check.
+- A replacement with exactly the same size and modification time is not noticed. That takes a copy that keeps the original's timestamp (`cp -p`, `rsync -t`) of a file the same size, or a same-size rewrite within the same timestamp tick on a share that only keeps whole seconds.
+- A file that failed to ingest is tried again when it is replaced, not before.
+
+If the folder can't be read for a while (a network share reconnecting, say, or the folder deleted), the checks are skipped and logged, and nothing is republished when it comes back with the same files. Files copied back in fresh, with new modification times, count as replaced and are published again. A pipeline that can't read its folder when it starts still starts and shows as running, with a warning in the file-consumer log. It publishes nothing until a check can read the folder. That check counts as the start: files not yet published are picked up as they would be after a restart. On the pipeline's very first start, everything in the folder at that check counts as already there.
 
 While the folder can't be read, the editor's File watcher panel shows a red ERROR line naming the folder and the reason (for example `permission denied`, or that the folder is missing): at once, then at most every 30 seconds while it lasts. When a check can read the folder again the panel says so. If a pipeline that started without its folder can read the folder but not the list of files it already published (a database hiccup), it keeps waiting and tries both again at the next check, rather than counting everything in the folder as already published.
 

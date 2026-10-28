@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { connectionService } from '../services/connectionService'
 import { useUIStore } from '../store/uiStore'
 import { useAuthStore } from '../store/authStore'
+import { useConnectionsStore } from '../store/connectionsStore'
 import { isAPIError, getErrorMessage } from '../utils/errors'
 import type { Connection, ConnectionStatus } from '../types/models'
 
@@ -33,6 +34,8 @@ export default function ConnectionsList() {
   // so the list refetches when the user switches workspace — without this the
   // page kept showing the previous tenant's connections until a manual reload.
   const currentTenantId = useAuthStore((s) => s.currentTenant?.id)
+  // Keeps the header badge and the sidebar counts in step after a change here.
+  const refreshSummary = useConnectionsStore((s) => s.load)
 
   const [connections, setConnections] = useState<Connection[]>([])
   const [total, setTotal] = useState(0)
@@ -90,6 +93,7 @@ export default function ConnectionsList() {
           addNotification({ type: 'success', title: 'Deleted', message: `"${connection.name}" deleted` })
           setConnections(prev => prev.filter(c => c.id !== connection.id))
           setTotal(prev => prev - 1)
+          void refreshSummary()
         } catch (error) {
           const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to delete connection'
           addNotification({ type: 'error', title: 'Error', message })
@@ -108,6 +112,7 @@ export default function ConnectionsList() {
       // Reflect the server's actual status (not an optimistic guess) so the
       // list stays consistent with the detail page.
       setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'stopped') as ConnectionStatus } : c))
+      void refreshSummary()
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to stop connection'
       addNotification({ type: 'error', title: 'Error', message })
@@ -124,6 +129,7 @@ export default function ConnectionsList() {
       // Reflect the server's actual status (not an optimistic guess) so the
       // list stays consistent with the detail page.
       setConnections(prev => prev.map(c => c.id === connection.id ? { ...c, status: (updated?.status ?? 'running') as ConnectionStatus } : c))
+      void refreshSummary()
     } catch (error) {
       const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to start connection'
       addNotification({ type: 'error', title: 'Error', message })
