@@ -49,6 +49,8 @@ func TestFileConsumer_UploadRoundTrip(t *testing.T) {
 			AddRow(connID, tenant, "File Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
+	// First start: no saved state, the empty folder is saved as done (#391).
+	expectCheckpoints(mock, connID, tenant, 1, 1)
 
 	c := &fileConsumer{}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "file-consumer", DB: mgmtDB})
@@ -122,6 +124,8 @@ func TestFileConsumer_WatchRoundTrip(t *testing.T) {
 			AddRow(connID, tenant, "File Conn", []byte(nodes), []byte(`[]`)))
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE connections SET last_payload").WithArgs(sqlmock.AnyArg(), connID, tenant).WillReturnResult(sqlmock.NewResult(0, 1))
+	// Start: read, save the first-start state. Publish: re-read, save (#391).
+	expectCheckpoints(mock, connID, tenant, 2, 2)
 
 	// A file is published on the second poll that sees it unchanged (#374);
 	// a short interval keeps that well inside the deadline below.
@@ -231,5 +235,21 @@ func TestStartConnection_BaselineTakenBeforeActive(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("db expectations: %v", err)
+	}
+}
+
+// expectCheckpoints adds the file node's checkpoint reads (no saved state) and
+// saves, all for this tenant, connection and node "c1" (#391). Without them
+// the checkpoint calls fail on the mock and the consumer quietly falls back to
+// the first-start rule, so these tests would not run the restart path at all.
+func expectCheckpoints(mock sqlmock.Sqlmock, connID, tenant string, gets, saves int) {
+	for i := 0; i < gets; i++ {
+		mock.ExpectQuery("FROM connection_node_checkpoints").WithArgs(tenant, connID, "c1").
+			WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}))
+	}
+	for i := 0; i < saves; i++ {
+		mock.ExpectExec("INSERT INTO connection_node_checkpoints").
+			WithArgs(tenant, connID, "c1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 }

@@ -28,7 +28,9 @@ The folder is checked every 5 seconds. A new file is published once its size and
 
 Names that start with `.` or `~`, or end in `.tmp` or `.part` (in any case), are never ingested. Upload under such a name and rename the file to its final name when the upload is done; the final name is then published once, complete. A writer that pauses for longer than a check partway through a file can still have it published early, so renaming into place is the safe way to deliver large files.
 
-Files already in the folder when the pipeline starts are not ingested. That includes a file that landed in the last few seconds before a stop, restart or deploy and had not been published yet: it may be skipped. Copy it in again under a new name once the pipeline is running; overwriting it under the same name is not picked up.
+Files already in the folder the first time the pipeline starts are not ingested. After that the file consumer remembers, per pipeline, which files it has published (in the database, so a restart or deploy keeps it). When the pipeline starts again, any file in the folder that was not published yet is published once: a file that landed in the last seconds before a stop, restart or deploy, a file still being written at the time, and files that arrived while the pipeline was stopped. Files published before the stop are not sent again.
+
+Changing the folder in the pipeline's config counts as a first start for the new folder, so what is already in it is not ingested. A file overwritten under a name that was already published is not picked up, while running or across a restart; copy it in under a new name.
 
 ## As a destination (producer)
 

@@ -135,7 +135,7 @@ Last updated 2026-10-27.
     it or renames a new `orders.csv` over it is ignored, unless the name
     disappeared for at least one poll in between. Decide whether a changed
     size or mtime on a known name means a new file. Found during #374.
-30. **Files still settling at a stop or restart are never published**
+30. ~~**Files still settling at a stop or restart are never published**~~ (#391)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
     taken at start counts every name in the directory as already there, so
     a file that landed before a stop or restart but had not been published
@@ -210,6 +210,16 @@ Last updated 2026-10-27.
     `testdata/`) there and in the `src/cmd/*` case. The script is under
     `infrastructure/azure/**`, so the fix is a PR labelled
     `agent:needs-human`, not an agent merge. Found during #375.
+40. **Two file-consumer pods watch the same folders during a deploy.**
+    The file-consumer Deployment (`infrastructure/kubernetes/connectors/connectors.yaml`)
+    has one replica and the default RollingUpdate strategy, so the new pod
+    starts and restores every running file connection before the old one
+    stops. For those seconds both pods poll the same folders on the shared
+    volume, and a file that lands then can be published by both. #391 has
+    each watcher re-read the saved done set before publishing, which
+    narrows this, but only `strategy: Recreate` (or a per-connection lease)
+    closes it. Manifest change: PR plus `agent:needs-human`. Found during
+    #391.
 
 ## Human
 
