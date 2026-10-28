@@ -67,10 +67,19 @@ change them ([Install](operator/install.md) lists what matters).
 
 #### Option 1: Build UI Only (Dev Mode)
 
+Start the core stack first (`make up-core` or `docker compose up -d`). The
+dev container joins its `vrsky-network` and Vite proxies `/api` to
+`http://management-api:3000` there; without the stack, `up` stops with
+"network vrsky-network declared as external, but could not be found".
+
 ```bash
 # Serves UI on http://localhost:5173 with hot reload
 docker compose -f docker-compose.ui.yml --profile dev up -d ui
 ```
+
+Running `npm run dev` on the host instead needs no container: the proxy
+defaults to `http://localhost:3000`, where the stack publishes the API. Set
+`API_PROXY_TARGET` to point it at another API.
 
 #### Option 2: Build UI Production Image
 
