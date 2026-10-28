@@ -77,6 +77,10 @@ dev container joins its `vrsky-network` and Vite proxies `/api` to
 docker compose -f docker-compose.ui.yml --profile dev up -d ui
 ```
 
+Stop it (`docker compose -f docker-compose.ui.yml --profile dev down`)
+before you take the core stack down, or the stack's `down` can't remove
+`vrsky-network` while the UI container is still on it.
+
 Running `npm run dev` on the host instead needs no container: the proxy
 defaults to `http://localhost:3000`, where the stack publishes the API. Set
 `API_PROXY_TARGET` to point it at another API.

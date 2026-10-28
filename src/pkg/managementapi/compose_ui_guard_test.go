@@ -3,6 +3,7 @@ package managementapi
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -514,8 +515,8 @@ func checkDevUIProxy(uiFile, core composeFile) []string {
 		bad = append(bad, fmt.Sprintf("ui doesn't set %s, so Vite proxies /api to localhost:3000, which inside the container is the container itself", apiProxyEnv))
 	} else {
 		listen, _ := composeEnvValue(api, "MGMT_API_LISTEN")
-		_, port, _ := strings.Cut(listen, ":")
-		if port == "" {
+		_, port, err := net.SplitHostPort(listen)
+		if err != nil || port == "" {
 			bad = append(bad, fmt.Sprintf("docker-compose.yml: %s sets no MGMT_API_LISTEN port to check %s against", apiService, apiProxyEnv))
 		} else if want := "http://" + apiService + ":" + port; strings.TrimRight(target, "/") != want {
 			bad = append(bad, fmt.Sprintf("ui sets %s=%q; want %q (%s's service name and MGMT_API_LISTEN port)", apiProxyEnv, target, want, apiService))
