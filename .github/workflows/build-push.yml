@@ -143,7 +143,7 @@ jobs:
           pkgs="$(../.github/scripts/go-test-shards.sh "${{ matrix.shard }}")"
           echo "shard ${{ matrix.shard }}: $(echo "$pkgs" | wc -l) packages"
           # shellcheck disable=SC2086 # one argument per package
-          go test -v -cover $pkgs 2>&1 | tee "$RUNNER_TEMP/go-test.log" # MUTATION: -race only in a comment
+          go test -v -race -cover $pkgs 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           # The database tests skip themselves when the variable is missing,
           # and a skip is invisible: three of them went unrun in CI for
           # months because nothing set the variable they waited for. Here a
@@ -197,6 +197,7 @@ jobs:
             groups:
               - pipeline-down-polled
               - pipeline-down-after-park
+              - dlq-growing
               - jetstream-lag-high
               - cert-expiry-soon
               - mgmt-api-error-rate
@@ -275,6 +276,7 @@ jobs:
         with:
           go-version: '1.26'
           check-latest: true # the newest 1.26 patch, not the runner's cached one (stdlib advisories)
+          cache: false
 
       - name: Lint cache week
         id: week
@@ -367,8 +369,9 @@ jobs:
         # TestGoTestsAggregatorFailsWhenANeededJobDid runs this script.
         run: |
           echo "shards: $SHARDS, lint: $LINT, alert rules: $RULES"
-          [ "$SHARDS" = success ] && [ "$LINT" = success ] && [ "$RULES" = success ]
-          echo "MUTATION: checked"
+          [ "$SHARDS" = success ] || exit 1
+          [ "$LINT" = success ] || exit 1
+          [ "$RULES" = success ] || exit 1
 
   # The remote agent (#266) runs on customer Windows machines. The Windows-only
   # code — the credential's ACL, atomic rename over a locked file, the service
