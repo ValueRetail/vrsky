@@ -153,7 +153,7 @@ connector right now), `src/cmd/remote-agent`, `.github/workflows`,
   tenant's writes, and its retry can't displace the real tenant's. Both
   functions are new in this PR, so this changes no released API. The stop
   handlers still cancel by connection ID whatever tenant the command names;
-  that is older than this change and goes to backlog item 92 for a human,
+  that is older than this change and goes to backlog item 95 for a human,
   since it is a tenant-isolation change to every consumer.
 - Sitoo is left on `Reserve` for now (it writes no status, so #423 does not
   apply); switching it is a one-line follow-up, noted in the backlog.

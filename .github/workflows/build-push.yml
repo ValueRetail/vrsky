@@ -650,6 +650,13 @@ jobs:
           for c in $CONNECTORS; do case "$c" in *-consumer|remote-agent) consumers="$consumers vrsky-$c";; esac; done
           if [ "$CONNECTORS_MANIFEST" = true ]; then consumers="vrsky-webhook-consumer vrsky-business-central-consumer vrsky-remote-agent"; fi
           infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/smoke-prod.sh $consumers"
+      # The backup Job pulls with a copy of vrsky-platform's acr-pull. Refresh
+      # it on every deploy, so an ACR password rotation reaches it without a
+      # Catch up (#431). Only that Secret: the CronJob's suspend is left alone.
+      # A no-op on a cluster without the source Secret.
+      - name: Refresh the acr-pull copy in vrsky-database
+        if: steps.cluster.outputs.state == 'Running'
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/copy-acr-pull.sh"
       # The management-DB backup CronJob (#395). Suspended until a human has
       # created vrsky-backup-config; the script never touches that Secret.
       # After the smoke check, so a failing apply can't hide its result.

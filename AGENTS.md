@@ -254,7 +254,9 @@ the affected images are built in ACR. Then:
   changed;
 - a change to `infrastructure/prometheus-rules.yml` or
   `infrastructure/kubernetes/monitoring/` runs `install-monitoring.sh`;
-- a smoke check finishes the run.
+- a smoke check runs; after it, every deploy refreshes the `acr-pull`
+  copy in `vrsky-database` (`copy-acr-pull.sh`), and a backup change
+  applies the backup CronJob (`deploy-backup-azure.sh`).
 
 A change under `src/pkg` (or `src/go.mod`, or any `src/cmd/*/Dockerfile`)
 rebuilds and restarts every Go service; one that touches only docs, plans
