@@ -241,7 +241,7 @@ Last updated 2026-10-27.
     every 5 s per connection that is publishing, and past jsonb's size
     limit the save fails. Store it incrementally (a row per name, or only
     the changes) or save less often. Found in review of #391.
-42. **One failed directory read republishes the whole folder**
+42. ~~**One failed directory read republishes the whole folder**~~ (#398)
     (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
     set when `os.ReadDir` fails, so `pollOnce` drops every known name as
     deleted and publishes them all again on the next good read. Older than
@@ -297,6 +297,22 @@ Last updated 2026-10-27.
     `wsUrl` from `ui/src/config/env.ts` (and the `VITE_WS_URL` mentions in
     the docs), or, if something should use the stream, make it relative
     like `api.ts`. Found during #399.
+50. **A file folder that can't be read only shows up in the log**
+    (`src/cmd/file-consumer/service.go`, `noteReadFailure`). Since #398 the
+    connection shows as `running` while its folder is unreadable, and the
+    only sign is one Warn in the file-consumer log. `noteReadFailure` could
+    emit a `FileEvent{Type: "error"}` on each failed poll. The File watcher
+    panel already shows those in red (`ui/src/pages/PipelineBuilder.tsx`),
+    and `emitEvent` only reaches live subscribers, so it costs nothing
+    when no panel is open. Found in review of #398.
+51. **A failed checkpoint read during a deferred baseline loses files**
+    (`src/cmd/file-consumer/known.go`, `loadKnown`). When the start could
+    not read the folder (#398), the first good read calls `loadKnown`. If
+    the checkpoint read fails then, it falls back to "everything present is
+    done", and that set is saved on the first real change, so files that
+    landed during the outage are never published. `takeDeferredBaseline`
+    already retries every poll, so it could stay deferred on a checkpoint
+    error instead. Found in review of #398.
 
 ## Human
 
