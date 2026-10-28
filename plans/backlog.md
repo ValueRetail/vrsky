@@ -626,7 +626,7 @@ Last updated 2026-10-28.
     Capture the output and print only a generic line and the exit code, as
     `copy-acr-pull.sh` does since #431, with a stub test like
     `TestCopyACRPullScript`'s "apply fails". `deploy-ui-azure.sh`'s copy
-    into `vrsky-ui` has the same leak; fix it with item 92.
+    into `vrsky-ui` has the same leak; fix it with item 93.
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in review
     of #431.
 

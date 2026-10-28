@@ -45,7 +45,7 @@ script.
      can print the patch, new `.dockerconfigjson` included, and the deploy
      log is public to anyone with repo access, so on a failure the script
      prints only a generic line and the exit code. The same leak in
-     `deploy-backup-azure.sh` and `deploy-ui-azure.sh` is backlog item 93.
+     `deploy-backup-azure.sh` and `deploy-ui-azure.sh` is backlog item 94.
    - Touches nothing but that one Secret. It never reads or applies the
      CronJob, so it can't change `suspend`. That's the reason for not just
      running `deploy-backup-azure.sh` on every deploy: it re-decides
