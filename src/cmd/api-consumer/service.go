@@ -42,6 +42,8 @@ type apiConsumer struct {
 	// Active pipelines: connectionId → cancel function
 	activePipelines map[string]context.CancelFunc
 	mu              sync.RWMutex
+	// starts holds the claim of each start in progress (#397); guarded by mu.
+	starts sdk.StartGuard
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -124,6 +126,8 @@ func (s *apiConsumer) Stop(ctx context.Context) error {
 		cancel()
 	}
 	s.activePipelines = make(map[string]context.CancelFunc)
+	// A start still in flight must not leave a poller nobody will cancel.
+	s.starts.StopAllLocked()
 	s.mu.Unlock()
 
 	select {
@@ -156,13 +160,16 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	_ = ctx
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
-	s.mu.RLock()
-	_, exists := s.activePipelines[connectionID]
-	s.mu.RUnlock()
-	if exists {
-		s.logger.Warn("Pipeline already running", "connection_id", connectionID)
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of starting a second poller (#397).
+	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.activePipelines[connectionID]; return ok })
+	if !ok {
+		s.logger.Warn("Pipeline already running or starting", "connection_id", connectionID)
 		return
 	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 
 	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
@@ -181,9 +188,12 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	s.mu.Lock()
-	s.activePipelines[connectionID] = cancel
-	s.mu.Unlock()
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { s.activePipelines[connectionID] = cancel }) {
+		cancel()
+		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
+		return
+	}
 
 	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
 		s.logger.Error("Failed to update connection status", "error", err)
@@ -208,9 +218,15 @@ func (s *apiConsumer) handleStopCommand(msg *nats.Msg) {
 		cancel()
 		delete(s.activePipelines, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of finishing after the stop (#397).
+	starting := s.starts.StopLocked(cmd.ConnectionID)
 	s.mu.Unlock()
 
 	if !exists {
+		if starting {
+			s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+			return
+		}
 		s.logger.Warn("Pipeline not running", "connection_id", cmd.ConnectionID)
 		return
 	}

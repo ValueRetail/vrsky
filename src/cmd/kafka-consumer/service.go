@@ -46,6 +46,8 @@ type kafkaConsumer struct {
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
+	// starts holds the claim of each start in progress (#397); guarded by mu.
+	starts sdk.StartGuard
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -146,6 +148,8 @@ func (k *kafkaConsumer) Stop(ctx context.Context) error {
 		cancel()
 	}
 	k.active = make(map[string]context.CancelFunc)
+	// A start still in flight must not leave a poller nobody will cancel.
+	k.starts.StopAllLocked()
 	k.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -169,13 +173,16 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	_ = ctx
 	logger := k.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
-	k.mu.RLock()
-	_, exists := k.active[connectionID]
-	k.mu.RUnlock()
-	if exists {
-		logger.Warn("Kafka consumer already running")
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of starting a second poller (#397).
+	claim, ok := k.starts.Reserve(&k.mu, connectionID, func() bool { _, ok := k.active[connectionID]; return ok })
+	if !ok {
+		logger.Warn("Kafka consumer already running or starting")
 		return
 	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 
 	cfg, ok := k.getKafkaConfig(connectionID, tenantID)
 	if !ok {
@@ -188,9 +195,12 @@ func (k *kafkaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	k.mu.Lock()
-	k.active[connectionID] = cancel
-	k.mu.Unlock()
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { k.active[connectionID] = cancel }) {
+		cancel()
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		return
+	}
 	_ = k.updateConnectionStatus(connectionID, tenantID, "running")
 
 	logger.Info("Starting Kafka consumer", "brokers", cfg.Brokers, "topic", cfg.Topic, "group", cfg.ConsumerGroup, "auth", cfg.AuthType)
@@ -209,7 +219,12 @@ func (k *kafkaConsumer) handleStopCommand(msg *nats.Msg) {
 		cancel()
 		delete(k.active, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of finishing after the stop (#397).
+	starting := k.starts.StopLocked(cmd.ConnectionID)
 	k.mu.Unlock()
+	if starting {
+		k.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+	}
 	if exists {
 		_ = k.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped")
 		k.logger.Info("Kafka consumer stopped", "connection_id", cmd.ConnectionID)

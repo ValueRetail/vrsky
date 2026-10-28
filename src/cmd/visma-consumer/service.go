@@ -39,6 +39,8 @@ type vismaConsumer struct {
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
+	// starts holds the claim of each start in progress (#397); guarded by mu.
+	starts sdk.StartGuard
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -126,6 +128,8 @@ func (c *vismaConsumer) Stop(ctx context.Context) error {
 		cancel()
 	}
 	c.active = make(map[string]context.CancelFunc)
+	// A start still in flight must not leave a poller nobody will cancel.
+	c.starts.StopAllLocked()
 	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -149,12 +153,15 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	_ = ctx
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
-	c.mu.RLock()
-	_, exists := c.active[connectionID]
-	c.mu.RUnlock()
-	if exists {
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of starting a second poller (#397).
+	claim, ok := c.starts.Reserve(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok })
+	if !ok {
 		return
 	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Visma consumer for this connection", "error", err)
@@ -170,9 +177,12 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.mu.Lock()
-	c.active[connectionID] = cancel
-	c.mu.Unlock()
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { c.active[connectionID] = cancel }) {
+		cancel()
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		return
+	}
 
 	logger.Info("Starting Visma poller", "resource", cfg.Resource, "interval", cfg.PollIntervalSeconds)
 	go c.runPoller(ctx, connectionID, tenantID, cfg)
@@ -188,6 +198,8 @@ func (c *vismaConsumer) handleStopCommand(msg *nats.Msg) {
 		cancel()
 		delete(c.active, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of finishing after the stop (#397).
+	c.starts.StopLocked(cmd.ConnectionID)
 	c.mu.Unlock()
 }
 

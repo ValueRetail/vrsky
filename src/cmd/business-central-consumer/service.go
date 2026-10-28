@@ -57,6 +57,8 @@ type bcConsumer struct {
 
 	active map[string]*poller
 	mu     sync.RWMutex
+	// starts holds the claim of each start in progress (#397); guarded by mu.
+	starts sdk.StartGuard
 
 	startSub, stopSub, resendSub *nats.Subscription
 }
@@ -208,6 +210,8 @@ func (c *bcConsumer) Stop(ctx context.Context) error {
 		p.cancel()
 	}
 	c.active = make(map[string]*poller)
+	// A start still in flight must not leave a poller nobody will cancel.
+	c.starts.StopAllLocked()
 	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -231,12 +235,15 @@ func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	_ = ctx
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
-	c.mu.RLock()
-	_, exists := c.active[connectionID]
-	c.mu.RUnlock()
-	if exists {
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of starting a second poller (#397).
+	claim, ok := c.starts.Reserve(&c.mu, connectionID, func() bool { _, ok := c.active[connectionID]; return ok })
+	if !ok {
 		return
 	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
 		logger.Debug("Not a Business Central consumer for this connection", "error", err)
@@ -257,9 +264,12 @@ func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &poller{cancel: cancel, resend: make(chan struct{}, 1)}
-	c.mu.Lock()
-	c.active[connectionID] = p
-	c.mu.Unlock()
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { c.active[connectionID] = p }) {
+		cancel()
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		return
+	}
 
 	logger.Info("Starting Business Central poller", "entity", cfg.effectiveEntity(), "interval", cfg.PollIntervalSeconds, "pictures", cfg.Pictures)
 	go c.runPoller(ctx, connectionID, tenantID, cfg, p.resend)
@@ -296,6 +306,8 @@ func (c *bcConsumer) handleStopCommand(msg *nats.Msg) {
 		p.cancel()
 		delete(c.active, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of finishing after the stop (#397).
+	c.starts.StopLocked(cmd.ConnectionID)
 	c.mu.Unlock()
 }
 
