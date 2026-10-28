@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/ValueRetail/vrsky/pkg/auth"
 	"github.com/ValueRetail/vrsky/pkg/notify"
 )
@@ -28,6 +30,7 @@ type resetRepo struct {
 	*loginRepo
 	tokens      map[string]*PasswordResetToken // by hash
 	invalidated []string                       // user ids
+	updated     *User                          // the user UpdateUserPassword last changed
 }
 
 func (r *resetRepo) CreatePasswordResetToken(_ context.Context, userID, tokenHash string, expiresAt time.Time) error {
@@ -60,6 +63,7 @@ func (r *resetRepo) UpdateUserPassword(_ context.Context, userID, hash string) e
 	for _, u := range r.users {
 		if u.ID == userID {
 			u.PasswordHash = hash
+			r.updated = u
 			return nil
 		}
 	}
@@ -85,15 +89,17 @@ func (r *resetRepo) ValidateSession(_ context.Context, tokenHash string) (*Sessi
 
 type resetEnv struct {
 	*loginEnv
-	repo  *resetRepo
-	mails []sentMail
+	t       *testing.T
+	repo    *resetRepo
+	mails   []sentMail
+	changes int // successful change-password requests so far
 }
 
 // newResetEnv is a loginEnv that can send mail to https://vrsky.example.
 func newResetEnv(t *testing.T) *resetEnv {
 	t.Helper()
 	base := newLoginEnv(t)
-	e := &resetEnv{loginEnv: base, repo: &resetRepo{loginRepo: base.repo, tokens: map[string]*PasswordResetToken{}}}
+	e := &resetEnv{loginEnv: base, t: t, repo: &resetRepo{loginRepo: base.repo, tokens: map[string]*PasswordResetToken{}}}
 	e.h.repo = e.repo
 	e.h.mailer = notify.MailerFunc(func(_ context.Context, to, subject, body string) error {
 		e.mails = append(e.mails, sentMail{to, subject, body})
@@ -117,8 +123,35 @@ func (e *resetEnv) change(sessionToken, current, next string) *httptest.Response
 	req.Header.Set("Authorization", "Bearer "+sessionToken)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	e.repo.updated = nil
 	e.h.ChangePassword(rec, req)
+	if rec.Code == http.StatusOK {
+		e.changes++
+		e.cheapen(next)
+	}
 	return rec
+}
+
+// cheapen re-stores a password ChangePassword just changed at bcrypt.MinCost.
+// ChangePassword hashes at cost 12, and every later login and change verifies
+// against that hash, seconds each under -race. The first change in a test
+// keeps the hash the handler stored, so the next login still checks that the
+// real path stored a hash of the new password. A 200 that stored nothing
+// fails here: re-storing the password would otherwise hide it.
+func (e *resetEnv) cheapen(password string) {
+	e.t.Helper()
+	u := e.repo.updated
+	if u == nil {
+		e.t.Fatal("change-password answered 200 but stored no new password")
+	}
+	if e.changes == 1 {
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	u.PasswordHash = string(hash)
 }
 
 var linkRe = regexp.MustCompile(`https?://\S+`)
