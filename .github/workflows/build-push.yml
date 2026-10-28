@@ -232,14 +232,16 @@ jobs:
         uses: actions/checkout@v5
 
       # RULE_GROUPS, not GROUPS: bash keeps GROUPS for the user's group ids
-      # and ignores an assignment to it.
+      # and ignores an assignment to it. The image runs as nobody, who
+      # cannot write the JUnit report into the runner's temp dir, hence
+      # --user.
       - name: Alert rules (promtool)
         env:
           RULE_GROUPS: ${{ join(matrix.groups, ' ') }}
         run: |
           docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
           run_re="^($(echo $RULE_GROUPS | tr ' ' '|'))\$"
-          docker run --rm -v "$PWD/infrastructure":/cfg -v "$RUNNER_TEMP":/out --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml --run="$run_re" --junit=/out/rules.xml
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/infrastructure":/cfg -v "$RUNNER_TEMP":/out --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml --run="$run_re" --junit=/out/rules.xml
           want=$(echo $RULE_GROUPS | wc -w)
           ran=$(grep -o '<testcase ' "$RUNNER_TEMP/rules.xml" | wc -l)
           echo "ran $ran of the $want test groups this leg names"
