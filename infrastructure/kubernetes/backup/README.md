@@ -27,7 +27,7 @@ scheduled for 02:00 UTC daily, which would give a recovery point objective
    pulling from ACR there needs one first.
 2. Create the config Secret with the object-store target + the master key.
    On AKS the database and its user are both `vrsky`, not
-   `postgres`/`management_db` as below (backlog item 36).
+   `postgres`/`management_db` as below (backlog item 44).
 
 ```sh
 kubectl -n vrsky-database create secret generic vrsky-backup-config \

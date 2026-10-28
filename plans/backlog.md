@@ -73,7 +73,7 @@ Last updated 2026-10-27.
     done, and once the name is known the finished file is never published.
     Wait until size and mtime are unchanged across two polls (or skip
     dotfiles and temp names) before ingesting. Found during #362.
-20. **Two starts for one file connection can race**
+20. ~~**Two starts for one file connection can race**~~ (#375)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The "already
     active" check and the insert are separate lock sections, and the boot
     restore runs alongside the start-command handler, so a start command
@@ -85,7 +85,7 @@ Last updated 2026-10-27.
     (`infrastructure/kubernetes/ui/deployment.yaml`). A tmpfs on `/var/run`
     (uid/gid 101) for `ui-prod` in `docker-compose.ui.yml`, or a pid path
     the image can write, would make it run. Found in #370.
-22. **The Dockerfile guard test doesn't apply `.dockerignore`**
+22. ~~**The Dockerfile guard test doesn't apply `.dockerignore`**~~ (#385)
     (`src/pkg/managementapi/makefile_guard_test.go`). It checks that each
     COPY/ADD source in `ui/Dockerfile` exists under the build context, but
     not that the root `.dockerignore` lets it through. Changing `!ui` to
@@ -135,7 +135,7 @@ Last updated 2026-10-27.
     it or renames a new `orders.csv` over it is ignored, unless the name
     disappeared for at least one poll in between. Decide whether a changed
     size or mtime on a known name means a new file. Found during #374.
-30. **Files still settling at a stop or restart are never published**
+30. ~~**Files still settling at a stop or restart are never published**~~ (#391)
     (`src/cmd/file-consumer/service.go`, `startConnection`). The baseline
     taken at start counts every name in the directory as already there, so
     a file that landed before a stop or restart but had not been published
@@ -143,8 +143,8 @@ Last updated 2026-10-27.
     has grown from at most 5 s to at most 10 s now that a file needs two
     unchanged polls. Persisting what was published, or treating files newer
     than the last stop as new, would close it. Found in review of #374.
-31. **`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
-    `VITE_ENVIRONMENT`** on both the `ui` dev service and `ui-prod`. The UI
+31. ~~**`docker-compose.ui.yml` sets `VITE_API_BASE_URL` and
+    `VITE_ENVIRONMENT`**~~ (#392) on both the `ui` dev service and `ui-prod`. The UI
     never reads either name (`ui/src/config/env.ts` reads `VITE_API_URL`,
     `VITE_WS_URL` and others), so they do nothing and suggest the API URL
     can be set there. Drop them from both services. The file's `version:`
@@ -158,8 +158,8 @@ Last updated 2026-10-27.
     read the original TypeScript. Decide whether that's wanted; if not, turn
     it off for the production build or upload the maps somewhere private.
     Found in #380.
-33. **The PowerShell key generator in `docs/operator/windows.md` isn't
-    cryptographic.** It builds `ENCRYPTION_KEY` from `Get-Random`, which is
+33. ~~**The PowerShell key generator in `docs/operator/windows.md` isn't
+    cryptographic.**~~ (#387) It builds `ENCRYPTION_KEY` from `Get-Random`, which is
     `System.Random`, not a CSPRNG. Use
     `[System.Security.Cryptography.RandomNumberGenerator]` instead
     (`::Create().GetBytes($b)` works on Windows PowerShell 5.1 as well as 7),
@@ -175,7 +175,79 @@ Last updated 2026-10-27.
     variable mounted at a fixed Linux path, with `HOST_HOME` translating
     editor paths), plus a check that a Unix-style shell's
     `HOME=/c/Users/...` doesn't hit the same trap. Found in review of #381.
-35. **The management-api README still places it behind Traefik.**
+35. **The other consumers have the start race #375 fixed in the file
+    consumer.** db, api, salesforce, cloud-storage, sftp, sitoo, brightpearl,
+    visma, business-central, kafka, rabbitmq, sap-s4hana and tenant each
+    check "already active" under `RLock`, release it, do the slow work and
+    insert later, while `sdk.RestoreRunning` runs alongside the
+    start-command handler. A start command during boot restore can start a
+    second poller for one connection. Port the reservation from `src/cmd/file-consumer/service.go`
+    (`reserveStart`/`activateStart`/`releaseStart`), or move it into the SDK
+    so each consumer gets it once. Until then the comment on
+    `RestoreRunning` (`src/pkg/sdk/restore.go`) that a start command during
+    the scan is harmless holds only for the file consumer. Found during #375.
+36. **A stop just after a file connection becomes active can leave the
+    database saying `running`** (`src/cmd/file-consumer/service.go`,
+    `startConnection`). The `running` status write comes after the
+    connection is in `activeConnections`. A stop landing in between cancels
+    the watcher and writes `stopped`, then the start writes `running`. Older
+    than #375, which closed the same gap for a stop that lands earlier in
+    the start. Found during #375.
+37. **A start refused while another start is in flight is lost if that one
+    fails** (`src/cmd/file-consumer/service.go`, `startConnection`). Since
+    #375 a second start for a connection that is already starting returns
+    at once. If the first then fails (say a transient database error during
+    boot restore), the second start, which might have succeeded, is not
+    retried and the connection stays down until someone starts it again.
+    A "start again" flag on the reservation would cover it. Found by the
+    test author on #375.
+38. **A test-only change rebuilds every Go image**
+    (`infrastructure/azure/affected.sh`, the `src/pkg/*` case around line
+    36). Any change under `src/pkg/`, `_test.go` files included, marks all
+    Go images as affected, so a PR that only adds a test (#379's guard test,
+    for one) rebuilds about 37 images in ACR and restarts every connector
+    whose image digest changed. Skip `_test.go` files (and probably
+    `testdata/`) there and in the `src/cmd/*` case. The script is under
+    `infrastructure/azure/**`, so the fix is a PR labelled
+    `agent:needs-human`, not an agent merge. Found during #375.
+39. **The `ui` dev service in `docker-compose.ui.yml` can't reach the API.**
+    The axios client (`ui/src/services/api.ts`) always sends relative
+    `/api/...` requests, and Vite's proxy in `ui/vite.config.ts` forwards
+    them to a hardcoded `http://localhost:3000`. Inside the container that
+    is the container itself, so every API call fails; no `VITE_*` variable
+    changes it. `npm run dev` on the host doesn't have the problem, since
+    the local stack publishes the management API on `127.0.0.1:3000`.
+    `host.docker.internal` won't help: that port is published on
+    127.0.0.1 only. A fix that works on every platform: let
+    `vite.config.ts` take the proxy target from an env var (default
+    `http://localhost:3000`), put the `ui` service on the stack's external
+    `vrsky-network`, and set the target to `http://management-api:3000`.
+    Or drop the dev service and point "Option 1" in
+    `docs/DEPLOYMENT_GUIDE.md` at `npm run dev`. Found in #392.
+40. **Two file-consumer pods watch the same folders during a deploy.**
+    The file-consumer Deployment (`infrastructure/kubernetes/connectors/connectors.yaml`)
+    has one replica and the default RollingUpdate strategy, so the new pod
+    starts and restores every running file connection before the old one
+    stops. For those seconds both pods poll the same folders on the shared
+    volume, and a file that lands then can be published by both. #391 has
+    each watcher re-read the saved done set before publishing, which
+    narrows this, but only `strategy: Recreate` (or a per-connection lease)
+    closes it. Manifest change: PR plus `agent:needs-human`. Found during
+    #391.
+41. **The file consumer's saved done set is rewritten and re-read in full
+    on every busy poll** (`src/cmd/file-consumer/known.go`, `saveKnown`
+    and `mergeSaved`). The whole name list is one jsonb value in
+    `connection_node_checkpoints.state`: about 3 MB per 100 000 names,
+    every 5 s per connection that is publishing, and past jsonb's size
+    limit the save fails. Store it incrementally (a row per name, or only
+    the changes) or save less often. Found in review of #391.
+42. **One failed directory read republishes the whole folder**
+    (`src/cmd/file-consumer/service.go`, `listFiles`). It returns an empty
+    set when `os.ReadDir` fails, so `pollOnce` drops every known name as
+    deleted and publishes them all again on the next good read. Older than
+    #391, which now also saves that empty set. A failed read should skip
+    the poll. Found in review of #391.
+43. **The management-api README still places it behind Traefik.**
     `infrastructure/kubernetes/management-api/README.md` says the replicas
     run "behind the Service / Traefik gateway" and advises sticky sessions
     for SSE "at Traefik". Production runs ingress-nginx, and the browser
@@ -184,20 +256,20 @@ Last updated 2026-10-27.
     client to one management-api replica. Rework the advice for the real
     path. Production runs one replica today (`deploy-azure.sh`), so nothing
     is broken yet. Found in #386.
-36. **The backup Secret example names the wrong database for AKS.**
+44. **The backup Secret example names the wrong database for AKS.**
     `infrastructure/kubernetes/backup/README.md` builds `BACKUP_DB_URL` as
     `postgres://postgres:…/management_db`, but on AKS the database and its
     user are both `vrsky` (`infrastructure/kubernetes/postgresql/configmap.yaml`,
     `infrastructure/azure/rotate-secrets.sh`). Fix it together with item 27,
     and have `docs/DR.md` use the same names. Found in #386.
-37. **The encryption-at-rest table reads as if every layer is in place.**
+45. **The encryption-at-rest table reads as if every layer is in place.**
     `docs/DEPLOYMENT_GUIDE.md` lists an encrypted StorageClass and MinIO
     SSE through KES, but on AKS `deploy-azure.sh` uses `managed-csi`, and no
     script or workflow applies `infrastructure/kubernetes/encryption/`. Say
     which layers production has (Azure disks are encrypted at rest by the
     platform; whether with a customer key can't be told from the repo) and
     which are optional overlays. Found in #386.
-38. **The whitepaper promises inbound mTLS for webhooks that production
+46. **The whitepaper promises inbound mTLS for webhooks that production
     can't do.** `docs/security/whitepaper.md` section 4 says a webhook
     consumer can require a client certificate. That needs the worker's TLS
     listener, but no Kubernetes manifest sets `WORKER_MTLS_PORT`, and the
@@ -205,14 +277,14 @@ Last updated 2026-10-27.
     ingress-nginx terminates TLS and the worker never sees a client cert.
     Either wire it up or say it's compose-only for now. Found in review of
     #386.
-39. **The encryption-at-rest checklist says `sslmode=require`; production
+47. **The encryption-at-rest checklist says `sslmode=require`; production
     uses `disable`.** `docs/operator/encryption-at-rest.md` tells operators
     to use TLS to the databases in production, but the AKS connection
     strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`,
     `infrastructure/kubernetes/postgresql/secret.example.yaml`). Either turn
     on TLS for Postgres or make the checklist say where production stands.
     Found in review of #386.
-40. **The CNPG manifest calls the restore drill a backup.** The comment in
+48. **The CNPG manifest calls the restore drill a backup.** The comment in
     `infrastructure/kubernetes/postgresql/cnpg-cluster.yaml` says backups
     are "covered by the vrsky-cli drill (#86)". The drill tests the tooling
     in CI and backs nothing up (`docs/DR.md`). Fix the comment. It's a

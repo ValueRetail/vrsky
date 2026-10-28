@@ -121,7 +121,7 @@ Kubernetes manifests exist but aren't wired up, and production has no Traefik.
 - The other rows of the encryption-at-rest table (encrypted StorageClass,
   KES): not part of this issue, and nothing on AKS applies them either
   (`git grep -i -E "kes|vrsky-encrypted|encryption/" -- infrastructure/azure
-  .github/workflows` finds nothing relevant). New backlog item 37.
+  .github/workflows` finds nothing relevant). New backlog item 45.
 
 ## Files
 
@@ -132,7 +132,7 @@ Kubernetes manifests exist but aren't wired up, and production has no Traefik.
 - `docs/security/whitepaper.md`
 - `infrastructure/kubernetes/backup/README.md`
 - `infrastructure/kubernetes/encryption/README.md`
-- `plans/backlog.md` (strike 28, add items 35 to 37)
+- `plans/backlog.md` (strike 28, add items 43 to 48 after renumbering)
 - this plan
 
 Two READMEs sit under `infrastructure/kubernetes/`. They are docs, no
