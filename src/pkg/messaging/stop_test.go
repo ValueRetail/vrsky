@@ -937,3 +937,86 @@ func TestShortAckWaitPollsShorter(t *testing.T) {
 		}
 	}
 }
+
+// TestPollFollowsShortestAckWait: the poll is pollWait, or a quarter of the
+// shortest ack wait the server may apply, floored at 10 ms. With a backoff
+// schedule the server's ack wait for delivery n is Backoff[n-1], so a short
+// later step counts, not only AckWait (Backoff[0]).
+func TestPollFollowsShortestAckWait(t *testing.T) {
+	ms := time.Millisecond
+	cases := []struct {
+		name    string
+		ackWait time.Duration
+		backoff []time.Duration
+		want    time.Duration
+	}{
+		{"default schedule", time.Second, DefaultBackoff, pollWait},
+		{"long AckWait", 30 * time.Second, []time.Duration{30 * time.Second}, pollWait},
+		{"short AckWait", 300 * ms, []time.Duration{300 * ms, 300 * ms}, 75 * ms},
+		{"short later step", 400 * ms, []time.Duration{400 * ms, 60 * ms, 60 * ms}, 15 * ms},
+		{"tiny step floored", time.Second, []time.Duration{time.Second, 8 * ms}, 10 * ms},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Subscriber{opts: SubscriberOpts{AckWait: tc.ackWait, Backoff: tc.backoff}}
+			if got := s.poll(); got != tc.want {
+				t.Errorf("poll() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShortBackoffStepPollsShorter: the AckWait is 400 ms but the second
+// delivery's ack wait is the backoff's 60 ms step. A first delivery NAK'd at
+// once comes back into the next fetch; if that fetch held it longer than
+// 60 ms before dispatching, the server would redeliver it into the same fetch
+// and it would be handled a third time. Exactly two calls, on deliveries 1
+// and 2.
+func TestShortBackoffStepPollsShorter(t *testing.T) {
+	_, js, cleanup := startServer(t)
+	defer cleanup()
+
+	for i := 0; i < 4; i++ {
+		durable := fmt.Sprintf("stop-short-step-%d", i)
+		opts := stopOpts(durable, durable, 32)
+		opts.Backoff = []time.Duration{400 * time.Millisecond, 60 * time.Millisecond, 60 * time.Millisecond, 60 * time.Millisecond}
+		var mu sync.Mutex
+		var calls []uint64
+		sub, err := Subscribe(js, opts, func(_ context.Context, m *nats.Msg) error {
+			var nd uint64
+			if md, err := m.Metadata(); err == nil {
+				nd = md.NumDelivered
+			}
+			mu.Lock()
+			calls = append(calls, nd)
+			n := len(calls)
+			mu.Unlock()
+			if n == 1 {
+				return errors.New("first attempt fails")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Subscribe: %v", err)
+		}
+		waitFetching(t, js, durable)
+		if err := publishStop(js, durable, durable, durable); err != nil {
+			sub.Stop()
+			t.Fatalf("publish: %v", err)
+		}
+		waitFor(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return len(calls) >= 2
+		}, 5*time.Second)
+		// Room for a third delivery to show up.
+		time.Sleep(300 * time.Millisecond)
+		timedStop(t, sub.Stop)
+		mu.Lock()
+		got := append([]uint64(nil), calls...)
+		mu.Unlock()
+		if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+			t.Errorf("iter %d: handled on deliveries %v, want [1 2]", i, got)
+		}
+	}
+}

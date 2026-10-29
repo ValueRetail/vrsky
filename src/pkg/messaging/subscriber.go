@@ -349,6 +349,13 @@ func (s *Subscriber) Stop() {
 // to one poll on an idle subscriber, and when it drains the subscription the
 // server holds no pull request of ours that could still deliver into it
 // (#494).
+//
+// So handlers still run after Halt returns: the messages of that last poll
+// are dispatched then. Keep whatever the handlers need alive until Stop has
+// returned. A caller that ends the handlers' scope right after Halt has them
+// fail, and each such message is NAK'd with a delivery attempt spent (on its
+// last attempt, dead-lettered). The remote-agent gateway still does that
+// (#576).
 func (s *Subscriber) Halt() {
 	s.halt.Do(func() { close(s.stopCh) })
 }
@@ -371,11 +378,23 @@ func (s *Subscriber) loop() {
 		for _, m := range msgs {
 			s.dispatch(m)
 		}
-		if err == nil || errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+		if err == nil {
 			continue
 		}
-		s.opts.Logger.Warn("JetStream fetch failed",
-			"durable", s.opts.DurableName, "error", err)
+		// A fetch that ended without the server's word (no batch filled, no
+		// 408) may leave its pull request open on the server: the 2 s
+		// backstop here, a lost connection below. Those are the only cases,
+		// and both are logged as such.
+		if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			s.opts.Logger.Info("JetStream fetch ended without the server's answer; its pull request may still be open",
+				"durable", s.opts.DurableName, "error", err)
+			continue
+		}
+		attrs := []any{"durable", s.opts.DurableName, "error", err}
+		if errors.Is(err, nats.ErrFetchDisconnected) {
+			attrs = append(attrs, "pull_request_may_be_open", true)
+		}
+		s.opts.Logger.Warn("JetStream fetch failed", attrs...)
 		// The back-off holds no pull request, so a halt may end it.
 		t := time.NewTimer(500 * time.Millisecond)
 		select {
@@ -410,14 +429,20 @@ func (s *Subscriber) fetch() ([]*nats.Msg, error) {
 }
 
 // poll is how long the server holds this subscriber's pull requests:
-// pollWait, or a quarter of the AckWait when that is shorter. What a fetch
-// brings is dispatched once the fetch is over, so the first message of a
-// batch waits up to a whole poll without heartbeats. Held longer than the
-// AckWait, it would be redelivered into the same fetch and handled twice. The
-// default AckWait is a second, and nothing in production sets one below that;
-// some tests do.
+// pollWait, or a quarter of the shortest ack wait when that is shorter. What
+// a fetch brings is dispatched once the fetch is over, so the first message
+// of a batch waits up to a whole poll without heartbeats. Held longer than
+// its ack wait, it would be redelivered into the same fetch and handled
+// twice. With a backoff schedule the server's ack wait for delivery n is
+// Backoff[n-1], not AckWait (which is Backoff[0]), so the shortest step
+// counts. The default schedule starts at a second and only grows, and
+// nothing in production sets a shorter one; some tests do.
 func (s *Subscriber) poll() time.Duration {
-	return max(min(pollWait, s.opts.AckWait/4), 10*time.Millisecond)
+	ackWait := s.opts.AckWait
+	for _, b := range s.opts.Backoff {
+		ackWait = min(ackWait, b)
+	}
+	return max(min(pollWait, ackWait/4), 10*time.Millisecond)
 }
 
 // pollContext is the context a fetch runs under. nats.go sets a pull

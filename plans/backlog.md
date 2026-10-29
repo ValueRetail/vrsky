@@ -528,7 +528,9 @@ Last updated 2026-10-28.
     cleanup) and it slows every pipeline stop and redeploy. A fetch that
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
-    Found during #460.
+    Found during #460. Done with short polls instead; the remote-agent
+    gateway still ends its handlers' scope right after `Halt`, which is
+    #576.
 82. ~~**GCS `PutStream` commits a partial object when the body fails.**~~ (#524)
     `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
     which finalises the upload; aborting needs the writer's context
