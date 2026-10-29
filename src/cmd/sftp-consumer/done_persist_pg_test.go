@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,12 +94,22 @@ func (p *pdPG) rows(conn string) map[string]string {
 // end "stopped".
 func (p *pdPG) start(tenant, conn string, fake *fakeSFTP, log *pdLog) {
 	p.t.Helper()
+	// The poller opens its source first thing. Holding that open until the
+	// status has been read keeps the read off the one-shot's own "stopped"
+	// write, which a poll with nothing new reaches within milliseconds.
+	gate := make(chan struct{})
+	var release sync.Once
+	open := func() { release.Do(func() { close(gate) }) }
+	p.t.Cleanup(open)
 	c := &sftpConsumer{
-		db:          p.db,
-		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		active:      make(map[string]*activeConn),
-		publish:     log.publish,
-		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
+		db:      p.db,
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		active:  make(map[string]*activeConn),
+		publish: log.publish,
+		dial: func(*SFTPConfig) (sftpConn, error) {
+			<-gate
+			return fake, nil
+		},
 		checkpoints: checkpoint.NewPostgresStore(p.db),
 		// The one-shot's second look (#562), without the 5 s wait.
 		settleMin: 20 * time.Millisecond,
@@ -107,6 +118,7 @@ func (p *pdPG) start(tenant, conn string, fake *fakeSFTP, log *pdLog) {
 	if got := p.status(conn); got != "running" {
 		p.t.Fatalf("status after the start = %q, want running", got)
 	}
+	open()
 	harness.Eventually(p.t, pdWait, "the one-shot to end", func() bool {
 		c.mu.RLock()
 		n := len(c.active)
