@@ -42,6 +42,43 @@ Config bullets:
 }
 ```
 
+### What gets published, and when again (poll mode)
+
+In poll mode the consumer remembers which objects it published, with the
+size and last-modified time each had, in the connection's checkpoint (one
+per tenant, connection and node). It survives restarts, deploys and the
+nightly park, so with `after_action: "none"` an object left in the bucket is
+published once, not again at every start (#538).
+
+- **First start.** Every object already under the prefix is published. A
+  start after the provider, endpoint, account, bucket or prefix was edited
+  counts as a first start too.
+- **Replaced object.** An object overwritten under the same key (its size or
+  last-modified time changed) is published again, once.
+- **Deleted, then added again.** An object that a poll finds gone from the
+  listing is forgotten; if it comes back it is published again.
+- **Failed after-action.** If `delete` or `move` fails, the object is still
+  counted as published and stays where it is; it is not published or moved
+  again, also after a restart. The failure is in the log (`after-action
+  failed`).
+- **Checkpoint unreadable.** If the database can't be read at start, the
+  consumer publishes nothing and logs `Could not read which objects were
+  already published`. It tries again at every poll and carries on as normal
+  once the read works. A one-shot connection (`poll_interval_seconds: 0`)
+  ends with status `error` instead.
+- **Crash.** The list is saved every 32 objects and at the end of each poll,
+  so a crash in the middle of a long poll publishes at most the objects since
+  the last save again.
+
+An object replaced with the same size within the same second (S3 keeps
+last-modified times in whole seconds) looks unchanged and is not published
+again. Event mode doesn't use this list: there the queue's acknowledgement
+decides what was handled.
+
+After the release that added this, each running poll-mode connection's first
+start has no saved list yet, so it publishes what is under its prefix once
+more, as every restart did before.
+
 ## As a destination (producer)
 
 A producer node writes each incoming message as an object under `prefix` in

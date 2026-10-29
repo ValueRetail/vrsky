@@ -604,8 +604,8 @@ Last updated 2026-10-28.
     ending and stop writes add `AND started_at = $n`. Or route the writes
     through the StatusWrite ordering #423/#424 adds to `sdk.StartGuard`.
     Found in review of #456.
-92. **The SFTP and cloud-storage consumers forget what they published on
-    every restart.** Their done set is the in-memory `processed` map in
+92. ~~**The SFTP and cloud-storage consumers forget what they published on
+    every restart.**~~ (#538) Their done set is the in-memory `processed` map in
     `runPoller` (`src/cmd/sftp-consumer/service.go`,
     `src/cmd/cloud-storage-consumer/service.go`, poll mode). With `after_action:
     none`, every restart or deploy publishes every file still in the
@@ -725,6 +725,44 @@ Last updated 2026-10-28.
     managed disk (`docs/operator/cost-parking.md`). Check what production
     runs, then fix the header as #527 did for Postgres. Manifest, so PR
     plus `agent:needs-human`. Found in review of #527.
+106. **Run the SFTP and cloud-storage consumers with `strategy: Recreate`.**
+    Since #538 they keep their done set, so a restart no longer publishes
+    everything again, but a rolling deploy still runs two pods for a few
+    seconds. With `after_action: delete` or `move` both can list and
+    publish the same file before either removes it (#425's overlap). Set
+    `strategy: Recreate` on `vrsky-sftp-consumer` and
+    `vrsky-cloud-storage-consumer` in `connectors.yaml`, as #425 did for the
+    file consumer. Manifest, so PR plus `agent:needs-human`. Found in #538.
+107. **The SFTP consumer publishes a file still being uploaded.** It has no
+    stability check: a file listed mid-upload is published half-written.
+    Since #538 the next poll sees the new size and publishes the finished
+    file as well, so the complete file arrives, after a partial one. Wait
+    for the same size and mtime on two polls first, like the file consumer
+    (#374). Found in #538.
+108. **The SFTP and cloud-storage connector pages name fields the code
+    doesn't read.** `docs/connectors/sftp.md` says `sftp.path`; the consumer
+    reads `remote_dir` (and `file_pattern`, `poll_interval_seconds`,
+    `move_dir`, `host_key`, none documented). `cloud-storage.md` says
+    `event_mode`; the consumer reads `mode`, and `after_action`,
+    `move_prefix`, `file_pattern` and `poll_interval_seconds` are missing.
+    Check against `getSFTPConfig`/`getConfig` and the UI property panel.
+    Found in #538.
+109. **A done set's changes can be written on a snapshot nobody reads.**
+    `ownsSaved` (`src/pkg/doneset`, and `src/cmd/file-consumer/known.go`)
+    reads only the changes row. If another poller's snapshot and changes
+    reset land between that read and the changes write, or another poller
+    writes a snapshot and its changes reset fails, this poller keeps writing
+    changes on its old snapshot and every reader ignores them until its next
+    snapshot, which on a quiet folder can be days. A restart in between
+    publishes those names again. Bound it: compare the snapshot's gen every
+    Nth save, or force a snapshot after N changes-only saves or X minutes.
+    Found in review of #538.
+110. **The SFTP and cloud-storage consumers never retry a failed
+    after-action.** A file whose `delete` or `move` failed is done, so it
+    stays in the folder for good; before #538 a restart published it again
+    and retried. Retry the after-action for done names still listed (with
+    `delete`/`move` a done name should not be there), with a backoff.
+    Found in review of #538.
 107. **The file connector page still says every check looks at every
     file.** Since #537 a folder with more than 1 000 published files has
     them checked for replacement in turns, so a replaced file there goes

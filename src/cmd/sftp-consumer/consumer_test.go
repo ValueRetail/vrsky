@@ -19,6 +19,8 @@ type fakeSFTP struct {
 	files   map[string][]byte // name → contents (in the watch dir)
 	removed []string
 	moved   map[string]string // oldPath → newPath
+	// mtimes is each file's mtime in the listing; zero when unset (#538).
+	mtimes map[string]time.Time
 }
 
 func (f *fakeSFTP) List(string) ([]remoteFile, error) {
@@ -26,7 +28,7 @@ func (f *fakeSFTP) List(string) ([]remoteFile, error) {
 	defer f.mu.Unlock()
 	out := make([]remoteFile, 0, len(f.files))
 	for name, b := range f.files {
-		out = append(out, remoteFile{Name: name, Size: int64(len(b))})
+		out = append(out, remoteFile{Name: name, Size: int64(len(b)), ModTime: f.mtimes[name]})
 	}
 	return out, nil
 }
@@ -102,7 +104,8 @@ func TestSFTPConsumer_FetchAndDelete(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &sftpConsumer{
-		dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil },
+		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
+		checkpoints: newMemStore(),
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: mgmtDB})
 
@@ -153,7 +156,8 @@ func TestSFTPConsumer_AfterActionMove(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &sftpConsumer{
-		dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil },
+		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
+		checkpoints: newMemStore(),
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: mgmtDB})
 
