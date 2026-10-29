@@ -1,139 +1,151 @@
 # #494: a subscriber's Stop waits out its fetch
 
-## Open questions
+## Decision
 
-For a human: is the residual window under Risks acceptable? In
-production's three-node cluster, a message the consumer leader hands to
-the pull request while `Halt`'s UNSUB is still on its way over the route
-has one delivery spent and comes back after AckWait; on its fifth attempt
-it is dropped without the DLQ. The exact alternative is short pull
-requests (an `expires` of 100–200 ms) with `Halt` waiting out the current
-one: no drain, no reclaim, no window, at the cost of a few pull requests
-per second per idle subscriber (handled by the consumer leader, not
-replicated) and a stop of up to one poll. The PR carries
-`agent:needs-human` for this choice.
+Ludvik, 2026-10-29, on PR #521: don't accept the residual window of the
+first version (a halt's UNSUB racing a delivery, which on a three-node
+cluster costs the message an attempt, and on its last attempt loses it
+without the DLQ). Rework to short pull requests: each fetch asks the server
+to hold its pull request only briefly, and `Halt`/`Stop` wait out the
+current one instead of cancelling it. No context cancellation of a fetch in
+flight, no drain to withdraw a request, no reclaim. The exported API stays
+the same.
 
 ## Goal
 
-`Subscriber.loop` in `src/pkg/messaging` long-polls with
-`Fetch(batch, MaxWait(2s))`. `Halt` only stops the *next* fetch, so `Stop`
-on an idle subscriber waits up to 2 s for the current one to time out.
-Every pipeline stop, redeploy and remote-agent test cleanup pays that.
-Make `Halt` (and so `Stop`) end the fetch at once, without changing what
-happens to messages.
+`Subscriber.loop` in `src/pkg/messaging` long-polled with
+`Fetch(batch, MaxWait(2s))`, so `Stop` on an idle subscriber waited up to
+2 s for the fetch to time out. Every pipeline stop, redeploy and
+remote-agent test cleanup paid that. Make a stop take at most one short
+poll, without any stop ever stranding a message.
 
-## What happens to messages today
+## Design
 
-- A fetch that returns messages, even after `Halt`, has them dispatched
-  (handler runs, then ack, NAK or DLQ as usual). Then the loop sees the
-  halt and exits.
-- The fetch always runs until its pull request is finished on the server
-  (batch filled, or the server's 408 at ~1.8 s, or the client deadline at
-  2 s). So when the loop exits, no pull request is left on the server and
-  nothing can arrive at the subscription afterwards. `Stop` then drains.
+1. `pollWait = 150ms`. Each fetch is one pull request that the server holds
+   for 150 ms (its `expires`). The loop checks the halt between fetches and
+   sends nothing once halted. `Halt` doesn't touch the fetch in progress.
+   A consumer with an AckWait under 600 ms polls for a quarter of its
+   AckWait instead (at least 10 ms). See item 4 for why.
+2. A fetch ends on the server's word, not on a client timer. It uses
+   `FetchBatch` and collects until the batch is complete or the server's
+   408 says the request expired. (`Fetch` ignores a 408 when it has nothing
+   and waits for its context, so with `Fetch` every idle round would end on
+   the client's clock.)
+3. The client listens longer than the server holds the request. nats.go
+   sets a pull request's `expires` to 90% of the time left until the
+   context's deadline, and listens until the context is done.
+   `pollContext` reports a deadline that gives the server 150 ms and stays
+   open for `fetchWait` (2 s). With an honest deadline the client would
+   stop listening 15 ms after the server started the request's clock. A
+   request that took longer than that to reach the server (a pod held back
+   by its CPU limit, a GC pause, a slow route) would outlive its fetch, and
+   a halt would leave it open. With `pollContext` that margin is 1.85 s, and
+   the 2 s backstop only matters when no answer comes at all.
+4. Everything a fetch returned is dispatched, halted or not: handled, then
+   acked, NAK'd or dead-lettered as usual. The server counted those as
+   delivered to this subscriber, and only it can settle them. Dispatch
+   starts after the fetch is over, as before, so a NAK never lands while
+   our request is still open. That is what #444 needs. The price is that
+   the first message of a batch waits up to a whole poll for its handler,
+   without heartbeats. If that wait passed the AckWait, the server would
+   redeliver the message into the same fetch and it would be handled twice.
+   Hence the cap. Nothing in production sets an AckWait below the default
+   second; some tests do. Main had the same exposure with its 1.8 s
+   requests.
+5. The 500 ms back-off after a failed fetch ends on a halt. It holds no
+   pull request.
+6. `Stop` is unchanged: halt, wait for the loop, drain.
 
-## Approach
+## Why there is no window
 
-1. The fetch takes a context: `context.WithTimeout(haltCtx, 2s)` passed
-   as `nats.Context`. The 2 s deadline keeps the server-side request
-   exactly as today (nats.go sets `expires` to 90 % of the deadline, as it
-   does for `MaxWait`). `haltCtx` is cancelled by `Halt`.
-2. A fetch that returns with the subscriber halted is not an error: no
-   Warn, no 500 ms back-off sleep. Messages it did return are dispatched
-   as today.
-3. Reclaim. A cut-short fetch leaves its pull request open on the server
-   for up to ~1.8 s. Anything the server hands to it would land in the
-   subscription's buffer with nobody reading it, count a delivery, and
-   come back only after AckWait (or never, if that was the last attempt).
-   So when the loop sees the halt after a fetch, it first drains the
-   subscription (UNSUB: the server stops delivering to the request), waits
-   until nats.go reports the drain complete (its own Flush round trip and
-   an empty buffer), and collects every message that arrived before the
-   UNSUB took effect. These, plus whatever the fetch returned, are
-   dispatched in order, as the uncut fetch would have dispatched them.
-   It narrows the window to about a millisecond but can't close it (see
-   Risks). The wait is bounded by the same 2 s as the fetch, so a broken
-   connection can't make Stop slower than today.
-4. `Stop` is unchanged: `Halt`, wait for the loop, `Drain` (a no-op if the
-   loop already drained).
+Messages for a pull request are queued on the server ahead of its 408, and
+both travel the same path to the client, so the 408 comes after the last
+message the request delivered. The loop exits only after a fetch has ended:
+batch complete, 408, or a status error that ends the request (409 consumer
+deleted or leadership change, 503 no responders). At that point the server
+holds no pull request of ours. A halted loop sends no new one. When `Stop`
+drains, there's nothing for the UNSUB to race: it can't cost a delivery or
+leave one in a buffer nobody reads.
 
-Exported API unchanged. No new NAKs, terms or DLQ paths.
+What remains is a request that reached the server more than 1.85 s late,
+or a connection lost mid-fetch. Main had the same with a 200 ms margin, and
+there it's a crash, not a stop.
+
+## Cost
+
+An idle subscriber sends a pull request every poll, so about 6–7 a second
+(150 ms held plus a round trip), and the server answers each with a 408.
+Main sent one every 2 s. The consumer leader handles them in memory. The
+main stream and its consumers are R1 today (`EnsureStreams` sets no
+replicas), so nothing is replicated. On an R3 consumer, nats-server 2.15
+proposes each pull request to the consumer's raft group when it arrives and
+again when it ends, so this would become two raft proposals per poll per
+subscriber. Worth remembering if the stream ever goes R3.
+
+Latency gets better. With a batch above 1, a message reaching an idle
+subscriber used to wait up to 1.8 s for the request to expire before it was
+dispatched. Now the wait is at most 150 ms. A backlog smaller than the batch
+now waits for the 408 too, up to 150 ms, where main's `Fetch` returned it
+at once with a no-wait request. A full batch returns at once.
+
+`Stop` on an idle subscriber now takes up to one poll, about 150 ms, down
+from up to 2 s. A halted subscriber still handles what its last poll
+brought: at most 150 ms of new messages, down from 2 s.
 
 ## Acceptance criteria
 
-- `Stop` and `Halt`+`Stop` on an idle subscriber return in well under
-  200 ms (about 2 s before).
+- `Stop` and `Halt`+`Stop` on an idle subscriber return within one poll and
+  a margin (test bound 400 ms; about 2 s before).
 - A message being handled when `Halt` comes is acked or NAK'd exactly as
-  before: one delivery, `NumDelivered` unchanged by the stop, nothing in
-  the DLQ, and the next subscriber on the durable gets it.
-- A message published 20 ms after `Halt` (with `Stop` later) is left for
-  the next subscriber with no delivery spent. Before, the halted
-  subscriber still handled it if its fetch was open.
-- A message published within a millisecond or so of `Halt` is never lost
-  and never dead-lettered by the stop: the halting subscriber handles it,
-  or the next one gets it with at most one delivery spent (rare; bounded
-  in the test).
-
-These two replace the first version of this criterion, "never stranded",
-which the test author's race test showed the design can't meet; see
-Risks.
-- No goroutine left behind after `Stop`.
-- A halt-cut fetch logs nothing at Warn/Error.
+  before: one delivery, nothing in the DLQ, and after a NAK the next
+  subscriber gets it with `NumDelivered=2`.
+- A message published around a halt is never stranded. Either the halting
+  subscriber's last poll brought it, and it was handled once, on its first
+  delivery, and acked. Or it is left untouched (no delivery counted) and the
+  next subscriber gets it with `NumDelivered=1`. No exceptions, not even
+  rare ones.
+- The same holds when the subscriber's pull requests reach the server late.
+- A message published after the halted subscriber's last poll ended is left
+  untouched: a halted loop sends no more pull requests.
+- A halt ends the back-off after a failed fetch.
+- With an AckWait shorter than a poll, a message is still handled once.
+- No goroutine left behind after `Stop`. A stop during a poll logs nothing
+  at Warn or above.
 - Existing `pkg/messaging` and remote-agent tests pass, also under
   `-count=20 -race`.
 
 ## Files
 
 - `src/pkg/messaging/subscriber.go`
-- `src/pkg/messaging/stop_test.go` (new, written by a separate test author)
+- `src/pkg/messaging/stop_test.go`
 - `plans/backlog.md` (strike item 81)
+
+## Tests
+
+In `stop_test.go`, all against the embedded JetStream server:
+
+- `TestStopIdleSubscriberIsPrompt`: idle stop ≤ 400 ms at several points
+  in a poll and several polls in. A stop that hangs fails after 5 s.
+- `TestHaltDuringHandlerKeepsDeliverySemantics`: ack and NAK cases.
+- `TestHaltRaceWithPublish`: publish before, after and concurrently with
+  `Halt`, 20 ms after it, and after the last poll ended, with batch 1 and
+  32. No strands at all.
+- `TestHaltOnSlowLinkStrandsNothing`: the subscriber's connection goes
+  through a proxy that delays everything it sends by 60 ms. A message is
+  published every 20 ms from the halt to past the last poll. No strands.
+- `TestShortAckWaitPollsShorter`: with an 80 ms AckWait and a batch of
+  32, a message is handled once, on its first delivery.
+- `TestStopLeavesNoGoroutines`, `TestHaltLogsNothing`,
+  `TestHaltEndsBackoff` (the fetch fails because the durable was deleted).
 
 ## Risks
 
-- The residual window. nats-server (v2.15.1, `consumer.deliverMsg`)
-  checks the request's interest, counts the delivery and tracks it as
-  pending, then hands the message to an internal queue that publishes it
-  later. If our UNSUB takes effect in between, the publish finds no
-  interest. What follows depends on where the consumer's leader is:
-  - On the server the client is connected to (the tests, the local
-    stack, and a third of the time in production): the stream's send
-    loop calls `didNotDeliver`, which restores the delivery count (a first
-    delivery still reads 2 afterwards), drops the dead request and
-    redelivers at once. Nothing is lost and no attempt is spent from
-    attempt 2 on. The race test saw this a few times per thousand messages
-    published within ~1 ms of a halt.
-  - On another node: the leader sees the route's interest, publishes over
-    the route, and the client's server drops the message silently. It
-    comes back after AckWait (1 s by default) with one delivery spent; on
-    its fifth attempt it is not redelivered and never reaches the DLQ. The
-    window is the UNSUB's trip over the route plus the leader's queue
-    latency, which the client can't measure.
-  Today a graceful stop can't do this (the fetch outlives its request); a
-  crash can. No client-side fix exists in nats.go 1.53 / nats-server 2.15:
-  a pull request can't be withdrawn without dropping interest, and keeping
-  interest means waiting for it to expire. Flagged for a human, with the
-  polling alternative in the open question.
-- Messages the cut fetch returned wait in `reclaim` without heartbeats.
-  Normally that's one round trip (about 100 ms if something was buffered,
-  `checkDrained`'s poll); `reclaim` gives up after half the AckWait so a
-  slow connection can't let JetStream hand them to another subscriber
-  first.
-- Halted subscribers now stop receiving. Before, a message arriving while
-  a halted subscriber's fetch was still open was handled by it, to a
-  handler whose owner was usually shutting down (the #444 setting, where
-  that costs an attempt). Now it stays in the stream for the next
-  subscriber, untouched.
-- Dispatching reclaimed messages after the UNSUB: acks, `InProgress` and
-  NAKs go out on the connection, not the subscription, so they still work
-  (checked in nats.go v1.53.1: `ackReply` uses `sub.conn`, which drain
-  never clears).
-
-## Verify
-
-- New tests fail on main (Stop ~2 s) and pass with the fix; a mutation
-  run on the halt handling and the reclaim.
-- Timings of `go test -race ./pkg/messaging/...` and
-  `./cmd/remote-agent/...` before and after.
-- From `src/`: build, vet, golangci-lint, `go test -race ./...`,
-  `make lint-tenant`; `-count=20 -race` on `pkg/messaging` and on
-  `TestOutput_|TestGroup_|TestCommandLanes_` in remote-agent.
+- `pollContext` depends on how nats.go 1.53 turns a context into
+  `expires`. If an upgrade changes that, an idle fetch would end on the 2 s
+  backstop, or the server would hold requests for 2 s. Either way the idle
+  stop test fails (stops take up to 2 s), and the slow-link test catches a
+  client that stops listening before the server's request expires.
+- A fetch failing with a status error after some messages now logs a Warn
+  and backs off after dispatching them. Main's `Fetch` returned the
+  messages and dropped the error.
+- Six or seven pull requests a second per idle subscriber, see Cost.

@@ -83,15 +83,25 @@ type Subscriber struct {
 	sub     *nats.Subscription
 	opts    SubscriberOpts
 	handler Handler
-	// halted is cancelled by Halt. The fetch in flight runs under it, so a
-	// halt ends that fetch at once instead of after fetchWait (#494).
-	halted context.Context
-	halt   context.CancelFunc
-	doneCh chan struct{}
+	stopCh  chan struct{}
+	doneCh  chan struct{}
+	halt    sync.Once
 }
 
-// fetchWait is how long one fetch waits for messages. nats.go asks the server
-// to hold the pull request for 90% of it.
+// pollWait is how long the server holds each pull request open (its
+// "expires"). The loop polls in rounds this short so that Halt and Stop wait
+// out at most one of them: an idle Stop used to wait out a two-second fetch
+// (#494). Shorter costs more requests: an idle subscriber sends one pull
+// request per pollWait, and the server answers each with a 408 when it
+// expires. A consumer with a short AckWait polls shorter still, see poll.
+const pollWait = 150 * time.Millisecond
+
+// fetchWait is how long the client listens for one fetch to end. The fetch
+// normally ends on the server's word, long before this: the batch filled, or
+// the 408 that says the pull request expired. fetchWait only covers an answer
+// that never comes (a broken connection). It is also the margin by which a
+// pull request may reach the server late and still be over before the fetch
+// is, which is what lets Stop drain without stranding a message.
 const fetchWait = 2 * time.Second
 
 // DefaultBackoff is the per-attempt delay schedule used when SubscriberOpts.
@@ -170,14 +180,12 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 		return nil, fmt.Errorf("PullSubscribe %s: %w", opts.FilterSubject, err)
 	}
 
-	halted, halt := context.WithCancel(context.Background())
 	s := &Subscriber{
 		pub:     pub,
 		sub:     sub,
 		opts:    opts,
 		handler: h,
-		halted:  halted,
-		halt:    halt,
+		stopCh:  make(chan struct{}),
 		doneCh:  make(chan struct{}),
 	}
 	go s.loop()
@@ -334,112 +342,101 @@ func (s *Subscriber) Stop() {
 // handler, and so on: each round is a delivery attempt, so a stop that is
 // descheduled for a couple of milliseconds dead-letters the message (#444).
 //
-// A fetch waiting for messages when Halt comes ends at once (#494); it used to
-// run out its fetchWait, so every Stop took up to two seconds.
+// Halt does not cut a fetch short. The fetch in progress, at most pollWait
+// of it, runs to its end, and whatever it brought is handled, acked or NAK'd
+// as usual: those messages were delivered to this subscriber, and only it can
+// settle them. Then the loop sends no more pull requests. So Stop takes up
+// to one poll on an idle subscriber, and when it drains the subscription the
+// server holds no pull request of ours that could still deliver into it
+// (#494).
 func (s *Subscriber) Halt() {
-	s.halt()
+	s.halt.Do(func() { close(s.stopCh) })
+}
+
+func (s *Subscriber) halted() bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Subscriber) loop() {
 	defer close(s.doneCh)
-	for s.halted.Err() == nil {
-		ctx, cancel := context.WithTimeout(s.halted, fetchWait)
-		msgs, err := s.sub.Fetch(s.opts.MaxAckPending, nats.Context(ctx))
-		cancel()
-		if s.halted.Err() != nil {
-			// Halted during the fetch, which may have been cut short. That
-			// is not a fetch error: nothing to log, no back-off. What it
-			// returned, and anything the server sent to its pull request
-			// before the request was withdrawn, is dispatched as an uncut
-			// fetch would have had it dispatched.
-			msgs = append(msgs, s.reclaim()...)
-			for _, m := range msgs {
-				s.dispatch(m)
-			}
-			return
-		}
-		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-			s.opts.Logger.Warn("JetStream fetch failed",
-				"durable", s.opts.DurableName, "error", err)
-			select {
-			case <-s.halted.Done():
-			case <-time.After(500 * time.Millisecond):
-			}
-			continue
-		}
+	for !s.halted() {
+		msgs, err := s.fetch()
+		// Dispatched even if Halt came during the fetch: the server has
+		// counted these as delivered to us.
 		for _, m := range msgs {
 			s.dispatch(m)
 		}
-	}
-}
-
-// reclaimPoll is how often reclaim looks for messages while the drain it
-// started completes.
-const reclaimPoll = 5 * time.Millisecond
-
-// reclaim withdraws the pull request a halted fetch may have left open and
-// returns the messages the server sent to it first.
-//
-// A fetch cut short by Halt leaves its pull request on the server until it
-// expires. Whatever the server hands it meanwhile is a delivery: left in the
-// subscription's buffer, it would be counted against the message and only come
-// back after AckWait, or never if it was the last attempt. An uncut fetch ran
-// until the request was over, so none of that could happen. Draining the
-// subscription withdraws our interest, so the server stops delivering to the
-// request; nats.go closes the subscription once a round trip shows the server
-// has processed that and its buffer is empty. Everything that arrived before is
-// collected here on the way.
-//
-// One gap stays open. The server counts a delivery before it publishes the
-// message, so a message handed to the request just as the UNSUB takes effect
-// finds no interest. When the consumer's leader is on the server this client
-// is connected to, the server notices, restores the count and redelivers at
-// once. When the leader is on another node of a cluster, the message crosses
-// a route, the client's server drops it, and it comes back after AckWait with
-// a delivery spent, as after a crash; on its last attempt it is not
-// redelivered and never reaches the DLQ. The window is the UNSUB's trip to
-// the leader. Closing it would mean keeping the request until it expires,
-// which is the wait this replaces (#494).
-//
-// Bounded by fetchWait, so a broken connection cannot make a stop slower than
-// the uncut fetch was, and by half the AckWait: the messages the cut fetch
-// returned wait here, without heartbeats, and must be dispatched before
-// JetStream hands them to another subscriber on the durable.
-func (s *Subscriber) reclaim() []*nats.Msg {
-	closed := s.sub.StatusChanged(nats.SubscriptionClosed)
-	if err := s.sub.Drain(); err != nil {
-		return nil
-	}
-	giveUp := time.NewTimer(min(fetchWait, s.opts.AckWait/2))
-	defer giveUp.Stop()
-	poll := time.NewTicker(reclaimPoll)
-	defer poll.Stop()
-	var out []*nats.Msg
-	for {
-		out = append(out, s.buffered()...)
-		select {
-		case <-closed:
-			// Closed only with nothing buffered: nothing more will come.
-			return out
-		case <-giveUp.C:
-			return out
-		case <-poll.C:
+		if err == nil || errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			continue
 		}
+		s.opts.Logger.Warn("JetStream fetch failed",
+			"durable", s.opts.DurableName, "error", err)
+		// The back-off holds no pull request, so a halt may end it.
+		t := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-s.stopCh:
+		case <-t.C:
+		}
+		t.Stop()
 	}
 }
 
-// buffered takes what is waiting in the subscription's buffer without sending
-// a pull request: Fetch on a draining subscription only hands out what has
-// already arrived.
-func (s *Subscriber) buffered() []*nats.Msg {
+// fetch sends one pull request, held by the server for one poll, and returns
+// what it brought once the server has ended it: by filling the batch, or by
+// the 408 it sends when the request expires. Ending on the server's word, not
+// on a client timer, is what makes a halt safe: the request is over when the
+// loop sees the halt, so nothing can be delivered into a subscription that no
+// one reads any more.
+func (s *Subscriber) fetch() ([]*nats.Msg, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
 	defer cancel()
-	msgs, _ := s.sub.Fetch(s.opts.MaxAckPending, nats.Context(ctx))
-	return msgs
+	mb, err := s.sub.FetchBatch(s.opts.MaxAckPending, nats.Context(pollContext{
+		Context:  ctx,
+		deadline: time.Now().Add(s.poll() * 10 / 9),
+	}))
+	if err != nil {
+		return nil, err
+	}
+	var msgs []*nats.Msg
+	for m := range mb.Messages() {
+		msgs = append(msgs, m)
+	}
+	return msgs, mb.Error()
 }
+
+// poll is how long the server holds this subscriber's pull requests:
+// pollWait, or a quarter of the AckWait when that is shorter. What a fetch
+// brings is dispatched once the fetch is over, so the first message of a
+// batch waits up to a whole poll without heartbeats. Held longer than the
+// AckWait, it would be redelivered into the same fetch and handled twice. The
+// default AckWait is a second, and nothing in production sets one below that;
+// some tests do.
+func (s *Subscriber) poll() time.Duration {
+	return max(min(pollWait, s.opts.AckWait/4), 10*time.Millisecond)
+}
+
+// pollContext is the context a fetch runs under. nats.go sets a pull
+// request's expires to 90% of the time left until the context's deadline and
+// listens until the context is done. Here the two differ on purpose: the
+// deadline gives the server one poll, and the context stays open until
+// fetchWait. With an honest deadline the client would stop listening only a
+// tenth of a poll (15 ms) after the server started its timer, and a request
+// that took longer than that to reach the server, a pod held back by its CPU
+// limit say, would outlive its fetch: a halt then leaves it open, and a
+// message delivered into it is never handled. Listening until the server's
+// 408 makes the margin fetchWait instead. FetchBatch (not Fetch) is what ends
+// on that 408 when nothing came; Fetch ignores it and waits for the context.
+type pollContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c pollContext) Deadline() (time.Time, bool) { return c.deadline, true }
 
 // heartbeatInterval returns how often to mark an in-flight message InProgress.
 // Default is AckWait/2 (floored at 250ms) so the redelivery timer is reset with
