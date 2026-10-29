@@ -1838,6 +1838,46 @@ func TestConsumersRestoreRunningOnBoot(t *testing.T) {
 	}
 }
 
+// sourcedScriptRe matches a line that sources a sibling script and captures
+// its file name: `. "$(dirname "${BASH_SOURCE[0]}")/x.sh"`, `source ./x.sh`,
+// `. x.sh; …`, `. x.sh # …`. TestInClusterScriptsUseOnlyRuntimeTools resolves
+// the name next to the script that sources it.
+var sourcedScriptRe = regexp.MustCompile(`(?m)^\s*(?:\.|source)\s+"?(?:[^;&#]*/)?([A-Za-z0-9_-]+\.sh)"?(?:\s|;|&|#|$)`)
+
+func TestSourcedScriptPattern(t *testing.T) {
+	cases := []struct {
+		line string
+		want string // "" for no match
+	}{
+		{`. "$(dirname "${BASH_SOURCE[0]}")/acr-pull-lib.sh"`, "acr-pull-lib.sh"},
+		{`  source "$REPO_ROOT/infrastructure/azure/acr-pull-lib.sh"`, "acr-pull-lib.sh"},
+		{`. ./lib.sh`, "lib.sh"},
+		{`. lib.sh`, "lib.sh"},
+		{`source lib.sh`, "lib.sh"},
+		{`. "lib.sh"`, "lib.sh"},
+		{`. lib.sh; apply_acr_pull "$pull" ns`, "lib.sh"},
+		{`. "$here/lib.sh" && echo ok`, "lib.sh"},
+		{`. lib.sh # the helpers`, "lib.sh"},
+		{`. lib.sh   `, "lib.sh"},
+		// The file sourced, not a later path on the same line.
+		{`. lib.sh && cat infrastructure/azure/other.sh`, "lib.sh"},
+		{`# . lib.sh`, ""},
+		{`echo . lib.sh`, ""},
+		{`. lib.shx`, ""},
+		{`bash lib.sh`, ""},
+	}
+	for _, tc := range cases {
+		m := sourcedScriptRe.FindStringSubmatch(tc.line)
+		got := ""
+		if m != nil {
+			got = m[1]
+		}
+		if got != tc.want {
+			t.Errorf("%q: sourced %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
 // Everything the deploy and catch-up jobs run inside the cluster executes in
 // the `az aks command invoke` runtime, which has bash, awk, grep, jq, kubectl
 // and helm but no sed, python or envsubst (probed 2026-10-19; a sed in the
@@ -1872,6 +1912,32 @@ func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
 	// because the runtime has no sed; make sure it is among those checked.
 	if !scripts["infrastructure/azure/deploy-backup-azure.sh"] {
 		t.Errorf("deploy-backup-azure.sh is not run in-cluster by any workflow, so its tools go unchecked (found %v)", scripts)
+	}
+	// A helper sourced from a sibling (`. "$(dirname …)/x.sh"`) runs in the
+	// same runtime; no workflow names it, so follow the source lines.
+	sourced := sourcedScriptRe
+	queue := make([]string, 0, len(scripts))
+	for ref := range scripts {
+		queue = append(queue, ref)
+	}
+	for len(queue) > 0 {
+		ref := queue[0]
+		queue = queue[1:]
+		body, err := os.ReadFile(filepath.Join("..", "..", "..", ref)) //nolint:gosec // paths come from the repo's own workflows
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range sourced.FindAllStringSubmatch(string(body), -1) {
+			lib := filepath.ToSlash(filepath.Join(filepath.Dir(ref), m[1]))
+			if !scripts[lib] {
+				scripts[lib] = true
+				queue = append(queue, lib)
+			}
+		}
+	}
+	// The acr-pull copy's apply lives there (#496).
+	if !scripts["infrastructure/azure/acr-pull-lib.sh"] {
+		t.Errorf("acr-pull-lib.sh is not sourced by any in-cluster script, so its tools go unchecked (found %v)", scripts)
 	}
 	for ref := range scripts {
 		body, err := os.ReadFile(filepath.Join("..", "..", "..", ref)) //nolint:gosec // paths come from the repo's own workflows
@@ -3175,10 +3241,12 @@ case "$verb" in
     if [ -f "$d/fail-get" ]; then echo 'error: You must be logged in to the server (Unauthorized)' >&2; exit 1; fi
     if [[ "$args" == *" namespace "* || "$args" == *" namespaces "* || "$args" == *" ns "* ]]; then
       if [ -f "$d/fail-ns-get" ]; then echo 'Error from server (Forbidden): namespaces "vrsky-database" is forbidden' >&2; exit 1; fi
-      if [[ "$args" == *vrsky-database* ]]; then
-        [ -f "$d/no-database-ns" ] && notfound namespaces vrsky-database
-        echo "namespace/vrsky-database"
-      fi
+      for n in database ui; do
+        if [[ "$args" == *" vrsky-$n "* ]]; then
+          [ -f "$d/no-$n-ns" ] && notfound namespaces "vrsky-$n"
+          echo "namespace/vrsky-$n"
+        fi
+      done
       exit 0
     fi
     if [[ "$args" == *acr-pull* ]]; then
@@ -3262,7 +3330,7 @@ func runDeployBackup(t *testing.T, acr bool, config map[string]string, failCronA
 // runWithStubKubectl runs an in-cluster script from the repo root against
 // stubKubectl. files go into the stub's directory: acr.json and config.json,
 // and the switches fail-cronjob-apply, fail-secret-apply, fail-get,
-// fail-ns-get and no-database-ns.
+// fail-ns-get, no-database-ns and no-ui-ns.
 func runWithStubKubectl(t *testing.T, script string, files map[string]string) deployBackupRun {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
@@ -3271,6 +3339,17 @@ func runWithStubKubectl(t *testing.T, script string, files map[string]string) de
 	}
 	if _, err := os.Stat(filepath.Join(root, script)); err != nil {
 		t.Fatalf("%s: %v", script, err)
+	}
+	return runBashWithStubKubectl(t, files, script)
+}
+
+// runBashWithStubKubectl runs `bash <args…>` from the repo root against
+// stubKubectl; runWithStubKubectl describes files.
+func runBashWithStubKubectl(t *testing.T, files map[string]string, args ...string) deployBackupRun {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	write := func(name, body string, mode os.FileMode) {
@@ -3285,7 +3364,7 @@ func runWithStubKubectl(t *testing.T, script string, files map[string]string) de
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", script)
+	cmd := exec.CommandContext(ctx, "bash", args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "STUB_DIR="+dir)
 	out, runErr := cmd.CombinedOutput()
@@ -3539,73 +3618,127 @@ func TestDeployBackupScript(t *testing.T) {
 	}
 }
 
-// The acr-pull copy in vrsky-database follows a rotated ACR password on the
-// next deploy, not only on Catch up or a backup change (#431). The deploy
-// job runs copy-acr-pull.sh whenever the cluster is up, whatever the merge
-// touched; Catch up refreshes it on every run through the backup script.
+// The acr-pull copies in vrsky-database and vrsky-ui follow a rotated ACR
+// password on the next deploy (#431, #497). The deploy job runs
+// copy-acr-pull.sh whenever the cluster is up, whatever the merge touched,
+// and Catch up runs it every time. In both it runs after the files are
+// staged and before anything rolls: a UI pod pulling with the stale copy
+// would sit in ImagePullBackOff, the rollout would time out and the job
+// would go red before a later refresh step ever ran.
 func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
-	deploy, ok := parseWorkflow(t, "build-push.yml").Jobs["deploy"]
-	if !ok {
-		t.Fatal("no deploy job in build-push.yml")
-	}
-	stageAt, smokeAt, copyAt := -1, -1, -1
-	for i, st := range deploy.Steps {
-		if strings.Contains(st.Run, "mkdir -p stage") {
-			stageAt = i
-		}
-		if strings.Contains(st.Run, "smoke-prod.sh") {
-			smokeAt = i
-		}
-		if !strings.Contains(st.Run, "in-cluster.sh") || !strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") {
-			continue
-		}
-		copyAt = i
+	cases := []struct {
+		workflow, job string
+		wantIf        string // the step's whole `if`, whitespace-normalised
+	}{
 		// Gated on the cluster running (a parked cluster deploys nothing)
 		// and on nothing else: a plan flag would bring back the gap.
-		if got := strings.Join(strings.Fields(st.If), " "); got != "steps.cluster.outputs.state == 'Running'" {
-			t.Errorf("step %q runs only under if=%q; it must run on every deploy with the cluster up (if: steps.cluster.outputs.state == 'Running')", st.Name, st.If)
-		}
-		if st.ContinueOnError {
-			t.Errorf("step %q has continue-on-error; a failed copy would go unnoticed", st.Name)
-		}
+		{"build-push.yml", "deploy", "steps.cluster.outputs.state == 'Running'"},
+		// Catch up fails earlier when the cluster is stopped; no gate at all.
+		{"catch-up.yml", "catch-up", ""},
 	}
-	if copyAt < 0 {
-		t.Fatal("the deploy job never runs infrastructure/azure/copy-acr-pull.sh through in-cluster.sh; " +
-			"after an ACR password rotation the backup Job could not pull until the next Catch up")
+	rollout := []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "rollout restart"}
+	for _, tc := range cases {
+		t.Run(tc.workflow, func(t *testing.T) {
+			job, ok := parseWorkflow(t, tc.workflow).Jobs[tc.job]
+			if !ok {
+				t.Fatalf("no %s job in %s", tc.job, tc.workflow)
+			}
+			stageAt, rollAt, copyAt := -1, -1, -1
+			for i, st := range job.Steps {
+				if strings.Contains(st.Run, "mkdir -p stage") {
+					stageAt = i
+				}
+				for _, r := range rollout {
+					if rollAt < 0 && strings.Contains(st.Run, "in-cluster.sh") && strings.Contains(st.Run, r) {
+						rollAt = i
+					}
+				}
+				if !strings.Contains(st.Run, "in-cluster.sh") || !strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") {
+					continue
+				}
+				if copyAt < 0 {
+					copyAt = i
+				}
+				if got := strings.Join(strings.Fields(st.If), " "); got != tc.wantIf {
+					t.Errorf("step %q runs only under if=%q; want if=%q, so it runs every time the cluster is up", st.Name, st.If, tc.wantIf)
+				}
+				if st.ContinueOnError {
+					t.Errorf("step %q has continue-on-error; a failed copy would go unnoticed", st.Name)
+				}
+			}
+			if copyAt < 0 {
+				t.Fatalf("%s never runs infrastructure/azure/copy-acr-pull.sh through in-cluster.sh; "+
+					"after an ACR password rotation the backup Job and the UI could not pull", tc.workflow)
+			}
+			if stageAt < 0 || copyAt < stageAt {
+				t.Errorf("copy-acr-pull.sh runs at step %d, before the files are staged (step %d)", copyAt, stageAt)
+			}
+			if rollAt < 0 {
+				t.Fatalf("%s has no rollout step (%v); the workflow layout probably moved", tc.workflow, rollout)
+			}
+			if copyAt > rollAt {
+				t.Errorf("copy-acr-pull.sh runs at step %d, after the first rollout (step %d %q); "+
+					"pods rolled before it pull with the stale acr-pull", copyAt, rollAt, job.Steps[rollAt].Name)
+			}
+		})
 	}
-	if stageAt < 0 || copyAt < stageAt {
-		t.Errorf("copy-acr-pull.sh runs at step %d, before the files are staged (step %d)", copyAt, stageAt)
-	}
-	// After the smoke check, as the backup step is: a failed copy must not
-	// stop the smoke check from reporting on the deploy.
-	if smokeAt < 0 {
-		t.Fatal("the deploy job has no smoke-prod.sh step")
-	}
-	if copyAt < smokeAt {
-		t.Errorf("copy-acr-pull.sh runs at step %d, before the smoke check (step %d)", copyAt, smokeAt)
-	}
+}
 
-	catchUp, ok := parseWorkflow(t, "catch-up.yml").Jobs["catch-up"]
-	if !ok {
-		t.Fatal("no catch-up job in catch-up.yml")
-	}
-	refreshed := false
-	for _, st := range catchUp.Steps {
-		if strings.Contains(st.Run, "in-cluster.sh") && strings.TrimSpace(st.If) == "" &&
-			(strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") || strings.Contains(st.Run, "infrastructure/azure/deploy-backup-azure.sh")) {
-			refreshed = true
+// acrPullCopies returns every acr-pull Secret a run applied through stdin,
+// keyed by the namespace it names, and fails on an apply of anything else
+// through stdin that isn't a document.
+func acrPullCopies(t *testing.T, r deployBackupRun) map[string]map[string]any {
+	t.Helper()
+	copies := map[string]map[string]any{}
+	for i, argv := range r.calls {
+		if kubectlVerb(argv) != "apply" {
+			continue
 		}
+		in, ok := r.stdins[i]
+		if !ok || strings.TrimSpace(in) == "" {
+			continue
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(in), &doc); err != nil || doc == nil {
+			t.Fatalf("call %d %v applies something that is not one document from stdin: %v", i, argv, err)
+		}
+		meta, _ := doc["metadata"].(map[string]any)
+		if doc["kind"] != "Secret" || meta["name"] != "acr-pull" {
+			continue
+		}
+		ns, _ := meta["namespace"].(string)
+		if _, dup := copies[ns]; dup {
+			t.Errorf("acr-pull applied to %s twice", ns)
+		}
+		copies[ns] = doc
 	}
-	if !refreshed {
-		t.Error("Catch up has no unconditional in-cluster step running copy-acr-pull.sh or deploy-backup-azure.sh; it would not refresh the acr-pull copy")
+	return copies
+}
+
+// checkACRPullCopy: type and data from the source, metadata only name and
+// namespace (a foreign uid would make apply refuse it).
+func checkACRPullCopy(t *testing.T, ns string, doc map[string]any) {
+	t.Helper()
+	meta, _ := doc["metadata"].(map[string]any)
+	if len(meta) != 2 {
+		t.Errorf("%s/acr-pull metadata %v; want only name and namespace, nothing from vrsky-platform's copy", ns, meta)
+	}
+	if doc["type"] != "kubernetes.io/dockerconfigjson" {
+		t.Errorf("%s/acr-pull type %v, want kubernetes.io/dockerconfigjson", ns, doc["type"])
+	}
+	data, _ := doc["data"].(map[string]any)
+	if data[".dockerconfigjson"] != "e30=" || len(data) != 1 {
+		t.Errorf("%s/acr-pull data %v, want the source's {.dockerconfigjson: e30=}", ns, data)
 	}
 }
 
 // copy-acr-pull.sh against the stub kubectl: it copies acr-pull into
-// vrsky-database without the source's identity, does nothing on a cluster
-// that has no source Secret or no vrsky-database yet, fails on a real
-// error without printing the Secret, and touches nothing but that Secret. Above all it never goes near
-// the backup CronJob, whose suspend a human may have set for a restore.
+// vrsky-database and vrsky-ui without the source's identity (#431, #497),
+// skips a namespace that doesn't exist yet and still copies into the other,
+// does nothing on a cluster without the source Secret, fails on a real error
+// without printing the Secret, and touches nothing but those Secrets. Above
+// all it never goes near the backup CronJob, whose suspend a human may have
+// set for a restore.
 func TestCopyACRPullScript(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq not on PATH; the in-cluster runtime has it, this machine does not")
@@ -3613,16 +3746,22 @@ func TestCopyACRPullScript(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not on PATH")
 	}
+	both := []string{"vrsky-database", "vrsky-ui"}
 	cases := []struct {
-		name      string
-		files     map[string]string
-		wantErr   bool
-		wantApply bool
-		wantSaid  string
+		name     string
+		files    map[string]string
+		wantErr  bool
+		wantNS   []string // namespaces that get a copy, in order
+		wantSaid []string
 	}{
-		{name: "source present", files: map[string]string{"acr.json": stubACRPull}, wantApply: true},
-		{name: "no source Secret (first install)", files: map[string]string{}, wantSaid: "no acr-pull secret in vrsky-platform"},
-		{name: "no vrsky-database namespace", files: map[string]string{"acr.json": stubACRPull, "no-database-ns": ""}, wantSaid: "no vrsky-database namespace"},
+		{name: "source present", files: map[string]string{"acr.json": stubACRPull}, wantNS: both},
+		{name: "no source Secret (first install)", files: map[string]string{}, wantSaid: []string{"no acr-pull secret in vrsky-platform"}},
+		{name: "no vrsky-database namespace", files: map[string]string{"acr.json": stubACRPull, "no-database-ns": ""},
+			wantNS: []string{"vrsky-ui"}, wantSaid: []string{"no vrsky-database namespace"}},
+		{name: "no vrsky-ui namespace", files: map[string]string{"acr.json": stubACRPull, "no-ui-ns": ""},
+			wantNS: []string{"vrsky-database"}, wantSaid: []string{"no vrsky-ui namespace"}},
+		{name: "neither namespace", files: map[string]string{"acr.json": stubACRPull, "no-database-ns": "", "no-ui-ns": ""},
+			wantSaid: []string{"no vrsky-database namespace", "no vrsky-ui namespace"}},
 		{name: "kubectl get fails", files: map[string]string{"acr.json": stubACRPull, "fail-get": ""}, wantErr: true},
 		// A Forbidden or a timeout on the namespace lookup is not a missing
 		// namespace: exiting 0 would let the copy go stale unnoticed.
@@ -3630,7 +3769,7 @@ func TestCopyACRPullScript(t *testing.T) {
 		// The apply's own output can carry the patch, data and all; the
 		// deploy log is public to anyone with repo access.
 		{name: "apply fails", files: map[string]string{"acr.json": stubACRPull, "fail-secret-apply": ""}, wantErr: true,
-			wantSaid: "apply of vrsky-database/acr-pull failed"},
+			wantSaid: []string{"apply of vrsky-database/acr-pull failed"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3653,8 +3792,10 @@ func TestCopyACRPullScript(t *testing.T) {
 					t.Errorf("the script printed the Secret's data (%s)\n%s", leak, r.out)
 				}
 			}
-			if tc.wantSaid != "" && !strings.Contains(r.out, tc.wantSaid) {
-				t.Errorf("the output does not say %q\n%s", tc.wantSaid, logs)
+			for _, s := range tc.wantSaid {
+				if !strings.Contains(r.out, s) {
+					t.Errorf("the output does not say %q\n%s", s, logs)
+				}
 			}
 
 			if tc.wantErr {
@@ -3667,41 +3808,138 @@ func TestCopyACRPullScript(t *testing.T) {
 				t.Fatalf("exit: %v\n%s", r.err, logs)
 			}
 
-			var applied []map[string]any
-			for i, argv := range r.calls {
-				if kubectlVerb(argv) != "apply" {
+			applies := 0
+			for _, argv := range r.calls {
+				if kubectlVerb(argv) == "apply" {
+					applies++
+				}
+			}
+			copies := acrPullCopies(t, r)
+			if applies != len(tc.wantNS) || len(copies) != len(tc.wantNS) {
+				t.Fatalf("%d applies, %d acr-pull copies (%v); want exactly one copy in each of %v\n%s",
+					applies, len(copies), sortedNames(copies), tc.wantNS, logs)
+			}
+			for _, ns := range tc.wantNS {
+				doc, ok := copies[ns]
+				if !ok {
+					t.Errorf("no acr-pull copy in %s (got %v)\n%s", ns, sortedNames(copies), logs)
 					continue
 				}
-				var doc map[string]any
-				if err := yaml.Unmarshal([]byte(r.stdins[i]), &doc); err != nil || doc == nil {
-					t.Fatalf("call %d %v applies something that is not one document from stdin: %v\n%s", i, argv, err, logs)
-				}
-				applied = append(applied, doc)
-			}
-			if !tc.wantApply {
-				if len(applied) != 0 {
-					t.Errorf("applied %d objects; want none\n%s", len(applied), logs)
-				}
-				return
-			}
-			if len(applied) != 1 {
-				t.Fatalf("applied %d objects; want exactly the acr-pull Secret\n%s", len(applied), logs)
-			}
-			doc := applied[0]
-			meta, _ := doc["metadata"].(map[string]any)
-			if doc["kind"] != "Secret" || meta["name"] != "acr-pull" || meta["namespace"] != "vrsky-database" {
-				t.Errorf("applied %v %v/%v; want Secret vrsky-database/acr-pull", doc["kind"], meta["namespace"], meta["name"])
-			}
-			if len(meta) != 2 {
-				t.Errorf("acr-pull metadata %v; want only name and namespace, nothing from vrsky-platform's copy", meta)
-			}
-			if doc["type"] != "kubernetes.io/dockerconfigjson" {
-				t.Errorf("acr-pull type %v, want kubernetes.io/dockerconfigjson", doc["type"])
-			}
-			data, _ := doc["data"].(map[string]any)
-			if data[".dockerconfigjson"] != "e30=" || len(data) != 1 {
-				t.Errorf("acr-pull data %v, want the source's {.dockerconfigjson: e30=}", data)
+				checkACRPullCopy(t, ns, doc)
 			}
 		})
+	}
+}
+
+func sortedNames[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// A failed acr-pull apply never prints the Secret (#496). On an existing
+// object kubectl can print "error when applying patch:" with the patch, new
+// .dockerconfigjson included, and the deploy log is public to anyone with
+// repo access; the UI script's output ends up pasted in issues. Each of the
+// three scripts that copy acr-pull must exit non-zero with only a generic
+// line. The stub prints the applied JSON and a sentinel on both streams.
+func TestACRPullApplyFailurePrintsNoSecret(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not on PATH; the in-cluster runtime has it, this machine does not")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+	cases := []struct {
+		script string
+		ns     string
+	}{
+		{"infrastructure/azure/copy-acr-pull.sh", "vrsky-database"},
+		{"infrastructure/azure/deploy-backup-azure.sh", "vrsky-database"},
+		{"infrastructure/azure/deploy-ui-azure.sh", "vrsky-ui"},
+	}
+	for _, tc := range cases {
+		t.Run(filepath.Base(tc.script), func(t *testing.T) {
+			r := runWithStubKubectl(t, tc.script, map[string]string{"acr.json": stubACRPull, "fail-secret-apply": ""})
+			if r.err == nil {
+				t.Fatalf("exit 0 after a failed acr-pull apply\n%s", r.out)
+			}
+			for _, leak := range []string{"e30=", "FAKE-SECRET-SENTINEL", "dockerconfigjson", "error when applying patch"} {
+				if strings.Contains(r.out, leak) {
+					t.Errorf("a failed apply printed kubectl's output (%s), which can hold the Secret\n%s", leak, r.out)
+				}
+			}
+			if want := "ERROR: apply of " + tc.ns + "/acr-pull failed (exit 1)"; !strings.Contains(r.out, want) {
+				t.Errorf("the output does not say %q\n%s", want, r.out)
+			}
+			// It stops there: nothing after the copy runs on a half-done setup.
+			for i, argv := range r.calls {
+				joined := strings.Join(argv, " ")
+				if strings.Contains(joined, "kubernetes/backup") || strings.Contains(joined, "rollout") ||
+					strings.Contains(joined, "serviceaccount") {
+					t.Errorf("call %d %v ran after the failed copy", i, argv)
+				}
+			}
+		})
+	}
+}
+
+// deploy-ui-azure.sh still copies acr-pull into vrsky-ui, now through the
+// same jq filter as the other two: type and data, none of the source's
+// identity, nowhere else.
+func TestDeployUIScriptCopiesACRPull(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not on PATH")
+	}
+	if _, err := exec.LookPath("perl"); err != nil {
+		t.Skip("perl not on PATH; the script edits the manifest with it")
+	}
+	r := runWithStubKubectl(t, "infrastructure/azure/deploy-ui-azure.sh", map[string]string{"acr.json": stubACRPull})
+	if r.err != nil {
+		t.Fatalf("exit: %v\n%s", r.err, r.out)
+	}
+	if strings.Contains(r.out, "e30=") {
+		t.Errorf("the script printed the Secret's data\n%s", r.out)
+	}
+	copies := acrPullCopies(t, r)
+	if len(copies) != 1 || copies["vrsky-ui"] == nil {
+		t.Fatalf("acr-pull copies in %v; want exactly one, in vrsky-ui\n%s", sortedNames(copies), r.out)
+	}
+	checkACRPullCopy(t, "vrsky-ui", copies["vrsky-ui"])
+}
+
+// apply_acr_pull fails on input jq can't read, whatever the caller set. In a
+// shell without pipefail, `jq | kubectl apply -f -` would take kubectl's exit
+// code: an apply of nothing (exit 0 from the stub) would pass for a copy, and
+// the Secret would silently stay stale. The helper sets pipefail inside its
+// own substitution, and must not leave it set in the caller.
+func TestACRPullHelperFailsOnBadJSONWithoutPipefail(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not on PATH")
+	}
+	const script = `set -u
+. infrastructure/azure/acr-pull-lib.sh
+rc=0
+apply_acr_pull '{"type":"kubernetes.io/dockerconfigjson","data":{".dockerconfigjson":"BAD-JSON-SENTINEL"' vrsky-ui || rc=$?
+echo "rc=$rc"
+if [[ -o pipefail ]]; then echo "pipefail leaked into the caller"; fi
+`
+	r := runBashWithStubKubectl(t, map[string]string{}, "-c", script)
+	if r.err != nil {
+		t.Fatalf("the wrapper shell failed: %v\n%s", r.err, r.out)
+	}
+	if !strings.Contains(r.out, "ERROR: apply of vrsky-ui/acr-pull failed") {
+		t.Errorf("no generic error line for input jq can't parse\n%s", r.out)
+	}
+	if strings.Contains(r.out, "rc=0") || !strings.Contains(r.out, "rc=") {
+		t.Errorf("apply_acr_pull returned 0 for input jq can't parse; the copy would pass for done\n%s", r.out)
+	}
+	for _, leak := range []string{"BAD-JSON-SENTINEL", "parse error", "pipefail leaked"} {
+		if strings.Contains(r.out, leak) {
+			t.Errorf("the output has %q\n%s", leak, r.out)
+		}
 	}
 }

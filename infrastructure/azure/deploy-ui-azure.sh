@@ -10,6 +10,8 @@
 # cluster now runs ingress-nginx and serves the UI publicly over TLS via the
 # `vrsky` Ingress (infrastructure/kubernetes/ui/ingress.yaml, applied below).
 # Port-forward still works and is still the way in when the ingress is down.
+#
+# Never run with -x (bash -x, set -x): the trace prints the acr-pull Secret.
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"
@@ -18,11 +20,15 @@ MGMT="vrsky-management-api.vrsky-platform.svc.cluster.local:8080"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# 1. namespace + reuse the acr-pull secret (copied from vrsky-platform, no creds in this script)
+# 1. namespace + reuse the acr-pull secret (copied from vrsky-platform, no creds
+#    in this script). acr-pull-lib.sh captures the apply's output, so a failure
+#    can't print the Secret (#496); it needs jq. Every deploy refreshes this
+#    copy afterwards (copy-acr-pull.sh, #497).
 kubectl create namespace vrsky-ui --dry-run=client -o yaml | kubectl apply -f -
-kubectl get secret acr-pull -n vrsky-platform -o yaml \
-  | sed '/namespace:/d;/resourceVersion:/d;/uid:/d;/creationTimestamp:/d;/^\s*selfLink:/d' \
-  | kubectl apply -n vrsky-ui -f -
+# shellcheck source=acr-pull-lib.sh
+. "$REPO_ROOT/infrastructure/azure/acr-pull-lib.sh"
+pull="$(kubectl get secret acr-pull -n vrsky-platform -o json)"
+apply_acr_pull "$pull" vrsky-ui
 kubectl patch serviceaccount default -n vrsky-ui -p '{"imagePullSecrets":[{"name":"acr-pull"}]}'
 
 # 2. nginx config: SPA + same-origin proxy to the management-api

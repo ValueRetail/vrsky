@@ -618,15 +618,16 @@ Last updated 2026-10-28.
     and retail ones, tenant) were not checked for the overlap; each one's
     cursor handling decides whether two pods for a few seconds can publish
     twice. Found in #425.
-93. **The `acr-pull` copy in `vrsky-ui` never refreshes.**
+93. ~~**The `acr-pull` copy in `vrsky-ui` never refreshes.**~~ (#497)
     `deploy-ui-azure.sh` copies it from `vrsky-platform` once, and only a
     human runs that script; the deploy job rolls the UI with
     `deploy-core-azure.sh`, which doesn't copy. After an ACR password
     rotation the next UI rollout can't pull. Add `vrsky-ui` to
     `copy-acr-pull.sh` (#431), which already runs on every deploy. There
-    is also no written runbook for rotating the ACR password itself.
+    is also no written runbook for rotating the ACR password itself (now
+    item 98).
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in #431.
-94. **A failed `acr-pull` apply can print the registry password.**
+94. ~~**A failed `acr-pull` apply can print the registry password.**~~ (#496)
     `deploy-backup-azure.sh` pipes the copied Secret into a bare
     `kubectl apply -f -`. On an existing object a failed apply can print
     "error when applying patch:" with the patch, new `.dockerconfigjson`
@@ -671,6 +672,13 @@ Last updated 2026-10-28.
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
     a retry would read better. Found in review of #501.
+99. **No runbook for rotating the ACR password.** The password enters the
+    cluster in `deploy-azure.sh` step 2 (`vrsky-platform`, `vrsky-storage`)
+    and `minio-images-acr.sh --repoint` (`vrsky-storage`), and every deploy
+    copies it on into `vrsky-database` and `vrsky-ui` (#497). Nothing says
+    which of these to run after `az acr credential renew`, in which order,
+    or how to check every namespace pulls again. Write it in
+    `docs/operator/`. Split out of item 93.
 
 ## Human
 

@@ -29,10 +29,18 @@ see [mail](mail.md) and [billing](billing.md)), node pools and other Azure
 resources. Database migrations run when the management API starts, so they
 ride along with its image as they always have.
 
-After the smoke check, every deploy that reaches a running cluster copies
-`acr-pull` from `vrsky-platform` into `vrsky-database`
-(`copy-acr-pull.sh`), so the backup Job keeps pulling after an ACR password
-rotation. It touches only that Secret ([backup](backup.md)).
+Before anything rolls, every deploy that reaches a running cluster copies
+`acr-pull` from `vrsky-platform` into `vrsky-database` and `vrsky-ui`
+(`copy-acr-pull.sh`), and so does every Catch up. After an ACR password
+rotation you update `acr-pull` in `vrsky-platform` only; the next deploy or
+Catch up carries it over before the first pod pulls, so the backup Job and
+the UI keep pulling. A namespace that doesn't exist yet is skipped. It
+touches only those two Secrets ([backup](backup.md)). A failed copy fails
+the run before the rollout. The log says which namespace and the exit
+code, and nothing else: kubectl's
+own error can contain the Secret, and the deploy log is readable by anyone
+with repo access. To see kubectl's reason, run the apply yourself in your
+own terminal.
 
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
@@ -81,7 +89,8 @@ nothing, and finishes **green** with a notice and a summary listing the
 images waiting in the registry. After `az aks start`, one click brings
 production to `main`:
 
-**Actions → Catch up → Run workflow.** It rolls every core service to its
+**Actions → Catch up → Run workflow.** It refreshes the `acr-pull` copies
+in `vrsky-database` and `vrsky-ui`, rolls every core service to its
 current `:latest` digest (a no-op for anything already there), restarts
 the connector fleet so it picks up its images (untick *connectors* to
 skip that), applies the monitoring values and rules, and runs the smoke
