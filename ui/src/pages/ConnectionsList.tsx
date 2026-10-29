@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { connectionService } from '../services/connectionService'
 import { useUIStore } from '../store/uiStore'
@@ -47,6 +47,15 @@ export default function ConnectionsList() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  // Why the last load failed, shown in place of the list; null when it didn't.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Bumped by "Try again" to rerun the load effect.
+  const [reloadKey, setReloadKey] = useState(0)
+  // Counts the loads that have written rows and total. A delete compares it
+  // before and after its request: if a load landed in between (a workspace
+  // switch, a page change, a retry), that load's total is the truth and the
+  // delete must not subtract from it (#515).
+  const rowsLoads = useRef(0)
 
   const ownRows = rowsTenantId === currentTenantId
   const shownConnections = ownRows ? connections : []
@@ -60,6 +69,7 @@ export default function ConnectionsList() {
     const load = async () => {
       try {
         setLoading(true)
+        setLoadError(null)
         const response = await connectionService.list(page, PAGE_SIZE)
         if (cancelled) return
         // The list's wire shape is the API's GetConnectionResponse (metrics loosely
@@ -68,13 +78,16 @@ export default function ConnectionsList() {
         setConnections(items)
         setTotal(response.total || 0)
         setRowsTenantId(currentTenantId)
+        rowsLoads.current++
       } catch (error) {
         if (cancelled) return
         // Never keep showing what may be another workspace's connections.
         setConnections([])
         setTotal(0)
         setRowsTenantId(currentTenantId)
+        rowsLoads.current++
         const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to load connections'
+        setLoadError(message)
         addNotification({ type: 'error', title: 'Error', message })
       } finally {
         if (!cancelled) setLoading(false)
@@ -84,7 +97,7 @@ export default function ConnectionsList() {
     return () => {
       cancelled = true
     }
-  }, [page, currentTenantId, addNotification])
+  }, [page, currentTenantId, addNotification, reloadKey])
 
   // Reset to the first page when the workspace changes so we don't land on a
   // page number that doesn't exist for the new tenant.
@@ -109,10 +122,15 @@ export default function ConnectionsList() {
         try {
           hideConfirmDialog()
           setActionLoading(true)
+          const loadsBefore = rowsLoads.current
           await connectionService.delete(connection.id)
           addNotification({ type: 'success', title: 'Deleted', message: `"${connection.name}" deleted` })
-          setConnections(prev => prev.filter(c => c.id !== connection.id))
-          setTotal(prev => prev - 1)
+          // Rows reloaded meanwhile (say, for another workspace) are not
+          // the ones this delete was made from; leave them and their total.
+          if (rowsLoads.current === loadsBefore) {
+            setConnections(prev => prev.filter(c => c.id !== connection.id))
+            setTotal(prev => prev - 1)
+          }
           void refreshSummary()
         } catch (error) {
           const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to delete connection'
@@ -214,6 +232,22 @@ export default function ConnectionsList() {
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-20 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="card-elevated text-center py-16 animate-fade-in" role="alert">
+            <div className="space-y-4">
+              <p className="text-lg text-neutral-900 dark:text-neutral-50">
+                Couldn't load connections
+              </p>
+              <p className="text-neutral-600 dark:text-neutral-400">{loadError}</p>
+              <button
+                type="button"
+                onClick={() => setReloadKey(k => k + 1)}
+                className="btn-primary"
+              >
+                Try again
+              </button>
+            </div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="card-elevated text-center py-16 animate-fade-in">
