@@ -34,6 +34,9 @@ import (
 // directly: a "boot" is a new sftpConsumer (a new pod) with a new done set over
 // the same checkpoint store, sharing nothing else with the previous one. The
 // end-to-end tests run the consumer through the SDK runner and NATS commands.
+//
+// Since #562 a file goes out on the second poll that finds it unchanged, so a
+// step that expects a new or replaced file published polls twice.
 
 const (
 	pdTenant = "tenant-pd"
@@ -232,8 +235,16 @@ type pdRig struct {
 	log    *pdLog
 	logs   *pdLogs
 
-	c    *sftpConsumer
-	done *doneset.Set
+	c       *sftpConsumer
+	done    *doneset.Set
+	pending map[string]sighting
+	// sched is what runPoller would know after the last poll; fresh is true
+	// from a boot to its first poll, which runPoller makes at once.
+	sched pollSchedule
+	fresh bool
+	// clock is the consumer's clock; each poll moves it as far as runPoller
+	// would wait before that poll.
+	clock time.Time
 }
 
 func newPDRig(t *testing.T, store checkpoint.Store, fake *fakeSFTP) *pdRig {
@@ -254,12 +265,34 @@ func (r *pdRig) boot() {
 		dial:        func(*SFTPConfig) (sftpConn, error) { return r.fake, nil },
 		publish:     r.log.publish,
 		checkpoints: r.store,
+		now:         func() time.Time { return r.clock },
 	}
 	r.done = r.c.doneSet(r.conn, r.tenant, &r.cfg)
+	r.pending = make(map[string]sighting)
+	r.sched = pollSchedule{}
+	r.fresh = true
 }
 
-func (r *pdRig) poll() {
-	r.c.pollOnce(context.Background(), r.conn, r.tenant, &r.cfg, r.done, r.c.logger)
+// poll is the wait runPoller would make (#562: none after a boot, the settle
+// gap while files are waiting to settle, else the poll interval), then a
+// poll. A one-shot config has no interval; its polls are a settle gap apart.
+func (r *pdRig) poll() { r.pollCtx(context.Background()) }
+
+func (r *pdRig) pollCtx(ctx context.Context) {
+	r.clock = r.clock.Add(r.nextStep())
+	r.fresh = false
+	r.sched.record(r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.pending, r.c.logger))
+}
+
+// nextStep is how long runPoller would wait before the next poll.
+func (r *pdRig) nextStep() time.Duration {
+	if r.fresh {
+		return 0
+	}
+	if step := r.sched.next(r.c, &r.cfg); step > 0 {
+		return step
+	}
+	return r.c.settleGap(&r.cfg)
 }
 
 func (r *pdRig) polls(n int) {
@@ -313,6 +346,7 @@ func TestDonePersist_StopMidPollSavesWhatWasPublished(t *testing.T) {
 	t.Run("stop", func(t *testing.T) {
 		r := newPDRig(t, newPDStore(), fake)
 		r.boot()
+		r.poll() // the files' first sighting
 		ctx, cancel := context.WithCancel(context.Background())
 		var n atomic.Int32
 		r.c.publish = func(c context.Context, env *envelope.Envelope) error {
@@ -321,12 +355,12 @@ func TestDonePersist_StopMidPollSavesWhatWasPublished(t *testing.T) {
 			}
 			return r.log.publish(c, env)
 		}
-		r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.c.logger)
+		r.pollCtx(ctx)
 		if got := int(n.Load()); got != saveEvery+3 {
 			t.Fatalf("published %d before the stop took effect, want %d", got, saveEvery+3)
 		}
 		r.boot()
-		r.poll()
+		r.polls(2)
 		requireCounts(t, r.log, "after the stop and a start", all)
 	})
 
@@ -342,11 +376,11 @@ func TestDonePersist_StopMidPollSavesWhatWasPublished(t *testing.T) {
 			}
 			return r.log.publish(c, env)
 		}
-		r.poll()
-		requireCounts(t, r.log, "first poll", all)
+		r.polls(2)
+		requireCounts(t, r.log, "first polls", all)
 		r.store = killed
 		r.boot()
-		r.poll()
+		r.polls(2)
 		total := 0
 		for _, c := range r.log.counts() {
 			total += c
@@ -378,8 +412,8 @@ func TestDonePersist_ReplacedFileIsPublishedOnceMore(t *testing.T) {
 			pdPut(fake, "b.json", `{"b":1}`, 0)
 			r := newPDRig(t, newPDStore(), fake)
 			r.boot()
-			r.poll()
-			requireCounts(t, r.log, "first poll", map[string]int{"a.json": 1, "b.json": 1})
+			r.polls(2)
+			requireCounts(t, r.log, "first polls", map[string]int{"a.json": 1, "b.json": 1})
 
 			pdPut(fake, "a.json", tc.body, tc.sec)
 			if tc.whileStopped {
@@ -412,7 +446,7 @@ func TestDonePersist_DeletedThenAddedAgainIsPublishedAgain(t *testing.T) {
 			pdPut(fake, "b.json", `{"b":1}`, 0)
 			r := newPDRig(t, newPDStore(), fake)
 			r.boot()
-			r.poll()
+			r.polls(2)
 
 			pdDel(fake, "a.json")
 			r.poll()
@@ -443,11 +477,11 @@ func TestDonePersist_TwoTenantsSameConnectionAndNode(t *testing.T) {
 	b.tenant = "tenant-b"
 
 	a.boot()
-	a.poll()
+	a.polls(2)
 	requireCounts(t, a.log, "A", map[string]int{"x.json": 1})
 
 	b.boot()
-	b.poll()
+	b.polls(2)
 	requireCounts(t, b.log, "B, after A published its x", map[string]int{"x.json": 1})
 	if got := b.log.payloads("x.json"); got[0] != `{"x":"b"}` {
 		t.Errorf("B published %q, want its own x", got[0])
@@ -471,7 +505,7 @@ func TestDonePersist_ReadFailurePublishesNothingUntilItWorks(t *testing.T) {
 		pdPut(fake, "b.json", `{"b":1}`, 0)
 		r := newPDRig(t, store, fake)
 		r.boot()
-		r.poll()
+		r.polls(2)
 
 		store.setFailGet(true)
 		r.boot()
@@ -545,6 +579,8 @@ func TestDonePersist_OneShotStatus(t *testing.T) {
 				publish:     log.publish,
 				dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
 				checkpoints: store,
+				// The one-shot's second look (#562), without the 5 s wait.
+				settleMin: 20 * time.Millisecond,
 			}
 			c.startConnection(context.Background(), pdConn, pdTenant)
 			harness.Eventually(t, pdWait, "the one-shot to end with status "+tc.status, func() bool {
@@ -578,12 +614,12 @@ func TestDonePersist_FirstStartPublishesEverything(t *testing.T) {
 				old := newPDRig(t, store, fake)
 				tc.saved(&old.cfg)
 				old.boot()
-				old.poll()
+				old.polls(2)
 				requireCounts(t, old.log, "the old config", map[string]int{"a.json": 1, "b.json": 1})
 			}
 			r := newPDRig(t, store, fake)
 			r.boot()
-			r.poll()
+			r.polls(2)
 			requireCounts(t, r.log, "first start", map[string]int{"a.json": 1, "b.json": 1})
 			r.boot()
 			r.poll()
@@ -605,12 +641,15 @@ func TestDonePersist_TwoPollersOfOneConnection(t *testing.T) {
 	newPod.log = oldPod.log // one count for the connection
 
 	oldPod.boot()
-	oldPod.poll()
+	oldPod.polls(2)
 	newPod.boot()
-	newPod.poll()
+	newPod.polls(2)
 	requireCounts(t, oldPod.log, "both started", map[string]int{"a.json": 1})
 
+	// Both see x, then the old pod publishes it first.
 	pdPut(fake, "x.json", `{"x":1}`, 0)
+	oldPod.poll()
+	newPod.poll()
 	oldPod.poll()
 	newPod.poll()
 	requireCounts(t, oldPod.log, "old pod published x", map[string]int{"a.json": 1, "x.json": 1})
@@ -624,10 +663,12 @@ func TestDonePersist_TwoPollersOfOneConnection(t *testing.T) {
 	pdPut(fake, "y.json", `{"y":1}`, 0)
 	newPod.poll()
 	oldPod.poll()
+	newPod.poll()
+	oldPod.poll()
 	r := newPDRig(t, store, fake)
 	r.log = oldPod.log
 	r.boot()
-	r.poll()
+	r.polls(2)
 	requireCounts(t, oldPod.log, "a third start", map[string]int{"a.json": 1, "x.json": 2, "y.json": 1})
 }
 
@@ -741,14 +782,17 @@ func TestDonePersist_EndToEnd_StopAndStart(t *testing.T) {
 	// file arrives once. (A new pod on the same store is a boot in the tests
 	// above.)
 	db := pdMockDB(t, pdConn, pdTenant, nodes, 2)
-	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil }, checkpoints: store}
+	// settleMin below the 1 s interval: the settle gap is the interval, as
+	// before #562's 5 s floor.
+	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil }, checkpoints: store, settleMin: 100 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: db})
 	data := pdSubscribe(t, h.NATS())
 	time.Sleep(200 * time.Millisecond) // the consumer subscribes to commands in Run
 
 	pdCommand(t, h.NATS(), "start", pdConn, pdTenant)
 	data.waitFor(t, "c.csv", 1)
-	closesAtLeast("the first poll to end", 1)
+	// The first poll only sees the files; the second publishes them (#562).
+	closesAtLeast("the poll that published them to end", 2)
 	data.require(t, "first start", map[string]int{"a.json": 1, "b.json": 1, "c.csv": 1})
 
 	pdCommand(t, h.NATS(), "stop", pdConn, pdTenant)
