@@ -75,6 +75,12 @@ type fileConsumer struct {
 	// readDir lists a watch folder; nil means os.ReadDir. Tests inject one
 	// that fails on demand (#398).
 	readDir func(dir string) ([]os.DirEntry, error)
+	// stat is the poll's look at one file; nil means os.Stat. Tests count
+	// the calls (#537).
+	stat func(path string) (os.FileInfo, error)
+	// knownStatsPerPoll caps how many done files a poll looks at for a
+	// replacement; zero means defaultKnownStatsPerPoll. Tests lower it.
+	knownStatsPerPoll int
 
 	// Event subscribers: connectionId → list of channels
 	eventSubs   map[string][]chan FileEvent
@@ -205,6 +211,10 @@ type ActiveConnection struct {
 	// of the current run of failed reads went to the File watcher panel; zero
 	// means none yet (#409). Touched only by the watcher goroutine.
 	readErrorEventAt time.Time
+	// statRound counts the polls that read the folder, to pick which done
+	// files the next one looks at (#537). Touched only by the watcher
+	// goroutine.
+	statRound uint64
 }
 
 // fileState is what the watcher compares between polls to decide that the
@@ -577,8 +587,10 @@ func (s *fileConsumer) clock() time.Time {
 // saw its name, and the finished file was then never published. Temp names
 // are left alone until they are renamed to their final name. A known name
 // whose size or mtime differs from when it was published, overwritten or
-// renamed over, is a new file and goes through the same check (#420). A poll
-// that changed the done set saves it at the end (#391).
+// renamed over, is a new file and goes through the same check (#420). In a
+// folder with more than knownStatsPerPoll done files, each poll looks at only
+// some of them for that, in turns (#537). A poll that changed the done set
+// saves it at the end (#391).
 func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	if ac.baselineDeferred {
@@ -611,6 +623,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 	}
 	refreshed := false
 	var adopt adoptCheck
+	turns, turn := s.statTurns(ac)
 
 	// Detect new files and ingest them into the pipeline. Previously this only
 	// emitted a UI "added" event and never published the file's contents, so
@@ -626,8 +639,11 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			}
 			continue
 		}
+		if turns > 1 && !s.statThisPoll(ac, name, turns, turn) {
+			continue
+		}
 		path := filepath.Join(ac.WatchDir, name)
-		info, err := os.Stat(path)
+		info, err := s.statFile(path)
 		if err != nil {
 			// Gone or unreadable since the listing; look again next poll.
 			delete(ac.pending, name)
@@ -746,6 +762,70 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		}
 	}
 	s.saveKnown(ctx, ac, logger)
+}
+
+// defaultKnownStatsPerPoll is about how many done files a poll stats to see
+// whether one was replaced (#537). Since #420 every poll stat'ed every file,
+// one round trip each on an SMB share: at a millisecond or two a trip, a
+// folder of 10 000 files took 10 to 20 seconds per poll, against a 5 second
+// interval. A folder with more done files than this has them looked at in
+// turns, each once every few polls; at 1 000 a poll costs about a second or
+// two on such a share at most, and a folder of 10 000 notices a replacement
+// within 10 polls (50 s) instead of 1, and publishes it a poll later.
+const defaultKnownStatsPerPoll = 1000
+
+// statTurns returns into how many turns this poll's look at ac's done files
+// is split, and which turn this poll is. One turn, every done file every
+// poll, while there are no more of them than knownStatsPerPoll. When the
+// number of turns changes (the done set crosses a multiple of the budget)
+// every name's turn is drawn again, so a name can wait up to about twice the
+// turns that once.
+func (s *fileConsumer) statTurns(ac *ActiveConnection) (turns, turn int) {
+	budget := s.knownStatsPerPoll
+	if budget <= 0 {
+		budget = defaultKnownStatsPerPoll
+	}
+	turns = max(1, (len(ac.knownFiles)+budget-1)/budget)
+	turn = int(ac.statRound % uint64(turns))
+	ac.statRound++
+	return turns, turn
+}
+
+// statThisPoll reports whether a poll in turn of turns stats name. Every
+// name that is not done, or done with no stamp yet, or seen changed and
+// waiting to settle, is stat'ed every poll as before. A done file with its
+// stamp is stat'ed once every turns polls, in the turn its name hashes to: a
+// replacement is noticed that much later, then goes through the stability
+// check and is published as before (#420, #537).
+func (s *fileConsumer) statThisPoll(ac *ActiveConnection, name string, turns, turn int) bool {
+	if !ac.knownFiles[name] {
+		return true
+	}
+	if _, stamped := ac.knownStamps[name]; !stamped {
+		return true
+	}
+	if _, waiting := ac.pending[name]; waiting {
+		return true
+	}
+	return statTurn(name, turns) == turn
+}
+
+// statTurn is the turn name is stat'ed in: FNV-1a of the name, so a name
+// keeps its turn while the number of turns stays the same.
+func statTurn(name string, turns int) int {
+	h := uint32(2166136261)
+	for i := 0; i < len(name); i++ {
+		h ^= uint32(name[i])
+		h *= 16777619
+	}
+	return int(h % uint32(turns))
+}
+
+func (s *fileConsumer) statFile(path string) (os.FileInfo, error) {
+	if s.stat != nil {
+		return s.stat(path)
+	}
+	return os.Stat(path)
 }
 
 // takeDeferredBaseline is a poll for a connection whose start could not read

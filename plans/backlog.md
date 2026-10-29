@@ -492,7 +492,7 @@ Last updated 2026-10-28.
     failure, two pods and a replacement at once. Skip adoption in
     `pollOnce` when the saved row has a different stamp. Found in review of
     #420 (#465).
-77. **Every file-consumer poll stats every file in the folder.** Since
+77. ~~**Every file-consumer poll stats every file in the folder.**~~ (#537) Since
     #420 known files are checked for replacement too, so a share with
     thousands of files costs one SMB round trip per file per poll. Consider
     a cheaper change signal (directory mtime, or stat known files less
@@ -725,6 +725,13 @@ Last updated 2026-10-28.
     managed disk (`docs/operator/cost-parking.md`). Check what production
     runs, then fix the header as #527 did for Postgres. Manifest, so PR
     plus `agent:needs-human`. Found in review of #527.
+107. **The file connector page still says every check looks at every
+    file.** Since #537 a folder with more than 1 000 published files has
+    them checked for replacement in turns, so a replaced file there goes
+    out up to `ceil(files/1000)` checks later (about 50 s at 10 000 files),
+    not after two. `docs/connectors/file.md`, the paragraphs on moving files
+    out and on replaced files. Left out of #537 because another worker had
+    `docs/` at the time.
 
 ## Human
 
