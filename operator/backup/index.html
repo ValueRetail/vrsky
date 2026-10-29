@@ -2795,14 +2795,20 @@ Secrets are lost and the key isn't somewhere else, the dumps are useless.</p>
 <p><code>vrsky-cli</code> provides <code>backup</code> / <code>list</code> / <code>restore</code>. The bucket, credentials
 and source database come from <code>BACKUP_*</code> environment variables and
 <code>ENCRYPTION_KEY</code>, not from flags. Backup and restore stream the dump, so the
-CronJob's 512Mi limit doesn't cap the database size. Restore also reads
-archives made before that change (#430); see
+CronJob's 512Mi limit doesn't cap the database size.</p>
+<p>Each archive names the key it was uploaded under (<code>VRSKYBK2</code>, #549).
+<code>verify</code> and <code>restore</code> refuse an archive that was made under another key,
+so an older backup copied over a newer key isn't restored by mistake.
+Archives from before that change (<code>VRSKYBK1</code>, and the pre-#430 single-seal
+ones) don't name their key; both commands refuse them unless you pass
+<code>--allow-unbound</code>, and then print a warning. See
 <a href="../../DR/#how-a-logical-backup-works">how a logical backup works</a>.</p>
 <div class="highlight"><pre><span></span><code>vrsky-cli<span class="w"> </span>backup<span class="w">     </span><span class="c1"># dump, encrypt, upload as mgmt-backups/management_db-&lt;timestamp&gt;.dump.gz.enc</span>
 vrsky-cli<span class="w"> </span>list<span class="w">       </span><span class="c1"># keys, sizes, ages</span>
-vrsky-cli<span class="w"> </span>backup<span class="w"> </span>verify<span class="w"> </span>mgmt-backups/management_db-20261029T110000Z.dump.gz.enc<span class="w">   </span><span class="c1"># decrypt to nowhere; non-zero exit on damage</span>
+vrsky-cli<span class="w"> </span>backup<span class="w"> </span>verify<span class="w"> </span>mgmt-backups/management_db-20261029T110000Z.dump.gz.enc<span class="w">   </span><span class="c1"># decrypt to nowhere; non-zero exit on damage or a key mismatch</span>
 vrsky-cli<span class="w"> </span>restore<span class="w"> </span>--target-db-url<span class="w"> </span><span class="s1">'postgres://…/vrsky'</span><span class="w"> </span>--confirm<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>mgmt-backups/management_db-20261029T110000Z.dump.gz.enc
+<span class="c1"># A backup made before VRSKYBK2: add --allow-unbound to verify and restore</span>
 </code></pre></div>
 <h2 id="monitoring">Monitoring<a class="headerlink" href="#monitoring" title="Permanent link">&para;</a></h2>
 <p><code>MgmtBackupMissing</code> (warning) fires when two of the CronJob's Jobs have failed

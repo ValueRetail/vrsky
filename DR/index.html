@@ -1328,6 +1328,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a disk snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore-from-a-logical-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a logical dump
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-ci-restore-drill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The CI restore drill
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-dry-run-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local dry-run (compose)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2408,6 +2452,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#restore-from-a-disk-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a disk snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#restore-from-a-logical-dump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore from a logical dump
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-ci-restore-drill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The CI restore drill
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-dry-run-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local dry-run (compose)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2519,20 +2607,41 @@ on a <code>postgres:18-alpine</code> base, so <code>pg_dump</code> matches the s
 Job's memory stays at a few MiB plus the storage SDK's upload buffers
 whatever the size of the database. The archive is encrypted in 64 KiB
 chunks, each its own GCM seal with a counter and a last-chunk flag in the
-nonce, behind a <code>VRSKYBK1</code> header. The chunks are sealed under a key made
+nonce, behind a <code>VRSKYBK2</code> header. The chunks are sealed under a key made
 for that archive alone, HKDF-SHA256 of the <code>ENCRYPTION_KEY</code> with a random
 salt stored in the header, so the backups never use the secrets vault's key
 directly (the format is documented in <code>src/cmd/vrsky-cli/stream.go</code>). A
 cut-off, reordered or edited archive fails to decrypt; it never restores as
 a shorter dump. If <code>pg_dump</code> fails, the upload is aborted before the last
 chunk is written.</p>
-<p><code>vrsky-cli restore</code> reads both this format and the archives made before</p>
-<h1 id="430-one-gcm-seal-under-the-encryption_key-over-the-whole-gzipped-dump">430 (one GCM seal under the <code>ENCRYPTION_KEY</code> over the whole gzipped dump).<a class="headerlink" href="#430-one-gcm-seal-under-the-encryption_key-over-the-whole-gzipped-dump" title="Permanent link">&para;</a></h1>
-<p>New archives are streamed into <code>pg_restore</code>; old ones are read into memory
-to decrypt, as before. A damaged new archive would only be caught while
-<code>pg_restore</code> runs, so run <code>vrsky-cli backup verify &lt;key&gt;</code> first, as the
-runbook below does: it reads the whole archive and fails on any damage
-without touching a database.</p>
+<p>The header also names the object key the archive was uploaded under and
+when the backup started (#549). Every chunk authenticates the header, and
+<code>backup verify</code> and <code>restore</code> refuse an archive whose header names a
+different key than the one they were given. So someone who can write to
+the bucket can't copy an older backup over the newest key and have it
+restored as if it were the newest. They can still delete backups; that is
+for the storage account's access control and soft delete. The binding
+covers the whole key, prefix included, but not the bucket: copying an
+archive to another storage account under the same key works, renaming it
+doesn't. To restore a renamed archive, copy it back to the key its header
+names (the error shows it) and run <code>backup verify</code> on that key. The header
+isn't proven until verify has read the archive, so a forged one can name
+any key; verify then fails.</p>
+<p><code>vrsky-cli restore</code> also reads the two older formats: <code>VRSKYBK1</code> (#430,
+the same chunks without the key in the header) and the archives made
+before #430 (one GCM seal under the <code>ENCRYPTION_KEY</code> over the whole
+gzipped dump). Neither says which backup it is, so both <code>verify</code> and
+<code>restore</code> refuse them unless you pass <code>--allow-unbound</code>, and then print a
+warning. Without that flag an attacker could put any old archive, from any
+time the same <code>ENCRYPTION_KEY</code> was in use, under the newest key. The newest
+backup is <code>VRSKYBK2</code> from the first CronJob run after the change is
+deployed, so the flag is only for deliberately going back further than
+that; the old formats age out of the 14-day retention after two weeks.</p>
+<p>New archives are streamed into <code>pg_restore</code>; pre-#430 ones are read into
+memory to decrypt, as before. A damaged chunked archive would only be
+caught while <code>pg_restore</code> runs, so run <code>vrsky-cli backup verify &lt;key&gt;</code>
+first, as the runbook below does: it reads the whole archive and fails on
+any damage without touching a database.</p>
 <p>Config is environment-driven: <code>BACKUP_DB_URL</code>, <code>ENCRYPTION_KEY</code>,
 <code>BACKUP_PROVIDER</code>, <code>BACKUP_BUCKET</code>, and <code>BACKUP_AZURE_ACCOUNT_NAME</code> +
 <code>BACKUP_AZURE_ACCOUNT_KEY</code> or <code>BACKUP_AZURE_CONNECTION_STRING</code> (the S3 and GCS
@@ -2652,12 +2761,23 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
 <span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["backup","verify","'</span><span class="s2">"</span><span class="nv">$KEY</span><span class="s2">"</span><span class="s1">'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
 </code></pre></div>
    <code>backup verify</code> downloads the dump and decrypts and gunzips it without
-   writing anything, then prints <code>backup ok: &lt;key&gt; (&lt;n&gt; bytes of dump)</code>. A
-   non-zero exit means the dump is damaged, cut off or under another
-   <code>ENCRYPTION_KEY</code>: pick another one. Don't skip this. <code>restore</code> would
-   notice a damaged dump only partway through and roll back, so you'd find
-   out later and with less detail.</li>
-<li><strong>Restore into it:</strong>
+   writing anything, then prints
+   <code>backup ok: &lt;key&gt; (&lt;n&gt; bytes of dump; VRSKYBK2, made &lt;time&gt;)</code>. Check
+   that the time is the one you expect for that key. A non-zero exit means
+   the dump is damaged, cut off, under another <code>ENCRYPTION_KEY</code>, or was
+   made under another key and copied or renamed to this one (the error
+   names the key its header claims): pick another one. Don't skip this.
+   <code>restore</code> would notice a damaged dump only partway through and roll
+   back, so you'd find out later and with less detail.</li>
+</ol>
+<p>A dump made before <code>VRSKYBK2</code> (#549) is refused unless you add
+   <code>--allow-unbound</code> after <code>verify</code> (and after <code>restore</code> in step 4). Those
+   archives don't say which backup they are, so nothing proves the file
+   under that key is the backup made then rather than an older one copied
+   over it. Only pass the flag when you mean to restore a dump from before
+   the change, and expect the warning it prints. They age out of the
+   14-day retention two weeks after the change reaches production.
+4. <strong>Restore into it:</strong>
    <div class="highlight"><pre><span></span><code><span class="nv">TARGET</span><span class="o">=</span><span class="s1">'postgres://vrsky:&lt;scratch password&gt;@pg-restore-test.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable'</span>
 kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span class="w"> </span>run<span class="w"> </span>vrsky-cli-restore<span class="w"> </span>--rm<span class="w"> </span>-it<span class="w"> </span>--restart<span class="o">=</span>Never<span class="w"> </span>--image<span class="o">=</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--overrides<span class="o">=</span><span class="s1">'{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'</span><span class="s2">"</span><span class="nv">$IMAGE</span><span class="s2">"</span><span class="s1">'","args":["restore","--target-db-url","'</span><span class="s2">"</span><span class="nv">$TARGET</span><span class="s2">"</span><span class="s1">'","--confirm","'</span><span class="s2">"</span><span class="nv">$KEY</span><span class="s2">"</span><span class="s1">'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'</span>
@@ -2669,8 +2789,7 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
    any statement fails, everything rolls back, the <code>--clean</code> drops included,
    and the target is left as it was. It requires <code>--target-db-url</code> and
    <code>--confirm</code>, and refuses to overwrite <code>BACKUP_DB_URL</code> unless you also pass
-   <code>--allow-source-db</code>.</li>
-</ol>
+   <code>--allow-source-db</code>.</p>
 <p>Without the cluster, run the same image anywhere with Docker and the
    environment from the <a href="../operator/backup/#layer-2-the-vrsky-backup-config-secret">Secret</a>,
    with <code>ENCRYPTION_KEY</code> from the password manager. Verify first with the
