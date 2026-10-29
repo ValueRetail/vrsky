@@ -705,7 +705,7 @@ Last updated 2026-10-28.
     makes the other pod skip new files the fallback took as done. Merge
     before that first snapshot, or keep the fallback's names out of it.
     Found in review of #500.
-103. **A workspace deleted elsewhere stays in the selector.** Deleting it
+103. ~~**A workspace deleted elsewhere stays in the selector.**~~ (#552) Deleting it
     again answers 403 or 404, and since #514 `TenantSelector` only shows
     that error. The server did answer, so a `checkAuth` on 403/404 can't
     turn a network blip into a logout; it would drop the stale workspace.
@@ -801,6 +801,17 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
+116. **`checkAuth` signs the user out when `/me` fails for any reason.**
+    `getMe` returns null on every failure, and `ui/src/store/authStore.ts`
+    clears the user and workspaces whenever it gets null, so a network
+    error or a 5xx on `/me` (at app load, after a workspace delete, after a
+    403/404 on a delete since #552) sends a user with a working session to
+    the login page. The session token stays, so a reload recovers. `getMe`
+    drops the token only on a 401 of its own, so `checkAuth` can tell the
+    two apart the way `reportUnauthorized` in `services/sessionExpiry.ts`
+    does: keep the state while the token is still there and say the
+    refresh failed. Auth state, so PR plus `agent:needs-human`. Found in
+    #552.
 119. **The SFTP and cloud-storage editors show a poll interval they don't
     save.** Both consumer panels in
     `ui/src/components/Pipeline/PropertyEditor.tsx` show
@@ -818,6 +829,19 @@ Last updated 2026-10-28.
     `file_pattern` to event keys and skip non-create S3 records, or say in
     the panel that the notification must be scoped. Documented as is in
     #564. Found in #564.
+124. **A refresh after a refused workspace delete resets the page.**
+    `TenantSelector` calls `checkAuth()` after a 403 or 404, `checkAuth`
+    sets `isLoading: true`, and `ui/src/components/Auth/ProtectedRoute.tsx:24`
+    swaps the page for the spinner and remounts the builder, so open
+    panels, the event history and the selection are lost (the canvas
+    survives in `canvasStore`). Since #552 a non-owner's 403 does this too.
+    A refresh that doesn't touch `isLoading` would avoid it; that changes
+    the auth store, so PR plus `agent:needs-human`. Found in review of #552.
+125. **`checkAuth` can select a workspace that isn't active.** When the saved
+    workspace is gone it falls back to `meData.current_tenant`
+    (`ui/src/store/authStore.ts` ~193), the server's `tenants[0]`, without
+    checking `status === 'active'`, which `switchTenant` would refuse. Auth
+    state, so PR plus `agent:needs-human`. Found in review of #552.
 130. **Refuse a cloud-storage `move_prefix` inside `prefix`.** The listing
     is recursive, so an object moved to a `move_prefix` under `prefix` is
     a new key at the next poll and is published again. Its second move
