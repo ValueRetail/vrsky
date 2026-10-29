@@ -47,6 +47,9 @@ func TestIncremental_CheckIncremental(t *testing.T) {
 		{"query sets start", "orders?start=0", nil, false},
 		{"query sets num", "orders?num=10", nil, false},
 		{"query sets num after a filter", "orders?orderstate=10&num=10", nil, false},
+		{"query sets Sort (mixed case)", "orders?Sort=orderid", nil, false},
+		{"query sets NUM (upper case)", "orders?NUM=10", nil, false},
+		{"query sets OrderIdFrom (mixed case)", "orders?OrderIdFrom=5", nil, false},
 		{"negative overlap", "orders", ov(-1), false},
 	}
 	for _, tc := range cases {

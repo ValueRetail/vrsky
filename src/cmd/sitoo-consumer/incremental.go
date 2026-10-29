@@ -113,6 +113,13 @@ func (c *SitooConfig) incrementalPageSize() int {
 	return max(c.PageSize, 2)
 }
 
+// overlapWiderThanAPoll reports whether re-reading the overlap can take more
+// than one poll's page budget. Then new orders wait several polls and a late
+// order can be missed during that catch-up (docs/connectors/sitoo.md).
+func (c *SitooConfig) overlapWiderThanAPoll() bool {
+	return c.overlap() > int64(c.incrementalPageSize()-1)*maxPagesPerPoll
+}
+
 // overlap is how far back each poll re-reads, in orderids.
 func (c *SitooConfig) overlap() int64 {
 	if c.CursorOverlap != nil {
@@ -282,8 +289,13 @@ func (s *sitooConsumer) fetchIncremental(ctx context.Context, connID, tenantID s
 			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, next, published); err != nil {
 				return err
 			}
-			logger.Info("Sitoo poll read its page budget; the next poll carries on",
-				"pages", pages, "watermark", mark, "next", from)
+			if next != nil {
+				logger.Info("Sitoo poll read its page budget before passing the watermark; the next poll carries on from here",
+					"pages", pages, "watermark", mark, "next", from)
+			} else {
+				logger.Info("Sitoo poll read its page budget; the next poll re-reads the overlap and goes on",
+					"pages", pages, "watermark", mark)
+			}
 			break
 		}
 		pages++

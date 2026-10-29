@@ -277,6 +277,10 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 			logger.Error("Sitoo incremental polling refused", "error", err)
 			return
 		}
+		if cfg.overlapWiderThanAPoll() {
+			logger.Warn("Sitoo cursor_overlap is more than one poll can re-read; lower it or raise page_size",
+				"cursor_overlap", cfg.overlap(), "page_size", cfg.incrementalPageSize(), "pages_per_poll", maxPagesPerPoll)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
