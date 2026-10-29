@@ -853,7 +853,7 @@ Last updated 2026-10-28.
     (`ui/src/store/authStore.ts` ~193), the server's `tenants[0]`, without
     checking `status === 'active'`, which `switchTenant` would refuse. Auth
     state, so PR plus `agent:needs-human`. Found in review of #552.
-130. **Refuse a cloud-storage `move_prefix` inside `prefix`.** The listing
+130. ~~**Refuse a cloud-storage `move_prefix` inside `prefix`.**~~ (#567) The listing
     is recursive, so an object moved to a `move_prefix` under `prefix` is
     a new key at the next poll and is published again. Its second move
     copies it onto its own key and then deletes it: on Azure and GCS that
@@ -870,6 +870,25 @@ Last updated 2026-10-28.
     `--allow-unbound` flag and the unbound warning, so every archive
     restore accepts is bound to its key. Update `docs/DR.md` and
     `docs/operator/backup.md`. Found in #549.
+133. **A cloud-storage start the consumer refuses leaves the connection
+    `running`, ingesting nothing.** `StartConnection` in
+    `src/pkg/managementapi/handler.go` writes `running` once the
+    orchestrator has deployed, and `RestoreRunning` keeps it. The consumer's
+    refusals in `startConnection` (`src/cmd/cloud-storage-consumer/service.go`,
+    `move` without `move_prefix`, and since #567 a `move_prefix` the listing
+    of `prefix` returns) return before `claim.Activate` and write no status,
+    so only the worker log says why. Refuse these configs in the start-time
+    validator (`src/pkg/managementapi/nodeconfig.go`, so the user gets a 400
+    with the reason) and/or have the worker write `error`; and show the
+    rule at the "Move to prefix" field in
+    `ui/src/components/Pipeline/PropertyEditor.tsx`. The rule is the
+    consumer's `validateMoveOutsideListing`. Found in review of #567.
+134. **Check `move_prefix` in cloud-storage event mode once it applies
+    `prefix`.** Event mode ignores `prefix` (item 120), so #567 checks the
+    start in poll mode only and relies on `afterAction` refusing a move
+    onto the object's own key. A moved object that the bucket notification
+    covers is still ingested a second time. If item 120 makes event mode
+    apply `prefix`, run the same start check there. Found in #567.
 
 ## Human
 
