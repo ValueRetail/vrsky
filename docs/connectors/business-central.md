@@ -274,9 +274,13 @@ node sees) is skipped and the converted record is written.
       names a record dated later than tomorrow (UTC).
     - A date says nothing about modification. An edit that leaves the date
       alone is not seen again (a record without `id` or `number` is
-      identified by its content, so there it is). A record added with a date
-      before the watermark is not seen at all, which is true of any cursor.
-      The blank date BC returns for an empty field (`0001-01-01`) is ignored.
+      identified by its content, so there it is). A record whose date is
+      earlier than the watermark when it is added is never read, and nothing
+      is logged. Business dates are often backdated — for example, Saturday's
+      sales posted on Monday with posting date Saturday — so use
+      `lastModifiedDateTime` as the cursor unless you are sure the date field
+      is never backdated. The blank date BC returns for an empty field
+      (`0001-01-01`) is ignored.
 
     The cost of a date cursor is the watermark day: each poll reads it again
     and the checkpoint lists its records. A day with more than 1,000 records

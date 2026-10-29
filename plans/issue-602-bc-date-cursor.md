@@ -69,3 +69,16 @@ incremental poll read and sent the whole entity again.
 
 `src/cmd/business-central-consumer` (service.go, cursor_date_test.go),
 `docs/connectors/business-central.md`, `plans/backlog.md` (strike 140).
+
+## Review
+
+- Docs corrected: a date cursor never reads a record added with a date before
+  the watermark, and nothing is logged. The "Date fields" section now says
+  so and recommends `lastModifiedDateTime` unless the date field is never
+  backdated.
+- Backlog 143 (backdated records need a `lookback_days` window) and 144
+  (changing `cursor_field` keeps the old watermark) added, both found in this
+  review.
+- Open question: the filter form `field ge 2026-10-29` (date unquoted) is the
+  OData v4 `Edm.Date` literal, but it has not yet been tried against a real
+  Business Central sandbox.
