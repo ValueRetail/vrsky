@@ -521,14 +521,16 @@ Last updated 2026-10-28.
     `infrastructure/` (say `prometheus-rules-test-legs.yml`) that the job
     reads, keeping only the leg count in the workflow, and point
     `TestRuleTestGroupsRunOnce` at it. Found in review of #468.
-81. **A subscriber's `Stop` waits out its fetch.** `Subscriber.loop` in
+81. ~~**A subscriber's `Stop` waits out its fetch.**~~ (#494) `Subscriber.loop` in
     `pkg/messaging` fetches with `MaxWait(2s)` and `Halt` cannot cut that
     short, so every stop takes up to 2 s even when nothing is held. It is
     most of what the remote-agent tests still spend (a stop in each
     cleanup) and it slows every pipeline stop and redeploy. A fetch that
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
-    Found during #460.
+    Found during #460. Done with short polls instead; the remote-agent
+    gateway still ends its handlers' scope right after `Halt`, which is
+    #576.
 82. ~~**GCS `PutStream` commits a partial object when the body fails.**~~ (#524)
     `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
     which finalises the upload; aborting needs the writer's context

@@ -88,6 +88,22 @@ type Subscriber struct {
 	halt    sync.Once
 }
 
+// pollWait is how long the server holds each pull request open (its
+// "expires"). The loop polls in rounds this short so that Halt and Stop wait
+// out at most one of them: an idle Stop used to wait out a two-second fetch
+// (#494). Shorter costs more requests: an idle subscriber sends one pull
+// request per pollWait, and the server answers each with a 408 when it
+// expires. A consumer with a short AckWait polls shorter still, see poll.
+const pollWait = 150 * time.Millisecond
+
+// fetchWait is how long the client listens for one fetch to end. The fetch
+// normally ends on the server's word, long before this: the batch filled, or
+// the 408 that says the pull request expired. fetchWait only covers an answer
+// that never comes (a broken connection). It is also the margin by which a
+// pull request may reach the server late and still be over before the fetch
+// is, which is what lets Stop drain without stranding a message.
+const fetchWait = 2 * time.Second
+
 // DefaultBackoff is the per-attempt delay schedule used when SubscriberOpts.
 // Backoff is empty. Total time from first delivery to DLQ ≈ 156 seconds.
 var DefaultBackoff = []time.Duration{
@@ -325,33 +341,127 @@ func (s *Subscriber) Stop() {
 // fetch the NAK'd message again, have it NAK'd again by the same ended
 // handler, and so on: each round is a delivery attempt, so a stop that is
 // descheduled for a couple of milliseconds dead-letters the message (#444).
+//
+// Halt does not cut a fetch short. The fetch in progress, at most pollWait
+// of it, runs to its end, and whatever it brought is handled, acked or NAK'd
+// as usual: those messages were delivered to this subscriber, and only it can
+// settle them. Then the loop sends no more pull requests. So Stop takes up
+// to one poll on an idle subscriber, and when it drains the subscription the
+// server holds no pull request of ours that could still deliver into it
+// (#494).
+//
+// So handlers still run after Halt returns: the messages of that last poll
+// are dispatched then. Keep whatever the handlers need alive until Stop has
+// returned. A caller that ends the handlers' scope right after Halt has them
+// fail, and each such message is NAK'd with a delivery attempt spent (on its
+// last attempt, dead-lettered). The remote-agent gateway still does that
+// (#576).
 func (s *Subscriber) Halt() {
 	s.halt.Do(func() { close(s.stopCh) })
 }
 
+func (s *Subscriber) halted() bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Subscriber) loop() {
 	defer close(s.doneCh)
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		default:
-		}
-		msgs, err := s.sub.Fetch(s.opts.MaxAckPending, nats.MaxWait(2*time.Second))
-		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-			s.opts.Logger.Warn("JetStream fetch failed",
-				"durable", s.opts.DurableName, "error", err)
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
+	for !s.halted() {
+		msgs, err := s.fetch()
+		// Dispatched even if Halt came during the fetch: the server has
+		// counted these as delivered to us.
 		for _, m := range msgs {
 			s.dispatch(m)
 		}
+		if err == nil {
+			continue
+		}
+		// A fetch that ended without the server's word (no batch filled, no
+		// 408) may leave its pull request open on the server: the 2 s
+		// backstop here, a lost connection below. Those are the only cases,
+		// and both are logged as such.
+		if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			s.opts.Logger.Info("JetStream fetch ended without the server's answer; its pull request may still be open",
+				"durable", s.opts.DurableName, "error", err)
+			continue
+		}
+		attrs := []any{"durable", s.opts.DurableName, "error", err}
+		if errors.Is(err, nats.ErrFetchDisconnected) {
+			attrs = append(attrs, "pull_request_may_be_open", true)
+		}
+		s.opts.Logger.Warn("JetStream fetch failed", attrs...)
+		// The back-off holds no pull request, so a halt may end it.
+		t := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-s.stopCh:
+		case <-t.C:
+		}
+		t.Stop()
 	}
 }
+
+// fetch sends one pull request, held by the server for one poll, and returns
+// what it brought once the server has ended it: by filling the batch, or by
+// the 408 it sends when the request expires. Ending on the server's word, not
+// on a client timer, is what makes a halt safe: the request is over when the
+// loop sees the halt, so nothing can be delivered into a subscription that no
+// one reads any more.
+func (s *Subscriber) fetch() ([]*nats.Msg, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
+	defer cancel()
+	mb, err := s.sub.FetchBatch(s.opts.MaxAckPending, nats.Context(pollContext{
+		Context:  ctx,
+		deadline: time.Now().Add(s.poll() * 10 / 9),
+	}))
+	if err != nil {
+		return nil, err
+	}
+	var msgs []*nats.Msg
+	for m := range mb.Messages() {
+		msgs = append(msgs, m)
+	}
+	return msgs, mb.Error()
+}
+
+// poll is how long the server holds this subscriber's pull requests:
+// pollWait, or a quarter of the shortest ack wait when that is shorter. What
+// a fetch brings is dispatched once the fetch is over, so the first message
+// of a batch waits up to a whole poll without heartbeats. Held longer than
+// its ack wait, it would be redelivered into the same fetch and handled
+// twice. With a backoff schedule the server's ack wait for delivery n is
+// Backoff[n-1], not AckWait (which is Backoff[0]), so the shortest step
+// counts. The default schedule starts at a second and only grows, and
+// nothing in production sets a shorter one; some tests do.
+func (s *Subscriber) poll() time.Duration {
+	ackWait := s.opts.AckWait
+	for _, b := range s.opts.Backoff {
+		ackWait = min(ackWait, b)
+	}
+	return max(min(pollWait, ackWait/4), 10*time.Millisecond)
+}
+
+// pollContext is the context a fetch runs under. nats.go sets a pull
+// request's expires to 90% of the time left until the context's deadline and
+// listens until the context is done. Here the two differ on purpose: the
+// deadline gives the server one poll, and the context stays open until
+// fetchWait. With an honest deadline the client would stop listening only a
+// tenth of a poll (15 ms) after the server started its timer, and a request
+// that took longer than that to reach the server, a pod held back by its CPU
+// limit say, would outlive its fetch: a halt then leaves it open, and a
+// message delivered into it is never handled. Listening until the server's
+// 408 makes the margin fetchWait instead. FetchBatch (not Fetch) is what ends
+// on that 408 when nothing came; Fetch ignores it and waits for the context.
+type pollContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c pollContext) Deadline() (time.Time, bool) { return c.deadline, true }
 
 // heartbeatInterval returns how often to mark an in-flight message InProgress.
 // Default is AckWait/2 (floored at 250ms) so the redelivery timer is reset with
