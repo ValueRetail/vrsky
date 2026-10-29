@@ -973,8 +973,8 @@ Last updated 2026-10-28.
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
-140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
-    watermark.** `cursorTracker.observe` in
+140. ~~**An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.**~~ (#602) `cursorTracker.observe` in
     `src/cmd/business-central-consumer/service.go` parses the value with
     `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
     so the node stores no watermark and every incremental poll reads and
