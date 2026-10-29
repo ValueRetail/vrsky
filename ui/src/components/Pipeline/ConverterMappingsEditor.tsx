@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import {
   CONVERTER_MAPPING_LABELS,
   CONVERTER_MAPPING_TYPES,
@@ -29,17 +29,32 @@ const checkboxLabelStyle = {
   display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#374151', marginTop: '8px',
 } as const
 
+// What a screen reader calls a row, so rows can be told apart (#542):
+// "mapping 2" at the top, "item mapping 1 of mapping 2" inside an `each`,
+// followed by what the row maps, e.g. "(items → lines)", once it has a
+// source or a target.
+function mappingRowLabel(rowName: string, mapping: ConverterMapping): string {
+  const source = mapping.source?.trim() ?? ''
+  const target = mapping.target?.trim() ?? ''
+  const what = source && target ? `${source} → ${target}` : source || target
+  return what ? `${rowName} (${what})` : rowName
+}
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
 function MappingRow({
   mapping,
   onChange,
   onRemove,
   depth,
+  rowName,
   wrapFields,
 }: {
   mapping: ConverterMapping
   onChange: (patch: Partial<ConverterMapping>) => void
   onRemove: () => void
   depth: number
+  // "mapping 2", or "item mapping 1 of mapping 2" for an `each` row's items.
+  rowName: string
   // Wraps the row's own fields only. The item mappings of an `each` sit
   // outside it, so a schema field dropped on an item never lands on the
   // `each` row's source.
@@ -49,13 +64,22 @@ function MappingRow({
   const type = mapping.type || 'rename'
   const known = CONVERTER_MAPPING_TYPES.includes(type)
   const warnings = converterMappingWarnings(mapping)
+  const rowLabel = mappingRowLabel(rowName, mapping)
+  // The row's inputs point at its warnings, so a screen reader reads them
+  // with the field (#542). They point at the items, not the list: a browser
+  // describes by the referenced element's aria-label when it has one, and the
+  // list's would read "Mapping warnings" instead of the warnings.
+  const warningsId = useId()
+  const warningIds = warnings.map((_, i) => `${warningsId}-${i}`)
+  const describedBy = warnings.length > 0 ? warningIds.join(' ') : undefined
 
   return (
-    <div style={{ backgroundColor: depth > 0 ? '#ffffff' : '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
+    <div role="group" aria-label={capitalize(rowLabel)} style={{ backgroundColor: depth > 0 ? '#ffffff' : '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px', marginBottom: '6px' }}>
       {wrapFields(<>
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
         <select
-          aria-label="Mapping type"
+          aria-label={`Type of ${rowLabel}`}
+          aria-describedby={describedBy}
           value={type}
           onChange={(e) => onChange({ type: e.target.value })}
           style={selectStyle}
@@ -70,7 +94,7 @@ function MappingRow({
         <div style={{ flex: 1 }} />
         <button
           type="button"
-          aria-label="Remove mapping"
+          aria-label={`Remove ${rowLabel}`}
           onClick={onRemove}
           style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}
         >
@@ -83,6 +107,7 @@ function MappingRow({
           placeholder={type === 'each' ? 'e.g. items' : type === 'remove' ? 'e.g. internal_id' : 'e.g. name or user.email'}
           value={mapping.source ?? ''}
           onChange={(v) => onChange({ source: v })}
+          describedBy={describedBy}
         />
       )}
       {type !== 'remove' && (
@@ -91,6 +116,7 @@ function MappingRow({
           placeholder={type === 'each' ? 'e.g. salesInvoiceLines' : 'e.g. full_name'}
           value={mapping.target ?? ''}
           onChange={(v) => onChange({ target: v })}
+          describedBy={describedBy}
         />
       )}
       {type === 'static' && (
@@ -99,6 +125,7 @@ function MappingRow({
           placeholder="e.g. default_value"
           value={mapping.value == null ? '' : String(mapping.value)}
           onChange={(v) => onChange({ value: v })}
+          describedBy={describedBy}
         />
       )}
       {type === 'template' && (
@@ -107,6 +134,7 @@ function MappingRow({
           placeholder="e.g. {first_name} {last_name}"
           value={mapping.expression ?? ''}
           onChange={(v) => onChange({ expression: v })}
+          describedBy={describedBy}
         />
       )}
       </>)}
@@ -121,6 +149,7 @@ function MappingRow({
             mappings={mapping.mappings ?? []}
             onChange={(next) => onChange({ mappings: next })}
             depth={depth + 1}
+            parentName={rowName}
             addLabel="+ Add Item Mapping"
           />
           <label style={checkboxLabelStyle}>
@@ -128,6 +157,7 @@ function MappingRow({
               type="checkbox"
               checked={mapping.drop_unmapped ?? false}
               onChange={(e) => onChange({ drop_unmapped: e.target.checked })}
+              aria-describedby={describedBy}
             />
             Drop unmapped item fields
           </label>
@@ -135,7 +165,7 @@ function MappingRow({
       )}
       {warnings.length > 0 && (
         <ul aria-label="Mapping warnings" style={{ margin: '6px 0 0', paddingLeft: '16px', fontSize: '11px', color: '#b45309' }}>
-          {warnings.map((w) => <li key={w}>{w}</li>)}
+          {warnings.map((w, i) => <li key={w} id={warningIds[i]}>{w}</li>)}
         </ul>
       )}
     </div>
@@ -146,6 +176,7 @@ export function MappingList({
   mappings,
   onChange,
   depth = 0,
+  parentName,
   addLabel = '+ Add Mapping',
   wrapRow = (_i, row) => row,
   wrapAdd = (button) => button,
@@ -153,6 +184,8 @@ export function MappingList({
   mappings: ConverterMapping[]
   onChange: (mappings: ConverterMapping[]) => void
   depth?: number
+  // The `each` row these are the item mappings of; unset at the top level.
+  parentName?: string
   addLabel?: string
   wrapRow?: RowWrap
   wrapAdd?: AddWrap
@@ -169,6 +202,7 @@ export function MappingList({
           onChange={(patch) => update(i, patch)}
           onRemove={() => onChange(mappings.filter((_, j) => j !== i))}
           depth={depth}
+          rowName={parentName ? `item mapping ${i + 1} of ${parentName}` : `mapping ${i + 1}`}
           wrapFields={(fields) => wrapRow(i, fields)}
         />
       ))}

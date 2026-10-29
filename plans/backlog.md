@@ -480,7 +480,7 @@ Last updated 2026-10-28.
     guard, so on a slow switch from A to B, A's answer can land after B's
     and the list shows A's connections under B. Give it the same guard as
     the connections store's `load()`. Found in review of #450 (#466).
-75. **The sidebar's status counts cover at most 100 connections.** They
+75. ~~**The sidebar's status counts cover at most 100 connections.**~~ (#541) They
     come from the store's loaded items (`limit=100`), while the badge shows
     the API total, so a workspace with more than 100 shows a badge that
     disagrees with the running/stopped/error cards. Count by status on the
@@ -492,7 +492,7 @@ Last updated 2026-10-28.
     failure, two pods and a replacement at once. Skip adoption in
     `pollOnce` when the saved row has a different stamp. Found in review of
     #420 (#465).
-77. **Every file-consumer poll stats every file in the folder.** Since
+77. ~~**Every file-consumer poll stats every file in the folder.**~~ (#537) Since
     #420 known files are checked for replacement too, so a share with
     thousands of files costs one SMB round trip per file per poll. Consider
     a cheaper change signal (directory mtime, or stat known files less
@@ -556,7 +556,7 @@ Last updated 2026-10-28.
     production and the CronJob has run on it. Until then restore still
     opens archives sealed directly under `ENCRYPTION_KEY`; removing it
     finishes the key separation. Found in review of #471.
-86. **The file destination's host folder is fixed to `data/output`.**
+86. ~~**The file destination's host folder is fixed to `data/output`.**~~ (#553)
     #422 lets `.env` pick the host folder behind `/data/input`
     (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
     repository's `data/output`, so a Windows user can read from their home
@@ -571,7 +571,7 @@ Last updated 2026-10-28.
     Either delete along the path (a behaviour change for existing
     pipelines, so say so in the PR) or document it. The editor's `each`
     help text says so since #458. Found in #458.
-88. **Converter editor accessibility.** Nested mapping rows repeat the
+88. ~~**Converter editor accessibility.**~~ (#542) Nested mapping rows repeat the
     accessible names "Mapping type" and "Remove mapping" with no row
     context, so a screen reader can't tell rows apart, and a row's
     warnings aren't tied to its inputs with `aria-describedby`
@@ -672,7 +672,7 @@ Last updated 2026-10-28.
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
     a retry would read better. Found in review of #501.
-99. **No runbook for rotating the ACR password.** The password enters the
+99. ~~**No runbook for rotating the ACR password.**~~ (#539) The password enters the
     cluster in `deploy-azure.sh` step 2 (`vrsky-platform`, `vrsky-storage`)
     and `minio-images-acr.sh --repoint` (`vrsky-storage`), and every deploy
     copies it on into `vrsky-database` and `vrsky-ui` (#497). Nothing says
@@ -687,15 +687,15 @@ Last updated 2026-10-28.
     canvas id with it). The #502 name sync stays safe meanwhile, because the
     store only applies a name to a canvas linked to that connection. Found
     in review of #502.
-101. **A stale edit-route answer can undo a rename deployed meanwhile.** The
+101. ~~**A stale edit-route answer can undo a rename deployed meanwhile.**~~ (#540) The
     #502 sync reads the canvas when the GET answers. If the user renames the
     tab and Deploys before that, `deployedName` already equals the new tab,
     so the old answer counts as "not renamed" and puts the old name back on
     both. The server keeps the new name; the tab is wrong until the next
     edit-route open. Capture `deployedName` when the request goes out and
     skip the sync if it changed. Found in review of #502.
-102. **A file-consumer start that couldn't read its checkpoint saves its
-    guess anyway.** `loadKnown`'s fallback after a failed checkpoint read
+102. ~~**A file-consumer start that couldn't read its checkpoint saves its
+    guess anyway.**~~ (#536) `loadKnown`'s fallback after a failed checkpoint read
     takes every file in the folder as done with its stamp now, and its
     comment says this isn't saved. But the first real change saves it:
     `saveKnown` takes the `savedGen == ""` path, which writes a snapshot
@@ -710,7 +710,7 @@ Last updated 2026-10-28.
     that error. The server did answer, so a `checkAuth` on 403/404 can't
     turn a network blip into a logout; it would drop the stale workspace.
     Found in review of #514.
-104. **The Postgres README's "Architecture" list is out of date.** It says
+104. ~~**The Postgres README's "Architecture" list is out of date.**~~ (#554) It says
     50GB "via Longhorn distributed storage" with "Full durability via
     Longhorn replication", but `statefulset.yaml` asks for `local-path` and
     production runs on `managed-csi` (the rewrite in
@@ -718,7 +718,7 @@ Last updated 2026-10-28.
     replication. Its resources line says requests of 2 CPU and 4GB, but the
     StatefulSet requests 250m and 512Mi. Fix the three lines. Manifest
     directory, so PR plus `agent:needs-human`. Found during #527.
-105. **The MinIO manifest calls itself dev-only too.**
+105. ~~**The MinIO manifest calls itself dev-only too.**~~ (#555)
     `infrastructure/kubernetes/minio/deployment.yaml` opens with "MinIO —
     DEV / SINGLE-NODE ONLY (#136)" and "NOT for production", but
     `deploy-azure.sh` installs it on AKS and production keeps its data on a
@@ -763,6 +763,37 @@ Last updated 2026-10-28.
     and retried. Retry the after-action for done names still listed (with
     `delete`/`move` a done name should not be there), with a backoff.
     Found in review of #538.
+107. **The file connector page still says every check looks at every
+    file.** Since #537 a folder with more than 1 000 published files has
+    them checked for replacement in turns, so a replaced file there goes
+    out up to `ceil(files/1000)` checks later (about 50 s at 10 000 files),
+    not after two. `docs/connectors/file.md`, the paragraphs on moving files
+    out and on replaced files. Left out of #537 because another worker had
+    `docs/` at the time.
+106. **A file-consumer checkpoint row that can't be decoded is never
+    replaced.** Since #536 a start that couldn't read its checkpoint saves
+    nothing until a read works. For a row that fails to decode that is
+    never: the watcher logs an Error every poll and falls back to its guess
+    at every start. Before #536 the first change overwrote it. Nobody can
+    read such a row, so a decode error (not a store error) could count as
+    "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
+    `keepSavedStamps` (#500). Found in review of #536.
+111. **The rest of the Postgres README still talks about Longhorn.** #554
+    fixed the "Architecture" list and the Storage section's first line, but
+    `infrastructure/kubernetes/postgresql/README.md` still says "PVC not
+    bound: Verify Longhorn is running", has Longhorn in "Increase Storage"
+    (expansion on `managed-csi` works differently, and needs checking), and
+    links Longhorn's docs under References. Manifest directory, so PR plus
+    `agent:needs-human`. Found in #554.
+112. **The MinIO README's "Architecture" list is out of date too.**
+    `infrastructure/kubernetes/minio/README.md` says 100GB "via Longhorn
+    distributed storage" and requests of 1 CPU and 2GB, but
+    `deployment.yaml` claims 8Gi on `local-path` (`managed-csi` in
+    production) and requests 50m and 512Mi. Its "High Availability" section
+    still reads as if production didn't run `deployment.yaml`, and its
+    bucket tree gives `temp/` a 15-minute TTL where `setup-job.yaml` sets
+    one day. Manifest directory, so PR plus `agent:needs-human`. Found in
+    #555.
 
 ## Human
 

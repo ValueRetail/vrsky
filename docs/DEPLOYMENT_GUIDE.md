@@ -423,6 +423,9 @@ reference that names `ghcr.io` means a manifest was applied without the
 rewrite (see the warning above). A tag ACR doesn't
 have means the image was never built: check with
 `az acr repository show-tags -n vrskyprodacr --repository vrsky/<name>`.
+A `401 Unauthorized` on pull usually means the ACR password was renewed
+and a namespace's `acr-pull` still has the old one: see
+[Rotating the ACR password](operator/acr-rotation.md).
 
 ### A rollout succeeded but the old version is still served
 

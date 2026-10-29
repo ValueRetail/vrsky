@@ -11,12 +11,15 @@ export function StyledInput({
   value,
   onChange,
   type = 'text',
+  describedBy,
 }: {
   label: string
   placeholder?: string
   value: string
   onChange: (value: string) => void
   type?: string
+  /** Space-separated ids of the elements that describe the input, such as warnings. */
+  describedBy?: string
 }) {
   const [focused, setFocused] = useState(false)
   const id = useId()
@@ -40,6 +43,7 @@ export function StyledInput({
       <input
         id={id}
         type={type}
+        aria-describedby={describedBy}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}

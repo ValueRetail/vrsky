@@ -55,6 +55,7 @@ nav:
   - Operator guide:
       - Install: operator/install.md
       - Deploying: operator/deploy.md
+      - Rotating the ACR password: operator/acr-rotation.md
       - Running on Windows: operator/windows.md
       - Remote agent: operator/remote-agent.md
       - Reaching a stack remotely: operator/remote-access.md

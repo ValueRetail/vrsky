@@ -1,10 +1,23 @@
 # =============================================================================
-# MinIO — DEV / SINGLE-NODE ONLY (#136)
+# MinIO — single replica, single drive (#136)
 # =============================================================================
-# Single replica, single drive, no erasure coding: a node or PVC loss means
-# data loss and downtime. Fine for local/POC clusters; NOT for production.
+# Production on AKS runs this Deployment (`minio` in vrsky-storage).
+# infrastructure/azure/deploy-azure.sh applied it at the first bring-up, with
+# local-path swapped for managed-csi. Since then the image was repointed to
+# its ACR copy with `minio-images-acr.sh --repoint` and the claim moved to
+# minio-data-small by hand (plans/disk-costs.md); today's deploy-azure.sh
+# does the image swap itself on a fresh cluster. The deploy job never
+# re-applies this file. The local k3d path (deploy-vrsky-platform.sh)
+# applies it as it is. In production it holds the connectors' claim-check
+# spill (payloads over 256 KiB, deploy-connectors-azure.sh), which expires
+# after 8 days (setup-job.yaml).
 #
-# For production use ONE of:
+# No erasure coding and no backup: while the pod is down, payloads over
+# 256 KiB can't be published or delivered, and losing the disk loses
+# spilled payloads that queued, retried or dead-lettered messages still
+# point to.
+#
+# For HA use ONE of:
 #   - statefulset-distributed.yaml  (self-hosted HA: 4-node erasure-coded pool)
 #   - a managed object store (AWS S3 / GCS / Azure Blob)  <-- recommended
 # See README "High Availability (production) — #136". Do not apply this file
@@ -104,8 +117,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   # Was minio-data at 100Gi. A claim cannot shrink, so the small one has a
-  # new name; spill objects expire after a day and use a few MB
-  # (plans/disk-costs.md).
+  # new name (plans/disk-costs.md). Spill objects expire after 8 days
+  # (setup-job.yaml) and use a few MB.
   name: minio-data-small
   namespace: vrsky-storage
 spec:

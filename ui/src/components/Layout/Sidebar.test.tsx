@@ -1,12 +1,13 @@
 /**
  * The sidebar: the Connections count is the workspace total (#450), the
- * running / stopped / error cards come from the loaded connections, entries
+ * running / stopped / error cards count the loaded connections, or use the
+ * API's per-status totals once the workspace outgrows one page (#541), entries
  * are gated by role, the current section is highlighted, and the docs link
  * never carries an unsafe scheme.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 vi.mock(import('@/services/api'), async (importOriginal) => ({
@@ -14,6 +15,7 @@ vi.mock(import('@/services/api'), async (importOriginal) => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() } as never,
 }))
 
+import apiClient from '@/services/api'
 import { useAuthStore } from '@/store/authStore'
 import { useConnectionsStore } from '@/store/connectionsStore'
 import { config } from '@/config/env'
@@ -90,6 +92,93 @@ describe('Sidebar connection counts', () => {
     expect(screen.getByText('Stopped')).toBeInTheDocument()
     expect(screen.queryByText('Running')).not.toBeInTheDocument()
     expect(screen.queryByText('Errors')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #541: with more connections than one summary page holds, the cards show the
+ * API's per-status totals. Driven through the real store load(); the HTTP
+ * client answers like ListConnections in src/pkg/managementapi/handler.go
+ * (limit 1..100 else 20, offset, a status filter its total counts too).
+ */
+describe('Sidebar status cards beyond the loaded page (#541)', () => {
+  const get = vi.mocked(apiClient.get)
+
+  const workspace = (running: number, stopped: number, error: number) => [
+    ...Array.from({ length: running }, (_, i) => ({ id: `r${i}`, name: `r${i}`, status: 'running' })),
+    ...Array.from({ length: stopped }, (_, i) => ({ id: `s${i}`, name: `s${i}`, status: 'stopped' })),
+    ...Array.from({ length: error }, (_, i) => ({ id: `e${i}`, name: `e${i}`, status: 'error' })),
+  ]
+
+  const serve = (items: ReturnType<typeof workspace>, failStatus?: string) =>
+    get.mockImplementation(((url: string) => {
+      const u = new URL(url, 'http://api.test')
+      if (u.pathname !== '/api/v1/connections') return Promise.reject(new Error(`unexpected ${url}`))
+      const q = u.searchParams
+      const status = q.get('status') ?? ''
+      if (status && status === failStatus) return Promise.reject(new Error('HTTP Error 500'))
+      const l = Number(q.get('limit'))
+      const limit = Number.isInteger(l) && l > 0 && l <= 100 ? l : 20
+      const o = Number(q.get('offset'))
+      const offset = Number.isInteger(o) && o >= 0 ? o : 0
+      const matches = status ? items.filter((c) => c.status === status) : items
+      return Promise.resolve({ data: { data: matches.slice(offset, offset + limit), total: matches.length, limit, offset } })
+    }) as never)
+
+  const card = (label: string) => {
+    const el = screen.getByText(label)
+    // Running has a dot beside its label, so its card is one level further up.
+    return label === 'Running' ? el.parentElement!.parentElement! : el.parentElement!
+  }
+
+  beforeEach(() => {
+    get.mockReset()
+  })
+
+  it('250 connections, the loaded 100 all running: cards show 120 / 80 / 50 from the API', async () => {
+    serve(workspace(120, 80, 50))
+    show()
+    await act(() => useConnectionsStore.getState().load())
+
+    expect(connectionsLink()).toHaveTextContent(/Connections\s*250/)
+    expect(card('Running')).toHaveTextContent(/^Running\s*120$/)
+    expect(card('Stopped')).toHaveTextContent(/^Stopped\s*80$/)
+    expect(card('Errors')).toHaveTextContent(/^Errors\s*50$/)
+  })
+
+  it('a small workspace loaded the same way still counts its loaded items, with one request', async () => {
+    serve(workspace(2, 1, 3))
+    show()
+    await act(() => useConnectionsStore.getState().load())
+
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(card('Running')).toHaveTextContent(/^Running\s*2$/)
+    expect(card('Stopped')).toHaveTextContent(/^Stopped\s*1$/)
+    expect(card('Errors')).toHaveTextContent(/^Errors\s*3$/)
+  })
+
+  it('a failed status request leaves no cards and no count', async () => {
+    serve(workspace(120, 80, 50), 'stopped')
+    show()
+    await act(() => useConnectionsStore.getState().load())
+
+    expect(connectionsLink()).toHaveTextContent(/^⚡ Connections$/)
+    expect(screen.queryByText('Running')).not.toBeInTheDocument()
+    expect(screen.queryByText('Stopped')).not.toBeInTheDocument()
+    expect(screen.queryByText('Errors')).not.toBeInTheDocument()
+  })
+
+  it('with only connections set (no load), counts the loaded items and makes no request', () => {
+    useConnectionsStore.setState({
+      connections: [conn('a', 'running'), conn('b', 'error'), conn('c', 'error'), conn('d', 'stopped')],
+      total: 12,
+    })
+    show()
+
+    expect(get).not.toHaveBeenCalled()
+    expect(card('Running')).toHaveTextContent(/^Running\s*1$/)
+    expect(card('Stopped')).toHaveTextContent(/^Stopped\s*1$/)
+    expect(card('Errors')).toHaveTextContent(/^Errors\s*2$/)
   })
 })
 

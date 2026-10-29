@@ -4,7 +4,7 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 
 ## Architecture
 
-- **Type**: Deployment (1 replica — DEV/POC only) → see **High Availability** below for production
+- **Type**: Deployment, 1 replica. Production on AKS runs this one, with no HA → see **High Availability** below
 - **Storage Backend**: S3-compatible object storage
 - **Resources**: 2 CPU, 4GB RAM (requests: 1 CPU, 2GB RAM)
 - **Storage**: 100GB via Longhorn distributed storage
@@ -21,7 +21,7 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 1. **namespace.yaml** - Creates `vrsky-storage` namespace
 2. **secret.yaml** - MinIO credentials (⚠️ CHANGE IN PRODUCTION!)
 3. **configmap.yaml** - MinIO configuration
-4. **deployment.yaml** - MinIO Deployment + PVC (DEV/single-node only)
+4. **deployment.yaml** - MinIO Deployment + PVC (single node; what production runs)
 5. **statefulset-distributed.yaml** - HA: 4-node erasure-coded StatefulSet + headless service + PodDisruptionBudget (production self-hosted)
 6. **service.yaml** - ClusterIP service (API: 9000, Console: 9001) — fronts either the Deployment or the StatefulSet
 7. **setup-job.yaml** - Job to create buckets and configure lifecycle policies

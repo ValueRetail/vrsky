@@ -130,13 +130,17 @@ func TestKnown_PublishCutOffByStopIsPublishedByNextStart(t *testing.T) {
 	}
 }
 
-// failingReadStore fails every read and counts saves.
+// failingReadStore fails every read until readable is set, and counts saves.
 type failingReadStore struct {
 	*lockedStore
-	saves atomic.Int32
+	saves    atomic.Int32
+	readable atomic.Bool
 }
 
-func (s *failingReadStore) Get(context.Context, string, string, string) (*checkpoint.Checkpoint, error) {
+func (s *failingReadStore) Get(ctx context.Context, tenantID, connectionID, nodeID string) (*checkpoint.Checkpoint, error) {
+	if s.readable.Load() {
+		return s.lockedStore.Get(ctx, tenantID, connectionID, nodeID)
+	}
 	return nil, errors.New("database unavailable")
 }
 
@@ -148,7 +152,8 @@ func (s *failingReadStore) Save(ctx context.Context, cp *checkpoint.Checkpoint) 
 // A start whose checkpoint read fails falls back to "everything present is
 // done" for this run, but must not save that: it would overwrite the saved
 // history, and another watcher re-reading it could skip a file it should
-// publish. The first real change saves.
+// publish. Nothing is saved until the saved set can be read (#536); then the
+// first save writes the set, with the guess checked against what was saved.
 func TestKnown_FailedReadDoesNotOverwriteSavedSet(t *testing.T) {
 	f := newRaceFixture(t)
 	if err := os.MkdirAll(f.inbox, 0o755); err != nil {
@@ -188,9 +193,23 @@ func TestKnown_FailedReadDoesNotOverwriteSavedSet(t *testing.T) {
 		t.Fatalf("new.json published %d times, want 1 (%s)", len(envs), describe(f.probe.published()))
 	}
 	assertWatchEnvelope(t, envs[0], "new.json", content)
-	// One save: a snapshot and the empty changes row on it (#426).
+	// The publish made the set dirty, but the saved set still can't be read,
+	// so the guess is not written over it (#536).
+	if got := store.saves.Load(); got != 0 {
+		t.Fatalf("%d checkpoint row writes while reads fail, want 0", got)
+	}
+
+	// Reads work again. Nothing is saved for this folder, so the guess is the
+	// first-start rule and stands: one save, a snapshot and the empty changes
+	// row on it (#426), and old.json is still not published.
+	store.readable.Store(true)
+	clock.advance(time.Hour)
+	f.c.pollOnce(context.Background(), ac)
 	if got := store.saves.Load(); got != 2 {
-		t.Errorf("%d checkpoint row writes after the publish, want 2 (one snapshot, its changes row)", got)
+		t.Errorf("%d checkpoint row writes once reads work, want 2 (one snapshot, its changes row)", got)
+	}
+	if got := len(f.probe.forName("old.json")); got != 0 {
+		t.Errorf("old.json published %d times after reads came back, want 0", got)
 	}
 }
 

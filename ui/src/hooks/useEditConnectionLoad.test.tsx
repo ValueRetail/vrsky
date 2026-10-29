@@ -11,6 +11,9 @@
  * per connection id, and the name sync stays with the connection it was
  * found for.
  *
+ * #540: a rename deployed while the name sync's GET was out was undone by the
+ * old answer. An answer is now dropped when deployedName changed meanwhile.
+ *
  * Runs the hook against the real canvas and UI stores; only the HTTP client
  * is mocked.
  */
@@ -26,6 +29,7 @@ vi.mock(import('@/services/api'), async (importOriginal) => ({
 import apiClient from '@/services/api'
 import { useCanvasStore } from '@/store/canvasStore'
 import { useUIStore } from '@/store/uiStore'
+import { deployIdentity } from '@/services/deployPipeline'
 import type { Node } from '@/types/pipeline'
 import { useEditConnectionLoad } from './useEditConnectionLoad'
 
@@ -184,6 +188,129 @@ describe('edit route on a canvas already linked to the connection (#502)', () =>
     await settle()
 
     expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Old name', deployedName: 'Old name', deployedConnectionId: 'conn-1' })
+  })
+})
+
+// #540: the name-sync GET answers with the server's name as it was when the
+// request went out. Things the user does in this tab while it is out decide
+// whether that answer is still news.
+describe('edit route name sync with the GET still out (#540)', () => {
+  const deferred = () => {
+    let resolve: (v: unknown) => void = () => {}
+    const promise = new Promise((res) => { resolve = res })
+    return { promise, resolve }
+  }
+  // Renders the edit route on the linked canvas and waits for the sync's GET,
+  // leaving its answer to the test.
+  const openWithAnswerPending = async () => {
+    const answer = deferred()
+    routeGets({ 'conn-1': () => answer.promise })
+    renderEdit('conn-1')
+    await waitFor(() => expect(connectionGets()).toHaveLength(1))
+    await settle()
+    expect(store().currentCanvasId).toBe(linkedId)
+    return async (serverName: string) => {
+      await act(async () => { answer.resolve(wireConnection('conn-1', serverName)) })
+      await settle()
+    }
+  }
+  // What the builder's Deploy does to the canvas: works out the name from the
+  // tab, and once the server took it, links the canvas with that name
+  // (deployCanvas's link(connectionId, payload.name)).
+  const deploy = () => {
+    const { name } = deployIdentity(canvas(linkedId), new Date())
+    act(() => store().setDeployedConnectionId(linkedId, 'conn-1', name))
+    return name
+  }
+  const nextDeploySends = () => deployIdentity(canvas(linkedId), new Date())
+
+  it.each([
+    ['keeping the "Edit: " prefix', 'Edit: New name', 'New name'],
+    ['without the prefix', 'New name', 'New name'],
+  ])('a rename deployed meanwhile (%s) survives the old answer, and the next deploy sends no name', async (_, tab, sentName) => {
+    seedLinkedCanvas('Edit: Old name', 'Old name')
+    const answerWith = await openWithAnswerPending()
+
+    act(() => store().renameCanvas(linkedId, tab))
+    expect(deploy()).toBe(sentName)
+    expect(canvas(linkedId).deployedName).toBe(sentName)
+    // The server now has the new name; the answer still carries the old one.
+    await answerWith('Old name')
+
+    expect(canvas(linkedId)).toMatchObject({ name: tab, deployedName: sentName, deployedConnectionId: 'conn-1' })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: tab, deployedName: sentName, deployedConnectionId: 'conn-1' })
+    expect(nextDeploySends()).toEqual({})
+    expect(canvas(linkedId).nodes).toEqual(localNodes)
+    expect(connectionGets()).toHaveLength(1)
+    expect(notifications()).toEqual([])
+  })
+
+  it('a canvas with no recorded deployedName that deploys meanwhile keeps what it deployed', async () => {
+    // Deployed before #450: linked, but the server's name was never recorded.
+    linkedId = store().importCanvas('Edit: Mine', localNodes, [], 'conn-1')!.id
+    store().switchCanvas(defaultId)
+    const answerWith = await openWithAnswerPending()
+
+    expect(deploy()).toBe('Mine')
+    await answerWith('Server name before the deploy')
+
+    expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: 'Mine' })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: 'Mine' })
+    expect(nextDeploySends()).toEqual({})
+  })
+
+  it.each([
+    ['the server kept the old name', 'Old name'],
+    ['the server was renamed elsewhere', 'Renamed elsewhere'],
+  ])('a rename typed meanwhile, not deployed, keeps the tab and records the server name (%s)', async (_, serverName) => {
+    seedLinkedCanvas('Edit: Old name', 'Old name')
+    const answerWith = await openWithAnswerPending()
+
+    act(() => store().renameCanvas(linkedId, 'Edit: Mine'))
+    await answerWith(serverName)
+
+    expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: serverName })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: serverName })
+    // The rename is still to be sent.
+    expect(nextDeploySends()).toEqual({ name: 'Mine' })
+  })
+
+  it('with nothing done meanwhile, a tab never renamed here follows the server', async () => {
+    seedLinkedCanvas('Edit: Old name', 'Old name')
+    const answerWith = await openWithAnswerPending()
+
+    await answerWith('Renamed elsewhere')
+
+    expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Renamed elsewhere', deployedName: 'Renamed elsewhere' })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: 'Edit: Renamed elsewhere', deployedName: 'Renamed elsewhere' })
+    expect(nextDeploySends()).toEqual({})
+  })
+
+  it('a deploy meanwhile that sent no name leaves deployedName alone, so the answer still syncs', async () => {
+    seedLinkedCanvas('Edit: Old name', 'Old name')
+    const answerWith = await openWithAnswerPending()
+
+    // The tab still reads deployedName, so Deploy sends no name and the link
+    // keeps the recorded one.
+    expect(deploy()).toBeUndefined()
+    expect(canvas(linkedId).deployedName).toBe('Old name')
+    await answerWith('Renamed elsewhere')
+
+    expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Renamed elsewhere', deployedName: 'Renamed elsewhere' })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: 'Edit: Renamed elsewhere', deployedName: 'Renamed elsewhere' })
+  })
+
+  it('a canvas with no recorded deployedName gets it from the answer, keeping its tab', async () => {
+    linkedId = store().importCanvas('Edit: Mine', localNodes, [], 'conn-1')!.id
+    store().switchCanvas(defaultId)
+    expect(canvas(linkedId).deployedName).toBeUndefined()
+    const answerWith = await openWithAnswerPending()
+
+    await answerWith('Server name')
+
+    expect(canvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: 'Server name', deployedConnectionId: 'conn-1' })
+    expect(storedCanvas(linkedId)).toMatchObject({ name: 'Edit: Mine', deployedName: 'Server name' })
+    expect(nextDeploySends()).toEqual({ name: 'Mine' })
   })
 })
 
