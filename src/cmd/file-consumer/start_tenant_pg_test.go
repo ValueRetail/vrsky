@@ -3,19 +3,17 @@ package main
 import (
 	"database/sql"
 	"testing"
-
-	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
-// Tenant isolation in the status order, against a real database: a stop
-// command for connection X that names tenant B, while X runs for its own
-// tenant A, must not move A's status order. Its UPDATE filters on tenant B
-// and matches no row; A's "running" written after it still lands.
+// Tenant isolation, against a real database: a stop command for connection X
+// that names tenant B, while X starts or runs for its own tenant A, changes
+// nothing (#498). It cancels no watcher and writes no status, so A's
+// "running" lands and stays, and A's own stop still stops X.
 //
-// Pre-existing, and not changed here: the stop handler cancels by connection
-// ID, so the wrong-tenant stop does stop A's watcher. The tests assert that
-// as it is today. Uses the env and consumer from start_status_pg_test.go;
-// skipped without VRSKY_TEST_POSTGRES_URL.
+// Before #498 the handler cancelled by connection ID, and these tests pinned
+// that: the wrong tenant's stop ended A's watcher and its UPDATE (filtered on
+// tenant B) matched no row. Uses the env and consumer from
+// start_status_pg_test.go; skipped without VRSKY_TEST_POSTGRES_URL.
 
 const statusUpdatedMsg = "Updated connection status"
 
@@ -43,30 +41,27 @@ func TestStartTenantPG_WrongTenantStop(t *testing.T) {
 		sc.afterActivate(id, func() { sc.stop(id, tenantB) })
 		sc.start(id, tenantA)
 
-		// A's order is A's own: its "running" lands although the wrong
-		// tenant's stop took a number and wrote first.
+		// A's "running" lands.
 		if st, started := e.status(id); st != "running" || !started {
 			t.Errorf("status = %q, started_at set = %v; want A's running", st, started)
 		}
-		// The wrong tenant's "stopped" matched no row.
 		if e.stoppedAtSet(id) {
 			t.Error("stopped_at set: the wrong tenant's stop UPDATE matched A's row")
 		}
-		// Both writes ran: the wrong tenant's stop (no row) and A's running.
-		if n := sc.logs.count(statusUpdatedMsg, id); n != 2 {
-			t.Errorf("status UPDATEs run = %d, want 2 (wrong tenant's stopped, then A's running)", n)
+		// Only A's running was written: the wrong tenant's stop wrote nothing.
+		if n := sc.logs.count(statusUpdatedMsg, id); n != 1 {
+			t.Errorf("status UPDATEs run = %d, want 1 (A's running only)", n)
 		}
-		// Pre-existing: the stop cancelled A's watcher by connection ID.
-		harness.Eventually(t, raceWaitStep, "A's watcher, cancelled by the stop, to end", func() bool {
-			_, live := sc.logs.watchers(id)
-			return live == 0
-		})
-		if sc.c.getActiveConnection(id) != nil {
-			t.Error("connection still active after the stop (today's stop cancels by ID)")
-		}
+		// The wrong tenant's stop left A's watcher running.
+		sc.requireWatchers(id, 1, 1)
+
+		// A's own stop still stops it.
+		sc.stop(id, tenantA)
+		e.requireStatus(id, "stopped")
+		sc.requireWatchers(id, 1, 0)
 	})
 
-	t.Run("new start for A after a wrong-tenant stop", func(t *testing.T) {
+	t.Run("A keeps running after a wrong-tenant stop", func(t *testing.T) {
 		e := env.with(t)
 		id := e.connection(tenantA, "stopped")
 		sc := e.consumer()
@@ -76,23 +71,27 @@ func TestStartTenantPG_WrongTenantStop(t *testing.T) {
 		sc.requireWatchers(id, 1, 1)
 
 		sc.stop(id, tenantB)
-		// The UPDATE named tenant B: A's row is untouched.
+		// Nothing changed: A's row, A's watcher, no UPDATE run.
 		e.requireStatus(id, "running")
 		if e.stoppedAtSet(id) {
 			t.Error("stopped_at set: the wrong tenant's stop UPDATE matched A's row")
 		}
-		// Pre-existing: A's watcher was cancelled by connection ID.
-		sc.requireWatchers(id, 1, 0)
+		sc.requireWatchers(id, 1, 1)
+		if n := sc.logs.count(statusUpdatedMsg, id); n != 1 {
+			t.Errorf("status UPDATEs run = %d, want 1 (A's running only)", n)
+		}
 
-		// A starts X again; its "running" lands and stays, with one watcher.
+		// A start for A finds it active and starts no second watcher.
 		sc.start(id, tenantA)
 		e.requireStatus(id, "running")
-		if e.stoppedAtSet(id) {
-			t.Error("stopped_at set after A's new start")
+		sc.requireWatchers(id, 1, 1)
+
+		// A's own stop still stops it.
+		sc.stop(id, tenantA)
+		e.requireStatus(id, "stopped")
+		if !e.stoppedAtSet(id) {
+			t.Error("stopped_at not set after A's own stop")
 		}
-		sc.requireWatchers(id, 2, 1)
-		if n := sc.logs.count(statusUpdatedMsg, id); n != 3 {
-			t.Errorf("status UPDATEs run = %d, want 3 (A's running, wrong tenant's stopped, A's running)", n)
-		}
+		sc.requireWatchers(id, 1, 0)
 	})
 }
