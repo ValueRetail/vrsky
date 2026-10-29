@@ -23,6 +23,9 @@ type fakeStore struct {
 	objects map[string][]byte
 	deleted []string
 	copied  map[string]string // src -> dst
+	// modified is each object's LastModified in the listing; zero when unset
+	// (#538).
+	modified map[string]time.Time
 }
 
 func (f *fakeStore) List(_ context.Context, prefix string) ([]objectstore.Object, error) {
@@ -31,7 +34,7 @@ func (f *fakeStore) List(_ context.Context, prefix string) ([]objectstore.Object
 	out := make([]objectstore.Object, 0, len(f.objects))
 	for k, b := range f.objects {
 		if prefix == "" || strings.HasPrefix(k, prefix) {
-			out = append(out, objectstore.Object{Key: k, Size: int64(len(b))})
+			out = append(out, objectstore.Object{Key: k, Size: int64(len(b)), LastModified: f.modified[k]})
 		}
 	}
 	return out, nil
@@ -208,7 +211,8 @@ func TestCloudConsumer_FetchAndDelete(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &cloudConsumer{
-		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+		newStore:    func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+		checkpoints: newMemStore(),
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "cloud-storage-consumer", DB: mgmtDB})
 
@@ -258,7 +262,8 @@ func TestCloudConsumer_AfterActionMove(t *testing.T) {
 	mock.ExpectExec("UPDATE connections SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c := &cloudConsumer{
-		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+		newStore:    func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fake, nil },
+		checkpoints: newMemStore(),
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "cloud-storage-consumer", DB: mgmtDB})
 

@@ -16,6 +16,9 @@ import (
 type remoteFile struct {
 	Name string
 	Size int64
+	// ModTime is the file's mtime from the listing. With Size it tells a file
+	// replaced under the same name from the one already published (#538).
+	ModTime time.Time
 }
 
 // sftpConn is the minimal SFTP surface the consumer needs. The real
@@ -54,7 +57,7 @@ func (r *realSFTP) List(dir string) ([]remoteFile, error) {
 		if fi.IsDir() {
 			continue
 		}
-		out = append(out, remoteFile{Name: fi.Name(), Size: fi.Size()})
+		out = append(out, remoteFile{Name: fi.Name(), Size: fi.Size(), ModTime: fi.ModTime()})
 	}
 	return out, nil
 }

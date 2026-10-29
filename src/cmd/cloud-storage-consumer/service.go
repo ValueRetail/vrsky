@@ -17,11 +17,22 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/doneset"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
+
+// saveEvery is how many publishes a poll makes between saves of the done set,
+// besides the save at its end: a crash in a long poll publishes at most this
+// many objects again (#538).
+const saveEvery = 32
+
+// fallbackNodeID keys the done set of a cloud-storage consumer node that has
+// no id.
+const fallbackNodeID = "cloud-storage-consumer"
 
 // cloudConsumer watches a cloud-storage bucket per active connection, fetches
 // new objects and publishes them into the pipeline. SDK Consumer: Configure
@@ -49,6 +60,10 @@ type cloudConsumer struct {
 	// in Configure; tests inject a fake.
 	newEvents eventSourceFactory
 
+	// checkpoints keeps each poller's done set across restarts (#538).
+	// Defaulted to Postgres in Configure; nil keeps it in memory only.
+	checkpoints checkpoint.Store
+
 	active map[string]*activeConn
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
@@ -75,6 +90,9 @@ type cloudConfig struct {
 	PollIntervalSeconds int    `json:"poll_interval_seconds"` // <= 0 means run once
 	AfterAction         string `json:"after_action"`          // "delete" | "move" | "none" (default none)
 	MovePrefix          string `json:"move_prefix"`           // destination prefix when after_action=move
+
+	// nodeID is the consumer node's id, the key of its done set (#538).
+	nodeID string
 }
 
 type nodeConfig struct {
@@ -108,6 +126,9 @@ func (s *cloudConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	}
 	if s.newEvents == nil {
 		s.newEvents = newEventSource
+	}
+	if s.checkpoints == nil {
+		s.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
 	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
@@ -327,15 +348,21 @@ func (s *cloudConsumer) runPoller(ctx context.Context, own *activeConn, connID, 
 		return
 	}
 
-	// processed tracks object keys already published this session, so an
-	// after_action=none bucket does not re-publish the same object every tick.
-	processed := make(map[string]bool)
+	// done holds the objects already published, saved per tenant, connection
+	// and node, so neither the next tick nor the next start publishes them
+	// again (#538).
+	done := s.doneSet(connID, tenantID, cfg)
 
-	s.pollOnce(ctx, connID, tenantID, store, cfg, processed, logger)
+	s.pollOnce(ctx, connID, tenantID, store, cfg, done, logger)
 
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("cloud-storage one-shot poll complete")
+		// A one-shot that could not read its done set published nothing.
+		if !done.Loaded() {
+			s.finishConn(own, connID, tenantID, "error")
+			return
+		}
 		s.finishConn(own, connID, tenantID, "stopped")
 		return
 	}
@@ -347,27 +374,67 @@ func (s *cloudConsumer) runPoller(ctx context.Context, own *activeConn, connID, 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.pollOnce(ctx, connID, tenantID, store, cfg, processed, logger)
+			s.pollOnce(ctx, connID, tenantID, store, cfg, done, logger)
 		}
 	}
 }
 
+// doneSet returns the poller's done set, keyed by tenant, connection and node,
+// for the bucket and prefix cfg names. A saved set for another provider,
+// endpoint, account, bucket or prefix is not used.
+func (s *cloudConsumer) doneSet(connID, tenantID string, cfg *cloudConfig) *doneset.Set {
+	nodeID := cfg.nodeID
+	if nodeID == "" {
+		nodeID = fallbackNodeID
+	}
+	scope := strings.Join([]string{cfg.providerOrDefault(), cfg.Endpoint, cfg.AccountName, cfg.Bucket, cfg.Prefix}, "|")
+	return doneset.New(s.checkpoints, doneset.Key{TenantID: tenantID, ConnectionID: connID, NodeID: nodeID}, scope)
+}
+
 // pollOnce lists the bucket under the prefix and fetches+publishes+after-actions
-// each new object.
-func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, processed map[string]bool, logger *slog.Logger) {
+// each object that is not done: new, or replaced since it was published
+// (#538). Until the saved done set has been read nothing is published:
+// without it every object in the bucket would look new.
+func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, logger *slog.Logger) {
+	if !done.Loaded() {
+		found, err := done.Load(ctx)
+		if err != nil {
+			logger.Error("Could not read which objects were already published; publishing nothing until it can be read", "error", err)
+			return
+		}
+		if found {
+			logger.Info("Resuming: objects already published are not published again", "already_done", done.Len())
+		} else {
+			logger.Info("First start for this bucket and prefix: every object under it is published")
+		}
+	}
+
 	objs, err := store.List(ctx, cfg.Prefix)
 	if err != nil {
 		logger.Error("cloud-storage list failed; will retry next cycle", "prefix", cfg.Prefix, "error", err)
 		return
 	}
 
+	listing := make(map[string]doneset.Stamp, len(objs))
+	for _, o := range objs {
+		listing[o.Key] = doneset.StampOf(o.Size, o.LastModified)
+	}
+	// Objects gone from the listing leave the done set: added again, they are
+	// published again.
+	done.Observe(listing)
+	// Also when a stop cuts the poll short: what it published is saved.
+	defer s.saveDone(ctx, done, logger)
+
+	refreshed := false
+	sinceSave := 0
 	for _, o := range objs {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		if processed[o.Key] {
+		stamp := listing[o.Key]
+		if done.Done(o.Key, stamp) {
 			continue
 		}
 		if cfg.FilePattern != "" {
@@ -375,11 +442,32 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 				continue
 			}
 		}
+		if !refreshed {
+			// Once per poll, before the first publish: another poller of
+			// this connection may have published it since this one loaded.
+			refreshed = true
+			if err := done.Refresh(ctx); err != nil {
+				logger.Warn("Could not re-read which objects were already published", "error", err)
+			} else if done.Done(o.Key, stamp) {
+				continue
+			}
+		}
 		if err := s.ingestObject(ctx, connID, tenantID, store, cfg, o.Key, logger); err != nil {
 			logger.Error("ingest failed; will retry next cycle", "key", o.Key, "error", err)
 			continue // leave the object in place
 		}
-		processed[o.Key] = true
+		done.Mark(o.Key, stamp)
+		if sinceSave++; sinceSave >= saveEvery {
+			s.saveDone(ctx, done, logger)
+			sinceSave = 0
+		}
+	}
+}
+
+// saveDone saves the done set; a failure is retried at the next save.
+func (s *cloudConsumer) saveDone(ctx context.Context, done *doneset.Set, logger *slog.Logger) {
+	if err := done.Save(ctx); err != nil {
+		logger.Error("Could not save which objects were published; retrying at the next save", "error", err)
 	}
 }
 
@@ -603,6 +691,7 @@ func (s *cloudConsumer) getConfig(connectionID, tenantID string) (*cloudConfig, 
 			continue
 		}
 		if nc.Type == "cloud_storage" && nc.Cloud != nil {
+			nc.Cloud.nodeID = n.ID
 			return nc.Cloud, true
 		}
 	}

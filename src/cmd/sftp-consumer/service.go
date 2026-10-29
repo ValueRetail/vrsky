@@ -10,13 +10,16 @@ import (
 	"io"
 	"log/slog"
 	"path"
+	"strconv"
 	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/doneset"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
@@ -25,6 +28,14 @@ const (
 	dialMaxAttempts = 3
 	dialBaseBackoff = time.Second
 )
+
+// saveEvery is how many publishes a poll makes between saves of the done set,
+// besides the save at its end: a crash in a long poll publishes at most this
+// many files again (#538).
+const saveEvery = 32
+
+// fallbackNodeID keys the done set of an SFTP consumer node that has no id.
+const fallbackNodeID = "sftp-consumer"
 
 // sftpConsumer watches a remote SFTP directory per active connection, fetches
 // new files and publishes them into the pipeline. SDK Consumer: Configure wires
@@ -47,6 +58,10 @@ type sftpConsumer struct {
 	// dial opens an SFTP connection. Defaulted to realDial in Configure; tests
 	// inject a fake so the poller runs without a live server.
 	dial dialFunc
+
+	// checkpoints keeps each poller's done set across restarts (#538).
+	// Defaulted to Postgres in Configure; nil keeps it in memory only.
+	checkpoints checkpoint.Store
 
 	active map[string]*activeConn
 	mu     sync.RWMutex
@@ -71,6 +86,9 @@ type SFTPConfig struct {
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 	AfterAction         string `json:"after_action"` // "delete" | "move" | "none" (default none)
 	MoveDir             string `json:"move_dir"`     // destination when after_action=move
+
+	// nodeID is the consumer node's id, the key of its done set (#538).
+	nodeID string
 }
 
 type nodeConfig struct {
@@ -101,6 +119,9 @@ func (s *sftpConsumer) Configure(ctx context.Context, res *sdk.Resources) error 
 	s.active = make(map[string]*activeConn)
 	if s.dial == nil {
 		s.dial = realDial
+	}
+	if s.checkpoints == nil {
+		s.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
 	s.RegisterHTTPHandler("/test-connection/", s.handleTestConnection())
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
@@ -302,15 +323,21 @@ func (s *sftpConsumer) handleStopCommand(msg *nats.Msg) {
 // cycle opens a fresh connection (natural reconnection) with bounded backoff.
 func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, tenantID string, cfg *SFTPConfig) {
 	logger := s.logger.With("connection_id", connID)
-	// processed tracks filenames already published this session, so an
-	// after_action=none directory does not re-publish the same file every tick.
-	processed := make(map[string]bool)
+	// done holds the files already published, saved per tenant, connection
+	// and node, so neither the next tick nor the next start publishes them
+	// again (#538).
+	done := s.doneSet(connID, tenantID, cfg)
 
-	s.pollOnce(ctx, connID, tenantID, cfg, processed, logger)
+	s.pollOnce(ctx, connID, tenantID, cfg, done, logger)
 
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
 		logger.Info("SFTP one-shot poll complete")
+		// A one-shot that could not read its done set published nothing.
+		status := "stopped"
+		if !done.Loaded() {
+			status = "error"
+		}
 		// Mark it stopped only if no newer start owns the entry, and with it
 		// the status, by now (#408, #456).
 		stopped, mine := s.dropActive(connID, tenantID, own)
@@ -318,7 +345,7 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 			logger.Info("A newer start owns the connection; leaving its status alone")
 			return
 		}
-		stopped.Write(func() { _ = s.updateConnectionStatus(connID, tenantID, "stopped") })
+		stopped.Write(func() { _ = s.updateConnectionStatus(connID, tenantID, status) })
 		return
 	}
 
@@ -329,14 +356,46 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.pollOnce(ctx, connID, tenantID, cfg, processed, logger)
+			s.pollOnce(ctx, connID, tenantID, cfg, done, logger)
 		}
 	}
 }
 
+// doneSet returns the poller's done set, keyed by tenant, connection and node,
+// for the remote folder cfg names. A saved set for another host, user, port or
+// folder is not used.
+func (s *sftpConsumer) doneSet(connID, tenantID string, cfg *SFTPConfig) *doneset.Set {
+	nodeID := cfg.nodeID
+	if nodeID == "" {
+		nodeID = fallbackNodeID
+	}
+	port := cfg.Port
+	if port == 0 {
+		port = 22
+	}
+	scope := "sftp://" + cfg.Username + "@" + cfg.Host + ":" + strconv.Itoa(port) + path.Clean("/"+cfg.RemoteDir)
+	return doneset.New(s.checkpoints, doneset.Key{TenantID: tenantID, ConnectionID: connID, NodeID: nodeID}, scope)
+}
+
 // pollOnce dials, lists the remote dir, and fetches+publishes+after-actions each
-// new file. Connection errors are logged and retried on the next tick.
-func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cfg *SFTPConfig, processed map[string]bool, logger *slog.Logger) {
+// file that is not done: new, or replaced since it was published (#538).
+// Connection errors are logged and retried on the next tick. Until the saved
+// done set has been read nothing is published: without it every file in the
+// folder would look new.
+func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cfg *SFTPConfig, done *doneset.Set, logger *slog.Logger) {
+	if !done.Loaded() {
+		found, err := done.Load(ctx)
+		if err != nil {
+			logger.Error("Could not read which files were already published; publishing nothing until it can be read", "error", err)
+			return
+		}
+		if found {
+			logger.Info("Resuming: files already published are not published again", "already_done", done.Len())
+		} else {
+			logger.Info("First start for this folder: every file in it is published")
+		}
+	}
+
 	conn, err := s.dialWithBackoff(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("SFTP connect failed; will retry next cycle", "error", err)
@@ -350,17 +409,40 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		return
 	}
 
+	listing := make(map[string]doneset.Stamp, len(files))
+	for _, f := range files {
+		listing[f.Name] = doneset.StampOf(f.Size, f.ModTime)
+	}
+	// Files gone from the folder leave the done set: added again, they are
+	// published again.
+	done.Observe(listing)
+	// Also when a stop cuts the poll short: what it published is saved.
+	defer s.saveDone(ctx, done, logger)
+
+	refreshed := false
+	sinceSave := 0
 	for _, f := range files {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		if processed[f.Name] {
+		stamp := listing[f.Name]
+		if done.Done(f.Name, stamp) {
 			continue
 		}
 		if cfg.FilePattern != "" {
 			if match, _ := path.Match(cfg.FilePattern, f.Name); !match {
+				continue
+			}
+		}
+		if !refreshed {
+			// Once per poll, before the first publish: another poller of
+			// this connection may have published it since this one loaded.
+			refreshed = true
+			if err := done.Refresh(ctx); err != nil {
+				logger.Warn("Could not re-read which files were already published", "error", err)
+			} else if done.Done(f.Name, stamp) {
 				continue
 			}
 		}
@@ -371,12 +453,23 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 			logger.Error("SFTP ingest failed", "file", f.Name, "error", err)
 			continue // leave the file in place; retried next cycle
 		}
-		processed[f.Name] = true
+		done.Mark(f.Name, stamp)
 		logger.Info("SFTP file ingested", "file", f.Name, "size", f.Size, "streamed", streamed)
+		if sinceSave++; sinceSave >= saveEvery {
+			s.saveDone(ctx, done, logger)
+			sinceSave = 0
+		}
 
 		if err := s.afterAction(conn, cfg, f.Name, remotePath); err != nil {
 			logger.Warn("after-action failed", "file", f.Name, "action", cfg.AfterAction, "error", err)
 		}
+	}
+}
+
+// saveDone saves the done set; a failure is retried at the next save.
+func (s *sftpConsumer) saveDone(ctx context.Context, done *doneset.Set, logger *slog.Logger) {
+	if err := done.Save(ctx); err != nil {
+		logger.Error("Could not save which files were published; retrying at the next save", "error", err)
 	}
 }
 
@@ -524,6 +617,7 @@ func (s *sftpConsumer) getSFTPConfig(connectionID, tenantID string) (*SFTPConfig
 			continue
 		}
 		if nc.Type == "sftp" && nc.SFTP != nil {
+			nc.SFTP.nodeID = n.ID
 			return nc.SFTP, true
 		}
 	}
