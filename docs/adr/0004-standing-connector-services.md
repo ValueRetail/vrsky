@@ -177,7 +177,9 @@ before any slow work (#375, #397). A start refused because another is in flight
 runs again if that one fails, and the start's `running` write and a stop's
 `stopped` write go through the guard in the order of the start and the stop, so
 a stop just after a start cannot leave the database saying `running` (#423,
-#424). A connector rollout therefore no longer needs any redeploy afterwards.
+#424). A stop acts only when its payload and its subject name the tenant the
+connection was started for; any other stop is logged and changes nothing
+(#498). A connector rollout therefore no longer needs any redeploy afterwards.
 
 ## Alternatives considered
 

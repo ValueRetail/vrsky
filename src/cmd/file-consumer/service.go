@@ -479,15 +479,21 @@ func (s *fileConsumer) handleStopCommand(msg *nats.Msg) {
 	s.logger.Info("Received stop command", "connection_id", cmd.ConnectionID)
 
 	s.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	starting, err := s.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		s.mu.Unlock()
+		s.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	ac, exists := s.activeConnections[cmd.ConnectionID]
 	if exists {
 		ac.Cancel()
 		delete(s.activeConnections, cmd.ConnectionID)
 	}
-	// A start still in progress is told to give up rather than finish after
-	// the stop and leave a watcher running (#375). It is removed, not only
-	// marked, so a start that comes after this stop is not refused.
-	starting := s.starts.StopLocked(cmd.ConnectionID)
 	// Taken with the stop, and only when there is something to write: of this
 	// "stopped" write and a start's "running" write, only the one for the later
 	// of the stop and the start's Activate is left standing, whichever reaches

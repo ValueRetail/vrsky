@@ -1,6 +1,10 @@
 package sdk
 
-import "sync"
+import (
+	"fmt"
+	"strings"
+	"sync"
+)
 
 // StartGuard keeps a command-driven consumer from starting a connection twice
 // (#375, #397). RestoreRunning and the start-command subscription call the same
@@ -46,6 +50,18 @@ import "sync"
 //	s.mu.Unlock()
 //	stopped.Write(func() { s.setStatus(id, tenant, "stopped") })
 //
+// A stop handler checks the command's tenant first (#498), and calls this in
+// place of StopLocked:
+//
+//	s.mu.Lock()
+//	starting, err := s.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, id)
+//	if err != nil {
+//		s.mu.Unlock()
+//		logger.Warn("Ignoring stop command", "connection_id", id, "error", err)
+//		return
+//	}
+//	... cancel and delete, StopStatusLocked as above ...
+//
 // ReserveOrRetry keeps a start refused while another is in flight and runs it
 // if that one gives up (#424). StatusWrite puts the start's "running" and the
 // stop's "stopped" in the order of the changes that caused them, so a stop
@@ -75,6 +91,16 @@ type StartGuard struct {
 	// starting holds the claim of every start in progress, by connection ID.
 	// Guarded by the owner's lock.
 	starting map[string]*StartClaim
+
+	// owners holds, by connection ID, the tenant the latest Activate was for:
+	// the tenant of the owner's active entry while it has one, since every
+	// entry goes in through Activate. StopForTenantLocked checks a stop
+	// against it (#498). Guarded by the owner's lock. Like seq it is never
+	// pruned: an entry the owner dropped leaves its tenant behind, a stop
+	// naming that tenant passes and finds nothing to stop, and a connection
+	// belongs to one tenant for life. An empty tenant (a start through
+	// Reserve) is not checked.
+	owners map[string]string
 
 	// seq numbers each connection's status-changing events (an Activate, a
 	// stop's StopStatusLocked) in the order they happen. Guarded by the
@@ -200,9 +226,10 @@ func (g *StartGuard) nextLocked(tenantID, connectionID string) StatusWrite {
 // counter per connection it has numbered.
 //
 // tenantID is the tenant the stop names, the one its UPDATE filters on. A stop
-// naming another tenant than the start's takes its place in that tenant's
-// order, not the start's, so it can neither skip the start's writes nor be
-// skipped by them.
+// handler that checks the tenant first with StopForTenantLocked (#498) only
+// gets here for the start's own tenant. Should a stop naming another tenant
+// get here anyway, it takes its place in that tenant's order, not the start's,
+// so it can neither skip the start's writes nor be skipped by them.
 func (g *StartGuard) StopStatusLocked(tenantID, connectionID string) StatusWrite {
 	return g.nextLocked(tenantID, connectionID)
 }
@@ -292,6 +319,10 @@ func (c *StartClaim) Activate(insert func()) bool {
 	}
 	insert()
 	c.retry = nil
+	if c.guard.owners == nil {
+		c.guard.owners = make(map[string]string)
+	}
+	c.guard.owners[c.connectionID] = c.tenantID
 	c.running = c.guard.nextLocked(c.tenantID, c.connectionID)
 	c.drop()
 	c.mu.Unlock()
@@ -375,4 +406,71 @@ func (g *StartGuard) StopAllLocked() {
 		c.retry = nil
 	}
 	g.starting = nil
+}
+
+// StopForTenantLocked is StopLocked for a stop command, checked against the
+// tenant the command names (#498). subject is the subject the command arrived
+// on, vrsky.commands.{tenant}.connection.stop; tenantID is the tenant in its
+// payload. The caller holds the owner's lock and calls it before it touches
+// its active map.
+//
+// It refuses the stop with a *StopTenantMismatch when the subject's tenant is
+// not tenantID, when a start in progress for the connection is for another
+// tenant, or when the latest Activate for it was for another tenant. The
+// caller then changes nothing (no cancel, no delete, no status write), logs
+// the error as a warning and returns. The one thing a refused stop does is
+// drop a start for its own tenant that ReserveOrRetry queued on another
+// tenant's claim: the stop is newer, as in StopLocked.
+//
+// Otherwise it does what StopLocked does and returns its result. A connection
+// this owner neither started nor is starting passes, so a stop meant for
+// another consumer finds nothing here, as before. A start through Reserve
+// records no tenant, and stops for it are checked against the subject only.
+func (g *StartGuard) StopForTenantLocked(subject, tenantID, connectionID string) (bool, error) {
+	if st, ok := CommandSubjectTenant(subject); !ok || st != tenantID {
+		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: st, Subject: true}
+	}
+	if c, ok := g.starting[connectionID]; ok {
+		if c.tenantID != "" && c.tenantID != tenantID {
+			delete(c.retry, tenantID)
+			return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: c.tenantID, Starting: true}
+		}
+	} else if owner := g.owners[connectionID]; owner != "" && owner != tenantID {
+		return false, &StopTenantMismatch{ConnectionID: connectionID, TenantID: tenantID, Other: owner}
+	}
+	return g.StopLocked(connectionID), nil
+}
+
+// StopTenantMismatch is why StopForTenantLocked refused a stop. Its message
+// holds the connection ID and the tenant IDs, nothing else from the command.
+type StopTenantMismatch struct {
+	ConnectionID string
+	TenantID     string // the tenant the command's payload names
+	Other        string // the subject's tenant, or the tenant the connection is starting or active for here
+	Subject      bool   // Other is the subject's tenant ("" if the subject is not a command subject)
+	Starting     bool   // Other is the tenant of a start in progress
+}
+
+func (e *StopTenantMismatch) Error() string {
+	switch {
+	case e.Subject && e.Other == "":
+		return fmt.Sprintf("stop for connection %s names tenant %q but its subject is not a connection command subject", e.ConnectionID, e.TenantID)
+	case e.Subject:
+		return fmt.Sprintf("stop for connection %s names tenant %q but its subject names tenant %q", e.ConnectionID, e.TenantID, e.Other)
+	case e.Starting:
+		return fmt.Sprintf("stop for connection %s names tenant %q but it is starting here for tenant %q", e.ConnectionID, e.TenantID, e.Other)
+	default:
+		return fmt.Sprintf("stop for connection %s names tenant %q but it is active here for tenant %q", e.ConnectionID, e.TenantID, e.Other)
+	}
+}
+
+// CommandSubjectTenant returns the tenant token of a connection command
+// subject, vrsky.commands.{tenant}.connection.{verb}. ok is false when subject
+// is not one.
+func CommandSubjectTenant(subject string) (string, bool) {
+	p := strings.Split(subject, ".")
+	if len(p) != 5 || p[0] != "vrsky" || p[1] != "commands" || p[2] == "" || p[3] != "connection" || p[4] == "" {
+		return "", false
+	}
+	return p[2], true
 }

@@ -222,7 +222,9 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 	// Restore and the start-command handler call this on different goroutines.
 	// The check and the claim are one critical section, so a second start for
 	// the same connection stops here instead of starting a second poller (#397).
-	claim, ok := s.starts.Reserve(&s.mu, connectionID, func() bool { _, ok := s.active[connectionID]; return ok })
+	// The claim carries the tenant so a stop naming another tenant is refused
+	// (#498); no retry, as before.
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID, func() bool { _, ok := s.active[connectionID]; return ok }, nil)
 	if !ok {
 		logger.Warn("Sitoo poller already running or starting")
 		return
@@ -264,13 +266,21 @@ func (s *sitooConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	s.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	starting, err := s.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		s.mu.Unlock()
+		s.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	cancel, exists := s.active[cmd.ConnectionID]
 	if exists {
 		cancel()
 		delete(s.active, cmd.ConnectionID)
 	}
-	// A start still in progress gives up instead of finishing after the stop (#397).
-	starting := s.starts.StopLocked(cmd.ConnectionID)
 	s.mu.Unlock()
 	if starting {
 		s.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)

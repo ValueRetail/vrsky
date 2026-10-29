@@ -638,7 +638,7 @@ Last updated 2026-10-28.
     into `vrsky-ui` has the same leak; fix it with item 93.
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in review
     of #431.
-95. **A stop command cancels a connection whatever tenant it names.** Every
+95. ~~**A stop command cancels a connection whatever tenant it names.**~~ (#498) Every
     command-driven consumer's `handleStopCommand` looks the connection up in
     its active map by ID alone and cancels it; only the `stopped` UPDATE
     filters on the command's `tenant_id`. A stop carrying the wrong tenant

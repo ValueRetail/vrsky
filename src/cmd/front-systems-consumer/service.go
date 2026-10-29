@@ -215,8 +215,17 @@ func (c *frontSystemsConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	c.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	starting, err := c.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		c.mu.Unlock()
+		c.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	delete(c.active, cmd.ConnectionID)
-	starting := c.starts.StopLocked(cmd.ConnectionID)
 	c.mu.Unlock()
 	if starting {
 		c.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
