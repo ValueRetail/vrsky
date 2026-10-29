@@ -359,13 +359,21 @@ func (s *webhookConsumer) handleStopCommand(msg *nats.Msg) {
 	s.logger.Info("Received stop command", "connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
 
 	s.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	starting, err := s.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		s.mu.Unlock()
+		s.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	ac, exists := s.activeConnections[cmd.ConnectionID]
 	if exists {
 		ac.Cancel()
 		delete(s.activeConnections, cmd.ConnectionID)
 	}
-	// A start still in progress gives up instead of registering after the stop.
-	starting := s.starts.StopLocked(cmd.ConnectionID)
 	// Taken with the stop, and only when there is something to write, so this
 	// "stopped" and a start's "running" land in the order of the changes that
 	// caused them (#423).

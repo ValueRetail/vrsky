@@ -210,13 +210,21 @@ func (c *rabbitConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	c.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	starting, err := c.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		c.mu.Unlock()
+		c.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	cancel, exists := c.active[cmd.ConnectionID]
 	if exists {
 		cancel()
 		delete(c.active, cmd.ConnectionID)
 	}
-	// A start still in progress gives up instead of finishing after the stop (#397).
-	starting := c.starts.StopLocked(cmd.ConnectionID)
 	// Taken with the stop, and only when there is something to write: of this
 	// "stopped" write and a start's "running" write, only the one for the later
 	// of the stop and the start's Activate is left standing, whichever reaches

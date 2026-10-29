@@ -27,13 +27,10 @@ interface ConnectionsStore {
   /** Fetches the current workspace's connections (the X-Tenant-ID header
    *  carries the workspace); errors land in `error`. */
   load: () => Promise<void>
-  setConnections: (connections: Connection[]) => void
   addConnection: (connection: Connection) => void
   updateConnection: (connection: Connection) => void
   deleteConnection: (id: string) => void
   setSelectedConnection: (connection: Connection | null) => void
-  setLoading: (loading: boolean) => void
-  setError: (error: string | null) => void
   clear: () => void
 
   // Helpers
@@ -73,8 +70,6 @@ export const useConnectionsStore = create<ConnectionsStore>((set, get) => ({
     }
   },
 
-  setConnections: (connections) => set({ connections, total: connections.length }),
-
   addConnection: (connection) =>
     set((state) => ({
       connections: [connection, ...state.connections],
@@ -99,10 +94,6 @@ export const useConnectionsStore = create<ConnectionsStore>((set, get) => ({
     })),
 
   setSelectedConnection: (connection) => set({ selectedConnection: connection }),
-
-  setLoading: (loading) => set({ loading }),
-
-  setError: (error) => set({ error }),
 
   // Also drops any load still in flight, so its answer can't land after.
   clear: () => {

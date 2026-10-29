@@ -461,7 +461,7 @@ Last updated 2026-10-28.
     generated name on every Deploy. Write the build's commit to a
     `version.json` beside `index.html`, poll it (and check on focus), and
     show a "A newer version is available, reload" banner. Found during #450.
-71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
+71. ~~**`ui/src/pages/Dashboard.tsx` is dead code**~~ (#513): no route renders it.
     Delete it, or route it if a dashboard is wanted. Found during #450.
 72. ~~**A linked builder tab's `deployedName` never re-syncs with the
     server.**~~ (#502) Opening a connection whose canvas is already linked
@@ -470,7 +470,7 @@ Last updated 2026-10-28.
     not with the server; Deploy then sends no name. Refresh `deployedName`
     from the loaded connection on edit-load (and show the server's name if
     the tab was never renamed). Found in review of #450.
-73. **A failed workspace delete leaves state as it was** although
+73. ~~**A failed workspace delete leaves state as it was**~~ (#514) although
     `TenantSelector`'s catch says "checkAuth will refresh state
     regardless"; it never calls checkAuth. Fix the comment or the code.
     Found during #450.
@@ -638,7 +638,7 @@ Last updated 2026-10-28.
     into `vrsky-ui` has the same leak; fix it with item 93.
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in review
     of #431.
-95. **A stop command cancels a connection whatever tenant it names.** Every
+95. ~~**A stop command cancels a connection whatever tenant it names.**~~ (#498) Every
     command-driven consumer's `handleStopCommand` looks the connection up in
     its active map by ID alone and cancels it; only the `stopped` UPDATE
     filters on the command's `tenant_id`. A stop carrying the wrong tenant
@@ -667,7 +667,7 @@ Last updated 2026-10-28.
     registrations before posting, and refuse events for connections that
     aren't running. Older than #429, which only stopped two concurrent
     starts from both registering. Found during #429.
-98. **Two small leftovers in the Connections list.** A delete that answers
+98. ~~**Two small leftovers in the Connections list.**~~ (#515) A delete that answers
     after a workspace switch still runs `setTotal(prev => prev - 1)` on the
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
@@ -705,6 +705,11 @@ Last updated 2026-10-28.
     makes the other pod skip new files the fallback took as done. Merge
     before that first snapshot, or keep the fallback's names out of it.
     Found in review of #500.
+103. **A workspace deleted elsewhere stays in the selector.** Deleting it
+    again answers 403 or 404, and since #514 `TenantSelector` only shows
+    that error. The server did answer, so a `checkAuth` on 403/404 can't
+    turn a network blip into a logout; it would drop the stale workspace.
+    Found in review of #514.
 
 ## Human
 

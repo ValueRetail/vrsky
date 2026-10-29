@@ -306,12 +306,20 @@ func (c *bcConsumer) handleStopCommand(msg *nats.Msg) {
 		return
 	}
 	c.mu.Lock()
+	// The stop must name the tenant the connection is starting or active for,
+	// in its payload and on its subject; one naming another tenant changes
+	// nothing (#498). A start still in progress gives up instead of finishing
+	// after the stop (#397).
+	_, err := c.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
+	if err != nil {
+		c.mu.Unlock()
+		c.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		return
+	}
 	if p, ok := c.active[cmd.ConnectionID]; ok {
 		p.cancel()
 		delete(c.active, cmd.ConnectionID)
 	}
-	// A start still in progress gives up instead of finishing after the stop (#397).
-	c.starts.StopLocked(cmd.ConnectionID)
 	c.mu.Unlock()
 }
 

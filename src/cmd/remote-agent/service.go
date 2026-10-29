@@ -284,6 +284,13 @@ func (s *gateway) onCommand(start bool) nats.MsgHandler {
 			s.logger.Warn("Ignoring malformed connection command", "subject", msg.Subject)
 			return
 		}
+		// A stop must name the same tenant on its subject as in its payload
+		// (#498). runStop checks the payload's tenant against the session's.
+		if st, ok := sdk.CommandSubjectTenant(msg.Subject); !start && (!ok || st != cmd.TenantID) {
+			s.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID,
+				"tenant_id", cmd.TenantID, "subject_tenant_id", st)
+			return
+		}
 		// The turn is taken here, on the callback goroutine, so the
 		// connection's commands run in the order this subscription saw them
 		// (#429).
@@ -514,13 +521,21 @@ func (s *gateway) isClosed() bool {
 func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) bool {
 	s.mu.Lock()
 	sess := s.sessions[connID]
+	var other string // the session's tenant when it is not tenantID (#498)
 	if sess != nil && sess.tenantID == tenantID {
 		delete(s.sessions, connID)
 		s.wakeAgentsLocked(sess)
 	} else {
+		if sess != nil {
+			other = sess.tenantID
+		}
 		sess = nil
 	}
 	s.mu.Unlock()
+	if other != "" {
+		s.logger.Warn("Ignoring stop for another tenant's pipeline", "connection_id", connID,
+			"tenant_id", tenantID, "session_tenant_id", other)
+	}
 	if sess == nil {
 		return false
 	}
