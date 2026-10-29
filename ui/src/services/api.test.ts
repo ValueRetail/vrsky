@@ -31,10 +31,25 @@ describe('apiClient response interceptor', () => {
   it('does not report other failures', async () => {
     for (const status of [400, 403, 404, 500]) {
       apiClient.defaults.adapter = respondWith(status, { error: 'X', message: 'm' })
-      await expect(apiClient.get('/x')).rejects.toBeInstanceOf(VRSkyAPIError)
+      const request = apiClient.get('/x')
+      await expect(request).rejects.toBeInstanceOf(VRSkyAPIError)
+      // Callers branch on the HTTP status (TenantSelector on 403/404), so it
+      // has to survive into details.
+      await expect(request).rejects.toMatchObject({ details: expect.objectContaining({ status }) })
     }
     apiClient.defaults.adapter = respondWith(200, { ok: true })
     await apiClient.get('/x')
+    expect(reportUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('rejects a network error without an HTTP status', async () => {
+    apiClient.defaults.adapter = async (config) => {
+      throw Object.assign(new Error('socket hang up'), { isAxiosError: true, config })
+    }
+    const err = await apiClient.get('/x').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(VRSkyAPIError)
+    expect(err).toMatchObject({ code: 'NETWORK_ERROR' })
+    expect((err as VRSkyAPIError).details).not.toHaveProperty('status')
     expect(reportUnauthorized).not.toHaveBeenCalled()
   })
 })

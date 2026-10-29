@@ -829,6 +829,19 @@ Last updated 2026-10-28.
     `file_pattern` to event keys and skip non-create S3 records, or say in
     the panel that the notification must be scoped. Documented as is in
     #564. Found in #564.
+124. **A refresh after a refused workspace delete resets the page.**
+    `TenantSelector` calls `checkAuth()` after a 403 or 404, `checkAuth`
+    sets `isLoading: true`, and `ui/src/components/Auth/ProtectedRoute.tsx:24`
+    swaps the page for the spinner and remounts the builder, so open
+    panels, the event history and the selection are lost (the canvas
+    survives in `canvasStore`). Since #552 a non-owner's 403 does this too.
+    A refresh that doesn't touch `isLoading` would avoid it; that changes
+    the auth store, so PR plus `agent:needs-human`. Found in review of #552.
+125. **`checkAuth` can select a workspace that isn't active.** When the saved
+    workspace is gone it falls back to `meData.current_tenant`
+    (`ui/src/store/authStore.ts` ~193), the server's `tenants[0]`, without
+    checking `status === 'active'`, which `switchTenant` would refuse. Auth
+    state, so PR plus `agent:needs-human`. Found in review of #552.
 130. **Refuse a cloud-storage `move_prefix` inside `prefix`.** The listing
     is recursive, so an object moved to a `move_prefix` under `prefix` is
     a new key at the next poll and is published again. Its second move
