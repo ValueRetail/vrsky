@@ -43,6 +43,11 @@ const checkpointTimeout = 5 * time.Second
 // the previous version wrote. Between snapshots a busy poll writes only the
 // changes, to a second row (changesState), because rewriting every name each
 // time cost about 11 MB per 100 000 names every 5 s (#426).
+//
+// Both rows must stay decodable by the previous version and the next: only
+// add fields, never change a field's type. A row a pod can't decode counts
+// as no checkpoint and is overwritten at its next save (#563), so after a
+// rollback, or with an old and a new pod, it would lose the saved history.
 type knownState struct {
 	WatchDir string                `json:"watch_dir"`
 	Gen      string                `json:"gen,omitempty"`

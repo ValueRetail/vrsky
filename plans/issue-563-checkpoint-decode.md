@@ -136,9 +136,20 @@ but those packages belong to other workers today; filed as a backlog item.
 
 ## Risks
 
-- A second watcher running at the same time (the old pod of a rolling
-  deploy) that has a file in `pending` sees this watcher's snapshot list it
-  as done, and its `mergeSaved` takes it as done. This is the hazard #536
-  closed for store errors. With an undecodable row it can't be closed: the
-  row that would tell the two apart is the broken one. It needs a broken row
-  and two watchers at once.
+- A second watcher of the same connection running at the same time, with a
+  file in `pending`, sees this watcher's snapshot list it as done, and its
+  `mergeSaved` takes it as done. This is the hazard #536 closed for store
+  errors; with an undecodable row it can't be closed, because the row that
+  would tell the two apart is the broken one. In production two pods never
+  overlap: `vrsky-file-consumer` runs `replicas: 1` with `strategy:
+  Recreate` (`infrastructure/kubernetes/connectors/connectors.yaml`). Inside
+  one pod only the old watcher finishing its last poll after a quick stop
+  and start overlaps. The loss is bounded to files the other watcher had
+  seen but not yet published (the last one or two poll intervals), once
+  per broken row.
+- The deferred baseline (#409) on a broken row now counts files that landed
+  while the folder was unreadable as done. Before, it stayed deferred for
+  good and published nothing at all.
+- A change of a field's type in `knownState` or `changesState` would make
+  an older or newer pod see every row as broken and overwrite it. A comment
+  on `knownState` now says the format must stay decodable both ways.
