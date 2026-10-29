@@ -106,6 +106,8 @@ func TestSFTPConsumer_FetchAndDelete(t *testing.T) {
 	c := &sftpConsumer{
 		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
 		checkpoints: newMemStore(),
+		// The one-shot's second look (#562), without the 5 s wait.
+		oneShotSettle: 50 * time.Millisecond,
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: mgmtDB})
 
@@ -158,6 +160,8 @@ func TestSFTPConsumer_AfterActionMove(t *testing.T) {
 	c := &sftpConsumer{
 		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
 		checkpoints: newMemStore(),
+		// The one-shot's second look (#562), without the 5 s wait.
+		oneShotSettle: 50 * time.Millisecond,
 	}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: mgmtDB})
 

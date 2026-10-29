@@ -17,9 +17,13 @@ The consumer remembers which files it published, with the size and modification 
 - **Checkpoint unreadable.** If the database can't be read at start, the consumer publishes nothing and logs `Could not read which files were already published`. It tries again at every poll and carries on as normal once the read works. A one-shot connection (`poll_interval_seconds: 0`) ends with status `error` instead.
 - **Crash.** The list is saved every 32 files and at the end of each poll, so a crash in the middle of a long poll publishes at most the files since the last save again.
 
-Two limits: a file replaced with the same size within the same second (most servers keep modification times in whole seconds) looks unchanged and is not published again. And there is no stability check yet, so a file listed while it is still being uploaded is published half-written, then again once the upload finishes and its size changes.
+A limit: a file replaced with the same size within the same second (most servers keep modification times in whole seconds) looks unchanged and is not published again.
 
 After the release that added this, each running SFTP connection's first start has no saved list yet, so it publishes what is in its folder once more, as every restart did before.
+
+### Files still being uploaded
+
+A file is published only once its size and modification time are the same on two polls in a row, at least `poll_interval_seconds` apart, so a file still being uploaded is not published half-written (#562). A new or replaced file therefore goes out one to two poll intervals after it lands, and a file that keeps changing is not published until it stops. A one-shot run (`poll_interval_seconds: 0`) looks twice, 5 seconds apart, and leaves a file still changing at the second look for its next run. An uploader that pauses for longer than a poll interval mid-file can still be caught half-way; uploading under a temporary name that `file_pattern` does not match, then renaming it, avoids that.
 
 ## As a destination (producer)
 

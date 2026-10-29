@@ -733,7 +733,7 @@ Last updated 2026-10-28.
     `strategy: Recreate` on `vrsky-sftp-consumer` and
     `vrsky-cloud-storage-consumer` in `connectors.yaml`, as #425 did for the
     file consumer. Manifest, so PR plus `agent:needs-human`. Found in #538.
-107. **The SFTP consumer publishes a file still being uploaded.** It has no
+107. ~~**The SFTP consumer publishes a file still being uploaded.**~~ (#562) It has no
     stability check: a file listed mid-upload is published half-written.
     Since #538 the next poll sees the new size and publishes the finished
     file as well, so the complete file arrives, after a partial one. Wait
@@ -915,6 +915,15 @@ Last updated 2026-10-28.
     `resourceURL` with the event's id unescaped; `url.PathEscape` it. Both
     touch connector security, so the PR gets `agent:needs-human`. Found in
     review of #457 (#472).
+117. **The SFTP consumer publishes temp names too.** The file consumer
+    skips dotfiles, `~*`, `*.tmp` and `*.part` until they are renamed
+    (#374); the SFTP consumer has no such skip, so an uploader that writes
+    `x.csv.part` and renames it gets both names published unless
+    `file_pattern` excludes the temp one. Since #562 a temp file is waited
+    on until it stops changing, but one left unchanged for the settle gap
+    (5 to 30 s; a slow uploader, or a rename that comes late) still goes out
+    under its temp name, and again under its final name. Skip the same names in
+    `pollOnce`. Found in #562.
 
 ## Human
 
