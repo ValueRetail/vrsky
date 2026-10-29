@@ -4,7 +4,7 @@ Open questions: none. Calls made without asking are under "Decisions".
 
 ## Goal
 
-Backlog items 108 and 107 (the second 107, on the file page). The SFTP and
+Backlog items 108 and 113 (the file-page item, numbered 107 until #560). The SFTP and
 cloud-storage pages document keys the workers don't read, and leave out most
 of the ones they do. The file page still says every check looks at every
 file, which stopped being true with #537.
@@ -54,7 +54,7 @@ pending and stampless names are stat'ed every poll.
    the in-turns check from #537 (1 000 per check, `ceil(files/1000)` checks,
    about 50 s at 10 000 files).
 3. `mkdocs build --strict` passes (what `docs.yml` runs).
-4. Backlog items 108 and the file-page 107 struck with `(#564)`. Mismatches
+4. Backlog items 108 and 113 struck with `(#564)`. Mismatches
    between code and UI found on the way go in as new backlog items.
 
 ## Files

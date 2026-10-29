@@ -24,7 +24,8 @@ Config bullets (all under `cloud_storage`):
 - `bucket` — the bucket (S3, GCS) or container (Azure) to read from.
   Required.
 - `prefix` — key prefix to scope the listing (e.g. `incoming/`). Empty means
-  the whole bucket.
+  the whole bucket. The listing is recursive: objects under deeper keys
+  (`incoming/2026/a.csv`) are ingested too.
 - `region` — provider region (S3).
 - `endpoint` — custom endpoint: MinIO or another S3-compatible store (path-style
   addressing is then used), or a private or emulated GCS endpoint.
@@ -40,7 +41,11 @@ Config bullets (all under `cloud_storage`):
   (default, leave it), `delete`, or `move`. Applies in both modes.
 - `move_prefix` — where `move` puts the object: it is copied to
   `<move_prefix>/<base name>`, then deleted. Required with `move`; without
-  it the consumer doesn't start.
+  it the consumer doesn't start. Put it outside `prefix` (and outside what
+  the bucket notification covers in event mode): a moved object inside it
+  is a new key to the consumer and is ingested again. Moves keep only the
+  base name, so `incoming/a/x.csv` and `incoming/b/x.csv` both land on
+  `<move_prefix>/x.csv` and the second overwrites the first.
 
 Event mode also reads:
 
@@ -52,7 +57,10 @@ Event mode also reads:
   `event_subscription` is a bare name.
 - `event_endpoint` — optional endpoint for the queue or Pub/Sub service
   (LocalStack, Azurite, the Pub/Sub emulator). Not the object-store
-  endpoint.
+  endpoint. On GCS it also turns off authentication and TLS for Pub/Sub, so
+  use it only for the emulator. On Azure it is used only with
+  `account_name` + `account_key`; with `connection_string` the queue
+  address comes from the connection string.
 
 In event mode `prefix` and `file_pattern` are not applied: every object a
 notification names is ingested. Scope the bucket notification itself to the
@@ -126,10 +134,13 @@ Config bullets:
 
 - `provider`, `bucket`, `prefix`, `region`, `endpoint` — as above.
 - Credentials — per-provider.
-- `sse.mode` — `none` (default, the bucket's own setting), `sse-s3` (S3
-  only), or `sse-kms`.
-- `sse.kms_key_id` — the key for `sse-kms`: a KMS key ID or ARN (S3), an
-  encryption scope name (Azure), or a Cloud KMS key name (GCS).
+- `sse.mode` — S3 only: `none` (default, the bucket's own setting),
+  `sse-s3`, or `sse-kms`. Azure and GCS don't read it.
+- `sse.kms_key_id` — on S3, the KMS key ID or ARN for `sse-kms`; without
+  it, `sse-kms` uses the AWS-managed key. On Azure (an encryption scope
+  name) and GCS (a Cloud KMS key name) it is applied whenever it is set,
+  whatever `sse.mode` says, so clear it to go back to the bucket's
+  default.
 - `key_template` — Go template for the object key, rendered against the
   record when it is a JSON object plus `{{.timestamp}}` and `{{.uuid}}`
   (default `{{.uuid}}`). **Pictures and other media** (images, audio,

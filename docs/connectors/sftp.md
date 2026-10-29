@@ -47,7 +47,7 @@ Source only:
 
 Destination only:
 
-- `sftp.filename_template` — Go template for the file name, rendered against the record when it is a JSON object, plus `{{.timestamp}}` (UTC, `20060102T150405Z`) and `{{.uuid}}` (the message id). Default `{{.uuid}}.json`. The result is cut to a single file name, so it can't point outside `remote_dir`. `remote_dir` is created if missing.
+- `sftp.filename_template` — Go template for the file name, rendered against the record when it is a JSON object, plus `{{.timestamp}}` (UTC, `20060102T150405Z`) and `{{.uuid}}` (the message id). Default `{{.uuid}}.json`. A record field named `timestamp` or `uuid` takes the place of the built-in. A template that names a field the record doesn't have drops the message, with an error in the producer's log (`invalid filename template; dropping message`). The result is cut to a single file name, so it can't point outside `remote_dir`. `remote_dir` is created if missing.
 
 ```json
 {

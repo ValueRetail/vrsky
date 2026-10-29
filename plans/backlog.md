@@ -818,6 +818,16 @@ Last updated 2026-10-28.
     `file_pattern` to event keys and skip non-create S3 records, or say in
     the panel that the notification must be scoped. Documented as is in
     #564. Found in #564.
+130. **Refuse a cloud-storage `move_prefix` inside `prefix`.** The listing
+    is recursive, so an object moved to a `move_prefix` under `prefix` is
+    a new key at the next poll and is published again. Its second move
+    copies it onto its own key and then deletes it: on Azure and GCS that
+    copy succeeds and the object is gone (S3 refuses a copy onto itself, so
+    there the after-action fails and the object stays). `start` in
+    `src/cmd/cloud-storage-consumer/service.go` already refuses `move`
+    without `move_prefix`; it could refuse one inside `prefix` the same
+    way, and the editor could say so. The docs warn about it (#564).
+    Found in review of #564.
 
 ## Human
 
