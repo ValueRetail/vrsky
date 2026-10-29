@@ -958,6 +958,12 @@ Last updated 2026-10-28.
     committed, but it also hides a ~2000 line component from the gate, so it
     needs a human decision. Until then the builder's deploy wiring is pinned
     from `services/deployPipeline.test.ts`. Found in review of #580.
+139. **The SFTP test-connection preview can sample a temp file.**
+    `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
+    matching `file_pattern`; with no pattern it can sample a `.part` or
+    dotfile that the poller now skips (#590), so the preview can differ from
+    what is published. Skip temp names there too, unless the pattern names
+    them. Found in review of #590.
 
 ## Human
 
