@@ -6,8 +6,10 @@ import (
 	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -346,9 +348,10 @@ func (s *fileConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
-		filename, payload, err := pickSampleFile(dirPath)
+		filename, payload, err := pickSampleFile(dirPath, s.dirLabel(tenantID, dirPath))
 		if err != nil {
-			writeSampleErr(w, err.Error())
+			s.logger.Warn("Sample data request failed", "path", dirPath, "tenant_id", tenantID, "error", err)
+			writeSampleErr(w, sampleFailureMessage(err))
 			return
 		}
 
@@ -383,14 +386,12 @@ func (s *fileConsumer) handleSampleData() http.HandlerFunc {
 
 // pickSampleFile lists dir, drops hidden entries and sub-directories, sorts
 // by modification time (most recent first) and reads up to 256KB from the
-// winner. Returns the filename + bytes.
-func pickSampleFile(dir string) (string, []byte, error) {
+// winner. Returns the filename + bytes. label is dir as the workspace knows
+// it; a failure is a *sampleError that names the folder by label only.
+func pickSampleFile(dir, label string) (string, []byte, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil, fmt.Errorf("directory does not exist: %s", dir)
-		}
-		return "", nil, err
+		return "", nil, &sampleError{folder: label, err: err}
 	}
 	type candidate struct {
 		name    string
@@ -417,7 +418,7 @@ func pickSampleFile(dir string) (string, []byte, error) {
 		})
 	}
 	if len(cands) == 0 {
-		return "", nil, fmt.Errorf("no readable files in %s", dir)
+		return "", nil, &sampleError{folder: label, err: errNoSampleFile}
 	}
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].modTime.After(cands[j].modTime)
@@ -426,14 +427,54 @@ func pickSampleFile(dir string) (string, []byte, error) {
 
 	f, err := os.Open(chosen.path)
 	if err != nil {
-		return "", nil, err
+		return "", nil, &sampleError{folder: label, file: chosen.name, err: err}
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, 256*1024))
 	if err != nil {
-		return "", nil, err
+		return "", nil, &sampleError{folder: label, file: chosen.name, err: err}
 	}
 	return chosen.name, data, nil
+}
+
+// errNoSampleFile is a sample folder with no file to show.
+var errNoSampleFile = errors.New("no readable files")
+
+// sampleError is a failed sample read. err is the Go error, with the path on
+// the volume in it, for the log. folder (relative to the tenant root) and
+// file are what the user is shown (#499).
+type sampleError struct {
+	folder string
+	file   string // the chosen file, for a failed open or read
+	err    error
+}
+
+func (e *sampleError) Error() string { return e.err.Error() }
+func (e *sampleError) Unwrap() error { return e.err }
+
+// sampleFailureMessage is the sample-data endpoint's text for err. It names
+// the folder relative to the workspace and gives only the operating system's
+// reason, never the path on the volume (#499).
+func sampleFailureMessage(err error) string {
+	var se *sampleError
+	if !errors.As(err, &se) {
+		return "could not read a sample file"
+	}
+	reason := ""
+	var pathErr *fs.PathError
+	if errors.As(se.err, &pathErr) {
+		reason = ": " + pathErr.Err.Error()
+	}
+	switch {
+	case errors.Is(se.err, errNoSampleFile):
+		return fmt.Sprintf("no readable files in %q", se.folder)
+	case se.file == "" && errors.Is(se.err, fs.ErrNotExist):
+		return fmt.Sprintf("folder %q does not exist", se.folder)
+	case se.file == "":
+		return fmt.Sprintf("could not read folder %q%s", se.folder, reason)
+	default:
+		return fmt.Sprintf("could not read %q in %q%s", se.file, se.folder, reason)
+	}
 }
 
 // isSamplePathAllowed mirrors the file-producer's path allowlist: any path

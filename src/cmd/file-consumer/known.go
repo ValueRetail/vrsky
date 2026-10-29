@@ -423,6 +423,50 @@ func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, cur
 	return true
 }
 
+// adoptCheck is one poll's read of the saved set, made the first time the
+// poll meets a done name with no stamp (#500).
+type adoptCheck struct {
+	read  bool
+	ok    bool
+	saved savedSet
+}
+
+// savedStampFor returns the stamp saved for name, for a done name this
+// watcher has no stamp for: its stat failed on a first start or after a
+// failed checkpoint read, it was saved without a stamp (before #420), or
+// mergeSaved took it from such a row. Taking the file's stamp as it
+// is now publishes nothing, which is wrong if another watcher saved the name
+// with a different stamp: it published that version, and the file has been
+// replaced since. mergeSaved leaves such a name alone (the saved stamp is no
+// longer the file's), so without this the poll took the replacement as done
+// and it was never published (#500).
+//
+// The saved set is read once per poll, and only by a poll that meets such a
+// name; each one gets a stamp in that poll, so this is rare. has is false
+// when the saved set has no stamp for name (or no checkpoint, or none is
+// kept). ok is false when the saved set can't be read: the caller leaves the
+// name for the next poll rather than guess.
+func (s *fileConsumer) savedStampFor(ctx context.Context, ac *ActiveConnection, name string, c *adoptCheck, logger *slog.Logger) (st fileStamp, has, ok bool) {
+	if s.checkpoints == nil {
+		return fileStamp{}, false, true
+	}
+	if !c.read {
+		c.read = true
+		saved, _, err := s.loadSaved(ctx, ac)
+		if err != nil {
+			logger.Warn("Could not read which files were already published; files with no stamp wait for the next poll", "error", err)
+			return fileStamp{}, false, false
+		}
+		c.ok = true
+		c.saved = saved
+	}
+	if !c.ok {
+		return fileStamp{}, false, false
+	}
+	st, has = c.saved.stamps[name]
+	return st, has, true
+}
+
 // ownsSaved reports whether the saved set is still this watcher's: its
 // changes row is on the snapshot this watcher wrote last. Only the watcher
 // that wrote a snapshot writes changes on it, and saveKnown checks this before
@@ -450,7 +494,9 @@ func (s *fileConsumer) ownsSaved(ctx context.Context, ac *ActiveConnection) (boo
 // one's would be ignored by every reader, and this watcher's own re-reads
 // would take that row as proof nobody else saved. So it merges what the other
 // one saved, as a poll does before publishing, and writes a snapshot instead.
-// If that can't be read, the snapshot is written as it is, as before #426.
+// If that can't be read, the snapshot is written as it is, as before #426,
+// unless a done name has no stamp: then keepSavedStamps needs the saved set
+// too, and nothing is written until it can be read (#500).
 func (s *fileConsumer) saveKnown(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) {
 	if s.checkpoints == nil || !ac.dirty {
 		return
@@ -511,9 +557,13 @@ func (s *fileConsumer) currentOrKnown(ac *ActiveConnection) map[string]bool {
 // changes row on it. The snapshot goes first: until the changes row follows,
 // the one there is on an older snapshot and is ignored, so a crash in between
 // loses nothing. If only the changes row fails, the set stays dirty and the
-// next save writes it. It returns the error of the snapshot write, which
-// leaves everything as it was.
+// next save writes it. It returns the error of the snapshot write, or of the
+// read keepSavedStamps needs first, either of which leaves everything as it
+// was.
 func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) error {
+	if err := s.keepSavedStamps(ctx, ac); err != nil {
+		return err
+	}
 	names := make([]string, 0, len(ac.knownFiles))
 	files := make(map[string]savedStamp, len(ac.knownStamps))
 	for name := range ac.knownFiles {
@@ -539,6 +589,41 @@ func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, l
 		logger.Warn("Saved which files were published, but could not reset the list of changes; the next save does",
 			"error", err)
 		ac.dirty = true
+	}
+	return nil
+}
+
+// keepSavedStamps gives each done name this watcher has no stamp for the
+// stamp saved for it, if there is one, before a snapshot replaces the saved
+// set. Written without it, the snapshot dropped another watcher's stamp for
+// the name, and the next poll that could stat the file took a replacement as
+// done (#500, the same loss savedStampFor stops in pollOnce). A saved stamp
+// for such a name is always another writer's: a watcher never drops a stamp
+// while it keeps the name. If the saved set can't be read it returns the error and the snapshot is
+// not written; the set stays dirty and the next poll tries again. It reads
+// nothing when every done name has a stamp, which is almost always.
+func (s *fileConsumer) keepSavedStamps(ctx context.Context, ac *ActiveConnection) error {
+	stampless := false
+	for name := range ac.knownFiles {
+		if _, ok := ac.knownStamps[name]; !ok {
+			stampless = true
+			break
+		}
+	}
+	if !stampless {
+		return nil
+	}
+	saved, _, err := s.loadSaved(context.WithoutCancel(ctx), ac)
+	if err != nil {
+		return fmt.Errorf("read the saved stamps of files with none: %w", err)
+	}
+	for name := range ac.knownFiles {
+		if _, ok := ac.knownStamps[name]; ok {
+			continue
+		}
+		if st, ok := saved.stamps[name]; ok {
+			ac.knownStamps[name] = st
+		}
 	}
 	return nil
 }

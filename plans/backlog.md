@@ -485,7 +485,7 @@ Last updated 2026-10-28.
     the API total, so a workspace with more than 100 shows a badge that
     disagrees with the running/stopped/error cards. Count by status on the
     server, or label the cards as a sample. Found in review of #450 (#466).
-76. **A file-consumer pod can adopt a replacement without publishing it.**
+76. ~~**A file-consumer pod can adopt a replacement without publishing it.**~~ (#500)
     If a pod's stat of a known name fails at load (so it has no stamp),
     another pod saved stamp S, and the file is now a newer S', `mergeSaved`
     leaves it alone and the next poll adopts S' as done. Needs a stat
@@ -649,7 +649,7 @@ Last updated 2026-10-28.
     `agent:needs-human`. Since #423 the status order is already keyed by
     tenant and connection, so such a stop can't reorder the real tenant's
     writes. Found in review of #487.
-96. **Two more file-consumer messages show the path on the volume.** A
+96. ~~**Two more file-consumer messages show the path on the volume.**~~ (#499) A
     watched file that fails to ingest sends an `error` event with the raw
     Go error (`src/cmd/file-consumer/service.go`, the `ingErr` event in
     `pollOnce`), and `os.Stat`, `os.ReadFile` and `os.Open` put
@@ -694,6 +694,17 @@ Last updated 2026-10-28.
     both. The server keeps the new name; the tab is wrong until the next
     edit-route open. Capture `deployedName` when the request goes out and
     skip the sync if it changed. Found in review of #502.
+102. **A file-consumer start that couldn't read its checkpoint saves its
+    guess anyway.** `loadKnown`'s fallback after a failed checkpoint read
+    takes every file in the folder as done with its stamp now, and its
+    comment says this isn't saved. But the first real change saves it:
+    `saveKnown` takes the `savedGen == ""` path, which writes a snapshot
+    with no merge (a deletion-only poll writes it with no read at all). That
+    snapshot can replace another pod's stamp S for a file with an
+    unpublished S', which that pod then adopts and never publishes, and it
+    makes the other pod skip new files the fallback took as done. Merge
+    before that first snapshot, or keep the fallback's names out of it.
+    Found in review of #500.
 
 ## Human
 

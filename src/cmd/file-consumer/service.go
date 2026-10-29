@@ -106,7 +106,7 @@ func (s *fileConsumer) ingestWatchedFile(ctx context.Context, ac *ActiveConnecti
 	// including the size ceiling that protects worker memory.
 	if s.publishStream == nil || s.inlineMax <= 0 || size <= int64(s.inlineMax) {
 		if size > maxWatchFileBytes {
-			return nil, size, false, fmt.Errorf("file exceeds the %d-byte limit and this worker cannot stream (no payload store configured)", int64(maxWatchFileBytes))
+			return nil, size, false, errWatchFileTooLarge
 		}
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
@@ -147,6 +147,10 @@ func (s *fileConsumer) ingestWatchedFile(ctx context.Context, ac *ActiveConnecti
 	return env, size, true, nil
 }
 
+// errWatchFileTooLarge is a watched file over maxWatchFileBytes on a worker
+// that cannot stream. Its text names no path, so the panel shows it as it is.
+var errWatchFileTooLarge = fmt.Errorf("file exceeds the %d-byte limit and this worker cannot stream (no payload store configured)", int64(maxWatchFileBytes))
+
 // contentSniffBytes is how much of a streamed file is read up front to detect
 // its content type — enough for detectContentType, small enough to be free.
 const contentSniffBytes = 512
@@ -174,7 +178,9 @@ type ActiveConnection struct {
 	// holds, for names in knownFiles, the size and mtime the file had when it
 	// was published or taken as done; a different stamp is a new file under
 	// that name (#420). A known name with no stamp takes the file's current
-	// one at the next poll, without publishing. pending holds names seen but
+	// one at the next poll, without publishing, unless another watcher saved
+	// it with a different stamp: then it takes that one, and the file is
+	// published as replaced (#500). pending holds names seen but
 	// not yet stable, with the size and mtime from the last poll (#374).
 	// dirty means knownFiles or knownStamps changed since the last save
 	// (#391). savedGen is the Gen of the snapshot this watcher saved last, ""
@@ -598,6 +604,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		s.noteReadRecovered(ac)
 	}
 	refreshed := false
+	var adopt adoptCheck
 
 	// Detect new files and ingest them into the pipeline. Previously this only
 	// emitted a UI "added" event and never published the file's contents, so
@@ -625,10 +632,24 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			done, stamped := ac.knownStamps[name]
 			if !stamped {
 				// Done with no stamp yet (a checkpoint from before #420, or
-				// a failed stat): take this one, publish nothing.
-				ac.knownStamps[name] = stamp
+				// a failed stat): take this one, publish nothing. Unless
+				// another watcher saved it with a different stamp: then it
+				// published that version and this is a newer one (#500).
+				theirs, has, ok := s.savedStampFor(ctx, ac, name, &adopt, logger)
+				if !ok {
+					// Can't tell; look again next poll.
+					continue
+				}
+				if !has || theirs == stamp {
+					ac.knownStamps[name] = stamp
+					ac.touch(name)
+					continue
+				}
+				// Keep the stamp that was published, so the poll sees the
+				// file as replaced and publishes it once it is stable.
+				ac.knownStamps[name] = theirs
 				ac.touch(name)
-				continue
+				done = theirs
 			}
 			if done == stamp {
 				delete(ac.pending, name)
@@ -688,7 +709,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			}
 			logger.Error("Failed to ingest detected file", "file", name, "error", ingErr)
 			s.emitEvent(ac.ConnectionID, FileEvent{
-				Type: "error", Filename: name, Size: size, Message: ingErr.Error(),
+				Type: "error", Filename: name, Size: size, Message: s.ingestFailureMessage(ac, name, ingErr),
 				Time: time.Now().UTC().Format(time.RFC3339),
 			})
 			continue
@@ -819,18 +840,45 @@ func (s *fileConsumer) readFailureMessage(ac *ActiveConnection, err error) strin
 	return msg
 }
 
+// ingestFailureMessage is the panel's text for a watched file that could not
+// be published (#499). The Go error behind it names the file's path on the
+// volume (os.Stat, os.ReadFile and os.Open put it there, and so does a read
+// that fails while the file is streamed) or the tenant's NATS subject (a
+// failed publish), so it stays in the log. The panel gets the folder as the
+// workspace sees it and, for a failed read, only the operating system's
+// reason, as readFailureMessage does.
+func (s *fileConsumer) ingestFailureMessage(ac *ActiveConnection, name string, err error) string {
+	folder := s.folderLabel(ac)
+	var pathErr *fs.PathError
+	switch {
+	case errors.Is(err, errWatchFileTooLarge):
+		return fmt.Sprintf("Could not publish %q in %q: %v", name, folder, err)
+	case errors.As(err, &pathErr):
+		return fmt.Sprintf("Could not read %q in %q: %s", name, folder, pathErr.Err)
+	default:
+		return fmt.Sprintf("Could not publish %q in %q; the reason is in the file-consumer log", name, folder)
+	}
+}
+
 // folderLabel is ac.WatchDir relative to the tenant's root, as the workspace
 // knows it: "orders/in", or "." for the root itself. If that can't be worked
 // out, only the last path segment.
 func (s *fileConsumer) folderLabel(ac *ActiveConnection) string {
-	root, err := tenantpath.Root(s.baseDir, ac.TenantID)
+	return s.dirLabel(ac.TenantID, ac.WatchDir)
+}
+
+// dirLabel is dir relative to the tenant's root: "orders/in", or "." for the
+// root itself. If that can't be worked out, only the last path segment, so a
+// message built from it never carries the volume root or the tenant id.
+func (s *fileConsumer) dirLabel(tenantID, dir string) string {
+	root, err := tenantpath.Root(s.baseDir, tenantID)
 	if err == nil {
-		rel, relErr := filepath.Rel(root, ac.WatchDir)
+		rel, relErr := filepath.Rel(root, dir)
 		if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return filepath.ToSlash(rel)
 		}
 	}
-	return filepath.Base(ac.WatchDir)
+	return filepath.Base(dir)
 }
 
 // isTempName reports whether a file name looks like one a writer is still

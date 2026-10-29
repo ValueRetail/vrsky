@@ -49,6 +49,8 @@ If the folder can't be read for a while (a network share reconnecting, say, or t
 
 The editor's File watcher panel opens with a line naming the folder it watches, relative to your workspace's root (`Watching "orders/in"`, or `"."` for the root itself). While the folder can't be read, the panel shows a red ERROR line naming the folder and the reason (for example `permission denied`, or that the folder is missing): at once, then at most every 30 seconds while it lasts. When a check can read the folder again the panel says so. If a pipeline that started without its folder can read the folder but not the list of files it already published (a database hiccup), it keeps waiting and tries both again at the next check, rather than counting everything in the folder as already published.
 
+A file the watcher finds but can't publish gets its own ERROR line in the panel, naming the file and its folder. If the file couldn't be read, the line gives the reason (`permission denied`, say); if publishing it failed, the reason is in the file-consumer log. The sample preview the editor shows before a deploy reports its errors the same way: the folder relative to your workspace and the reason, never the path on the server's disk.
+
 ## As a destination (producer)
 
 A producer node writes one file per incoming message to the configured directory.
