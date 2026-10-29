@@ -90,7 +90,7 @@ describe('defaults', () => {
   it('applies the documented defaults when nothing is set', async () => {
     const { config } = await loadConfig({})
     expect(config.tenantId).toBeTruthy()
-    expect(config.docsUrl).toContain('valueretail.github.io')
+    expect(config.docsUrl).toBe('https://valueretail.github.io/vrsky/')
     expect(['debug', 'info', 'warn', 'error']).toContain(config.logLevel)
   })
 })
@@ -130,5 +130,24 @@ describe('validateConfig', () => {
     ;(mod.config as { tenantId: string }).tenantId = ''
     expect(() => mod.validateConfig()).toThrow('VITE_TENANT_ID')
     ;(mod.config as { tenantId: string }).tenantId = original
+  })
+})
+
+describe('docs URL matches mkdocs.yml (#451)', () => {
+  // The sidebar's Help & Docs link opens the published mkdocs site, so the UI
+  // default and mkdocs.yml's site_url have to name the same place.
+  const mkdocs = import.meta.glob('../../../mkdocs.yml', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>
+
+  it('uses mkdocs.yml site_url as the default docsUrl', async () => {
+    const files = Object.values(mkdocs)
+    expect(files).toHaveLength(1)
+    const siteUrl = /^site_url:\s*(\S+)\s*$/m.exec(files[0])?.[1]
+    expect(siteUrl).toBeTruthy()
+    const { config } = await loadConfig({})
+    expect(config.docsUrl).toBe(siteUrl)
   })
 })

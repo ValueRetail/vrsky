@@ -2,19 +2,33 @@ name: docs
 
 # Builds the mkdocs site from docs/ on every PR (strict — broken links/nav fail
 # the build) and publishes it to GitHub Pages on push to main (#94).
+#
+# #451: the published site must stay reachable, since the UI's "Help & Docs"
+# link opens it. After a deploy, and once a day, `published` fetches the site
+# URL and fails the run if it is not 200. A red run on main opens the CI
+# failure issue (ci-failure-alert.yml already watches "docs").
 
 on:
   push:
     branches: [main]
     paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
   pull_request:
-    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+      - 'scripts/check-docs-url*.sh'
+      - 'ui/src/config/env.ts'
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +39,10 @@ jobs:
         run: pip install mkdocs-material
       - name: Build site (strict)
         run: mkdocs build --strict
+      - name: Docs URL is the same in mkdocs.yml and the UI (offline)
+        run: |
+          scripts/check-docs-url_test.sh
+          scripts/check-docs-url.sh --offline
 
   deploy:
     # Publish to GitHub Pages only from main.
@@ -43,3 +61,18 @@ jobs:
       - run: pip install mkdocs-material
       - name: Deploy to gh-pages
         run: mkdocs gh-deploy --force
+
+  published:
+    # The site answers 200 at its public URL. Runs after a deploy (Pages needs
+    # a minute or two, the script retries), daily, and on demand. `always()`
+    # keeps the daily run going although `build` and `deploy` are skipped.
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && needs.deploy.result == 'success'))
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the docs site
+        run: scripts/check-docs-url.sh

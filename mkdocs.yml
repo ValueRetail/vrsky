@@ -1,5 +1,6 @@
 site_name: VRSky Documentation
 site_description: Operator, integrator, and API documentation for the VRSky integration platform.
+site_url: https://valueretail.github.io/vrsky/
 docs_dir: docs
 
 # Keep link checking strict for the curated site, but don't fail on the
