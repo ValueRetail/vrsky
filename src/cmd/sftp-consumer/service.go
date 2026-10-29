@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -583,6 +584,13 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 				continue
 			}
 		}
+		if isTempName(f.Name) && !patternNamesTemp(cfg.FilePattern) {
+			// A writer is still filling it and will rename it (#590). Not
+			// tracked and not waited on: it is looked at again as a new
+			// file once it has its final name.
+			logger.Debug("Skipping temp file name until it is renamed", "file", f.Name)
+			continue
+		}
 		if !settled(pending, f.Name, stamp, listedAt, gap) {
 			waiting++
 			continue
@@ -617,6 +625,28 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		}
 	}
 	return waiting, false
+}
+
+// isTempName reports whether a file name looks like one a writer is still
+// filling and will rename when done: dotfiles, ~ prefixes, and .tmp or .part
+// suffixes in any case. Copied from the file consumer's rule (#374,
+// src/cmd/file-consumer/service.go isTempName), which this must match; the
+// two are kept apart so neither service imports the other.
+func isTempName(name string) bool {
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "~") {
+		return true
+	}
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".tmp") || strings.HasSuffix(lower, ".part")
+}
+
+// patternNamesTemp reports whether file_pattern asks for temp names by
+// name: it is itself in the temp form (starts with . or ~, or ends with
+// .tmp or .part), as in "*.part" or ".*". A pattern that only happens to
+// match one, such as "*" or "*.csv" on "x.csv.part", does not (#590). A
+// pattern like that still has to match the file name to publish it.
+func patternNamesTemp(pattern string) bool {
+	return pattern != "" && isTempName(pattern)
 }
 
 // saveDone saves the done set; a failure is retried at the next save.

@@ -917,7 +917,7 @@ Last updated 2026-10-28.
     `resourceURL` with the event's id unescaped; `url.PathEscape` it. Both
     touch connector security, so the PR gets `agent:needs-human`. Found in
     review of #457 (#472).
-117. **The SFTP consumer publishes temp names too.** The file consumer
+117. ~~**The SFTP consumer publishes temp names too.**~~ (#590) The file consumer
     skips dotfiles, `~*`, `*.tmp` and `*.part` until they are renamed
     (#374); the SFTP consumer has no such skip, so an uploader that writes
     `x.csv.part` and renames it gets both names published unless
