@@ -499,10 +499,18 @@ func (c *SitooConfig) effectiveResource() string {
 
 // checkResource rejects a resource the URL builders would mangle: a `#` ends
 // the URL there, so everything after it (start, num, the cursor) would be
-// dropped from the request.
+// dropped from the request, and a query string that doesn't parse would be
+// dropped whole.
 func (c *SitooConfig) checkResource() error {
 	if strings.Contains(c.Resource, "#") {
 		return fmt.Errorf("resource %q must not contain '#'", c.Resource)
+	}
+	// resourceQuery drops a query string that doesn't parse, so refuse it
+	// here rather than poll without the filter it was meant to carry.
+	if _, raw, ok := strings.Cut(c.Resource, "?"); ok {
+		if _, err := url.ParseQuery(raw); err != nil {
+			return fmt.Errorf("resource %q has a query string that doesn't parse: %w", c.Resource, err)
+		}
 	}
 	return nil
 }

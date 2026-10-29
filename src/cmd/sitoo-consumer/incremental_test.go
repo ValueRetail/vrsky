@@ -990,7 +990,6 @@ func TestIncremental_PageBudget(t *testing.T) {
 	}
 	const n = 250
 	for _, fm := range filterModes {
-		// 50 is the largest overlap checkIncremental allows at page size 2.
 		for _, overlap := range []int64{0, 10, 50} {
 			t.Run(fmt.Sprintf("%s/overlap_%d", fm.name, overlap), func(t *testing.T) {
 				f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(1, n)...)...)

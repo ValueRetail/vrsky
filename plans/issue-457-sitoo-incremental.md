@@ -44,18 +44,18 @@ changes what a running pipeline delivers.
 Sitoo consumer keys:
 
 - `incremental` (bool): read only orders not yet published.
-- `cursor_overlap` (orderids, default 1000): how far back each poll
-  re-reads, for an order whose id was handed out before others but that
-  became visible after them (several tills). At the default page size that
-  costs at most one extra page per poll; the re-read orders are not sent
-  again.
+- `cursor_overlap` (orderids, default 1000, at most 100 000): how far back
+  each poll re-reads, for an order whose id was handed out before others
+  but that became visible after them (several tills). At the default page
+  size that costs at most one extra page per poll; the re-read orders are
+  not sent again.
 
 A node with `incremental` on is refused at start with a logged error, the
 same way an incomplete config is today, when its resource is not `orders`
 (a query string is allowed, `orders?orderstate=10`), when that query string
 sets `orderidfrom`, `sort`, `start` or `num` (the poller sets those), or
-when `cursor_overlap` is negative. A `resource` containing `#` is refused in
-either mode.
+when `cursor_overlap` is negative or above 100 000. A `resource` containing
+`#`, or a query string that doesn't parse, is refused in either mode.
 
 Each poll:
 
@@ -63,11 +63,15 @@ Each poll:
    `connection_node_checkpoints` via `pkg/checkpoint` (the BC consumer's
    store). `last_processed_message_id` is the watermark W, the highest
    orderid published. `state` holds the query it belongs to (resource and
-   its query string) and the orderids published in `[W − overlap, W]`.
+   its query string), the orderids published from `Floor` up, `Floor`
+   itself (the stored set is complete from there), and `Next` (where a
+   poll cut short by its page budget got to).
    A store that can't be read fails the poll. A row that can't be decoded,
    or one for a different query, means a first poll.
-2. First poll: no filter. Otherwise the first page asks for
-   `orderidfrom = W − overlap`.
+2. First poll: no filter. After a poll cut short by its budget: carry on
+   from `Next`. Otherwise the first page asks for
+   `orderidfrom = max(W − overlap, Floor)`, so raising the overlap never
+   re-reads below what the stored set covers.
 3. Every page is `sort=orderid`, `start=0`, `num=page size`, and is
    checked before anything on it is published: every record has an
    integer `orderid` (else `errNoOrderID`), the ids rise strictly (else
@@ -76,15 +80,19 @@ Each poll:
    published stay saved.
 4. Publish the records whose orderid is not in the stored set and not met
    earlier in this poll. Then save the checkpoint: W' = the page's last
-   orderid if higher, with the published ids pruned to `[W' − overlap, W']`.
-   The save uses a context a stop can't cancel (the records are out). A
-   failed save fails the poll.
-5. A page shorter than the page size ends the poll. Otherwise the next page
-   asks for `orderidfrom = the last orderid`. Whether Sitoo treats the
-   filter as `>=` or `>`, that returns everything after it; the repeated id
-   is dropped as met.
+   orderid if higher, `Floor' = max(W' − overlap, Floor)`, with the
+   published ids pruned to `[Floor', W']`. The save uses a context a stop
+   can't cancel (the records are out), bounded by a 10 s timeout. A failed
+   save fails the poll.
+5. The next page asks for `orderidfrom = the last orderid`. Whether Sitoo
+   treats the filter as `>=` or `>`, that returns everything after it; the
+   repeated id is dropped as met. The poll ends at a page with no id past
+   the one asked for. A short page doesn't end it: Sitoo may cap `num`
+   below the page size (review round 4).
 6. At most 100 pages per poll (100 000 orders at the default size). The
-   rest is read by the next poll, from the saved watermark.
+   budget save stores `Next`; the next poll carries on from it rather than
+   re-reading the overlap first, so an overlap wider than the budget still
+   makes progress. A poll that reads to the end clears `Next`.
 
 Saving per page is safe because `orderid` is unique and the listing is
 sorted on it: once a page is out, every order up to its last id is out,
@@ -126,7 +134,11 @@ without it.
 13. A stop right after a publish doesn't lose that page's save; a store
     that can't be read fails the poll with nothing published; a row that
     can't be decoded reads everything once and is replaced.
-14. `resource` with a query string produces one well-formed URL.
+14. `resource` with a query string produces one well-formed URL; one that
+    doesn't parse is refused.
+15. (review 4) Raising `cursor_overlap` re-sends nothing; Sitoo capping
+    `num` below the page size doesn't stop new orders going out; an overlap
+    wider than the page budget still progresses.
 
 ## Files
 
@@ -159,3 +171,18 @@ resource `transactions` needs checking against a live Sitoo first
 `go build ./...`, `go vet ./...`, `golangci-lint run ./...`,
 `go test -race ./...`, `make lint-tenant` from `src/`, `-count=3` on the
 package; mutation run on the checks, the dedupe, the save and the overlap.
+
+## Review (rework, 2026-10-29)
+
+- Test author: found that an overlap wider than the page budget stalled the
+  poller (every poll re-read the same 100 pages). Fixed with `Next`.
+- Fresh reviewer, round 4: all five round-3 findings closed. Required and
+  fixed: raising the overlap re-sent orders (`Floor`), a short page taken
+  as the end (end on no progress instead), a malformed resource query
+  dropped silently (refused). Optional and taken: save timeout, overlap cap
+  of 100 000, a docs line on webhook plus poll, a stale test comment. Its
+  three failing tests are in `review_r4_test.go`.
+- Not fixable in code, so a sandbox check stays required before anyone
+  turns this on: if Sitoo sorted only within a page after applying `num`,
+  every page would pass its checks while orders between pages were
+  skipped.

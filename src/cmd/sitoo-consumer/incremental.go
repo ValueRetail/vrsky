@@ -53,9 +53,14 @@ const (
 	// defaultCursorOverlap is how far back each poll re-reads, in orderids.
 	// At the default page size that is at most one extra page per poll.
 	defaultCursorOverlap = 1000
+	// maxCursorOverlap bounds cursor_overlap: the ids published inside the
+	// window are kept in the checkpoint and rewritten after every page.
+	maxCursorOverlap = 100_000
 	// maxPagesPerPoll bounds one poll. The rest is read by the next poll,
 	// from the watermark saved after the last page.
 	maxPagesPerPoll = 100
+	// saveTimeout bounds a checkpoint save, which a stop can't cancel.
+	saveTimeout = 10 * time.Second
 	// defaultCheckpointNode keys the checkpoint when the node has no id.
 	defaultCheckpointNode = "sitoo-consumer"
 )
@@ -93,8 +98,8 @@ func (c *SitooConfig) checkIncremental() error {
 			}
 		}
 	}
-	if c.CursorOverlap != nil && *c.CursorOverlap < 0 {
-		return fmt.Errorf("cursor_overlap must not be negative (got %d)", *c.CursorOverlap)
+	if c.CursorOverlap != nil && (*c.CursorOverlap < 0 || *c.CursorOverlap > maxCursorOverlap) {
+		return fmt.Errorf("cursor_overlap must be between 0 and %d (got %d)", maxCursorOverlap, *c.CursorOverlap)
 	}
 	return nil
 }
@@ -130,8 +135,12 @@ type incrementalState struct {
 	Resource      string `json:"resource"`
 	ResourceQuery string `json:"resource_query"`
 	// Sent holds the orderids published within the overlap window below the
-	// watermark, so the re-read part is not sent twice.
-	Sent []int64 `json:"sent"`
+	// watermark, so the re-read part is not sent twice. It is complete from
+	// Floor up: a poll never re-reads below Floor, so raising cursor_overlap
+	// can't re-send the orders between the old window and the new one. The
+	// window widens as the watermark moves on.
+	Sent  []int64 `json:"sent"`
+	Floor int64   `json:"floor"`
 	// Next is where a poll that stopped at its page budget got to. The next
 	// poll carries on from there instead of re-reading the overlap first;
 	// otherwise an overlap wider than the budget could keep every poll from
@@ -144,65 +153,68 @@ func (c *SitooConfig) queryState() incrementalState {
 	return incrementalState{Resource: c.effectiveResource(), ResourceQuery: c.resourceQuery().Encode()}
 }
 
-// loadIncremental returns the stored checkpoint: the watermark, the orderids
-// published within its overlap window, and where a poll cut short by its page
-// budget got to (nil if the last poll read to the end). ok is false for a
-// first poll.
+// loadIncremental returns the stored checkpoint: the watermark, its state
+// (the floor and where a poll cut short by its page budget got to) and the
+// orderids published within the overlap window. ok is false for a first
+// poll.
 //
 // A store that can't be read fails the poll: polling from the start would
 // re-send every order to a destination that may not dedupe, and the next
 // tick retries the read anyway. A row that can't be decoded never will be,
 // so it counts as no checkpoint and the first save replaces it.
 func (s *sitooConsumer) loadIncremental(ctx context.Context, tenantID, connID string, cfg *SitooConfig,
-	logger *slog.Logger) (watermark int64, sent map[int64]bool, next *int64, ok bool, err error) {
+	logger *slog.Logger) (watermark int64, st incrementalState, sent map[int64]bool, ok bool, err error) {
 	sent = map[int64]bool{}
 	if s.checkpoints == nil {
-		return 0, sent, nil, false, nil
+		return 0, st, sent, false, nil
 	}
 	cp, err := s.checkpoints.Get(ctx, tenantID, connID, cfg.checkpointNode())
 	if err != nil {
-		return 0, sent, nil, false, fmt.Errorf("read Sitoo checkpoint: %w", err)
+		return 0, st, sent, false, fmt.Errorf("read Sitoo checkpoint: %w", err)
 	}
 	if cp == nil || cp.LastProcessedMessageID == "" {
-		return 0, sent, nil, false, nil
+		return 0, st, sent, false, nil
 	}
 	watermark, err = strconv.ParseInt(cp.LastProcessedMessageID, 10, 64)
 	if err != nil {
 		logger.Warn("Stored Sitoo watermark is not a number; reading every order once", "watermark", cp.LastProcessedMessageID)
-		return 0, sent, nil, false, nil
+		return 0, incrementalState{}, sent, false, nil
 	}
-	var st incrementalState
 	if err := json.Unmarshal(cp.State, &st); err != nil {
 		logger.Warn("Stored Sitoo checkpoint state unreadable; reading every order once", "error", err)
-		return 0, sent, nil, false, nil
+		return 0, incrementalState{}, sent, false, nil
 	}
 	if want := cfg.queryState(); st.Resource != want.Resource || st.ResourceQuery != want.ResourceQuery {
 		logger.Info("Sitoo query changed since the stored watermark; reading every order once",
 			"stored_resource", st.Resource, "stored_query", st.ResourceQuery,
 			"resource", want.Resource, "query", want.ResourceQuery)
-		return 0, sent, nil, false, nil
+		return 0, incrementalState{}, sent, false, nil
 	}
 	for _, id := range st.Sent {
 		sent[id] = true
 	}
-	return watermark, sent, st.Next, true, nil
+	return watermark, st, sent, true, nil
 }
 
 // saveIncremental stores the watermark, the orderids published within its
-// overlap window, and next (nil unless the poll stopped at its page budget).
+// overlap window and complete from floor up, and next (nil unless the poll
+// stopped at its page budget).
 func (s *sitooConsumer) saveIncremental(ctx context.Context, tenantID, connID string, cfg *SitooConfig,
-	watermark int64, sent map[int64]bool, next *int64, published int) error {
+	watermark, floor int64, sent map[int64]bool, next *int64, published int) error {
 	if s.checkpoints == nil {
 		return nil
 	}
 	// The orders are already out: a stop arriving now must not cost the
-	// save, or the next poll re-sends them.
-	ctx = context.WithoutCancel(ctx)
+	// save, or the next poll re-sends them. A hung database still can't keep
+	// a stopped poller alive.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
+	defer cancel()
 	st := cfg.queryState()
 	st.Next = next
+	st.Floor = max(watermark-cfg.overlap(), floor)
 	st.Sent = []int64{}
 	for id := range sent {
-		if id >= watermark-cfg.overlap() {
+		if id >= st.Floor {
 			st.Sent = append(st.Sent, id)
 		}
 	}
@@ -231,7 +243,7 @@ func (s *sitooConsumer) saveIncremental(ctx context.Context, tenantID, connID st
 // them, so an order can repeat (the failed page) but is not skipped.
 func (s *sitooConsumer) fetchIncremental(ctx context.Context, connID, tenantID string, cfg *SitooConfig,
 	logger *slog.Logger) error {
-	watermark, sent, next, resume, err := s.loadIncremental(ctx, tenantID, connID, cfg, logger)
+	watermark, st, sent, resume, err := s.loadIncremental(ctx, tenantID, connID, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -239,24 +251,25 @@ func (s *sitooConsumer) fetchIncremental(ctx context.Context, connID, tenantID s
 
 	// from is the orderid the next page reads from; filtered is false only
 	// on the first page of a first poll. A poll after one cut short by its
-	// page budget carries on where that one got to.
-	from, filtered := int64(0), resume
+	// page budget carries on where that one got to. Below the floor the
+	// stored set is incomplete, so a poll never starts there.
+	from, filtered, floor := int64(0), resume, st.Floor
 	switch {
-	case next != nil:
-		from = *next
+	case st.Next != nil:
+		from = *st.Next
 	case resume:
-		from = max(watermark-cfg.overlap(), 0)
+		from = max(watermark-cfg.overlap(), floor, 0)
 	}
 	// carrying is true while the stored checkpoint still says to carry on: a
 	// poll that reads to the end has to clear it, even with nothing new.
-	carrying := next != nil
+	carrying := st.Next != nil
 	mark := watermark
 	met := map[int64]bool{}
 	published, skipped, pages, done := 0, 0, 0, false
 
 	for !done {
 		if pages == maxPagesPerPoll {
-			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, sent, &from, published); err != nil {
+			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, &from, published); err != nil {
 				return err
 			}
 			logger.Info("Sitoo poll read its page budget; the next poll carries on",
@@ -317,16 +330,18 @@ func (s *sitooConsumer) fetchIncremental(ctx context.Context, connID, tenantID s
 			mark = ids[len(ids)-1]
 		}
 		if len(ids) > 0 && (len(batch) > 0 || mark > watermark) {
-			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, sent, nil, published); err != nil {
+			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, nil, published); err != nil {
 				return err
 			}
 			watermark, carrying = mark, false
 		}
 
-		if len(coll.Items) < pageSize {
+		// Paging is by id, so a short page isn't the end: Sitoo may cap num
+		// below the page size. The end is a page with nothing past from.
+		if len(ids) == 0 || (filtered && ids[len(ids)-1] <= from) {
 			done = true
 			if carrying {
-				if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, sent, nil, published); err != nil {
+				if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, nil, published); err != nil {
 					return err
 				}
 			}

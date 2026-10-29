@@ -31,7 +31,8 @@ func TestIncremental_CheckIncremental(t *testing.T) {
 		{"orders with a filter", "orders?orderstate=10", nil, true},
 		{"orders with two filters", "orders?orderstate=10&customerref=7", nil, true},
 		{"overlap 0", "orders", ov(0), true},
-		{"large overlap", "orders", ov(500000), true},
+		{"largest overlap", "orders", ov(maxCursorOverlap), true},
+		{"overlap past the cap", "orders", ov(maxCursorOverlap + 1), false},
 
 		{"default resource (transactions)", "", nil, false},
 		{"transactions", "transactions", nil, false},

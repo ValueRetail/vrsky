@@ -71,7 +71,9 @@ haven't been published yet:
 - `cursor_overlap` — how far back each poll re-reads, in order ids (default
   `1000`). It covers an order whose id was handed out before others but that
   showed up in Sitoo after them, for example from a till that was offline.
-  Must not be negative.
+  Between `0` and `100000`. Raising it doesn't re-send the orders between
+  the old window and the new one; the wider window builds up as new orders
+  come in.
 
 ```json
 {
@@ -94,7 +96,9 @@ How it behaves:
   poll after the resource or its query string changes. After that each poll
   starts at `last order id − cursor_overlap`.
 - It reads orders in id order, a page at a time: each next page asks for
-  orders from the previous page's last id on.
+  orders from the previous page's last id on, until a page brings nothing
+  new. A page shorter than `page_size` doesn't end the poll, in case Sitoo
+  returns fewer orders than asked for.
 - Every page is checked before it's published: each order has a numeric
   `orderid`, the ids rise, and none is below the id asked for. A page that
   fails the check fails the poll with an error saying which, and nothing on
@@ -103,13 +107,17 @@ How it behaves:
   `connection_node_checkpoints` after every page, so a restart, a redeploy
   or a failed poll resumes from there. The page that failed can arrive
   twice; no order is skipped.
-- A poll reads at most 100 pages (100 000 orders at the default page size)
-  and leaves the rest for the next poll.
+- A poll reads at most 100 pages (100 000 orders at the default page size).
+  The next poll carries on where it stopped.
 - Orders re-read inside the overlap are not sent again. An order that shows
   up later than `cursor_overlap` ids behind the newest one published is
   missed; raise the overlap if your tills can lag more than that.
 - It picks up new orders, not changes to existing ones: Sitoo's
   `orderidfrom` filters on the id, which never changes.
+- Orders that also arrive through webhook mode on the same connection aren't
+  known to the poller, so an order can come through both.
+- A resource query string that doesn't parse is refused, in either mode,
+  rather than polled without its filter.
 
 Turning `incremental` on for a running pipeline sends every order once more
 on its first poll, then only new ones. This hasn't been run against a live
