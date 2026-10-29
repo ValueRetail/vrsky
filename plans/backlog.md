@@ -907,8 +907,8 @@ Last updated 2026-10-28.
     is not unique, so records sharing a second need a tiebreaker. Needs a
     Sitoo sandbox to check sort and tie order first. Found in review of
     #457 (#472).
-128. **A far-future cursor value freezes the BC consumer's cursor**
-    (`cursorTracker`). One record stamped years ahead sets the watermark
+128. ~~**A far-future cursor value freezes the BC consumer's cursor**
+    (`cursorTracker`).~~ (#591) One record stamped years ahead sets the watermark
     there, and every later poll asks only for records after it. Ignore or
     log values above now + overlap. Found in review of #457 (#472).
 129. **The Sitoo `base_url` is unvalidated tenant config.** A tenant can

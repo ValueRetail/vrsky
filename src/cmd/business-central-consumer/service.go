@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,15 @@ const (
 	// BC's own last-modified field on the v2.0 API entities. Overridable
 	// because a custom API page may expose a differently named one.
 	defaultCursorField = "lastModifiedDateTime"
+
+	// maxCursorSkew is how far ahead of now a record's cursor may be and still
+	// move the watermark (#591). Past it the record is published but the
+	// watermark ignores it: one record stamped years ahead would otherwise
+	// park the watermark there, and every later poll would ask for records
+	// after it and read nothing. Five minutes covers clock drift between BC
+	// and this pod plus a poll interval of slack; whatever a bogus stamp
+	// inside the bound can hide is limited to that window.
+	maxCursorSkew = 5 * time.Minute
 )
 
 // bcConsumer polls a Business Central OData entity per active connection and
@@ -52,6 +63,9 @@ type bcConsumer struct {
 	publishStream sdk.PublishStreamFunc
 	inlineMax     int
 	checkpoints   checkpoint.Store
+
+	// now is the clock the cursor bound is measured against; nil = time.Now.
+	now func() time.Time
 
 	httpClient *http.Client
 
@@ -115,6 +129,13 @@ type BCConfig struct {
 	// persisted in the node's checkpoint state, so a restart or redeploy does
 	// not re-send every picture. nil = not loaded yet.
 	pictureSeen map[string]seenPicture
+
+	// aheadSeen is record key → the cursor value it carried when it was
+	// published ahead of the bound (#591). Such a record never moves the
+	// watermark, so the "gt watermark" filter keeps returning it; this is
+	// what stops it being sent again every poll. Persisted in the node's
+	// checkpoint state. nil = not loaded yet.
+	aheadSeen map[string]string
 
 	// resendAll makes the next fetch ignore the incremental watermark and the
 	// seen pictures, so everything goes out again — for a till that just
@@ -364,6 +385,13 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	cursor := ""
 	if cfg.Incremental && !cfg.resendAll {
 		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
+		// A watermark stored before #591 may already sit far ahead and hide
+		// everything new. Reading from the start once is the only way back.
+		if t, err := time.Parse(time.RFC3339, cursor); err == nil && t.After(c.clock().Add(maxCursorSkew)) {
+			logger.Warn("stored Business Central watermark is beyond the cursor bound; reading from the start",
+				"watermark", cursor)
+			cursor = ""
+		}
 	}
 	if cfg.resendAll {
 		cfg.pictureSeen = map[string]seenPicture{}
@@ -371,11 +399,18 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cfg.pictureSeen = c.loadPictureState(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 
+	if cfg.resendAll {
+		cfg.aheadSeen = map[string]string{}
+	} else if cfg.Incremental && cfg.aheadSeen == nil {
+		cfg.aheadSeen = c.loadAheadState(ctx, tenantID, connID, cfg.NodeID, logger)
+	}
+
 	next := cfg.entityURL(cursor)
 	page, total := 0, 0
 	var pics pictureCounts
-	var watermark cursorTracker
-	inFeed := map[string]bool{} // record ids this poll carried, for the sweep
+	watermark := cursorTracker{ceiling: c.clock().Add(maxCursorSkew)}
+	ahead := map[string]string{} // records beyond the bound this poll carried
+	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
 	for next != "" {
 		page++
 		body, err := c.get(ctx, tok, next, cfg.PageSize)
@@ -387,11 +422,14 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			return fmt.Errorf("parse OData page: %w", err)
 		}
 		if len(p.Value) > 0 {
+			out := p.Value
 			if cfg.Incremental {
-				watermark.observe(p.Value, cfg.effectiveCursorField())
+				out = c.withoutSentAhead(cfg, &watermark, p.Value, ahead, logger)
 			}
-			if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
-				return fmt.Errorf("publish records: %w", err)
+			if len(out) > 0 {
+				if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), out); err != nil {
+					return fmt.Errorf("publish records: %w", err)
+				}
 			}
 			if cfg.Pictures {
 				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, inFeed, logger)
@@ -400,7 +438,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 					return fmt.Errorf("publish pictures: %w", err)
 				}
 			}
-			total += len(p.Value)
+			total += len(out)
 		}
 		next = p.NextLink
 	}
@@ -428,8 +466,12 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	if cfg.Incremental && watermark.raw != "" {
 		newCursor = watermark.raw
 	}
-	if newCursor != "" || cfg.Pictures {
-		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, int64(total), cfg.pictureState(), logger)
+	aheadChanged := cfg.Incremental && !sameAhead(cfg.aheadSeen, ahead)
+	if cfg.Incremental {
+		cfg.aheadSeen = ahead
+	}
+	if newCursor != "" || cfg.Pictures || aheadChanged {
+		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, int64(total), cfg.nodeState(), logger)
 	}
 
 	if cfg.Pictures {
@@ -452,12 +494,24 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 // Business Central, so it is by construction a datetime literal BC accepts
 // back in a $filter. Comparison goes through the parsed time: "…:00.5Z" sorts
 // before "…:00Z" as text while being the later instant.
+//
+// A value later than ceiling (when set) is not a watermark candidate (#591):
+// one far-future record would otherwise freeze the watermark and hide every
+// record that arrives after it. observe reports such records instead.
 type cursorTracker struct {
-	newest time.Time
-	raw    string
+	newest  time.Time
+	raw     string
+	ceiling time.Time // zero = no bound
 }
 
-func (t *cursorTracker) observe(records []json.RawMessage, field string) {
+// aheadRecord is a record whose cursor lies beyond the tracker's ceiling.
+type aheadRecord struct {
+	Key    string // the record's id, for dedupe and the log
+	Cursor string // the cursor value as Business Central wrote it
+}
+
+func (t *cursorTracker) observe(records []json.RawMessage, field string) []aheadRecord {
+	var ahead []aheadRecord
 	for _, rec := range records {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(rec, &fields); err != nil {
@@ -475,10 +529,113 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) {
 		if err != nil {
 			continue
 		}
+		if !t.ceiling.IsZero() && parsed.After(t.ceiling) {
+			ahead = append(ahead, aheadRecord{Key: recordKey(rec, fields), Cursor: s})
+			continue
+		}
 		if parsed.After(t.newest) {
 			t.newest, t.raw = parsed, s
 		}
 	}
+	return ahead
+}
+
+// recordKey identifies a record across polls: its OData id, else its number,
+// else a hash of the whole record (so an edit counts as a new record, which
+// is right for an entity without an id).
+func recordKey(rec json.RawMessage, fields map[string]json.RawMessage) string {
+	for _, f := range []string{"id", "number"} {
+		var s string
+		if raw, ok := fields[f]; ok && json.Unmarshal(raw, &s) == nil && s != "" {
+			return s
+		}
+	}
+	sum := sha256.Sum256(rec)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func (c *bcConsumer) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+// withoutSentAhead feeds a page to the watermark and returns the records to
+// publish. A record beyond the cursor bound does not move the watermark. It
+// is published once and logged at Warn; because the watermark stayed behind
+// it, the filter returns it on every poll until the clock catches up, so a
+// record already sent with the same cursor value is left out, including on
+// the poll where the clock finally reaches it. Edited again, its cursor
+// changes and it goes out again.
+func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records []json.RawMessage,
+	ahead map[string]string, logger *slog.Logger) []json.RawMessage {
+	field := cfg.effectiveCursorField()
+	for _, h := range w.observe(records, field) {
+		ahead[h.Key] = h.Cursor
+		if prev, ok := cfg.aheadSeen[h.Key]; ok && prev == h.Cursor {
+			continue
+		}
+		logger.Warn("Business Central record is dated beyond the cursor bound; "+
+			"published, but the incremental watermark ignores it",
+			"record_id", h.Key, "cursor_field", field,
+			"cursor_value", h.Cursor, "bound", w.ceiling.UTC().Format(time.RFC3339))
+	}
+	if len(cfg.aheadSeen) == 0 {
+		return records
+	}
+	out := make([]json.RawMessage, 0, len(records))
+	for _, rec := range records {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(rec, &fields) == nil {
+			var cur string
+			if raw, ok := fields[field]; ok && json.Unmarshal(raw, &cur) == nil {
+				if prev, ok := cfg.aheadSeen[recordKey(rec, fields)]; ok && prev == cur {
+					continue
+				}
+			}
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+func sameAhead(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// loadAheadState reads the remembered far-future records back from the
+// checkpoint row. Nothing remembered costs one re-send of each, not data.
+func (c *bcConsumer) loadAheadState(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) map[string]string {
+	seen := map[string]string{}
+	if c.checkpoints == nil || nodeID == "" {
+		return seen
+	}
+	cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
+	if err != nil {
+		logger.Error("read Business Central cursor state; far-future records may be sent again", "error", err)
+		return seen
+	}
+	if cp == nil || len(cp.State) == 0 {
+		return seen
+	}
+	var st pictureState
+	if err := json.Unmarshal(cp.State, &st); err != nil {
+		logger.Error("parse Business Central cursor state; far-future records may be sent again", "error", err)
+		return seen
+	}
+	if st.Ahead != nil {
+		seen = st.Ahead
+	}
+	return seen
 }
 
 // loadCursor returns the stored watermark, or "" for a first run. A store that

@@ -229,6 +229,22 @@ node sees) is skipped and the converted record is written.
     The comparison is `gt`, so a record written in the same millisecond as the
     watermark but after the fetch read it is not picked up. `ge` would redeliver
     the watermark record on every poll instead.
+
+    **Records dated in the future.** A record whose `cursor_field` is more than
+    5 minutes ahead of the consumer's clock does not move the watermark;
+    otherwise one record stamped years ahead would park the watermark there and
+    every later poll would read nothing. Such a record is still published, once,
+    and the consumer logs a Warn with its `record_id`, the value, and the bound.
+    Because the watermark stays behind it, Business Central keeps returning it
+    on every poll; the node remembers (in the same checkpoint row) the records
+    it has sent this way, with the cursor value each carried, and leaves them
+    out until their value changes. When the clock reaches the value, the
+    record is not sent again and the watermark moves past it. A watermark
+    stored earlier that is already beyond the bound is dropped with a Warn and
+    the entity is read once from the start. A `cursor_field` that is a business
+    date in the future (a due date, say) never advances the watermark, so every
+    poll re-reads those records without re-sending them; pick a
+    last-modified field instead.
 - **UI source-type wiring** — config is API-settable today.
 
 The same OAuth2 client-credentials pattern (via `pkg/oauthcc`) is reused by the
