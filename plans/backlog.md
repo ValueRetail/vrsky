@@ -529,13 +529,13 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
-82. **GCS `PutStream` commits a partial object when the body fails.**
+82. ~~**GCS `PutStream` commits a partial object when the body fails.**~~ (#524)
     `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
     which finalises the upload; aborting needs the writer's context
     cancelled instead. S3 and Azure abort. A failed `vrsky-cli backup` on
     GCS can leave a cut-off archive that fails restore loudly (no final
     chunk) but still looks like a backup in `list`. Found during #430.
-83. **`pgRestore` in `vrsky-cli` has no unit test.** Its error precedence
+83. ~~**`pgRestore` in `vrsky-cli` has no unit test.**~~ (#523) Its error precedence
     (an archive read error wins over pg_restore's exit status) and the
     drain after pg_restore exits, which is where a chunked archive's final
     chunk and the gzip checksum get checked, are only exercised by the DR

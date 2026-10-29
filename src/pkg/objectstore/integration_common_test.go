@@ -5,14 +5,19 @@ package objectstore
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"testing"
+	"testing/iotest"
+	"time"
 )
 
 // assertRoundTrip exercises the full ObjectStore surface against a live backend:
-// Put -> List -> Get (with content type) -> Copy -> Delete. Shared by the S3,
-// Azure, and GCS integration tests.
+// Put -> List -> Get (with content type) -> Copy -> Delete, then a streamed
+// round-trip and a streamed upload whose body fails. Shared by the S3, Azure,
+// and GCS integration tests.
 func assertRoundTrip(t *testing.T, ctx context.Context, store ObjectStore) {
 	t.Helper()
 
@@ -88,6 +93,43 @@ func assertRoundTrip(t *testing.T, ctx context.Context, store ObjectStore) {
 		t.Errorf("GetStream content-type = %q, want application/octet-stream", ct)
 	}
 	_ = store.Delete(ctx, skey) // cleanup
+
+	assertFailedPutStreamLeavesNothing(t, ctx, store)
+}
+
+var errIntegrationBody = errors.New("body failed partway")
+
+// assertFailedPutStreamLeavesNothing streams bodies that fail partway and
+// checks the backend kept nothing: PutStream errors, List doesn't show the key
+// and Get fails. A cut-off backup archive must never look like a real one.
+// The larger body gets past GCS's first 16 MiB resumable chunk and S3's first
+// 5 MiB part, so the abort runs after data reached the server.
+func assertFailedPutStreamLeavesNothing(t *testing.T, ctx context.Context, store ObjectStore) {
+	t.Helper()
+	for _, sent := range []int{64 << 10, 17 << 20} {
+		// A fresh key per run: emulator buckets outlive the test.
+		key := fmt.Sprintf("in/failed-stream-%d-%d.bin", sent, time.Now().UnixNano())
+		body := io.MultiReader(bytes.NewReader(make([]byte, sent)), iotest.ErrReader(errIntegrationBody))
+
+		err := store.PutStream(ctx, key, body, "application/octet-stream")
+		if err == nil {
+			t.Errorf("PutStream of a body failing after %d bytes returned nil", sent)
+		}
+
+		objs, lerr := store.List(ctx, "in/")
+		if lerr != nil {
+			t.Fatalf("List: %v", lerr)
+		}
+		for _, o := range objs {
+			if o.Key == key {
+				t.Errorf("failed PutStream left %q (%d bytes) in List", key, o.Size)
+			}
+		}
+		if _, _, gerr := store.Get(ctx, key); gerr == nil {
+			t.Errorf("Get(%q) succeeded after a failed PutStream", key)
+		}
+		_ = store.Delete(ctx, key) // cleanup if it was committed anyway
+	}
 }
 
 func envOr(k, def string) string {

@@ -88,7 +88,13 @@ func (g *gcsStore) GetStream(ctx context.Context, key string) (io.ReadCloser, st
 
 // PutStream uploads by copying body into the object Writer, which flushes in
 // chunks (default 16 MiB) rather than buffering the whole object in memory.
+//
+// A body that fails aborts the upload, like S3 and Azure: Close would commit
+// what was copied so far, so the writer's context is cancelled first. Close
+// then returns without finalising and waits for the upload to stop.
 func (g *gcsStore) PutStream(ctx context.Context, key string, body io.Reader, contentType string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	w := g.client.Bucket(g.bucket).Object(key).NewWriter(ctx)
 	if contentType != "" {
 		w.ContentType = contentType
@@ -97,6 +103,7 @@ func (g *gcsStore) PutStream(ctx context.Context, key string, body io.Reader, co
 		w.KMSKeyName = g.sse.KMSKeyID
 	}
 	if _, err := io.Copy(w, body); err != nil {
+		cancel()
 		_ = w.Close()
 		return fmt.Errorf("gcs put-stream %q: %w", key, err)
 	}
