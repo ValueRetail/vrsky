@@ -825,8 +825,8 @@ Last updated 2026-10-28.
     first-start rule for these pollers publishes every file in the folder,
     so decide first whether that or "everything present is done" fits.
     Found in #563.
-119. **The SFTP and cloud-storage editors show a poll interval they don't
-    save.** Both consumer panels in
+119. ~~**The SFTP and cloud-storage editors show a poll interval they don't
+    save.**~~ (#589) Both consumer panels in
     `ui/src/components/Pipeline/PropertyEditor.tsx` show
     `poll_interval_seconds ?? 60` but write the field only when it is
     edited. The consumers read unset as 0, "poll once", so a node saved
