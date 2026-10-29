@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -45,8 +46,28 @@ type frontSystemsConsumer struct {
 	// say) from both registering its webhooks, and lets a stop that arrives
 	// mid-start win (#397, #429). Both under mu.
 	mu     sync.Mutex
-	active map[string]struct{}
+	active map[string]*activeConn
 	starts sdk.StartGuard
+
+	// pendingUnregister holds, by connection ID, webhooks a stop has taken
+	// off an active connection that are not deleted at Front Systems yet. It
+	// is drained with that connection's hook lock held, by the stop's own
+	// goroutine or by the next start, whichever gets there first, so a start
+	// never lists the webhooks before a stop's deletes are done (#503).
+	// hookLocks has one mutex per connection, never pruned (like the guard's
+	// seq): it serialises every Front Systems webhook call for the
+	// connection. restoring is true while boot restore runs; closed once Stop
+	// has run. All under mu.
+	pendingUnregister map[string][]hookSet
+	hookLocks         map[string]*sync.Mutex
+	restoring         bool
+	closed            bool
+
+	// bgCtx is cancelled by Stop; unregisters started by stop commands run
+	// under it and are counted by bg. Created lazily under mu.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bg       sync.WaitGroup
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -74,6 +95,29 @@ type node struct {
 	Config json.RawMessage `json:"config"`
 }
 
+// activeConn is one started connection: the tenant it was started for (the
+// one whose (id, tenant) lookup found it) and the webhooks registered at
+// Front Systems for it, to delete when it is stopped.
+type activeConn struct {
+	tenantID string
+	hooks    hookSet
+}
+
+// hookSet is a connection's Front Systems webhook ids and the configuration
+// (base URL and keys) to delete them with. cfg is nil when nothing was
+// registered.
+type hookSet struct {
+	cfg *FrontSystemsConfig
+	ids []string
+}
+
+// unregisterTimeout bounds one batch of unregister calls.
+const unregisterTimeout = 30 * time.Second
+
+// stopGrace is how long Stop waits for unregisters from stop commands before
+// cancelling them.
+const stopGrace = 5 * time.Second
+
 type commandMessage struct {
 	ConnectionID string `json:"connection_id"`
 	TenantID     string `json:"tenant_id"`
@@ -96,6 +140,14 @@ func (c *frontSystemsConsumer) Configure(ctx context.Context, res *sdk.Resources
 	if c.resolveTenant == nil {
 		c.resolveTenant = c.getConnectionTenant
 	}
+
+	// The runner starts the HTTP server right after Configure, before Run
+	// restores the running connections. Until Run's restore is done, the
+	// webhook route answers 503 rather than 410 for a connection not started
+	// yet: it may well be running.
+	c.mu.Lock()
+	c.restoring = true
+	c.mu.Unlock()
 
 	// Real-time events: Front Systems POSTs to /frontsystems/events/{connectionID}.
 	c.RegisterHTTPHandler("/frontsystems/events/", c.handleWebhook())
@@ -124,14 +176,24 @@ func (c *frontSystemsConsumer) Run(ctx context.Context, publish sdk.PublishFunc)
 	// Bring back what the database says is running: start/stop are NATS commands
 	// and are not persisted, so without this a restart silently stopped every
 	// pipeline on this service until someone redeployed it.
+	// restoring has been true since Configure (set again here for callers
+	// that skip it); the webhook route answers 503 until the scan is done.
+	c.mu.Lock()
+	c.restoring = true
+	c.mu.Unlock()
 	sdk.RestoreRunning(ctx, c.db, c.logger, "front_systems", c.startConnection)
+	c.mu.Lock()
+	c.restoring = false
+	c.mu.Unlock()
 
 	<-ctx.Done()
 	return nil
 }
 
-// Stop unsubscribes. Webhook registrations in Front Systems persist across
-// restarts (they're server-side), so we don't tear them down here.
+// Stop unsubscribes. It does not unregister webhooks at Front Systems: the
+// connections are still running in the database, and boot restore in the
+// next process finds and reuses their registrations. Unregisters already
+// started by stop commands get stopGrace to finish, then are cancelled.
 func (c *frontSystemsConsumer) Stop(ctx context.Context) error {
 	if c.startSub != nil {
 		_ = c.startSub.Unsubscribe()
@@ -140,11 +202,84 @@ func (c *frontSystemsConsumer) Stop(ctx context.Context) error {
 		_ = c.stopSub.Unsubscribe()
 	}
 	c.mu.Lock()
+	c.closed = true
 	c.active = nil
 	// A start still in flight gives up instead of counting as started.
 	c.starts.StopAllLocked()
+	c.lifecycleCtxLocked()
+	cancel := c.bgCancel
 	c.mu.Unlock()
+
+	// No stop command adds to bg once closed is set (it is checked under mu),
+	// so this Wait sees every Add.
+	done := make(chan struct{})
+	go func() {
+		c.bg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-time.After(stopGrace):
+	}
+	// Cancelling ends the unregisters' calls and those of any start in
+	// progress (they all run under the lifecycle context). One still waiting
+	// for its connection's hook lock is not waited for past ctx.
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 	return nil
+}
+
+// lifecycleCtxLocked returns the context background unregisters run under,
+// cancelled by Stop. The caller holds mu.
+func (c *frontSystemsConsumer) lifecycleCtxLocked() context.Context {
+	if c.bgCtx == nil {
+		c.bgCtx, c.bgCancel = context.WithCancel(context.Background())
+	}
+	return c.bgCtx
+}
+
+// hookLock returns the connection's hook lock. It takes mu, so the caller
+// must not hold it.
+func (c *frontSystemsConsumer) hookLock(connectionID string) *sync.Mutex {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hookLocks == nil {
+		c.hookLocks = make(map[string]*sync.Mutex)
+	}
+	l, ok := c.hookLocks[connectionID]
+	if !ok {
+		l = &sync.Mutex{}
+		c.hookLocks[connectionID] = l
+	}
+	return l
+}
+
+// refuseEvent decides what the webhook route does with an event for
+// connectionID, whose row belongs to tenantID. It returns 0 to publish it, or
+// the HTTP status to refuse it with. An event is published only for a
+// connection this process started, and only for the tenant it was started
+// for (#503).
+func (c *frontSystemsConsumer) refuseEvent(connectionID, tenantID string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ac, ok := c.active[connectionID]; ok {
+		if ac.tenantID == tenantID {
+			return 0
+		}
+		c.logger.Warn("Front Systems event refused: the connection's tenant is not the one it was started for",
+			"connection_id", connectionID, "tenant_id", tenantID, "started_for", ac.tenantID)
+		return http.StatusGone
+	}
+	// While boot restore runs, or the process is shutting down, the
+	// connection may be running in the database: try later, not gone.
+	if c.restoring || c.closed {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusGone
 }
 
 func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
@@ -173,8 +308,25 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 		logger.Warn("Front Systems connection already started or starting")
 		return
 	}
-	// Frees the claim on every early return below; a no-op once active.
+	// Frees the claim on every early return below; a no-op once active. It
+	// runs after the hook lock is unlocked (defers run last in, first out),
+	// so a start it retries can take that lock.
 	defer claim.Release()
+
+	// Every webhook call for this connection runs under its hook lock. A
+	// stop's deletes still pending are done first, so the lookup below cannot
+	// find and reuse a webhook that is about to be deleted (#503).
+	// The Front Systems calls run under the lifecycle context, so Stop's
+	// cancel ends them. The hook lock is held through Activate, so a test's
+	// StartGuard.AfterActivate hook must not wait for a stop's unregister of
+	// this connection.
+	hl := c.hookLock(connectionID)
+	hl.Lock()
+	defer hl.Unlock()
+	c.mu.Lock()
+	fsCtx := c.lifecycleCtxLocked()
+	c.mu.Unlock()
+	c.drainUnregisters(fsCtx, connectionID, logger)
 
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
@@ -186,67 +338,258 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 	// connector just receives on /frontsystems/events/{id}. A failed
 	// registration leaves the connection not started, so the next start (or a
 	// start refused meanwhile) tries again.
+	ac := &activeConn{tenantID: tenantID}
 	if cfg.CallbackURL != "" && len(cfg.Events) > 0 {
-		if err := c.registerWebhooks(context.Background(), cfg, logger); err != nil {
+		ids, err := c.registerWebhooks(fsCtx, cfg, logger)
+		if err != nil {
 			logger.Error("Front Systems webhook registration failed", "error", err)
 			return
 		}
+		ac.hooks = hookSet{cfg: cfg, ids: ids}
 	}
 	// A stop that arrived during the work above has taken the claim back and
-	// wins. Registrations are server-side and a stop never removes them, so
-	// there is nothing to undo here.
+	// wins: what this start registered is deleted again, still under the hook
+	// lock. Not when the process is shutting down: the connection is then
+	// still running, and boot restore reuses the registrations.
 	if !claim.Activate(func() {
 		if c.active == nil {
-			c.active = make(map[string]struct{})
+			c.active = make(map[string]*activeConn)
 		}
-		c.active[connectionID] = struct{}{}
+		c.active[connectionID] = ac
 	}) {
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		if !closed && len(ac.hooks.ids) > 0 {
+			uctx, cancel := context.WithTimeout(fsCtx, unregisterTimeout)
+			defer cancel()
+			c.unregisterWebhooks(uctx, ac.hooks, logger)
+		}
 	}
 }
 
-// handleStopCommand forgets the connection, so its next start registers the
-// webhooks again, and makes a start in progress give up. There are no
-// per-connection resources to tear down (registrations are server-side).
+// handleStopCommand forgets the connection, so the webhook route refuses its
+// events from now on, makes a start in progress give up, and unregisters the
+// connection's webhooks at Front Systems (#503). The unregister is best
+// effort and runs on its own goroutine: the connection is stopped here
+// whether or not it succeeds. A stop naming another tenant than the one the
+// connection was started for leaves the connection running.
 func (c *frontSystemsConsumer) handleStopCommand(msg *nats.Msg) {
 	var cmd commandMessage
 	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
 		c.logger.Error("parse stop command", "error", err)
 		return
 	}
+	logger := c.logger.With("connection_id", cmd.ConnectionID, "tenant_id", cmd.TenantID)
+	var (
+		unregister bool
+		bgCtx      context.Context
+	)
 	c.mu.Lock()
 	// The stop must name the tenant the connection is starting or active for,
 	// in its payload and on its subject; one naming another tenant changes
-	// nothing (#498). A start still in progress gives up instead of finishing
-	// after the stop (#397).
+	// nothing (#498): no forget, no unregister. A start still in progress
+	// gives up instead of finishing after the stop (#397).
 	starting, err := c.starts.StopForTenantLocked(msg.Subject, cmd.TenantID, cmd.ConnectionID)
 	if err != nil {
 		c.mu.Unlock()
-		c.logger.Warn("Ignoring stop command for another tenant", "connection_id", cmd.ConnectionID, "error", err)
+		logger.Warn("Ignoring stop command for another tenant", "error", err)
 		return
 	}
-	delete(c.active, cmd.ConnectionID)
+	if ac, ok := c.active[cmd.ConnectionID]; ok {
+		delete(c.active, cmd.ConnectionID)
+		// Handed over in the critical section that forgets the connection, so
+		// a start that follows finds them pending and deletes them first.
+		if len(ac.hooks.ids) > 0 && !c.closed {
+			if c.pendingUnregister == nil {
+				c.pendingUnregister = make(map[string][]hookSet)
+			}
+			c.pendingUnregister[cmd.ConnectionID] = append(c.pendingUnregister[cmd.ConnectionID], ac.hooks)
+			bgCtx = c.lifecycleCtxLocked()
+			c.bg.Add(1)
+			unregister = true
+		}
+	}
 	c.mu.Unlock()
 	if starting {
-		c.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+		logger.Info("Stop arrived while the connection was starting; the start is abandoned")
+	}
+	if unregister {
+		go func() {
+			defer c.bg.Done()
+			hl := c.hookLock(cmd.ConnectionID)
+			hl.Lock()
+			defer hl.Unlock()
+			c.drainUnregisters(bgCtx, cmd.ConnectionID, logger)
+		}()
 	}
 }
 
-// registerWebhooks subscribes our callback URL for each configured event type
-// via POST {base}/api/webhooks {"event":..., "url":...}.
-func (c *frontSystemsConsumer) registerWebhooks(ctx context.Context, cfg *FrontSystemsConfig, logger *slog.Logger) error {
+// drainUnregisters deletes the webhooks stops have left pending for the
+// connection. The caller holds the connection's hook lock.
+func (c *frontSystemsConsumer) drainUnregisters(ctx context.Context, connectionID string, logger *slog.Logger) {
+	c.mu.Lock()
+	pending := c.pendingUnregister[connectionID]
+	delete(c.pendingUnregister, connectionID)
+	c.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, unregisterTimeout)
+	defer cancel()
+	for _, hs := range pending {
+		c.unregisterWebhooks(ctx, hs, logger)
+	}
+}
+
+// unregisterWebhooks deletes each webhook with DELETE {base}/api/webhooks/{id}.
+// Best effort: a failure is logged and the others are still tried. A 404
+// means it is gone already and counts as done.
+func (c *frontSystemsConsumer) unregisterWebhooks(ctx context.Context, hs hookSet, logger *slog.Logger) {
+	if hs.cfg == nil {
+		return
+	}
+	for _, id := range hs.ids {
+		status, resp, err := c.do(ctx, hs.cfg, http.MethodDelete, "/api/webhooks/"+url.PathEscape(id), nil)
+		switch {
+		case err != nil:
+			logger.Warn("Could not unregister a Front Systems webhook; it stays registered", "webhook_id", id, "error", err)
+		case status == http.StatusNotFound || (status >= 200 && status < 300):
+			logger.Info("Unregistered Front Systems webhook", "webhook_id", id)
+		default:
+			logger.Warn("Could not unregister a Front Systems webhook; it stays registered",
+				"webhook_id", id, "status", status, "body", snippet(resp))
+		}
+	}
+}
+
+// webhook is Front Systems' WebhookViewModel.
+type webhook struct {
+	ID    string `json:"id"`
+	Event string `json:"event"`
+	URL   string `json:"url"`
+}
+
+// registerWebhooks makes sure our callback URL is registered for each
+// configured event type and returns the ids of those registrations, to
+// delete on stop. It lists the existing webhooks first (GET
+// {base}/api/webhooks) and reuses those with the same event and URL, so a
+// restart or a stop and start doesn't register the callback again (#503).
+// The rest it creates with POST {base}/api/webhooks {"event":..., "url":...},
+// taking the id from the response when it has one and from a second list
+// otherwise. A list that fails is logged and skipped: the events are then
+// posted, as before.
+func (c *frontSystemsConsumer) registerWebhooks(ctx context.Context, cfg *FrontSystemsConfig, logger *slog.Logger) ([]string, error) {
+	callback := strings.TrimRight(cfg.CallbackURL, "/")
+	existing, err := c.listWebhooks(ctx, cfg)
+	if err != nil {
+		logger.Warn("Could not list Front Systems webhooks; registering without checking for existing ones", "error", err)
+	}
+	var ids []string
+	seen := map[string]bool{}
+	add := func(found ...string) {
+		for _, id := range found {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	var noID []string    // events created without an id in the response
+	var created []string // ids this call created, undone if a later event fails
+	fail := func(err error) ([]string, error) {
+		// The connection is not started, so no stop would delete these.
+		c.unregisterWebhooks(ctx, hookSet{cfg: cfg, ids: created}, logger)
+		return nil, err
+	}
 	for _, event := range cfg.Events {
-		body, _ := json.Marshal(map[string]string{"event": event, "url": strings.TrimRight(cfg.CallbackURL, "/")})
+		if found := matchingWebhooks(existing, event, callback); len(found) > 0 {
+			add(found...)
+			if len(found) > 1 {
+				logger.Warn("Front Systems has this webhook more than once; all of them are removed on stop", "event", event, "count", len(found))
+			}
+			logger.Info("Front Systems webhook already registered", "event", event)
+			continue
+		}
+		body, _ := json.Marshal(map[string]string{"event": event, "url": callback})
 		status, resp, err := c.do(ctx, cfg, http.MethodPost, "/api/webhooks", body)
 		if err != nil {
-			return fmt.Errorf("register %s: %w", event, err)
+			return fail(fmt.Errorf("register %s: %w", event, err))
 		}
 		if status < 200 || status >= 300 {
-			return fmt.Errorf("register %s: HTTP %d: %s", event, status, snippet(resp))
+			return fail(fmt.Errorf("register %s: HTTP %d: %s", event, status, snippet(resp)))
+		}
+		var hook webhook
+		if json.Unmarshal(resp, &hook) == nil && hook.ID != "" {
+			add(hook.ID)
+			created = append(created, hook.ID)
+		} else {
+			noID = append(noID, event)
 		}
 		logger.Info("Registered Front Systems webhook", "event", event)
 	}
-	return nil
+	if len(noID) > 0 {
+		listed, err := c.listWebhooks(ctx, cfg)
+		if err != nil {
+			logger.Warn("Could not read back the new Front Systems webhooks' ids; they will not be removed on stop", "events", noID, "error", err)
+			return ids, nil
+		}
+		for _, event := range noID {
+			found := matchingWebhooks(listed, event, callback)
+			if len(found) == 0 {
+				logger.Warn("New Front Systems webhook not in the list; it will not be removed on stop", "event", event)
+			}
+			add(found...)
+		}
+	}
+	return ids, nil
+}
+
+// listWebhooks reads the webhooks registered under the connection's keys.
+func (c *frontSystemsConsumer) listWebhooks(ctx context.Context, cfg *FrontSystemsConfig) ([]webhook, error) {
+	status, resp, err := c.do(ctx, cfg, http.MethodGet, "/api/webhooks", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("HTTP %d: %s", status, snippet(resp))
+	}
+	// The response body is not documented: a bare array is expected, and the
+	// usual wrappers are accepted too.
+	var hooks []webhook
+	if err := json.Unmarshal(resp, &hooks); err == nil {
+		return hooks, nil
+	}
+	var wrapped struct {
+		Value []webhook `json:"value"`
+		Items []webhook `json:"items"`
+		Data  []webhook `json:"data"`
+	}
+	if err := json.Unmarshal(resp, &wrapped); err != nil {
+		return nil, fmt.Errorf("parse webhook list: %w (body: %s)", err, snippet(resp))
+	}
+	switch {
+	case wrapped.Value != nil:
+		return wrapped.Value, nil
+	case wrapped.Items != nil:
+		return wrapped.Items, nil
+	case wrapped.Data != nil:
+		return wrapped.Data, nil
+	}
+	return nil, fmt.Errorf("parse webhook list: no array in %s", snippet(resp))
+}
+
+// matchingWebhooks returns the ids of the webhooks for event that call
+// callback (trailing slashes ignored, event names compared without case).
+func matchingWebhooks(hooks []webhook, event, callback string) []string {
+	var ids []string
+	for _, h := range hooks {
+		if h.ID != "" && strings.EqualFold(h.Event, event) && strings.TrimRight(h.URL, "/") == callback {
+			ids = append(ids, h.ID)
+		}
+	}
+	return ids
 }
 
 // do performs a Front Systems API request with the two required auth headers.

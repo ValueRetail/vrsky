@@ -658,7 +658,7 @@ Last updated 2026-10-28.
     /data/input/<tenant-id>/…", or `os.ReadDir`'s own text). Name the
     folder with `folderLabel` and keep only the operating system's reason,
     as `readFailureMessage` does since #409. Found in review of #455.
-97. **Front Systems keeps its webhooks after a stop.** A stop forgets the
+97. ~~**Front Systems keeps its webhooks after a stop.**~~ (#503) A stop forgets the
     connection but never unregisters its callback at Front Systems, and
     `/frontsystems/events/{id}` publishes for any connection that exists,
     running or not. So a stopped pipeline still takes in events, and a

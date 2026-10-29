@@ -28,12 +28,34 @@ POST /frontsystems/events/{connectionID}
 ```
 
 served on `WORKER_HTTP_PORT` (9270 in compose). Each event body is published as a
-message; the handler returns `202` (Front Systems **requires** a 2xx or it treats
-the event as undelivered and retries).
+message and the handler returns `202`. Front Systems counts only a 2xx as
+delivered and does not resend on its own: a failed event stays in its event log
+(`GET /api/WebhooksEvents/{webhookId}?success=false`) until someone resends it.
+
+Events are published only while the connection is running. Otherwise nothing is
+published and the handler answers:
+
+| Status | When |
+|---|---|
+| `404` | No connection with that id. |
+| `410` | The connection exists but is stopped (or failed to start). |
+| `503` | The connector is starting up and hasn't restored its running connections yet, or is shutting down. |
+
+The route has no authentication of its own (Front Systems documents no
+signature): the connection id in the URL is the secret. The event is published
+for the tenant that owns the connection, and only if that is the tenant the
+connection was started for.
 
 If `callback_url` + `events` are configured, the connector **auto-registers** its
 callback for those event types on connection-start via `POST /api/webhooks`.
-Otherwise register the webhook out of band.
+It lists the existing webhooks first (`GET /api/webhooks`) and reuses any with
+the same event and URL, so restarts don't register the callback twice. On
+connection-stop it deletes them again (`DELETE /api/webhooks/{id}`). That is best
+effort: a failed delete is logged and the pipeline stops anyway, and the next
+start reuses the leftover registration. A restart of the connector itself (deploy,
+cluster start) keeps the registrations. If `callback_url` is not set, register
+the webhook out of band; the connector then neither registers nor deletes
+anything, but still refuses events while the connection is stopped.
 
 - `base_url` — per-partner Azure APIM host (required).
 - `subscription_key_secret_id` / `api_key_secret_id` — the two auth keys.
@@ -86,7 +108,8 @@ are poison and go to the DLQ.
 - **Missed-event reconciliation** — Front Systems exposes
   `GET /api/WebhooksEvents/{webhookId}?success=false&from=&to=` plus a resend
   endpoint. A periodic reconcile poller that replays missed events is a
-  straightforward enhancement.
+  straightforward enhancement. It would also recover events refused with
+  `410`/`503` above.
 - **Webhook signature verification** — no HMAC scheme is documented; confirm
   with Front Systems and add verification if one exists (today the callback
   relies on URL secrecy + the `x-api-key`).
