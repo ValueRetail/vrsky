@@ -543,7 +543,7 @@ Last updated 2026-10-28.
     `PATH`: one that exits 0 early, one that fails, one that reads all of
     stdin, each against a good and a damaged archive. Found in review of
     #471.
-84. **A backup archive isn't bound to its object key.** Anyone who can
+84. ~~**A backup archive isn't bound to its object key.**~~ (#549) Anyone who can
     write to the bucket can copy an older valid archive over the newest
     key, and `verify` and `restore` accept it. Put the stamp (and the key
     name) in the `VRSKYBK1` header, so it is part of every chunk's AAD,
@@ -852,6 +852,13 @@ Last updated 2026-10-28.
     without `move_prefix`; it could refuse one inside `prefix` the same
     way, and the editor could say so. The docs warn about it (#564).
     Found in review of #564.
+131. **Stop reading `VRSKYBK1` backups** in `vrsky-cli` once the 14-day
+    retention holds only `VRSKYBK2` archives, i.e. 14 days after #549
+    reaches production and the CronJob has run on it. Delete the v1 branch
+    of `readBackupHeader` and `backupKDFInfo`, and with item 85 the
+    `--allow-unbound` flag and the unbound warning, so every archive
+    restore accepts is bound to its key. Update `docs/DR.md` and
+    `docs/operator/backup.md`. Found in #549.
 
 ## Human
 

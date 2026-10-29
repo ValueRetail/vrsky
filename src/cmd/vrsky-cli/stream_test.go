@@ -46,16 +46,26 @@ func randomBytes(t testing.TB, n int) []byte {
 
 func sum(b []byte) [32]byte { return sha256.Sum256(b) }
 
-// seal encrypts plain with the given chunk size (0 means the default writer).
+// The identity seal binds its archives to (#549), and the resulting header
+// size.
+const (
+	testObjectKey  = "mgmt-backups/management_db-20261029T110000Z.dump.gz.enc"
+	testHeaderSize = backupHeaderFixedV2 + len(testObjectKey)
+)
+
+var testCreated = time.Date(2026, 10, 29, 11, 0, 0, 0, time.UTC)
+
+// seal encrypts plain with the given chunk size (0 means the default writer),
+// bound to testObjectKey.
 func seal(t testing.TB, plain []byte, keyHex string, chunk int) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	var w io.WriteCloser
 	var err error
 	if chunk == 0 {
-		w, err = newSealWriter(&buf, keyHex)
+		w, err = newSealWriter(&buf, keyHex, testObjectKey, testCreated)
 	} else {
-		w, err = newSealWriterSize(&buf, keyHex, chunk)
+		w, err = newSealWriterSize(&buf, keyHex, testObjectKey, testCreated, chunk)
 	}
 	if err != nil {
 		t.Fatalf("new seal writer: %v", err)
@@ -72,16 +82,18 @@ func seal(t testing.TB, plain []byte, keyHex string, chunk int) []byte {
 // openAll reads a chunked archive to EOF through newOpenReader. Construction
 // errors and read errors are both returned.
 func openAll(archive []byte, keyHex string) ([]byte, error) {
-	r, err := newOpenReader(bytes.NewReader(archive), keyHex)
+	r, _, err := newOpenReader(bytes.NewReader(archive), keyHex)
 	if err != nil {
 		return nil, err
 	}
 	return io.ReadAll(r)
 }
 
-// restoreAll reads a whole backup object (either format) through openArchive.
-func restoreAll(object []byte, keyHex string) ([]byte, error) {
-	r, err := openArchive(bytes.NewReader(object), keyHex)
+// restoreAll reads a whole backup object (any format) stored under objectKey
+// through openArchive, allowing unbound archives: these tests are about
+// decryption, the binding has its own.
+func restoreAll(object []byte, keyHex, objectKey string) ([]byte, error) {
+	r, _, err := openArchive(bytes.NewReader(object), keyHex, objectKey, true)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +179,7 @@ func TestSealOpenOddIO(t *testing.T) {
 	for _, chunk := range []int{1, 13, 64, 4096} {
 		t.Run(fmt.Sprintf("chunk=%d", chunk), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := newSealWriterSize(&buf, key, chunk)
+			w, err := newSealWriterSize(&buf, key, testObjectKey, testCreated, chunk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +194,7 @@ func TestSealOpenOddIO(t *testing.T) {
 			if err := w.Close(); err != nil {
 				t.Fatal(err)
 			}
-			r, err := newOpenReader(iotest.OneByteReader(bytes.NewReader(buf.Bytes())), key)
+			r, _, err := newOpenReader(iotest.OneByteReader(bytes.NewReader(buf.Bytes())), key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +205,7 @@ func TestSealOpenOddIO(t *testing.T) {
 			if !bytes.Equal(got, plain) {
 				t.Fatal("round trip mismatch with odd-sized I/O")
 			}
-			r2, err := newOpenReader(bytes.NewReader(buf.Bytes()), key)
+			r2, _, err := newOpenReader(bytes.NewReader(buf.Bytes()), key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,7 +219,7 @@ func TestSealOpenOddIO(t *testing.T) {
 // Close must not close the underlying writer.
 func TestSealWriterCloseKeepsUnderlyingOpen(t *testing.T) {
 	cw := &closeTracker{}
-	w, err := newSealWriter(cw, randomKey(t))
+	w, err := newSealWriter(cw, randomKey(t), testObjectKey, testCreated)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +255,7 @@ func TestSealArchivesDiffer(t *testing.T) {
 func TestBadKeys(t *testing.T) {
 	for _, k := range []string{"", "zz", strings.Repeat("a", 63), strings.Repeat("a", 62), strings.Repeat("g", 64), strings.Repeat("a", 32)} {
 		t.Run(fmt.Sprintf("len=%d", len(k)), func(t *testing.T) {
-			if w, err := newSealWriter(io.Discard, k); err == nil {
+			if w, err := newSealWriter(io.Discard, k, testObjectKey, testCreated); err == nil {
 				_ = w.Close()
 				t.Errorf("newSealWriter accepted key %q", k)
 			}
@@ -298,14 +310,14 @@ func TestStreamBackupRoundTrip(t *testing.T) {
 				if !bytes.HasPrefix(store.body, []byte(backupMagic)) {
 					t.Fatal("stored object is not a chunked archive")
 				}
-				got, err := restoreAll(store.body, key)
+				got, err := restoreAll(store.body, key, store.key)
 				if err != nil {
 					t.Fatalf("openArchive: %v", err)
 				}
 				if sum(got) != sum(dump) {
 					t.Fatalf("restored %d bytes, want %d identical bytes", len(got), n)
 				}
-				if _, err := restoreAll(store.body, randomKey(t)); err == nil {
+				if _, err := restoreAll(store.body, randomKey(t), store.key); err == nil {
 					t.Fatal("openArchive with the wrong key succeeded")
 				}
 			})
@@ -328,22 +340,22 @@ func TestOpenArchiveLegacy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := restoreAll(legacy, key)
+			got, err := restoreAll(legacy, key, testObjectKey)
 			if err != nil {
 				t.Fatalf("openArchive(legacy): %v", err)
 			}
 			if sum(got) != sum(dump) {
 				t.Fatalf("legacy restore mismatch: got %d bytes, want %d", len(got), len(dump))
 			}
-			if _, err := restoreAll(legacy, randomKey(t)); err == nil {
+			if _, err := restoreAll(legacy, randomKey(t), testObjectKey); err == nil {
 				t.Error("legacy archive opened with the wrong key")
 			}
 			bad := bytes.Clone(legacy)
 			bad[len(bad)/2] ^= 1
-			if _, err := restoreAll(bad, key); err == nil {
+			if _, err := restoreAll(bad, key, testObjectKey); err == nil {
 				t.Error("tampered legacy archive opened")
 			}
-			if _, err := restoreAll(legacy[:len(legacy)-1], key); err == nil {
+			if _, err := restoreAll(legacy[:len(legacy)-1], key, testObjectKey); err == nil {
 				t.Error("truncated legacy archive opened")
 			}
 		})
@@ -363,7 +375,7 @@ func layout(t *testing.T, key string, chunk int) (header, record int) {
 	if l3-l2 != record || record <= chunk {
 		t.Fatalf("chunk records are not fixed-size: %d, %d", l3-l2, l4-l3)
 	}
-	header = backupHeaderSize
+	header = testHeaderSize
 	if final := l3 - header - 3*record; final <= 0 || final >= record {
 		t.Fatalf("unexpected layout: header %d, record %d, total %d", header, record, l3)
 	}
@@ -446,7 +458,7 @@ func TestOpenReaderRejectsTruncationDefaultChunk(t *testing.T) {
 	const chunk = 64 << 10
 	plain := randomBytes(t, 2*chunk+100)
 	archive := seal(t, plain, key, 0)
-	h := backupHeaderSize
+	h := testHeaderSize
 	rec := len(seal(t, make([]byte, 3*chunk+100), key, 0)) - len(archive)
 	for _, n := range []int{0, 1, h - 1, h, h + 1, h + rec - 1, h + rec, h + rec + 1, h + 2*rec, len(archive) - 1} {
 		expectOpenError(t, fmt.Sprintf("truncated to %d", n), archive[:n], key, plain)
@@ -459,7 +471,7 @@ func TestOpenReaderRejectsUnclosedWriter(t *testing.T) {
 	for _, n := range []int{0, 1, 15, 16, 17, 64, 100} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			var buf bytes.Buffer
-			w, err := newSealWriterSize(&buf, key, 16)
+			w, err := newSealWriterSize(&buf, key, testObjectKey, testCreated, 16)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -482,7 +494,7 @@ func TestOpenArchiveRejectsTampering(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj := store.body
-	h := backupHeaderSize
+	h := backupHeaderFixedV2 + len("k") // streamBackup bound it to "k"
 	rec := 64<<10 + (len(seal(t, make([]byte, 64<<10+1), key, 0)) - len(seal(t, make([]byte, 1), key, 0)) - 64<<10)
 	if len(obj) < h+3*rec {
 		t.Fatalf("object too small for the test: %d bytes", len(obj))
@@ -509,12 +521,12 @@ func TestOpenArchiveRejectsTampering(t *testing.T) {
 		"trailing bytes":         cat(obj, []byte("junk")),
 	}
 	for name, b := range cases {
-		got, err := restoreAll(b, key)
+		got, err := restoreAll(b, key, "k")
 		if err == nil {
 			t.Errorf("%s: restored without error (%d of %d bytes)", name, len(got), len(dump))
 		}
 	}
-	if _, err := restoreAll(obj, randomKey(t)); err == nil {
+	if _, err := restoreAll(obj, randomKey(t), "k"); err == nil {
 		t.Error("wrong key: restored without error")
 	}
 }
@@ -596,7 +608,7 @@ func TestStreamBackupProducerFailures(t *testing.T) {
 				}
 			}
 			// Whatever the store got must not restore.
-			if got, err := restoreAll(store.body, "00"+strings.Repeat("0", 62)); err == nil {
+			if got, err := restoreAll(store.body, "00"+strings.Repeat("0", 62), store.key); err == nil {
 				t.Errorf("partial object restored (%d bytes)", len(got))
 			}
 			waitGoroutines(t, before)
@@ -614,7 +626,7 @@ func TestStreamBackupFailedObjectDoesNotOpen(t *testing.T) {
 	if err == nil {
 		t.Fatal("streamBackup succeeded")
 	}
-	if got, err := restoreAll(store.body, key); err == nil {
+	if got, err := restoreAll(store.body, key, store.key); err == nil {
 		t.Fatalf("object from a failed pg_dump restored (%d bytes)", len(got))
 	}
 }

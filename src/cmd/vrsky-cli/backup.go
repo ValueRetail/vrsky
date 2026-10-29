@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sort"
 	"time"
@@ -107,8 +108,11 @@ func streamBackup(ctx context.Context, store streamPutter, key string, dump io.R
 	var raw int64
 	done := make(chan error, 1)
 
+	// The archive is bound to the key it is uploaded under, so the two can't
+	// differ.
+	created := time.Now()
 	go func() {
-		err := sealDump(pw, dump, wait, keyHex, &raw)
+		err := sealDump(pw, dump, wait, keyHex, key, created, &raw)
 		if err != nil {
 			_ = pw.CloseWithError(err)
 		} else {
@@ -144,9 +148,10 @@ func streamBackup(ctx context.Context, store streamPutter, key string, dump io.R
 }
 
 // sealDump copies dump through gzip and the chunked encryption into w and
-// writes the final chunk only after wait reports success.
-func sealDump(w io.Writer, dump io.Reader, wait func() error, keyHex string, raw *int64) error {
-	enc, err := newSealWriter(w, keyHex)
+// writes the final chunk only after wait reports success. The archive is bound
+// to objectKey and created.
+func sealDump(w io.Writer, dump io.Reader, wait func() error, keyHex, objectKey string, created time.Time, raw *int64) error {
+	enc, err := newSealWriter(w, keyHex, objectKey, created)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}
@@ -195,10 +200,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // damaged archive is caught before restore's --clean touches a database.
 func runVerify(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("backup verify", flag.ExitOnError)
+	allowUnbound := fs.Bool("allow-unbound", false, "accept a VRSKYBK1 or older archive, which does not name its object key (backups made before VRSKYBK2)")
 	_ = fs.Parse(args)
 	key := fs.Arg(0)
 	if key == "" || fs.NArg() > 1 {
-		return fmt.Errorf("usage: vrsky-cli backup verify <backup-key>")
+		return fmt.Errorf("usage: vrsky-cli backup verify [--allow-unbound] <backup-key>")
 	}
 	cfg, err := storeConfigFromEnv()
 	if err != nil {
@@ -208,11 +214,14 @@ func runVerify(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open object store: %w", err)
 	}
-	n, err := verifyBackup(ctx, store, key, cfg.keyHex)
+	n, info, err := verifyBackup(ctx, store, key, cfg.keyHex, *allowUnbound)
 	if err != nil {
-		return fmt.Errorf("backup %q is damaged or unreadable: %w", key, err)
+		return fmt.Errorf("backup %q is damaged, unreadable or not the backup made under that key: %w", key, err)
 	}
-	fmt.Printf("backup ok: %s (%d bytes of dump)\n", key, n)
+	if !info.bound() {
+		fmt.Fprintln(os.Stderr, unboundWarning(key, info))
+	}
+	fmt.Printf("backup ok: %s (%d bytes of dump; %s)\n", key, n, describeArchive(info))
 	return nil
 }
 
@@ -223,18 +232,21 @@ type streamGetter interface {
 }
 
 // verifyBackup reads the backup under key to the end, through decryption and
-// gunzip, and returns the dump size. Any damage is an error.
-func verifyBackup(ctx context.Context, store streamGetter, key, keyHex string) (int64, error) {
+// gunzip, and returns the dump size and what the archive's header says. Any
+// damage is an error, and so is an archive made under another key, or an
+// unbound one unless allowUnbound (see openArchive).
+func verifyBackup(ctx context.Context, store streamGetter, key, keyHex string, allowUnbound bool) (int64, archiveInfo, error) {
 	body, _, err := store.GetStream(ctx, key)
 	if err != nil {
-		return 0, fmt.Errorf("download: %w", err)
+		return 0, archiveInfo{}, fmt.Errorf("download: %w", err)
 	}
 	defer body.Close()
-	dump, err := openArchive(body, keyHex)
+	dump, info, err := openArchive(body, keyHex, key, allowUnbound)
 	if err != nil {
-		return 0, err
+		return 0, info, err
 	}
-	return io.Copy(io.Discard, dump)
+	n, err := io.Copy(io.Discard, dump)
+	return n, info, err
 }
 
 // runList prints the available backups (most recent first).

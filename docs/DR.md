@@ -65,7 +65,7 @@ The four steps are one stream (#430): nothing holds the whole dump, so the
 Job's memory stays at a few MiB plus the storage SDK's upload buffers
 whatever the size of the database. The archive is encrypted in 64 KiB
 chunks, each its own GCM seal with a counter and a last-chunk flag in the
-nonce, behind a `VRSKYBK1` header. The chunks are sealed under a key made
+nonce, behind a `VRSKYBK2` header. The chunks are sealed under a key made
 for that archive alone, HKDF-SHA256 of the `ENCRYPTION_KEY` with a random
 salt stored in the header, so the backups never use the secrets vault's key
 directly (the format is documented in `src/cmd/vrsky-cli/stream.go`). A
@@ -73,13 +73,36 @@ cut-off, reordered or edited archive fails to decrypt; it never restores as
 a shorter dump. If `pg_dump` fails, the upload is aborted before the last
 chunk is written.
 
-`vrsky-cli restore` reads both this format and the archives made before
-#430 (one GCM seal under the `ENCRYPTION_KEY` over the whole gzipped dump).
-New archives are streamed into `pg_restore`; old ones are read into memory
-to decrypt, as before. A damaged new archive would only be caught while
-`pg_restore` runs, so run `vrsky-cli backup verify <key>` first, as the
-runbook below does: it reads the whole archive and fails on any damage
-without touching a database.
+The header also names the object key the archive was uploaded under and
+when the backup started (#549). Every chunk authenticates the header, and
+`backup verify` and `restore` refuse an archive whose header names a
+different key than the one they were given. So someone who can write to
+the bucket can't copy an older backup over the newest key and have it
+restored as if it were the newest. They can still delete backups; that is
+for the storage account's access control and soft delete. The binding
+covers the whole key, prefix included, but not the bucket: copying an
+archive to another storage account under the same key works, renaming it
+doesn't. To restore a renamed archive, copy it back to the key its header
+names (the error shows it) and run `backup verify` on that key. The header
+isn't proven until verify has read the archive, so a forged one can name
+any key; verify then fails.
+
+`vrsky-cli restore` also reads the two older formats: `VRSKYBK1` (#430,
+the same chunks without the key in the header) and the archives made
+before #430 (one GCM seal under the `ENCRYPTION_KEY` over the whole
+gzipped dump). Neither says which backup it is, so both `verify` and
+`restore` refuse them unless you pass `--allow-unbound`, and then print a
+warning. Without that flag an attacker could put any old archive, from any
+time the same `ENCRYPTION_KEY` was in use, under the newest key. The newest
+backup is `VRSKYBK2` from the first CronJob run after the change is
+deployed, so the flag is only for deliberately going back further than
+that; the old formats age out of the 14-day retention after two weeks.
+
+New archives are streamed into `pg_restore`; pre-#430 ones are read into
+memory to decrypt, as before. A damaged chunked archive would only be
+caught while `pg_restore` runs, so run `vrsky-cli backup verify <key>`
+first, as the runbook below does: it reads the whole archive and fails on
+any damage without touching a database.
 
 Config is environment-driven: `BACKUP_DB_URL`, `ENCRYPTION_KEY`,
 `BACKUP_PROVIDER`, `BACKUP_BUCKET`, and `BACKUP_AZURE_ACCOUNT_NAME` +
@@ -216,11 +239,22 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
      --overrides='{"spec":{"imagePullSecrets":[{"name":"acr-pull"}],"containers":[{"name":"c","image":"'"$IMAGE"'","args":["backup","verify","'"$KEY"'"],"envFrom":[{"secretRef":{"name":"vrsky-backup-config"}}]}]}}'
    ```
    `backup verify` downloads the dump and decrypts and gunzips it without
-   writing anything, then prints `backup ok: <key> (<n> bytes of dump)`. A
-   non-zero exit means the dump is damaged, cut off or under another
-   `ENCRYPTION_KEY`: pick another one. Don't skip this. `restore` would
-   notice a damaged dump only partway through and roll back, so you'd find
-   out later and with less detail.
+   writing anything, then prints
+   `backup ok: <key> (<n> bytes of dump; VRSKYBK2, made <time>)`. Check
+   that the time is the one you expect for that key. A non-zero exit means
+   the dump is damaged, cut off, under another `ENCRYPTION_KEY`, or was
+   made under another key and copied or renamed to this one (the error
+   names the key its header claims): pick another one. Don't skip this.
+   `restore` would notice a damaged dump only partway through and roll
+   back, so you'd find out later and with less detail.
+
+   A dump made before `VRSKYBK2` (#549) is refused unless you add
+   `--allow-unbound` after `verify` (and after `restore` in step 4). Those
+   archives don't say which backup they are, so nothing proves the file
+   under that key is the backup made then rather than an older one copied
+   over it. Only pass the flag when you mean to restore a dump from before
+   the change, and expect the warning it prints. They age out of the
+   14-day retention two weeks after the change reaches production.
 4. **Restore into it:**
    ```bash
    TARGET='postgres://vrsky:<scratch password>@pg-restore-test.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable'
