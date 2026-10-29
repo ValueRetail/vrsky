@@ -521,7 +521,7 @@ Last updated 2026-10-28.
     `infrastructure/` (say `prometheus-rules-test-legs.yml`) that the job
     reads, keeping only the leg count in the workflow, and point
     `TestRuleTestGroupsRunOnce` at it. Found in review of #468.
-81. **A subscriber's `Stop` waits out its fetch.** `Subscriber.loop` in
+81. ~~**A subscriber's `Stop` waits out its fetch.**~~ (#494) `Subscriber.loop` in
     `pkg/messaging` fetches with `MaxWait(2s)` and `Halt` cannot cut that
     short, so every stop takes up to 2 s even when nothing is held. It is
     most of what the remote-agent tests still spend (a stop in each

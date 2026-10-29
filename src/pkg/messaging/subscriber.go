@@ -83,10 +83,16 @@ type Subscriber struct {
 	sub     *nats.Subscription
 	opts    SubscriberOpts
 	handler Handler
-	stopCh  chan struct{}
-	doneCh  chan struct{}
-	halt    sync.Once
+	// halted is cancelled by Halt. The fetch in flight runs under it, so a
+	// halt ends that fetch at once instead of after fetchWait (#494).
+	halted context.Context
+	halt   context.CancelFunc
+	doneCh chan struct{}
 }
+
+// fetchWait is how long one fetch waits for messages. nats.go asks the server
+// to hold the pull request for 90% of it.
+const fetchWait = 2 * time.Second
 
 // DefaultBackoff is the per-attempt delay schedule used when SubscriberOpts.
 // Backoff is empty. Total time from first delivery to DLQ ≈ 156 seconds.
@@ -164,12 +170,14 @@ func Subscribe(js nats.JetStreamContext, opts SubscriberOpts, h Handler) (*Subsc
 		return nil, fmt.Errorf("PullSubscribe %s: %w", opts.FilterSubject, err)
 	}
 
+	halted, halt := context.WithCancel(context.Background())
 	s := &Subscriber{
 		pub:     pub,
 		sub:     sub,
 		opts:    opts,
 		handler: h,
-		stopCh:  make(chan struct{}),
+		halted:  halted,
+		halt:    halt,
 		doneCh:  make(chan struct{}),
 	}
 	go s.loop()
@@ -325,32 +333,112 @@ func (s *Subscriber) Stop() {
 // fetch the NAK'd message again, have it NAK'd again by the same ended
 // handler, and so on: each round is a delivery attempt, so a stop that is
 // descheduled for a couple of milliseconds dead-letters the message (#444).
+//
+// A fetch waiting for messages when Halt comes ends at once (#494); it used to
+// run out its fetchWait, so every Stop took up to two seconds.
 func (s *Subscriber) Halt() {
-	s.halt.Do(func() { close(s.stopCh) })
+	s.halt()
 }
 
 func (s *Subscriber) loop() {
 	defer close(s.doneCh)
-	for {
-		select {
-		case <-s.stopCh:
+	for s.halted.Err() == nil {
+		ctx, cancel := context.WithTimeout(s.halted, fetchWait)
+		msgs, err := s.sub.Fetch(s.opts.MaxAckPending, nats.Context(ctx))
+		cancel()
+		if s.halted.Err() != nil {
+			// Halted during the fetch, which may have been cut short. That
+			// is not a fetch error: nothing to log, no back-off. What it
+			// returned, and anything the server sent to its pull request
+			// before the request was withdrawn, is dispatched as an uncut
+			// fetch would have had it dispatched.
+			msgs = append(msgs, s.reclaim()...)
+			for _, m := range msgs {
+				s.dispatch(m)
+			}
 			return
-		default:
 		}
-		msgs, err := s.sub.Fetch(s.opts.MaxAckPending, nats.MaxWait(2*time.Second))
 		if err != nil {
 			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 				continue
 			}
 			s.opts.Logger.Warn("JetStream fetch failed",
 				"durable", s.opts.DurableName, "error", err)
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-s.halted.Done():
+			case <-time.After(500 * time.Millisecond):
+			}
 			continue
 		}
 		for _, m := range msgs {
 			s.dispatch(m)
 		}
 	}
+}
+
+// reclaimPoll is how often reclaim looks for messages while the drain it
+// started completes.
+const reclaimPoll = 5 * time.Millisecond
+
+// reclaim withdraws the pull request a halted fetch may have left open and
+// returns the messages the server sent to it first.
+//
+// A fetch cut short by Halt leaves its pull request on the server until it
+// expires. Whatever the server hands it meanwhile is a delivery: left in the
+// subscription's buffer, it would be counted against the message and only come
+// back after AckWait, or never if it was the last attempt. An uncut fetch ran
+// until the request was over, so none of that could happen. Draining the
+// subscription withdraws our interest, so the server stops delivering to the
+// request; nats.go closes the subscription once a round trip shows the server
+// has processed that and its buffer is empty. Everything that arrived before is
+// collected here on the way.
+//
+// One gap stays open. The server counts a delivery before it publishes the
+// message, so a message handed to the request just as the UNSUB takes effect
+// finds no interest. When the consumer's leader is on the server this client
+// is connected to, the server notices, restores the count and redelivers at
+// once. When the leader is on another node of a cluster, the message crosses
+// a route, the client's server drops it, and it comes back after AckWait with
+// a delivery spent, as after a crash; on its last attempt it is not
+// redelivered and never reaches the DLQ. The window is the UNSUB's trip to
+// the leader. Closing it would mean keeping the request until it expires,
+// which is the wait this replaces (#494).
+//
+// Bounded by fetchWait, so a broken connection cannot make a stop slower than
+// the uncut fetch was, and by half the AckWait: the messages the cut fetch
+// returned wait here, without heartbeats, and must be dispatched before
+// JetStream hands them to another subscriber on the durable.
+func (s *Subscriber) reclaim() []*nats.Msg {
+	closed := s.sub.StatusChanged(nats.SubscriptionClosed)
+	if err := s.sub.Drain(); err != nil {
+		return nil
+	}
+	giveUp := time.NewTimer(min(fetchWait, s.opts.AckWait/2))
+	defer giveUp.Stop()
+	poll := time.NewTicker(reclaimPoll)
+	defer poll.Stop()
+	var out []*nats.Msg
+	for {
+		out = append(out, s.buffered()...)
+		select {
+		case <-closed:
+			// Closed only with nothing buffered: nothing more will come.
+			return out
+		case <-giveUp.C:
+			return out
+		case <-poll.C:
+		}
+	}
+}
+
+// buffered takes what is waiting in the subscription's buffer without sending
+// a pull request: Fetch on a draining subscription only hands out what has
+// already arrived.
+func (s *Subscriber) buffered() []*nats.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
+	defer cancel()
+	msgs, _ := s.sub.Fetch(s.opts.MaxAckPending, nats.Context(ctx))
+	return msgs
 }
 
 // heartbeatInterval returns how often to mark an in-flight message InProgress.
