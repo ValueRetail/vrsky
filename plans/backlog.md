@@ -529,7 +529,7 @@ Last updated 2026-10-28.
     also ends on the stop channel (a context-aware `Fetch`) would make
     `Stop` return at once. Shared code: every connector's subscriber.
     Found during #460.
-82. **GCS `PutStream` commits a partial object when the body fails.**
+82. ~~**GCS `PutStream` commits a partial object when the body fails.**~~ (#524)
     `pkg/objectstore/gcs.go` calls `w.Close()` after a failed `io.Copy`,
     which finalises the upload; aborting needs the writer's context
     cancelled instead. S3 and Azure abort. A failed `vrsky-cli backup` on
