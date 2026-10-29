@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,29 @@ const (
 	// BC's own last-modified field on the v2.0 API entities. Overridable
 	// because a custom API page may expose a differently named one.
 	defaultCursorField = "lastModifiedDateTime"
+
+	// maxCursorSkew is how far ahead of now a record's cursor may be before
+	// the consumer logs it at Warn as a likely bad stamp (#591). It is not the
+	// watermark ceiling: that is now itself. A record dated after now, by any
+	// amount, is published once and remembered but never becomes the
+	// watermark, because a watermark in the future hides every record BC
+	// stamps before it. Within the skew that is BC's clock running a little
+	// ahead of this pod's, which is normal and not worth a Warn.
+	//
+	// It is also the line past which a stored watermark counts as frozen
+	// (stored by the code before #591) and is recovered from.
+	maxCursorSkew = 5 * time.Minute
+
+	// frozenRecoveryMargin is how far before the checkpoint's last save a
+	// frozen watermark's recovery read starts. It covers the length of the
+	// poll that stored the bad watermark (records modified while it paged)
+	// and BC's clock running behind this pod's.
+	frozenRecoveryMargin = time.Hour
+
+	// aheadWarnSize is the size of the remembered set of future-dated
+	// records past which the node logs that its cursor_field is probably a
+	// business date rather than a last-modified stamp.
+	aheadWarnSize = 1000
 )
 
 // bcConsumer polls a Business Central OData entity per active connection and
@@ -52,6 +77,10 @@ type bcConsumer struct {
 	publishStream sdk.PublishStreamFunc
 	inlineMax     int
 	checkpoints   checkpoint.Store
+
+	// now is the clock the watermark ceiling is measured against; nil =
+	// time.Now.
+	now func() time.Time
 
 	httpClient *http.Client
 
@@ -115,6 +144,16 @@ type BCConfig struct {
 	// persisted in the node's checkpoint state, so a restart or redeploy does
 	// not re-send every picture. nil = not loaded yet.
 	pictureSeen map[string]seenPicture
+
+	// aheadSeen is record key → the cursor value it carried when it was
+	// published dated after now (#591). Such a record does not move the
+	// watermark while it is ahead, so the "gt watermark" filter keeps returning it; this is
+	// what stops it being sent again every poll. Persisted in the node's
+	// checkpoint state. nil = not loaded yet.
+	aheadSeen map[string]string
+	// aheadWarned is set once the size Warn for aheadSeen was logged, so it
+	// is logged once per process rather than every poll.
+	aheadWarned bool
 
 	// resendAll makes the next fetch ignore the incremental watermark and the
 	// seen pictures, so everything goes out again — for a till that just
@@ -361,9 +400,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	if err := cfg.validatePictures(); err != nil {
 		return err
 	}
-	cursor := ""
+	cursor, rec := "", recovery{}
 	if cfg.Incremental && !cfg.resendAll {
-		cursor = c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
+		cursor, rec = c.startCursor(cfg, c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger), logger)
 	}
 	if cfg.resendAll {
 		cfg.pictureSeen = map[string]seenPicture{}
@@ -371,11 +410,18 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cfg.pictureSeen = c.loadPictureState(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 
+	if cfg.resendAll {
+		cfg.aheadSeen = map[string]string{}
+	} else if cfg.Incremental && cfg.aheadSeen == nil {
+		cfg.aheadSeen = c.loadAheadState(ctx, tenantID, connID, cfg.NodeID, logger)
+	}
+
 	next := cfg.entityURL(cursor)
 	page, total := 0, 0
 	var pics pictureCounts
-	var watermark cursorTracker
-	inFeed := map[string]bool{} // record ids this poll carried, for the sweep
+	watermark := cursorTracker{ceiling: c.clock()}
+	ahead := map[string]string{} // records dated after now this poll carried
+	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
 	for next != "" {
 		page++
 		body, err := c.get(ctx, tok, next, cfg.PageSize)
@@ -387,11 +433,14 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			return fmt.Errorf("parse OData page: %w", err)
 		}
 		if len(p.Value) > 0 {
+			out := p.Value
 			if cfg.Incremental {
-				watermark.observe(p.Value, cfg.effectiveCursorField())
+				out = c.withoutSentAhead(cfg, &watermark, p.Value, ahead, logger)
 			}
-			if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), p.Value); err != nil {
-				return fmt.Errorf("publish records: %w", err)
+			if len(out) > 0 {
+				if err := c.publishRecords(ctx, connID, tenantID, cfg.effectiveEntity(), out); err != nil {
+					return fmt.Errorf("publish records: %w", err)
+				}
 			}
 			if cfg.Pictures {
 				n, err := c.publishPictures(ctx, connID, tenantID, cfg, tok, p.Value, inFeed, logger)
@@ -400,7 +449,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 					return fmt.Errorf("publish pictures: %w", err)
 				}
 			}
-			total += len(p.Value)
+			total += len(out)
 		}
 		next = p.NextLink
 	}
@@ -424,12 +473,33 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	// resumes from the old watermark — the records it already published arrive
 	// twice, which the pipeline is built for, rather than being skipped, which
 	// it is not.
-	newCursor := ""
-	if cfg.Incremental && watermark.raw != "" {
+	//
+	// A recovery read stores where it started when it found nothing to take
+	// the watermark from (only future-dated records, say): keeping the stored
+	// watermark there would put the frozen one back.
+	newCursor, replace := "", false
+	switch {
+	case rec.resaved(ahead, watermark.ceiling):
+		// The bounded window cannot be trusted (see recovery.resaved): store
+		// no watermark, so the next poll reads from the start. The remembered
+		// set is saved below, so the future-dated records this poll sent are
+		// not sent a third time.
+		newCursor, replace = "", true
+		logger.Warn("Business Central recovery read found a future-dated record below the frozen watermark, so "+
+			"the node may have saved again after it froze; the next poll reads the entity from the start",
+			"watermark", rec.stored, "resume_from", cursor)
+	case cfg.Incremental && watermark.raw != "":
 		newCursor = watermark.raw
+	case rec.active:
+		newCursor, replace = cursor, true
 	}
-	if newCursor != "" || cfg.Pictures {
-		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, int64(total), cfg.pictureState(), logger)
+	aheadChanged := cfg.Incremental && !sameAhead(cfg.aheadSeen, ahead)
+	if cfg.Incremental {
+		cfg.aheadSeen = ahead
+		c.warnAheadSize(cfg, logger)
+	}
+	if newCursor != "" || replace || cfg.Pictures || aheadChanged {
+		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), cfg.nodeState(), logger)
 	}
 
 	if cfg.Pictures {
@@ -452,12 +522,27 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 // Business Central, so it is by construction a datetime literal BC accepts
 // back in a $filter. Comparison goes through the parsed time: "…:00.5Z" sorts
 // before "…:00Z" as text while being the later instant.
+//
+// A value later than ceiling (when set) is not a watermark candidate (#591).
+// The caller sets the ceiling to now: the next poll asks for records after
+// the watermark, and BC stamps what it writes with its own clock, so a
+// watermark in the future would hide every record BC writes until the clock
+// passes it (forever, for a record stamped 2099). observe reports such
+// records instead.
 type cursorTracker struct {
-	newest time.Time
-	raw    string
+	newest  time.Time
+	raw     string
+	ceiling time.Time // zero = no bound
 }
 
-func (t *cursorTracker) observe(records []json.RawMessage, field string) {
+// aheadRecord is a record whose cursor lies after the tracker's ceiling.
+type aheadRecord struct {
+	Key    string // the record's id, for dedupe and the log
+	Cursor string // the cursor value as Business Central wrote it
+}
+
+func (t *cursorTracker) observe(records []json.RawMessage, field string) []aheadRecord {
+	var ahead []aheadRecord
 	for _, rec := range records {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(rec, &fields); err != nil {
@@ -475,38 +560,275 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) {
 		if err != nil {
 			continue
 		}
+		if !t.ceiling.IsZero() && parsed.After(t.ceiling) {
+			ahead = append(ahead, aheadRecord{Key: recordKey(rec, fields), Cursor: s})
+			continue
+		}
 		if parsed.After(t.newest) {
 			t.newest, t.raw = parsed, s
 		}
 	}
+	return ahead
 }
 
-// loadCursor returns the stored watermark, or "" for a first run. A store that
-// cannot be read is logged and treated as a first run: a full re-read is
-// noisy, whereas refusing to poll is an outage.
-func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) string {
+// recordKey identifies a record across polls: its OData id, else its number,
+// else a hash of the whole record (so an edit counts as a new record, which
+// is right for an entity without an id).
+func recordKey(rec json.RawMessage, fields map[string]json.RawMessage) string {
+	for _, f := range []string{"id", "number"} {
+		var s string
+		if raw, ok := fields[f]; ok && json.Unmarshal(raw, &s) == nil && s != "" {
+			return s
+		}
+	}
+	sum := sha256.Sum256(rec)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func (c *bcConsumer) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+// withoutSentAhead feeds a page to the watermark and returns the records to
+// publish. A record dated after now does not move the watermark. It is
+// published once; because the watermark stayed behind it, the filter returns
+// it on every poll until the clock catches up, so a record already sent with
+// the same cursor value is left out, including on the poll where the clock
+// finally reaches it and it becomes the watermark. Edited again, its cursor
+// changes and it goes out again.
+//
+// A record a few seconds ahead is BC's clock running ahead of this pod's: it
+// is held one poll and passes quietly. Only one dated more than
+// maxCursorSkew ahead is logged at Warn, as a likely bad stamp.
+func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records []json.RawMessage,
+	ahead map[string]string, logger *slog.Logger) []json.RawMessage {
+	field := cfg.effectiveCursorField()
+	warnAfter := w.ceiling.Add(maxCursorSkew)
+	for _, h := range w.observe(records, field) {
+		ahead[h.Key] = h.Cursor
+		if prev, ok := cfg.aheadSeen[h.Key]; ok && prev == h.Cursor {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, h.Cursor); err != nil || !t.After(warnAfter) {
+			continue
+		}
+		logger.Warn("Business Central record is dated in the future; "+
+			"published, but the incremental watermark ignores it",
+			"record_id", h.Key, "cursor_field", field,
+			"cursor_value", h.Cursor, "bound", warnAfter.UTC().Format(time.RFC3339))
+	}
+	if len(cfg.aheadSeen) == 0 {
+		return records
+	}
+	out := make([]json.RawMessage, 0, len(records))
+	for _, rec := range records {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(rec, &fields) == nil {
+			var cur string
+			if raw, ok := fields[field]; ok && json.Unmarshal(raw, &cur) == nil {
+				if prev, ok := cfg.aheadSeen[recordKey(rec, fields)]; ok && prev == cur {
+					continue
+				}
+			}
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// warnAheadSize logs once when the remembered set of future-dated records
+// grows past aheadWarnSize. A last-modified stamp is only ever a little
+// ahead, so a large set means cursor_field is a business date (a due date):
+// every poll then re-reads all those records, and the checkpoint carries
+// each one.
+func (c *bcConsumer) warnAheadSize(cfg *BCConfig, logger *slog.Logger) {
+	if len(cfg.aheadSeen) <= aheadWarnSize {
+		cfg.aheadWarned = false
+		return
+	}
+	if cfg.aheadWarned {
+		return
+	}
+	cfg.aheadWarned = true
+	logger.Warn("many Business Central records are dated in the future; every poll re-reads them. "+
+		"Is cursor_field a last-modified field?",
+		"cursor_field", cfg.effectiveCursorField(), "records", len(cfg.aheadSeen))
+}
+
+func sameAhead(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// loadAheadState reads the remembered far-future records back from the
+// checkpoint row. Nothing remembered costs one re-send of each, not data.
+func (c *bcConsumer) loadAheadState(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) map[string]string {
+	seen := map[string]string{}
 	if c.checkpoints == nil || nodeID == "" {
-		return ""
+		return seen
+	}
+	cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
+	if err != nil {
+		logger.Error("read Business Central cursor state; far-future records may be sent again", "error", err)
+		return seen
+	}
+	if cp == nil || len(cp.State) == 0 {
+		return seen
+	}
+	var st pictureState
+	if err := json.Unmarshal(cp.State, &st); err != nil {
+		logger.Error("parse Business Central cursor state; far-future records may be sent again", "error", err)
+		return seen
+	}
+	if st.Ahead != nil {
+		seen = st.Ahead
+	}
+	return seen
+}
+
+// loadCursor returns the node's checkpoint row (the watermark is its
+// LastProcessedMessageID), or nil for a first run. A store that cannot be
+// read is logged and treated as a first run: a full re-read is noisy, whereas
+// refusing to poll is an outage.
+func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID string, logger *slog.Logger) *checkpoint.Checkpoint {
+	if c.checkpoints == nil || nodeID == "" {
+		return nil
 	}
 	cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
 	if err != nil {
 		logger.Error("read Business Central watermark; polling from the start", "error", err)
-		return ""
+		return nil
 	}
-	if cp == nil {
-		return ""
-	}
-	return cp.LastProcessedMessageID
+	return cp
 }
 
-// saveProgress stores the watermark (when cursor is non-empty; otherwise the
-// stored one is kept) and the node's state in one checkpoint row.
-func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID, cursor string, count int64,
-	state json.RawMessage, logger *slog.Logger) {
+// recovery describes how a fetch gets past a frozen watermark.
+type recovery struct {
+	// active: the stored watermark was frozen and this fetch reads from
+	// somewhere else; the caller then stores an explicit watermark at the
+	// end, so the frozen one cannot come back.
+	active bool
+	// bounded: the read starts shortly before LastProcessedAt rather than
+	// from the start of the entity.
+	bounded bool
+	stored  string    // the frozen watermark as stored
+	frozen  time.Time // it, parsed
+}
+
+// resaved reports whether a bounded recovery read saw a reason to distrust
+// its window. The window rests on the frozen node never having saved after
+// the poll that stored the frozen watermark. But the code before #591 did
+// save again whenever it read an even later value (2099, then 2100), and
+// then LastProcessedAt is that second save; records modified between the
+// two saves are older than the window. The read itself shows the evidence:
+// it returns every future-dated record, and a value more than maxCursorSkew
+// ahead yet below the stored watermark is one the node once froze on, or
+// was ahead of a freeze on. Then the caller falls back to a full read.
+//
+// Not detected: the first far-future record deleted since, or the same
+// record moved from 2099 to 2100 (one value only). Over-detected: several
+// far-future values already present when the node first froze (a full read
+// that was not needed; the safe direction).
+func (r recovery) resaved(ahead map[string]string, now time.Time) bool {
+	if !r.bounded {
+		return false
+	}
+	for _, v := range ahead {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil && t.After(now.Add(maxCursorSkew)) && t.Before(r.frozen) {
+			return true
+		}
+	}
+	return false
+}
+
+// startCursor picks the watermark a fetch filters on, from the checkpoint
+// row, and says whether this fetch recovers from a frozen one.
+//
+// Frozen means more than maxCursorSkew ahead of now. Since #591 the consumer
+// never stores a watermark later than its own clock, so only the code before
+// it (which took any value, 2099 included) leaves one. Such a node has read
+// nothing since: every poll asked for records after 2099.
+//
+// Without pictures, the code before #591 saved the checkpoint only when the
+// watermark moved, so its LastProcessedAt is when the frozen watermark was
+// stored, and every record stamped before the poll that stored it was read
+// by that poll or an earlier one. The recovery read starts
+// frozenRecoveryMargin before it: it re-sends that hour and sends what the
+// frozen node missed, not the whole entity.
+//
+// With pictures, every poll saved, so LastProcessedAt is the last poll and
+// says nothing about when the node froze; the same is true when it is not
+// set. Then the entity is read from the start. That re-sends everything once,
+// which is costly, but resuming from "now minus a bound" instead would drop
+// whatever was modified between the freeze and that bound, with nothing but a
+// log line to show for it.
+//
+// A node that froze and then read an even later far-future value saved again
+// then, so LastProcessedAt is that second save; recovery.resaved catches what
+// it can of that case and turns it into a full read.
+func (c *bcConsumer) startCursor(cfg *BCConfig, cp *checkpoint.Checkpoint, logger *slog.Logger) (string, recovery) {
+	if cp == nil {
+		return "", recovery{}
+	}
+	stored := cp.LastProcessedMessageID
+	now := c.clock()
+	t, err := time.Parse(time.RFC3339, stored)
+	if err != nil || !t.After(now.Add(maxCursorSkew)) {
+		return stored, recovery{}
+	}
+	rec := recovery{active: true, stored: stored, frozen: t}
+	if cp.LastProcessedAt.IsZero() || cfg.Pictures || stateHasPictures(cp.State) {
+		logger.Warn("stored Business Central watermark is in the future and the checkpoint does not say when "+
+			"it was stored; reading the entity from the start, so every record is sent again once",
+			"watermark", stored, "last_processed_at", cp.LastProcessedAt, "pictures", cfg.Pictures)
+		return "", rec
+	}
+	from := cp.LastProcessedAt
+	if from.After(now) {
+		from = now
+	}
+	cursor := from.Add(-frozenRecoveryMargin).UTC().Format(time.RFC3339)
+	logger.Warn("stored Business Central watermark is in the future; re-reading from shortly before it was stored. "+
+		"Records modified in that hour are sent again",
+		"watermark", stored, "last_processed_at", cp.LastProcessedAt, "resume_from", cursor)
+	rec.bounded = true
+	return cursor, rec
+}
+
+// stateHasPictures reports whether a checkpoint's state was ever saved by a
+// node with pictures on: the picture state is written as "pictures", an
+// object even when no record had one. (A node without pictures that
+// remembers future-dated records writes "pictures":null.)
+func stateHasPictures(state json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if len(state) == 0 || json.Unmarshal(state, &fields) != nil {
+		return false
+	}
+	v, ok := fields["pictures"]
+	return ok && string(v) != "null"
+}
+
+// saveProgress stores the watermark and the node's state in one checkpoint
+// row. An empty cursor keeps the stored watermark, unless replace is set:
+// then cursor is stored as given, "" included (the next poll reads from the
+// start).
+func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID, cursor string, replace bool,
+	count int64, state json.RawMessage, logger *slog.Logger) {
 	if c.checkpoints == nil || nodeID == "" {
 		return
 	}
-	if cursor == "" {
+	if cursor == "" && !replace {
 		if cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID); err == nil && cp != nil {
 			cursor = cp.LastProcessedMessageID
 		}
@@ -516,7 +838,7 @@ func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID,
 		ConnectionID:           connID,
 		NodeID:                 nodeID,
 		LastProcessedMessageID: cursor,
-		LastProcessedAt:        time.Now().UTC(),
+		LastProcessedAt:        c.clock().UTC(),
 		MessageCount:           count,
 		State:                  state,
 	})

@@ -907,8 +907,8 @@ Last updated 2026-10-28.
     is not unique, so records sharing a second need a tiebreaker. Needs a
     Sitoo sandbox to check sort and tie order first. Found in review of
     #457 (#472).
-128. **A far-future cursor value freezes the BC consumer's cursor**
-    (`cursorTracker`). One record stamped years ahead sets the watermark
+128. ~~**A far-future cursor value freezes the BC consumer's cursor**
+    (`cursorTracker`).~~ (#591) One record stamped years ahead sets the watermark
     there, and every later poll asks only for records after it. Ignore or
     log values above now + overlap. Found in review of #457 (#472).
 129. **The Sitoo `base_url` is unvalidated tenant config.** A tenant can
@@ -964,6 +964,14 @@ Last updated 2026-10-28.
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
+140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.** `cursorTracker.observe` in
+    `src/cmd/business-central-consumer/service.go` parses the value with
+    `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
+    so the node stores no watermark and every incremental poll reads and
+    sends the whole entity. Parse date-only values too (and write them back
+    in the filter as a date literal), or refuse the config with a clear
+    error. Found in review of #592.
 
 ## Human
 

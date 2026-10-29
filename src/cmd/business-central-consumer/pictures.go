@@ -81,16 +81,19 @@ type seenPicture struct {
 }
 
 // pictureState is the node's checkpoint state (checkpoint.Checkpoint.State).
+// It also carries the far-future records already published (#591); the name
+// stays because the pictures were first.
 type pictureState struct {
 	Pictures map[string]seenPicture `json:"pictures"`
+	Ahead    map[string]string      `json:"ahead,omitempty"`
 }
 
-// pictureState serialises what the node remembers, for the checkpoint row.
-func (cfg *BCConfig) pictureState() json.RawMessage {
-	if cfg.pictureSeen == nil {
+// nodeState serialises what the node remembers, for the checkpoint row.
+func (cfg *BCConfig) nodeState() json.RawMessage {
+	if cfg.pictureSeen == nil && len(cfg.aheadSeen) == 0 {
 		return nil
 	}
-	b, err := json.Marshal(pictureState{Pictures: cfg.pictureSeen})
+	b, err := json.Marshal(pictureState{Pictures: cfg.pictureSeen, Ahead: cfg.aheadSeen})
 	if err != nil {
 		return nil
 	}
