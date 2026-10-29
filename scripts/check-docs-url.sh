@@ -13,18 +13,29 @@
 #
 # Usage: scripts/check-docs-url.sh [--offline]
 #   --offline   only the consistency check, no network.
+# Any other argument is an error (exit 2).
 # Environment:
-#   DOCS_URL_ATTEMPTS  tries before giving up (default 12)
+#   DOCS_URL_ATTEMPTS  tries before giving up (default 12; the workflow sets 20)
 #   DOCS_URL_DELAY     seconds between tries (default 15)
 #   DOCS_URL_OVERRIDE  fetch this URL instead of site_url (used by the test)
+#   DOCS_MKDOCS_FILE   read site_url from this file instead of mkdocs.yml (test)
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+usage() { echo "usage: scripts/check-docs-url.sh [--offline]" >&2; }
 offline=false
-[ "${1:-}" = "--offline" ] && offline=true
+case "$#:${1:-}" in
+  0:) ;;
+  1:--offline) offline=true ;;
+  *) usage; exit 2 ;;
+esac
 
-site_url="$(sed -n 's/^site_url:[[:space:]]*//p' "$root/mkdocs.yml" | tr -d '"'"'"' \r')"
+# site_url may be quoted and may carry a trailing "# comment" (both valid YAML).
+# ui/src/config/env.test.ts parses it the same way.
+mkdocs_file="${DOCS_MKDOCS_FILE:-$root/mkdocs.yml}"
+site_url="$(sed -n 's/^site_url:[[:space:]]*//p' "$mkdocs_file" | head -1 | tr -d '\r' \
+  | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/')"
 ui_url="$(sed -n "s/.*getEnv('VITE_DOCS_URL', *'\([^']*\)').*/\1/p" "$root/ui/src/config/env.ts")"
 
 if [ -z "$site_url" ]; then

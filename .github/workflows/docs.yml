@@ -28,7 +28,10 @@ permissions:
 
 jobs:
   build:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    # Runs on every event, the daily schedule and manual dispatch included: a
+    # run that skipped it would end green on the stale site although the docs
+    # no longer build, and ci-failure-alert.yml would close "CI red on main:
+    # docs" with the build still broken.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,14 +68,22 @@ jobs:
   published:
     # The site answers 200 at its public URL. Runs after a deploy (Pages needs
     # a minute or two, the script retries), daily, and on demand. `always()`
-    # keeps the daily run going although `build` and `deploy` are skipped.
+    # keeps it going on schedule and dispatch, where `deploy` is skipped; it
+    # still requires `build` to have passed, so a broken build fails the run.
+    #
+    # After a deploy, a 200 proves the URL is reachable, not that the new
+    # content is live: Pages may still serve the previous version. The check
+    # is for "the site exists" (#451), not "the latest deploy has propagated".
     if: >-
-      always() &&
+      always() && needs.build.result == 'success' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && needs.deploy.result == 'success'))
-    needs: [deploy]
+    needs: [build, deploy]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Fetch the docs site
+        env:
+          DOCS_URL_ATTEMPTS: '20'  # 20 x 15 s, about 5 min
         run: scripts/check-docs-url.sh

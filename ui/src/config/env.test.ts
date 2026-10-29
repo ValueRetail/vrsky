@@ -90,7 +90,7 @@ describe('defaults', () => {
   it('applies the documented defaults when nothing is set', async () => {
     const { config } = await loadConfig({})
     expect(config.tenantId).toBeTruthy()
-    expect(config.docsUrl).toBe('https://valueretail.github.io/vrsky/')
+    expect(config.docsUrl).toBeTruthy() // the exact URL is tied to mkdocs.yml below
     expect(['debug', 'info', 'warn', 'error']).toContain(config.logLevel)
   })
 })
@@ -145,7 +145,12 @@ describe('docs URL matches mkdocs.yml (#451)', () => {
   it('uses mkdocs.yml site_url as the default docsUrl', async () => {
     const files = Object.values(mkdocs)
     expect(files).toHaveLength(1)
-    const siteUrl = /^site_url:\s*(\S+)\s*$/m.exec(files[0])?.[1]
+    // Same parsing as scripts/check-docs-url.sh: optional quotes, optional
+    // trailing "# comment".
+    const siteUrl = /^site_url:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/m
+      .exec(files[0])
+      ?.slice(1)
+      .find(Boolean)
     expect(siteUrl).toBeTruthy()
     const { config } = await loadConfig({})
     expect(config.docsUrl).toBe(siteUrl)
