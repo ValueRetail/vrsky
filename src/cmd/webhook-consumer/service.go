@@ -54,6 +54,11 @@ type webhookConsumer struct {
 	activeConnections map[string]*ActiveConnection
 	mu                sync.RWMutex
 
+	// starts keeps two starts of one connection (boot restore and a start
+	// command, say) from both registering it, and lets a stop that arrives
+	// mid-start win (#397, #429). It works under mu.
+	starts sdk.StartGuard
+
 	// tunnel tracks the on-demand cloudflared quick tunnel.
 	tunnel tunnelState
 
@@ -178,6 +183,8 @@ func (s *webhookConsumer) Stop(ctx context.Context) error {
 		ac.Cancel()
 	}
 	s.activeConnections = make(map[string]*ActiveConnection)
+	// A start still in flight must not register a webhook after shutdown.
+	s.starts.StopAllLocked()
 	s.mu.Unlock()
 
 	s.stopTunnel()
@@ -274,13 +281,20 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 	_ = ctx
 	s.logger.Info("Received start command", "connection_id", connectionID, "tenant_id", tenantID)
 
-	s.mu.RLock()
-	_, exists := s.activeConnections[connectionID]
-	s.mu.RUnlock()
-	if exists {
-		s.logger.Warn("Webhook already registered", "connection_id", connectionID)
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here (#397, #429). A start refused while
+	// another is in flight runs again if that one gives up without registering
+	// (#424).
+	claim, ok := s.starts.ReserveOrRetry(&s.mu, tenantID, connectionID,
+		func() bool { _, ok := s.activeConnections[connectionID]; return ok },
+		func() { s.startConnection(ctx, connectionID, tenantID) })
+	if !ok {
+		s.logger.Warn("Webhook already registered or registering", "connection_id", connectionID)
 		return
 	}
+	// Frees the claim on every early return below; a no-op once registered.
+	defer claim.Release()
 
 	conn, err := s.getConnection(connectionID, tenantID)
 	if err != nil {
@@ -308,19 +322,26 @@ func (s *webhookConsumer) startConnection(ctx context.Context, connectionID, ten
 			"connection_id", connectionID)
 	}
 
-	s.mu.Lock()
-	s.activeConnections[connectionID] = &ActiveConnection{
+	ac := &ActiveConnection{
 		ConnectionID: connectionID,
 		TenantID:     tenantID,
 		Cancel:       cancel,
 		Signature:    sig,
 		ClientCA:     clientCA,
 	}
-	s.mu.Unlock()
-
-	if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
+	// A stop that arrived during the work above has taken the claim back and wins.
+	if !claim.Activate(func() { s.activeConnections[connectionID] = ac }) {
+		cancel()
+		s.logger.Info("Start abandoned: a stop arrived while it was in progress", "connection_id", connectionID)
+		return
 	}
+	// Through the guard's status order: a stop that unregistered the webhook
+	// since Activate and wrote "stopped" first makes this a no-op (#423).
+	claim.RunningStatus().Write(func() {
+		if err := s.updateConnectionStatus(connectionID, tenantID, "running"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	s.logger.Info("Webhook registered",
 		"connection_id", connectionID,
@@ -343,16 +364,32 @@ func (s *webhookConsumer) handleStopCommand(msg *nats.Msg) {
 		ac.Cancel()
 		delete(s.activeConnections, cmd.ConnectionID)
 	}
+	// A start still in progress gives up instead of registering after the stop.
+	starting := s.starts.StopLocked(cmd.ConnectionID)
+	// Taken with the stop, and only when there is something to write, so this
+	// "stopped" and a start's "running" land in the order of the changes that
+	// caused them (#423).
+	var stopped sdk.StatusWrite
+	if exists {
+		stopped = s.starts.StopStatusLocked(cmd.TenantID, cmd.ConnectionID)
+	}
 	s.mu.Unlock()
 
+	if starting {
+		s.logger.Info("Stop arrived while the webhook was being registered; the start is abandoned", "connection_id", cmd.ConnectionID)
+	}
 	if !exists {
-		s.logger.Warn("Webhook not registered", "connection_id", cmd.ConnectionID)
+		if !starting {
+			s.logger.Warn("Webhook not registered", "connection_id", cmd.ConnectionID)
+		}
 		return
 	}
 
-	if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
-		s.logger.Error("Failed to update connection status", "error", err)
-	}
+	stopped.Write(func() {
+		if err := s.updateConnectionStatus(cmd.ConnectionID, cmd.TenantID, "stopped"); err != nil {
+			s.logger.Error("Failed to update connection status", "error", err)
+		}
+	})
 
 	s.logger.Info("Webhook unregistered", "connection_id", cmd.ConnectionID)
 }
