@@ -125,7 +125,7 @@ data-converter, tenant-consumer, file-consumer, sitoo-consumer,
   nothing. Before, every start registered again, so a redeploy with changed
   `events` or `callback_url` while running picked the change up; now that
   takes a stop and a start, as on every other guarded consumer (review).
-  Backlog item 96 covers the registration lifecycle as a whole.
+  Backlog item 97 covers the registration lifecycle as a whole.
 - Remote agent: a start that fails a check after a stop was queued still
   writes `error` over the API's `stopped`. Older than this change and rare;
   left as is to keep the change small (review).
