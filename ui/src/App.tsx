@@ -4,6 +4,7 @@ import { validateConfig } from './config/env'
 import ErrorBoundary from './components/Common/ErrorBoundary'
 import Toast from './components/Common/Toast'
 import ConfirmDialog from './components/Common/ConfirmDialog'
+import NewVersionBanner from './components/Common/NewVersionBanner'
 import RootLayout from './components/Layout/RootLayout'
 import ProtectedRoute from './components/Auth/ProtectedRoute'
 import { useUIStore } from './store/uiStore'
@@ -122,6 +123,8 @@ function App() {
         </Routes>
         <Toast />
         <ConfirmDialog config={confirmDialog} onClose={hideConfirmDialog} />
+        {/* A newer deployed UI than this tab runs (#551); on every route */}
+        <NewVersionBanner />
       </Router>
     </ErrorBoundary>
   )

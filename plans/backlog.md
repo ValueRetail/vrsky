@@ -454,7 +454,7 @@ Last updated 2026-10-28.
     Alert rules job ever becomes the slowest before a deploy, name the
     test groups and split them over matrix legs with `--run`, with a guard
     that every group runs in exactly one leg. Found during #446.
-70. **An open UI tab never learns that a newer UI is deployed.** The bundle
+70. ~~**An open UI tab never learns that a newer UI is deployed.**~~ (#551) The bundle
     is one file with no lazy chunks, so a tab left open across deploys
     keeps running the old code against the new API. That is how #450's
     "Pipeline 15:26:55" happened: a pre-2026-10-14 tab still sent a
@@ -763,14 +763,14 @@ Last updated 2026-10-28.
     and retried. Retry the after-action for done names still listed (with
     `delete`/`move` a done name should not be there), with a backoff.
     Found in review of #538.
-107. **The file connector page still says every check looks at every
+113. **The file connector page still says every check looks at every
     file.** Since #537 a folder with more than 1 000 published files has
     them checked for replacement in turns, so a replaced file there goes
     out up to `ceil(files/1000)` checks later (about 50 s at 10 000 files),
     not after two. `docs/connectors/file.md`, the paragraphs on moving files
     out and on replaced files. Left out of #537 because another worker had
     `docs/` at the time.
-106. **A file-consumer checkpoint row that can't be decoded is never
+114. **A file-consumer checkpoint row that can't be decoded is never
     replaced.** Since #536 a start that couldn't read its checkpoint saves
     nothing until a read works. For a row that fails to decode that is
     never: the watcher logs an Error every poll and falls back to its guess
@@ -794,6 +794,13 @@ Last updated 2026-10-28.
     bucket tree gives `temp/` a 15-minute TTL where `setup-job.yaml` sets
     one day. Manifest directory, so PR plus `agent:needs-human`. Found in
     #555.
+115. **A reload during a UI rollout can load a blank page.** With three UI
+    replicas and `maxSurge: 1`, `index.html` from a new pod can name
+    `/assets/index-<new>.js`, which an old pod answers with 404 (its
+    `error_page 404 /index.html` sends HTML for the script). The #551 banner
+    can show as soon as the first new pod serves, so a quick Reload can hit
+    this. Keep the previous build's assets in the new image, or have the
+    banner wait for two matching checks. Found in review of #551.
 
 ## Human
 
