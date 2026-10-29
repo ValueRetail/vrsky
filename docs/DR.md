@@ -94,7 +94,8 @@ Jobs since the last good backup, or no scheduled run and no successful Job
 for over four days of being active (seven at weekends and outside the
 afternoon check), while it isn't suspended. `MgmtBackupSuspended` fires
 when it has been suspended for over 7 days while `vrsky-backup-config` has
-existed for over 7 days.
+existed for over 7 days. `MgmtBackupCronJobAbsent` fires when the CronJob
+has been gone for 30 minutes while `vrsky-backup-config` exists.
 
 ## Restore from a disk snapshot
 

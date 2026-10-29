@@ -579,7 +579,7 @@ Last updated 2026-10-28.
     by position or target ("Remove mapping 2", "Item mapping type for
     lineObjectNumber") and point the inputs at the warning list. Found in
     #458.
-89. **A deleted backup CronJob is silent.** If `vrsky-mgmt-backup` is
+89. ~~**A deleted backup CronJob is silent.**~~ (#526) If `vrsky-mgmt-backup` is
     deleted (by hand, or a failed re-apply), its kube-state-metrics series
     end, and both `MgmtBackupMissing` and `MgmtBackupSuspended` match
     nothing, so no backups run and nobody is paged. An `absent()` rule on
