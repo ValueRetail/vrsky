@@ -108,7 +108,10 @@ How it behaves:
   or a failed poll resumes from there. The page that failed can arrive
   twice; no order is skipped.
 - A poll reads at most 100 pages (100 000 orders at the default page size).
-  The next poll carries on where it stopped.
+  The next poll re-reads the overlap and goes on from there. Keep
+  `cursor_overlap` well below 100 × `page_size`: if re-reading the overlap
+  takes more than one poll, new orders wait several polls, and a late order
+  can be missed during that catch-up.
 - Orders re-read inside the overlap are not sent again. An order that shows
   up later than `cursor_overlap` ids behind the newest one published is
   missed; raise the overlap if your tills can lag more than that.

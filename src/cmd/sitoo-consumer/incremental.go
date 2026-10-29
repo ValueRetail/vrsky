@@ -141,10 +141,11 @@ type incrementalState struct {
 	// window widens as the watermark moves on.
 	Sent  []int64 `json:"sent"`
 	Floor int64   `json:"floor"`
-	// Next is where a poll that stopped at its page budget got to. The next
-	// poll carries on from there instead of re-reading the overlap first;
-	// otherwise an overlap wider than the budget could keep every poll from
-	// ever getting past the watermark. A poll that reads to the end clears it.
+	// Next is where a poll that stopped at its page budget before getting
+	// past the watermark got to. The next poll carries on from there instead
+	// of re-reading the overlap first; otherwise an overlap wider than the
+	// budget would keep every poll from ever getting past the watermark. A
+	// poll that gets past the watermark or reads to the end clears it.
 	Next *int64 `json:"next,omitempty"`
 }
 
@@ -263,13 +264,22 @@ func (s *sitooConsumer) fetchIncremental(ctx context.Context, connID, tenantID s
 	// carrying is true while the stored checkpoint still says to carry on: a
 	// poll that reads to the end has to clear it, even with nothing new.
 	carrying := st.Next != nil
-	mark := watermark
+	mark, loaded := watermark, watermark
 	met := map[int64]bool{}
 	published, skipped, pages, done := 0, 0, 0, false
 
 	for !done {
 		if pages == maxPagesPerPoll {
-			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, &from, published); err != nil {
+			// Carry on from here only if this poll never got past the
+			// watermark it started with (an overlap wider than the budget).
+			// Once it has, the next poll re-reads the overlap as usual: an
+			// order that shows up late behind the new watermark is then read,
+			// where carrying on would step past it.
+			var next *int64
+			if mark == loaded {
+				next = &from
+			}
+			if err := s.saveIncremental(ctx, tenantID, connID, cfg, mark, floor, sent, next, published); err != nil {
 				return err
 			}
 			logger.Info("Sitoo poll read its page budget; the next poll carries on",

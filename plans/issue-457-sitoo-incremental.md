@@ -90,9 +90,12 @@ Each poll:
    the one asked for. A short page doesn't end it: Sitoo may cap `num`
    below the page size (review round 4).
 6. At most 100 pages per poll (100 000 orders at the default size). The
-   budget save stores `Next`; the next poll carries on from it rather than
-   re-reading the overlap first, so an overlap wider than the budget still
-   makes progress. A poll that reads to the end clears `Next`.
+   budget save stores `Next` only if the poll never got past the watermark
+   it started with (an overlap wider than the budget); the next poll then
+   carries on from it, so such an overlap still makes progress. Otherwise
+   the next poll re-reads the overlap as usual, so a late order behind the
+   new watermark is still read (review round 5). A poll that reads to the
+   end clears `Next`.
 
 Saving per page is safe because `orderid` is unique and the listing is
 sorted on it: once a page is out, every order up to its last id is out,
@@ -186,3 +189,8 @@ package; mutation run on the checks, the dedupe, the save and the overlap.
   turns this on: if Sitoo sorted only within a page after applying `num`,
   every page would pass its checks while orders between pages were
   skipped.
+- Round 5: the round-4 fixes hold. Required and fixed: a poll carrying on
+  from `Next` after a budget stop stepped past a late order inside the
+  overlap (now `Next` is saved only when the poll didn't get past the
+  watermark). Optional and taken: the sample-data endpoint refuses a
+  resource the poller refuses. Both failing tests are in `review_test.go`.

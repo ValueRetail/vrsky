@@ -1022,10 +1022,9 @@ func TestIncremental_PageBudget(t *testing.T) {
 				}
 				assertOnce(t, "poll 1", all, v1(idRange(1, w)...)...)
 
-				// Later polls carry on until the collection is read. A poll after
-				// one that used its whole budget carries on where that one got to
-				// (the last orderid read); any other starts at W − overlap.
-				prevFull := true
+				// Later polls carry on until the collection is read. Each of
+				// these polls gets past its watermark, so the next one re-reads
+				// the overlap from W − overlap rather than carrying on.
 				for p := 2; ; p++ {
 					if p > 10 {
 						t.Fatal("still reading after 10 polls")
@@ -1035,12 +1034,7 @@ func TestIncremental_PageBudget(t *testing.T) {
 					if len(reqs) > maxPagesPerPoll {
 						t.Errorf("%s made %d requests, more than %d", label, len(reqs), maxPagesPerPoll)
 					}
-					first := fromFor(w, ov(overlap))
-					if prevFull {
-						first = strconv.FormatInt(w, 10)
-					}
-					checkKeyset(t, label, reqs, first, 2)
-					prevFull = len(reqs) == maxPagesPerPoll
+					checkKeyset(t, label, reqs, fromFor(w, ov(overlap)), 2)
 					stored, _ := strconv.ParseInt(watermark(t, store, incTenant, incConn, incNode), 10, 64)
 					if stored <= w && len(reqs) == maxPagesPerPoll {
 						t.Fatalf("%s used its whole budget without moving the watermark past %d", label, w)
@@ -1232,39 +1226,45 @@ func TestIncremental_ThroughHarness(t *testing.T) {
 // Found by the test author: with an overlap wider than a poll's page budget
 // (page size 2, default overlap 1000), every poll after the first used to
 // start at W − overlap, re-read the same 100 pages and never get past W.
-// A poll cut short by the budget is now carried on by the next one.
+// A poll cut short by the budget before getting past W is now carried on by
+// the next one.
 func TestIncremental_OverlapWiderThanThePageBudgetStillProgresses(t *testing.T) {
-	const n = 1500
+	// Page size 2 reads at most 200 ids a poll, so an overlap of 300 takes
+	// more than one poll to re-read.
+	const n, overlap = 600, 300
 	for _, fm := range filterModes {
 		t.Run(fm.name, func(t *testing.T) {
 			f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(1, n)...)...)
 			store := checkpoint.NewInMemoryStore()
 			c, got, mu := newIncConsumer(store)
-			cfg := incConfig(srv.URL, nil, 2)
+			cfg := incConfig(srv.URL, ov(overlap), 2)
 			var all []pubRec
-			last, prevFrom, prevFull := int64(0), int64(-1), false
+			// A poll cut short before getting past the watermark saves where
+			// it got to, and the next one must start further on. So every
+			// poll either moves the watermark or reads further than the one
+			// before, and the poller can't go round in circles.
+			last, prevFrom, prevStuck := int64(0), int64(-1), false
 			for p := 1; ; p++ {
-				if p > 40 {
-					t.Fatalf("still reading after 40 polls; watermark %d", last)
+				if p > 60 {
+					t.Fatalf("still reading after 60 polls; watermark %d", last)
 				}
 				if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger); err != nil {
 					t.Fatalf("poll %d: %v", p, err)
 				}
 				reqs := f.take()
 				all = append(all, published(t, got, mu, incTenant, incConn)...)
-				last, _ = strconv.ParseInt(watermark(t, store, incTenant, incConn, incNode), 10, 64)
-				// A poll after one cut short by the budget must start further on
-				// than that one did, or the poller is going round in circles.
 				from := int64(0)
 				if v := reqs[0].q.Get("orderidfrom"); v != "" {
 					from, _ = strconv.ParseInt(v, 10, 64)
 				}
-				if prevFull && from <= prevFrom {
-					t.Fatalf("poll %d starts at orderid %d, no further than the poll before (%d)", p, from, prevFrom)
+				if prevStuck && from <= prevFrom {
+					t.Fatalf("poll %d starts at orderid %d, no further than the stuck poll before it (%d)", p, from, prevFrom)
 				}
-				// Cut short: the budget is used and its last page was full.
-				prevFrom, prevFull = from, len(reqs) == maxPagesPerPoll && len(reqs[len(reqs)-1].served) == 2
-				if last == n && !prevFull {
+				w, _ := strconv.ParseInt(watermark(t, store, incTenant, incConn, incNode), 10, 64)
+				cutShort := len(reqs) == maxPagesPerPoll && len(reqs[len(reqs)-1].served) == 2
+				prevFrom, prevStuck = from, cutShort && w == last
+				last = w
+				if last == n && !cutShort {
 					break
 				}
 			}
@@ -1279,7 +1279,7 @@ func TestIncremental_OverlapWiderThanThePageBudgetStillProgresses(t *testing.T) 
 				t.Fatal(err)
 			}
 			reqs := f.take()
-			checkKeyset(t, "after the end", reqs, fromFor(n, nil), 2)
+			checkKeyset(t, "after the end", reqs, fromFor(n, ov(overlap)), 2)
 			if extra := published(t, got, mu, incTenant, incConn); len(extra) != 0 {
 				t.Errorf("re-reading the overlap published %v", extra)
 			}

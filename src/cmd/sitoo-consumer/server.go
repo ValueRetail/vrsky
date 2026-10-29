@@ -66,6 +66,10 @@ func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
+		if err := cfg.checkResource(); err != nil {
+			writeErr(err.Error())
+			return
+		}
 		body, err := s.get(r.Context(), &cfg, cfg.collectionURL(0, sitooSampleLimit, nil))
 		if err != nil {
 			writeErr(err.Error())
