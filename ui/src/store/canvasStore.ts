@@ -6,6 +6,7 @@
 
 import { create } from 'zustand'
 import type { Canvas, Node, Edge } from '../types/pipeline'
+import { syncWithServerName } from '../services/deployPipeline'
 
 const STORAGE_KEY_PREFIX = 'vrsky:canvases:v1'
 
@@ -76,6 +77,7 @@ interface CanvasStore {
   switchCanvas: (id: string) => void
   renameCanvas: (id: string, newName: string) => void
   setDeployedConnectionId: (canvasId: string, connectionId: string | null, deployedName?: string) => void
+  syncDeployedName: (canvasId: string, connectionId: string, serverName: string) => void
 
   // Helpers
   getActiveCanvas: () => Canvas | null
@@ -269,6 +271,25 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             updatedAt: Date.now(),
           }
         : c
+    )
+    set({ canvases: updatedCanvases })
+    saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
+  },
+
+  // The server's current name for a linked canvas's connection (#502):
+  // deployedName takes it, and the tab too unless the user renamed it here
+  // (syncWithServerName). Read when the answer lands, so a rename made while
+  // the request was out is kept; a canvas no longer linked to that
+  // connection, or from another workspace, is left alone.
+  syncDeployedName: (canvasId, connectionId, serverName) => {
+    const { canvases, currentCanvasId, tenantId } = get()
+    const name = serverName.trim()
+    const canvas = canvases.find((c) => c.id === canvasId)
+    if (!name || !canvas || canvas.deployedConnectionId !== connectionId) return
+    const synced = syncWithServerName(canvas, name)
+    if (synced.name === canvas.name && synced.deployedName === canvas.deployedName) return
+    const updatedCanvases = canvases.map((c) =>
+      c.id === canvasId ? { ...c, ...synced, updatedAt: Date.now() } : c
     )
     set({ canvases: updatedCanvases })
     saveToStorage(updatedCanvases, currentCanvasId, tenantId || undefined)
