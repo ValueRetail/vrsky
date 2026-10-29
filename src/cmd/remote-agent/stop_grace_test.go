@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 
@@ -489,4 +490,160 @@ func TestStopGrace_StuckHandlersBoundTheStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An agent's ack that is being accepted just as a stop's grace ends must not
+// be lost. resolve takes the delivery out of pending and hands its result to
+// the handler; if the scope ended in between, the handler used to take the
+// session-ended branch and NAK, although the agent had its 204, and the next
+// session wrote the file again. The inResolve seam ends the scope inside that
+// window and holds it open.
+func TestStopGrace_AckAsTheGraceEndsIsKept(t *testing.T) {
+	e := newTestEnv(t)
+	e.startOutputPipeline(t, "grace-edge")
+	e.g.mu.Lock()
+	sess := e.g.sessions["grace-edge"]
+	e.g.mu.Unlock()
+	acks := e.watchAcks(t, outputDurable("grace-edge"))
+	e.publishTo(t, tenant1, "grace-edge", `{"order":1}`)
+	w := e.poll(t, credA, 5)
+	if len(w.Deliveries) != 1 {
+		t.Fatalf("got %d deliveries, want 1", len(w.Deliveries))
+	}
+
+	stopped := make(chan struct{})
+	go func() { e.g.stopConnection(context.Background(), "grace-edge", tenant1); close(stopped) }()
+	waitFor(t, "the stop to take the session out", func() bool { return e.g.ended(sess) })
+	e.g.mu.Lock() // resolve reads the seam under mu
+	e.g.inResolve = func() {
+		sess.cancel() // the grace ends now
+		time.Sleep(100 * time.Millisecond)
+	}
+	e.g.mu.Unlock()
+	resp := e.do(t, http.MethodPost, "/agent/v1/deliveries/"+w.Deliveries[0].ID+"/ack", credA,
+		mustJSON(agentproto.AckRequest{Status: agentproto.AckOK}))
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stop did not return")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("ack: %d, want 204", resp.StatusCode)
+	}
+	acks.settledOnFirstDelivery(t)
+}
+
+// A shutdown waits for a stop command that is already running, which took
+// its session out of s.sessions before Stop could see it and may be in its
+// grace. Returning earlier lets the runner close the NATS connection under it:
+// an ack sent then is lost and the next session writes the file again. The
+// wait is bounded by Stop's context.
+func TestStopGrace_ShutdownWaitsForRunningStopCommand(t *testing.T) {
+	cases := []struct {
+		name    string
+		timeout time.Duration // Stop's context; 0 for none
+		check   func(t *testing.T, e *testEnv, took time.Duration)
+	}{
+		{"no deadline", 0, func(t *testing.T, e *testEnv, took time.Duration) {
+			if err := e.mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("Stop returned after %v with the stop command still running: %v", took, err)
+			}
+		}},
+		{"deadline", 300 * time.Millisecond, func(t *testing.T, e *testEnv, took time.Duration) {
+			if took > 700*time.Millisecond {
+				t.Fatalf("Stop took %v; its context ended after 300 ms", took)
+			}
+			waitFor(t, "the stop command to finish", func() bool { return e.mock.ExpectationsWereMet() == nil })
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newTestEnv(t)
+			e.startOutputPipeline(t, "grace-cmd")
+			e.publishTo(t, tenant1, "grace-cmd", `{"order":1}`)
+			waitFor(t, "the message to be held", func() bool { return e.consumerInfo(t, "grace-cmd").NumAckPending == 1 })
+			e.mock.ExpectExec(`UPDATE connections SET status = 'stopped'`).WithArgs("grace-cmd", tenant1).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			e.g.onCommand(false)(cmdMsg(false, "grace-cmd", tenant1))
+			waitFor(t, "the stop command to take the session out", func() bool {
+				e.g.mu.Lock()
+				defer e.g.mu.Unlock()
+				return e.g.sessions["grace-cmd"] == nil
+			})
+			ctx := context.Background()
+			if c.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, c.timeout)
+				defer cancel()
+			}
+			began := time.Now()
+			_ = e.g.Stop(ctx)
+			c.check(t, e, time.Since(began))
+		})
+	}
+}
+
+// A shutdown whose context ends before the grace would shortens the grace to
+// fit, leaving shutdownMargin for the stops themselves.
+func TestStopGrace_ShutdownDeadlineShortensTheGrace(t *testing.T) {
+	e := newTestEnv(t)
+	e.startOutputPipeline(t, "grace-deadline")
+	acks := e.watchAcks(t, outputDurable("grace-deadline"))
+	e.publishTo(t, tenant1, "grace-deadline", `{"order":1}`)
+	waitFor(t, "the message to be held", func() bool { return e.consumerInfo(t, "grace-deadline").NumAckPending == 1 })
+
+	const window = 700 * time.Millisecond // under the 1 s grace
+	ctx, cancel := context.WithTimeout(context.Background(), window)
+	defer cancel()
+	began := time.Now()
+	_ = e.g.Stop(ctx)
+	took := time.Since(began)
+	t.Logf("Stop took %v with a %v window", took.Round(time.Millisecond), window)
+	if took > window {
+		t.Fatalf("Stop took %v, past its %v window", took, window)
+	}
+	acks.waitUntil(t, "the release", func(evs []ackEvent) bool {
+		for _, ev := range evs {
+			if ev.kind == "-NAK" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// A member that is gone or revoked can't ack any more, so the reconcile that
+// drops it releases its held message at once instead of holding reconcileMu,
+// and any stop of the session, for the grace.
+func TestStopGrace_RevokedMemberIsReleasedAtOnce(t *testing.T) {
+	e := newTestEnv(t)
+	memberA := memberRow(agentA, "till-a", "{all-tills}", outWrite)
+	e.startGroupPipeline(t, "grace-rev", memberA, memberRow(agentA2, "till-a2", "{all-tills}", outWrite))
+	acks := e.watchAcks(t, memberDurable("grace-rev", agentA2))
+	e.publishTo(t, tenant1, "grace-rev", `{"order":1}`)
+	waitFor(t, "A2's message to be held", func() bool {
+		ci, _ := e.memberInfo("grace-rev", agentA2)
+		return ci != nil && ci.NumAckPending == 1
+	})
+
+	e.expectMembers(tenant1, 1, memberA) // A2 revoked
+	began := time.Now()
+	e.g.reconcileAll(context.Background())
+	took := time.Since(began)
+	t.Logf("the reconcile took %v", took.Round(time.Millisecond))
+	if limit := e.g.stopGrace / 2; took > limit {
+		t.Fatalf("the reconcile took %v dropping a revoked member; want under %v, not the stop grace", took, limit)
+	}
+	if _, err := e.memberInfo("grace-rev", agentA2); err == nil {
+		t.Fatal("the revoked member's durable still exists")
+	}
+	acks.waitUntil(t, "the release", func(evs []ackEvent) bool {
+		for _, ev := range evs {
+			if ev.kind == "-NAK" {
+				return true
+			}
+		}
+		return false
+	})
 }

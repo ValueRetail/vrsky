@@ -123,15 +123,33 @@ func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.
 		}
 
 		var firstErr error
+		record := func(err error) {
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	wait:
 		for i, d := range waiting {
 			select {
 			case err := <-d.result:
-				if err != nil && firstErr == nil {
-					firstErr = err
-				}
+				record(err)
 			case <-scope.done:
 				s.dequeue(waiting[i:]...)
-				return errSessionEnded
+				// An agent may have acked between the scope ending and the
+				// dequeue: it got its 204 and wrote the file, so a NAK now
+				// would have the next session write it again. resolve hands
+				// the result over under s.mu, and the dequeue took s.mu, so
+				// any such ack is in d.result by now; anything not there
+				// never will be.
+				for _, d := range waiting[i:] {
+					select {
+					case err := <-d.result:
+						record(err)
+					default:
+						return errSessionEnded
+					}
+				}
+				break wait
 			}
 		}
 		if firstErr == nil {
@@ -196,17 +214,27 @@ func (s *gateway) dequeue(ds ...*delivery) {
 // resolve records an agent's ack for one of ITS deliveries. The lookup starts
 // from the authenticated agent, so an ID belonging to any other agent is simply
 // not found. Returns false when there is no such pending delivery.
+//
+// The result is handed over under s.mu, in the same critical section that
+// takes the delivery out of pending. A handler whose scope ended dequeues
+// under s.mu and then looks in d.result, so an ack is either seen there or
+// refused here with a 404; it can't be accepted and then lost. The send
+// can't block: result has room for one, and only the resolve that took the
+// delivery out of pending sends on it.
 func (s *gateway) resolve(agentID, deliveryID string, err error) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	a := s.agents[agentID]
 	var d *delivery
 	if a != nil {
 		d = a.pending[deliveryID]
 		delete(a.pending, deliveryID)
 	}
-	s.mu.Unlock()
 	if d == nil {
 		return false
+	}
+	if s.inResolve != nil {
+		s.inResolve()
 	}
 	d.result <- err
 	return true

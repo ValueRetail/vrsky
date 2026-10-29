@@ -184,7 +184,7 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 	for _, n := range sess.outputs {
 		check(n, agentproto.ModeWrite)
 	}
-	var toStop []*memberSub
+	var toStop, toStopGone []*memberSub
 	var toDelete []string
 	for id, ms := range sess.memberSubs {
 		if !desired[id] {
@@ -193,11 +193,12 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 			// an endSession from now on doesn't see it, and its cancel
 			// must not find the loop still fetching. See endSession.
 			ms.sub.Halt()
-			toStop = append(toStop, ms)
 			if members[id] == nil {
 				// Gone or revoked: nothing must keep waiting for it.
+				toStopGone = append(toStopGone, ms)
 				toDelete = append(toDelete, memberDurable(sess.connID, id))
 			} else {
+				toStop = append(toStop, ms)
 				sess.dormant[id] = true // left the group: keep its place
 			}
 		}
@@ -231,20 +232,14 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		s.logger.Warn("Group member skipped", "connection_id", sess.connID, "reason", w)
 		s.events.emit(sess.connID, event{Type: "warning", Message: w})
 	}
-	// Outside the lock: a stopping handler dequeues under it.
-	if len(toStop) > 0 {
-		subs := make([]*messaging.Subscriber, len(toStop))
-		for i, ms := range toStop {
-			subs[i] = ms.sub
-		}
-		// Halted above; their last polls are handled before their contexts
-		// end, as in endSession.
-		s.stopSubscribers(func() {
-			for _, ms := range toStop {
-				ms.cancel()
-			}
-		}, subs...)
-	}
+	// Outside the lock: a stopping handler dequeues under it. All were
+	// halted above. A member that merely left the group gets the stop grace,
+	// as in endSession: its agent may still finish a file it is writing. One
+	// that is gone or revoked can't ack any more (its credential is refused),
+	// so its handler is released at once rather than holding reconcileMu,
+	// and with it any stop of this session, for the grace.
+	s.stopMembers(0, toStopGone)
+	s.stopMembers(s.stopGrace, toStop)
 	for _, d := range toDelete {
 		if err := messaging.DeleteConsumer(s.js, d); err != nil {
 			s.logger.Warn("Could not delete a departed member's consumer", "durable", d, "error", err)
@@ -286,12 +281,29 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		s.mu.Lock()
 		if s.sessions[sess.connID] != sess || sess.memberSubs[id] != nil {
 			s.mu.Unlock()
-			s.stopSubscribers(mcancel, sub)
+			s.stopSubscribers(s.stopGrace, mcancel, sub)
 			continue
 		}
 		sess.memberSubs[id] = &memberSub{sub: sub, cancel: mcancel}
 		s.mu.Unlock()
 	}
+}
+
+// stopMembers stops member subscribers with stopSubscribers, ending each
+// one's own context once the grace is over.
+func (s *gateway) stopMembers(grace time.Duration, ms []*memberSub) {
+	if len(ms) == 0 {
+		return
+	}
+	subs := make([]*messaging.Subscriber, len(ms))
+	for i, m := range ms {
+		subs[i] = m.sub
+	}
+	s.stopSubscribers(grace, func() {
+		for _, m := range ms {
+			m.cancel()
+		}
+	}, subs...)
 }
 
 // ended reports whether a session has been taken out of s.sessions, which a

@@ -96,7 +96,8 @@ subscriber.
 - `src/cmd/remote-agent/service.go`: `stopGrace`, `stopSubscribers`,
   `endSession`, `Stop`, the `afterHalt` test seam
 - `src/cmd/remote-agent/groups.go`: both member stops
-- `src/cmd/remote-agent/output.go`: `errSessionEnded` comment
+- `src/cmd/remote-agent/output.go`: `errSessionEnded` comment; `resolve`
+  and the handler's session-ended branch (review follow-up)
 - `src/cmd/remote-agent/stop_grace_test.go`: new
 - `src/pkg/messaging/subscriber.go`: `Halt` doc comment only
 - `docs/connectors/remote-agent.md`: the note on stopping while a message is
@@ -121,3 +122,33 @@ polling the real HTTP API:
   a mixed pipeline (three durables) and a shutdown of three sessions each
   finish within grace + 800 ms, each message NAK'd exactly once, nothing
   dead-lettered, no stop goroutine or dispatch loop left.
+
+## Review follow-up
+
+The Opus review approved and suggested four optional changes, all taken:
+
+1. An ack accepted just as the grace ends. `resolve` took the delivery out
+   of pending, released `s.mu`, then sent on `d.result`. A cancel in between
+   sent the handler down the session-ended branch: NAK, although the agent
+   had its 204, and the next session wrote the file again. `resolve` now
+   sends under `s.mu` (room for one, a single sender, so it can't block),
+   and the session-ended branch looks in `d.result` after its dequeue and
+   uses what it finds. An ack is either seen there or refused with a 404.
+   Test: `TestStopGrace_AckAsTheGraceEndsIsKept`, with an `inResolve` seam
+   that ends the scope inside that window.
+2. Shutdown waits for running commands. `onCommand` counts its goroutines
+   in `commandsRunning` (added under `s.mu` while not closed; a command
+   after shutdown is ignored), and `Stop` waits for them, bounded by its
+   context. A stop command takes its session out of `s.sessions` first, so
+   `Stop` never saw it, and could return while it was still in its grace;
+   the runner then closes the NATS connection, an ack is lost, and the
+   message is redelivered after the AckWait. Test:
+   `TestStopGrace_ShutdownWaitsForRunningStopCommand`.
+3. A member that is gone or revoked can't ack. The reconcile now releases
+   its handler at once (grace 0, still halt first) instead of holding
+   `reconcileMu` through the grace. Test:
+   `TestStopGrace_RevokedMemberIsReleasedAtOnce`.
+4. `Stop` shortens the grace when its context's deadline is closer than the
+   grace plus `shutdownMargin` (250 ms: a poll and the drain). The runner
+   gives 5 s, so this doesn't change production today. Test:
+   `TestStopGrace_ShutdownDeadlineShortensTheGrace`.

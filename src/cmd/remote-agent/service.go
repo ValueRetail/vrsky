@@ -56,6 +56,11 @@ const lastSeenWriteEvery = 30 * time.Second
 // poll, with its handlers' scope still alive, before it ends that scope (#576).
 const defaultStopGrace = time.Second
 
+// shutdownMargin is what a session's stop needs after its grace has ended:
+// the poll in progress (150 ms at most) and the drain. A shutdown whose
+// context has a deadline shortens the grace to leave this much.
+const shutdownMargin = 250 * time.Millisecond
+
 // gateway is the remote-agent connector. See main.go for the shape.
 type gateway struct {
 	sdk.BaseConsumer
@@ -79,8 +84,15 @@ type gateway struct {
 	agents   map[string]*agentState  // agentID → pending work
 	events   *eventHub
 	// closed is set by Stop, under mu. A start that finishes after it ends
-	// the session it built instead of registering it.
+	// the session it built instead of registering it, and a command that
+	// arrives after it is ignored.
 	closed bool
+	// commandsRunning counts the command goroutines onCommand started. Stop
+	// waits for them: a stop command may still be in its grace, and closing
+	// the connection under it would lose the ack of a message the agent
+	// wrote. Add only under mu while !closed, so every Add happens before
+	// Stop's Wait.
+	commandsRunning sync.WaitGroup
 
 	// commands runs each connection's starts and stops one at a time, in
 	// arrival order (#429); see lanes.go.
@@ -128,6 +140,11 @@ type gateway struct {
 	// message published here lands in the last poll of a halted subscriber
 	// (#576).
 	afterHalt func()
+	// inResolve is a test seam, nil in production, read and run under mu.
+	// It runs in resolve once an ack's delivery has been taken out of
+	// pending and before its result is handed to the waiting handler: the
+	// window in which a stop's grace can end under an ack being accepted.
+	inResolve func()
 }
 
 func newGateway() *gateway {
@@ -281,16 +298,36 @@ func (s *gateway) Stop(ctx context.Context) error {
 	s.mu.Unlock()
 	// Side by side: each may wait out its stop grace for a handler whose
 	// agent does not answer, and one after another that would add up past
-	// the runner's shutdown window.
+	// the runner's shutdown window. The grace is shortened if the window is
+	// shorter than it.
+	grace := s.stopGrace
+	if dl, ok := ctx.Deadline(); ok {
+		grace = min(grace, max(time.Until(dl)-shutdownMargin, 0))
+	}
 	var wg sync.WaitGroup
 	for _, sess := range all {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.endSession(sess)
+			s.endSession(sess, grace)
 		}()
 	}
 	wg.Wait()
+	// Commands already running: a stop command took its session out of
+	// s.sessions before the lines above, so they did not end it, and it may
+	// still be in its grace. The runner closes the NATS connection once Stop
+	// returns, and an ack sent after that is lost: the server redelivers
+	// after the AckWait, and the next session writes the file again.
+	running := make(chan struct{})
+	go func() {
+		s.commandsRunning.Wait()
+		close(running)
+	}()
+	select {
+	case <-running:
+	case <-ctx.Done():
+		s.logger.Warn("Shutting down with connection commands still running", "error", ctx.Err())
+	}
 	return nil
 }
 
@@ -313,6 +350,16 @@ func (s *gateway) onCommand(start bool) nats.MsgHandler {
 				"tenant_id", cmd.TenantID, "subject_tenant_id", st)
 			return
 		}
+		// Stop has ended every session and waits for the commands it counted;
+		// one arriving after it has nothing left to do.
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			s.logger.Info("Ignoring connection command during shutdown", "connection_id", cmd.ConnectionID, "start", start)
+			return
+		}
+		s.commandsRunning.Add(1)
+		s.mu.Unlock()
 		// The turn is taken here, on the callback goroutine, so the
 		// connection's commands run in the order this subscription saw them
 		// (#429).
@@ -320,6 +367,7 @@ func (s *gateway) onCommand(start bool) nats.MsgHandler {
 		// Off the NATS callback goroutine: a start queries the database, and
 		// a stop waits for an in-flight delivery to let go.
 		go func() {
+			defer s.commandsRunning.Done()
 			defer turn.done()
 			turn.wait()
 			// The timeout starts once it is this command's turn, so waiting
@@ -488,7 +536,7 @@ func (s *gateway) runStart(ctx context.Context, turn *commandTurn, connID, tenan
 	}
 	s.mu.Unlock()
 	if abandon {
-		s.endSession(sess)
+		s.endSession(sess, s.stopGrace)
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		return
 	}
@@ -561,7 +609,7 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) b
 	if sess == nil {
 		return false
 	}
-	s.endSession(sess)
+	s.endSession(sess, s.stopGrace)
 	s.logger.Info("Remote agent pipeline stopped", "connection_id", connID)
 	return true
 }
@@ -570,7 +618,7 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) b
 // Must not be called with s.mu held: the output handler takes it to dequeue.
 //
 // The subscribers are stopped with stopSubscribers: halted, given up to
-// stopGrace to handle their last poll with the session still alive, and only
+// grace (stopGrace, less in a shutdown short of time) to handle their last poll with the session still alive, and only
 // then is the session cancelled. A message a halted subscriber's last poll
 // brought is handled like any other (#576). A message whose agent does not
 // write it within the grace, the one held for an offline agent above all, is
@@ -594,7 +642,7 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) b
 // the reconcile's context: reconcileTimeout for the background ones, the
 // caller's in startConnection), or one subscribe and its stop (under
 // JetStream's own timeouts, plus at most stopGrace).
-func (s *gateway) endSession(sess *connSession) {
+func (s *gateway) endSession(sess *connSession, grace time.Duration) {
 	sess.reconcileMu.Lock()
 	defer sess.reconcileMu.Unlock()
 	s.mu.Lock()
@@ -607,7 +655,7 @@ func (s *gateway) endSession(sess *connSession) {
 	}
 	sess.memberSubs = map[string]*memberSub{}
 	s.mu.Unlock()
-	s.stopSubscribers(sess.cancel, subs...) // sess.cancel also ends every member's context
+	s.stopSubscribers(grace, sess.cancel, subs...) // sess.cancel also ends every member's context
 }
 
 // stopSubscribers stops output subscribers whose handlers run in the scope
@@ -623,7 +671,7 @@ func (s *gateway) endSession(sess *connSession) {
 // also drains the subscription, and that is harmless with the scope still
 // alive: by then the loop has ended and holds no pull request.
 //
-// The wait is bounded by stopGrace. A handler waiting for an agent that is
+// The wait is bounded by grace. A handler waiting for an agent that is
 // offline, or that went away during the stop, would otherwise hold the stop
 // for as long as the agent stays away. Once the grace has passed the scope is
 // ended, which releases every such handler (the message is NAK'd and waits
@@ -633,7 +681,7 @@ func (s *gateway) endSession(sess *connSession) {
 // Nothing a handler waits for depends on the session still being registered:
 // an agent's poll hands out its pending deliveries and takes their acks
 // whether or not the session is in s.sessions, and nothing here holds s.mu.
-func (s *gateway) stopSubscribers(cancel func(), subs ...*messaging.Subscriber) {
+func (s *gateway) stopSubscribers(grace time.Duration, cancel func(), subs ...*messaging.Subscriber) {
 	for _, sub := range subs {
 		sub.Halt()
 	}
@@ -653,12 +701,12 @@ func (s *gateway) stopSubscribers(cancel func(), subs ...*messaging.Subscriber) 
 		}
 		wg.Wait()
 	}()
-	grace := time.NewTimer(s.stopGrace)
+	timer := time.NewTimer(grace)
 	select {
 	case <-stopped:
-	case <-grace.C:
+	case <-timer.C:
 	}
-	grace.Stop()
+	timer.Stop()
 	cancel()
 	<-stopped
 }
