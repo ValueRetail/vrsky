@@ -470,7 +470,7 @@ Last updated 2026-10-28.
     not with the server; Deploy then sends no name. Refresh `deployedName`
     from the loaded connection on edit-load (and show the server's name if
     the tab was never renamed). Found in review of #450.
-73. **A failed workspace delete leaves state as it was** although
+73. ~~**A failed workspace delete leaves state as it was**~~ (#514) although
     `TenantSelector`'s catch says "checkAuth will refresh state
     regardless"; it never calls checkAuth. Fix the comment or the code.
     Found during #450.
@@ -705,6 +705,11 @@ Last updated 2026-10-28.
     makes the other pod skip new files the fallback took as done. Merge
     before that first snapshot, or keep the fallback's names out of it.
     Found in review of #500.
+103. **A workspace deleted elsewhere stays in the selector.** Deleting it
+    again answers 403 or 404, and since #514 `TenantSelector` only shows
+    that error. The server did answer, so a `checkAuth` on 403/404 can't
+    turn a network blip into a logout; it would drop the stale workspace.
+    Found in review of #514.
 
 ## Human
 

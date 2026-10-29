@@ -3,10 +3,11 @@ import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import CreateTenantModal from './CreateTenantModal'
 import apiClient from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiError'
 
 export default function TenantSelector() {
   const { tenants, currentTenant, switchTenant, checkAuth } = useAuthStore()
-  const { showConfirmDialog, hideConfirmDialog } = useUIStore()
+  const { showConfirmDialog, hideConfirmDialog, showErrorNotification } = useUIStore()
   const [showCreateModal, setShowCreateModal] = useState(false)
 
   if (tenants.length === 0) return null
@@ -23,10 +24,17 @@ export default function TenantSelector() {
         hideConfirmDialog()
         try {
           await apiClient.delete(`/api/v1/tenants/${currentTenant.id}`)
-          await checkAuth()
-        } catch {
-          // checkAuth will refresh state regardless
+        } catch (err) {
+          // The workspace is still there, so the selector stays as it is.
+          // No checkAuth here: it signs the user out when /me fails, which
+          // on a network error would turn a failed delete into a logout.
+          showErrorNotification(
+            'Workspace not deleted',
+            apiErrorMessage(err, 'Could not delete the workspace. Try again.'),
+          )
+          return
         }
+        await checkAuth()
       },
     })
   }
