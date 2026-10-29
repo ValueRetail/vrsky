@@ -74,6 +74,13 @@ type gateway struct {
 	sessions map[string]*connSession // connectionID → running pipeline
 	agents   map[string]*agentState  // agentID → pending work
 	events   *eventHub
+	// closed is set by Stop, under mu. A start that finishes after it ends
+	// the session it built instead of registering it.
+	closed bool
+
+	// commands runs each connection's starts and stops one at a time, in
+	// arrival order (#429); see lanes.go.
+	commands commandLanes
 
 	startSub, stopSub *nats.Subscription
 
@@ -104,6 +111,11 @@ type gateway struct {
 	// registered in memberSubs: the window in which an endSession could not
 	// see it to halt it (#461).
 	afterMemberSubscribe func(agentID string)
+	// afterPipelineLoad is a test seam, nil in production. It runs in a start
+	// once the pipeline's nodes are read, during the start's turn: the window
+	// in which a second start or a stop for the connection arrives while the
+	// first is still loading (#429).
+	afterPipelineLoad func(connID string)
 }
 
 func newGateway() *gateway {
@@ -247,6 +259,7 @@ func (s *gateway) Stop(ctx context.Context) error {
 		_ = s.stopSub.Unsubscribe()
 	}
 	s.mu.Lock()
+	s.closed = true
 	all := make([]*connSession, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		all = append(all, sess)
@@ -271,15 +284,23 @@ func (s *gateway) onCommand(start bool) nats.MsgHandler {
 			s.logger.Warn("Ignoring malformed connection command", "subject", msg.Subject)
 			return
 		}
+		// The turn is taken here, on the callback goroutine, so the
+		// connection's commands run in the order this subscription saw them
+		// (#429).
+		turn := s.commands.queue(cmd.ConnectionID, cmd.TenantID, !start)
 		// Off the NATS callback goroutine: a start queries the database, and
 		// a stop waits for an in-flight delivery to let go.
 		go func() {
+			defer turn.done()
+			turn.wait()
+			// The timeout starts once it is this command's turn, so waiting
+			// behind another command does not eat into it.
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if start {
-				s.startConnection(ctx, cmd.ConnectionID, cmd.TenantID)
+				s.runStart(ctx, turn, cmd.ConnectionID, cmd.TenantID)
 			} else {
-				s.stopConnection(ctx, cmd.ConnectionID, cmd.TenantID)
+				s.runStop(ctx, cmd.ConnectionID, cmd.TenantID)
 			}
 		}()
 	}
@@ -294,11 +315,27 @@ func (s *gateway) restoreRunning(ctx context.Context) {
 }
 
 // startConnection brings a pipeline's remote_agent nodes up, or does nothing if
-// the pipeline has none. The connection is looked up scoped by the tenant the
-// command names, and every agent a node refers to must belong to that same
-// tenant — this is where an agent from another workspace is refused.
+// the pipeline has none, in its turn on the connection's lane: it waits for
+// the connection's earlier commands to finish first (#429). Boot restore
+// calls it; start commands take their turn on the callback goroutine and call
+// runStart.
 func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) {
+	turn := s.commands.queue(connID, tenantID, false)
+	defer turn.done()
+	turn.wait()
+	s.runStart(ctx, turn, connID, tenantID)
+}
+
+// runStart is a start's work, run in its turn. The connection is looked up
+// scoped by the tenant the command names, and every agent a node refers to
+// must belong to that same tenant — this is where an agent from another
+// workspace is refused.
+func (s *gateway) runStart(ctx context.Context, turn *commandTurn, connID, tenantID string) {
 	logger := s.logger.With("connection_id", connID, "tenant_id", tenantID)
+	if turn.stoppedSince() || s.isClosed() {
+		logger.Info("Start abandoned: a stop arrived before it ran")
+		return
+	}
 
 	var nodesJSON, edgesJSON []byte
 	err := s.db.QueryRowContext(ctx, `
@@ -314,6 +351,9 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 	if err != nil {
 		logger.Error("Could not read pipeline nodes", "error", err)
 		return
+	}
+	if s.afterPipelineLoad != nil {
+		s.afterPipelineLoad(connID)
 	}
 	if len(inputs) == 0 && len(outputs) == 0 {
 		// Not ours — or no longer ours after a redeploy.
@@ -407,10 +447,22 @@ func (s *gateway) startConnection(ctx context.Context, connID, tenantID string) 
 		sess.sub = sub
 	}
 
+	// A stop queued during the work above is newer than this start and wins,
+	// and so does shutdown: end what was built (halt before cancel, as for
+	// any session) instead of registering it. A stop queued after this point
+	// waits for the turn to end and then stops the session.
 	s.mu.Lock()
-	s.sessions[connID] = sess
-	s.wakeAgentsLocked(sess)
+	abandon := s.closed || turn.stoppedSince()
+	if !abandon {
+		s.sessions[connID] = sess
+		s.wakeAgentsLocked(sess)
+	}
 	s.mu.Unlock()
+	if abandon {
+		s.endSession(sess)
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
+		return
+	}
 
 	// Per-member durables for the group outputs.
 	s.reconcileGroups(ctx, sess)
@@ -438,8 +490,28 @@ func hasSingleAgentOutput(outputs []remoteNode) bool {
 	return false
 }
 
-// stopConnection ends a pipeline's session, if it has one.
-func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) {
+// runStop is a stop command's work, run in its turn: it ends the session and,
+// if there was one, records "stopped". Written here, in the turn, the status
+// lands after the "running" of any start before it, so a stop that arrived
+// while that start was finishing still ends "stopped" (#429). A stop for a
+// connection this gateway is not running writes nothing.
+func (s *gateway) runStop(ctx context.Context, connID, tenantID string) {
+	if s.stopConnection(ctx, connID, tenantID) {
+		s.setStopped(ctx, connID, tenantID)
+	}
+}
+
+// isClosed reports whether Stop has run.
+func (s *gateway) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// stopConnection ends a pipeline's session, if it has one, and reports
+// whether it did. It writes no status: a start replacing the session calls it
+// too.
+func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) bool {
 	s.mu.Lock()
 	sess := s.sessions[connID]
 	if sess != nil && sess.tenantID == tenantID {
@@ -450,10 +522,11 @@ func (s *gateway) stopConnection(ctx context.Context, connID, tenantID string) {
 	}
 	s.mu.Unlock()
 	if sess == nil {
-		return
+		return false
 	}
 	s.endSession(sess)
 	s.logger.Info("Remote agent pipeline stopped", "connection_id", connID)
+	return true
 }
 
 // endSession cancels a session and waits for its subscribers to let go. The
@@ -579,6 +652,16 @@ func (s *gateway) setStatus(ctx context.Context, connID, tenantID, status string
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE connections SET status = $1, started_at = NOW(), updated_at = NOW(), last_error = NULL
 		WHERE id::text = $2 AND tenant_id = $3`, status, connID, tenantID); err != nil {
+		s.logger.Warn("Could not update pipeline status", "connection_id", connID, "error", err)
+	}
+}
+
+// setStopped records a stop. last_error is left alone: a billing stop has
+// already put its reason there.
+func (s *gateway) setStopped(ctx context.Context, connID, tenantID string) {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE connections SET status = 'stopped', stopped_at = NOW(), updated_at = NOW()
+		WHERE id::text = $1 AND tenant_id = $2`, connID, tenantID); err != nil {
 		s.logger.Warn("Could not update pipeline status", "connection_id", connID, "error", err)
 	}
 }

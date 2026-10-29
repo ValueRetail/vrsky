@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -37,6 +38,15 @@ type frontSystemsConsumer struct {
 	// resolveTenant maps a connection id to its owning tenant (webhook routing).
 	// Defaulted in Configure to the DB lookup; tests inject a stub.
 	resolveTenant func(connID string) (string, error)
+
+	// active holds the connections this process has started (and registered
+	// webhooks for, when a callback URL is set), by connection ID. starts
+	// keeps two starts of one connection (boot restore and a start command,
+	// say) from both registering its webhooks, and lets a stop that arrives
+	// mid-start win (#397, #429). Both under mu.
+	mu     sync.Mutex
+	active map[string]struct{}
+	starts sdk.StartGuard
 
 	startSub *nats.Subscription
 	stopSub  *nats.Subscription
@@ -129,6 +139,11 @@ func (c *frontSystemsConsumer) Stop(ctx context.Context) error {
 	if c.stopSub != nil {
 		_ = c.stopSub.Unsubscribe()
 	}
+	c.mu.Lock()
+	c.active = nil
+	// A start still in flight gives up instead of counting as started.
+	c.starts.StopAllLocked()
+	c.mu.Unlock()
 	return nil
 }
 
@@ -144,8 +159,22 @@ func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
 func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	_ = ctx
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
+
+	// Restore and the start-command handler call this on different goroutines.
+	// The check and the claim are one critical section, so a second start for
+	// the same connection stops here instead of registering the webhooks again
+	// (#397, #429). A start refused while another is in flight runs again if
+	// that one gives up without activating (#424).
+	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID,
+		func() bool { _, ok := c.active[connectionID]; return ok },
+		func() { c.startConnection(ctx, connectionID, tenantID) })
+	if !ok {
+		logger.Warn("Front Systems connection already started or starting")
+		return
+	}
+	// Frees the claim on every early return below; a no-op once active.
+	defer claim.Release()
 
 	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
 	if err != nil {
@@ -154,16 +183,44 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 	}
 	// Auto-register our callback for the configured events, if a callback URL is
 	// set. If not, the webhook is expected to be registered out of band and this
-	// connector just receives on /frontsystems/events/{id}.
+	// connector just receives on /frontsystems/events/{id}. A failed
+	// registration leaves the connection not started, so the next start (or a
+	// start refused meanwhile) tries again.
 	if cfg.CallbackURL != "" && len(cfg.Events) > 0 {
 		if err := c.registerWebhooks(context.Background(), cfg, logger); err != nil {
 			logger.Error("Front Systems webhook registration failed", "error", err)
+			return
 		}
+	}
+	// A stop that arrived during the work above has taken the claim back and
+	// wins. Registrations are server-side and a stop never removes them, so
+	// there is nothing to undo here.
+	if !claim.Activate(func() {
+		if c.active == nil {
+			c.active = make(map[string]struct{})
+		}
+		c.active[connectionID] = struct{}{}
+	}) {
+		logger.Info("Start abandoned: a stop arrived while it was in progress")
 	}
 }
 
+// handleStopCommand forgets the connection, so its next start registers the
+// webhooks again, and makes a start in progress give up. There are no
+// per-connection resources to tear down (registrations are server-side).
 func (c *frontSystemsConsumer) handleStopCommand(msg *nats.Msg) {
-	// No per-connection resources to tear down (registrations are server-side).
+	var cmd commandMessage
+	if err := json.Unmarshal(msg.Data, &cmd); err != nil {
+		c.logger.Error("parse stop command", "error", err)
+		return
+	}
+	c.mu.Lock()
+	delete(c.active, cmd.ConnectionID)
+	starting := c.starts.StopLocked(cmd.ConnectionID)
+	c.mu.Unlock()
+	if starting {
+		c.logger.Info("Stop arrived while the connection was starting; the start is abandoned", "connection_id", cmd.ConnectionID)
+	}
 }
 
 // registerWebhooks subscribes our callback URL for each configured event type
