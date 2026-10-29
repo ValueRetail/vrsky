@@ -2536,12 +2536,31 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   (default, leave it), <code>delete</code>, or <code>move</code>. Applies in both modes.</li>
 <li><code>move_prefix</code> — where <code>move</code> puts the object: it is copied to
   <code>&lt;move_prefix&gt;/&lt;base name&gt;</code>, then deleted. Required with <code>move</code>; without
-  it the consumer doesn't start. Put it outside <code>prefix</code> (and outside what
-  the bucket notification covers in event mode): a moved object inside it
-  is a new key to the consumer and is ingested again. Moves keep only the
-  base name, so <code>incoming/a/x.csv</code> and <code>incoming/b/x.csv</code> both land on
+  it the consumer doesn't start. Moves keep only the base name, so
+  <code>incoming/a/x.csv</code> and <code>incoming/b/x.csv</code> both land on
   <code>&lt;move_prefix&gt;/x.csv</code> and the second overwrites the first.</li>
 </ul>
+<p>In poll mode the start is also refused when the listing of <code>prefix</code>
+  would find moved objects again (#567). The log says <code>invalid
+  move_prefix</code> and names both values. The listing matches <code>prefix</code> as
+  text, not as a folder:
+  - Starts: <code>prefix: incoming/</code> with <code>processed/</code>, <code>incoming-done/</code> or <code>.</code>
+    (the bucket root); <code>prefix: incoming/a/</code> with <code>incoming</code> (one level
+    up).
+  - Refused: <code>move_prefix</code> equal to or under <code>prefix</code> (<code>incoming/</code>,
+    <code>incoming/done/</code>); any <code>move_prefix</code> with an empty <code>prefix</code> (the whole
+    bucket); <code>prefix: incoming</code> without the <code>/</code> and <code>incoming-done/</code>
+    (<code>incoming</code> lists <code>incoming-done/…</code> too); <code>prefix: data/report_</code> with
+    <code>data</code> (<code>data/report_1.csv</code> would move onto itself).</p>
+<p>For the bucket root use <code>.</code>, not <code>/</code>: a move keeps a leading slash, so
+  <code>/</code> puts <code>x.csv</code> at the key <code>/x.csv</code>, which S3 and GCS keep as a
+  separate key from <code>x.csv</code>. The check resolves <code>.</code> and <code>..</code> the way the
+  move does but ignores leading slashes, so it may refuse a config with a
+  leading <code>/</code> that would have worked on S3 or GCS. In event mode <code>prefix</code> is not applied, so the start is not
+  checked: keep <code>move_prefix</code> outside what the bucket notification covers,
+  or a moved object is ingested a second time. In both modes the consumer
+  never moves an object onto its own key: that move fails with
+  <code>after-action failed</code> in the log and the object stays where it is.</p>
 <p>Event mode also reads:</p>
 <ul>
 <li><code>event_queue_url</code> — S3: the SQS queue URL. Required.</li>
