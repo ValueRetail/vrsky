@@ -4,7 +4,7 @@
  */
 
 import apiClient from './api'
-import type { Connection } from '../types/models'
+import type { Connection, ConnectionStatus } from '../types/models'
 import type {
   GetConnectionResponse,
   ListConnectionsResponse,
@@ -47,13 +47,16 @@ export async function getConnection(id: string): Promise<Connection> {
  */
 export async function listConnections(
   page?: number,
-  pageSize?: number
+  pageSize?: number,
+  status?: ConnectionStatus
 ): Promise<ListConnectionsResponse> {
   const params = new URLSearchParams()
   const limit = pageSize || 20
   const offset = page !== undefined ? (page - 1) * limit : 0
   params.append('limit', limit.toString())
   params.append('offset', offset.toString())
+  // The API filters by status, and its total counts only the matches.
+  if (status) params.append('status', status)
 
   const queryString = params.toString()
   const url = queryString ? `/api/v1/connections?${queryString}` : '/api/v1/connections'

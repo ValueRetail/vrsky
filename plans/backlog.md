@@ -480,7 +480,7 @@ Last updated 2026-10-28.
     guard, so on a slow switch from A to B, A's answer can land after B's
     and the list shows A's connections under B. Give it the same guard as
     the connections store's `load()`. Found in review of #450 (#466).
-75. **The sidebar's status counts cover at most 100 connections.** They
+75. ~~**The sidebar's status counts cover at most 100 connections.**~~ (#541) They
     come from the store's loaded items (`limit=100`), while the badge shows
     the API total, so a workspace with more than 100 shows a badge that
     disagrees with the running/stopped/error cards. Count by status on the
@@ -571,7 +571,7 @@ Last updated 2026-10-28.
     Either delete along the path (a behaviour change for existing
     pipelines, so say so in the PR) or document it. The editor's `each`
     help text says so since #458. Found in #458.
-88. **Converter editor accessibility.** Nested mapping rows repeat the
+88. ~~**Converter editor accessibility.**~~ (#542) Nested mapping rows repeat the
     accessible names "Mapping type" and "Remove mapping" with no row
     context, so a screen reader can't tell rows apart, and a row's
     warnings aren't tied to its inputs with `aria-describedby`
@@ -672,7 +672,7 @@ Last updated 2026-10-28.
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
     a retry would read better. Found in review of #501.
-99. **No runbook for rotating the ACR password.** The password enters the
+99. ~~**No runbook for rotating the ACR password.**~~ (#539) The password enters the
     cluster in `deploy-azure.sh` step 2 (`vrsky-platform`, `vrsky-storage`)
     and `minio-images-acr.sh --repoint` (`vrsky-storage`), and every deploy
     copies it on into `vrsky-database` and `vrsky-ui` (#497). Nothing says
@@ -687,15 +687,15 @@ Last updated 2026-10-28.
     canvas id with it). The #502 name sync stays safe meanwhile, because the
     store only applies a name to a canvas linked to that connection. Found
     in review of #502.
-101. **A stale edit-route answer can undo a rename deployed meanwhile.** The
+101. ~~**A stale edit-route answer can undo a rename deployed meanwhile.**~~ (#540) The
     #502 sync reads the canvas when the GET answers. If the user renames the
     tab and Deploys before that, `deployedName` already equals the new tab,
     so the old answer counts as "not renamed" and puts the old name back on
     both. The server keeps the new name; the tab is wrong until the next
     edit-route open. Capture `deployedName` when the request goes out and
     skip the sync if it changed. Found in review of #502.
-102. **A file-consumer start that couldn't read its checkpoint saves its
-    guess anyway.** `loadKnown`'s fallback after a failed checkpoint read
+102. ~~**A file-consumer start that couldn't read its checkpoint saves its
+    guess anyway.**~~ (#536) `loadKnown`'s fallback after a failed checkpoint read
     takes every file in the folder as done with its stamp now, and its
     comment says this isn't saved. But the first real change saves it:
     `saveKnown` takes the `savedGen == ""` path, which writes a snapshot
@@ -732,6 +732,14 @@ Last updated 2026-10-28.
     not after two. `docs/connectors/file.md`, the paragraphs on moving files
     out and on replaced files. Left out of #537 because another worker had
     `docs/` at the time.
+106. **A file-consumer checkpoint row that can't be decoded is never
+    replaced.** Since #536 a start that couldn't read its checkpoint saves
+    nothing until a read works. For a row that fails to decode that is
+    never: the watcher logs an Error every poll and falls back to its guess
+    at every start. Before #536 the first change overwrote it. Nobody can
+    read such a row, so a decode error (not a store error) could count as
+    "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
+    `keepSavedStamps` (#500). Found in review of #536.
 
 ## Human
 
