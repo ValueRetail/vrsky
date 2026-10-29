@@ -143,6 +143,7 @@ func TestIncremental_FrozenWatermarkResumesShortlyBeforeItWasStored(t *testing.T
 		"o": stamp(-4 * time.Hour),                // read long before the freeze
 		"w": stamp(-2*time.Hour - 30*time.Minute), // in the hour before the freeze: re-sent
 		"m": stamp(-time.Hour),                    // modified after the freeze: missed until now
+		"n": stamp(time.Minute),                   // BC's clock a little ahead: held, not evidence of anything
 		"f": "2099-01-01T00:00:00Z",
 	})
 	c, got, mu := newTestConsumer()
@@ -152,8 +153,8 @@ func TestIncremental_FrozenWatermarkResumesShortlyBeforeItWasStored(t *testing.T
 	seedFrozen(t, c, frozeAt, "")
 	cfg := bc.cfg()
 
-	if ids := poll(t, c, got, mu, cfg); sorted(ids) != "f,m,w" {
-		t.Errorf("recovery published %v, want f,m,w (o is older than the window)", ids)
+	if ids := poll(t, c, got, mu, cfg); sorted(ids) != "f,m,n,w" {
+		t.Errorf("recovery published %v, want f,m,n,w (o is older than the window)", ids)
 	}
 	resume := frozeAt.Add(-time.Hour).UTC().Format(time.RFC3339)
 	if want := "lastModifiedDateTime gt " + resume; bc.asks[0] != want {
@@ -189,13 +190,16 @@ func TestIncremental_FrozenWatermarkFallsBackToAFullRead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bc := newAheadBC(t, map[string]string{
 				"o": stamp(-4 * time.Hour), "m": stamp(-time.Hour), "f": "2099-01-01T00:00:00Z",
+				// below the stored watermark: on a full read that is no reason
+				// to store none and read everything again
+				"f0": "2098-01-01T00:00:00Z",
 			})
 			c, got, mu := newTestConsumer()
 			c.now = func() time.Time { return aheadNow }
 			seedFrozen(t, c, tc.at, tc.state)
 			cfg := bc.cfg()
-			if ids := poll(t, c, got, mu, cfg); sorted(ids) != "f,m,o" {
-				t.Errorf("published %v, want a full re-read (f,m,o)", ids)
+			if ids := poll(t, c, got, mu, cfg); sorted(ids) != "f,f0,m,o" {
+				t.Errorf("published %v, want a full re-read (f,f0,m,o)", ids)
 			}
 			if bc.asks[0] != "" {
 				t.Errorf("first request carried $filter=%q, want none", bc.asks[0])
@@ -330,5 +334,52 @@ func TestIncremental_FrozenRecoveryNeverStartsInTheFuture(t *testing.T) {
 	}
 	if want := "lastModifiedDateTime gt " + stamp(-time.Hour); bc.asks[0] != want {
 		t.Errorf("recovery asked %q, want %q", bc.asks[0], want)
+	}
+}
+
+// TestIncremental_FrozenThenResavedFallsBackToAFullRead — from the second
+// review of #592. The old code froze on f1 (2099) at now-10h, missed m
+// (modified at now-5h), then read f2 (2100) and saved again at now-2h. The
+// bounded window (from now-3h) cannot see m. The recovery read returns f1, a
+// far-future value below the stored watermark, which shows a second save may
+// have happened: the next poll reads from the start, m goes out, and f1 and
+// f2 are not sent again.
+func TestIncremental_FrozenThenResavedFallsBackToAFullRead(t *testing.T) {
+	bc := newAheadBC(t, map[string]string{
+		"a": stamp(-12 * time.Hour), "f1": "2099-01-01T00:00:00Z",
+		"m": stamp(-5 * time.Hour), "f2": "2100-01-01T00:00:00Z",
+	})
+	c, got, mu := newTestConsumer()
+	c.now = func() time.Time { return aheadNow }
+	var logs bytes.Buffer
+	c.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	if err := c.checkpoints.Save(context.Background(), &checkpoint.Checkpoint{
+		TenantID: "tenant-1", ConnectionID: "conn-1", NodeID: "src",
+		LastProcessedMessageID: "2100-01-01T00:00:00Z", LastProcessedAt: aheadNow.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh config each poll, as after a restart: the remembered set must
+	// come back from the checkpoint.
+	if ids := poll(t, c, got, mu, bc.cfg()); sorted(ids) != "f1,f2" {
+		t.Fatalf("bounded recovery published %v, want f1,f2", ids)
+	}
+	if w := storedWatermark(t, c); w != "" {
+		t.Errorf("stored watermark %q after the evidence of a second save, want none (full read next)", w)
+	}
+	if !strings.Contains(logs.String(), "may have saved again") {
+		t.Errorf("no Warn about the fallback:\n%s", logs.String())
+	}
+	if ids := poll(t, c, got, mu, bc.cfg()); sorted(ids) != "a,m" {
+		t.Errorf("full read published %v, want a,m (f1 and f2 already sent)", ids)
+	}
+	if bc.lastAsk() != "" {
+		t.Errorf("second poll asked %q, want no filter", bc.lastAsk())
+	}
+	if ids := poll(t, c, got, mu, bc.cfg()); len(ids) != 0 {
+		t.Errorf("third poll published %v, want nothing", ids)
+	}
+	if want := "lastModifiedDateTime gt " + stamp(-5*time.Hour); bc.lastAsk() != want {
+		t.Errorf("third poll asked %q, want %q", bc.lastAsk(), want)
 	}
 }

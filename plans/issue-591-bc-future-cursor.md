@@ -53,11 +53,21 @@ and no later record is ever newer, so the node goes quiet.
     with a Warn. Rejected: it drops whatever changed between the freeze and
     the bound, silently apart from a log line. A full read costs a replay;
     the other costs data.
-  - Not covered: a frozen node that read an even later far-future value
-    saved again then, so `LastProcessedAt` is that save; records changed
-    between the two saves are older than the window. The Warn carries
-    `watermark`, `last_processed_at` and `resume_from` so an operator can
-    use Resend everything.
+  - A frozen node that read an even later far-future value saved again
+    then, so `LastProcessedAt` is that save, and records changed between the
+    two saves are older than the window (second review). The bounded read
+    returns every future-dated record; one more than 5 minutes ahead but
+    below the stored watermark is evidence of such a save. Then the poll
+    stores no watermark (explicitly), keeps the remembered set, and Warns;
+    the next poll is a full read that does not re-send the future-dated
+    records. Limits: the first far-future record deleted since, or the same
+    record moved 2099 → 2100, is not detected; several far-future values
+    present at the first freeze over-detect (an unneeded full read, the safe
+    direction). The Warns carry `watermark`, `last_processed_at` and
+    `resume_from` for an operator who wants to Resend everything anyway.
+  - Since this fix no watermark later than the clock is stored, so a frozen
+    checkpoint reappears realistically only through a DR restore of a backup
+    taken before the upgrade; the recovery then runs again for that node.
   - The recovery's start is stored explicitly at the end of the poll when the
     read found nothing to take a watermark from (review finding 3: otherwise
     `saveProgress` copied the frozen watermark back). For a full read that
@@ -81,8 +91,8 @@ and no later record is ever newer, so the node goes quiet.
    nothing withheld).
 4. A watermark frozen by the old code is recovered by reading from
    `LastProcessedAt` - 1 h (no pictures) or from the start (pictures, or no
-   `LastProcessedAt`), and is not written back when the recovery finds only
-   future-dated records.
+   `LastProcessedAt`, or the bounded read shows a later re-save), and is not
+   written back when the recovery finds only future-dated records.
 5. Table-driven tracker tests and poll tests against a fake BC that honours
    `gt`.
 

@@ -265,12 +265,26 @@ node sees) is skipped and the converted record is written.
     the start and sends everything again once. That is the costly option, but
     resuming from a guessed time would drop whatever changed between the
     freeze and the guess without a trace. If the recovery read fails partway
-    it starts over on the next poll and sends the same records again. One
-    case the one-hour window cannot see: a frozen node that later read an even
-    later future value saved again then; records changed between those two
-    saves are older than the window. The Warn carries `watermark`,
+    it starts over on the next poll and sends the same records again.
+
+    The one-hour window assumes the node never saved after it froze. Earlier
+    versions did save again when they read an even later value (2099, then
+    2100), and records changed between those two saves are older than the
+    window. The recovery read returns every future-dated record, so when it
+    sees one more than 5 minutes ahead but below the stored watermark, the
+    node may have saved again: it stores no watermark, logs a Warn, and the
+    next poll reads the entity from the start (the future-dated records it
+    already sent are not sent again). What this cannot see: the first
+    far-future record deleted since, or the same record moved from 2099 to
+    2100. Several far-future records already there when the node first froze
+    trigger a full read that was not needed. The Warns carry `watermark`,
     `last_processed_at` and `resume_from`; if in doubt, use **Resend
     everything** on the pipeline, which reads the entity from the start.
+
+    The code since #591 never stores a watermark later than its own clock, so
+    a frozen checkpoint only comes back if the database is restored from a
+    backup taken before the upgrade (a DR restore); the recovery then runs
+    again for that node.
 - **UI source-type wiring** — config is API-settable today.
 
 The same OAuth2 client-credentials pattern (via `pkg/oauthcc`) is reused by the

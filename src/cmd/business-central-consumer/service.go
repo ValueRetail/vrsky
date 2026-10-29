@@ -400,9 +400,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	if err := cfg.validatePictures(); err != nil {
 		return err
 	}
-	cursor, recovering := "", false
+	cursor, rec := "", recovery{}
 	if cfg.Incremental && !cfg.resendAll {
-		cursor, recovering = c.startCursor(cfg, c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger), logger)
+		cursor, rec = c.startCursor(cfg, c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger), logger)
 	}
 	if cfg.resendAll {
 		cfg.pictureSeen = map[string]seenPicture{}
@@ -478,9 +478,19 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	// the watermark from (only future-dated records, say): keeping the stored
 	// watermark there would put the frozen one back.
 	newCursor, replace := "", false
-	if cfg.Incremental && watermark.raw != "" {
+	switch {
+	case rec.resaved(ahead, watermark.ceiling):
+		// The bounded window cannot be trusted (see recovery.resaved): store
+		// no watermark, so the next poll reads from the start. The remembered
+		// set is saved below, so the future-dated records this poll sent are
+		// not sent a third time.
+		newCursor, replace = "", true
+		logger.Warn("Business Central recovery read found a future-dated record below the frozen watermark, so "+
+			"the node may have saved again after it froze; the next poll reads the entity from the start",
+			"watermark", rec.stored, "resume_from", cursor)
+	case cfg.Incremental && watermark.raw != "":
 		newCursor = watermark.raw
-	} else if recovering {
+	case rec.active:
 		newCursor, replace = cursor, true
 	}
 	aheadChanged := cfg.Incremental && !sameAhead(cfg.aheadSeen, ahead)
@@ -702,10 +712,48 @@ func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID st
 	return cp
 }
 
+// recovery describes how a fetch gets past a frozen watermark.
+type recovery struct {
+	// active: the stored watermark was frozen and this fetch reads from
+	// somewhere else; the caller then stores an explicit watermark at the
+	// end, so the frozen one cannot come back.
+	active bool
+	// bounded: the read starts shortly before LastProcessedAt rather than
+	// from the start of the entity.
+	bounded bool
+	stored  string    // the frozen watermark as stored
+	frozen  time.Time // it, parsed
+}
+
+// resaved reports whether a bounded recovery read saw a reason to distrust
+// its window. The window rests on the frozen node never having saved after
+// the poll that stored the frozen watermark. But the code before #591 did
+// save again whenever it read an even later value (2099, then 2100), and
+// then LastProcessedAt is that second save; records modified between the
+// two saves are older than the window. The read itself shows the evidence:
+// it returns every future-dated record, and a value more than maxCursorSkew
+// ahead yet below the stored watermark is one the node once froze on, or
+// was ahead of a freeze on. Then the caller falls back to a full read.
+//
+// Not detected: the first far-future record deleted since, or the same
+// record moved from 2099 to 2100 (one value only). Over-detected: several
+// far-future values already present when the node first froze (a full read
+// that was not needed; the safe direction).
+func (r recovery) resaved(ahead map[string]string, now time.Time) bool {
+	if !r.bounded {
+		return false
+	}
+	for _, v := range ahead {
+		t, err := time.Parse(time.RFC3339, v)
+		if err == nil && t.After(now.Add(maxCursorSkew)) && t.Before(r.frozen) {
+			return true
+		}
+	}
+	return false
+}
+
 // startCursor picks the watermark a fetch filters on, from the checkpoint
-// row. recovering is true when the stored watermark was frozen and this
-// fetch reads from somewhere else to get past it; the caller then stores an
-// explicit watermark at the end, so the frozen one cannot come back.
+// row, and says whether this fetch recovers from a frozen one.
 //
 // Frozen means more than maxCursorSkew ahead of now. Since #591 the consumer
 // never stores a watermark later than its own clock, so only the code before
@@ -726,35 +774,36 @@ func (c *bcConsumer) loadCursor(ctx context.Context, tenantID, connID, nodeID st
 // whatever was modified between the freeze and that bound, with nothing but a
 // log line to show for it.
 //
-// One case the bound cannot see: a node that froze and then read an even
-// later far-future value saved again then, so LastProcessedAt is that second
-// save. Records modified between the two saves are older than the recovery
-// read. The Warn carries the stored values so an operator can Resend instead.
-func (c *bcConsumer) startCursor(cfg *BCConfig, cp *checkpoint.Checkpoint, logger *slog.Logger) (cursor string, recovering bool) {
+// A node that froze and then read an even later far-future value saved again
+// then, so LastProcessedAt is that second save; recovery.resaved catches what
+// it can of that case and turns it into a full read.
+func (c *bcConsumer) startCursor(cfg *BCConfig, cp *checkpoint.Checkpoint, logger *slog.Logger) (string, recovery) {
 	if cp == nil {
-		return "", false
+		return "", recovery{}
 	}
 	stored := cp.LastProcessedMessageID
 	now := c.clock()
 	t, err := time.Parse(time.RFC3339, stored)
 	if err != nil || !t.After(now.Add(maxCursorSkew)) {
-		return stored, false
+		return stored, recovery{}
 	}
+	rec := recovery{active: true, stored: stored, frozen: t}
 	if cp.LastProcessedAt.IsZero() || cfg.Pictures || stateHasPictures(cp.State) {
 		logger.Warn("stored Business Central watermark is in the future and the checkpoint does not say when "+
 			"it was stored; reading the entity from the start, so every record is sent again once",
 			"watermark", stored, "last_processed_at", cp.LastProcessedAt, "pictures", cfg.Pictures)
-		return "", true
+		return "", rec
 	}
 	from := cp.LastProcessedAt
 	if from.After(now) {
 		from = now
 	}
-	cursor = from.Add(-frozenRecoveryMargin).UTC().Format(time.RFC3339)
+	cursor := from.Add(-frozenRecoveryMargin).UTC().Format(time.RFC3339)
 	logger.Warn("stored Business Central watermark is in the future; re-reading from shortly before it was stored. "+
 		"Records modified in that hour are sent again",
 		"watermark", stored, "last_processed_at", cp.LastProcessedAt, "resume_from", cursor)
-	return cursor, true
+	rec.bounded = true
+	return cursor, rec
 }
 
 // stateHasPictures reports whether a checkpoint's state was ever saved by a
