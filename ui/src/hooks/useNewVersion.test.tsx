@@ -219,6 +219,62 @@ describe('useNewVersion: two matching checks (#600)', () => {
     expect(result.current).toBeNull()
   })
 
+  it('after a rollback to the old set, needs two matching sightings of the new set again', async () => {
+    loadTab(A)
+    // The old pod answers the confirming check, then the new one answers again.
+    fetchMock
+      .mockResolvedValueOnce(answer(html(B)))
+      .mockResolvedValueOnce(answer(html(A)))
+      .mockResolvedValue(answer(html(B)))
+    const { result } = renderHook(() => useNewVersion())
+    await advance(VERSION_POLL_MS) // B: first sighting
+    await advance(VERSION_RECHECK_MS) // A: the old pod answered
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current).toBeNull()
+    await advance(VERSION_POLL_MS - VERSION_RECHECK_MS) // B again, but a first sighting
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.current).toBeNull()
+    await advance(VERSION_RECHECK_MS) // B twice since the rollback
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(result.current).toContain('index-BBB.js')
+  })
+
+  it('a rejected fetch between two sightings starts the wait again', async () => {
+    loadTab(A)
+    fetchMock
+      .mockResolvedValueOnce(answer(html(B)))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(answer(html(B)))
+    const { result } = renderHook(() => useNewVersion())
+    await advance(VERSION_POLL_MS) // B
+    await advance(VERSION_RECHECK_MS) // network error
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current).toBeNull()
+    await advance(VERSION_POLL_MS - VERSION_RECHECK_MS) // B again, but a first sighting
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.current).toBeNull()
+    await advance(VERSION_RECHECK_MS)
+    expect(result.current).toContain('index-BBB.js')
+  })
+
+  it('a page without /assets/ references between two sightings starts the wait again', async () => {
+    loadTab(A)
+    fetchMock
+      .mockResolvedValueOnce(answer(html(B)))
+      .mockResolvedValueOnce(answer('<html><body><h1>503 Service Temporarily Unavailable</h1></body></html>'))
+      .mockResolvedValue(answer(html(B)))
+    const { result } = renderHook(() => useNewVersion())
+    await advance(VERSION_POLL_MS) // B
+    await advance(VERSION_RECHECK_MS) // an error page
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.current).toBeNull()
+    await advance(VERSION_POLL_MS - VERSION_RECHECK_MS) // B again, but a first sighting
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.current).toBeNull()
+    await advance(VERSION_RECHECK_MS)
+    expect(result.current).toContain('index-BBB.js')
+  })
+
   it('withdraws an offered version when the next check sees yet another set', async () => {
     loadTab(A)
     fetchMock.mockResolvedValue(answer(html(B)))

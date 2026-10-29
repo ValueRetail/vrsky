@@ -86,3 +86,18 @@ No change to `ui/Dockerfile`, the nginx config or `infrastructure/`.
 - Mutation run (by hand) on the gap check, the already-offered check, the
   same-set comparison, the flag check and the origin check; each is caught
   by at least one test.
+- The guard skips its reload when `#root` already has children after the
+  2 s wait: if the app started, a second failing script (a lazy chunk, say)
+  must not reload the page.
+
+## Limits
+
+- The guard is an inline script, so it depends on the UI serving no
+  Content-Security-Policy that blocks inline scripts. True today:
+  `ui/nginx.conf`, `ui/nginx.default.conf` and the UI ingress set none.
+  Adding a CSP later needs a nonce or hash for this script, or the guard
+  silently stops working.
+- The rollout window is narrowed, not closed. Old and new pods can both
+  answer two checks 31 s apart, so the banner can still be offered for a
+  set whose script an old pod 404s. The entry-script retry covers that
+  case after the fact.

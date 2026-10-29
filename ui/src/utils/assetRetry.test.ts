@@ -120,6 +120,34 @@ describe('asset retry guard', () => {
     expect(reload).toHaveBeenCalledTimes(2)
   })
 
+  it('skips the reload when the app has started by then (#root has children)', () => {
+    const root = document.createElement('div')
+    root.id = 'root'
+    document.body.appendChild(root)
+    try {
+      // A second script fails; the flag is set, but the app is already up.
+      failScript('/assets/chunk-LATE.js')
+      root.appendChild(document.createElement('div'))
+      vi.advanceTimersByTime(5_000)
+      expect(reload).not.toHaveBeenCalled()
+    } finally {
+      root.remove()
+    }
+  })
+
+  it('still reloads when #root exists but is empty', () => {
+    const root = document.createElement('div')
+    root.id = 'root'
+    document.body.appendChild(root)
+    try {
+      failScript('/assets/index-NEW.js')
+      vi.advanceTimersByTime(5_000)
+      expect(reload).toHaveBeenCalledTimes(1)
+    } finally {
+      root.remove()
+    }
+  })
+
   it('ignores scripts outside /assets/, such as an injected extension script', () => {
     failScript('/extension/inject.js')
     failScript('https://cdn.example.com/assets/x.js')
