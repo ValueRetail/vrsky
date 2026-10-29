@@ -14,6 +14,9 @@ looked fine.
   and returns `{ started: true }` or `{ started: false, message }`, with the
   message from `getErrorMessage` (the API's own text). It never throws, and
   never drops the error.
+- `services/deployPipeline.ts`: `startOutcome(id, start, extras)` is the pure
+  decision: the toast (type, title, message) and the status bar (label, tone).
+  An empty API message reads "the API gave no reason".
 - `pages/PipelineBuilder.tsx`: after the deploy (create or update) the page
   calls `startDeployed`.
   - Started: the success toast as before.
@@ -32,11 +35,11 @@ looked fine.
   The toast says the pipeline was saved.
 - The status bar shows the real state after a failed start.
 - Tests that fail before the fix, in `services/deployPipeline.test.ts`:
-  `startDeployed` returns the API's message for a rejected start (and
-  `started: true` otherwise), and source pins on the builder's deploy
-  function check that the start goes through `startDeployed`, that
-  "deployed and running!" is only on the started branch, that the other branch
-  raises an error toast with the message and that the bar follows the result.
+  `startDeployed` returns the API's message for a rejected start;
+  `startOutcome` gives the toast and bar for success, an API error and an
+  empty message; source pins check that the builder's deploy function goes
+  through `startDeployed` and `startOutcome`, has no success text of its own
+  and renders the bar from the outcome.
   The page is not rendered in the suite: it is a ~2000 line component the
   coverage gate keeps out, and importing it into a test drops the global
   thresholds below 80/75 (measured: statements 78%, branches 67%). The same
