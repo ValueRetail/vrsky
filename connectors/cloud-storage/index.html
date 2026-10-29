@@ -2529,9 +2529,11 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
 <li>Credentials — per-provider, as in the table above.</li>
 <li><code>mode</code> — <code>poll</code> (default) or <code>event</code> for notification-driven reads.</li>
 <li><code>poll_interval_seconds</code> — poll mode: seconds between listings. <code>0</code> or
-  unset means one listing, after which the connection shows as stopped. The
-  editor shows <code>60</code> in this field until you change it, but saves nothing
-  until you do, so type the interval you want.</li>
+  unset means one listing, after which the connection shows as stopped. A new
+  poll-mode source in the editor saves <code>60</code> here without you touching the
+  field. A node saved before that change (#589) has no value and lists once:
+  open it, press Save Configuration so it gets the <code>60</code>, and redeploy. Type
+  <code>0</code> to choose one listing on purpose.</li>
 <li><code>file_pattern</code> — poll mode: glob matched against the object's base name
   (the part after the last <code>/</code>), e.g. <code>*.csv</code>. Empty means every object.</li>
 <li><code>after_action</code> — what to do with an object once it is published: <code>none</code>
