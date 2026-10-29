@@ -282,10 +282,13 @@ var errCheckpointRead = errors.New("could not read which files were already publ
 // again.
 //
 // A failed checkpoint read depends on requireSaved. Without it (the start)
-// it falls back to the first-start rule for this run but does not save it:
-// that would overwrite the saved history with "everything present is done",
-// and another watcher re-reading it could then skip a file it should
-// publish. The first real change saves. With it (a deferred baseline) it
+// it falls back to the first-start rule for this run, but that is a guess
+// and is never saved as it is: it would overwrite the saved history with
+// "everything present is done", and another watcher re-reading it could then
+// skip a file it should publish. The guessed names are kept in ac.guessed
+// and the set is dirty, so each poll tries to save; the save reads the saved
+// set first and corrects the guess from it, and writes nothing until that
+// read works (settleGuess, #536). With it (a deferred baseline) it
 // returns an error wrapping errCheckpointRead and changes nothing, so the
 // baseline stays deferred and the next poll tries again: falling back there
 // would count every file that landed during the outage as done (#409).
@@ -306,6 +309,7 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 		// one (#426).
 		ac.savedGen = ""
 		ac.changed = nil
+		ac.guessed = nil
 	}
 	switch {
 	case err != nil && requireSaved:
@@ -313,7 +317,12 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 	case err != nil:
 		ac.knownFiles = current
 		ac.knownStamps = stampAll(ac.WatchDir, current)
-		logger.Error("Could not read which files were already published; treating every file in the folder as done",
+		ac.guessed = make(map[string]bool, len(current))
+		for name := range current {
+			ac.guessed[name] = true
+		}
+		ac.dirty = true
+		logger.Error("Could not read which files were already published; treating every file in the folder as done until it can be read",
 			"error", err)
 	case !found:
 		// Saved once the start is active, so a first start is recorded even
@@ -558,9 +567,12 @@ func (s *fileConsumer) currentOrKnown(ac *ActiveConnection) map[string]bool {
 // the one there is on an older snapshot and is ignored, so a crash in between
 // loses nothing. If only the changes row fails, the set stays dirty and the
 // next save writes it. It returns the error of the snapshot write, or of the
-// read keepSavedStamps needs first, either of which leaves everything as it
-// was.
+// read settleGuess or keepSavedStamps needs first, any of which leaves the
+// saved set as it was.
 func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) error {
+	if err := s.settleGuess(ctx, ac, logger); err != nil {
+		return err
+	}
 	if err := s.keepSavedStamps(ctx, ac); err != nil {
 		return err
 	}
@@ -590,6 +602,61 @@ func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, l
 			"error", err)
 		ac.dirty = true
 	}
+	return nil
+}
+
+// settleGuess replaces the guess loadKnown made after a failed checkpoint
+// read with what the saved set says, before a snapshot is written (#536).
+// Written as it was, the guess replaced another watcher's saved stamp for a
+// file replaced since with the new one, which that watcher then took as done
+// and never published; and it saved as done a file that arrived while this
+// one was stopped, so the other watcher skipped it too.
+//
+// Each guessed name still done is corrected as a start that could read would
+// have set it: a name the saved set lacks is no longer done, so the polls
+// publish it; a name saved with a stamp takes it, so a file replaced since is
+// published (#420); a name saved without one (before #420) keeps its stamp.
+// With no checkpoint for the folder the guess is the first-start rule and
+// stays. If the saved set can't be read it returns the error and changes
+// nothing: the snapshot is not written, the set stays dirty, and the next
+// poll tries again. Every write goes through here while there is a guess,
+// since changes are only written on a snapshot of this watcher's own.
+func (s *fileConsumer) settleGuess(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) error {
+	if ac.guessed == nil {
+		return nil
+	}
+	saved, found, err := s.loadSaved(context.WithoutCancel(ctx), ac)
+	if err != nil {
+		return fmt.Errorf("read which files were already published before saving over it: %w", err)
+	}
+	guessed := ac.guessed
+	ac.guessed = nil
+	if !found {
+		logger.Info("Read which files were already published: nothing saved for this folder, so files already in it stay done")
+		return nil
+	}
+	dropped, restamped := 0, 0
+	for name := range guessed {
+		if !ac.knownFiles[name] {
+			continue
+		}
+		if !saved.names[name] {
+			delete(ac.knownFiles, name)
+			delete(ac.knownStamps, name)
+			ac.touch(name)
+			dropped++
+			continue
+		}
+		if st, ok := saved.stamps[name]; ok {
+			if mine, has := ac.knownStamps[name]; !has || mine != st {
+				ac.knownStamps[name] = st
+				ac.touch(name)
+				restamped++
+			}
+		}
+	}
+	logger.Info("Read which files were already published; files that arrived or changed while stopped will be published",
+		"new", dropped, "changed", restamped)
 	return nil
 }
 

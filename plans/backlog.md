@@ -694,8 +694,8 @@ Last updated 2026-10-28.
     both. The server keeps the new name; the tab is wrong until the next
     edit-route open. Capture `deployedName` when the request goes out and
     skip the sync if it changed. Found in review of #502.
-102. **A file-consumer start that couldn't read its checkpoint saves its
-    guess anyway.** `loadKnown`'s fallback after a failed checkpoint read
+102. ~~**A file-consumer start that couldn't read its checkpoint saves its
+    guess anyway.**~~ (#536) `loadKnown`'s fallback after a failed checkpoint read
     takes every file in the folder as done with its stamp now, and its
     comment says this isn't saved. But the first real change saves it:
     `saveKnown` takes the `savedGen == ""` path, which writes a snapshot
@@ -725,6 +725,14 @@ Last updated 2026-10-28.
     managed disk (`docs/operator/cost-parking.md`). Check what production
     runs, then fix the header as #527 did for Postgres. Manifest, so PR
     plus `agent:needs-human`. Found in review of #527.
+106. **A file-consumer checkpoint row that can't be decoded is never
+    replaced.** Since #536 a start that couldn't read its checkpoint saves
+    nothing until a read works. For a row that fails to decode that is
+    never: the watcher logs an Error every poll and falls back to its guess
+    at every start. Before #536 the first change overwrote it. Nobody can
+    read such a row, so a decode error (not a store error) could count as
+    "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
+    `keepSavedStamps` (#500). Found in review of #536.
 
 ## Human
 

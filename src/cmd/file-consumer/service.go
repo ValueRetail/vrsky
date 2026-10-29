@@ -185,7 +185,10 @@ type ActiveConnection struct {
 	// dirty means knownFiles or knownStamps changed since the last save
 	// (#391). savedGen is the Gen of the snapshot this watcher saved last, ""
 	// before its first; changed holds the names whose entry changed since
-	// that snapshot, which a save writes as the changes row (#426). All of
+	// that snapshot, which a save writes as the changes row (#426). guessed
+	// holds the names loadKnown took as done only because it could not read
+	// the checkpoint; nil otherwise. They are corrected from the saved set
+	// before anything is written (#536). All of
 	// these are touched only by the watcher goroutine after startConnection
 	// returns.
 	knownFiles  map[string]bool
@@ -194,6 +197,7 @@ type ActiveConnection struct {
 	dirty       bool
 	savedGen    string
 	changed     map[string]bool
+	guessed     map[string]bool
 	// readFailures counts folder reads in a row that failed (#398), so only
 	// the first is logged as a warning. baselineDeferred means the start could
 	// not read the folder: knownFiles is not set yet, and each poll tries
@@ -687,9 +691,12 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		// What to put back if a stop cuts the publish off.
 		wasKnown := ac.knownFiles[name]
 		prevStamp, hadStamp := ac.knownStamps[name]
+		wasGuessed := ac.guessed[name]
 		delete(ac.pending, name)
 		ac.knownFiles[name] = true
 		ac.knownStamps[name] = stamp
+		// Published by this watcher: no longer a guess (#536).
+		delete(ac.guessed, name)
 		ac.touch(name)
 
 		logger.Info("File added", "file", name)
@@ -709,6 +716,9 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 					ac.knownStamps[name] = prevStamp
 				} else {
 					delete(ac.knownStamps, name)
+				}
+				if wasGuessed {
+					ac.guessed[name] = true
 				}
 				logger.Info("Stopped while publishing a file; it is published again on the next start", "file", name)
 				break
