@@ -210,6 +210,7 @@ func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res s
 		}
 		failure := c.permanentFailures[connectionID]
 		failure.count++
+		count := failure.count
 		failure.version = res.updatedAt
 		failure.wroteError = false
 		c.permanentFailures[connectionID] = failure
@@ -217,9 +218,12 @@ func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res s
 		logger.Error("Front Systems start failed and will not be retried", "error", res.err)
 		if current && c.markError(connectionID, tenantID, res.reason, version, logger) {
 			c.mu.Lock()
-			failure := c.permanentFailures[connectionID]
-			failure.wroteError = true
-			c.permanentFailures[connectionID] = failure
+			// Only if the record is still this failure's: it is the latest
+			// one's, and a newer failure's flag is not ours to set.
+			if failure := c.permanentFailures[connectionID]; failure.count == count {
+				failure.wroteError = true
+				c.permanentFailures[connectionID] = failure
+			}
 			c.mu.Unlock()
 		}
 	default: // startNotOurs, startAbandoned

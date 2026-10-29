@@ -128,6 +128,12 @@ Each mutation of the new condition must fail a test. Run with
 | `markError` reports success when the guard refused | table case "error write refused, row restarted", `PG_QueuedStartRunsAfterRestartedRow` |
 | `wroteError` never recorded | `PG_QueuedStartDroppedWhenErrorWritten`, the existing dropped test |
 | failed start's version not recorded | three table cases |
+| zero version (failed start never read the row) drops | `QueuedStartRunsWhenFailedStartNeverReadRow` |
+
+`wroteError` is set only if the record's `count` is still the one this failure
+bumped to (a newer permanent failure could have replaced the record). That
+window is not reachable from a test without a hook between `markError` and the
+flag, so the guard has no test of its own.
 
 ## Verification
 

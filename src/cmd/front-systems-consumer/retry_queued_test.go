@@ -4,10 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
@@ -214,5 +216,44 @@ func TestFrontSystemsRetryPG_QueuedStartDroppedWhenErrorWritten(t *testing.T) {
 	e.fs.mu.Unlock()
 	if posts != 1 {
 		t.Errorf("creates = %d, want 1 (the queued start must not try the refused keys again)", posts)
+	}
+}
+
+// The failed start never read the row (its lookup failed with an error no
+// retry fixes, here an id that is not a UUID), so no version was recorded and
+// nothing can say the queued start is the same request. It runs.
+func TestFrontSystemsRetry_QueuedStartRunsWhenFailedStartNeverReadRow(t *testing.T) {
+	f := newRetryFixture(t, 5*time.Millisecond)
+	u := urConn{id: "conn-fs-queued-noversion", tenant: urTenantA}
+	f.owners.set(u.id, u.tenant)
+	f.mock.ExpectQuery(configLookupSQL).WithArgs(u.id, u.tenant).
+		WillReturnError(&pq.Error{Code: "22P02", Message: "invalid input syntax for type uuid"})
+	f.mock.ExpectQuery(configLookupSQL).WithArgs(u.id, u.tenant).
+		WillReturnRows(configRows(u.nodes(f.fs.srv.URL)))
+
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.c.starts.AfterReserve = func(string) {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(reached)
+			<-release
+		}
+	}
+	first := goDone(func() { f.start(u) })
+	fgAwait(t, reached, "the first start to hold the claim")
+	fgAwait(t, goDone(func() { f.c.handleStartCommand(cmdMsg("start", u.id, u.tenant)) }), "the second start, queued")
+	close(release)
+	fgAwait(t, first, "the first start and the queued one")
+
+	if _, ok := activeTenant(f.c, u.id); !ok {
+		t.Error("connection not active: the queued start was dropped though the failed start never read the row")
+	}
+	if code := postEvent(f.c, u.id, `{"event":"SaleCreated"}`); code != http.StatusAccepted {
+		t.Errorf("event: status %d, want 202", code)
+	}
+	if err := f.mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("db: %v", err)
 	}
 }
