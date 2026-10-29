@@ -398,7 +398,7 @@ Last updated 2026-10-28.
     running connection as stopped. Write the status only when the entry was
     still this poller's own (`dropActive` could report it). Found during
     #408.
-62. **The Sitoo poller re-reads the whole collection every poll**
+62. ~~**The Sitoo poller re-reads the whole collection every poll**~~ (#457)
     (`src/cmd/sitoo-consumer/service.go`, `fetchAndPublish`). The POS sales
     template sends every receipt to Business Central every 5 minutes, and
     only `dedupe_fields` keeps them from becoming duplicate invoices, at one
@@ -889,6 +889,32 @@ Last updated 2026-10-28.
     onto the object's own key. A moved object that the bucket notification
     covers is still ingested a second time. If item 120 makes event mode
     apply `prefix`, run the same start check there. Found in #567.
+126. **Turn on Sitoo incremental polling in the POS sales template**
+    (`ui/src/onboarding/templates.ts`). #457 added `incremental` for
+    `orders`, but the template polls `transactions`, which the Sitoo API
+    reference does not list. Waits on human item 9: the sandbox has to show
+    which collection holds receipts and that `orderidfrom` with
+    `sort=orderid` behaves as documented before the template changes. The
+    `incremental` key also goes into `consumer/sitoo` in
+    `ui/src/types/nodeConfig.ts`, or templates.test.ts rejects it. Found
+    during #457.
+127. **Sitoo incremental for collections other than `orders`.** #457 ships
+    it for `orders` only, because `orderid` is unique and the API reference
+    documents both its filter and its sort. `products` has a
+    `datelastmodified` filter but no documented sort, and a timestamp cursor
+    is not unique, so records sharing a second need a tiebreaker. Needs a
+    Sitoo sandbox to check sort and tie order first. Found in review of
+    #457 (#472).
+128. **A far-future cursor value freezes the BC consumer's cursor**
+    (`cursorTracker`). One record stamped years ahead sets the watermark
+    there, and every later poll asks only for records after it. Ignore or
+    log values above now + overlap. Found in review of #457 (#472).
+129. **The Sitoo `base_url` is unvalidated tenant config.** A tenant can
+    point the consumer, with its Basic-auth credential, at any host,
+    internal ones included (SSRF). The webhook path also builds
+    `resourceURL` with the event's id unescaped; `url.PathEscape` it. Both
+    touch connector security, so the PR gets `agent:needs-human`. Found in
+    review of #457 (#472).
 
 ## Human
 
@@ -906,5 +932,7 @@ Last updated 2026-10-28.
    in `MC_vrsky-prod_vrsky-prod_norwayeast`).
 9. **Sitoo ⇄ Business Central templates.** Need a field mapping tested
    against a real Sitoo sandbox and the BC trial before they return to the
-   gallery (`plans/template-fields.md`).
+   gallery (`plans/template-fields.md`). While there, check which
+   collection holds POS receipts (`transactions` or `orders`) and that
+   `incremental: true` sends each one once (#457, agent item 126).
 10. **Close #266** (the remote agent shipped).

@@ -66,9 +66,11 @@ func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
-		reqURL := fmt.Sprintf("%s/accounts/%d/sites/%d/%s?start=0&num=%d",
-			cfg.effectiveBaseURL(), cfg.AccountID, cfg.SiteID, cfg.effectiveResource(), sitooSampleLimit)
-		body, err := s.get(r.Context(), &cfg, reqURL)
+		if err := cfg.checkResource(); err != nil {
+			writeErr(err.Error())
+			return
+		}
+		body, err := s.get(r.Context(), &cfg, cfg.collectionURL(0, sitooSampleLimit, nil))
 		if err != nil {
 			writeErr(err.Error())
 			return
