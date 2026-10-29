@@ -255,7 +255,7 @@ func TestCloudConsumer_AfterActionMove(t *testing.T) {
 	}
 	defer mgmtDB.Close()
 	mock.MatchExpectationsInOrder(false)
-	nodes := `[{"id":"c1","type":"consumer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":"b","prefix":"in/","after_action":"move","move_prefix":"in/processed","poll_interval_seconds":0}}}]`
+	nodes := `[{"id":"c1","type":"consumer","config":{"type":"cloud_storage","cloud_storage":{"provider":"s3","bucket":"b","prefix":"in/","after_action":"move","move_prefix":"processed","poll_interval_seconds":0}}}]`
 	mock.ExpectQuery("SELECT nodes FROM connections").
 		WithArgs(connID, tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow([]byte(nodes)))
@@ -281,7 +281,7 @@ func TestCloudConsumer_AfterActionMove(t *testing.T) {
 	harness.Eventually(t, 3*time.Second, "object moved into move_prefix", func() bool {
 		fake.mu.Lock()
 		defer fake.mu.Unlock()
-		return fake.copied["in/data.csv"] == "in/processed/data.csv" &&
+		return fake.copied["in/data.csv"] == "processed/data.csv" &&
 			len(fake.deleted) == 1 && fake.deleted[0] == "in/data.csv"
 	})
 }

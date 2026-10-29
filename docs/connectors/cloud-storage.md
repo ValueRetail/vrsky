@@ -41,11 +41,32 @@ Config bullets (all under `cloud_storage`):
   (default, leave it), `delete`, or `move`. Applies in both modes.
 - `move_prefix` — where `move` puts the object: it is copied to
   `<move_prefix>/<base name>`, then deleted. Required with `move`; without
-  it the consumer doesn't start. Put it outside `prefix` (and outside what
-  the bucket notification covers in event mode): a moved object inside it
-  is a new key to the consumer and is ingested again. Moves keep only the
-  base name, so `incoming/a/x.csv` and `incoming/b/x.csv` both land on
+  it the consumer doesn't start. Moves keep only the base name, so
+  `incoming/a/x.csv` and `incoming/b/x.csv` both land on
   `<move_prefix>/x.csv` and the second overwrites the first.
+
+  In poll mode the start is also refused when the listing of `prefix`
+  would find moved objects again (#567). The log says `invalid
+  move_prefix` and names both values. The listing matches `prefix` as
+  text, not as a folder:
+  - Starts: `prefix: incoming/` with `processed/`, `incoming-done/` or `.`
+    (the bucket root); `prefix: incoming/a/` with `incoming` (one level
+    up).
+  - Refused: `move_prefix` equal to or under `prefix` (`incoming/`,
+    `incoming/done/`); any `move_prefix` with an empty `prefix` (the whole
+    bucket); `prefix: incoming` without the `/` and `incoming-done/`
+    (`incoming` lists `incoming-done/…` too); `prefix: data/report_` with
+    `data` (`data/report_1.csv` would move onto itself).
+
+  For the bucket root use `.`, not `/`: a move keeps a leading slash, so
+  `/` puts `x.csv` at the key `/x.csv`, which S3 and GCS keep as a
+  separate key from `x.csv`. The check resolves `.` and `..` the way the
+  move does but ignores leading slashes, so it may refuse a config with a
+  leading `/` that would have worked on S3 or GCS. In event mode `prefix` is not applied, so the start is not
+  checked: keep `move_prefix` outside what the bucket notification covers,
+  or a moved object is ingested a second time. In both modes the consumer
+  never moves an object onto its own key: that move fails with
+  `after-action failed` in the log and the object stays where it is.
 
 Event mode also reads:
 

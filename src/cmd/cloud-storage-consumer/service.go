@@ -239,6 +239,10 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		logger.Error("after_action=move requires move_prefix")
 		return
 	}
+	if err := cfg.validateMoveOutsideListing(); err != nil {
+		logger.Error("invalid move_prefix", "error", err)
+		return
+	}
 	if cfg.Mode == "event" {
 		if err := cfg.validateEventConfig(); err != nil {
 			logger.Error("invalid event-mode config", "error", err)
@@ -625,6 +629,15 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 			return fmt.Errorf("after_action=move but move_prefix is empty")
 		}
 		dst := path.Join(cfg.MovePrefix, path.Base(key))
+		// Copying an object onto its own key and then deleting it loses it on
+		// Azure and GCS (#567). Poll mode refuses such a config at start; in
+		// event mode the notification decides which keys arrive, so a moved
+		// object can come back here. Trimming leading slashes is deliberately
+		// conservative: it also refuses some real S3/GCS moves (a.csv to
+		// /a.csv), which fails safe by leaving the object in place.
+		if strings.TrimLeft(dst, "/") == strings.TrimLeft(key, "/") {
+			return fmt.Errorf("object %q is already in move_prefix %q; not moved", key, cfg.MovePrefix)
+		}
 		if err := store.Copy(ctx, key, dst); err != nil {
 			return fmt.Errorf("copy to move_prefix: %w", err)
 		}
@@ -739,6 +752,43 @@ func (c *cloudConfig) validateEventConfig() error {
 		}
 	}
 	return nil
+}
+
+// validateMoveOutsideListing refuses, in poll mode, an after_action=move whose
+// moved objects the listing of prefix would return again (#567). They would be
+// published a second time and then moved onto their own key and deleted, which
+// loses them on Azure and GCS.
+//
+// The providers match prefix as a plain string, not a folder: prefix "in"
+// lists "in-done/a.csv" too. A move writes path.Join(move_prefix, base name),
+// so every destination is dir+b with b a base name (not empty, no "/"). One of
+// them is listed when dir starts with prefix (equal, under it, or an empty
+// prefix), or when prefix starts with dir and the rest of prefix has no "/"
+// (a base name starting with that rest is listed). Leading slashes are
+// ignored on both sides, which refuses more rather than less.
+//
+// Event mode does not apply prefix (the bucket notification decides), so it
+// is not checked here; afterAction refuses a move onto the object's own key.
+func (c *cloudConfig) validateMoveOutsideListing() error {
+	if c.AfterAction != "move" || c.MovePrefix == "" || c.Mode == "event" {
+		return nil
+	}
+	prefix := strings.TrimLeft(c.Prefix, "/")
+	dir := strings.TrimLeft(path.Clean(c.MovePrefix), "/")
+	if dir == "." {
+		dir = ""
+	}
+	if dir != "" {
+		dir += "/"
+	}
+	rest, under := strings.CutPrefix(prefix, dir)
+	if !strings.HasPrefix(dir, prefix) && (!under || strings.Contains(rest, "/")) {
+		return nil
+	}
+	if c.Prefix == "" {
+		return fmt.Errorf("move_prefix %q is inside prefix \"\" (the whole bucket): moved objects would be published again", c.MovePrefix)
+	}
+	return fmt.Errorf("move_prefix %q is inside what prefix %q lists (prefix is matched as text, not as a folder; end it with \"/\" to read one folder): moved objects would be published again", c.MovePrefix, c.Prefix)
 }
 
 // eventTarget returns the provider-specific event identifier, for logging.
