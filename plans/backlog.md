@@ -461,7 +461,7 @@ Last updated 2026-10-28.
     generated name on every Deploy. Write the build's commit to a
     `version.json` beside `index.html`, poll it (and check on focus), and
     show a "A newer version is available, reload" banner. Found during #450.
-71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
+71. ~~**`ui/src/pages/Dashboard.tsx` is dead code**~~ (#513): no route renders it.
     Delete it, or route it if a dashboard is wanted. Found during #450.
 72. ~~**A linked builder tab's `deployedName` never re-syncs with the
     server.**~~ (#502) Opening a connection whose canvas is already linked
