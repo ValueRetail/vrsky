@@ -90,6 +90,26 @@ Each issue goes through the same subagent flow:
 6. Docs: update `docs/` (operator and connector pages), READMEs and the
    OpenAPI registry when behaviour or configuration changes.
 
+## Model per subagent
+
+Pick each subagent's model by what a miss would cost, not by habit:
+
+- **Haiku**: mechanical work with exact instructions. Rebases and
+  backlog renumbering, PR body edits, labels, small test follow-ups a
+  reviewer already spelled out.
+- **Sonnet**: ordinary implementation and checking. Docs workers, small
+  fixes, test authors for straightforward code, verifier and mutation
+  runs.
+- **Opus**: work where a miss loses data or opens a hole. Reviewers for
+  delivery semantics, concurrency, tenant isolation, auth, secrets,
+  backups and crypto; design reworks; implementers in `pkg/messaging`,
+  auth, migrations and anything under the hard limits below.
+
+Reviewers of a PR that gets `agent:needs-human` always run on Opus. If a
+Sonnet worker fails a review round on something subtle, the next round
+runs on Opus rather than repeating on Sonnet. Watching CI is a shell loop,
+not an agent.
+
 ## Parallel execution
 
 - Up to 4 issue workers at once, each owning one issue end to end in its
