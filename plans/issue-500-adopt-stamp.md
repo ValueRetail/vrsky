@@ -129,7 +129,7 @@ watcher owns the snapshot, snapshot otherwise).
   interval for B's save; it's the window #420 and #426 already have.
 - Review found one more route to a lost replacement that this doesn't
   close: `loadKnown`'s fallback after a failed checkpoint read is saved by
-  the first change after all, blind. Filed as backlog item 98.
+  the first change after all, blind. Filed as backlog item 102.
 - Two watchers of this version still have the last-writer-wins window
   #426 lists under Risks. This only closes it for stampless names. Since
   #425 the Deployment is `Recreate`, so two pods overlap only by accident.
