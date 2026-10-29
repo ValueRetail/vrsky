@@ -1697,6 +1697,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#incremental-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incremental polling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#webhook-mode-real-time-spi-events" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2471,6 +2482,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#incremental-polling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incremental polling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#webhook-mode-real-time-spi-events" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2574,7 +2596,9 @@ paging through all results, and emits each page as a JSON-array message.</p>
 <li><code>api_id</code> — the Sitoo REST API ID.</li>
 <li><code>api_password_secret_id</code> — secret reference to the API password.</li>
 <li><code>resource</code> — the collection to poll (default <code>transactions</code>; e.g.
-  <code>warehouseitems</code>, <code>products</code>).</li>
+  <code>warehouseitems</code>, <code>products</code>). It may carry its own filters as a query
+  string, e.g. <code>orders?orderstate=10</code>; the poller adds <code>start</code>/<code>num</code> to it.
+  A <code>#</code> is refused.</li>
 <li><code>poll_interval_seconds</code> — poll cadence. Set <code>0</code> (or omit) for <strong>webhook-only</strong>.</li>
 <li><code>page_size</code> — Sitoo <code>num</code> (default <code>1000</code>; 1000–5000 is optimal).</li>
 <li><code>base_url</code> — optional override (default <code>https://api.mysitoo.com/v2</code>).</li>
@@ -2598,6 +2622,73 @@ paging through all results, and emits each page as a JSON-array message.</p>
 </code></pre></div>
 <p>The connector honours Sitoo's rate limit: on HTTP <code>429</code> it waits for
 <code>X-Rate-Limit-Reset</code> / <code>Retry-After</code> and retries.</p>
+<h3 id="incremental-polling">Incremental polling<a class="headerlink" href="#incremental-polling" title="Permanent link">&para;</a></h3>
+<p>By default every poll reads and publishes the whole collection. For the
+<code>orders</code> resource, set <code>incremental: true</code> to publish only orders that
+haven't been published yet:</p>
+<ul>
+<li><code>incremental</code> — on for <code>orders</code> only. Sitoo has no common "modified since"
+  filter, and <code>orders</code> is the one collection whose filter (<code>orderidfrom</code>)
+  and sort (<code>sort=orderid</code>) the API reference documents. Any other resource
+  with <code>incremental</code> on is refused at start. A query string on the resource
+  is fine (<code>orders?orderstate=10</code>), as long as it doesn't set <code>orderidfrom</code>,
+  <code>sort</code>, <code>start</code> or <code>num</code>: the poller sets those itself.</li>
+<li><code>cursor_overlap</code> — how far back each poll re-reads, in order ids (default
+  <code>1000</code>). It covers an order whose id was handed out before others but that
+  showed up in Sitoo after them, for example from a till that was offline.
+  Between <code>0</code> and <code>100000</code>. Raising it doesn't re-send the orders between
+  the old window and the new one; the wider window builds up as new orders
+  come in.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitoo"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"sitoo"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"account_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"site_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-api-id"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"api_password_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;secret-uuid&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"orders"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"incremental"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>How it behaves:</p>
+<ul>
+<li>The first poll reads every order and publishes it once. So does the first
+  poll after the resource or its query string changes. After that each poll
+  starts at <code>last order id − cursor_overlap</code>.</li>
+<li>It reads orders in id order, a page at a time: each next page asks for
+  orders from the previous page's last id on, until a page brings nothing
+  new. A page shorter than <code>page_size</code> doesn't end the poll, in case Sitoo
+  returns fewer orders than asked for.</li>
+<li>Every page is checked before it's published: each order has a numeric
+  <code>orderid</code>, the ids rise, and none is below the id asked for. A page that
+  fails the check fails the poll with an error saying which, and nothing on
+  it is published.</li>
+<li>The highest order id published is saved per connection node in
+  <code>connection_node_checkpoints</code> after every page, so a restart, a redeploy
+  or a failed poll resumes from there. The page that failed can arrive
+  twice; no order is skipped.</li>
+<li>A poll reads at most 100 pages (100 000 orders at the default page size).
+  The next poll re-reads the overlap and goes on from there. Keep
+  <code>cursor_overlap</code> well below 100 × <code>page_size</code>: if re-reading the overlap
+  takes more than one poll, new orders wait several polls, and a late order
+  can be missed during that catch-up.</li>
+<li>Orders re-read inside the overlap are not sent again. An order that shows
+  up later than <code>cursor_overlap</code> ids behind the newest one published is
+  missed; raise the overlap if your tills can lag more than that.</li>
+<li>It picks up new orders, not changes to existing ones: Sitoo's
+  <code>orderidfrom</code> filters on the id, which never changes.</li>
+<li>Orders that also arrive through webhook mode on the same connection aren't
+  known to the poller, so an order can come through both.</li>
+<li>A resource query string that doesn't parse is refused, in either mode,
+  rather than polled without its filter.</li>
+</ul>
+<p>Turning <code>incremental</code> on for a running pipeline sends every order once more
+on its first poll, then only new ones. This hasn't been run against a live
+Sitoo account yet; the filter and sort come from the API reference. If Sitoo
+ignores either, the poll fails with that error rather than losing orders.</p>
 <h3 id="webhook-mode-real-time-spi-events">Webhook mode (real-time SPI Events)<a class="headerlink" href="#webhook-mode-real-time-spi-events" title="Permanent link">&para;</a></h3>
 <p>Point Sitoo's SPI Events at the connector's auxiliary HTTP endpoint:</p>
 <div class="highlight"><pre><span></span><code>POST /sitoo/events/{connectionID}
@@ -2671,9 +2762,11 @@ for:</p>
 <li>Sitoo prices include VAT, so the BC customer needs <em>Prices Including VAT</em>
   turned on.</li>
 <li>The receipt number goes to <code>externalDocumentNumber</code>, which is how a receipt
-  already in BC is skipped, posted or not. The poller re-reads every receipt
-  on each poll, one BC lookup each, so keep it to a test site with few
-  receipts until the poller gets a cursor.</li>
+  already in BC is skipped, posted or not. The template polls <code>transactions</code>
+  without <code>incremental</code>, so it re-reads every receipt on each poll, one BC
+  lookup each; keep it to a test site with few receipts. The template will
+  switch to incremental polling once a live Sitoo sandbox confirms which
+  collection holds receipts.</li>
 <li>Use one Sitoo site per pipeline: receipt numbers from two sites could
   collide.</li>
 <li>Currency and posting date are not sent. BC takes them from the customer
@@ -2689,9 +2782,6 @@ posted, so until then the stock push sends Sitoo the level from before the
 sale.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Incremental polling</strong> — the current poller does a full paged fetch each
-  cycle; a <code>modified_after</code>-style cursor is a straightforward enhancement for
-  high-volume order streams.</li>
 <li><strong>Webhook signature verification</strong> — add HMAC verification once the SPI Event
   signing scheme is confirmed for your account.</li>
 </ul>
