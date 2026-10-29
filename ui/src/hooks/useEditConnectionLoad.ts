@@ -90,12 +90,20 @@ export function useEditConnectionLoad(editConnectionId: string | undefined): voi
   // line with the server, so Deploy's "was it renamed?" check compares
   // against the real name (#502). A failed fetch leaves both as they were;
   // the canvas is already open, and Deploy reports a deleted connection.
+  //
+  // The answer only describes the server as it was when the request went out.
+  // If deployedName changed meanwhile, a deploy from this tab has told the
+  // server a newer name than the answer knows, so the answer is dropped;
+  // syncing it would put the old name back on the tab (#540).
   useEffect(() => {
     if (!editConnectionId || !linkedEditCanvasId) return
     let cancelled = false
+    const deployedNameAt = () => useCanvasStore.getState().getCanvasById(linkedEditCanvasId)?.deployedName
+    const sentWith = deployedNameAt()
     connectionService.get(editConnectionId).then(
       (conn) => {
-        if (!cancelled && conn.name) syncDeployedName(linkedEditCanvasId, editConnectionId, conn.name)
+        if (cancelled || !conn.name || deployedNameAt() !== sentWith) return
+        syncDeployedName(linkedEditCanvasId, editConnectionId, conn.name)
       },
       () => {},
     )
