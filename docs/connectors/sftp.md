@@ -1,6 +1,6 @@
 # SFTP
 
-The SFTP connector (`config.type: "sftp"`) transfers files over SFTP. It works both as a source (consumer) and a destination (producer), sharing the same config shape.
+The SFTP connector (`config.type: "sftp"`) transfers files over SFTP. It works both as a source (consumer) and a destination (producer). Both use the same connection fields; each role adds a few of its own.
 
 ## As a source (consumer)
 
@@ -27,16 +27,27 @@ A producer node connects to a remote SFTP server and writes files into the confi
 
 ## Config reference
 
-The same `sftp` config block applies to both roles:
+Both roles use an `sftp` block. The connection fields are the same for both:
 
 - `type` — `"sftp"`.
-- `sftp.host` — server hostname.
-- `sftp.port` — server port (e.g. `22`).
-- `sftp.username` — login username.
-- `sftp.password_secret_id` — reference to the password secret. Use this **or** the private key.
-- `sftp.private_key_secret_id` — reference to the private key secret. Use this **or** the password.
-- `sftp.path` — remote directory.
-- `sftp.after_action` — what to do with a source file after processing: `"none"`, `"delete"`, or `"move"`.
+- `sftp.host` — server hostname. Required.
+- `sftp.port` — server port. Default `22`.
+- `sftp.username` — login username. Required.
+- `sftp.password_secret_id` — reference to the password secret.
+- `sftp.private_key_secret_id` — reference to the private key secret (PEM).
+- `sftp.host_key` — the server's public key as one line, e.g. `ssh-ed25519 AAAA…` (the key part of its `known_hosts` line). When set, a server that presents another key is refused. When empty, any key is accepted and the worker logs a warning; set it in production.
+- `sftp.remote_dir` — remote directory to read from or write to. Required.
+
+Source only:
+
+- `sftp.file_pattern` — glob matched against the file name, e.g. `*.csv`. Empty means every file. Subdirectories are never read.
+- `sftp.poll_interval_seconds` — seconds between polls. `0` or unset means one poll, after which the connection shows as stopped. The editor shows `60` in this field until you change it, but saves nothing until you do, so type the interval you want.
+- `sftp.after_action` — what to do with a file once it is published: `"none"` (default, leave it), `"delete"`, or `"move"`.
+- `sftp.move_dir` — directory to move files into when `after_action` is `"move"`; created if missing. With `"move"` and no `move_dir`, every move fails and the files stay where they are.
+
+Destination only:
+
+- `sftp.filename_template` — Go template for the file name, rendered against the record when it is a JSON object, plus `{{.timestamp}}` (UTC, `20060102T150405Z`) and `{{.uuid}}` (the message id). Default `{{.uuid}}.json`. A record field named `timestamp` or `uuid` takes the place of the built-in. A template that names a field the record doesn't have drops the message, with an error in the producer's log (`invalid filename template; dropping message`). The result is cut to a single file name, so it can't point outside `remote_dir`. `remote_dir` is created if missing.
 
 ```json
 {
@@ -46,14 +57,18 @@ The same `sftp` config block applies to both roles:
     "port": 22,
     "username": "vrsky",
     "private_key_secret_id": "sec_sftpkey_01",
-    "path": "/remote/dir",
-    "after_action": "move"
+    "host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...",
+    "remote_dir": "/remote/in",
+    "file_pattern": "*.csv",
+    "poll_interval_seconds": 60,
+    "after_action": "move",
+    "move_dir": "/remote/in/processed"
   }
 }
 ```
 
 ## Notes
 
-- **Authentication.** Provide **either** a password (`password_secret_id`) **or** a private key (`private_key_secret_id`), not both.
+- **Authentication.** Set a password (`password_secret_id`) or a private key (`private_key_secret_id`). With neither, a source doesn't start and a destination drops each message with an error in its log. With both, the key is tried first, then the password.
 - **Secrets.** `password` and `private_key` are secret fields. You enter them as plaintext in the editor; at deploy they are minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.
-- **Test connection.** Use the **Test connection** button in the editor, backed by the `/test-connection` endpoint (#82), to validate host, credentials, and path before deploying.
+- **Test connection.** Use the **Test connection** button in the editor, backed by the `/test-connection` endpoint (#82), to validate host, credentials, and remote directory before deploying.
