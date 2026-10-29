@@ -36,8 +36,9 @@ one-time human setup in the next section.
 The Job pulls `vrsky-cli` with a copy of the `acr-pull` Secret from
 `vrsky-platform`. Every deploy with the cluster up refreshes that copy
 (`infrastructure/azure/copy-acr-pull.sh`), and so does every Catch up, so
-after an ACR password rotation you only update `acr-pull` in
-`vrsky-platform`; the next deploy or Catch up carries it over. The copy step
+after an ACR password rotation the backup only needs `acr-pull` updated in
+`vrsky-platform`; the next deploy or Catch up carries it over
+([Rotating the ACR password](acr-rotation.md) has the whole procedure). The copy step
 touches only the `acr-pull` copies (this one and the UI's in `vrsky-ui`)
 and never the CronJob, so a CronJob you suspended
 for a restore stays suspended. The backup script itself still runs only on a
