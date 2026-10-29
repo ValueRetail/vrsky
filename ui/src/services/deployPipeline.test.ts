@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION, deployPlan, deployCanvas,
+  deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION, deployPlan, deployCanvas, startDeployed, startOutcome,
 } from './deployPipeline'
 import builderSource from '../pages/PipelineBuilder.tsx?raw'
 
@@ -220,6 +220,57 @@ describe('deployCanvas keeps the canvas link in step', () => {
   })
 })
 
+describe('startDeployed (#580)', () => {
+  it('starts the connection', async () => {
+    post.mockResolvedValue({})
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: true })
+    expect(post).toHaveBeenCalledWith('/api/v1/connections/c1/start')
+  })
+
+  it('returns the API message instead of throwing or swallowing it', async () => {
+    post.mockRejectedValue(Object.assign(new Error('quota reached'), { code: 'HTTP_409' }))
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: false, message: 'quota reached' })
+  })
+
+  it('has a message for a non-Error rejection too', async () => {
+    post.mockRejectedValue(undefined)
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: false, message: 'An unknown error occurred' })
+  })
+})
+
+describe('startOutcome (#580)', () => {
+  const id = 'abcdef12-3456-7890'
+
+  it('a started pipeline is reported as running, with a webhook URL or else the output path', () => {
+    const hook = startOutcome(id, { started: true }, { webhookUrl: 'https://h/webhook/x', filePath: '/out' })
+    expect(hook.toast).toEqual({
+      type: 'success', title: 'Pipeline Started',
+      message: 'Pipeline abcdef12... deployed and running! Webhook URL: https://h/webhook/x',
+    })
+    expect(hook.bar).toEqual({ label: 'DEPLOYED', tone: 'ok' })
+    expect(startOutcome(id, { started: true }, { filePath: '/out' }).toast.message).toBe('Pipeline abcdef12... deployed and running! Output: /out')
+    expect(startOutcome(id, { started: true }).toast.message).toBe('Pipeline abcdef12... deployed and running!')
+  })
+
+  it('a failed start is an error that says saved and carries the API message, never "running"', () => {
+    const out = startOutcome(id, { started: false, message: 'worker image unavailable' }, { webhookUrl: 'https://h/webhook/x', filePath: '/out' })
+    expect(out.toast).toEqual({
+      type: 'error', title: 'Pipeline saved, not started',
+      message: 'Pipeline abcdef12... was saved but did not start: worker image unavailable',
+    })
+    expect(out.toast.message).not.toMatch(/running|Webhook|Output/)
+    expect(out.bar).toEqual({ label: 'SAVED, NOT STARTED', tone: 'error' })
+  })
+
+  it('an empty or blank message still reads sensibly', () => {
+    for (const message of ['', '   ']) {
+      const out = startOutcome(id, { started: false, message })
+      expect(out.toast.message).toBe('Pipeline abcdef12... was saved but did not start: the API gave no reason')
+      expect(out.bar.tone).toBe('error')
+    }
+  })
+})
+
 describe('the builder deploys through deployPlan and deployCanvas', () => {
   // The page is a large canvas component that the coverage gate keeps out of
   // the suite; these pin its few lines of deploy wiring instead.
@@ -245,6 +296,25 @@ describe('the builder deploys through deployPlan and deployCanvas', () => {
     expect(body).toContain('buildConnectionPayload(plan.identity)')
     expect(body).toMatch(/deployCanvas\(apiClient, payload, plan\.previousConnectionId,/)
     expect(src).not.toMatch(/deployIdentity\(/)
+  })
+
+  // #580: the start call used to sit in a try whose catch only logged, and the
+  // success toast followed whatever happened. Rendering the page here would
+  // pull its ~2000 lines into the coverage gate, so its wiring is pinned; the
+  // decision itself is startOutcome, tested above.
+  it('the toast and the status bar come from startOutcome, after startDeployed (#580)', () => {
+    const body = bodyOf('const deployPipeline = async')
+    expect(body).toContain('await startDeployed(apiClient, connectionId)')
+    expect(body).toContain('startOutcome(connectionId, start,')
+    expect(body).toContain('outcome.toast.message')
+    expect(body).toContain('bar: outcome.bar')
+    expect(body).not.toContain('Failed to auto-start')
+    expect(body).not.toMatch(/\/start`\)/)
+    // no success text of its own, so it cannot be shown whatever the start did
+    expect(src).not.toContain('deployed and running')
+    expect(src).not.toContain('Pipeline Started')
+    expect(src).toContain('{deploymentInfo.bar.label}')
+    expect(src).not.toMatch(/●\s*DEPLOYED/)
   })
 
   it('"Deploy as new" redeploys with asNew', () => {

@@ -9,6 +9,7 @@
  */
 
 import type { AxiosInstance } from 'axios'
+import { getErrorMessage } from '../utils/errors'
 
 export class ConnectionGone extends Error {
   readonly connectionId: string
@@ -59,6 +60,54 @@ export async function deployPipeline(
     throw err
   }
   return { connectionId: previousConnectionId, created: false }
+}
+
+export type StartResult = { started: true } | { started: false; message: string }
+
+/**
+ * Starts a connection that was just saved (#580). A failed start is a result,
+ * not an exception and not silence: the pipeline is saved but not running,
+ * and the caller has to say so, with the API's own message.
+ */
+export async function startDeployed(client: Pick<AxiosInstance, 'post'>, connectionId: string): Promise<StartResult> {
+  try {
+    await client.post(`/api/v1/connections/${connectionId}/start`)
+    return { started: true }
+  } catch (err) {
+    return { started: false, message: getErrorMessage(err) }
+  }
+}
+
+export interface StartOutcome {
+  /** What the builder toasts after a deploy. */
+  toast: { type: 'success' | 'error'; title: string; message: string }
+  /** The status bar under the canvas: its text and colour. */
+  bar: { label: string; tone: 'ok' | 'error' }
+}
+
+/**
+ * What the builder tells the user once the deploy and its start are done
+ * (#580). The pipeline is always saved at this point; only a started one is
+ * reported as running. extras are the success message's hints (webhook URL,
+ * else output path).
+ */
+export function startOutcome(
+  connectionId: string,
+  start: StartResult,
+  extras: { webhookUrl?: string; filePath?: string } = {},
+): StartOutcome {
+  const id = `${connectionId.substring(0, 8)}...`
+  if (start.started) {
+    let message = `Pipeline ${id} deployed and running!`
+    if (extras.webhookUrl) message += ` Webhook URL: ${extras.webhookUrl}`
+    else if (extras.filePath) message += ` Output: ${extras.filePath}`
+    return { toast: { type: 'success', title: 'Pipeline Started', message }, bar: { label: 'DEPLOYED', tone: 'ok' } }
+  }
+  const reason = start.message.trim() || 'the API gave no reason'
+  return {
+    toast: { type: 'error', title: 'Pipeline saved, not started', message: `Pipeline ${id} was saved but did not start: ${reason}` },
+    bar: { label: 'SAVED, NOT STARTED', tone: 'error' },
+  }
 }
 
 /** Creates a new connection for the payload; the "deploy as new" path. */

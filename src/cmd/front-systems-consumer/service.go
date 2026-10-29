@@ -70,11 +70,13 @@ type frontSystemsConsumer struct {
 	// up and Stop remove it. Under mu.
 	pending map[string]*pendingStart
 
-	// permanentFailures counts, by connection ID, starts that failed for
-	// good. A start queued behind another (ReserveOrRetry) is skipped when
-	// the count moved since it was asked for: it would fail the same way.
-	// Never pruned, like the guard's seq. Under mu.
-	permanentFailures map[string]uint64
+	// permanentFailures records, by connection ID, the latest start that
+	// failed for good (see permanentFailure). A start queued behind another
+	// (ReserveOrRetry) is skipped when the count moved since it was asked
+	// for and the failed start's "error" write landed or the row is still
+	// the version that start read (#574): it would fail the same way. Never
+	// pruned, like the guard's seq. Under mu.
+	permanentFailures map[string]permanentFailure
 
 	// Retry timing for failed starts; zero means the defaults in retry.go.
 	// Tests shorten them.
@@ -334,13 +336,13 @@ func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
 // (retry.go); one that fails for good marks the connection "error".
 func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
 	c.mu.Lock()
-	failures := c.permanentFailures[connectionID]
+	failures := c.permanentFailures[connectionID].count
 	c.mu.Unlock()
 	res := c.attemptStart(connectionID, tenantID, nil, func() {
 		c.mu.Lock()
-		failedMeanwhile := c.permanentFailures[connectionID] != failures
+		failure := c.permanentFailures[connectionID]
 		c.mu.Unlock()
-		if failedMeanwhile {
+		if failure.count != failures && c.sameRequestFailed(connectionID, tenantID, failure) {
 			c.logger.Info("Queued Front Systems start dropped: the start ahead of it failed for good",
 				"connection_id", connectionID, "tenant_id", tenantID)
 			return
