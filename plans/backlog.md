@@ -834,7 +834,7 @@ Last updated 2026-10-28.
     stops. Write 60 on mount, as `PollOrMethod` in the same file does for
     the retail connectors' 300, or show 0. The connector pages describe the
     current behaviour (#564). Found in #564.
-120. **Cloud-storage event mode ignores `prefix` and `file_pattern`.**
+120. ~~**Cloud-storage event mode ignores `prefix` and `file_pattern`.**~~ (#594)
     `runEventLoop` (`src/cmd/cloud-storage-consumer/service.go`) ingests
     every key a notification names, and the S3 parser takes every record,
     not only `ObjectCreated` ones (Azure and GCS filter by event type). The
@@ -885,8 +885,8 @@ Last updated 2026-10-28.
     rule at the "Move to prefix" field in
     `ui/src/components/Pipeline/PropertyEditor.tsx`. The rule is the
     consumer's `validateMoveOutsideListing`. Found in review of #567.
-134. **Check `move_prefix` in cloud-storage event mode once it applies
-    `prefix`.** Event mode ignores `prefix` (item 120), so #567 checks the
+134. ~~**Check `move_prefix` in cloud-storage event mode once it applies
+    `prefix`.**~~ (#594) Event mode ignores `prefix` (item 120), so #567 checks the
     start in poll mode only and relies on `afterAction` refusing a move
     onto the object's own key. A moved object that the bucket notification
     covers is still ingested a second time. If item 120 makes event mode
@@ -964,6 +964,10 @@ Last updated 2026-10-28.
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
+141. ~~**Show "File pattern" in the cloud-storage editor in event mode.**~~
+    (#594) `CloudStorageConfigEditor.tsx` rendered the field only in poll
+    mode. Event mode applies `file_pattern` since #594, so the editor shows
+    it for both modes. Done in #594.
 
 ## Human
 

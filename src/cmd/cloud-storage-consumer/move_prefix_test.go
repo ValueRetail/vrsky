@@ -19,8 +19,9 @@ import (
 // Tests for #567: with after_action=move, a move_prefix whose moved objects
 // the listing of prefix returns again makes the consumer publish them a second
 // time and then copy them onto their own key and delete them (Azure and GCS
-// lose the object). Poll mode refuses such a config at start; afterAction
-// never copies an object onto its own key.
+// lose the object). The start is refused for such a config, in event mode too
+// since it applies prefix (#594); afterAction never copies an object onto its
+// own key.
 
 // mpLog is a log sink safe for the poller goroutine and the test at once.
 type mpLog struct {
@@ -97,9 +98,19 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 		{name: "bucket root as dot", prefix: "in/", movePrefix: ".", refused: false},
 		{name: "nested sibling", prefix: "data/2026/", movePrefix: "data/archive", refused: false},
 
-		// Only move is checked, and only in poll mode.
+		// Only move is checked.
 		{name: "delete ignores move_prefix", prefix: "", movePrefix: "processed", afterAction: "delete", refused: false},
-		{name: "event mode is not checked at start", prefix: "in/", movePrefix: "in/done", mode: "event", refused: false},
+
+		// Event mode applies prefix to notified keys (#594), so the same rule
+		// holds there: a moved object notifies as a new object.
+		{name: "event mode, under", prefix: "in/", movePrefix: "in/done", mode: "event", refused: true},
+		{name: "event mode, equal", prefix: "in/", movePrefix: "in", mode: "event", refused: true},
+		{name: "event mode, empty prefix", prefix: "", movePrefix: "processed", mode: "event", refused: true},
+		{name: "event mode, prefix without slash lists sibling", prefix: "in", movePrefix: "in-done/", mode: "event", refused: true},
+		{name: "event mode, prefix names files in move_prefix", prefix: "data/report_", movePrefix: "data", mode: "event", refused: true},
+		{name: "event mode, sibling folder", prefix: "in/", movePrefix: "in-done/", mode: "event", refused: false},
+		{name: "event mode, one level up", prefix: "incoming/a/", movePrefix: "incoming", mode: "event", refused: false},
+		{name: "event mode, delete ignores move_prefix", prefix: "", movePrefix: "processed", afterAction: "delete", mode: "event", refused: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,7 +232,8 @@ func TestPoll_SiblingMovePrefixPublishesOnce(t *testing.T) {
 }
 
 // Event mode: a notification for an object already in move_prefix (the
-// notification covers it, so the move came back) publishes it once, acks
+// start check refuses configs where prefix selects it, so this is the second
+// line, reached with a prefix that does not exclude it) publishes it once, acks
 // the message, and leaves the object where it is. The guard's refusal is an
 // after-action failure, so the object still counts as ingested and the
 // message is not left for redelivery.
