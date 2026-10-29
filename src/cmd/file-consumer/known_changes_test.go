@@ -396,6 +396,11 @@ func TestKnownChanges_CompactsPastTheLimit(t *testing.T) {
 			probe := &recordingProbe{}
 			ctx := context.Background()
 			w := newChangesWatcher(t, dir, store, probe.publish)
+			// Every done file is stat'ed each poll, so a batch of
+			// replacements goes out in two polls whatever the set size. How
+			// a large folder looks at them in turns (#537) is tested in
+			// stat_turns_test.go.
+			w.c.knownStatsPerPoll = tc.set
 			gen0 := decodeSnapshot(t, rawRow(t, store.inner, knownTenant, knownConn, knownNode)).Gen
 
 			next := 0
