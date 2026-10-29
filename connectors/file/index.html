@@ -2541,9 +2541,10 @@ their own names (see <a href="../business-central/#pictures">Business Central â†
   source reads <code>/data/input</code>, which is the repository's <code>data/input</code> unless
   <code>.env</code> sets <code>VRSKY_FILES_HOST_DIR</code> to another folder (any path style,
   <code>C:\Users\you\vrsky-files</code> included). A leading <code>~</code> in the source's path
-  means that same folder. The destination writes to <code>/data/output</code>, the
-  repository's <code>data/output</code>, and a leading <code>~</code> in its path means
-  <code>/data/output</code>, not the source's folder. Either way your workspace's files
+  means that same folder. The destination writes to <code>/data/output</code>, which
+  is the repository's <code>data/output</code> unless <code>.env</code> sets
+  <code>VRSKY_FILES_OUTPUT_HOST_DIR</code> (same path styles), and a leading <code>~</code> in its
+  path means <code>/data/output</code>, not the source's folder. Either way your workspace's files
   sit in a <code>&lt;workspace id&gt;</code> subfolder. See <a href="../../operator/windows/#windows-specific-things-that-bite">Windows</a>.</li>
 <li><strong>Uploads.</strong> The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.</li>
 <li><strong>CSV columns.</strong> For <code>format: "csv"</code>, the header row defines the column names (#81).</li>

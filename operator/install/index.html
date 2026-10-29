@@ -2506,6 +2506,9 @@ as no <code>.env</code>. To override one, set it in <code>.env</code> (or in the
   mounted at <code>/data/input</code> in the file connectors. Empty means the
   repository's <code>data/input</code>. Any path style works, Windows ones included;
   see <a href="../../connectors/file/#notes">File connector</a>.</li>
+<li><strong><code>VRSKY_FILES_OUTPUT_HOST_DIR</code></strong>: the host folder file pipelines write
+  to, mounted at <code>/data/output</code> in the file destination. Empty means the
+  repository's <code>data/output</code>. Same path styles as above.</li>
 <li>Database passwords and any object-storage credentials. In the local compose
   stack these are fixed dev values written into <code>docker-compose.yml</code>, not
   read from <code>.env</code>; the stack binds its ports to <code>127.0.0.1</code> for that reason.</li>
