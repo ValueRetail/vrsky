@@ -22,76 +22,81 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
-// Tests for incremental polling (#457), written against the acceptance
-// criteria in plans/issue-457-sitoo-incremental.md. The fake Sitoo below
-// serves a mutable collection, filtered on the cursor param as ">=", sorted
-// by the cursor field (as sort-by-modified would), and paged by start/num.
+// Tests for incremental polling of Sitoo orders (#457), written from the
+// acceptance criteria in plans/issue-457-sitoo-incremental.md, not from the
+// implementation. The cursor is fixed: field `orderid`, filter `orderidfrom`,
+// `sort=orderid`. The fake Sitoo below serves a mutable collection of orders
+// and can treat `orderidfrom` as ">=" or ">", ignore the sort or the filter,
+// serve a repeated orderid or an order without one, and fail a request.
 
 const (
 	incTenant = "tenant-inc"
 	incConn   = "conn-inc"
 	incNode   = "node-inc"
-	incField  = "modified"
-	incParam  = "modifiedfrom"
 )
 
-// fakeRecord is one record in the fake collection. Cursor nil means the
-// record has no cursor field at all.
-type fakeRecord struct {
-	ID      string
-	Cursor  *int64
-	Version int
+// fakeOrder is one order in the fake collection. ID is what the fake filters
+// and sorts on; Raw is how its orderid is served: "" the number itself, "-"
+// left out, anything else that JSON verbatim (`"105"`, `105.5`, `null`).
+// Every order also carries "ref" (= ID) and "v", which is how the tests
+// recognise a published record whatever its orderid looks like.
+type fakeOrder struct {
+	ID  int64
+	V   int
+	Raw string
 }
 
-func cur(v int64) *int64 { return &v }
+func (o *fakeOrder) encode() json.RawMessage {
+	var b strings.Builder
+	b.WriteString("{")
+	switch o.Raw {
+	case "":
+		fmt.Fprintf(&b, `"orderid":%d,`, o.ID)
+	case "-":
+	default:
+		fmt.Fprintf(&b, `"orderid":%s,`, o.Raw)
+	}
+	fmt.Fprintf(&b, `"ref":%d,"v":%d,"orderstate":10}`, o.ID, o.V)
+	return json.RawMessage(b.String())
+}
+
+// fakeReq is one request the fake received.
+type fakeReq struct {
+	q      url.Values
+	path   string
+	uri    string
+	served []int64 // ids served, in order; nil when the request failed
+}
 
 type fakeSitoo struct {
-	mu    sync.Mutex
-	field string // record field the cursor lives in
-	param string // query param that filters on it (">=", or ">" when exclusive)
-	// exclusive makes the filter ">" (like products' datelastmodified).
+	mu sync.Mutex
+	// exclusive makes orderidfrom ">" instead of the documented ">=".
 	exclusive bool
-	// ignoreSort serves insertion order whatever sort is asked for.
+	// ignoreSort serves Sitoo's default order (-orderid) whatever is asked.
 	ignoreSort bool
-	base       string // the server URL, for tests that build their own config
-	recs       []*fakeRecord
-	reqs       []url.Values // query of each request, in order
-	paths      []string     // URL path of each request
-	uris       []string     // raw request URI of each request
-	served     [][]string   // ids served per request (nil when it failed)
-	// cursor values served per request, in order (-1 for a record without one)
-	servedCur [][]int64
-	// before runs (with mu held) before request n (1-based) is answered. It
-	// may change recs; a non-zero return is sent as the status instead.
+	// ignoreFilter serves every order whatever orderidfrom says.
+	ignoreFilter bool
+	orders       []*fakeOrder
+	reqs         []fakeReq
+	// before runs (with mu held) before request n (1-based since the last
+	// take) is answered. It may change orders; a non-zero return is sent as
+	// the HTTP status instead of a page.
 	before func(n int, q url.Values) int
 }
 
-func newFakeSitoo(t *testing.T, field, param string, recs ...*fakeRecord) (*fakeSitoo, *httptest.Server) {
+func newFakeSitoo(t *testing.T, exclusive bool, orders ...*fakeOrder) (*fakeSitoo, *httptest.Server) {
 	t.Helper()
-	f := &fakeSitoo{field: field, param: param, recs: recs}
+	f := &fakeSitoo{exclusive: exclusive, orders: orders}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	return f, srv
-}
-
-func (f *fakeSitoo) encode(r *fakeRecord) json.RawMessage {
-	m := map[string]any{"id": r.ID, "v": r.Version}
-	if r.Cursor != nil {
-		m[f.field] = *r.Cursor
-	}
-	b, _ := json.Marshal(m)
-	return b
 }
 
 func (f *fakeSitoo) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	q := r.URL.Query()
-	f.reqs = append(f.reqs, q)
-	f.paths = append(f.paths, r.URL.Path)
-	f.uris = append(f.uris, r.RequestURI)
-	f.served = append(f.served, nil)
-	f.servedCur = append(f.servedCur, nil)
+	f.reqs = append(f.reqs, fakeReq{q: q, path: r.URL.Path, uri: r.RequestURI})
 	n := len(f.reqs)
 	if f.before != nil {
 		if st := f.before(n, q); st != 0 {
@@ -102,7 +107,7 @@ func (f *fakeSitoo) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var from *int64
-	if v := q.Get(f.param); v != "" {
+	if v := q.Get("orderidfrom"); v != "" && !f.ignoreFilter {
 		p, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -110,144 +115,116 @@ func (f *fakeSitoo) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		from = &p
 	}
-	var match []*fakeRecord
-	for _, rec := range f.recs {
-		// A record without a cursor value cannot be filtered on; serve it.
-		if from == nil || rec.Cursor == nil || *rec.Cursor > *from || (!f.exclusive && *rec.Cursor == *from) {
-			match = append(match, rec)
+	var match []*fakeOrder
+	for _, o := range f.orders {
+		if from == nil || o.ID > *from || (!f.exclusive && o.ID == *from) {
+			match = append(match, o)
 		}
 	}
-	// Sorted on the cursor only when asked to, like a real listing; anything
-	// else comes back in insertion order.
-	if q.Get("sort") == f.field && !f.ignoreSort {
-		sort.SliceStable(match, func(i, j int) bool {
-			a, b := match[i].Cursor, match[j].Cursor
-			if a == nil || b == nil {
-				return a == nil && b != nil
-			}
-			return *a < *b
-		})
-	}
+	asc := q.Get("sort") == "orderid" && !f.ignoreSort
+	sort.SliceStable(match, func(i, j int) bool {
+		if asc {
+			return match[i].ID < match[j].ID
+		}
+		return match[i].ID > match[j].ID
+	})
 	start, _ := strconv.Atoi(q.Get("start"))
 	num, _ := strconv.Atoi(q.Get("num"))
 	if num <= 0 {
-		num = 1000
+		num = 100
 	}
 	items := []json.RawMessage{}
-	var ids []string
-	var curs []int64
+	served := []int64{}
 	for i := start; i < len(match) && i < start+num; i++ {
-		items = append(items, f.encode(match[i]))
-		ids = append(ids, match[i].ID)
-		cv := int64(-1)
-		if match[i].Cursor != nil {
-			cv = *match[i].Cursor
-		}
-		curs = append(curs, cv)
+		items = append(items, match[i].encode())
+		served = append(served, match[i].ID)
 	}
-	f.served[n-1] = ids
-	f.servedCur[n-1] = curs
+	f.reqs[n-1].served = served
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(sitooCollection{TotalCount: len(match), Items: items})
 }
 
-func (f *fakeSitoo) find(id string) *fakeRecord {
-	for _, r := range f.recs {
-		if r.ID == id {
-			return r
-		}
-	}
-	return nil
-}
-
-// update changes a record between polls: a new cursor value and new content.
-func (f *fakeSitoo) update(id string, cursor int64) {
+func (f *fakeSitoo) add(orders ...*fakeOrder) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	r := f.find(id)
-	r.Cursor = cur(cursor)
-	r.Version++
+	f.orders = append(f.orders, orders...)
 }
 
-func (f *fakeSitoo) add(recs ...*fakeRecord) {
+func (f *fakeSitoo) set(fn func(f *fakeSitoo)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.recs = append(f.recs, recs...)
+	fn(f)
 }
 
 func (f *fakeSitoo) setBefore(fn func(n int, q url.Values) int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.before = fn
+	f.set(func(f *fakeSitoo) { f.before = fn })
 }
 
-// takeRequests returns the queries received so far and forgets them, so each
-// assertion looks at one poll.
-func (f *fakeSitoo) takeRequests() []url.Values {
+// take returns the requests received since the last take and forgets them,
+// so each assertion looks at one poll.
+func (f *fakeSitoo) take() []fakeReq {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := f.reqs
-	f.reqs, f.paths, f.uris, f.served, f.servedCur = nil, nil, nil, nil, nil
+	f.reqs = nil
 	return out
 }
 
-// takePoll is takeRequests plus the cursor values each request served.
-func (f *fakeSitoo) takePoll() ([]url.Values, [][]int64) {
-	f.mu.Lock()
-	curs := f.servedCur
-	f.mu.Unlock()
-	return f.takeRequests(), curs
-}
-
-// checkKeyset checks one poll pages by cursor value: the first request asks
-// from first ("" = no filter), every later one from the previous page's last
-// cursor value, and all of them from offset 0.
-func checkKeyset(t *testing.T, label string, reqs []url.Values, curs [][]int64, first string) {
-	t.Helper()
-	if len(reqs) == 0 {
-		t.Errorf("%s: no requests", label)
-		return
-	}
-	for i, q := range reqs {
-		if s := q.Get("start"); s != "0" {
-			t.Errorf("%s request %d: start=%s, want 0", label, i+1, s)
-		}
-		if q.Get("sort") != incField {
-			t.Errorf("%s request %d: sort=%q, want %q", label, i+1, q.Get("sort"), incField)
-		}
-		want := first
-		if i > 0 {
-			prev := curs[i-1]
-			want = strconv.FormatInt(prev[len(prev)-1], 10)
-		}
-		if got := q.Get(incParam); got != want {
-			t.Errorf("%s request %d: %s=%q, want %q", label, i+1, incParam, got, want)
-		}
-	}
-}
-
-func (f *fakeSitoo) snapshot() (reqs []url.Values, paths, uris []string, served [][]string) {
+func (f *fakeSitoo) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]url.Values(nil), f.reqs...), append([]string(nil), f.paths...),
-		append([]string(nil), f.uris...), append([][]string(nil), f.served...)
+	return len(f.reqs)
 }
 
-func recs(cursors ...int64) []*fakeRecord {
-	out := make([]*fakeRecord, len(cursors))
-	for i, c := range cursors {
-		out[i] = &fakeRecord{ID: string(rune('a' + i)), Cursor: cur(c), Version: 1}
+func ords(ids ...int64) []*fakeOrder {
+	out := make([]*fakeOrder, len(ids))
+	for i, id := range ids {
+		out[i] = &fakeOrder{ID: id, V: 1}
 	}
 	return out
+}
+
+func idRange(from, to int64) []int64 {
+	var out []int64
+	for i := from; i <= to; i++ {
+		out = append(out, i)
+	}
+	return out
+}
+
+func without(ids []int64, drop ...int64) []int64 {
+	var out []int64
+	for _, id := range ids {
+		keep := true
+		for _, d := range drop {
+			if id == d {
+				keep = false
+			}
+		}
+		if keep {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func ov(n int64) *int64 { return &n }
+
+var filterModes = []struct {
+	name      string
+	exclusive bool
+}{
+	{"orderidfrom inclusive", false},
+	{"orderidfrom exclusive", true},
 }
 
 // pubRec is one record as it reached the pipeline.
 type pubRec struct {
-	ID      string
-	Version int
+	ID int64 // the order's ref
+	V  int
 }
 
-func (p pubRec) String() string { return fmt.Sprintf("%s@v%d", p.ID, p.Version) }
+func (p pubRec) String() string { return fmt.Sprintf("%d@v%d", p.ID, p.V) }
 
 // published drains what the consumer published since the last call and
 // returns the records, checking every envelope on the way.
@@ -262,7 +239,10 @@ func published(t *testing.T, got *[]*envelope.Envelope, mu *sync.Mutex, tenant, 
 		if env.TenantID != tenant || env.IntegrationID != conn {
 			t.Errorf("envelope routed to %s/%s, want %s/%s", env.TenantID, env.IntegrationID, tenant, conn)
 		}
-		var items []map[string]any
+		var items []struct {
+			Ref int64 `json:"ref"`
+			V   int   `json:"v"`
+		}
 		if err := json.Unmarshal(env.Payload, &items); err != nil {
 			t.Fatalf("payload is not a JSON array of records: %v (%s)", err, env.Payload)
 		}
@@ -270,36 +250,41 @@ func published(t *testing.T, got *[]*envelope.Envelope, mu *sync.Mutex, tenant, 
 			t.Errorf("published an envelope with no records: %s", env.Payload)
 		}
 		for _, it := range items {
-			id, _ := it["id"].(string)
-			v, _ := it["v"].(float64)
-			out = append(out, pubRec{ID: id, Version: int(v)})
+			out = append(out, pubRec{ID: it.Ref, V: it.V})
 		}
 	}
 	return out
 }
 
-// assertPublishedExactly checks got holds exactly want, each exactly once.
-func assertPublishedExactly(t *testing.T, got []pubRec, want ...pubRec) {
-	t.Helper()
-	count := map[pubRec]int{}
-	for _, p := range got {
-		count[p]++
+func countRecs(recs ...[]pubRec) map[pubRec]int {
+	m := map[pubRec]int{}
+	for _, rs := range recs {
+		for _, r := range rs {
+			m[r]++
+		}
 	}
+	return m
+}
+
+// assertOnce checks got holds exactly want, each exactly once.
+func assertOnce(t *testing.T, label string, got []pubRec, want ...pubRec) {
+	t.Helper()
+	count := countRecs(got)
 	for _, w := range want {
 		if count[w] != 1 {
-			t.Errorf("record %s published %d times, want 1 (published: %v)", w, count[w], got)
+			t.Errorf("%s: order %s published %d times, want 1 (published: %v)", label, w, count[w], got)
 		}
 		delete(count, w)
 	}
 	for p, n := range count {
-		t.Errorf("record %s published %d times, want 0 (published: %v)", p, n, got)
+		t.Errorf("%s: order %s published %d times, want 0 (published: %v)", label, p, n, got)
 	}
 }
 
-func v1(ids ...string) []pubRec {
+func v1(ids ...int64) []pubRec {
 	out := make([]pubRec, len(ids))
 	for i, id := range ids {
-		out[i] = pubRec{ID: id, Version: 1}
+		out[i] = pubRec{ID: id, V: 1}
 	}
 	return out
 }
@@ -307,11 +292,8 @@ func v1(ids ...string) []pubRec {
 func incConfig(srvURL string, overlap *int64, pageSize int) *SitooConfig {
 	return &SitooConfig{
 		AccountID: 1, SiteID: 2, APIID: "apiid", APIPassword: "pw",
-		BaseURL: srvURL, Resource: "items", PageSize: pageSize,
-		Incremental: true, CursorField: incField, CursorParam: incParam, CursorSort: incField,
-		// The fake filters with >=, so it is inclusive and overlap 0 is allowed.
-		CursorInclusive: true,
-		CursorOverlap:   overlap, NodeID: incNode,
+		BaseURL: srvURL, Resource: "orders", PageSize: pageSize,
+		Incremental: true, CursorOverlap: overlap, NodeID: incNode,
 	}
 }
 
@@ -342,1053 +324,793 @@ func watermark(t *testing.T, store checkpoint.Store, tenant, conn, node string) 
 	return cp.LastProcessedMessageID
 }
 
-// AC 2: no checkpoint means a full read: the first request has no cursor
-// param; every record goes out once and the checkpoint stores the highest
-// cursor value. Later pages step forward by cursor value (keyset paging).
-func TestIncremental_FirstPollPublishesAllAndStoresWatermark(t *testing.T) {
-	for _, pageSize := range []int{1, 2, 3, 1000} {
-		t.Run(fmt.Sprintf("page_size_%d", pageSize), func(t *testing.T) {
-			// Out of insertion order on purpose: the watermark is the max, not the last.
-			f, srv := newFakeSitoo(t, incField, incParam, recs(103, 100, 104, 101, 102)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-
-			poll(t, c, incTenant, incConn, incConfig(srv.URL, nil, pageSize))
-
-			assertPublishedExactly(t, published(t, got, mu, incTenant, incConn), v1("a", "b", "c", "d", "e")...)
-			reqs, curs := f.takePoll()
-			checkKeyset(t, "first poll", reqs, curs, "")
-			wantNum := strconv.Itoa(max(pageSize, 2)) // a page size below 2 is raised to 2
-			for i, q := range reqs {
-				if q.Get("num") != wantNum {
-					t.Errorf("request %d num = %s, want %s", i+1, q.Get("num"), wantNum)
-				}
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "104" {
-				t.Errorf("stored watermark = %q, want \"104\"", w)
-			}
-		})
+// fromFor is the orderidfrom a poll after watermark w should start at.
+func fromFor(w int64, overlap *int64) string {
+	o := int64(defaultCursorOverlap)
+	if overlap != nil {
+		o = *overlap
 	}
+	return strconv.FormatInt(max(0, w-o), 10)
 }
 
-// AC 3: the next poll asks for watermark - overlap and publishes only what
-// is new or changed; an unchanged collection publishes nothing.
-func TestIncremental_NextPollSendsCursorAndPublishesOnlyChanges(t *testing.T) {
-	cases := []struct {
-		name      string
-		overlap   *int64
-		wantParam string // watermark 104 minus the overlap
-		wantNext  string // watermark 111 minus the overlap
-	}{
-		{"default overlap 60", nil, "44", "51"},
-		{"overlap 10", cur(10), "94", "101"},
-		{"overlap 0", cur(0), "104", "111"},
+func lastServed(t *testing.T, r fakeReq) int64 {
+	t.Helper()
+	if len(r.served) == 0 {
+		t.Fatalf("request %s served nothing, so it has no last orderid", r.uri)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			cfg := incConfig(srv.URL, tc.overlap, 2)
-
-			poll(t, c, incTenant, incConn, cfg)
-			published(t, got, mu, incTenant, incConn)
-			f.takeRequests()
-
-			// Unchanged collection: cursor sent, nothing published.
-			poll(t, c, incTenant, incConn, cfg)
-			reqs, curs := f.takePoll()
-			checkKeyset(t, "unchanged poll", reqs, curs, tc.wantParam)
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("unchanged collection published %v, want nothing", p)
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "104" {
-				t.Errorf("watermark after unchanged poll = %q, want \"104\"", w)
-			}
-
-			// One new record, one record changed (new cursor value, new content).
-			f.add(&fakeRecord{ID: "f", Cursor: cur(110), Version: 1})
-			f.update("c", 111)
-			poll(t, c, incTenant, incConn, cfg)
-			reqs, curs = f.takePoll()
-			checkKeyset(t, "changed poll", reqs, curs, tc.wantParam)
-			assertPublishedExactly(t, published(t, got, mu, incTenant, incConn),
-				pubRec{"f", 1}, pubRec{"c", 2})
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "111" {
-				t.Errorf("watermark after changed poll = %q, want \"111\"", w)
-			}
-
-			// And the poll after that asks from the new watermark.
-			poll(t, c, incTenant, incConn, cfg)
-			reqs, curs = f.takePoll()
-			checkKeyset(t, "poll after advance", reqs, curs, tc.wantNext)
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("poll after advance published %v, want nothing", p)
-			}
-		})
-	}
+	return r.served[len(r.served)-1]
 }
 
-// AC 4: a record that changes mid-poll moves to the end of the sort order
-// and shifts every record behind it by one. Plain offset paging would then
-// skip the record that slid across the page boundary.
-func TestIncremental_RecordChangedDuringPoll(t *testing.T) {
-	cases := []struct {
-		name     string
-		pageSize int
-		changeAt int    // request number the change lands before
-		changed  string // record that changes
-	}{
-		// Page 1 is a,b,c; b moves to the end, so d slides back to index 2.
-		{"first poll, change before page 2", 3, 2, "b"},
-		// Page 1 is a,b; a moves; page 2 would have started at c's old slot.
-		{"first poll, page size 2", 2, 2, "a"},
-		// The change lands later: before page 3.
-		{"first poll, change before page 3", 2, 3, "b"},
+// checkKeyset checks one poll's requests: every one is sort=orderid, start=0,
+// num=num; the first asks from first ("" = no orderidfrom at all), every later
+// one from the last orderid the previous page served.
+func checkKeyset(t *testing.T, label string, reqs []fakeReq, first string, num int) {
+	t.Helper()
+	if len(reqs) == 0 {
+		t.Errorf("%s: no requests", label)
+		return
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104, 105, 106)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			f.setBefore(func(n int, _ url.Values) int {
-				if n == tc.changeAt {
-					r := f.find(tc.changed)
-					r.Cursor = cur(200)
-					r.Version = 2
-				}
-				return 0
-			})
-
-			poll(t, c, incTenant, incConn, incConfig(srv.URL, cur(10), tc.pageSize))
-
-			p := published(t, got, mu, incTenant, incConn)
-			count := map[pubRec]int{}
-			latest := map[string]bool{}
-			for _, r := range p {
-				count[r]++
-			}
-			for r, n := range count {
-				if n != 1 {
-					t.Errorf("record %s published %d times, want once", r, n)
-				}
-			}
-			for _, id := range []string{"a", "b", "c", "d", "e", "f", "g"} {
-				v := 1
-				if id == tc.changed {
-					v = 2
-				}
-				if count[pubRec{id, v}] == 0 {
-					t.Errorf("latest version of %s (v%d) never published; published: %v", id, v, p)
-				}
-				latest[id] = true
-			}
-			for r := range count {
-				if !latest[r.ID] {
-					t.Errorf("published unknown record %s", r)
-				}
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "200" {
-				t.Errorf("watermark = %q, want \"200\"", w)
-			}
-			// Paged by cursor value throughout, so the shift could not make it
-			// skip anything.
-			reqs, curs := f.takePoll()
-			checkKeyset(t, "poll with a change", reqs, curs, "")
-
-			// Nothing is left over for the next poll.
-			f.setBefore(nil)
-			poll(t, c, incTenant, incConn, incConfig(srv.URL, cur(10), tc.pageSize))
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("next poll published %v, want nothing", p)
-			}
-		})
-	}
-}
-
-// The change-mid-poll case on an incremental (not first) poll, with the
-// change landing inside the cursor-filtered window.
-func TestIncremental_RecordChangedDuringIncrementalPoll(t *testing.T) {
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104)...)
-	store := checkpoint.NewInMemoryStore()
-	c, got, mu := newIncConsumer(store)
-	cfg := incConfig(srv.URL, cur(10), 2)
-	poll(t, c, incTenant, incConn, cfg)
-	published(t, got, mu, incTenant, incConn)
-
-	f.add(&fakeRecord{ID: "f", Cursor: cur(110), Version: 1}, &fakeRecord{ID: "g", Cursor: cur(111), Version: 1},
-		&fakeRecord{ID: "h", Cursor: cur(112), Version: 1})
-	// Window is >= 94: a,b,c,d,e,f,g,h. Page 1 is a,b; then a changes.
-	f.setBefore(func(n int, _ url.Values) int {
-		if n == 2 {
-			r := f.find("a")
-			r.Cursor = cur(150)
-			r.Version = 2
+	for i, r := range reqs {
+		q := r.q
+		if got := q["sort"]; len(got) != 1 || got[0] != "orderid" {
+			t.Errorf("%s request %d: sort=%v, want [orderid] (%s)", label, i+1, got, r.uri)
 		}
-		return 0
-	})
-	f.takeRequests()
-	poll(t, c, incTenant, incConn, cfg)
-	assertPublishedExactly(t, published(t, got, mu, incTenant, incConn),
-		pubRec{"f", 1}, pubRec{"g", 1}, pubRec{"h", 1}, pubRec{"a", 2})
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "150" {
-		t.Errorf("watermark = %q, want \"150\"", w)
+		if got := q["start"]; len(got) != 1 || got[0] != "0" {
+			t.Errorf("%s request %d: start=%v, want [0] (%s)", label, i+1, got, r.uri)
+		}
+		if got := q["num"]; len(got) != 1 || got[0] != strconv.Itoa(num) {
+			t.Errorf("%s request %d: num=%v, want [%d] (%s)", label, i+1, got, num, r.uri)
+		}
+		if i == 0 {
+			if first == "" {
+				if q.Has("orderidfrom") {
+					t.Errorf("%s request 1: orderidfrom=%s, want none (a full read)", label, q.Get("orderidfrom"))
+				}
+			} else if got := q["orderidfrom"]; len(got) != 1 || got[0] != first {
+				t.Errorf("%s request 1: orderidfrom=%v, want [%s]", label, got, first)
+			}
+			continue
+		}
+		prev := reqs[i-1].served
+		if len(prev) == 0 {
+			t.Errorf("%s request %d follows a page that served nothing", label, i+1)
+			continue
+		}
+		want := strconv.FormatInt(prev[len(prev)-1], 10)
+		if got := q["orderidfrom"]; len(got) != 1 || got[0] != want {
+			t.Errorf("%s request %d: orderidfrom=%v, want [%s] (the previous page's last orderid)", label, i+1, got, want)
+		}
 	}
 }
 
-// Constant churn (#472 review): the lowest record changes and moves to the
-// end before every request after the first, so every page drifts. The poll
-// still completes, publishes every record's latest version exactly once as
-// of what it read, misses nothing that never changed, and advances the
-// cursor. A churn budget stops the fake after a while so "latest" is fixed.
-func TestIncremental_DriftEveryPageStillCompletes(t *testing.T) {
-	cases := []struct {
-		pageSize, records, changes int
-	}{
-		{3, 20, 15}, {5, 20, 15}, {8, 20, 15},
-		// Long enough that a budget per poll (rather than per position) of
-		// go-backs would run out.
-		{5, 60, 80},
-	}
-	for _, tc := range cases {
-		pageSize := tc.pageSize
-		t.Run(fmt.Sprintf("page_size_%d_records_%d_changes_%d", tc.pageSize, tc.records, tc.changes), func(t *testing.T) {
-			var cursors []int64
-			for i := int64(0); i < int64(tc.records); i++ {
-				cursors = append(cursors, 100+i)
-			}
-			f, srv := newFakeSitoo(t, incField, incParam, recs(cursors...)...)
-			store := checkpoint.NewInMemoryStore()
+// AC 1: with incremental off nothing changes: every poll is an offset-paged
+// full read that republishes everything, sends no orderidfrom and no sort,
+// and never touches the checkpoint store, even with settings that incremental
+// would refuse.
+func TestIncremental_OffIsAFullReadEveryPoll(t *testing.T) {
+	for _, resource := range []string{"transactions", "orders", "orders?orderstate=10"} {
+		t.Run(resource, func(t *testing.T) {
+			f, srv := newFakeSitoo(t, false, ords(idRange(1, 5)...)...)
+			store := &failingStore{Store: checkpoint.NewInMemoryStore()}
 			c, got, mu := newIncConsumer(store)
-			next := int64(1000)
-			changes := 0
-			f.setBefore(func(n int, _ url.Values) int {
-				if n == 1 || changes >= tc.changes {
-					return 0
-				}
-				var low *fakeRecord
-				for _, r := range f.recs {
-					if low == nil || *r.Cursor < *low.Cursor {
-						low = r
+			cfg := incConfig(srv.URL, ov(-1), 2) // a negative overlap is only refused with incremental on
+			cfg.Resource = resource
+			cfg.Incremental = false
+
+			for i := 1; i <= 2; i++ {
+				poll(t, c, incTenant, incConn, cfg)
+				assertOnce(t, fmt.Sprintf("poll %d", i), published(t, got, mu, incTenant, incConn), v1(idRange(1, 5)...)...)
+				reqs := f.take()
+				var starts []string
+				for j, r := range reqs {
+					starts = append(starts, r.q.Get("start"))
+					if r.q.Has("orderidfrom") || r.q.Has("sort") {
+						t.Errorf("poll %d request %d: %s, want no orderidfrom and no sort with incremental off", i, j+1, r.uri)
+					}
+					if r.q.Get("num") != "2" {
+						t.Errorf("poll %d request %d: num=%s, want 2", i, j+1, r.q.Get("num"))
 					}
 				}
-				low.Cursor = cur(next)
-				low.Version++
-				next++
-				changes++
-				return 0
-			})
-
-			done := make(chan error, 1)
-			go func() {
-				done <- c.fetchAndPublish(context.Background(), incConn, incTenant, incConfig(srv.URL, cur(10), pageSize), c.logger)
-			}()
-			var err error
-			select {
-			case err = <-done:
-			case <-time.After(10 * time.Second):
-				t.Fatal("poll did not finish on a collection that drifts on every page")
-			}
-			if err != nil {
-				t.Fatalf("fetchAndPublish: %v", err)
-			}
-
-			p := published(t, got, mu, incTenant, incConn)
-			count := map[pubRec]int{}
-			for _, r := range p {
-				count[r]++
-			}
-			for r, n := range count {
-				if n != 1 {
-					t.Errorf("record %s published %d times, want once", r, n)
+				if s := strings.Join(starts, ","); s != "0,2,4" {
+					t.Errorf("poll %d: start values %s, want 0,2,4 (offset paging)", i, s)
 				}
 			}
-			// Every record that exists now must have gone out at its current
-			// version: either read after its last change, or never changed.
-			f.mu.Lock()
-			final := map[string]int{}
-			for _, r := range f.recs {
-				final[r.ID] = r.Version
-			}
-			f.mu.Unlock()
-			for id, v := range final {
-				if count[pubRec{id, v}] == 0 {
-					t.Errorf("record %s at its final version v%d never published (published: %v)", id, v, p)
-				}
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w == "" || w == "0" {
-				t.Errorf("watermark = %q, want it advanced", w)
-			} else if n, _ := strconv.ParseInt(w, 10, 64); n < int64(100+tc.records-1) {
-				t.Errorf("watermark = %d, want at least %d (the highest cursor before any change)", n, 100+tc.records-1)
+			if store.saves != 0 || store.gets != 0 {
+				t.Errorf("incremental off used the checkpoint store: %d gets, %d saves", store.gets, store.saves)
 			}
 		})
 	}
 }
 
-// A record that appears mid-poll at or above where the poll is reading goes
-// out in this poll. One that appears behind it (a late commit with an older
-// cursor value) goes out in the next poll, as long as it is inside the
-// overlap; that is what the overlap is for.
-func TestIncremental_RecordInsertedDuringPoll(t *testing.T) {
-	cases := []struct {
-		name     string
-		pageSize int
-		cursor   int64 // cursor value of the record inserted before page 2
-		thisPoll bool  // published by the poll it lands in
-	}{
-		{"ahead of the read position", 3, 150, true},
-		{"ahead, page size 2", 2, 150, true},
-		{"behind the read position, inside the overlap", 3, 101, false},
-		{"behind, page size 2", 2, 101, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var all []*fakeRecord
-			for i := 0; i < 10; i++ {
-				all = append(all, &fakeRecord{ID: string(rune('a' + i)), Cursor: cur(int64(100 + 2*i)), Version: 1})
-			}
-			f, srv := newFakeSitoo(t, incField, incParam, all...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			f.setBefore(func(n int, _ url.Values) int {
-				if n == 2 {
-					f.recs = append(f.recs, &fakeRecord{ID: "z", Cursor: cur(tc.cursor), Version: 1})
-				}
-				return 0
-			})
-			cfg := incConfig(srv.URL, cur(60), tc.pageSize)
-			poll(t, c, incTenant, incConn, cfg)
-			first := published(t, got, mu, incTenant, incConn)
-			f.setBefore(nil)
-			poll(t, c, incTenant, incConn, cfg)
-			second := published(t, got, mu, incTenant, incConn)
+// AC 2: no checkpoint means a full read: no orderidfrom on the first request,
+// sort=orderid on every one, every order published once, and the checkpoint
+// holds the highest orderid. A page size below 2 is raised to 2.
+func TestIncremental_FirstPollReadsEverythingOnce(t *testing.T) {
+	// Out of order on purpose: the watermark is the highest id, not the last.
+	ids := []int64{105, 101, 109, 103, 107, 102, 108, 104, 106, 100}
+	for _, fm := range filterModes {
+		for _, ps := range []struct{ cfg, num int }{{0, defaultPageSize}, {1, 2}, {2, 2}, {3, 3}, {1000, 1000}} {
+			t.Run(fmt.Sprintf("%s/page_size_%d", fm.name, ps.cfg), func(t *testing.T) {
+				f, srv := newFakeSitoo(t, fm.exclusive, ords(ids...)...)
+				store := checkpoint.NewInMemoryStore()
+				c, got, mu := newIncConsumer(store)
 
-			want := append(v1("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"), pubRec{"z", 1})
-			assertPublishedExactly(t, append(first, second...), want...)
-			inFirst := false
-			for _, r := range first {
-				if r.ID == "z" {
-					inFirst = true
+				poll(t, c, incTenant, incConn, incConfig(srv.URL, nil, ps.cfg))
+
+				assertOnce(t, "first poll", published(t, got, mu, incTenant, incConn), v1(ids...)...)
+				checkKeyset(t, "first poll", f.take(), "", ps.num)
+				if w := watermark(t, store, incTenant, incConn, incNode); w != "109" {
+					t.Errorf("stored watermark = %q, want \"109\"", w)
 				}
-			}
-			if inFirst != tc.thisPoll {
-				t.Errorf("z published in the poll it landed in: %v, want %v", inFirst, tc.thisPoll)
-			}
-		})
+			})
+		}
 	}
 }
 
-// #472 review: at the default page size, the record at a page boundary
-// changes in place (an order status change: same cursor value, new content),
-// is deleted, or is the last record of all. Nothing fails, nothing is lost,
-// nothing goes out twice, and the poll takes no more requests than the
-// collection needs (the first version of this took about 50 times that).
-func TestIncremental_BoundaryRecordChangesAtDefaultPageSize(t *testing.T) {
+// AC 3: the next poll asks for watermark − overlap (never below 0) and only
+// orders not yet published go out; an unchanged collection publishes nothing.
+func TestIncremental_NextPollAsksFromWatermarkMinusOverlap(t *testing.T) {
+	cases := []struct {
+		name    string
+		base    int64 // orders base..base+9
+		overlap *int64
+	}{
+		{"default overlap", 5000, nil},
+		{"default overlap, clamped at 0", 100, nil},
+		{"overlap 3", 5000, ov(3)},
+		{"overlap 0", 5000, ov(0)},
+		{"overlap larger than the ids", 5, ov(50)},
+	}
+	for _, fm := range filterModes {
+		for _, tc := range cases {
+			t.Run(fm.name+"/"+tc.name, func(t *testing.T) {
+				w := tc.base + 9
+				f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(tc.base, w)...)...)
+				store := checkpoint.NewInMemoryStore()
+				c, got, mu := newIncConsumer(store)
+				cfg := incConfig(srv.URL, tc.overlap, 3)
+
+				poll(t, c, incTenant, incConn, cfg)
+				published(t, got, mu, incTenant, incConn)
+				f.take()
+
+				// Unchanged collection.
+				poll(t, c, incTenant, incConn, cfg)
+				checkKeyset(t, "unchanged poll", f.take(), fromFor(w, tc.overlap), 3)
+				assertOnce(t, "unchanged poll", published(t, got, mu, incTenant, incConn))
+				if got := watermark(t, store, incTenant, incConn, incNode); got != strconv.FormatInt(w, 10) {
+					t.Errorf("watermark after an unchanged poll = %q, want %d", got, w)
+				}
+
+				// Three new orders.
+				f.add(ords(w+1, w+2, w+5)...)
+				poll(t, c, incTenant, incConn, cfg)
+				checkKeyset(t, "poll with new orders", f.take(), fromFor(w, tc.overlap), 3)
+				assertOnce(t, "poll with new orders", published(t, got, mu, incTenant, incConn), v1(w+1, w+2, w+5)...)
+				if got := watermark(t, store, incTenant, incConn, incNode); got != strconv.FormatInt(w+5, 10) {
+					t.Errorf("watermark = %q, want %d", got, w+5)
+				}
+
+				// The poll after that asks from the new watermark.
+				poll(t, c, incTenant, incConn, cfg)
+				checkKeyset(t, "poll after the advance", f.take(), fromFor(w+5, tc.overlap), 3)
+				assertOnce(t, "poll after the advance", published(t, got, mu, incTenant, incConn))
+			})
+		}
+	}
+}
+
+// AC 4: an order that becomes visible late (its id handed out before others
+// it shows up after) is published once when its id is inside the overlap,
+// and not at all when it is below it: a documented limit of the watermark.
+func TestIncremental_LateOrders(t *testing.T) {
 	cases := []struct {
 		name     string
-		records  int
+		initial  []int64
+		overlap  int64
 		pageSize int
-		at       int  // index of the record that changes before request 2
-		del      bool // delete it instead of changing it in place
-		maxReqs  int
+		between  []int64 // added between poll 1 and poll 2
+		during   []int64 // added before request duringAt of poll 1
+		duringAt int
+		want     []int64 // published exactly once over three polls
+		never    []int64 // never published
 	}{
-		{"updated in place, page 1000", 2500, 1000, 999, false, 3},
-		{"deleted, page 1000", 2500, 1000, 999, true, 3},
-		{"updated in place, page 50", 2500, 50, 49, false, 52},
-		{"last record updated, page 1000", 2000, 1000, 1999, false, 3},
-		{"last record deleted, page 1000", 2000, 1000, 1999, true, 3},
-		{"default page size, nothing changes", 2500, 0, -1, false, 3},
+		{name: "between polls, inside the overlap", initial: without(idRange(100, 110), 107), overlap: 5, pageSize: 3,
+			between: []int64{107}, want: idRange(100, 110)},
+		{name: "between polls, below the overlap", initial: without(idRange(100, 110), 103), overlap: 5, pageSize: 3,
+			between: []int64{103}, want: without(idRange(100, 110), 103), never: []int64{103}},
+		{name: "between polls, inside, with new orders past it", initial: without(idRange(100, 110), 108), overlap: 5,
+			pageSize: 3, between: []int64{108, 111, 112}, want: idRange(100, 112)},
+		{name: "during the poll, behind the read position", initial: without(idRange(100, 112), 104), overlap: 10,
+			pageSize: 3, during: []int64{104}, duringAt: 3, want: idRange(100, 112)},
+		{name: "during the poll, ahead of the read position", initial: idRange(100, 112), overlap: 10,
+			pageSize: 3, during: []int64{150}, duringAt: 2, want: append(idRange(100, 112), 150)},
+		{name: "during the poll, behind and below the overlap", initial: without(idRange(100, 130), 101), overlap: 5,
+			pageSize: 4, during: []int64{101}, duringAt: 3, want: without(idRange(100, 130), 101), never: []int64{101}},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			all := make([]*fakeRecord, tc.records)
-			for i := range all {
-				all[i] = &fakeRecord{ID: fmt.Sprintf("r%05d", i), Cursor: cur(int64(100000 + i)), Version: 1}
-			}
-			f, srv := newFakeSitoo(t, incField, incParam, all...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			var deleted string
-			f.setBefore(func(n int, _ url.Values) int {
-				if n == 2 && tc.at >= 0 {
-					if tc.del {
-						deleted = f.recs[tc.at].ID
-						f.recs = append(f.recs[:tc.at], f.recs[tc.at+1:]...)
-					} else {
-						f.recs[tc.at].Version++
+	for _, fm := range filterModes {
+		for _, tc := range cases {
+			t.Run(fm.name+"/"+tc.name, func(t *testing.T) {
+				f, srv := newFakeSitoo(t, fm.exclusive, ords(tc.initial...)...)
+				store := checkpoint.NewInMemoryStore()
+				c, got, mu := newIncConsumer(store)
+				cfg := incConfig(srv.URL, ov(tc.overlap), tc.pageSize)
+				if len(tc.during) > 0 {
+					f.setBefore(func(n int, _ url.Values) int {
+						if n == tc.duringAt {
+							f.orders = append(f.orders, ords(tc.during...)...)
+						}
+						return 0
+					})
+				}
+				poll(t, c, incTenant, incConn, cfg)
+				if len(tc.during) > 0 && f.count() < tc.duringAt {
+					t.Fatalf("poll 1 made %d requests; the late order was never added", f.count())
+				}
+				f.setBefore(nil)
+				f.take()
+				var all []pubRec
+				all = append(all, published(t, got, mu, incTenant, incConn)...)
+
+				f.add(ords(tc.between...)...)
+				poll(t, c, incTenant, incConn, cfg)
+				all = append(all, published(t, got, mu, incTenant, incConn)...)
+				poll(t, c, incTenant, incConn, cfg)
+				all = append(all, published(t, got, mu, incTenant, incConn)...)
+
+				assertOnce(t, "three polls", all, v1(tc.want...)...)
+				count := countRecs(all)
+				for _, id := range tc.never {
+					if count[pubRec{id, 1}] != 0 {
+						t.Errorf("order %d, late and below the overlap, was published; the test's premise is wrong", id)
 					}
 				}
-				return 0
 			})
-			poll(t, c, incTenant, incConn, incConfig(srv.URL, cur(10), tc.pageSize))
+		}
+	}
+}
 
-			reqs, curs := f.takePoll()
-			checkKeyset(t, "poll", reqs, curs, "")
-			if len(reqs) > tc.maxReqs {
-				t.Errorf("poll took %d requests, want at most %d", len(reqs), tc.maxReqs)
+// AC 5: a new consumer with the same checkpoint store resumes from the stored
+// watermark and does not re-send what the overlap re-reads.
+func TestIncremental_RestartResumesFromCheckpoint(t *testing.T) {
+	for _, fm := range filterModes {
+		for _, overlap := range []*int64{ov(0), ov(3), nil} {
+			name := "default overlap"
+			if overlap != nil {
+				name = fmt.Sprintf("overlap %d", *overlap)
 			}
-			count := map[pubRec]int{}
-			for _, r := range published(t, got, mu, incTenant, incConn) {
-				count[r]++
-			}
-			for r, n := range count {
-				if n != 1 {
-					t.Errorf("record %s published %d times, want once", r, n)
+			t.Run(fm.name+"/"+name, func(t *testing.T) {
+				f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(100, 109)...)...)
+				store := checkpoint.NewInMemoryStore()
+				first, got1, mu1 := newIncConsumer(store)
+				poll(t, first, incTenant, incConn, incConfig(srv.URL, overlap, 4))
+				assertOnce(t, "before the restart", published(t, got1, mu1, incTenant, incConn), v1(idRange(100, 109)...)...)
+				f.take()
+
+				// A new consumer and a fresh config, as a restart loads it again.
+				restarted, got2, mu2 := newIncConsumer(store)
+				poll(t, restarted, incTenant, incConn, incConfig(srv.URL, overlap, 4))
+				checkKeyset(t, "after the restart", f.take(), fromFor(109, overlap), 4)
+				assertOnce(t, "after the restart", published(t, got2, mu2, incTenant, incConn))
+
+				f.add(ords(110)...)
+				poll(t, restarted, incTenant, incConn, incConfig(srv.URL, overlap, 4))
+				assertOnce(t, "new order after the restart", published(t, got2, mu2, incTenant, incConn), v1(110)...)
+				if w := watermark(t, store, incTenant, incConn, incNode); w != "110" {
+					t.Errorf("watermark = %q, want \"110\"", w)
 				}
+			})
+		}
+	}
+}
+
+// AC 6: the checkpoint is keyed by (tenant, connection, node). The same node
+// id under another tenant or connection, or another node in the same
+// connection, keeps its own checkpoint, and its first poll is a full read.
+func TestIncremental_CheckpointKeys(t *testing.T) {
+	type key struct{ tenant, conn, node string }
+	cases := []struct {
+		name string
+		a, b key
+	}{
+		{"other tenant, same connection and node", key{"tenant-a", "conn-1", incNode}, key{"tenant-b", "conn-1", incNode}},
+		{"same tenant, other connection", key{"tenant-a", "conn-1", incNode}, key{"tenant-a", "conn-2", incNode}},
+		{"same connection, other node", key{"tenant-a", "conn-1", "node-a"}, key{"tenant-a", "conn-1", "node-b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, srv := newFakeSitoo(t, false, ords(100, 101, 102)...)
+			store := checkpoint.NewInMemoryStore()
+			c, got, mu := newIncConsumer(store)
+			cfgA := incConfig(srv.URL, ov(10), 1000)
+			cfgA.NodeID = tc.a.node
+			cfgB := incConfig(srv.URL, ov(10), 1000)
+			cfgB.NodeID = tc.b.node
+
+			poll(t, c, tc.a.tenant, tc.a.conn, cfgA)
+			assertOnce(t, "key a, first poll", published(t, got, mu, tc.a.tenant, tc.a.conn), v1(100, 101, 102)...)
+			f.add(ords(103)...)
+			f.take()
+
+			poll(t, c, tc.b.tenant, tc.b.conn, cfgB)
+			checkKeyset(t, "key b, first poll", f.take(), "", 1000)
+			assertOnce(t, "key b, first poll", published(t, got, mu, tc.b.tenant, tc.b.conn), v1(100, 101, 102, 103)...)
+			if w := watermark(t, store, tc.b.tenant, tc.b.conn, tc.b.node); w != "103" {
+				t.Errorf("key b watermark = %q, want \"103\"", w)
 			}
-			for _, r := range f.recs {
-				if count[pubRec{r.ID, r.Version}] != 1 {
-					t.Errorf("record %s@v%d (its latest) published %d times, want once", r.ID, r.Version, count[pubRec{r.ID, r.Version}])
-				}
+			if w := watermark(t, store, tc.a.tenant, tc.a.conn, tc.a.node); w != "102" {
+				t.Errorf("key a watermark = %q, want \"102\" (untouched by key b's poll)", w)
 			}
-			if tc.del && deleted == "" {
-				t.Fatal("nothing was deleted")
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w == "" {
-				t.Error("no checkpoint saved")
-			}
+
+			// Key a still resumes from its own watermark.
+			poll(t, c, tc.a.tenant, tc.a.conn, cfgA)
+			checkKeyset(t, "key a, second poll", f.take(), "92", 1000)
+			assertOnce(t, "key a, second poll", published(t, got, mu, tc.a.tenant, tc.a.conn), v1(103)...)
 		})
 	}
 }
 
-// #472 review, finding 1: a listing that is not sorted on the cursor can
-// lose a change for good (a record already read changes and keeps its place;
-// a later record carries the watermark past the change). So incremental
-// needs a sort; without one the config is refused, and if Sitoo ignores the
-// sort the poll fails before publishing the unsorted page or saving.
-func TestIncremental_UnsortedListingCannotLoseAnUpdate(t *testing.T) {
-	newProducts := func(t *testing.T, ignoreSort bool) *fakeSitoo {
-		var all []*fakeRecord
-		for i := 0; i < 30; i++ {
-			all = append(all, &fakeRecord{ID: fmt.Sprintf("p%02d", i), Cursor: cur(100 + int64(i)), Version: 1})
-		}
-		f, srv := newFakeSitoo(t, "datemodified", "datelastmodified", all...)
-		f.mu.Lock()
-		f.exclusive, f.ignoreSort = true, ignoreSort
-		f.mu.Unlock()
-		f.base = srv.URL
-		return f
-	}
-	cfgFor := func(f *fakeSitoo, sortBy string) *SitooConfig {
-		return &SitooConfig{AccountID: 1, SiteID: 2, APIID: "a", APIPassword: "p", BaseURL: f.base,
-			Resource: "products", PageSize: 10, Incremental: true, NodeID: incNode,
-			CursorField: "datemodified", CursorParam: "datelastmodified", CursorSort: sortBy}
-	}
-	// Mid-poll: p00 (read on page 1) changes, then p25 changes 10 minutes later.
-	churn := func(f *fakeSitoo) {
-		f.setBefore(func(n int, _ url.Values) int {
-			if n == 2 {
-				r := f.find("p00")
-				r.Cursor, r.Version = cur(500), 2
-			}
-			if n == 3 {
-				r := f.find("p25")
-				r.Cursor, r.Version = cur(1100), 2
-			}
-			return 0
-		})
-	}
-
-	t.Run("no cursor_sort is refused", func(t *testing.T) {
-		f := newProducts(t, false)
-		c, got, mu := newIncConsumer(checkpoint.NewInMemoryStore())
-		if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfgFor(f, ""), c.logger); err == nil {
-			t.Fatal("incremental without cursor_sort accepted")
-		}
-		if reqs := f.takeRequests(); len(reqs) != 0 {
-			t.Errorf("made %d requests, want none", len(reqs))
-		}
-		if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-			t.Errorf("published %v", p)
-		}
-	})
-
-	t.Run("sort ignored by the server fails the poll", func(t *testing.T) {
-		f := newProducts(t, true)
-		churn(f)
-		store := checkpoint.NewInMemoryStore()
-		c, got, mu := newIncConsumer(store)
-		// Insertion order is p00..p29, which happens to be sorted until p00
-		// moves to 500 and stays first.
-		err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfgFor(f, "datemodified"), c.logger)
-		if !errors.Is(err, errNotSorted) {
-			t.Fatalf("error = %v, want errNotSorted", err)
-		}
-		if w := watermark(t, store, incTenant, incConn, incNode); w != "" {
-			t.Errorf("checkpoint %q saved by a poll over an unsorted listing", w)
-		}
-		for _, r := range published(t, got, mu, incTenant, incConn) {
-			if r.Version != 1 {
-				t.Errorf("published %s from an unsorted page", r)
-			}
-		}
-	})
-
-	t.Run("sorted listing publishes both changes", func(t *testing.T) {
-		f := newProducts(t, false)
-		churn(f)
-		store := checkpoint.NewInMemoryStore()
-		c, got, mu := newIncConsumer(store)
-		cfg := cfgFor(f, "datemodified")
-		poll(t, c, incTenant, incConn, cfg)
-		f.setBefore(nil)
-		poll(t, c, incTenant, incConn, cfg)
-		count := map[pubRec]int{}
-		for _, r := range published(t, got, mu, incTenant, incConn) {
-			count[r]++
-		}
-		for _, want := range []pubRec{{"p00", 2}, {"p25", 2}} {
-			if count[want] != 1 {
-				t.Errorf("%s published %d times, want once", want, count[want])
-			}
-		}
-		for r, n := range count {
-			if n != 1 {
-				t.Errorf("%s published %d times", r, n)
-			}
-		}
-		if w := watermark(t, store, incTenant, incConn, incNode); w != "1100" {
-			t.Errorf("watermark = %q, want \"1100\"", w)
-		}
-	})
-}
-
-// A server that ignores the cursor filter fails the poll before anything
-// below the filter is published, and nothing is saved.
-func TestIncremental_FilterIgnoredFailsThePoll(t *testing.T) {
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104)...)
+// An empty node id still checkpoints, under "sitoo-consumer", and resumes.
+func TestIncremental_EmptyNodeIDUsesDefaultKey(t *testing.T) {
+	f, srv := newFakeSitoo(t, false, ords(100, 101)...)
 	store := checkpoint.NewInMemoryStore()
 	c, got, mu := newIncConsumer(store)
-	cfg := incConfig(srv.URL, cur(0), 2)
+	cfg := incConfig(srv.URL, ov(10), 1000)
+	cfg.NodeID = ""
+
+	poll(t, c, incTenant, incConn, cfg)
+	assertOnce(t, "first poll", published(t, got, mu, incTenant, incConn), v1(100, 101)...)
+	if w := watermark(t, store, incTenant, incConn, "sitoo-consumer"); w != "101" {
+		t.Errorf("checkpoint under node id \"sitoo-consumer\" = %q, want \"101\"", w)
+	}
+	f.take()
+
+	cfg2 := incConfig(srv.URL, ov(10), 1000)
+	cfg2.NodeID = ""
+	poll(t, c, incTenant, incConn, cfg2)
+	checkKeyset(t, "second poll", f.take(), "91", 1000)
+	assertOnce(t, "second poll", published(t, got, mu, incTenant, incConn))
+}
+
+// AC 7: a poll that fails on page k has saved pages 1 to k−1, and the next
+// poll resumes after them: nothing is lost, and at most the failed page's
+// orders go out twice (only when its publish failed after delivery). A first
+// page that fails saves nothing.
+func TestIncremental_FailureOnPageKKeepsEarlierPages(t *testing.T) {
+	kinds := []string{"HTTP 500", "publish error"}
+	phases := []string{"first poll", "later poll"}
+	for _, fm := range filterModes {
+		for _, kind := range kinds {
+			for _, phase := range phases {
+				for _, k := range []int{1, 2, 3} {
+					t.Run(fmt.Sprintf("%s/%s/%s/page_%d", fm.name, kind, phase, k), func(t *testing.T) {
+						f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(101, 110)...)...)
+						store := checkpoint.NewInMemoryStore()
+						c, got, mu := newIncConsumer(store)
+						// Overlap 0, so every page of the later poll carries new orders.
+						cfg := incConfig(srv.URL, ov(0), 3)
+						all := []int64{}
+						var prior []pubRec
+						priorW := ""
+						if phase == "later poll" {
+							poll(t, c, incTenant, incConn, cfg)
+							prior = published(t, got, mu, incTenant, incConn)
+							priorW = watermark(t, store, incTenant, incConn, incNode)
+							f.take()
+							f.add(ords(idRange(111, 120)...)...)
+							all = idRange(101, 120)
+						} else {
+							all = idRange(101, 110)
+						}
+
+						// Inject the failure on page k.
+						failed := false
+						switch kind {
+						case "HTTP 500":
+							f.setBefore(func(n int, _ url.Values) int {
+								if n == k {
+									failed = true
+									return http.StatusInternalServerError
+								}
+								return 0
+							})
+						case "publish error":
+							inner := c.publish
+							c.publish = func(ctx context.Context, env *envelope.Envelope) error {
+								if f.count() == k && !failed {
+									failed = true
+									_ = inner(ctx, env) // delivered, but reported as failed
+									return errors.New("injected publish failure")
+								}
+								return inner(ctx, env)
+							}
+						}
+						err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger)
+						// take locks the fake, which orders the handler's write
+						// of failed before the read below.
+						reqs := f.take()
+						if !failed {
+							t.Fatalf("the failure was never injected on page %d", k)
+						}
+						if err == nil {
+							t.Fatal("fetchAndPublish returned nil for a poll that failed")
+						}
+						if len(reqs) != k {
+							t.Fatalf("failed poll made %d requests, want %d (it stops at the failed page)", len(reqs), k)
+						}
+						failedPoll := published(t, got, mu, incTenant, incConn)
+
+						// Pages 1..k-1 went out and are saved.
+						before := countRecs(prior)
+						var earlier []pubRec
+						seen := map[int64]bool{}
+						for _, r := range reqs[:k-1] {
+							for _, id := range r.served {
+								if !seen[id] && before[pubRec{id, 1}] == 0 {
+									earlier = append(earlier, pubRec{id, 1})
+								}
+								seen[id] = true
+							}
+						}
+						var pageK []pubRec
+						for _, id := range reqs[k-1].served {
+							if !seen[id] && before[pubRec{id, 1}] == 0 {
+								pageK = append(pageK, pubRec{id, 1})
+							}
+						}
+						if kind == "HTTP 500" {
+							assertOnce(t, "failed poll", failedPoll, earlier...)
+						} else {
+							assertOnce(t, "failed poll", failedPoll, append(append([]pubRec{}, earlier...), pageK...)...)
+						}
+						wantW := priorW
+						if k > 1 {
+							wantW = strconv.FormatInt(lastServed(t, reqs[k-2]), 10)
+						}
+						if w := watermark(t, store, incTenant, incConn, incNode); w != wantW {
+							t.Errorf("watermark after failing on page %d = %q, want %q", k, w, wantW)
+						}
+
+						// The next poll resumes after the saved pages.
+						f.setBefore(nil)
+						poll(t, c, incTenant, incConn, cfg)
+						first := ""
+						if wantW != "" {
+							first = wantW // overlap 0
+						}
+						checkKeyset(t, "recovery poll", f.take(), first, 3)
+						recovery := published(t, got, mu, incTenant, incConn)
+
+						total := countRecs(prior, failedPoll, recovery)
+						dupOK := map[pubRec]bool{}
+						if kind == "publish error" {
+							for _, r := range pageK {
+								dupOK[r] = true
+							}
+						}
+						for _, id := range all {
+							r := pubRec{id, 1}
+							switch n := total[r]; {
+							case n == 0:
+								t.Errorf("order %d lost", id)
+							case n == 2 && dupOK[r]:
+							case n != 1:
+								t.Errorf("order %d published %d times (only the failed page's orders may go out twice)", id, n)
+							}
+						}
+						if len(total) != len(all) {
+							t.Errorf("published %d distinct orders, want %d", len(total), len(all))
+						}
+						if w := watermark(t, store, incTenant, incConn, incNode); w != strconv.FormatInt(all[len(all)-1], 10) {
+							t.Errorf("watermark after recovery = %q, want %d", w, all[len(all)-1])
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// AC 8: a page that is not sorted ascending on orderid, repeats an orderid,
+// shows Sitoo ignored orderidfrom, or holds an order without an integer
+// orderid fails the poll before anything on that page is published. Earlier
+// pages stay published and saved. A quoted integer orderid is fine.
+func TestIncremental_PageChecks(t *testing.T) {
+	cases := []struct {
+		name     string
+		setup    func(f *fakeSitoo)
+		wantErr  error // nil: the poll succeeds
+		wantReqs int   // requests made, the last one being the bad page
+	}{
+		{name: "sort ignored (Sitoo's default -orderid)", setup: func(f *fakeSitoo) { f.ignoreSort = true },
+			wantErr: errNotSorted, wantReqs: 1},
+		{name: "repeated orderid", setup: func(f *fakeSitoo) { f.orders = append(f.orders, &fakeOrder{ID: 105, V: 2}) },
+			// Pages: [101 102 103] [103 104 105] [105 105 106]
+			wantErr: errNotSorted, wantReqs: 3},
+		{name: "filter ignored", setup: func(f *fakeSitoo) { f.ignoreFilter = true },
+			// Page 2 asks from 103 and gets 101 again.
+			wantErr: errFilterIgnored, wantReqs: 2},
+		{name: "order without orderid", setup: func(f *fakeSitoo) { f.orders[4].Raw = "-" },
+			wantErr: errNoOrderID, wantReqs: 2},
+		{name: "orderid null", setup: func(f *fakeSitoo) { f.orders[4].Raw = "null" },
+			wantErr: errNoOrderID, wantReqs: 2},
+		{name: "orderid a fraction", setup: func(f *fakeSitoo) { f.orders[4].Raw = "105.5" },
+			wantErr: errNoOrderID, wantReqs: 2},
+		{name: "orderid not a number", setup: func(f *fakeSitoo) { f.orders[4].Raw = `"abc"` },
+			wantErr: errNoOrderID, wantReqs: 2},
+		{name: "orderid an object", setup: func(f *fakeSitoo) { f.orders[4].Raw = `{"id":105}` },
+			wantErr: errNoOrderID, wantReqs: 2},
+		{name: "orderid a quoted integer is accepted", setup: func(f *fakeSitoo) { f.orders[4].Raw = `"105"` }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Inclusive filter, page size 3: pages [101 102 103] [103 104 105] ...
+			f, srv := newFakeSitoo(t, false, ords(idRange(101, 109)...)...)
+			f.set(tc.setup)
+			store := checkpoint.NewInMemoryStore()
+			c, got, mu := newIncConsumer(store)
+
+			err := c.fetchAndPublish(context.Background(), incConn, incTenant, incConfig(srv.URL, nil, 3), c.logger)
+			reqs := f.take()
+			p := published(t, got, mu, incTenant, incConn)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("fetchAndPublish: %v", err)
+				}
+				assertOnce(t, "poll", p, v1(idRange(101, 109)...)...)
+				if w := watermark(t, store, incTenant, incConn, incNode); w != "109" {
+					t.Errorf("watermark = %q, want \"109\"", w)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if len(reqs) != tc.wantReqs {
+				t.Fatalf("made %d requests, want %d (the poll stops at the bad page)", len(reqs), tc.wantReqs)
+			}
+			// Exactly the pages before the bad one were published.
+			var want []pubRec
+			seen := map[int64]bool{}
+			for _, r := range reqs[:len(reqs)-1] {
+				for _, id := range r.served {
+					if !seen[id] {
+						want = append(want, pubRec{id, 1})
+					}
+					seen[id] = true
+				}
+			}
+			assertOnce(t, "poll with a bad page", p, want...)
+			wantW := ""
+			if len(reqs) > 1 {
+				wantW = strconv.FormatInt(lastServed(t, reqs[len(reqs)-2]), 10)
+			}
+			if w := watermark(t, store, incTenant, incConn, incNode); w != wantW {
+				t.Errorf("watermark = %q, want %q (the last good page)", w, wantW)
+			}
+		})
+	}
+}
+
+// AC 8, on a later poll: Sitoo ignoring orderidfrom on the first request
+// fails the poll with nothing published and the watermark where it was.
+func TestIncremental_FilterIgnoredOnALaterPoll(t *testing.T) {
+	f, srv := newFakeSitoo(t, false, ords(idRange(101, 109)...)...)
+	store := checkpoint.NewInMemoryStore()
+	c, got, mu := newIncConsumer(store)
+	cfg := incConfig(srv.URL, ov(2), 3)
 	poll(t, c, incTenant, incConn, cfg)
 	published(t, got, mu, incTenant, incConn)
-	before := watermark(t, store, incTenant, incConn, incNode)
+	f.take()
 
-	f.mu.Lock()
-	f.param = "somethingelse" // the fake no longer filters on what the poller sends
-	f.mu.Unlock()
-	f.add(&fakeRecord{ID: "x", Cursor: cur(105), Version: 1})
+	f.set(func(f *fakeSitoo) { f.ignoreFilter = true })
+	f.add(ords(110)...)
 	err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger)
 	if !errors.Is(err, errFilterIgnored) {
 		t.Fatalf("error = %v, want errFilterIgnored", err)
 	}
-	if w := watermark(t, store, incTenant, incConn, incNode); w != before {
-		t.Errorf("watermark moved from %q to %q on a failed poll", before, w)
+	if reqs := f.take(); len(reqs) != 1 {
+		t.Errorf("made %d requests, want 1", len(reqs))
 	}
-	if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-		t.Errorf("published %v", p)
+	assertOnce(t, "poll with the filter ignored", published(t, got, mu, incTenant, incConn))
+	if w := watermark(t, store, incTenant, incConn, incNode); w != "109" {
+		t.Errorf("watermark = %q, want \"109\" (unchanged)", w)
 	}
 }
 
-// More records than a page share one cursor value (a bulk import stamped in
-// one second). The poll pages through that run by offset; a record in the
-// run that changes mid-run moves out of it and shifts the rest, so the run is
-// read again from its start. Everything goes out once.
-func TestIncremental_RunOfEqualCursorValues(t *testing.T) {
-	cases := []struct {
-		name     string
-		changeAt int // request number the change lands before (0 = none)
-	}{
-		{"no change", 0},
-		{"change inside the run", 2},
-		{"change later in the run", 3},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var all []*fakeRecord
-			for i := 0; i < 25; i++ {
-				all = append(all, &fakeRecord{ID: fmt.Sprintf("b%02d", i), Cursor: cur(100), Version: 1})
-			}
-			all = append(all, &fakeRecord{ID: "after1", Cursor: cur(101), Version: 1},
-				&fakeRecord{ID: "after2", Cursor: cur(102), Version: 1})
-			f, srv := newFakeSitoo(t, incField, incParam, all...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			f.setBefore(func(n int, _ url.Values) int {
-				if n == tc.changeAt {
-					r := f.find("b03")
-					r.Cursor, r.Version = cur(200), 2
+// AC 9: whether Sitoo treats orderidfrom as ">=" or ">", every order is
+// published exactly once, over polls with orders added between and during
+// them, at several page sizes and overlaps.
+func TestIncremental_InclusiveOrExclusiveFilter(t *testing.T) {
+	for _, fm := range filterModes {
+		for _, pageSize := range []int{2, 3, 7, 1000} {
+			for _, overlap := range []*int64{ov(0), ov(4), nil} {
+				name := "default overlap"
+				if overlap != nil {
+					name = fmt.Sprintf("overlap %d", *overlap)
 				}
-				return 0
+				t.Run(fmt.Sprintf("%s/page_size_%d/%s", fm.name, pageSize, name), func(t *testing.T) {
+					f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(1, 20)...)...)
+					store := checkpoint.NewInMemoryStore()
+					c, got, mu := newIncConsumer(store)
+					cfg := incConfig(srv.URL, overlap, pageSize)
+					var all []pubRec
+
+					poll(t, c, incTenant, incConn, cfg)
+					checkKeyset(t, "poll 1", f.take(), "", pageSize)
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+
+					f.add(ords(idRange(21, 25)...)...)
+					poll(t, c, incTenant, incConn, cfg)
+					checkKeyset(t, "poll 2", f.take(), fromFor(20, overlap), pageSize)
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+
+					// 28 lands between polls; 29 and 30 while poll 3 reads its
+					// second page (or after it, when poll 3 has only one page).
+					f.add(ords(28)...)
+					addedDuring := false
+					f.setBefore(func(n int, _ url.Values) int {
+						if n == 2 {
+							f.orders = append(f.orders, ords(29, 30)...)
+							addedDuring = true
+						}
+						return 0
+					})
+					poll(t, c, incTenant, incConn, cfg)
+					f.setBefore(nil)
+					checkKeyset(t, "poll 3", f.take(), fromFor(25, overlap), pageSize)
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+					if !addedDuring {
+						f.add(ords(29, 30)...)
+					}
+
+					poll(t, c, incTenant, incConn, cfg)
+					f.take()
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+					poll(t, c, incTenant, incConn, cfg)
+					f.take()
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+
+					assertOnce(t, "all polls", all, v1(append(idRange(1, 25), 28, 29, 30)...)...)
+					if w := watermark(t, store, incTenant, incConn, incNode); w != "30" {
+						t.Errorf("watermark = %q, want \"30\"", w)
+					}
+				})
+			}
+		}
+	}
+}
+
+// AC 10: a poll reads at most maxPagesPerPoll (100) pages, saves the
+// watermark at the last of them, and the next poll carries on from there.
+// Nothing is lost or published twice.
+func TestIncremental_PageBudget(t *testing.T) {
+	if maxPagesPerPoll != 100 {
+		t.Errorf("maxPagesPerPoll = %d, want 100", maxPagesPerPoll)
+	}
+	const n = 250
+	for _, fm := range filterModes {
+		// 50 is the largest overlap checkIncremental allows at page size 2.
+		for _, overlap := range []int64{0, 10, 50} {
+			t.Run(fmt.Sprintf("%s/overlap_%d", fm.name, overlap), func(t *testing.T) {
+				f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(1, n)...)...)
+				store := checkpoint.NewInMemoryStore()
+				c, got, mu := newIncConsumer(store)
+				cfg := incConfig(srv.URL, ov(overlap), 2)
+				var all []pubRec
+
+				pollOnce := func(label string) []fakeReq {
+					t.Helper()
+					err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger)
+					// Running out of pages may or may not be reported as an
+					// error; it must not be one of the page checks.
+					if errors.Is(err, errNotSorted) || errors.Is(err, errFilterIgnored) || errors.Is(err, errNoOrderID) {
+						t.Fatalf("%s: %v", label, err)
+					}
+					reqs := f.take()
+					all = append(all, published(t, got, mu, incTenant, incConn)...)
+					return reqs
+				}
+
+				reqs := pollOnce("poll 1")
+				if len(reqs) != maxPagesPerPoll {
+					t.Fatalf("poll 1 made %d requests, want exactly %d", len(reqs), maxPagesPerPoll)
+				}
+				checkKeyset(t, "poll 1", reqs, "", 2)
+				w := lastServed(t, reqs[len(reqs)-1])
+				if got := watermark(t, store, incTenant, incConn, incNode); got != strconv.FormatInt(w, 10) {
+					t.Fatalf("watermark after poll 1 = %q, want %d (the 100th page's last orderid)", got, w)
+				}
+				assertOnce(t, "poll 1", all, v1(idRange(1, w)...)...)
+
+				// Later polls carry on until the collection is read. A poll after
+				// one that used its whole budget carries on where that one got to
+				// (the last orderid read); any other starts at W − overlap.
+				prevFull := true
+				for p := 2; ; p++ {
+					if p > 10 {
+						t.Fatal("still reading after 10 polls")
+					}
+					label := fmt.Sprintf("poll %d", p)
+					reqs := pollOnce(label)
+					if len(reqs) > maxPagesPerPoll {
+						t.Errorf("%s made %d requests, more than %d", label, len(reqs), maxPagesPerPoll)
+					}
+					first := fromFor(w, ov(overlap))
+					if prevFull {
+						first = strconv.FormatInt(w, 10)
+					}
+					checkKeyset(t, label, reqs, first, 2)
+					prevFull = len(reqs) == maxPagesPerPoll
+					stored, _ := strconv.ParseInt(watermark(t, store, incTenant, incConn, incNode), 10, 64)
+					if stored <= w && len(reqs) == maxPagesPerPoll {
+						t.Fatalf("%s used its whole budget without moving the watermark past %d", label, w)
+					}
+					w = stored
+					if len(reqs) < maxPagesPerPoll {
+						break
+					}
+				}
+				if w != n {
+					t.Errorf("final watermark = %d, want %d", w, n)
+				}
+				assertOnce(t, "all polls", all, v1(idRange(1, n)...)...)
 			})
-			cfg := incConfig(srv.URL, cur(10), 10)
-			poll(t, c, incTenant, incConn, cfg)
-
-			count := map[pubRec]int{}
-			for _, r := range published(t, got, mu, incTenant, incConn) {
-				count[r]++
-			}
-			for r, n := range count {
-				if n != 1 {
-					t.Errorf("record %s published %d times, want once", r, n)
-				}
-			}
-			for _, r := range f.recs {
-				if count[pubRec{r.ID, r.Version}] != 1 {
-					t.Errorf("record %s@v%d (its latest) published %d times, want once", r.ID, r.Version, count[pubRec{r.ID, r.Version}])
-				}
-			}
-			reqs := f.takeRequests()
-			offset := false
-			for _, q := range reqs {
-				if q.Get("start") != "0" {
-					offset = true
-				}
-			}
-			if !offset {
-				t.Errorf("never paged by offset through the run (requests: %v)", reqs)
-			}
-			// The next poll has nothing left to send.
-			f.setBefore(nil)
-			poll(t, c, incTenant, incConn, cfg)
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("next poll published %v", p)
-			}
-		})
-	}
-}
-
-// A run that keeps changing under the poll would otherwise be read forever.
-// The poll stops at its page cap (a few times what totalcount needs), fails
-// without saving, and has sent each record at most once.
-func TestIncremental_PageCapStopsAnEndlessPoll(t *testing.T) {
-	var recs30 []json.RawMessage
-	for i := 0; i < 30; i++ {
-		recs30 = append(recs30, json.RawMessage(fmt.Sprintf(`{"id":"r%02d","v":1,%q:100}`, i, incField)))
-	}
-	var mu sync.Mutex
-	requests := 0
-	// Every request rotates the run by one, so the record a run page should
-	// begin with is never there.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requests++
-		n := requests
-		mu.Unlock()
-		start, _ := strconv.Atoi(r.URL.Query().Get("start"))
-		num, _ := strconv.Atoi(r.URL.Query().Get("num"))
-		var items []json.RawMessage
-		for i := start; i < start+num && i < len(recs30); i++ {
-			items = append(items, recs30[(i+n)%len(recs30)])
-		}
-		_ = json.NewEncoder(w).Encode(sitooCollection{TotalCount: len(recs30), Items: items})
-	}))
-	t.Cleanup(srv.Close)
-	store := checkpoint.NewInMemoryStore()
-	c, got, gmu := newIncConsumer(store)
-	done := make(chan error, 1)
-	go func() {
-		done <- c.fetchAndPublish(context.Background(), incConn, incTenant, incConfig(srv.URL, cur(10), 10), c.logger)
-	}()
-	var err error
-	select {
-	case err = <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("poll never stopped")
-	}
-	if !errors.Is(err, errPageCap) {
-		t.Fatalf("error = %v, want errPageCap", err)
-	}
-	wantCap := pageCapFactor*(30/10+1) + pageCapSlack
-	mu.Lock()
-	if requests != wantCap {
-		t.Errorf("made %d requests, want the cap %d", requests, wantCap)
-	}
-	mu.Unlock()
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "" {
-		t.Errorf("checkpoint %q saved by a capped poll", w)
-	}
-	count := map[pubRec]int{}
-	for _, r := range published(t, got, gmu, incTenant, incConn) {
-		count[r]++
-		if count[r] > 1 {
-			t.Errorf("record %s published more than once", r)
 		}
 	}
 }
 
-// AC 5: a new consumer with the same checkpoint store resumes from the
-// stored cursor and does not re-send.
-func TestIncremental_RestartResumesFromCheckpoint(t *testing.T) {
-	for _, overlap := range []int64{0, 10} {
-		t.Run(fmt.Sprintf("overlap_%d", overlap), func(t *testing.T) {
-			f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104)...)
-			store := checkpoint.NewInMemoryStore()
-			first, got1, mu1 := newIncConsumer(store)
-			cfg := incConfig(srv.URL, cur(overlap), 2)
-			poll(t, first, incTenant, incConn, cfg)
-			assertPublishedExactly(t, published(t, got1, mu1, incTenant, incConn), v1("a", "b", "c", "d", "e")...)
-			f.takeRequests()
-
-			restarted, got2, mu2 := newIncConsumer(store)
-			// A fresh config too, as a restart loads it again from the database.
-			poll(t, restarted, incTenant, incConn, incConfig(srv.URL, cur(overlap), 2))
-			reqs, curs := f.takePoll()
-			checkKeyset(t, "after restart", reqs, curs, strconv.FormatInt(104-overlap, 10))
-			if p := published(t, got2, mu2, incTenant, incConn); len(p) != 0 {
-				t.Errorf("restarted consumer re-sent %v, want nothing", p)
-			}
-
-			f.add(&fakeRecord{ID: "f", Cursor: cur(105), Version: 1})
-			poll(t, restarted, incTenant, incConn, incConfig(srv.URL, cur(overlap), 2))
-			assertPublishedExactly(t, published(t, got2, mu2, incTenant, incConn), pubRec{"f", 1})
-		})
-	}
-}
-
-// AC 6: the same node id under another tenant or another connection keeps
-// its own checkpoint. The second key's first poll is a full read.
-func TestIncremental_CheckpointsAreScopedPerTenantAndConnection(t *testing.T) {
+// AC 14: a resource with its own query string makes one well-formed URL per
+// request, with the resource's parameters kept, incremental on or off.
+func TestIncremental_ResourceQueryStringURL(t *testing.T) {
 	cases := []struct {
-		name           string
-		tenant, conn   string
-		otherT, otherC string
-	}{
-		{"other tenant, same connection id", "tenant-a", "conn-1", "tenant-b", "conn-1"},
-		{"same tenant, other connection", "tenant-a", "conn-1", "tenant-a", "conn-2"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			cfg := incConfig(srv.URL, cur(10), 1000)
-
-			poll(t, c, tc.tenant, tc.conn, cfg)
-			assertPublishedExactly(t, published(t, got, mu, tc.tenant, tc.conn), v1("a", "b", "c")...)
-			f.add(&fakeRecord{ID: "d", Cursor: cur(103), Version: 1})
-			f.takeRequests()
-
-			poll(t, c, tc.otherT, tc.otherC, cfg)
-			for i, q := range f.takeRequests() {
-				if q.Has(incParam) {
-					t.Errorf("first poll of %s/%s, request %d sent %s=%s, want a full read (cursor leaked across keys)",
-						tc.otherT, tc.otherC, i+1, incParam, q.Get(incParam))
-				}
-			}
-			assertPublishedExactly(t, published(t, got, mu, tc.otherT, tc.otherC), v1("a", "b", "c", "d")...)
-			if w := watermark(t, store, tc.otherT, tc.otherC, incNode); w != "103" {
-				t.Errorf("%s/%s watermark = %q, want \"103\"", tc.otherT, tc.otherC, w)
-			}
-			if w := watermark(t, store, tc.tenant, tc.conn, incNode); w != "102" {
-				t.Errorf("%s/%s watermark = %q, want \"102\" (untouched by the other key's poll)", tc.tenant, tc.conn, w)
-			}
-
-			// The first key still resumes from its own cursor.
-			poll(t, c, tc.tenant, tc.conn, cfg)
-			for i, q := range f.takeRequests() {
-				if q.Get(incParam) != "92" {
-					t.Errorf("%s/%s request %d: %s=%q, want \"92\"", tc.tenant, tc.conn, i+1, incParam, q.Get(incParam))
-				}
-			}
-			assertPublishedExactly(t, published(t, got, mu, tc.tenant, tc.conn), pubRec{"d", 1})
-		})
-	}
-}
-
-// Two nodes in one connection keep separate checkpoints; an empty node id
-// still checkpoints (under a fixed default) and resumes.
-func TestIncremental_NodeIDKeysTheCheckpoint(t *testing.T) {
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101)...)
-	store := checkpoint.NewInMemoryStore()
-	c, got, mu := newIncConsumer(store)
-
-	cfgA := incConfig(srv.URL, cur(10), 1000)
-	cfgA.NodeID = "node-a"
-	cfgB := incConfig(srv.URL, cur(10), 1000)
-	cfgB.NodeID = "node-b"
-	poll(t, c, incTenant, incConn, cfgA)
-	published(t, got, mu, incTenant, incConn)
-	f.takeRequests()
-	poll(t, c, incTenant, incConn, cfgB)
-	for _, q := range f.takeRequests() {
-		if q.Has(incParam) {
-			t.Errorf("node-b's first poll sent %s=%s, want a full read", incParam, q.Get(incParam))
-		}
-	}
-	assertPublishedExactly(t, published(t, got, mu, incTenant, incConn), v1("a", "b")...)
-
-	cfgEmpty := incConfig(srv.URL, cur(10), 1000)
-	cfgEmpty.NodeID = ""
-	poll(t, c, incTenant, incConn, cfgEmpty)
-	published(t, got, mu, incTenant, incConn)
-	f.takeRequests()
-	cfgEmpty2 := incConfig(srv.URL, cur(10), 1000)
-	cfgEmpty2.NodeID = ""
-	poll(t, c, incTenant, incConn, cfgEmpty2)
-	for _, q := range f.takeRequests() {
-		if q.Get(incParam) != "91" {
-			t.Errorf("empty node id, second poll: %s=%q, want \"91\" (checkpoint under the default node id)", incParam, q.Get(incParam))
-		}
-	}
-	if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-		t.Errorf("empty node id, second poll published %v, want nothing", p)
-	}
-}
-
-// AC 7: a poll that fails midway leaves the checkpoint where it was; the next
-// poll reads from the old watermark again (at-least-once).
-func TestIncremental_FailedPollDoesNotAdvance(t *testing.T) {
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103, 104)...)
-	store := checkpoint.NewInMemoryStore()
-	c, got, mu := newIncConsumer(store)
-	cfg := incConfig(srv.URL, cur(0), 2)
-	poll(t, c, incTenant, incConn, cfg)
-	published(t, got, mu, incTenant, incConn)
-
-	f.add(&fakeRecord{ID: "f", Cursor: cur(110), Version: 1}, &fakeRecord{ID: "g", Cursor: cur(111), Version: 1},
-		&fakeRecord{ID: "h", Cursor: cur(112), Version: 1})
-	f.takeRequests()
-	// Window >= 104 is e,f,g,h. Page 1 (e,f) lands, page 2 gets a 500.
-	f.setBefore(func(n int, _ url.Values) int {
-		if n == 2 {
-			return http.StatusInternalServerError
-		}
-		return 0
-	})
-	if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger); err == nil {
-		t.Fatal("fetchAndPublish returned nil when page 2 failed")
-	}
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "104" {
-		t.Errorf("watermark after a failed poll = %q, want \"104\" (unchanged)", w)
-	}
-	published(t, got, mu, incTenant, incConn) // f may have gone out before the failure
-
-	f.setBefore(nil)
-	f.takeRequests()
-	poll(t, c, incTenant, incConn, cfg)
-	reqs, curs := f.takePoll()
-	checkKeyset(t, "poll after failure (from the old watermark)", reqs, curs, "104")
-	p := published(t, got, mu, incTenant, incConn)
-	for _, want := range []pubRec{{"g", 1}, {"h", 1}} {
-		n := 0
-		for _, r := range p {
-			if r == want {
-				n++
-			}
-		}
-		if n != 1 {
-			t.Errorf("after a failed poll, %s published %d times, want 1 (published: %v)", want, n, p)
-		}
-	}
-	for _, r := range p {
-		if r.ID != "f" && r.ID != "g" && r.ID != "h" {
-			t.Errorf("after a failed poll, re-sent %s which the last complete poll already published", r)
-		}
-	}
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "112" {
-		t.Errorf("watermark after recovery = %q, want \"112\"", w)
-	}
-}
-
-// A failed first poll (no checkpoint yet) saves nothing.
-func TestIncremental_FailedFirstPollSavesNothing(t *testing.T) {
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102, 103)...)
-	store := checkpoint.NewInMemoryStore()
-	c, _, _ := newIncConsumer(store)
-	f.setBefore(func(n int, _ url.Values) int {
-		if n == 2 {
-			return http.StatusInternalServerError
-		}
-		return 0
-	})
-	if err := c.fetchAndPublish(context.Background(), incConn, incTenant, incConfig(srv.URL, nil, 2), c.logger); err == nil {
-		t.Fatal("fetchAndPublish returned nil when page 2 failed")
-	}
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "" {
-		t.Errorf("failed first poll saved watermark %q", w)
-	}
-}
-
-// Records without a cursor value are published, never dropped; they do not
-// move the watermark and are not remembered.
-func TestIncremental_RecordWithoutCursorIsPublishedEveryPoll(t *testing.T) {
-	all := append(recs(100, 101), &fakeRecord{ID: "x", Cursor: nil, Version: 1})
-	_, srv := newFakeSitoo(t, incField, incParam, all...)
-	store := checkpoint.NewInMemoryStore()
-	c, got, mu := newIncConsumer(store)
-	cfg := incConfig(srv.URL, cur(10), 1000)
-
-	poll(t, c, incTenant, incConn, cfg)
-	assertPublishedExactly(t, published(t, got, mu, incTenant, incConn), v1("a", "b", "x")...)
-	if w := watermark(t, store, incTenant, incConn, incNode); w != "101" {
-		t.Errorf("watermark = %q, want \"101\"", w)
-	}
-	poll(t, c, incTenant, incConn, cfg)
-	assertPublishedExactly(t, published(t, got, mu, incTenant, incConn), pubRec{"x", 1})
-}
-
-// AC 8 and AC 9: URL shape for a resource with its own query string, and the
-// per-resource defaults.
-func TestIncremental_URLAndResourceDefaults(t *testing.T) {
-	cases := []struct {
-		name      string
 		resource  string
-		field     string // record field the fake keeps the cursor in
-		param     string // param the poller must send
-		cfgField  string
-		cfgParam  string
-		cfgSort   string
-		wantPath  string
-		wantQuery map[string]string // must be present on every request
-		wantSort  string            // "" means no sort param
-		wantFirst string            // param on the second poll's first request
+		wantQuery map[string]string
 	}{
-		{name: "orders defaults", resource: "orders", field: "orderid", param: "orderidfrom",
-			wantPath: "/accounts/1/sites/2/orders", wantSort: "orderid", wantFirst: "944"},
-		{name: "orders with a query string", resource: "orders?orderstate=10", field: "orderid", param: "orderidfrom",
-			wantPath: "/accounts/1/sites/2/orders", wantQuery: map[string]string{"orderstate": "10"}, wantSort: "orderid",
-			wantFirst: "944"},
-		{name: "products with its cursor configured", resource: "products", field: "datemodified", param: "datelastmodified",
-			cfgField: "datemodified", cfgParam: "datelastmodified", cfgSort: "datemodified",
-			wantPath: "/accounts/1/sites/2/products", wantSort: "datemodified", wantFirst: "943"},
-		{name: "custom resource with sort and query", resource: "/warehouseitems?warehouseid=7&x=a%20b",
-			field: "moddate", param: "datelastmodifiedfrom", cfgField: "moddate", cfgParam: "datelastmodifiedfrom",
-			cfgSort: "moddate", wantPath: "/accounts/1/sites/2/warehouseitems",
-			wantQuery: map[string]string{"warehouseid": "7", "x": "a b"}, wantSort: "moddate", wantFirst: "943"},
-		{name: "orders with explicit overrides", resource: "orders", field: "datemodified", param: "datemodifiedfrom",
-			cfgField: "datemodified", cfgParam: "datemodifiedfrom", cfgSort: "datemodified",
-			wantPath: "/accounts/1/sites/2/orders", wantSort: "datemodified", wantFirst: "943"},
+		{"orders?orderstate=10", map[string]string{"orderstate": "10"}},
+		{"orders?orderstate=10&customerref=a%20b", map[string]string{"orderstate": "10", "customerref": "a b"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, tc.field, tc.param, recs(1000, 1001, 1002, 1003, 1004)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			cfg := &SitooConfig{
-				AccountID: 1, SiteID: 2, APIID: "apiid", APIPassword: "pw",
-				BaseURL: srv.URL, Resource: tc.resource, PageSize: 2, Incremental: true,
-				CursorField: tc.cfgField, CursorParam: tc.cfgParam, CursorSort: tc.cfgSort, NodeID: incNode,
-			}
-			poll(t, c, incTenant, incConn, cfg)
-			assertPublishedExactly(t, published(t, got, mu, incTenant, incConn), v1("a", "b", "c", "d", "e")...)
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "1004" {
-				t.Errorf("watermark = %q, want \"1004\" (cursor read from %q)", w, tc.field)
-			}
-			firstPollReqs, _, _, _ := f.snapshot()
-			poll(t, c, incTenant, incConn, cfg)
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("second poll published %v, want nothing", p)
-			}
-
-			reqs, paths, uris, _ := f.snapshot()
-			n1 := len(firstPollReqs)
-			if firstPollReqs[0].Has(tc.param) {
-				t.Errorf("first poll's first request sent %s=%s, want a full read", tc.param, firstPollReqs[0].Get(tc.param))
-			}
-			if n1 >= len(reqs) {
-				t.Fatalf("second poll made no requests")
-			}
-			if v := reqs[n1].Get(tc.param); v != tc.wantFirst {
-				t.Errorf("second poll's first request %s = %q, want %q (1004 - default overlap 60)", tc.param, v, tc.wantFirst)
-			}
-			for i, q := range reqs {
-				if paths[i] != tc.wantPath {
-					t.Errorf("request %d path = %q, want %q", i+1, paths[i], tc.wantPath)
-				}
-				if n := strings.Count(uris[i], "?"); n != 1 {
-					t.Errorf("request %d URI %q has %d '?', want 1", i+1, uris[i], n)
-				}
-				for k, v := range tc.wantQuery {
-					if got := q[k]; len(got) != 1 || got[0] != v {
-						t.Errorf("request %d %s = %v, want [%q]", i+1, k, got, v)
-					}
-				}
-				if !q.Has("start") || !q.Has("num") {
-					t.Errorf("request %d lacks start/num: %s", i+1, uris[i])
-				}
-				if s := q.Get("sort"); s != tc.wantSort {
-					t.Errorf("request %d sort = %q, want %q", i+1, s, tc.wantSort)
-				}
-				if i >= n1 && !q.Has(tc.param) {
-					t.Errorf("request %d of the second poll has no %s", i+1, tc.param)
-				}
-			}
-		})
-	}
-}
-
-// AC 9: other resources need both cursor_field and cursor_param.
-func TestIncremental_UnknownResourceWithoutCursorSettingsErrors(t *testing.T) {
-	cases := []struct {
-		name, resource, field, param string
-	}{
-		{"neither", "warehouseitems", "", ""},
-		{"field only", "warehouseitems", "moddate", ""},
-		{"param only", "warehouseitems", "", "datelastmodifiedfrom"},
-		{"default resource", "", "", ""},
-		{"transactions", "transactions", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, "moddate", "datelastmodifiedfrom", recs(1, 2)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			cfg := &SitooConfig{
-				AccountID: 1, SiteID: 2, APIID: "apiid", APIPassword: "pw", BaseURL: srv.URL,
-				Resource: tc.resource, Incremental: true, CursorField: tc.field, CursorParam: tc.param, NodeID: incNode,
-			}
-			if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger); err == nil {
-				t.Fatal("fetchAndPublish returned nil for an incremental resource with no cursor settings")
-			}
-			if p := published(t, got, mu, incTenant, incConn); len(p) != 0 {
-				t.Errorf("published %v, want nothing", p)
-			}
-			if reqs, _, _, _ := f.snapshot(); len(reqs) != 0 {
-				t.Errorf("made %d requests, want none", len(reqs))
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "" {
-				t.Errorf("saved watermark %q", w)
-			}
-		})
-	}
-}
-
-// AC 1: with incremental off nothing changes: every poll is a full read,
-// republishes everything, sends no cursor and saves no checkpoint, even with
-// cursor settings present.
-func TestIncremental_OffRepublishesEverything(t *testing.T) {
-	for _, resource := range []string{"items", "orders?orderstate=10"} {
-		t.Run(resource, func(t *testing.T) {
-			f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102)...)
-			store := checkpoint.NewInMemoryStore()
-			c, got, mu := newIncConsumer(store)
-			cfg := incConfig(srv.URL, cur(10), 2)
-			cfg.Resource = resource
-			cfg.Incremental = false
-
-			for i := 0; i < 2; i++ {
+		for _, inc := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/incremental_%v", tc.resource, inc), func(t *testing.T) {
+				f, srv := newFakeSitoo(t, false, ords(idRange(100, 104)...)...)
+				store := checkpoint.NewInMemoryStore()
+				c, got, mu := newIncConsumer(store)
+				cfg := incConfig(srv.URL, ov(2), 2)
+				cfg.Resource = tc.resource
+				cfg.Incremental = inc
 				poll(t, c, incTenant, incConn, cfg)
-				p := published(t, got, mu, incTenant, incConn)
-				if len(p) < 3 {
-					t.Errorf("poll %d published %v, want every record", i+1, p)
+				poll(t, c, incTenant, incConn, cfg)
+				published(t, got, mu, incTenant, incConn)
+				reqs := f.take()
+				if len(reqs) == 0 {
+					t.Fatal("no requests")
 				}
-				seen := map[string]bool{}
-				for _, r := range p {
-					seen[r.ID] = true
-				}
-				for _, id := range []string{"a", "b", "c"} {
-					if !seen[id] {
-						t.Errorf("poll %d did not publish %s", i+1, id)
+				for i, r := range reqs {
+					if r.path != "/accounts/1/sites/2/orders" {
+						t.Errorf("request %d path = %q, want /accounts/1/sites/2/orders", i+1, r.path)
+					}
+					if n := strings.Count(r.uri, "?"); n != 1 {
+						t.Errorf("request %d URI %q has %d '?', want 1", i+1, r.uri, n)
+					}
+					for k, v := range tc.wantQuery {
+						if got := r.q[k]; len(got) != 1 || got[0] != v {
+							t.Errorf("request %d %s = %v, want [%q] (%s)", i+1, k, got, v, r.uri)
+						}
+					}
+					for _, k := range []string{"start", "num"} {
+						if got := r.q[k]; len(got) != 1 {
+							t.Errorf("request %d %s = %v, want exactly one (%s)", i+1, k, got, r.uri)
+						}
+					}
+					if inc {
+						if got := r.q["sort"]; len(got) != 1 || got[0] != "orderid" {
+							t.Errorf("request %d sort = %v, want [orderid] (%s)", i+1, got, r.uri)
+						}
 					}
 				}
-			}
-			reqs, _, uris, _ := f.snapshot()
-			for i, q := range reqs {
-				if q.Has(incParam) {
-					t.Errorf("request %d sent %s with incremental off", i+1, incParam)
-				}
-				if n := strings.Count(uris[i], "?"); n != 1 {
-					t.Errorf("request %d URI %q has %d '?', want 1", i+1, uris[i], n)
-				}
-				if strings.HasPrefix(resource, "orders?") && q.Get("orderstate") != "10" {
-					t.Errorf("request %d lost orderstate=10: %s", i+1, uris[i])
-				}
-			}
-			if w := watermark(t, store, incTenant, incConn, incNode); w != "" {
-				t.Errorf("incremental off saved watermark %q", w)
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -1402,7 +1124,8 @@ type lockedStore struct {
 func (l *lockedStore) Save(ctx context.Context, cp *checkpoint.Checkpoint) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.s.Save(ctx, cp)
+	c := *cp
+	return l.s.Save(ctx, &c)
 }
 
 func (l *lockedStore) Get(ctx context.Context, tenantID, connectionID, nodeID string) (*checkpoint.Checkpoint, error) {
@@ -1429,15 +1152,15 @@ func (l *lockedStore) DeleteForConnection(ctx context.Context, tenantID, connect
 }
 
 // End to end through the SDK runner and an embedded JetStream: the boot
-// restore starts the poller, the first poll publishes everything, later
-// polls of an unchanged collection publish nothing, and a new record goes
-// out alone. The database is sqlmock (connection lookup only).
+// restore starts the poller from the node config, the first poll publishes
+// every order, later polls of an unchanged collection publish nothing, and a
+// new order goes out alone. The database is sqlmock (connection lookup only).
 func TestIncremental_ThroughHarness(t *testing.T) {
 	const (
 		connID = "conn-sitoo-inc"
 		tenant = "tenant-sitoo-inc"
 	)
-	f, srv := newFakeSitoo(t, incField, incParam, recs(100, 101, 102)...)
+	f, srv := newFakeSitoo(t, false, ords(100, 101, 102)...)
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1449,9 +1172,7 @@ func TestIncremental_ThroughHarness(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id"}).AddRow(connID, tenant))
 	nodes := fmt.Sprintf(`[{"id":"in","type":"consumer","config":{"type":"sitoo","sitoo":{
 		"account_id":1,"site_id":2,"api_id":"apiid","api_password":"pw","base_url":%q,
-		"resource":"items","poll_interval_seconds":1,"incremental":true,
-		"cursor_field":%q,"cursor_param":%q,"cursor_sort":%q,"cursor_inclusive":true,
-		"cursor_overlap":10}}}]`, srv.URL, incField, incParam, incField)
+		"resource":"orders","poll_interval_seconds":1,"incremental":true,"cursor_overlap":10}}}]`, srv.URL)
 	mock.ExpectQuery("SELECT nodes FROM connections").WithArgs(connID, tenant).
 		WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow([]byte(nodes)))
 
@@ -1459,49 +1180,110 @@ func TestIncremental_ThroughHarness(t *testing.T) {
 	c := &sitooConsumer{checkpoints: store}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sitoo-consumer", DB: db})
 
-	decode := func(env *envelope.Envelope) []string {
-		var items []map[string]any
+	decode := func(env *envelope.Envelope) string {
+		var items []struct {
+			OrderID int64 `json:"orderid"`
+		}
 		if err := json.Unmarshal(env.Payload, &items); err != nil {
 			t.Fatalf("payload: %v", err)
 		}
 		var ids []string
 		for _, it := range items {
-			ids = append(ids, fmt.Sprint(it["id"]))
+			ids = append(ids, strconv.FormatInt(it.OrderID, 10))
 		}
 		sort.Strings(ids)
-		return ids
+		return strings.Join(ids, ",")
 	}
 
 	first := h.ExpectEnvelope(t, harness.MatchTenant(tenant), 10*time.Second)
 	if first.IntegrationID != connID {
 		t.Fatalf("published for %s, want %s", first.IntegrationID, connID)
 	}
-	if ids := decode(first); strings.Join(ids, ",") != "a,b,c" {
-		t.Fatalf("first envelope carries %v, want [a b c]", ids)
+	if ids := decode(first); ids != "100,101,102" {
+		t.Fatalf("first envelope carries %s, want 100,101,102", ids)
 	}
 	harness.Eventually(t, 5*time.Second, "the first poll's checkpoint", func() bool {
 		cp, _ := store.Get(context.Background(), tenant, connID, "in")
 		return cp != nil && cp.LastProcessedMessageID == "102"
 	})
-	// Let at least one more poll of the unchanged collection run.
-	harness.Eventually(t, 5*time.Second, "a poll with the cursor", func() bool {
-		reqs, _, _, _ := f.snapshot()
-		for _, q := range reqs {
-			if q.Get(incParam) == "92" {
+	// Let at least one poll of the unchanged collection run.
+	harness.Eventually(t, 5*time.Second, "a poll from the watermark", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, r := range f.reqs {
+			if r.q.Get("orderidfrom") == "92" && r.served != nil {
 				return true
 			}
 		}
 		return false
 	})
 
-	f.add(&fakeRecord{ID: "d", Cursor: cur(103), Version: 1})
-	// The next envelope must be d alone: the polls in between published nothing.
+	f.add(ords(103)...)
+	// The next envelope must be 103 alone: the polls in between published nothing.
 	next := h.ExpectEnvelope(t, harness.MatchTenant(tenant), 10*time.Second)
-	if ids := decode(next); strings.Join(ids, ",") != "d" {
-		t.Fatalf("envelope after adding d carries %v, want [d]", ids)
+	if ids := decode(next); ids != "103" {
+		t.Fatalf("envelope after adding 103 carries %s, want 103", ids)
 	}
 	harness.Eventually(t, 5*time.Second, "the checkpoint to advance to 103", func() bool {
 		cp, _ := store.Get(context.Background(), tenant, connID, "in")
 		return cp != nil && cp.LastProcessedMessageID == "103"
 	})
+}
+
+// Found by the test author: with an overlap wider than a poll's page budget
+// (page size 2, default overlap 1000), every poll after the first used to
+// start at W − overlap, re-read the same 100 pages and never get past W.
+// A poll cut short by the budget is now carried on by the next one.
+func TestIncremental_OverlapWiderThanThePageBudgetStillProgresses(t *testing.T) {
+	const n = 1500
+	for _, fm := range filterModes {
+		t.Run(fm.name, func(t *testing.T) {
+			f, srv := newFakeSitoo(t, fm.exclusive, ords(idRange(1, n)...)...)
+			store := checkpoint.NewInMemoryStore()
+			c, got, mu := newIncConsumer(store)
+			cfg := incConfig(srv.URL, nil, 2)
+			var all []pubRec
+			last, prevFrom, prevFull := int64(0), int64(-1), false
+			for p := 1; ; p++ {
+				if p > 40 {
+					t.Fatalf("still reading after 40 polls; watermark %d", last)
+				}
+				if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger); err != nil {
+					t.Fatalf("poll %d: %v", p, err)
+				}
+				reqs := f.take()
+				all = append(all, published(t, got, mu, incTenant, incConn)...)
+				last, _ = strconv.ParseInt(watermark(t, store, incTenant, incConn, incNode), 10, 64)
+				// A poll after one cut short by the budget must start further on
+				// than that one did, or the poller is going round in circles.
+				from := int64(0)
+				if v := reqs[0].q.Get("orderidfrom"); v != "" {
+					from, _ = strconv.ParseInt(v, 10, 64)
+				}
+				if prevFull && from <= prevFrom {
+					t.Fatalf("poll %d starts at orderid %d, no further than the poll before (%d)", p, from, prevFrom)
+				}
+				// Cut short: the budget is used and its last page was full.
+				prevFrom, prevFull = from, len(reqs) == maxPagesPerPoll && len(reqs[len(reqs)-1].served) == 2
+				if last == n && !prevFull {
+					break
+				}
+			}
+			if last != n {
+				t.Errorf("final watermark = %d, want %d", last, n)
+			}
+			assertOnce(t, "all polls", all, v1(idRange(1, n)...)...)
+
+			// Read to the end, the next poll goes back to re-reading the
+			// overlap from W − overlap.
+			if err := c.fetchAndPublish(context.Background(), incConn, incTenant, cfg, c.logger); err != nil {
+				t.Fatal(err)
+			}
+			reqs := f.take()
+			checkKeyset(t, "after the end", reqs, fromFor(n, nil), 2)
+			if extra := published(t, got, mu, incTenant, incConn); len(extra) != 0 {
+				t.Errorf("re-reading the overlap published %v", extra)
+			}
+		})
+	}
 }

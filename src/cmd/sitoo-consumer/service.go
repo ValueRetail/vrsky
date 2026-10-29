@@ -87,23 +87,13 @@ type SitooConfig struct {
 	// means the convention below: "transactions" -> "transactionid".
 	WebhookIDField string `json:"webhook_id_field"`
 
-	// Incremental makes each poll ask only for what changed since the last
-	// complete poll, and skip records already published. Off by default:
-	// turning it on changes what a running pipeline delivers. See
-	// incremental.go and plans/issue-457-sitoo-incremental.md.
+	// Incremental makes each poll read only orders not yet published (the
+	// `orders` resource only). Off by default: turning it on changes what a
+	// running pipeline delivers. See incremental.go and
+	// plans/issue-457-sitoo-incremental.md.
 	Incremental bool `json:"incremental"`
-	// CursorField is the record field holding an increasing integer (a Unix
-	// timestamp or an id). Defaulted for the resources in knownCursors.
-	CursorField string `json:"cursor_field"`
-	// CursorParam is the query parameter Sitoo filters CursorField with.
-	CursorParam string `json:"cursor_param"`
-	// CursorSort is an optional `sort` value sent with incremental reads.
-	CursorSort string `json:"cursor_sort"`
-	// CursorInclusive declares that CursorParam returns records whose cursor
-	// equals the value (>=). Only then may CursorOverlap be 0.
-	CursorInclusive bool `json:"cursor_inclusive"`
-	// CursorOverlap is how far back, in cursor units, each poll re-reads.
-	// nil means defaultCursorOverlap; 0 only with an inclusive filter.
+	// CursorOverlap is how far back, in orderids, each incremental poll
+	// re-reads. nil means defaultCursorOverlap.
 	CursorOverlap *int64 `json:"cursor_overlap"`
 
 	// NodeID keys the checkpoint. It comes from the connection's node, not
@@ -283,8 +273,8 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 		return
 	}
 	if cfg.Incremental {
-		if _, err := cfg.cursorSpec(); err != nil {
-			logger.Error("Sitoo incremental config incomplete", "error", err)
+		if err := cfg.checkIncremental(); err != nil {
+			logger.Error("Sitoo incremental polling refused", "error", err)
 			return
 		}
 	}
@@ -361,18 +351,16 @@ type sitooCollection struct {
 
 // fetchAndPublish pages through the configured Sitoo collection (start/num) and
 // publishes each non-empty page as one JSON-array envelope. With incremental
-// on it reads only what changed since the last complete poll instead
-// (fetchIncremental).
+// on it reads only the orders not yet published instead (fetchIncremental).
 func (s *sitooConsumer) fetchAndPublish(ctx context.Context, connID, tenantID string, cfg *SitooConfig, logger *slog.Logger) error {
 	if err := cfg.checkResource(); err != nil {
 		return err
 	}
 	if cfg.Incremental {
-		spec, err := cfg.cursorSpec()
-		if err != nil {
+		if err := cfg.checkIncremental(); err != nil {
 			return err
 		}
-		return s.fetchIncremental(ctx, connID, tenantID, cfg, spec, logger)
+		return s.fetchIncremental(ctx, connID, tenantID, cfg, logger)
 	}
 	pageSize := cfg.PageSize
 	if pageSize <= 0 {

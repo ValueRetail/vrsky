@@ -58,36 +58,20 @@ The connector honours Sitoo's rate limit: on HTTP `429` it waits for
 
 ### Incremental polling
 
-By default every poll reads and publishes the whole collection. Set
-`incremental: true` to read only what changed since the last complete poll:
+By default every poll reads and publishes the whole collection. For the
+`orders` resource, set `incremental: true` to publish only orders that
+haven't been published yet:
 
-- `cursor_field` — the record field holding an increasing integer (a Unix
-  timestamp in seconds, or an id).
-- `cursor_param` — the Sitoo query parameter that filters on it. Not
-  `start`, `num` or `sort`: the poller sets those itself.
-- `cursor_sort` — the `sort` value that lists the collection ascending on
-  `cursor_field`. Required: without it a change made during a poll can be
-  lost for good.
-- `cursor_overlap` — how far back each poll re-reads, in cursor units
-  (default `60`: a minute of timestamps, or 60 ids). `0` is refused unless
-  the filter is inclusive (returns records equal to the value).
-- `cursor_inclusive` — set it when your `cursor_param` returns records equal
-  to the value (`>=`). `orderidfrom` is known to be; `datelastmodified`
-  ("modified after") is not. Left unset, the poller asks one below the
-  value, which is right for either kind.
-
-Sitoo has no common "modified since" filter, so each collection needs its own
-filter and sort. One is built in, from the Sitoo API reference:
-
-| resource | `cursor_field` | `cursor_param` | `cursor_sort` |
-|---|---|---|---|
-| `orders` | `orderid` | `orderidfrom` | `orderid` |
-
-For any other resource set `cursor_field`, `cursor_param` and `cursor_sort`,
-or the connection refuses to start. `orders` by id picks up new orders, not
-changes to existing ones. `products` has a `datelastmodified` filter but the
-API reference documents no sort for it, so there is no default; only set it
-up if Sitoo confirms a sort on `datemodified` for your account.
+- `incremental` — on for `orders` only. Sitoo has no common "modified since"
+  filter, and `orders` is the one collection whose filter (`orderidfrom`)
+  and sort (`sort=orderid`) the API reference documents. Any other resource
+  with `incremental` on is refused at start. A query string on the resource
+  is fine (`orders?orderstate=10`), as long as it doesn't set `orderidfrom`,
+  `sort`, `start` or `num`: the poller sets those itself.
+- `cursor_overlap` — how far back each poll re-reads, in order ids (default
+  `1000`). It covers an order whose id was handed out before others but that
+  showed up in Sitoo after them, for example from a till that was offline.
+  Must not be negative.
 
 ```json
 {
@@ -106,40 +90,31 @@ up if Sitoo confirms a sort on `datemodified` for your account.
 
 How it behaves:
 
-- The first poll reads everything and publishes it once, and so does the
-  first poll after the resource, its query string, `cursor_field` or
-  `cursor_param` changes. After that each poll starts at
-  `last cursor − cursor_overlap`.
-- It pages by cursor value, not by position: each next page asks the filter
-  for records from the previous page's last cursor value on. A record that
-  changes during the poll gets a newer value, so it lands ahead of where the
-  poll is reading and goes out in the same poll; nothing slides past it.
-- Every page is checked: ascending on `cursor_field`, and nothing below the
-  value asked for. A page that fails the check fails the poll before it is
-  published, and the cursor stays where it was. The error names
-  `cursor_sort` or `cursor_param`.
-- More records than a page sharing one cursor value (a bulk import stamped in
-  one second) are paged through by position; if that run changes while it is
-  read, it is read again from its start.
-- A poll that reads far more pages than the collection needs (three times
-  what the first page's `totalcount` implies, plus ten) stops, logs it and
-  fails without moving the cursor.
-- The highest cursor value seen is stored per connection node in
-  `connection_node_checkpoints`, so a restart or redeploy resumes there
-  instead of re-sending everything.
-- The overlap re-reads a little of what was already sent; records are
-  skipped by content, so only new or changed records go out. A record that
-  changes is published again with its new content. A record committed late
-  with a cursor value just below where the poll had got to arrives on the
-  next poll, as long as it is within the overlap.
-- The cursor only moves once every page has been published. A poll that
-  fails halfway is read again from the old cursor next time, so some records
-  can arrive twice but none are skipped.
-- A record without the cursor field is published every poll; check the
-  field name if you see that warning in the logs.
+- The first poll reads every order and publishes it once. So does the first
+  poll after the resource or its query string changes. After that each poll
+  starts at `last order id − cursor_overlap`.
+- It reads orders in id order, a page at a time: each next page asks for
+  orders from the previous page's last id on.
+- Every page is checked before it's published: each order has a numeric
+  `orderid`, the ids rise, and none is below the id asked for. A page that
+  fails the check fails the poll with an error saying which, and nothing on
+  it is published.
+- The highest order id published is saved per connection node in
+  `connection_node_checkpoints` after every page, so a restart, a redeploy
+  or a failed poll resumes from there. The page that failed can arrive
+  twice; no order is skipped.
+- A poll reads at most 100 pages (100 000 orders at the default page size)
+  and leaves the rest for the next poll.
+- Orders re-read inside the overlap are not sent again. An order that shows
+  up later than `cursor_overlap` ids behind the newest one published is
+  missed; raise the overlap if your tills can lag more than that.
+- It picks up new orders, not changes to existing ones: Sitoo's
+  `orderidfrom` filters on the id, which never changes.
 
-Turning `incremental` on for a running pipeline sends everything once more on
-its first poll, then only changes.
+Turning `incremental` on for a running pipeline sends every order once more
+on its first poll, then only new ones. This hasn't been run against a live
+Sitoo account yet; the filter and sort come from the API reference. If Sitoo
+ignores either, the poll fails with that error rather than losing orders.
 
 ### Webhook mode (real-time SPI Events)
 
