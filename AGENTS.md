@@ -222,6 +222,15 @@ fails the PR. From the repo root, with `pip install mkdocs-material`:
 mkdocs build --strict
 ```
 
+The site lives at `https://valueretail.github.io/vrsky/` (Settings, Pages,
+branch `gh-pages`). The same URL is `site_url` in `mkdocs.yml` and the default
+of `docsUrl` in `ui/src/config/env.ts`, which the sidebar's Help & Docs link
+opens; production sets no `VITE_DOCS_URL`. `scripts/check-docs-url.sh` checks
+that the two agree and that the site answers 200. The `docs` workflow runs it
+after each deploy and daily, and a red run on main opens a CI failure issue.
+Move the site (custom domain, new repo name) and you change both URLs in the
+same PR.
+
 ## Local stack
 
 From the repo root:

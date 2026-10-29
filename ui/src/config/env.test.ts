@@ -90,7 +90,7 @@ describe('defaults', () => {
   it('applies the documented defaults when nothing is set', async () => {
     const { config } = await loadConfig({})
     expect(config.tenantId).toBeTruthy()
-    expect(config.docsUrl).toContain('valueretail.github.io')
+    expect(config.docsUrl).toBeTruthy() // the exact URL is tied to mkdocs.yml below
     expect(['debug', 'info', 'warn', 'error']).toContain(config.logLevel)
   })
 })
@@ -130,5 +130,29 @@ describe('validateConfig', () => {
     ;(mod.config as { tenantId: string }).tenantId = ''
     expect(() => mod.validateConfig()).toThrow('VITE_TENANT_ID')
     ;(mod.config as { tenantId: string }).tenantId = original
+  })
+})
+
+describe('docs URL matches mkdocs.yml (#451)', () => {
+  // The sidebar's Help & Docs link opens the published mkdocs site, so the UI
+  // default and mkdocs.yml's site_url have to name the same place.
+  const mkdocs = import.meta.glob('../../../mkdocs.yml', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>
+
+  it('uses mkdocs.yml site_url as the default docsUrl', async () => {
+    const files = Object.values(mkdocs)
+    expect(files).toHaveLength(1)
+    // Same parsing as scripts/check-docs-url.sh: optional quotes, optional
+    // trailing "# comment".
+    const siteUrl = /^site_url:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/m
+      .exec(files[0])
+      ?.slice(1)
+      .find(Boolean)
+    expect(siteUrl).toBeTruthy()
+    const { config } = await loadConfig({})
+    expect(config.docsUrl).toBe(siteUrl)
   })
 })
