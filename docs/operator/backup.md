@@ -179,7 +179,18 @@ Secret exists the CronJob is suspended on purpose and this alert is silent.
 It reads the Secret's age from kube-state-metrics (`kube_secret_created`),
 so recreating the Secret starts the 7 days again.
 
-Both sit outside the `vrsky-*` rule groups, so they reach Teams but don't
+`MgmtBackupCronJobAbsent` (warning) covers the CronJob that is gone: deleted
+by hand, or lost in a re-apply that failed halfway. The two alerts above
+read the CronJob's own metrics, so they go quiet with it. This one fires
+when `vrsky-backup-config` exists and the CronJob has been missing for 30
+minutes. Run Catch up, which applies it again; its backup step says whether the
+CronJob came back active or suspended. Without the Secret (before the
+setup, or renamed away during a restore) it is silent, and a morning start
+or a rolled kube-state-metrics pod doesn't trip it. An evicted
+kube-state-metrics pod can resolve a firing alert for a minute; it fires
+again 30 minutes later.
+
+All three sit outside the `vrsky-*` rule groups, so they reach Teams but don't
 fail a deploy's smoke check. A single failed Job also shows up as the
 chart's `KubeJobFailed`.
 
