@@ -2496,32 +2496,72 @@ credential fields apply.</p>
 <tbody>
 <tr>
 <td><code>s3</code></td>
-<td><code>access_key_id</code> + <code>secret_access_key</code></td>
+<td><code>access_key_id</code> + <code>secret_access_key</code>. Unless both are set, the AWS default credential chain applies (environment, role).</td>
 </tr>
 <tr>
 <td><code>azure</code></td>
-<td><code>account_name</code> + <code>account_key</code></td>
+<td><code>connection_string</code>, or <code>account_name</code> + <code>account_key</code>.</td>
 </tr>
 <tr>
 <td><code>gcs</code></td>
-<td><code>credentials_json</code></td>
+<td><code>credentials_json</code> (service-account JSON). With an <code>endpoint</code> and no JSON, no credentials are sent (the emulator).</td>
 </tr>
 </tbody>
 </table>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node lists objects under <code>prefix</code> in the configured <code>bucket</code> and
-downloads them as messages. By default it polls; set <code>event_mode</code> to <code>event</code>
-to receive object-created notifications instead (S3 → SQS, Azure → Storage
+downloads them as messages. By default it polls; set <code>mode</code> to <code>event</code> to
+receive object-created notifications instead (S3 → SQS, Azure → Storage
 Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
-<p>Config bullets:</p>
+<p>Config bullets (all under <code>cloud_storage</code>):</p>
 <ul>
-<li><code>provider</code> — <code>s3</code>, <code>azure</code>, or <code>gcs</code>.</li>
-<li><code>bucket</code> — the bucket / container to read from.</li>
-<li><code>prefix</code> — key prefix to scope the listing (e.g. <code>incoming/</code>).</li>
+<li><code>provider</code> — <code>s3</code> (default), <code>azure</code>, or <code>gcs</code>.</li>
+<li><code>bucket</code> — the bucket (S3, GCS) or container (Azure) to read from.
+  Required.</li>
+<li><code>prefix</code> — key prefix to scope the listing (e.g. <code>incoming/</code>). Empty means
+  the whole bucket. The listing is recursive: objects under deeper keys
+  (<code>incoming/2026/a.csv</code>) are ingested too.</li>
 <li><code>region</code> — provider region (S3).</li>
+<li><code>endpoint</code> — custom endpoint: MinIO or another S3-compatible store (path-style
+  addressing is then used), or a private or emulated GCS endpoint.</li>
 <li>Credentials — per-provider, as in the table above.</li>
-<li><code>event_mode</code> — <code>poll</code> (default) or <code>event</code> for notification-driven reads.</li>
+<li><code>mode</code> — <code>poll</code> (default) or <code>event</code> for notification-driven reads.</li>
+<li><code>poll_interval_seconds</code> — poll mode: seconds between listings. <code>0</code> or
+  unset means one listing, after which the connection shows as stopped. The
+  editor shows <code>60</code> in this field until you change it, but saves nothing
+  until you do, so type the interval you want.</li>
+<li><code>file_pattern</code> — poll mode: glob matched against the object's base name
+  (the part after the last <code>/</code>), e.g. <code>*.csv</code>. Empty means every object.</li>
+<li><code>after_action</code> — what to do with an object once it is published: <code>none</code>
+  (default, leave it), <code>delete</code>, or <code>move</code>. Applies in both modes.</li>
+<li><code>move_prefix</code> — where <code>move</code> puts the object: it is copied to
+  <code>&lt;move_prefix&gt;/&lt;base name&gt;</code>, then deleted. Required with <code>move</code>; without
+  it the consumer doesn't start. Put it outside <code>prefix</code> (and outside what
+  the bucket notification covers in event mode): a moved object inside it
+  is a new key to the consumer and is ingested again. Moves keep only the
+  base name, so <code>incoming/a/x.csv</code> and <code>incoming/b/x.csv</code> both land on
+  <code>&lt;move_prefix&gt;/x.csv</code> and the second overwrites the first.</li>
 </ul>
+<p>Event mode also reads:</p>
+<ul>
+<li><code>event_queue_url</code> — S3: the SQS queue URL. Required.</li>
+<li><code>event_queue_name</code> — Azure: the Storage Queue name. Required.</li>
+<li><code>event_subscription</code> — GCS: the Pub/Sub subscription, as a full path or a
+  bare name. Required.</li>
+<li><code>event_project</code> — GCS: the GCP project ID. Required when
+  <code>event_subscription</code> is a bare name.</li>
+<li><code>event_endpoint</code> — optional endpoint for the queue or Pub/Sub service
+  (LocalStack, Azurite, the Pub/Sub emulator). Not the object-store
+  endpoint. On GCS it also turns off authentication and TLS for Pub/Sub, so
+  use it only for the emulator. On Azure it is used only with
+  <code>account_name</code> + <code>account_key</code>; with <code>connection_string</code> the queue
+  address comes from the connection string.</li>
+</ul>
+<p>In event mode <code>prefix</code> and <code>file_pattern</code> are not applied: every object a
+notification names is ingested. Scope the bucket notification itself to the
+prefix and suffix you want. Azure and GCS ingest only object-created events
+(<code>BlobCreated</code>, <code>OBJECT_FINALIZE</code>); on S3 every record in a notification is
+ingested, so send only <code>s3:ObjectCreated:*</code> events to the queue.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cloud_storage"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"cloud_storage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
@@ -2530,8 +2570,11 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
 <span class="w">    </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"incoming/"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"region"</span><span class="p">:</span><span class="w"> </span><span class="s2">"us-east-1"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"access_key_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AKIA..."</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"secret_access_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"event_mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"event"</span>
+<span class="w">    </span><span class="nt">"secret_access_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_s3key_01"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"event"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"event_queue_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://sqs.us-east-1.amazonaws.com/123456789012/vrsky-incoming"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"after_action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"move"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"move_prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"processed/"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2571,15 +2614,20 @@ start has no saved list yet, so it publishes what is under its prefix once
 more, as every restart did before.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A producer node writes each incoming message as an object under <code>prefix</code> in
-<code>bucket</code>. Server-side encryption can be enabled per bucket (#80) via the
-<code>encryption</code> block: <code>none</code>, <code>sse-s3</code> (S3-managed keys), or <code>sse-kms</code> (supply
+<code>bucket</code>. Server-side encryption can be set per node (#80) via the <code>sse</code>
+block: <code>none</code>, <code>sse-s3</code> (S3-managed keys), or <code>sse-kms</code> (supply
 <code>kms_key_id</code>).</p>
 <p>Config bullets:</p>
 <ul>
-<li><code>provider</code>, <code>bucket</code>, <code>prefix</code>, <code>region</code> — as above.</li>
+<li><code>provider</code>, <code>bucket</code>, <code>prefix</code>, <code>region</code>, <code>endpoint</code> — as above.</li>
 <li>Credentials — per-provider.</li>
-<li><code>encryption.mode</code> — <code>none</code>, <code>sse-s3</code>, or <code>sse-kms</code>.</li>
-<li><code>encryption.kms_key_id</code> — KMS key when <code>mode</code> is <code>sse-kms</code>.</li>
+<li><code>sse.mode</code> — S3 only: <code>none</code> (default, the bucket's own setting),
+  <code>sse-s3</code>, or <code>sse-kms</code>. Azure and GCS don't read it.</li>
+<li><code>sse.kms_key_id</code> — on S3, the KMS key ID or ARN for <code>sse-kms</code>; without
+  it, <code>sse-kms</code> uses the AWS-managed key. On Azure (an encryption scope
+  name) and GCS (a Cloud KMS key name) it is applied whenever it is set,
+  whatever <code>sse.mode</code> says, so clear it to go back to the bucket's
+  default.</li>
 <li><code>key_template</code> — Go template for the object key, rendered against the
   record when it is a JSON object plus <code>{{.timestamp}}</code> and <code>{{.uuid}}</code>
   (default <code>{{.uuid}}</code>). <strong>Pictures and other media</strong> (images, audio,
@@ -2594,18 +2642,18 @@ more, as every restart did before.</p>
 <span class="w">    </span><span class="nt">"bucket"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my-container"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="s2">"outgoing/"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"account_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mystorageacct"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"account_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;field&gt;_secret_id"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"encryption"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="nt">"account_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_azkey_01"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"sse"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="w"> </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Secrets.</strong> Credentials typed in the UI (<code>secret_access_key</code>,
-  <code>account_key</code>, <code>credentials_json</code>) are minted into encrypted tenant secrets
-  at deploy and replaced with <code>&lt;field&gt;_secret_id</code> references — they never
-  appear in plaintext in the stored connection. Non-secret fields like
-  <code>access_key_id</code> and <code>account_name</code> are stored as-is.</li>
+  <code>connection_string</code>, <code>account_key</code>, <code>credentials_json</code>) are minted into
+  encrypted tenant secrets at deploy and replaced with <code>&lt;field&gt;_secret_id</code>
+  references — they never appear in plaintext in the stored connection.
+  Non-secret fields like <code>access_key_id</code> and <code>account_name</code> are stored as-is.</li>
 <li><strong>Test connection.</strong> The cloud-storage worker exposes a <code>/test-connection</code>
   endpoint; use the <strong>Test connection</strong> button in the editor to verify bucket
   access before deploying.</li>

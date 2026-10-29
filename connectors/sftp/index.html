@@ -2504,7 +2504,7 @@
 
 
 <h1 id="sftp">SFTP<a class="headerlink" href="#sftp" title="Permanent link">&para;</a></h1>
-<p>The SFTP connector (<code>config.type: "sftp"</code>) transfers files over SFTP. It works both as a source (consumer) and a destination (producer), sharing the same config shape.</p>
+<p>The SFTP connector (<code>config.type: "sftp"</code>) transfers files over SFTP. It works both as a source (consumer) and a destination (producer). Both use the same connection fields; each role adds a few of its own.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node connects to a remote SFTP server, reads files from a directory, and emits them into the pipeline. The <code>after_action</code> setting controls what happens to a file once it has been read.</p>
 <h3 id="what-gets-published-and-when-again">What gets published, and when again<a class="headerlink" href="#what-gets-published-and-when-again" title="Permanent link">&para;</a></h3>
@@ -2522,16 +2522,27 @@
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A producer node connects to a remote SFTP server and writes files into the configured directory.</p>
 <h2 id="config-reference">Config reference<a class="headerlink" href="#config-reference" title="Permanent link">&para;</a></h2>
-<p>The same <code>sftp</code> config block applies to both roles:</p>
+<p>Both roles use an <code>sftp</code> block. The connection fields are the same for both:</p>
 <ul>
 <li><code>type</code> — <code>"sftp"</code>.</li>
-<li><code>sftp.host</code> — server hostname.</li>
-<li><code>sftp.port</code> — server port (e.g. <code>22</code>).</li>
-<li><code>sftp.username</code> — login username.</li>
-<li><code>sftp.password_secret_id</code> — reference to the password secret. Use this <strong>or</strong> the private key.</li>
-<li><code>sftp.private_key_secret_id</code> — reference to the private key secret. Use this <strong>or</strong> the password.</li>
-<li><code>sftp.path</code> — remote directory.</li>
-<li><code>sftp.after_action</code> — what to do with a source file after processing: <code>"none"</code>, <code>"delete"</code>, or <code>"move"</code>.</li>
+<li><code>sftp.host</code> — server hostname. Required.</li>
+<li><code>sftp.port</code> — server port. Default <code>22</code>.</li>
+<li><code>sftp.username</code> — login username. Required.</li>
+<li><code>sftp.password_secret_id</code> — reference to the password secret.</li>
+<li><code>sftp.private_key_secret_id</code> — reference to the private key secret (PEM).</li>
+<li><code>sftp.host_key</code> — the server's public key as one line, e.g. <code>ssh-ed25519 AAAA…</code> (the key part of its <code>known_hosts</code> line). When set, a server that presents another key is refused. When empty, any key is accepted and the worker logs a warning; set it in production.</li>
+<li><code>sftp.remote_dir</code> — remote directory to read from or write to. Required.</li>
+</ul>
+<p>Source only:</p>
+<ul>
+<li><code>sftp.file_pattern</code> — glob matched against the file name, e.g. <code>*.csv</code>. Empty means every file. Subdirectories are never read.</li>
+<li><code>sftp.poll_interval_seconds</code> — seconds between polls. <code>0</code> or unset means one poll, after which the connection shows as stopped. The editor shows <code>60</code> in this field until you change it, but saves nothing until you do, so type the interval you want.</li>
+<li><code>sftp.after_action</code> — what to do with a file once it is published: <code>"none"</code> (default, leave it), <code>"delete"</code>, or <code>"move"</code>.</li>
+<li><code>sftp.move_dir</code> — directory to move files into when <code>after_action</code> is <code>"move"</code>; created if missing. With <code>"move"</code> and no <code>move_dir</code>, every move fails and the files stay where they are.</li>
+</ul>
+<p>Destination only:</p>
+<ul>
+<li><code>sftp.filename_template</code> — Go template for the file name, rendered against the record when it is a JSON object, plus <code>{{.timestamp}}</code> (UTC, <code>20060102T150405Z</code>) and <code>{{.uuid}}</code> (the message id). Default <code>{{.uuid}}.json</code>. A record field named <code>timestamp</code> or <code>uuid</code> takes the place of the built-in. A template that names a field the record doesn't have drops the message, with an error in the producer's log (<code>invalid filename template; dropping message</code>). The result is cut to a single file name, so it can't point outside <code>remote_dir</code>. <code>remote_dir</code> is created if missing.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sftp"</span><span class="p">,</span>
@@ -2540,16 +2551,20 @@
 <span class="w">    </span><span class="nt">"port"</span><span class="p">:</span><span class="w"> </span><span class="mi">22</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vrsky"</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"private_key_secret_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sec_sftpkey_01"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/remote/dir"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"after_action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"move"</span>
+<span class="w">    </span><span class="nt">"host_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"remote_dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/remote/in"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"file_pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"*.csv"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"after_action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"move"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"move_dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/remote/in/processed"</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Authentication.</strong> Provide <strong>either</strong> a password (<code>password_secret_id</code>) <strong>or</strong> a private key (<code>private_key_secret_id</code>), not both.</li>
+<li><strong>Authentication.</strong> Set a password (<code>password_secret_id</code>) or a private key (<code>private_key_secret_id</code>). With neither, a source doesn't start and a destination drops each message with an error in its log. With both, the key is tried first, then the password.</li>
 <li><strong>Secrets.</strong> <code>password</code> and <code>private_key</code> are secret fields. You enter them as plaintext in the editor; at deploy they are minted into encrypted tenant secrets and replaced with <code>&lt;field&gt;_secret_id</code> references. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
-<li><strong>Test connection.</strong> Use the <strong>Test connection</strong> button in the editor, backed by the <code>/test-connection</code> endpoint (#82), to validate host, credentials, and path before deploying.</li>
+<li><strong>Test connection.</strong> Use the <strong>Test connection</strong> button in the editor, backed by the <code>/test-connection</code> endpoint (#82), to validate host, credentials, and remote directory before deploying.</li>
 </ul>
 
 
