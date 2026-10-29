@@ -114,8 +114,8 @@ function MappingRow({
         <div role="group" aria-label="Item mappings" style={{ borderLeft: '2px solid #e5e7eb', paddingLeft: '8px' }}>
           <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>
             Applied to every object in the source array; the mapped array is written under the target name.
-            Items that are not objects are kept as they are. With a dotted source and node-level &quot;Drop unmapped
-            fields&quot; off, the original array stays in place as well.
+            Items that are not objects are kept as they are. The source array is removed, also when it is a dotted
+            path; its parent object stays, even if it ends up empty.
           </div>
           <MappingList
             mappings={mapping.mappings ?? []}

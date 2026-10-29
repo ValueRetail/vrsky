@@ -563,7 +563,7 @@ Last updated 2026-10-28.
     folder and not write to it. A second variable for `/data/output`, with
     the same fixed target and the guard in
     `compose_files_mount_guard_test.go`, would close that. Found in #422.
-87. **Rename and `each` leave a dotted source in place.** With the node's
+87. ~~**Rename and `each` leave a dotted source in place.**~~ (#525) With the node's
     `drop_unmapped` off, both read `source` as a path but remove it with
     `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
     `rename` and `each` cases), which only deletes a top-level key. So

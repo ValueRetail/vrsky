@@ -124,14 +124,14 @@ describe('each row', () => {
     expect(within(group).getByLabelText('Value')).toHaveValue('Item')
   })
 
-  // delete(result, m.Source) only removes a top-level key, so with a dotted
-  // source and node drop_unmapped off the original array stays next to the
-  // new one. The help text must not promise it is replaced.
-  it('does not claim a dotted source array is replaced', () => {
+  // Since #525 each removes its source along a dotted path (deleteNestedField),
+  // so the help text says the source array goes, dotted or not, and no longer
+  // warns that the original stays in place.
+  it('says the source array is removed, dotted path included', () => {
     renderEditor(templateConfig())
     const [group] = itemGroups()
-    expect(group.textContent).not.toMatch(/replaces it/i)
-    expect(group.textContent).toMatch(/dotted source[^.]*stays in place/i)
+    expect(group.textContent).not.toMatch(/stays in place/i)
+    expect(group.textContent).toMatch(/source array is removed, also when it is a dotted path/i)
   })
 
   it('edits an item mapping field', () => {
