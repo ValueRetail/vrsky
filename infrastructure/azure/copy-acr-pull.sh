@@ -6,11 +6,15 @@
 # with a copy of vrsky-platform's acr-pull Secret. deploy-backup-azure.sh and
 # deploy-ui-azure.sh make those copies, but only Catch up, a backup change or
 # a human runs them, so after an ACR password rotation a copy went stale.
-# The deploy job runs this on every deploy.
+# The deploy job (with the cluster up) and Catch up run this every time,
+# before anything rolls, so the first rollout after a rotation already pulls
+# with the new password.
 #
 # Runs inside the cluster through in-cluster.sh: bash, jq and kubectl only,
 # no sed, no az. No credential is in this script and it prints none of the
 # values (the apply goes through acr-pull-lib.sh).
+#
+# Never run with -x (bash -x, set -x): the trace prints the Secret.
 #
 # It touches those Secrets and nothing else. It never reads or applies the
 # backup CronJob, so it can't change its `suspend` (a CronJob suspended by

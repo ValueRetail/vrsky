@@ -45,12 +45,41 @@ None.
    sibling script, so the helper is checked for sed and friends too
    (otherwise nothing in the workflows names it).
 
-The workflow isn't changed. Its step is still named "Refresh the acr-pull
-copy in vrsky-database"; renaming it would put `.github/workflows/` in the
-diff for a label. Noted in the PR.
+### After review (round 1)
+
+The first version left the workflows alone, and that was wrong. The
+deploy job ran the refresh after "Roll core services" and the smoke check,
+and Catch up never ran `copy-acr-pull.sh`. Here is what happens after an
+ACR rotation. The next merge that touches the UI rolls UI pods with the
+stale `vrsky-ui/acr-pull`. They sit in ImagePullBackOff, the rollout times
+out, and the job goes red before the refresh runs. A Catch up after a
+rotation made while the cluster was parked fails the same way. So:
+
+6. `build-push.yml` deploy job: the refresh step moves up, between "Stage
+   the deploy files" and "Roll core services by digest". It is still gated
+   only on the cluster running, and is renamed "Refresh the acr-pull copies
+   in vrsky-database and vrsky-ui". The trade: a failed copy now fails the
+   run before the rollout and the smoke check. That is the right order,
+   because a stale copy would fail the rollout anyway.
+7. `catch-up.yml`: the same step, unconditional, after staging and before
+   "Roll every core service".
+8. `TestACRPullCopyRefreshesOnEveryDeploy` pins the step in both workflows
+   to after staging and before the first rollout step (`deploy-core-azure.sh`,
+   `deploy-connectors-azure.sh` or `rollout restart`). It also pins its `if`.
+9. A test sources the helper into a shell without pipefail and feeds it
+   JSON that jq can't parse. It expects the generic line, a non-zero rc and
+   no pipefail leaking into the caller.
+10. All four files get a "never run with -x" header line.
+11. The guard's `sourced` regex also matches `. lib.sh` with no slash, and a
+    trailing `;`, `&`, `#` or whitespace. Its own table test covers these
+    cases.
+
+The workflow edits touch only the deploy job's steps and `catch-up.yml`.
 
 ## Touches
 
+- `.github/workflows/build-push.yml` (deploy job: move and rename one step)
+- `.github/workflows/catch-up.yml` (one step)
 - `infrastructure/azure/acr-pull-lib.sh` (new)
 - `infrastructure/azure/copy-acr-pull.sh`
 - `infrastructure/azure/deploy-backup-azure.sh` (section 1 only)

@@ -1838,6 +1838,46 @@ func TestConsumersRestoreRunningOnBoot(t *testing.T) {
 	}
 }
 
+// sourcedScriptRe matches a line that sources a sibling script and captures
+// its file name: `. "$(dirname "${BASH_SOURCE[0]}")/x.sh"`, `source ./x.sh`,
+// `. x.sh; …`, `. x.sh # …`. TestInClusterScriptsUseOnlyRuntimeTools resolves
+// the name next to the script that sources it.
+var sourcedScriptRe = regexp.MustCompile(`(?m)^\s*(?:\.|source)\s+"?(?:[^;&#]*/)?([A-Za-z0-9_-]+\.sh)"?(?:\s|;|&|#|$)`)
+
+func TestSourcedScriptPattern(t *testing.T) {
+	cases := []struct {
+		line string
+		want string // "" for no match
+	}{
+		{`. "$(dirname "${BASH_SOURCE[0]}")/acr-pull-lib.sh"`, "acr-pull-lib.sh"},
+		{`  source "$REPO_ROOT/infrastructure/azure/acr-pull-lib.sh"`, "acr-pull-lib.sh"},
+		{`. ./lib.sh`, "lib.sh"},
+		{`. lib.sh`, "lib.sh"},
+		{`source lib.sh`, "lib.sh"},
+		{`. "lib.sh"`, "lib.sh"},
+		{`. lib.sh; apply_acr_pull "$pull" ns`, "lib.sh"},
+		{`. "$here/lib.sh" && echo ok`, "lib.sh"},
+		{`. lib.sh # the helpers`, "lib.sh"},
+		{`. lib.sh   `, "lib.sh"},
+		// The file sourced, not a later path on the same line.
+		{`. lib.sh && cat infrastructure/azure/other.sh`, "lib.sh"},
+		{`# . lib.sh`, ""},
+		{`echo . lib.sh`, ""},
+		{`. lib.shx`, ""},
+		{`bash lib.sh`, ""},
+	}
+	for _, tc := range cases {
+		m := sourcedScriptRe.FindStringSubmatch(tc.line)
+		got := ""
+		if m != nil {
+			got = m[1]
+		}
+		if got != tc.want {
+			t.Errorf("%q: sourced %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
 // Everything the deploy and catch-up jobs run inside the cluster executes in
 // the `az aks command invoke` runtime, which has bash, awk, grep, jq, kubectl
 // and helm but no sed, python or envsubst (probed 2026-10-19; a sed in the
@@ -1875,7 +1915,7 @@ func TestInClusterScriptsUseOnlyRuntimeTools(t *testing.T) {
 	}
 	// A helper sourced from a sibling (`. "$(dirname …)/x.sh"`) runs in the
 	// same runtime; no workflow names it, so follow the source lines.
-	sourced := regexp.MustCompile(`(?m)^\s*(?:\.|source)\s+.*/([A-Za-z0-9_-]+\.sh)"?\s*$`)
+	sourced := sourcedScriptRe
 	queue := make([]string, 0, len(scripts))
 	for ref := range scripts {
 		queue = append(queue, ref)
@@ -3300,6 +3340,17 @@ func runWithStubKubectl(t *testing.T, script string, files map[string]string) de
 	if _, err := os.Stat(filepath.Join(root, script)); err != nil {
 		t.Fatalf("%s: %v", script, err)
 	}
+	return runBashWithStubKubectl(t, files, script)
+}
+
+// runBashWithStubKubectl runs `bash <args…>` from the repo root against
+// stubKubectl; runWithStubKubectl describes files.
+func runBashWithStubKubectl(t *testing.T, files map[string]string, args ...string) deployBackupRun {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	write := func(name, body string, mode os.FileMode) {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), mode); err != nil {
@@ -3313,7 +3364,7 @@ func runWithStubKubectl(t *testing.T, script string, files map[string]string) de
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", script)
+	cmd := exec.CommandContext(ctx, "bash", args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "STUB_DIR="+dir)
 	out, runErr := cmd.CombinedOutput()
@@ -3567,67 +3618,72 @@ func TestDeployBackupScript(t *testing.T) {
 	}
 }
 
-// The acr-pull copy in vrsky-database follows a rotated ACR password on the
-// next deploy, not only on Catch up or a backup change (#431). The deploy
-// job runs copy-acr-pull.sh whenever the cluster is up, whatever the merge
-// touched; Catch up refreshes it on every run through the backup script.
+// The acr-pull copies in vrsky-database and vrsky-ui follow a rotated ACR
+// password on the next deploy (#431, #497). The deploy job runs
+// copy-acr-pull.sh whenever the cluster is up, whatever the merge touched,
+// and Catch up runs it every time. In both it runs after the files are
+// staged and before anything rolls: a UI pod pulling with the stale copy
+// would sit in ImagePullBackOff, the rollout would time out and the job
+// would go red before a later refresh step ever ran.
 func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
-	deploy, ok := parseWorkflow(t, "build-push.yml").Jobs["deploy"]
-	if !ok {
-		t.Fatal("no deploy job in build-push.yml")
-	}
-	stageAt, smokeAt, copyAt := -1, -1, -1
-	for i, st := range deploy.Steps {
-		if strings.Contains(st.Run, "mkdir -p stage") {
-			stageAt = i
-		}
-		if strings.Contains(st.Run, "smoke-prod.sh") {
-			smokeAt = i
-		}
-		if !strings.Contains(st.Run, "in-cluster.sh") || !strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") {
-			continue
-		}
-		copyAt = i
+	cases := []struct {
+		workflow, job string
+		wantIf        string // the step's whole `if`, whitespace-normalised
+	}{
 		// Gated on the cluster running (a parked cluster deploys nothing)
 		// and on nothing else: a plan flag would bring back the gap.
-		if got := strings.Join(strings.Fields(st.If), " "); got != "steps.cluster.outputs.state == 'Running'" {
-			t.Errorf("step %q runs only under if=%q; it must run on every deploy with the cluster up (if: steps.cluster.outputs.state == 'Running')", st.Name, st.If)
-		}
-		if st.ContinueOnError {
-			t.Errorf("step %q has continue-on-error; a failed copy would go unnoticed", st.Name)
-		}
+		{"build-push.yml", "deploy", "steps.cluster.outputs.state == 'Running'"},
+		// Catch up fails earlier when the cluster is stopped; no gate at all.
+		{"catch-up.yml", "catch-up", ""},
 	}
-	if copyAt < 0 {
-		t.Fatal("the deploy job never runs infrastructure/azure/copy-acr-pull.sh through in-cluster.sh; " +
-			"after an ACR password rotation the backup Job could not pull until the next Catch up")
-	}
-	if stageAt < 0 || copyAt < stageAt {
-		t.Errorf("copy-acr-pull.sh runs at step %d, before the files are staged (step %d)", copyAt, stageAt)
-	}
-	// After the smoke check, as the backup step is: a failed copy must not
-	// stop the smoke check from reporting on the deploy.
-	if smokeAt < 0 {
-		t.Fatal("the deploy job has no smoke-prod.sh step")
-	}
-	if copyAt < smokeAt {
-		t.Errorf("copy-acr-pull.sh runs at step %d, before the smoke check (step %d)", copyAt, smokeAt)
-	}
-
-	catchUp, ok := parseWorkflow(t, "catch-up.yml").Jobs["catch-up"]
-	if !ok {
-		t.Fatal("no catch-up job in catch-up.yml")
-	}
-	refreshed := false
-	for _, st := range catchUp.Steps {
-		if strings.Contains(st.Run, "in-cluster.sh") && strings.TrimSpace(st.If) == "" &&
-			(strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") || strings.Contains(st.Run, "infrastructure/azure/deploy-backup-azure.sh")) {
-			refreshed = true
-		}
-	}
-	if !refreshed {
-		t.Error("Catch up has no unconditional in-cluster step running copy-acr-pull.sh or deploy-backup-azure.sh; it would not refresh the acr-pull copy")
+	rollout := []string{"deploy-core-azure.sh", "deploy-connectors-azure.sh", "rollout restart"}
+	for _, tc := range cases {
+		t.Run(tc.workflow, func(t *testing.T) {
+			job, ok := parseWorkflow(t, tc.workflow).Jobs[tc.job]
+			if !ok {
+				t.Fatalf("no %s job in %s", tc.job, tc.workflow)
+			}
+			stageAt, rollAt, copyAt := -1, -1, -1
+			for i, st := range job.Steps {
+				if strings.Contains(st.Run, "mkdir -p stage") {
+					stageAt = i
+				}
+				for _, r := range rollout {
+					if rollAt < 0 && strings.Contains(st.Run, "in-cluster.sh") && strings.Contains(st.Run, r) {
+						rollAt = i
+					}
+				}
+				if !strings.Contains(st.Run, "in-cluster.sh") || !strings.Contains(st.Run, "infrastructure/azure/copy-acr-pull.sh") {
+					continue
+				}
+				if copyAt < 0 {
+					copyAt = i
+				}
+				if got := strings.Join(strings.Fields(st.If), " "); got != tc.wantIf {
+					t.Errorf("step %q runs only under if=%q; want if=%q, so it runs every time the cluster is up", st.Name, st.If, tc.wantIf)
+				}
+				if st.ContinueOnError {
+					t.Errorf("step %q has continue-on-error; a failed copy would go unnoticed", st.Name)
+				}
+			}
+			if copyAt < 0 {
+				t.Fatalf("%s never runs infrastructure/azure/copy-acr-pull.sh through in-cluster.sh; "+
+					"after an ACR password rotation the backup Job and the UI could not pull", tc.workflow)
+			}
+			if stageAt < 0 || copyAt < stageAt {
+				t.Errorf("copy-acr-pull.sh runs at step %d, before the files are staged (step %d)", copyAt, stageAt)
+			}
+			if rollAt < 0 {
+				t.Fatalf("%s has no rollout step (%v); the workflow layout probably moved", tc.workflow, rollout)
+			}
+			if copyAt > rollAt {
+				t.Errorf("copy-acr-pull.sh runs at step %d, after the first rollout (step %d %q); "+
+					"pods rolled before it pull with the stale acr-pull", copyAt, rollAt, job.Steps[rollAt].Name)
+			}
+		})
 	}
 }
+
 
 // acrPullCopies returns every acr-pull Secret a run applied through stdin,
 // keyed by the namespace it names, and fails on an apply of anything else
@@ -3854,4 +3910,37 @@ func TestDeployUIScriptCopiesACRPull(t *testing.T) {
 		t.Fatalf("acr-pull copies in %v; want exactly one, in vrsky-ui\n%s", sortedNames(copies), r.out)
 	}
 	checkACRPullCopy(t, "vrsky-ui", copies["vrsky-ui"])
+}
+
+// apply_acr_pull fails on input jq can't read, whatever the caller set. In a
+// shell without pipefail, `jq | kubectl apply -f -` would take kubectl's exit
+// code: an apply of nothing (exit 0 from the stub) would pass for a copy, and
+// the Secret would silently stay stale. The helper sets pipefail inside its
+// own substitution, and must not leave it set in the caller.
+func TestACRPullHelperFailsOnBadJSONWithoutPipefail(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not on PATH")
+	}
+	const script = `set -u
+. infrastructure/azure/acr-pull-lib.sh
+rc=0
+apply_acr_pull '{"type":"kubernetes.io/dockerconfigjson","data":{".dockerconfigjson":"BAD-JSON-SENTINEL"' vrsky-ui || rc=$?
+echo "rc=$rc"
+if [[ -o pipefail ]]; then echo "pipefail leaked into the caller"; fi
+`
+	r := runBashWithStubKubectl(t, map[string]string{}, "-c", script)
+	if r.err != nil {
+		t.Fatalf("the wrapper shell failed: %v\n%s", r.err, r.out)
+	}
+	if !strings.Contains(r.out, "ERROR: apply of vrsky-ui/acr-pull failed") {
+		t.Errorf("no generic error line for input jq can't parse\n%s", r.out)
+	}
+	if strings.Contains(r.out, "rc=0") || !strings.Contains(r.out, "rc=") {
+		t.Errorf("apply_acr_pull returned 0 for input jq can't parse; the copy would pass for done\n%s", r.out)
+	}
+	for _, leak := range []string{"BAD-JSON-SENTINEL", "parse error", "pipefail leaked"} {
+		if strings.Contains(r.out, leak) {
+			t.Errorf("the output has %q\n%s", leak, r.out)
+		}
+	}
 }

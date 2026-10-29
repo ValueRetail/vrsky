@@ -4,6 +4,9 @@
 #
 # bash, jq and kubectl only: the first two run inside the cluster through
 # in-cluster.sh, where there is no sed.
+#
+# Never run this, or a script that sources it, with -x (bash -x, set -x): the
+# trace prints the Secret.
 
 # apply_acr_pull <secret-json> <namespace>
 #
@@ -14,9 +17,9 @@
 # The deploy log is public to anyone with repo access, and a failed apply on
 # an existing object can print "error when applying patch:" with the patch,
 # which holds the new .dockerconfigjson. So the output is captured, and on a
-# failure only a generic line and the exit code are printed. Returns
-# kubectl's exit code; callers run it as a plain command so `set -e` stops
-# them.
+# failure only a generic line and the exit code are printed. Returns the
+# exit code of whatever failed (jq or kubectl); callers run it as a plain
+# command so `set -e` stops them.
 apply_acr_pull() {
   local pull="$1" ns="$2" out rc=0
   # pipefail inside the substitution, whatever the caller set: a failed jq

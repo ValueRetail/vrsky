@@ -20,6 +20,8 @@
 # vrsky-backup-config is created by a human with `kubectl create secret
 # generic` (infrastructure/kubernetes/backup/README.md). This script reads its
 # key names and nothing else: it never creates, changes or prints it.
+#
+# Never run with -x (bash -x, set -x): the trace prints the acr-pull Secret.
 set -euo pipefail
 
 NS=vrsky-database

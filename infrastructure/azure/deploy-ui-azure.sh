@@ -10,6 +10,8 @@
 # cluster now runs ingress-nginx and serves the UI publicly over TLS via the
 # `vrsky` Ingress (infrastructure/kubernetes/ui/ingress.yaml, applied below).
 # Port-forward still works and is still the way in when the ingress is down.
+#
+# Never run with -x (bash -x, set -x): the trace prints the acr-pull Secret.
 set -euo pipefail
 
 REG="${REG:-vrskyprodacr}"

@@ -247,6 +247,8 @@ the Windows agent tests on the merge commit. When they are green,
 `infrastructure/azure/affected.sh` maps the changed paths to targets and
 the affected images are built in ACR. Then:
 
+- before anything rolls, every deploy refreshes the `acr-pull` copies in
+  `vrsky-database` and `vrsky-ui` (`copy-acr-pull.sh`); Catch up does too;
 - core services (`management-api`, `ui`, `data-filter`, `data-converter`,
   `alert-responder`) roll by digest through `deploy-core-azure.sh`;
 - a changed connector gets a `kubectl rollout restart`, or the whole fleet
@@ -254,9 +256,7 @@ the affected images are built in ACR. Then:
   changed;
 - a change to `infrastructure/prometheus-rules.yml` or
   `infrastructure/kubernetes/monitoring/` runs `install-monitoring.sh`;
-- a smoke check runs; after it, every deploy refreshes the `acr-pull`
-  copies in `vrsky-database` and `vrsky-ui` (`copy-acr-pull.sh`), and a backup change
-  applies the backup CronJob (`deploy-backup-azure.sh`).
+- a smoke check runs; after it, a backup change applies the backup CronJob (`deploy-backup-azure.sh`).
 
 A change under `src/pkg` (or `src/go.mod`, or any `src/cmd/*/Dockerfile`)
 rebuilds and restarts every Go service; one that touches only docs, plans

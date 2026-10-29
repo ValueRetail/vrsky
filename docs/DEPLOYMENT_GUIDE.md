@@ -316,7 +316,7 @@ before any real connection (the script's closing message says which).
 
 | File | On AKS |
 |---|---|
-| `namespace.yaml` | Not applied; the script creates `vrsky-ui` itself and copies the `acr-pull` secret into it (with jq; every deploy refreshes that copy through `copy-acr-pull.sh`) |
+| `namespace.yaml` | Not applied; the script creates `vrsky-ui` itself and copies the `acr-pull` secret into it (with jq). Every deploy and every Catch up refresh that copy through `copy-acr-pull.sh` before anything rolls |
 | `configmap.yaml` | Applied. Its `VITE_*` values have no effect; the file's header explains why |
 | `deployment.yaml` | Applied from a copy: image `vrskyprodacr.azurecr.io/vrsky/ui:latest`, `imagePullPolicy: Always`, 2 replicas, and the `vrsky-ui-nginx` ConfigMap mounted as the nginx config, which proxies `/api` and `/ws` to the management API |
 | `service.yaml` | Applied: ClusterIP `vrsky-ui`, port 80 |

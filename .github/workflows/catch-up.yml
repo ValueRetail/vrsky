@@ -2,7 +2,8 @@
 #
 # The cluster is parked between working sessions (docs/operator/cost-parking.md).
 # Merges while it is stopped build their images and deploy nothing; after
-# `az aks start`, this one click rolls every core service to its current
+# `az aks start`, this one click refreshes the acr-pull copies in
+# vrsky-database and vrsky-ui, rolls every core service to its current
 # :latest digest (a no-op for anything already there), restarts the
 # connector fleet so it picks up its :latest images, applies the monitoring
 # values and rules, applies the backup CronJob (active only once its Secret
@@ -55,6 +56,10 @@ jobs:
             echo "$n $d" >> stage/digests.txt
           done
           echo "digests:"; sed 's/^/  /' stage/digests.txt
+      # Before the rollout: an ACR password rotated while the cluster was
+      # parked must reach vrsky-ui before its pods pull (#497).
+      - name: Refresh the acr-pull copies in vrsky-database and vrsky-ui
+        run: infrastructure/azure/in-cluster.sh stage "bash infrastructure/azure/copy-acr-pull.sh"
       - name: Roll every core service to its current digest
         run: infrastructure/azure/in-cluster.sh stage "DIGESTS_FILE=digests.txt bash infrastructure/azure/deploy-core-azure.sh"
       - name: Restart the connector fleet
