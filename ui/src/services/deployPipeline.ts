@@ -80,6 +80,34 @@ export interface CanvasIdentity {
 const EDIT_PREFIX = 'Edit: '
 export const NEW_PIPELINE_DESCRIPTION = 'Created via visual pipeline editor'
 
+/** The tab's name without the "Edit: " prefix, and whether it is a default
+ *  name ("Tenant 3", or blank) the user never chose. */
+function tabName(canvas: CanvasIdentity): { prefix: string; tab: string; untitled: boolean } {
+  const prefix = canvas.name.startsWith(EDIT_PREFIX) ? EDIT_PREFIX : ''
+  const tab = canvas.name.slice(prefix.length).trim()
+  return { prefix, tab, untitled: tab === '' || /^Tenant \d+$/.test(canvas.name) }
+}
+
+/**
+ * A linked canvas's tab name and deployedName once the server's current name
+ * for its connection is known (#502).
+ *
+ * deployedName is the client's record of the server's name, and deploy sends
+ * a name only when the tab differs from it. If the name was changed
+ * elsewhere, the tab and deployedName still agreed with each other, so
+ * Deploy sent nothing and the tab showed a name the server no longer had.
+ * deployedName now always takes the server's name. The tab follows it when
+ * it was never renamed here (it still reads the old deployedName, or a
+ * default name); a tab the user renamed keeps that name, so the next Deploy
+ * still sends it. With no recorded deployedName there is no telling, so the
+ * tab is kept, which is what Deploy assumed before.
+ */
+export function syncWithServerName(canvas: CanvasIdentity, serverName: string): { name: string; deployedName: string } {
+  const { prefix, tab, untitled } = tabName(canvas)
+  const renamed = !untitled && tab !== canvas.deployedName
+  return { name: renamed ? canvas.name : `${prefix}${serverName}`, deployedName: serverName }
+}
+
 /**
  * Which name and description a deploy sends (plans/builder-deploy-names.md).
  *
@@ -92,8 +120,7 @@ export const NEW_PIPELINE_DESCRIPTION = 'Created via visual pipeline editor'
  * or `Pipeline <time>` for an untitled one.
  */
 export function deployIdentity(canvas: CanvasIdentity, now: Date): { name?: string; description?: string } {
-  const tab = (canvas.name.startsWith(EDIT_PREFIX) ? canvas.name.slice(EDIT_PREFIX.length) : canvas.name).trim()
-  const untitled = tab === '' || /^Tenant \d+$/.test(canvas.name)
+  const { tab, untitled } = tabName(canvas)
   if (canvas.deployedConnectionId) {
     if (untitled || tab === canvas.deployedName) return {}
     return { name: tab }

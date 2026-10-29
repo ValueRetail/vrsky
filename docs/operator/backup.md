@@ -38,7 +38,8 @@ The Job pulls `vrsky-cli` with a copy of the `acr-pull` Secret from
 (`infrastructure/azure/copy-acr-pull.sh`), and so does every Catch up, so
 after an ACR password rotation you only update `acr-pull` in
 `vrsky-platform`; the next deploy or Catch up carries it over. The copy step
-touches that one Secret and never the CronJob, so a CronJob you suspended
+touches only the `acr-pull` copies (this one and the UI's in `vrsky-ui`)
+and never the CronJob, so a CronJob you suspended
 for a restore stays suspended. The backup script itself still runs only on a
 backup change and on Catch up, because it decides `suspend` again each time. The repo can't show whether that
 setup has been done; check with `kubectl -n vrsky-database get cronjob

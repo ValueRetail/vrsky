@@ -463,8 +463,8 @@ Last updated 2026-10-28.
     show a "A newer version is available, reload" banner. Found during #450.
 71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
     Delete it, or route it if a dashboard is wanted. Found during #450.
-72. **A linked builder tab's `deployedName` never re-syncs with the
-    server.** Opening a connection whose canvas is already linked
+72. ~~**A linked builder tab's `deployedName` never re-syncs with the
+    server.**~~ (#502) Opening a connection whose canvas is already linked
     (`PipelineBuilder.tsx` edit flow) only switches to it, so a name changed
     elsewhere leaves the tab and `deployedName` agreeing with each other and
     not with the server; Deploy then sends no name. Refresh `deployedName`
@@ -618,15 +618,16 @@ Last updated 2026-10-28.
     and retail ones, tenant) were not checked for the overlap; each one's
     cursor handling decides whether two pods for a few seconds can publish
     twice. Found in #425.
-93. **The `acr-pull` copy in `vrsky-ui` never refreshes.**
+93. ~~**The `acr-pull` copy in `vrsky-ui` never refreshes.**~~ (#497)
     `deploy-ui-azure.sh` copies it from `vrsky-platform` once, and only a
     human runs that script; the deploy job rolls the UI with
     `deploy-core-azure.sh`, which doesn't copy. After an ACR password
     rotation the next UI rollout can't pull. Add `vrsky-ui` to
     `copy-acr-pull.sh` (#431), which already runs on every deploy. There
-    is also no written runbook for rotating the ACR password itself.
+    is also no written runbook for rotating the ACR password itself (now
+    item 98).
     `infrastructure/azure/**`: PR plus `agent:needs-human`. Found in #431.
-94. **A failed `acr-pull` apply can print the registry password.**
+94. ~~**A failed `acr-pull` apply can print the registry password.**~~ (#496)
     `deploy-backup-azure.sh` pipes the copied Secret into a bare
     `kubectl apply -f -`. On an existing object a failed apply can print
     "error when applying patch:" with the patch, new `.dockerconfigjson`
@@ -671,6 +672,28 @@ Last updated 2026-10-28.
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
     a retry would read better. Found in review of #501.
+99. **No runbook for rotating the ACR password.** The password enters the
+    cluster in `deploy-azure.sh` step 2 (`vrsky-platform`, `vrsky-storage`)
+    and `minio-images-acr.sh --repoint` (`vrsky-storage`), and every deploy
+    copies it on into `vrsky-database` and `vrsky-ui` (#497). Nothing says
+    which of these to run after `az acr credential renew`, in which order,
+    or how to check every namespace pulls again. Write it in
+    `docs/operator/`. Split out of item 93.
+100. **The builder's edit route loads only the first connection it sees.**
+    `useEditConnectionLoad` sets `editLoadDone` once and never resets it
+    when `:id` changes, so going from `/connections/A/edit` to
+    `/connections/B/edit` on an open builder never switches to or imports
+    B; the page stays on A's canvas. Reset it per id (and drop the linked
+    canvas id with it). The #502 name sync stays safe meanwhile, because the
+    store only applies a name to a canvas linked to that connection. Found
+    in review of #502.
+101. **A stale edit-route answer can undo a rename deployed meanwhile.** The
+    #502 sync reads the canvas when the GET answers. If the user renames the
+    tab and Deploys before that, `deployedName` already equals the new tab,
+    so the old answer counts as "not renamed" and puts the old name back on
+    both. The server keeps the new name; the tab is wrong until the next
+    edit-route open. Capture `deployedName` when the request goes out and
+    skip the sync if it changed. Found in review of #502.
 
 ## Human
 

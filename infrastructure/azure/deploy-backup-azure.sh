@@ -7,7 +7,8 @@
 #
 #   1. Copy the acr-pull secret from vrsky-platform into vrsky-database, so the
 #      Job can pull vrsky-cli from ACR. Copied on every run, so a rotated ACR
-#      password follows. No credential is in this script.
+#      password follows. No credential is in this script, and a failed apply
+#      prints none (acr-pull-lib.sh).
 #   2. Decide `suspend`: false only when the vrsky-backup-config Secret exists
 #      with the keys a backup needs (REQUIRED below, plus Azure credentials:
 #      account name and key, or a connection string). Otherwise it stays
@@ -19,6 +20,8 @@
 # vrsky-backup-config is created by a human with `kubectl create secret
 # generic` (infrastructure/kubernetes/backup/README.md). This script reads its
 # key names and nothing else: it never creates, changes or prints it.
+#
+# Never run with -x (bash -x, set -x): the trace prints the acr-pull Secret.
 set -euo pipefail
 
 NS=vrsky-database
@@ -32,10 +35,10 @@ if ! pull="$(kubectl get secret acr-pull -n vrsky-platform -o json)"; then
   echo "ERROR: no acr-pull secret in vrsky-platform to copy; the backup Job could not pull its image" >&2
   exit 1
 fi
-printf '%s' "$pull" \
-  | jq --arg ns "$NS" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
-                        metadata: {name: "acr-pull", namespace: $ns}}' \
-  | kubectl apply -f -
+# The apply's output is captured: a failure can print the Secret (#496).
+# shellcheck source=acr-pull-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/acr-pull-lib.sh"
+apply_acr_pull "$pull" "$NS"
 
 # --- 2. suspended unless the config Secret is complete ------------------------
 # Key names only; the values never leave the API server.
