@@ -796,7 +796,7 @@ Last updated 2026-10-28.
     bucket tree gives `temp/` a 15-minute TTL where `setup-job.yaml` sets
     one day. Manifest directory, so PR plus `agent:needs-human`. Found in
     #555.
-115. **A reload during a UI rollout can load a blank page.** With three UI
+115. ~~**A reload during a UI rollout can load a blank page.**~~ (#600) With three UI
     replicas and `maxSurge: 1`, `index.html` from a new pod can name
     `/assets/index-<new>.js`, which an old pod answers with 404 (its
     `error_page 404 /index.html` sends HTML for the script). The #551 banner

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { clearAssetRetry } from './utils/assetRetry'
 
 // Dark mode is opt-in only. The app's dark theme is incomplete — many pages
 // (settings, the pipeline detail panels, etc.) have no dark styles — so
@@ -22,3 +23,6 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+// The entry script loaded, so the reload guard in index.html (#600) may retry again.
+clearAssetRetry()
