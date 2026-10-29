@@ -238,10 +238,10 @@ type pdRig struct {
 	c       *sftpConsumer
 	done    *doneset.Set
 	pending map[string]sighting
-	// waiting is what the last poll left waiting to settle; fresh is true
+	// sched is what runPoller would know after the last poll; fresh is true
 	// from a boot to its first poll, which runPoller makes at once.
-	waiting int
-	fresh   bool
+	sched pollSchedule
+	fresh bool
 	// clock is the consumer's clock; each poll moves it as far as runPoller
 	// would wait before that poll.
 	clock time.Time
@@ -269,7 +269,7 @@ func (r *pdRig) boot() {
 	}
 	r.done = r.c.doneSet(r.conn, r.tenant, &r.cfg)
 	r.pending = make(map[string]sighting)
-	r.waiting = 0
+	r.sched = pollSchedule{}
 	r.fresh = true
 }
 
@@ -281,7 +281,7 @@ func (r *pdRig) poll() { r.pollCtx(context.Background()) }
 func (r *pdRig) pollCtx(ctx context.Context) {
 	r.clock = r.clock.Add(r.nextStep())
 	r.fresh = false
-	r.waiting = r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.pending, r.c.logger)
+	r.sched.record(r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.pending, r.c.logger))
 }
 
 // nextStep is how long runPoller would wait before the next poll.
@@ -289,7 +289,7 @@ func (r *pdRig) nextStep() time.Duration {
 	if r.fresh {
 		return 0
 	}
-	if step := r.c.nextPoll(&r.cfg, r.waiting); step > 0 {
+	if step := r.sched.next(r.c, &r.cfg); step > 0 {
 		return step
 	}
 	return r.c.settleGap(&r.cfg)

@@ -153,3 +153,25 @@ Changes:
 - Not fixed here: `TestDonePersistPG_RestartAndTenants` is flaky on main too
   (the one-shot can write "stopped" before the test reads "running"); it gets
   its own issue.
+
+## Review round 2
+
+Approved, with three small changes asked for before merge:
+
+- Round 1 made a failed connect or listing count every pending file as
+  waiting, so the poller retried every settle gap (3 login attempts each)
+  for as long as the server refused, from the cluster's one egress address.
+  A fail2ban-style ban would then lock out every tenant on that host. Now
+  the wait doubles after each failed poll in a row (gap, 2×gap, 4×gap, …),
+  capped at the poll interval, and a poll that gets through resets it. The
+  bookkeeping is a small `pollSchedule` (waiting count and failures in a
+  row) that `runPoller` and the test rig share, so the rig cannot drift from
+  the loop.
+- Tests: `TestStable_UnreachableServerBacksOff` (30, 60, 120, 240 s, then
+  30 s again after a poll that gets through), backoff rows in
+  `TestStable_NextPoll` including the cap, a failed listing next to the
+  failed connect in `TestStable_PendingBookkeeping`, and
+  `TestStable_RunPollerKeepsLookingWhileAFileChanges` (real timers, hour
+  interval: a file that changes between the first and second look is
+  published on the third, a settle gap later), which pins the timer reset
+  in the poll loop.

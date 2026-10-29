@@ -350,7 +350,9 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 	// one settle gap (at most 30 s) after the start's first poll.
 	pending := make(map[string]sighting)
 
-	waiting := s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger)
+	var sched pollSchedule
+	waiting, unreachable := s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger)
+	sched.record(waiting, unreachable)
 
 	// poll_interval_seconds <= 0 means run once (matches the UI label "0 = once").
 	if cfg.PollIntervalSeconds <= 0 {
@@ -363,7 +365,7 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 			case <-ctx.Done():
 				timer.Stop()
 			case <-timer.C:
-				waiting = s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger)
+				waiting, _ = s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger)
 			}
 			if waiting > 0 && ctx.Err() == nil {
 				logger.Warn("SFTP one-shot left files that were still changing; the next run tries them again", "files", waiting)
@@ -389,28 +391,59 @@ func (s *sftpConsumer) runPoller(ctx context.Context, own *activeConn, connID, t
 	// A timer re-armed after each poll, not a ticker: a ticker fires again as
 	// soon as a slow poll returns, which would put the next look at the folder
 	// right behind the last one (#374, #562).
-	timer := time.NewTimer(s.nextPoll(cfg, waiting))
+	timer := time.NewTimer(sched.next(s, cfg))
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			waiting = s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger)
-			timer.Reset(s.nextPoll(cfg, waiting))
+			sched.record(s.pollOnce(ctx, connID, tenantID, cfg, done, pending, logger))
+			timer.Reset(sched.next(s, cfg))
 		}
 	}
 }
 
+// pollSchedule is what the poller's last polls say about when to poll next:
+// how many files the last one left waiting to settle, and how many in a row
+// could not connect or list.
+type pollSchedule struct {
+	waiting  int
+	failures int
+}
+
+// record takes the outcome of a poll.
+func (p *pollSchedule) record(waiting int, unreachable bool) {
+	p.waiting = waiting
+	if unreachable {
+		p.failures++
+	} else {
+		p.failures = 0
+	}
+}
+
+// next is how long to wait before the next poll.
+func (p *pollSchedule) next(s *sftpConsumer, cfg *SFTPConfig) time.Duration {
+	return s.nextPoll(cfg, p.waiting, p.failures)
+}
+
 // nextPoll is how long to wait after a poll that left waiting files to settle:
 // the settle gap while some are, so a file goes out one gap after it was first
-// seen unchanged, not one interval; the poll interval otherwise.
-func (s *sftpConsumer) nextPoll(cfg *SFTPConfig, waiting int) time.Duration {
+// seen unchanged, not one interval; the poll interval otherwise. After failures
+// polls in a row that could not connect or list, the gap doubles with each
+// one, up to the interval: a server refusing logins is not tried every 30 s
+// from the cluster's one egress address, which a fail2ban-style ban would
+// then shut out for every tenant on that host.
+func (s *sftpConsumer) nextPoll(cfg *SFTPConfig, waiting, failures int) time.Duration {
 	interval := time.Duration(cfg.PollIntervalSeconds) * time.Second
-	if gap := s.settleGap(cfg); waiting > 0 && gap < interval {
-		return gap
+	gap := s.settleGap(cfg)
+	if waiting == 0 || gap >= interval {
+		return interval
 	}
-	return interval
+	for i := 1; i < failures && gap < interval; i++ {
+		gap *= 2
+	}
+	return min(gap, interval)
 }
 
 // sighting is how a pending file looked: its stamp, and when the poller first
@@ -482,14 +515,14 @@ func (s *sftpConsumer) doneSet(connID, tenantID string, cfg *SFTPConfig) *donese
 // retried on the next tick. Until the saved done set has been read nothing is
 // published: without it every file in the folder would look new. It returns
 // how many files it left waiting to settle (after a failed connect or listing,
-// every pending file); a file whose publish failed is not counted, it is
-// retried at the next poll as before.
-func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cfg *SFTPConfig, done *doneset.Set, pending map[string]sighting, logger *slog.Logger) (waiting int) {
+// every pending file, and unreachable is true); a file whose publish failed is
+// not counted, it is retried at the next poll as before.
+func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cfg *SFTPConfig, done *doneset.Set, pending map[string]sighting, logger *slog.Logger) (waiting int, unreachable bool) {
 	if !done.Loaded() {
 		found, err := done.Load(ctx)
 		if err != nil {
 			logger.Error("Could not read which files were already published; publishing nothing until it can be read", "error", err)
-			return 0
+			return 0, false
 		}
 		if found {
 			logger.Info("Resuming: files already published are not published again", "already_done", done.Len())
@@ -502,15 +535,15 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 	if err != nil {
 		logger.Error("SFTP connect failed; will retry next cycle", "error", err)
 		// Files seen before still wait for their second look: try again
-		// a settle gap later, not a whole interval.
-		return len(pending)
+		// a settle gap later, not a whole interval (backing off, nextPoll).
+		return len(pending), true
 	}
 	defer conn.Close()
 
 	files, err := conn.List(cfg.RemoteDir)
 	if err != nil {
 		logger.Error("SFTP list failed", "dir", cfg.RemoteDir, "error", err)
-		return len(pending)
+		return len(pending), true
 	}
 	// The time of this look, for the stability check (#562): the listing is
 	// what the check compares, not when each file's turn comes in the loop.
@@ -537,7 +570,7 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 	for _, f := range files {
 		select {
 		case <-ctx.Done():
-			return waiting
+			return waiting, false
 		default:
 		}
 		stamp := listing[f.Name]
@@ -583,7 +616,7 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 			logger.Warn("after-action failed", "file", f.Name, "action", cfg.AfterAction, "error", err)
 		}
 	}
-	return waiting
+	return waiting, false
 }
 
 // saveDone saves the done set; a failure is retried at the next save.

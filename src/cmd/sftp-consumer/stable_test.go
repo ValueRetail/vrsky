@@ -531,24 +531,128 @@ func TestStable_SettleGap(t *testing.T) {
 
 // After a poll that left files waiting to settle the next poll comes a settle
 // gap later, if that is sooner than the interval; otherwise one interval later.
+// After failures polls in a row that could not reach the server, the gap
+// doubles with each, up to the interval.
 func TestStable_NextPoll(t *testing.T) {
 	cases := []struct {
 		interval int
 		waiting  int
+		failures int
 		want     time.Duration
 	}{
-		{60, 0, 60 * time.Second},
-		{60, 1, 30 * time.Second},
-		{24 * 3600, 3, 30 * time.Second},
-		{24 * 3600, 0, 24 * time.Hour},
-		{10, 1, 10 * time.Second},
-		{2, 1, 2 * time.Second}, // the 5 s floor does not slow a short interval
+		{60, 0, 0, 60 * time.Second},
+		{60, 1, 0, 30 * time.Second},
+		{24 * 3600, 3, 0, 30 * time.Second},
+		{24 * 3600, 0, 0, 24 * time.Hour},
+		{10, 1, 0, 10 * time.Second},
+		{2, 1, 0, 2 * time.Second}, // the 5 s floor does not slow a short interval
+		// Backing off after failed connects or listings (review round 2).
+		{3600, 1, 1, 30 * time.Second},
+		{3600, 1, 2, 60 * time.Second},
+		{3600, 1, 3, 120 * time.Second},
+		{3600, 1, 7, 1920 * time.Second},
+		{3600, 1, 8, 3600 * time.Second}, // capped at the interval
+		{3600, 1, 1000, 3600 * time.Second},
+		{60, 1, 2, 60 * time.Second},
+		{60, 1, 5, 60 * time.Second},
+		{20, 1, 1, 20 * time.Second},
+		{20, 1, 3, 20 * time.Second},
+		{3600, 0, 3, 3600 * time.Second}, // nothing waiting: the interval
 	}
 	c := &sftpConsumer{}
 	for _, tc := range cases {
-		if got := c.nextPoll(&SFTPConfig{PollIntervalSeconds: tc.interval}, tc.waiting); got != tc.want {
-			t.Errorf("interval %d s, %d waiting: next poll in %v, want %v", tc.interval, tc.waiting, got, tc.want)
+		if got := c.nextPoll(&SFTPConfig{PollIntervalSeconds: tc.interval}, tc.waiting, tc.failures); got != tc.want {
+			t.Errorf("interval %d s, %d waiting, %d failures: next poll in %v, want %v", tc.interval, tc.waiting, tc.failures, got, tc.want)
 		}
+	}
+}
+
+// stFlakySFTP fails every List while down is set.
+type stFlakySFTP struct {
+	*fakeSFTP
+	down atomic.Bool
+}
+
+func (f *stFlakySFTP) List(dir string) ([]remoteFile, error) {
+	if f.down.Load() {
+		return nil, errors.New("permission denied")
+	}
+	return f.fakeSFTP.List(dir)
+}
+
+// Polls that cannot list the folder back off: the wait doubles after each
+// one in a row, up to the interval, and a poll that gets through resets it.
+func TestStable_UnreachableServerBacksOff(t *testing.T) {
+	flaky := &stFlakySFTP{fakeSFTP: &fakeSFTP{}}
+	r := newPDRig(t, newPDStore(), flaky.fakeSFTP)
+	r.cfg.PollIntervalSeconds = 3600
+	r.boot()
+	r.c.dial = func(*SFTPConfig) (sftpConn, error) { return flaky, nil }
+	pdPut(r.fake, "a.json", `{"a`, 0)
+	r.poll() // a.json seen, waiting
+	if got := r.nextStep(); got != 30*time.Second {
+		t.Fatalf("after the first look: next poll in %v, want 30s", got)
+	}
+	flaky.down.Store(true)
+	for i, want := range []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second, 240 * time.Second} {
+		r.poll()
+		if got := r.nextStep(); got != want {
+			t.Fatalf("after %d failed polls: next poll in %v, want %v", i+1, got, want)
+		}
+	}
+	flaky.down.Store(false)
+	pdPut(r.fake, "a.json", `{"a":1}`, 1) // changed meanwhile: still waiting
+	r.poll()
+	if got := r.nextStep(); got != 30*time.Second {
+		t.Fatalf("after a poll that got through: next poll in %v, want 30s again", got)
+	}
+	r.poll()
+	requireCounts(t, r.log, "once settled", map[string]int{"a.json": 1})
+}
+
+// Through runPoller and real timers: a file still changing at the second look
+// is looked at again a settle gap later, not an hour later, and published.
+func TestStable_RunPollerKeepsLookingWhileAFileChanges(t *testing.T) {
+	fake := &fakeSFTP{}
+	pdPut(fake, "a.json", `{"a`, 0)
+	conn := &stHookSFTP{fakeSFTP: fake, afterList: func(n int32) {
+		if n == 1 {
+			pdPut(fake, "a.json", `{"a":1}`, 1) // the upload goes on after the first look
+		}
+	}}
+	log := &pdLog{}
+	c := &sftpConsumer{
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		publish:     log.publish,
+		dial:        func(*SFTPConfig) (sftpConn, error) { return conn, nil },
+		checkpoints: newPDStore(),
+		settleMin:   20 * time.Millisecond,
+		settleMax:   50 * time.Millisecond,
+	}
+	cfg := &SFTPConfig{Host: "sftp", Username: "u", Password: "p", RemoteDir: "/in", AfterAction: "none", PollIntervalSeconds: 3600, nodeID: "c1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		c.runPoller(ctx, &activeConn{cancel: cancel}, pdConn, pdTenant, cfg)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-ended:
+		case <-time.After(2 * time.Second):
+			t.Error("the poller did not end within 2 s of the stop")
+		}
+	}()
+
+	harness.Eventually(t, 3*time.Second, "a.json published a few settle gaps after the first poll", func() bool {
+		return log.counts()["a.json"] == 1
+	})
+	if got := log.payloads("a.json"); got[0] != `{"a":1}` {
+		t.Errorf("published %q, want the finished file", got[0])
+	}
+	if got := conn.lists.Load(); got != 3 {
+		t.Errorf("listed the folder %d times, want 3: seen, changed, settled", got)
 	}
 }
 
@@ -642,8 +746,8 @@ func TestStable_PendingBookkeeping(t *testing.T) {
 		pdPut(r.fake, "a.json", `{"a"`, 0)
 		pdPut(r.fake, "b.json", `{"b"`, 0)
 		r.poll()
-		if len(r.pending) != 2 || r.waiting != 2 {
-			t.Fatalf("pending %d, waiting %d after the first poll; want 2 and 2", len(r.pending), r.waiting)
+		if len(r.pending) != 2 || r.sched.waiting != 2 {
+			t.Fatalf("pending %d, waiting %d after the first poll; want 2 and 2", len(r.pending), r.sched.waiting)
 		}
 		pdDel(r.fake, "a.json")
 		r.poll()
@@ -669,23 +773,31 @@ func TestStable_PendingBookkeeping(t *testing.T) {
 		r.poll()
 		r.poll()
 		requireCounts(t, r.log, "the failed publish", map[string]int{})
-		if _, ok := r.pending["a.json"]; !ok || r.waiting != 0 {
-			t.Fatalf("after the failed publish: pending %v, waiting %d; want a.json kept and 0 waiting", r.pending, r.waiting)
+		if _, ok := r.pending["a.json"]; !ok || r.sched.waiting != 0 {
+			t.Fatalf("after the failed publish: pending %v, waiting %d; want a.json kept and 0 waiting", r.pending, r.sched.waiting)
 		}
 		r.poll()
 		requireCounts(t, r.log, "the retry", map[string]int{"a.json": 1})
 	})
 
-	t.Run("a failed connect keeps the files waiting", func(t *testing.T) {
-		r := newPDRig(t, newPDStore(), &fakeSFTP{})
-		r.cfg.PollIntervalSeconds = 3600
-		r.boot()
-		pdPut(r.fake, "a.json", `{"a":1}`, 0)
-		r.poll()
-		r.c.dial = func(*SFTPConfig) (sftpConn, error) { return nil, errors.New("down") }
-		r.poll()
-		if r.waiting != 1 {
-			t.Fatalf("waiting after a failed connect = %d, want 1: the next poll comes a settle gap later", r.waiting)
-		}
-	})
+	for _, fail := range []string{"connect", "listing"} {
+		t.Run("a failed "+fail+" keeps the files waiting", func(t *testing.T) {
+			flaky := &stFlakySFTP{fakeSFTP: &fakeSFTP{}}
+			r := newPDRig(t, newPDStore(), flaky.fakeSFTP)
+			r.cfg.PollIntervalSeconds = 3600
+			r.boot()
+			r.c.dial = func(*SFTPConfig) (sftpConn, error) { return flaky, nil }
+			pdPut(r.fake, "a.json", `{"a":1}`, 0)
+			r.poll()
+			if fail == "connect" {
+				r.c.dial = func(*SFTPConfig) (sftpConn, error) { return nil, errors.New("down") }
+			} else {
+				flaky.down.Store(true)
+			}
+			r.poll()
+			if r.sched.waiting != 1 || r.sched.failures != 1 {
+				t.Fatalf("after a failed %s: waiting %d, failures %d; want 1 and 1, so the next poll comes a settle gap later", fail, r.sched.waiting, r.sched.failures)
+			}
+		})
+	}
 }
