@@ -770,8 +770,8 @@ Last updated 2026-10-28.
     not after two. `docs/connectors/file.md`, the paragraphs on moving files
     out and on replaced files. Left out of #537 because another worker had
     `docs/` at the time.
-114. **A file-consumer checkpoint row that can't be decoded is never
-    replaced.** Since #536 a start that couldn't read its checkpoint saves
+114. ~~**A file-consumer checkpoint row that can't be decoded is never
+    replaced.**~~ (#563) Since #536 a start that couldn't read its checkpoint saves
     nothing until a read works. For a row that fails to decode that is
     never: the watcher logs an Error every poll and falls back to its guess
     at every start. Before #536 the first change overwrote it. Nobody can
@@ -812,6 +812,17 @@ Last updated 2026-10-28.
     does: keep the state while the token is still there and say the
     refresh failed. Auth state, so PR plus `agent:needs-human`. Found in
     #552.
+118. **An SFTP or cloud-storage done set that can't be decoded stops the
+    poller for good.** `doneset.Set.Load` (`src/pkg/doneset`) returns the
+    same error for a row it can't decode as for a store error, and both
+    pollers publish nothing until `Load` works, logging an Error every poll.
+    A row that fails to decode never loads, so the connection publishes
+    nothing until someone fixes the row by hand. Treat a decode error as no
+    saved set there too, as #563 does for the file consumer (`loadSaved`
+    and `errSavedUndecodable` in `src/cmd/file-consumer/known.go`): the
+    first-start rule for these pollers publishes every file in the folder,
+    so decide first whether that or "everything present is done" fits.
+    Found in #563.
 119. **The SFTP and cloud-storage editors show a poll interval they don't
     save.** Both consumer panels in
     `ui/src/components/Pipeline/PropertyEditor.tsx` show

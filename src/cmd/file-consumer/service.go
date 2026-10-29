@@ -204,6 +204,10 @@ type ActiveConnection struct {
 	savedGen    string
 	changed     map[string]bool
 	guessed     map[string]bool
+	// undecodableLogged means this watcher has logged a saved set it can't
+	// decode at Warn; later ones go to Debug (#563). Touched only by the
+	// start path before the watcher goroutine runs, then by that goroutine.
+	undecodableLogged bool
 	// readFailures counts folder reads in a row that failed (#398), so only
 	// the first is logged as a warning. baselineDeferred means the start could
 	// not read the folder: knownFiles is not set yet, and each poll tries

@@ -167,7 +167,7 @@ func (s *fileConsumer) loadChanges(ctx context.Context, ac *ActiveConnection) (c
 		return changesState{}, false, nil
 	}
 	if err := json.Unmarshal(cp.State, &ch); err != nil {
-		return changesState{}, false, fmt.Errorf("decode saved file name changes: %w", err)
+		return changesState{}, false, fmt.Errorf("%w: changes row: %w", errSavedUndecodable, err)
 	}
 	if ch.WatchDir != ac.WatchDir || ch.Base == "" {
 		return changesState{}, false, nil
@@ -213,7 +213,7 @@ func (s *fileConsumer) loadSaved(ctx context.Context, ac *ActiveConnection) (sav
 	}
 	var st knownState
 	if err := json.Unmarshal(cp.State, &st); err != nil {
-		return savedSet{}, false, fmt.Errorf("decode saved file names: %w", err)
+		return savedSet{}, false, fmt.Errorf("%w: %w", errSavedUndecodable, err)
 	}
 	if st.WatchDir != ac.WatchDir {
 		return savedSet{}, false, nil
@@ -268,6 +268,38 @@ func toSaved(st fileStamp) savedStamp {
 // saved set, when the caller asked for the saved set (#409).
 var errCheckpointRead = errors.New("could not read which files were already published")
 
+// errSavedUndecodable marks a loadSaved or loadChanges error that is not the
+// store's: a row is there but its state is not one this version can decode
+// (#563). Postgres keeps it as jsonb, so it is valid JSON of the wrong shape.
+var errSavedUndecodable = errors.New("could not decode the saved list of published files")
+
+// undecodableAsNone takes a saved set nobody can decode as no saved set
+// (#563), and returns any other error as it is. Unlike a store error such a
+// row never reads: waiting for a read to work (#409, #500, #536) waited for
+// good, and the watcher guessed again at every start. It holds nothing anyone
+// can use, so the first-start rule applies and the next save replaces it with
+// a full snapshot. A changes row that can't be decoded discards the snapshot
+// under it too: the snapshot alone lacks what was published since, which
+// would then be published again. Logged at Warn the first time per watcher,
+// then at Debug.
+func (s *fileConsumer) undecodableAsNone(ac *ActiveConnection, err error, logger *slog.Logger) error {
+	if !errors.Is(err, errSavedUndecodable) {
+		return err
+	}
+	// The next save writes a snapshot over it, not changes on a snapshot
+	// nobody can read.
+	ac.savedGen = ""
+	ac.dirty = true
+	msg := "The saved list of published files can't be decoded; it counts as missing and the next save replaces it"
+	if ac.undecodableLogged {
+		logger.Debug(msg, "error", err)
+		return nil
+	}
+	ac.undecodableLogged = true
+	logger.Warn(msg, "error", err)
+	return nil
+}
+
 // loadKnown sets ac.knownFiles at start, before the connection shows as
 // active (#366). On the first start (no checkpoint for this folder) every
 // name in the folder is done, as before. After that only the names saved as
@@ -292,6 +324,10 @@ var errCheckpointRead = errors.New("could not read which files were already publ
 // returns an error wrapping errCheckpointRead and changes nothing, so the
 // baseline stays deferred and the next poll tries again: falling back there
 // would count every file that landed during the outage as done (#409).
+//
+// A failed read is a store error. A saved set that is there but can't be
+// decoded is not one: it never reads, so it counts as no checkpoint, with or
+// without requireSaved, and the start's save replaces it (#563).
 func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requireSaved bool) error {
 	current, err := s.listFiles(ac.WatchDir)
 	if err != nil {
@@ -304,6 +340,8 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 	}
 	logger := s.logger.With("connection_id", ac.ConnectionID, "watch_dir", ac.WatchDir)
 	saved, found, err := s.loadSaved(ctx, ac)
+	undecodable := errors.Is(err, errSavedUndecodable)
+	err = s.undecodableAsNone(ac, err, logger)
 	if err == nil || !requireSaved {
 		// This watcher has no snapshot of its own yet: its first save writes
 		// one (#426).
@@ -326,11 +364,18 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 			"error", err)
 	case !found:
 		// Saved once the start is active, so a first start is recorded even
-		// if nothing is ever published.
+		// if nothing is ever published. A saved set that can't be decoded
+		// gets the same (#563): nobody can tell which files in the folder
+		// were published, and the guess a failed read makes takes them all
+		// as done too.
 		ac.knownFiles = current
 		ac.knownStamps = stampAll(ac.WatchDir, current)
 		ac.dirty = true
-		logger.Info("First start for this folder: files already in it are not published", "files", len(current))
+		if undecodable {
+			logger.Info("Files already in the folder are not published, as at a first start", "files", len(current))
+		} else {
+			logger.Info("First start for this folder: files already in it are not published", "files", len(current))
+		}
 	default:
 		known := make(map[string]bool, len(saved.names))
 		stamps := make(map[string]fileStamp, len(saved.names))
@@ -381,7 +426,8 @@ func (s *fileConsumer) loadKnown(ctx context.Context, ac *ActiveConnection, requ
 // on another snapshot) means another writer may have saved: the whole set is
 // read, as before, and the next save writes a new snapshot, since changes on
 // the old one would no longer be read. It reports false if the saved set
-// could not be read.
+// could not be read; a saved set that can't be decoded has nothing to merge
+// (#563).
 func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, current map[string]bool, logger *slog.Logger) bool {
 	if s.checkpoints == nil {
 		return true
@@ -389,7 +435,7 @@ func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, cur
 	ctx, cancel := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancel()
 	mine, err := s.ownsSaved(ctx, ac)
-	if err != nil {
+	if err = s.undecodableAsNone(ac, err, logger); err != nil {
 		logger.Warn("Could not re-read which files were already published", "error", err)
 		return false
 	}
@@ -397,7 +443,7 @@ func (s *fileConsumer) mergeSaved(ctx context.Context, ac *ActiveConnection, cur
 		return true
 	}
 	saved, found, err := s.loadSaved(ctx, ac)
-	if err != nil {
+	if err = s.undecodableAsNone(ac, err, logger); err != nil {
 		logger.Warn("Could not re-read which files were already published", "error", err)
 		return false
 	}
@@ -453,8 +499,8 @@ type adoptCheck struct {
 // The saved set is read once per poll, and only by a poll that meets such a
 // name; each one gets a stamp in that poll, so this is rare. has is false
 // when the saved set has no stamp for name (or no checkpoint, or none is
-// kept). ok is false when the saved set can't be read: the caller leaves the
-// name for the next poll rather than guess.
+// kept, or it can't be decoded, #563). ok is false when the saved set can't
+// be read: the caller leaves the name for the next poll rather than guess.
 func (s *fileConsumer) savedStampFor(ctx context.Context, ac *ActiveConnection, name string, c *adoptCheck, logger *slog.Logger) (st fileStamp, has, ok bool) {
 	if s.checkpoints == nil {
 		return fileStamp{}, false, true
@@ -462,7 +508,7 @@ func (s *fileConsumer) savedStampFor(ctx context.Context, ac *ActiveConnection, 
 	if !c.read {
 		c.read = true
 		saved, _, err := s.loadSaved(ctx, ac)
-		if err != nil {
+		if err = s.undecodableAsNone(ac, err, logger); err != nil {
 			logger.Warn("Could not read which files were already published; files with no stamp wait for the next poll", "error", err)
 			return fileStamp{}, false, false
 		}
@@ -573,7 +619,7 @@ func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, l
 	if err := s.settleGuess(ctx, ac, logger); err != nil {
 		return err
 	}
-	if err := s.keepSavedStamps(ctx, ac); err != nil {
+	if err := s.keepSavedStamps(ctx, ac, logger); err != nil {
 		return err
 	}
 	names := make([]string, 0, len(ac.knownFiles))
@@ -617,7 +663,8 @@ func (s *fileConsumer) saveSnapshot(ctx context.Context, ac *ActiveConnection, l
 // publish it; a name saved with a stamp takes it, so a file replaced since is
 // published (#420); a name saved without one (before #420) keeps its stamp.
 // With no checkpoint for the folder the guess is the first-start rule and
-// stays. If the saved set can't be read it returns the error and changes
+// stays, as it does when the saved set can't be decoded (#563). If the saved
+// set can't be read (a store error) it returns the error and changes
 // nothing: the snapshot is not written, the set stays dirty, and the next
 // poll tries again. Every write goes through here while there is a guess,
 // since changes are only written on a snapshot of this watcher's own.
@@ -626,7 +673,7 @@ func (s *fileConsumer) settleGuess(ctx context.Context, ac *ActiveConnection, lo
 		return nil
 	}
 	saved, found, err := s.loadSaved(context.WithoutCancel(ctx), ac)
-	if err != nil {
+	if err = s.undecodableAsNone(ac, err, logger); err != nil {
 		return fmt.Errorf("read which files were already published before saving over it: %w", err)
 	}
 	guessed := ac.guessed
@@ -666,10 +713,12 @@ func (s *fileConsumer) settleGuess(ctx context.Context, ac *ActiveConnection, lo
 // the name, and the next poll that could stat the file took a replacement as
 // done (#500, the same loss savedStampFor stops in pollOnce). A saved stamp
 // for such a name is always another writer's: a watcher never drops a stamp
-// while it keeps the name. If the saved set can't be read it returns the error and the snapshot is
-// not written; the set stays dirty and the next poll tries again. It reads
+// while it keeps the name. If the saved set can't be read (a store error) it
+// returns the error and the snapshot is not written; the set stays dirty and
+// the next poll tries again. One that can't be decoded has no stamps to keep
+// (#563). It reads
 // nothing when every done name has a stamp, which is almost always.
-func (s *fileConsumer) keepSavedStamps(ctx context.Context, ac *ActiveConnection) error {
+func (s *fileConsumer) keepSavedStamps(ctx context.Context, ac *ActiveConnection, logger *slog.Logger) error {
 	stampless := false
 	for name := range ac.knownFiles {
 		if _, ok := ac.knownStamps[name]; !ok {
@@ -681,7 +730,7 @@ func (s *fileConsumer) keepSavedStamps(ctx context.Context, ac *ActiveConnection
 		return nil
 	}
 	saved, _, err := s.loadSaved(context.WithoutCancel(ctx), ac)
-	if err != nil {
+	if err = s.undecodableAsNone(ac, err, logger); err != nil {
 		return fmt.Errorf("read the saved stamps of files with none: %w", err)
 	}
 	for name := range ac.knownFiles {
