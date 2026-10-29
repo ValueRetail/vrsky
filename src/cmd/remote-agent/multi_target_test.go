@@ -3,12 +3,21 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
+
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
+	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/messaging"
 )
 
 // A message for several agents is acked only once every one of them has
@@ -362,4 +371,128 @@ func TestWrittenSet(t *testing.T) {
 			t.Errorf("re-adding a held key evicted another; size %d", w.size())
 		}
 	})
+}
+
+// TestOutput_MultiTargetLastAttemptRemembersNothing: on its last attempt a
+// message that fails goes to the dead-letter queue instead of coming back,
+// and a retry from Failed Messages is a new message. So the writes of that
+// attempt are not remembered: nothing would ever look them up.
+func TestOutput_MultiTargetLastAttemptRemembersNothing(t *testing.T) {
+	e := newTestEnv(t)
+	const connID = "last"
+	e.startTwoAgentPipeline(t, connID, agentA, agentA2)
+	acks := e.watchAcks(t, outputDurable(connID))
+	e.publishTo(t, tenant1, connID, `{"order":1}`)
+
+	for attempt := uint64(1); attempt <= messaging.MaxDeliveryAttempts; attempt++ {
+		a, a2 := e.pollOne(t, credA), e.pollOne(t, credA2)
+		if attempt < messaging.MaxDeliveryAttempts {
+			// Both fail: nothing to remember, and the message comes back.
+			e.ackAs(t, credA, a.ID, agentproto.AckFailed)
+			e.ackAs(t, credA2, a2.ID, agentproto.AckFailed)
+			acks.waitUntil(t, "the NAK", func(evs []ackEvent) bool { return hasAck(evs, "-NAK", attempt) })
+			if n := e.g.written.size(); n != 0 {
+				t.Fatalf("attempt %d: %d writes remembered, want 0", attempt, n)
+			}
+			continue
+		}
+		// The last attempt: A writes it, A2 fails.
+		e.ackAs(t, credA, a.ID, agentproto.AckOK)
+		e.ackAs(t, credA2, a2.ID, agentproto.AckFailed)
+		acks.waitUntil(t, "the ack that settles it into the DLQ", func(evs []ackEvent) bool { return hasAck(evs, "+ACK", attempt) })
+	}
+	waitFor(t, "the message in the DLQ", func() bool { return e.dlqMsgs(t) == 1 })
+	if n := e.g.written.size(); n != 0 {
+		t.Errorf("%d writes remembered from the last attempt, want 0", n)
+	}
+}
+
+// TestOutputHandler_SessionEndKeepsTheWriteError: when the session ends with
+// a target unanswered and another target's write failed, the handler returns
+// the write's error, not errSessionEnded, whichever order the targets are in.
+// The message is NAK'd either way; the subscriber logs what it was given.
+// The handler is called directly, with a message bound the way a pull
+// subscription binds it, so the returned error can be read.
+func TestOutputHandler_SessionEndKeepsTheWriteError(t *testing.T) {
+	writeErr := "agent could not write the file: disk full"
+	cases := []struct {
+		name   string
+		failer string // the agent whose write fails; "" for none
+		order  []string
+		want   string
+	}{
+		{"the failing target comes first", agentA, []string{agentA, agentA2}, writeErr},
+		{"the failing target comes second", agentA2, []string{agentA, agentA2}, writeErr},
+		{"nobody answers", "", []string{agentA, agentA2}, errSessionEnded.Error()},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := newGateway()
+			g.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+			sess := &connSession{connID: "direct", tenantID: tenant1}
+			for _, id := range c.order {
+				sess.outputs = append(sess.outputs, remoteNode{NodeID: "out-" + id, Target: targetAgent, AgentID: id, Directory: "out"})
+			}
+			done := make(chan struct{})
+			result := make(chan error, 1)
+			go func() {
+				result <- g.outputHandler(sess, outputScope{done: done})(context.Background(), boundMsg(t, 1))
+			}()
+			waitFor(t, "both deliveries pending", func() bool {
+				return g.pendingCount(agentA) == 1 && g.pendingCount(agentA2) == 1
+			})
+			if c.failer != "" {
+				if !g.resolve(c.failer, g.pendingIDs(c.failer)[0], errors.New(writeErr)) {
+					t.Fatal("the failed write was not taken")
+				}
+			}
+			close(done)
+			select {
+			case err := <-result:
+				if err == nil || err.Error() != c.want {
+					t.Fatalf("handler returned %v, want %q", err, c.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the handler did not return after the scope ended")
+			}
+		})
+	}
+}
+
+// boundMsg is an envelope for tenant 1's "direct" pipeline as a pull
+// subscription hands it over: bound, with a JetStream reply subject carrying
+// its stream sequence and delivery count.
+func boundMsg(t *testing.T, delivered uint64) *nats.Msg {
+	t.Helper()
+	env := &envelope.Envelope{
+		ID: uuid.NewString(), TenantID: tenant1, IntegrationID: "direct",
+		Payload: []byte(`{"order":1}`), PayloadSize: 11, ContentType: "application/json",
+		Source: "test", CreatedAt: time.Now().UTC(), Metadata: map[string]any{"filename": "orders.json"},
+	}
+	body, err := envelope.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &nats.Msg{
+		Subject: messaging.DataSubject(tenant1, "direct"),
+		Reply:   fmt.Sprintf("$JS.ACK.%s.%s.%d.%d.%d.%d.%d", messaging.MainStreamName, "durable", delivered, 7, 7, time.Now().UnixNano(), 0),
+		Data:    body,
+		Sub:     &nats.Subscription{},
+	}
+}
+
+func (s *gateway) pendingCount(agentID string) int {
+	return len(s.pendingIDs(agentID))
+}
+
+func (s *gateway) pendingIDs(agentID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	if a := s.agents[agentID]; a != nil {
+		for id := range a.pending {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

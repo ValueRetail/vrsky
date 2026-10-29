@@ -22,7 +22,9 @@ import (
 // delivery attempt per stop, so a message held across five redeploys of an
 // offline agent's pipeline lands in the dead-letter queue, where it can be
 // retried from the UI. Targets of the message that had already written it are
-// skipped by the redelivery (#587; see writtenSet).
+// skipped by the redelivery (#587; see writtenSet). When another target's
+// write failed, the handler returns that error instead: it is the one worth
+// logging, and the message is NAK'd all the same.
 var errSessionEnded = errors.New("pipeline stopped while the message was waiting for its agent")
 
 // delivery is one file waiting to be written by one agent.
@@ -181,12 +183,17 @@ func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.
 				unanswered = true
 			}
 		}
-		if unanswered {
+		// A write that failed is the better reason to log for the NAK than
+		// the session ending.
+		if unanswered && firstErr == nil {
 			firstErr = errSessionEnded
 		}
 		if firstErr != nil {
-			// NAK'd: remember who wrote it, so the redelivery skips them.
-			if tracked {
+			// NAK'd: remember who wrote it, so the redelivery skips them. Not
+			// on the last attempt: the subscriber moves the message to the
+			// dead-letter queue instead of NAK'ing it, and a retry from there
+			// is a new message, so nothing would ever look the entries up.
+			if tracked && meta.NumDelivered < messaging.MaxDeliveryAttempts {
 				var done []writtenKey
 				for i := range waiting {
 					if wrote[i] {

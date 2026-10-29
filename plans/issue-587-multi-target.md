@@ -128,3 +128,24 @@ polling the real HTTP API:
   first, then oldest), re-adding a held key.
 
 Mutation run over the key conditions: see the PR.
+
+## Review follow-up
+
+The Opus review approved and suggested two optional changes, both taken:
+
+1. Nothing is remembered on the last attempt (`NumDelivered >=
+   messaging.MaxDeliveryAttempts`). The subscriber moves that message to the
+   dead-letter queue instead of NAK'ing it, and a retry from Failed Messages
+   is a new message, so the entries would only sit until TTL or the cap.
+   (If the DLQ publish itself fails, the subscriber NAKs and the message
+   comes back once more; then its writers are written again. Rare, and a
+   duplicate, not a loss.) Test: `TestOutput_MultiTargetLastAttemptRemembersNothing`
+   (four attempts where both writes fail, then one where A writes and A2
+   fails: the message is dead-lettered and the set is empty).
+2. When the session ends with a target unanswered and another target's write
+   failed, the handler returns the write's error rather than
+   `errSessionEnded`, so the subscriber's "Handler error, will retry" log
+   shows the real reason. Still a NAK. Test:
+   `TestOutputHandler_SessionEndKeepsTheWriteError`, which calls the handler
+   directly with a bound message and reads the returned error (failing target
+   first, failing target second, nobody answering).
