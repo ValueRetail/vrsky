@@ -83,6 +83,9 @@ type gateway struct {
 	sessions map[string]*connSession // connectionID → running pipeline
 	agents   map[string]*agentState  // agentID → pending work
 	events   *eventHub
+	// written remembers the targets that wrote a message which was NAK'd
+	// anyway, so its redelivery skips them (#587; see written.go).
+	written *writtenSet
 	// closed is set by Stop, under mu. A start that finishes after it ends
 	// the session it built instead of registering it, and a command that
 	// arrives after it is ignored.
@@ -152,6 +155,7 @@ func newGateway() *gateway {
 		sessions:          map[string]*connSession{},
 		agents:            map[string]*agentState{},
 		events:            newEventHub(),
+		written:           newWrittenSet(writtenTTL, writtenMax),
 		uploadMax:         defaultUploadMax,
 		outputAckWait:     30 * time.Second,
 		membershipRefresh: defaultMembershipRefresh,
