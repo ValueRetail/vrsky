@@ -1542,6 +1542,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-published-and-when-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets published, and when again
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2417,6 +2434,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-published-and-when-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets published, and when again
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2473,6 +2507,18 @@
 <p>The SFTP connector (<code>config.type: "sftp"</code>) transfers files over SFTP. It works both as a source (consumer) and a destination (producer), sharing the same config shape.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node connects to a remote SFTP server, reads files from a directory, and emits them into the pipeline. The <code>after_action</code> setting controls what happens to a file once it has been read.</p>
+<h3 id="what-gets-published-and-when-again">What gets published, and when again<a class="headerlink" href="#what-gets-published-and-when-again" title="Permanent link">&para;</a></h3>
+<p>The consumer remembers which files it published, with the size and modification time each had, in the connection's checkpoint (one per tenant, connection and node). It survives restarts, deploys and the nightly park, so with <code>after_action: "none"</code> a file left in the folder is published once, not again at every start (#538).</p>
+<ul>
+<li><strong>First start.</strong> Every file already in the folder is published. A start after the host, port, username or folder was edited counts as a first start too.</li>
+<li><strong>Replaced file.</strong> A file overwritten under the same name (its size or modification time changed) is published again, once.</li>
+<li><strong>Deleted, then added again.</strong> A file that a poll finds gone from the folder is forgotten; if it comes back it is published again. One deleted and put back between two polls with the same size and modification time (<code>scp -p</code>, <code>rsync -t</code>) looks unchanged and is not.</li>
+<li><strong>Failed after-action.</strong> If <code>delete</code> or <code>move</code> fails, the file is still counted as published and stays in the folder; it is not published or moved again, also after a restart. The failure is in the log (<code>after-action failed</code>).</li>
+<li><strong>Checkpoint unreadable.</strong> If the database can't be read at start, the consumer publishes nothing and logs <code>Could not read which files were already published</code>. It tries again at every poll and carries on as normal once the read works. A one-shot connection (<code>poll_interval_seconds: 0</code>) ends with status <code>error</code> instead.</li>
+<li><strong>Crash.</strong> The list is saved every 32 files and at the end of each poll, so a crash in the middle of a long poll publishes at most the files since the last save again.</li>
+</ul>
+<p>Two limits: a file replaced with the same size within the same second (most servers keep modification times in whole seconds) looks unchanged and is not published again. And there is no stability check yet, so a file listed while it is still being uploaded is published half-written, then again once the upload finishes and its size changes.</p>
+<p>After the release that added this, each running SFTP connection's first start has no saved list yet, so it publishes what is in its folder once more, as every restart did before.</p>
 <h2 id="as-a-destination-producer">As a destination (producer)<a class="headerlink" href="#as-a-destination-producer" title="Permanent link">&para;</a></h2>
 <p>A producer node connects to a remote SFTP server and writes files into the configured directory.</p>
 <h2 id="config-reference">Config reference<a class="headerlink" href="#config-reference" title="Permanent link">&para;</a></h2>
