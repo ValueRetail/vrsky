@@ -112,3 +112,89 @@ describe('canvasStore: canvases', () => {
     expect(reload().canvases.map((c) => c.name)).toEqual(['Mine'])
   })
 })
+
+// #502: opening a linked connection fetches its name; the answer brings the
+// canvas's deployedName (and an unrenamed tab) in line with the server.
+describe('canvasStore: syncDeployedName', () => {
+  const s = () => useCanvasStore.getState()
+  const stored = (id: string) => reload().canvases.find((x) => x.id === id)!
+  const STORAGE_T1 = 'vrsky:canvases:v1:t1'
+
+  it('updates the linked canvas and persists it', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    expect(s().getCanvasById(c.id)).toMatchObject({ name: 'Edit: New name', deployedName: 'New name', deployedConnectionId: 'conn-1' })
+    expect(stored(c.id)).toMatchObject({ name: 'Edit: New name', deployedName: 'New name', deployedConnectionId: 'conn-1' })
+  })
+
+  it('a tab renamed here keeps its name; deployedName still follows the server', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    s().renameCanvas(c.id, 'Mine')
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    expect(stored(c.id)).toMatchObject({ name: 'Mine', deployedName: 'New name' })
+  })
+
+  it('a rename made after the request went out wins over the answer', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    // The request goes out with the tab reading "Edit: Old name"; the user
+    // renames before it answers.
+    s().renameCanvas(c.id, 'Typed meanwhile')
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    expect(stored(c.id)).toMatchObject({ name: 'Typed meanwhile', deployedName: 'New name' })
+  })
+
+  it('keeps nodes, edges, the current canvas and the other canvases', () => {
+    const node = { id: 'n1', type: 'input', position: { x: 10, y: 20 }, data: { label: 'In' } } as const
+    const c = s().importCanvas('Edit: Old name', [node], [{ source: 'n1', target: 'n1' }], 'conn-1', 'Old name')!
+    const first = s().canvases[0].id
+    s().switchCanvas(first)
+    const others = s().canvases.filter((x) => x.id !== c.id)
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    const after = reload()
+    const synced = after.canvases.find((x) => x.id === c.id)!
+    expect(synced.nodes).toEqual([node])
+    expect(synced.edges).toEqual([{ source: 'n1', target: 'n1' }])
+    expect(after.currentCanvasId).toBe(first)
+    expect(after.canvases.filter((x) => x.id !== c.id)).toEqual(others)
+  })
+
+  it('trims the server name', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    s().syncDeployedName(c.id, 'conn-1', '  New name  ')
+    expect(stored(c.id)).toMatchObject({ name: 'Edit: New name', deployedName: 'New name' })
+  })
+
+  it.each([
+    ['a canvas linked to a different connection', (id: string) => s().syncDeployedName(id, 'conn-2', 'New name')],
+    ['an unknown canvas id', () => s().syncDeployedName('nope', 'conn-1', 'New name')],
+    ['a blank server name', (id: string) => s().syncDeployedName(id, 'conn-1', '   ')],
+    ['an empty server name', (id: string) => s().syncDeployedName(id, 'conn-1', '')],
+  ])('%s changes nothing', (_, act) => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    const before = s().canvases
+    const storedBefore = localStorage.getItem(STORAGE_T1)
+    act(c.id)
+    expect(s().canvases).toEqual(before)
+    expect(s().getCanvasById(c.id)).toMatchObject({ name: 'Edit: Old name', deployedName: 'Old name' })
+    expect(localStorage.getItem(STORAGE_T1)).toBe(storedBefore)
+  })
+
+  it('a canvas unlinked while the request was out stays unlinked and keeps its name', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    s().setDeployedConnectionId(c.id, null)
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    const after = stored(c.id)
+    expect(after.name).toBe('Edit: Old name')
+    expect(after.deployedConnectionId).toBeUndefined()
+    expect(after.deployedName).toBeUndefined()
+  })
+
+  it('a canvas from another workspace is not touched after a switch', () => {
+    const c = s().importCanvas('Edit: Old name', [], [], 'conn-1', 'Old name')!
+    s().initialize('t2')
+    s().syncDeployedName(c.id, 'conn-1', 'New name')
+    expect(s().canvases.some((x) => x.id === c.id)).toBe(false)
+    expect(localStorage.getItem('vrsky:canvases:v1:t2')).not.toContain('New name')
+    expect(stored(c.id)).toMatchObject({ name: 'Edit: Old name', deployedName: 'Old name' })
+  })
+})

@@ -463,8 +463,8 @@ Last updated 2026-10-28.
     show a "A newer version is available, reload" banner. Found during #450.
 71. **`ui/src/pages/Dashboard.tsx` is dead code**: no route renders it.
     Delete it, or route it if a dashboard is wanted. Found during #450.
-72. **A linked builder tab's `deployedName` never re-syncs with the
-    server.** Opening a connection whose canvas is already linked
+72. ~~**A linked builder tab's `deployedName` never re-syncs with the
+    server.**~~ (#502) Opening a connection whose canvas is already linked
     (`PipelineBuilder.tsx` edit flow) only switches to it, so a name changed
     elsewhere leaves the tab and `deployedName` agreeing with each other and
     not with the server; Deploy then sends no name. Refresh `deployedName`
@@ -679,6 +679,21 @@ Last updated 2026-10-28.
     which of these to run after `az acr credential renew`, in which order,
     or how to check every namespace pulls again. Write it in
     `docs/operator/`. Split out of item 93.
+100. **The builder's edit route loads only the first connection it sees.**
+    `useEditConnectionLoad` sets `editLoadDone` once and never resets it
+    when `:id` changes, so going from `/connections/A/edit` to
+    `/connections/B/edit` on an open builder never switches to or imports
+    B; the page stays on A's canvas. Reset it per id (and drop the linked
+    canvas id with it). The #502 name sync stays safe meanwhile, because the
+    store only applies a name to a canvas linked to that connection. Found
+    in review of #502.
+101. **A stale edit-route answer can undo a rename deployed meanwhile.** The
+    #502 sync reads the canvas when the GET answers. If the user renames the
+    tab and Deploys before that, `deployedName` already equals the new tab,
+    so the old answer counts as "not renamed" and puts the old name back on
+    both. The server keeps the new name; the tab is wrong until the next
+    edit-route open. Capture `deployedName` when the request goes out and
+    skip the sync if it changed. Found in review of #502.
 
 ## Human
 
