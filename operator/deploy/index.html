@@ -14,7 +14,7 @@
         <link rel="prev" href="../install/">
       
       
-        <link rel="next" href="../windows/">
+        <link rel="next" href="../acr-rotation/">
       
       
         
@@ -928,6 +928,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acr-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rotating the ACR password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2545,15 +2573,18 @@ ride along with its image as they always have.</p>
 <p>Before anything rolls, every deploy that reaches a running cluster copies
 <code>acr-pull</code> from <code>vrsky-platform</code> into <code>vrsky-database</code> and <code>vrsky-ui</code>
 (<code>copy-acr-pull.sh</code>), and so does every Catch up. After an ACR password
-rotation you update <code>acr-pull</code> in <code>vrsky-platform</code> only; the next deploy or
-Catch up carries it over before the first pod pulls, so the backup Job and
-the UI keep pulling. A namespace that doesn't exist yet is skipped. It
-touches only those two Secrets (<a href="../backup/">backup</a>). A failed copy fails
+rotation you update <code>acr-pull</code> by hand in <code>vrsky-platform</code> and in
+<code>vrsky-storage</code> (MinIO has its own, not a copy); the next deploy or Catch
+up carries <code>vrsky-platform</code>'s over before the first pod pulls, so the backup
+Job and the UI keep pulling. The copy skips a namespace that doesn't exist
+yet and touches only the two copies (<a href="../backup/">backup</a>). A failed copy fails
 the run before the rollout. The log says which namespace and the exit
 code, and nothing else: kubectl's
 own error can contain the Secret, and the deploy log is readable by anyone
 with repo access. To see kubectl's reason, run the apply yourself in your
 own terminal.</p>
+<p>The whole rotation, with a check that every namespace pulls again, is in
+<a href="../acr-rotation/">Rotating the ACR password</a>.</p>
 <p>Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.</p>
 <p>Most connectors roll: the new pod starts before the old one stops. The file

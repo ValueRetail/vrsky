@@ -827,6 +827,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../operator/acr-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rotating the ACR password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../operator/windows/" class="md-nav__link">
         
   
@@ -3678,7 +3706,10 @@ management API's own <code>vrsky-management-api</code> service account. An image
 reference that names <code>ghcr.io</code> means a manifest was applied without the
 rewrite (see the warning above). A tag ACR doesn't
 have means the image was never built: check with
-<code>az acr repository show-tags -n vrskyprodacr --repository vrsky/&lt;name&gt;</code>.</p>
+<code>az acr repository show-tags -n vrskyprodacr --repository vrsky/&lt;name&gt;</code>.
+A <code>401 Unauthorized</code> on pull usually means the ACR password was renewed
+and a namespace's <code>acr-pull</code> still has the old one: see
+<a href="../operator/acr-rotation/">Rotating the ACR password</a>.</p>
 <h3 id="a-rollout-succeeded-but-the-old-version-is-still-served">A rollout succeeded but the old version is still served<a class="headerlink" href="#a-rollout-succeeded-but-the-old-version-is-still-served" title="Permanent link">&para;</a></h3>
 <p>A digest-pinned deployment was restarted instead of updated. Run
 <code>deploy-core-azure.sh</code> for that service; it sets the current digest and

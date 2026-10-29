@@ -827,6 +827,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../acr-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rotating the ACR password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../windows/" class="md-nav__link">
         
   
@@ -2673,8 +2701,9 @@ one-time human setup in the next section.</p>
 <p>The Job pulls <code>vrsky-cli</code> with a copy of the <code>acr-pull</code> Secret from
 <code>vrsky-platform</code>. Every deploy with the cluster up refreshes that copy
 (<code>infrastructure/azure/copy-acr-pull.sh</code>), and so does every Catch up, so
-after an ACR password rotation you only update <code>acr-pull</code> in
-<code>vrsky-platform</code>; the next deploy or Catch up carries it over. The copy step
+after an ACR password rotation the backup only needs <code>acr-pull</code> updated in
+<code>vrsky-platform</code>; the next deploy or Catch up carries it over
+(<a href="../acr-rotation/">Rotating the ACR password</a> has the whole procedure). The copy step
 touches only the <code>acr-pull</code> copies (this one and the UI's in <code>vrsky-ui</code>)
 and never the CronJob, so a CronJob you suspended
 for a restore stays suspended. The backup script itself still runs only on a
