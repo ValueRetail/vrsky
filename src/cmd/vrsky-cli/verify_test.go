@@ -21,27 +21,36 @@ import (
 
 func archiveSalt(t *testing.T, archive []byte) []byte {
 	t.Helper()
-	if len(archive) < backupHeaderSize {
+	if len(archive) < backupHeaderSizeV1 {
 		t.Fatalf("archive shorter than its header: %d bytes", len(archive))
 	}
-	return archive[len(backupMagic)+4 : backupHeaderSize]
+	return archive[len(backupMagic)+4 : backupHeaderSizeV1]
 }
 
-// The derivation is HKDF-SHA256(ENCRYPTION_KEY, salt, "vrsky-backup-v1"),
-// checked against the standard library's HKDF so the parameters are pinned.
+// v2Info is the HKDF info of a VRSKYBK2 archive with this header:
+// "vrsky-backup-v2" || header (#549).
+func v2Info(header []byte) []byte {
+	return append([]byte("vrsky-backup-v2"), header...)
+}
+
+// The derivation is HKDF-SHA256(ENCRYPTION_KEY, salt, info), checked against
+// the standard library's HKDF so the parameters are pinned, for v1's info and
+// for a v2 one. TestArchivesGetSeparateKeys pins which info v2 uses.
 func TestDeriveBackupKeyMatchesHKDF(t *testing.T) {
 	master := randomBytes(t, 32)
 	salt := randomBytes(t, backupSaltSize)
-	want, err := stdhkdf.Key(sha256.New, master, salt, "vrsky-backup-v1", 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := deriveBackupKey(hex.EncodeToString(master), salt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("derived key %x, want %x", got, want)
+	for _, info := range []string{"vrsky-backup-v1", string(v2Info(randomBytes(t, testHeaderSize)))} {
+		want, err := stdhkdf.Key(sha256.New, master, salt, info, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := deriveBackupKey(hex.EncodeToString(master), salt, []byte(info))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("derived key %x, want %x", got, want)
+		}
 	}
 }
 
@@ -55,11 +64,11 @@ func TestArchivesGetSeparateKeys(t *testing.T) {
 	if bytes.Equal(saltA, saltB) {
 		t.Fatal("two archives share a salt")
 	}
-	keyA, err := deriveBackupKey(keyHex, saltA)
+	keyA, err := deriveBackupKey(keyHex, saltA, v2Info(a[:testHeaderSize]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyB, err := deriveBackupKey(keyHex, saltB)
+	keyB, err := deriveBackupKey(keyHex, saltB, v2Info(b[:testHeaderSize]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,13 +78,13 @@ func TestArchivesGetSeparateKeys(t *testing.T) {
 	if bytes.Equal(keyA, master) || bytes.Equal(keyB, master) {
 		t.Fatal("subkey equals ENCRYPTION_KEY")
 	}
-	if bytes.Equal(a[backupHeaderSize:], b[backupHeaderSize:]) {
+	if bytes.Equal(a[testHeaderSize:], b[testHeaderSize:]) {
 		t.Fatal("two archives of the same input have the same ciphertext")
 	}
 
 	// The first chunk opens under the subkey and not under the master key.
-	chunk0 := a[backupHeaderSize : backupHeaderSize+64+gcmTagSize]
-	header := a[:backupHeaderSize]
+	chunk0 := a[testHeaderSize : testHeaderSize+64+gcmTagSize]
+	header := a[:testHeaderSize]
 	nonce := chunkNonce(nil, 0, false)
 	open := func(key []byte) error {
 		block, err := aes.NewCipher(key)
@@ -109,13 +118,13 @@ func TestHeaderSaltAndKeyEditsFail(t *testing.T) {
 		key     string
 	}
 	var cases []tc
-	for _, i := range []int{saltStart, saltStart + 15, backupHeaderSize - 1} {
+	for _, i := range []int{saltStart, saltStart + 15, backupHeaderSizeV1 - 1} {
 		c := bytes.Clone(archive)
 		c[i] ^= 0x01
 		cases = append(cases, tc{fmt.Sprintf("salt byte %d flipped", i-saltStart), c, keyHex})
 	}
 	zeroSalt := bytes.Clone(archive)
-	copy(zeroSalt[saltStart:backupHeaderSize], make([]byte, backupSaltSize))
+	copy(zeroSalt[saltStart:backupHeaderSizeV1], make([]byte, backupSaltSize))
 	cases = append(cases,
 		tc{"salt zeroed", zeroSalt, keyHex},
 		tc{"wrong key", archive, randomKey(t)},
@@ -150,7 +159,7 @@ func TestVerifyBackup(t *testing.T) {
 	dump := append([]byte("PGDMP"), randomBytes(t, 200<<10)...)
 
 	put := &memStore{}
-	if _, err := streamBackup(context.Background(), put, "k", bytes.NewReader(dump), func() error { return nil }, keyHex); err != nil {
+	if _, err := streamBackup(context.Background(), put, "mgmt-backups/x.dump.gz.enc", bytes.NewReader(dump), func() error { return nil }, keyHex); err != nil {
 		t.Fatalf("backup: %v", err)
 	}
 	good := put.body
@@ -174,7 +183,7 @@ func TestVerifyBackup(t *testing.T) {
 		{"good legacy archive", legacy, keyHex, true},
 		{"truncated by one byte", good[:len(good)-1], keyHex, false},
 		{"truncated at half", good[:len(good)/2], keyHex, false},
-		{"truncated after the header", good[:backupHeaderSize], keyHex, false},
+		{"truncated after the header", good[:backupHeaderFixedV2+len("mgmt-backups/x.dump.gz.enc")], keyHex, false},
 		{"bit flipped in the middle", flip(good, len(good)/2), keyHex, false},
 		{"bit flipped in the last byte", flip(good, len(good)-1), keyHex, false},
 		{"bit flipped in the salt", flip(good, len(backupMagic)+4), keyHex, false},
@@ -186,7 +195,7 @@ func TestVerifyBackup(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			store := getStore{"mgmt-backups/x.dump.gz.enc": c.object}
-			n, err := verifyBackup(context.Background(), store, "mgmt-backups/x.dump.gz.enc", c.key)
+			n, _, err := verifyBackup(context.Background(), store, "mgmt-backups/x.dump.gz.enc", c.key, true)
 			if c.ok {
 				if err != nil {
 					t.Fatalf("verify failed on a good archive: %v", err)
@@ -202,7 +211,7 @@ func TestVerifyBackup(t *testing.T) {
 		})
 	}
 
-	if _, err := verifyBackup(context.Background(), getStore{}, "missing", keyHex); err == nil {
+	if _, _, err := verifyBackup(context.Background(), getStore{}, "missing", keyHex, true); err == nil {
 		t.Fatal("verify passed a key that does not exist")
 	}
 }

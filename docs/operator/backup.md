@@ -150,16 +150,23 @@ Secrets are lost and the key isn't somewhere else, the dumps are useless.
 `vrsky-cli` provides `backup` / `list` / `restore`. The bucket, credentials
 and source database come from `BACKUP_*` environment variables and
 `ENCRYPTION_KEY`, not from flags. Backup and restore stream the dump, so the
-CronJob's 512Mi limit doesn't cap the database size. Restore also reads
-archives made before that change (#430); see
+CronJob's 512Mi limit doesn't cap the database size.
+
+Each archive names the key it was uploaded under (`VRSKYBK2`, #549).
+`verify` and `restore` refuse an archive that was made under another key,
+so an older backup copied over a newer key isn't restored by mistake.
+Archives from before that change (`VRSKYBK1`, and the pre-#430 single-seal
+ones) don't name their key; both commands refuse them unless you pass
+`--allow-unbound`, and then print a warning. See
 [how a logical backup works](../DR.md#how-a-logical-backup-works).
 
 ```bash
 vrsky-cli backup     # dump, encrypt, upload as mgmt-backups/management_db-<timestamp>.dump.gz.enc
 vrsky-cli list       # keys, sizes, ages
-vrsky-cli backup verify mgmt-backups/management_db-20261029T110000Z.dump.gz.enc   # decrypt to nowhere; non-zero exit on damage
+vrsky-cli backup verify mgmt-backups/management_db-20261029T110000Z.dump.gz.enc   # decrypt to nowhere; non-zero exit on damage or a key mismatch
 vrsky-cli restore --target-db-url 'postgres://…/vrsky' --confirm \
   mgmt-backups/management_db-20261029T110000Z.dump.gz.enc
+# A backup made before VRSKYBK2: add --allow-unbound to verify and restore
 ```
 
 ## Monitoring

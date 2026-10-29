@@ -3,9 +3,9 @@
 // storage, list backups, and restore one into a target database.
 //
 //	vrsky-cli backup
-//	vrsky-cli backup verify <backup-key>
+//	vrsky-cli backup verify [--allow-unbound] <backup-key>
 //	vrsky-cli list
-//	vrsky-cli restore --target-db-url postgres://… --confirm <backup-key>
+//	vrsky-cli restore --target-db-url postgres://… --confirm [--allow-unbound] <backup-key>
 //
 // Config comes from the environment (12-factor) — see backupConfigFromEnv.
 package main
@@ -23,7 +23,9 @@ const usage = `vrsky-cli — VRSky operator CLI
 
 Usage:
   vrsky-cli backup                 Dump the management DB, encrypt, upload to object storage
-  vrsky-cli backup verify <key>    Download and decrypt a backup without restoring it; fails on any damage
+  vrsky-cli backup verify [--allow-unbound] <key>
+                                   Download and decrypt a backup without restoring it; fails on any damage
+                                   or if the archive was made under another key
   vrsky-cli list                   List available backups (key + size + age)
   vrsky-cli restore [flags] <key>  Restore a backup into a target database
 

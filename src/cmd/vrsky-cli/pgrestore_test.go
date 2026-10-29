@@ -114,7 +114,7 @@ func runPgRestore(t *testing.T, archive []byte, key string) (int64, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	dump, err := openArchive(bytes.NewReader(archive), key)
+	dump, _, err := openArchive(bytes.NewReader(archive), key, testObjectKey, false)
 	if err != nil {
 		t.Fatalf("openArchive: %v", err)
 	}
