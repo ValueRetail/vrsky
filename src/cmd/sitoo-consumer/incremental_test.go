@@ -689,7 +689,7 @@ func TestIncremental_FailureOnPageKKeepsEarlierPages(t *testing.T) {
 						c, got, mu := newIncConsumer(store)
 						// Overlap 0, so every page of the later poll carries new orders.
 						cfg := incConfig(srv.URL, ov(0), 3)
-						all := []int64{}
+						var all []int64
 						var prior []pubRec
 						priorW := ""
 						if phase == "later poll" {
