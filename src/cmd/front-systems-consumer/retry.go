@@ -201,15 +201,30 @@ func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res s
 		}
 		c.dropPendingLocked(connectionID, p)
 		// Starts queued behind this one (boot restore and a start command, say)
-		// were asked for before it failed for good; they'd fail the same way.
+		// were asked for before it failed for good; they'd fail the same way,
+		// unless the row has moved on since (#574). They run after this
+		// outcome is recorded, so they see the count and the version below,
+		// and wroteError once markError has returned.
 		if c.permanentFailures == nil {
-			c.permanentFailures = make(map[string]uint64)
+			c.permanentFailures = make(map[string]permanentFailure)
 		}
-		c.permanentFailures[connectionID]++
+		failure := c.permanentFailures[connectionID]
+		failure.count++
+		count := failure.count
+		failure.version = res.updatedAt
+		failure.wroteError = false
+		c.permanentFailures[connectionID] = failure
 		c.mu.Unlock()
 		logger.Error("Front Systems start failed and will not be retried", "error", res.err)
-		if current {
-			c.markError(connectionID, tenantID, res.reason, version, logger)
+		if current && c.markError(connectionID, tenantID, res.reason, version, logger) {
+			c.mu.Lock()
+			// Only if the record is still this failure's: it is the latest
+			// one's, and a newer failure's flag is not ours to set.
+			if failure := c.permanentFailures[connectionID]; failure.count == count {
+				failure.wroteError = true
+				c.permanentFailures[connectionID] = failure
+			}
+			c.mu.Unlock()
 		}
 	default: // startNotOurs, startAbandoned
 		if res.outcome == startNotOurs {
@@ -323,17 +338,56 @@ func (c *frontSystemsConsumer) rowRunning(ctx context.Context, connectionID, ten
 	return status == "running", updatedAt, nil
 }
 
+// permanentFailure is the latest start of a connection that failed for good:
+// how many have, the row version it read, and whether it wrote "error" to the
+// row. A start queued behind it uses these to tell the same request failing
+// again from a newer one (#574).
+type permanentFailure struct {
+	count      uint64
+	version    time.Time // the row's updated_at as the failed start read it; zero if it never did
+	wroteError bool      // its "error" write changed the row
+}
+
+// sameRequestFailed reports whether a start that was queued behind the failed
+// start f would make the same refused call, and so can be dropped. That is so
+// when f marked the row "error", or when the row is still the version f read.
+// If the row has moved on, a stop and a new start (with new keys, say) landed
+// while f was working, the management API bumped updated_at, and the
+// "updated_at" guard kept f from writing "error" over the new run. The queued
+// start is that new run, or stands for it: it must run (#574). A start that
+// cannot tell (f never read the row, or the row can't be read now) runs too:
+// at worst it repeats one refused call and marks the row itself.
+func (c *frontSystemsConsumer) sameRequestFailed(connectionID, tenantID string, f permanentFailure) bool {
+	if f.wroteError {
+		return true
+	}
+	if f.version.IsZero() {
+		return false
+	}
+	// Under the lifecycle context, so Stop ends the read; no lock is held
+	// here (Release runs the queued start after unlocking).
+	c.mu.Lock()
+	ctx := c.lifecycleCtxLocked()
+	c.mu.Unlock()
+	_, updatedAt, err := c.rowRunning(ctx, connectionID, tenantID)
+	if err != nil {
+		return false
+	}
+	return updatedAt.Equal(f.version)
+}
+
 // markError records a start that won't be retried: status "error" and the
-// reason in last_error. Only the row version the start read is changed: it
-// must still say "running" and have the updated_at the start saw. The
-// management API bumps updated_at on every start and stop, so a stop, or a
-// stop and a new start, that landed meanwhile keeps its status. Without a
-// version (the start never read the row) nothing is written.
+// reason in last_error, and reports whether the row was changed. Only the
+// row version the start read is changed: it must still say "running" and have
+// the updated_at the start saw. The management API bumps updated_at on every
+// start and stop, so a stop, or a stop and a new start, that landed meanwhile
+// keeps its status. Without a version (the start never read the row) nothing
+// is written.
 // lint:tenant-ok — update is scoped by (id, tenant_id).
-func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, updatedAt time.Time, logger *slog.Logger) {
+func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, updatedAt time.Time, logger *slog.Logger) bool {
 	if updatedAt.IsZero() {
 		logger.Warn("Not marking the connection error: its row was never read")
-		return
+		return false
 	}
 	c.mu.Lock()
 	ctx := c.lifecycleCtxLocked()
@@ -346,11 +400,17 @@ func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, 
 		reason, connectionID, tenantID, updatedAt)
 	if err != nil {
 		logger.Warn("Could not mark the connection error", "error", err)
-		return
+		return false
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false
+	}
+	if n == 0 {
 		logger.Info("Not marking the connection error: it was stopped or started again meanwhile")
+		return false
 	}
+	return true
 }
 
 // errBadBaseURL is a base_url that is missing or not a URL: no retry fixes it.
