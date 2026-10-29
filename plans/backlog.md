@@ -321,8 +321,8 @@ Last updated 2026-10-28.
     the new one's entry; the next start then runs a second poller beside
     it. Older than #397. Delete only when the stored value is this
     poller's own (compare a pointer). Found during #397.
-53. **Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
-    and three consumers are not on it yet.** Since #397 all command-driven
+53. ~~**Items 36 and 37 now hold for every consumer on `sdk.StartGuard`,
+    and three consumers are not on it yet.**~~ (#429) Since #397 all command-driven
     consumers refuse a start while one is in flight (37) and write
     `running` after activating (36), like the file consumer. The webhook
     consumer still checks and inserts in two steps (a double start only
@@ -336,7 +336,10 @@ Last updated 2026-10-28.
     the guard (#423, #424), but the Sitoo consumer still calls `Reserve`
     rather than `ReserveOrRetry`, so a refused start there is still lost if
     the start in flight fails; switching it is a one-line change, held back
-    while another branch works on the Sitoo connector.
+    while another branch works on the Sitoo connector. #429 put webhook and
+    Front Systems on the guard and gave the remote agent per-connection
+    command lanes (`src/cmd/remote-agent/lanes.go`); the Sitoo switch is
+    still open.
 54. ~~**`affected.sh` ignores `src/internal`.**~~ (#410) Seven Dockerfiles under
     `src/cmd` copy `src/internal/` (`vrsky-cli` among them), but a change
     there maps to no target, so the deploy job rebuilds none of those images.
@@ -644,6 +647,15 @@ Last updated 2026-10-28.
     `agent:needs-human`. Since #423 the status order is already keyed by
     tenant and connection, so such a stop can't reorder the real tenant's
     writes. Found in review of #487.
+96. **Front Systems keeps its webhooks after a stop.** A stop forgets the
+    connection but never unregisters its callback at Front Systems, and
+    `/frontsystems/events/{id}` publishes for any connection that exists,
+    running or not. So a stopped pipeline still takes in events, and a
+    stop then start registers the callback a second time (Front Systems may
+    then deliver each event twice). Unregister on stop, or look up existing
+    registrations before posting, and refuse events for connections that
+    aren't running. Older than #429, which only stopped two concurrent
+    starts from both registering. Found during #429.
 
 ## Human
 
