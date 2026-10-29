@@ -139,6 +139,19 @@ files received, files written, and failures.
   Messages, where it can be retried.
 - **Failures.** A file the agent cannot write (disk full, checksum mismatch) is
   retried with backoff and goes to Failed Messages after 5 attempts.
+- **Several destinations.** A pipeline with two or more destinations that
+  each name one agent, or with two group destinations whose folders the same
+  agent has, sends each message to all of them and counts it done once every
+  one has written it. (Group members otherwise have a queue each.) If the
+  pipeline stops while one has not, or one's write fails, the message comes
+  back and is offered only to the destinations that have not written it yet;
+  the others keep the file they have and are not sent it again. VRSky
+  remembers this in the remote-agent service, for 72 hours at most. If that
+  service restarts before the message comes back (a VRSky deploy, say), every
+  destination is sent it again. The agent then writes the same file under
+  the same name and replaces its earlier copy, so a program that already took
+  that copy out of the folder gets it a second time. Make sure such a program
+  can tell a file it has seen, by name or by content.
 - **Size.** Uploads are limited to 2 GiB by default. A file VRSky refuses is
   moved to `rejected/` on the machine with a note saying why.
 - **Duplicates.** A retried upload reuses its ID, so a file sent twice after a

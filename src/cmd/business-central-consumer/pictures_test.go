@@ -281,8 +281,8 @@ func TestPictures_ContentFailureHoldsTheWatermark(t *testing.T) {
 	if _, pics := split(*got); len(pics) != 0 {
 		t.Errorf("published %d pictures from a failed download", len(pics))
 	}
-	if cursor := c.loadCursor(context.Background(), "tenant-1", "conn-1", "n1", c.logger); cursor != "" {
-		t.Errorf("watermark advanced to %q past a picture that was never delivered", cursor)
+	if cp := c.loadCursor(context.Background(), "tenant-1", "conn-1", "n1", c.logger); cp != nil && cp.LastProcessedMessageID != "" {
+		t.Errorf("watermark advanced to %q past a picture that was never delivered", cp.LastProcessedMessageID)
 	}
 }
 

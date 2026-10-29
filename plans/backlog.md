@@ -907,8 +907,8 @@ Last updated 2026-10-28.
     is not unique, so records sharing a second need a tiebreaker. Needs a
     Sitoo sandbox to check sort and tie order first. Found in review of
     #457 (#472).
-128. **A far-future cursor value freezes the BC consumer's cursor**
-    (`cursorTracker`). One record stamped years ahead sets the watermark
+128. ~~**A far-future cursor value freezes the BC consumer's cursor**
+    (`cursorTracker`).~~ (#591) One record stamped years ahead sets the watermark
     there, and every later poll asks only for records after it. Ignore or
     log values above now + overlap. Found in review of #457 (#472).
 129. **The Sitoo `base_url` is unvalidated tenant config.** A tenant can
@@ -958,12 +958,29 @@ Last updated 2026-10-28.
     committed, but it also hides a ~2000 line component from the gate, so it
     needs a human decision. Until then the builder's deploy wiring is pinned
     from `services/deployPipeline.test.ts`. Found in review of #580.
+138. **Remember multi-target writes across remote-agent restarts.** Since
+    #587 a message NAK'd after some of its targets wrote it skips those
+    targets on redelivery, but only within one gateway process (in memory).
+    After a restart or a rolling deploy every target writes it again. Keeping
+    it across processes needs a JetStream key-value bucket (or a table) keyed
+    by stream, sequence and target, with a TTL of the main stream's 72 h.
+    A KV bucket is stream configuration: PR plus `agent:needs-human`. Worth
+    it only if duplicates after a deploy turn out to matter to a customer.
+    Found in #587.
 139. **The SFTP test-connection preview can sample a temp file.**
     `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
     matching `file_pattern`; with no pattern it can sample a `.part` or
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
+140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.** `cursorTracker.observe` in
+    `src/cmd/business-central-consumer/service.go` parses the value with
+    `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
+    so the node stores no watermark and every incremental poll reads and
+    sends the whole entity. Parse date-only values too (and write them back
+    in the filter as a date literal), or refuse the config with a clear
+    error. Found in review of #592.
 
 ## Human
 
