@@ -134,8 +134,9 @@ files received, files written, and failures.
 - **One file at a time.** Each pipeline delivers to its agent one message at a
   time, in order. While the agent is offline the next message is held, not
   retried, so an outage does not use up retries. Stopping or redeploying the
-  pipeline while a message is held does use one: after five, that message goes
-  to Failed Messages, where it can be retried.
+  pipeline while a message is held does use one, unless the agent writes it
+  within a second of the stop: after five, that message goes to Failed
+  Messages, where it can be retried.
 - **Failures.** A file the agent cannot write (disk full, checksum mismatch) is
   retried with backoff and goes to Failed Messages after 5 attempts.
 - **Size.** Uploads are limited to 2 GiB by default. A file VRSky refuses is
