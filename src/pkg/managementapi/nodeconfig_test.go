@@ -3684,7 +3684,6 @@ func TestACRPullCopyRefreshesOnEveryDeploy(t *testing.T) {
 	}
 }
 
-
 // acrPullCopies returns every acr-pull Secret a run applied through stdin,
 // keyed by the namespace it names, and fails on an apply of anything else
 // through stdin that isn't a document.
