@@ -19,9 +19,10 @@ import (
 // Tests for #567: with after_action=move, a move_prefix whose moved objects
 // the listing of prefix returns again makes the consumer publish them a second
 // time and then copy them onto their own key and delete them (Azure and GCS
-// lose the object). The start is refused for such a config, in event mode too
-// since it applies prefix (#594); afterAction never copies an object onto its
-// own key.
+// lose the object). Poll mode refuses such a config at start. Event mode
+// applies prefix since #594 but only warns: a moved key is always
+// move_prefix/<base>, so when it comes back afterAction refuses to copy it
+// onto its own key and it is published once more, not lost.
 
 // mpLog is a log sink safe for the poller goroutine and the test at once.
 type mpLog struct {
@@ -60,6 +61,7 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 		afterAction string // default "move"
 		mode        string // "" = poll
 		refused     bool
+		warned      bool // event mode: started, with a Warn naming the overlap
 	}{
 		// Equal after normalising slashes.
 		{name: "equal", prefix: "in/", movePrefix: "in/", refused: true},
@@ -102,12 +104,15 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 		{name: "delete ignores move_prefix", prefix: "", movePrefix: "processed", afterAction: "delete", refused: false},
 
 		// Event mode applies prefix to notified keys (#594), so the same rule
-		// holds there: a moved object notifies as a new object.
-		{name: "event mode, under", prefix: "in/", movePrefix: "in/done", mode: "event", refused: true},
-		{name: "event mode, equal", prefix: "in/", movePrefix: "in", mode: "event", refused: true},
-		{name: "event mode, empty prefix", prefix: "", movePrefix: "processed", mode: "event", refused: true},
-		{name: "event mode, prefix without slash lists sibling", prefix: "in", movePrefix: "in-done/", mode: "event", refused: true},
-		{name: "event mode, prefix names files in move_prefix", prefix: "data/report_", movePrefix: "data", mode: "event", refused: true},
+		// finds the overlap, but the start goes ahead with a Warn: a moved
+		// object that comes back is published once more and left in place by
+		// afterAction's own-key guard. Refusing would stop setups the docs
+		// used to recommend (empty prefix, notification scoped to a folder).
+		{name: "event mode, under", prefix: "in/", movePrefix: "in/done", mode: "event", warned: true},
+		{name: "event mode, equal", prefix: "in/", movePrefix: "in", mode: "event", warned: true},
+		{name: "event mode, empty prefix", prefix: "", movePrefix: "processed", mode: "event", warned: true},
+		{name: "event mode, prefix without slash lists sibling", prefix: "in", movePrefix: "in-done/", mode: "event", warned: true},
+		{name: "event mode, prefix names files in move_prefix", prefix: "data/report_", movePrefix: "data", mode: "event", warned: true},
 		{name: "event mode, sibling folder", prefix: "in/", movePrefix: "in-done/", mode: "event", refused: false},
 		{name: "event mode, one level up", prefix: "incoming/a/", movePrefix: "incoming", mode: "event", refused: false},
 		{name: "event mode, delete ignores move_prefix", prefix: "", movePrefix: "processed", afterAction: "delete", mode: "event", refused: false},
@@ -148,6 +153,14 @@ func TestStart_RefusesMovePrefixTheListingReturns(t *testing.T) {
 			}
 			if n := f.activeCount(); n != 1 {
 				t.Fatalf("prefix %q, move_prefix %q: start refused, want it running\n%s", tt.prefix, tt.movePrefix, logs.String())
+			}
+			out := logs.String()
+			if strings.Contains(out, "level=ERROR") {
+				t.Errorf("started connection logged an error:\n%s", out)
+			}
+			warned := strings.Contains(out, "level=WARN") && strings.Contains(out, "move_prefix is inside prefix")
+			if warned != tt.warned {
+				t.Errorf("warned = %v, want %v:\n%s", warned, tt.warned, out)
 			}
 		})
 	}
@@ -232,8 +245,8 @@ func TestPoll_SiblingMovePrefixPublishesOnce(t *testing.T) {
 }
 
 // Event mode: a notification for an object already in move_prefix (the
-// start check refuses configs where prefix selects it, so this is the second
-// line, reached with a prefix that does not exclude it) publishes it once, acks
+// start only warns when prefix selects it, so this guard is what keeps the
+// object) publishes it once, acks
 // the message, and leaves the object where it is. The guard's refusal is an
 // after-action failure, so the object still counts as ingested and the
 // message is not left for redelivery.

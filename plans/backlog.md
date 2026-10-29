@@ -878,7 +878,7 @@ Last updated 2026-10-28.
     orchestrator has deployed, and `RestoreRunning` keeps it. The consumer's
     refusals in `startConnection` (`src/cmd/cloud-storage-consumer/service.go`,
     `move` without `move_prefix`, and since #567 a `move_prefix` the listing
-    of `prefix` returns) return before `claim.Activate` and write no status,
+    of `prefix` returns, in poll mode only: event mode warns since #594) return before `claim.Activate` and write no status,
     so only the worker log says why. Refuse these configs in the start-time
     validator (`src/pkg/managementapi/nodeconfig.go`, so the user gets a 400
     with the reason) and/or have the worker write `error`; and show the
@@ -890,7 +890,11 @@ Last updated 2026-10-28.
     start in poll mode only and relies on `afterAction` refusing a move
     onto the object's own key. A moved object that the bucket notification
     covers is still ingested a second time. If item 120 makes event mode
-    apply `prefix`, run the same start check there. Found in #567.
+    apply `prefix`, run the same start check there. Found in #567. #594
+    runs it there but only warns: a moved key comes back as
+    `move_prefix/<base>`, which the own-key guard refuses, so the cost is
+    one duplicate publish, and refusing would stop connections already in
+    production.
 126. **Turn on Sitoo incremental polling in the POS sales template**
     (`ui/src/onboarding/templates.ts`). #457 added `incremental` for
     `orders`, but the template polls `transactions`, which the Sitoo API
@@ -968,6 +972,18 @@ Last updated 2026-10-28.
     (#594) `CloudStorageConfigEditor.tsx` rendered the field only in poll
     mode. Event mode applies `file_pattern` since #594, so the editor shows
     it for both modes. Done in #594.
+142. **One failed key in a multi-key event message with `after_action`
+    `delete` or `move` makes the message loop.** `runEventLoop` in
+    `src/cmd/cloud-storage-consumer/service.go` leaves the whole message
+    for redelivery when any key fails, but the keys that succeeded were
+    already deleted or moved. On redelivery their `get` fails (the object
+    is gone), so the message never acks and redelivers until the queue's
+    retention drops it, logging `ingest failed` each time. S3 and Event Grid
+    mostly send one record per message, so it is rare, but a batched or
+    forwarded notification hits it. Suggestion: in event mode treat "object
+    not found" on `get` as already done (log at Info, count the key as
+    ingested), which needs a not-found error from `pkg/objectstore` for each
+    provider. Found in review of #594.
 
 ## Human
 

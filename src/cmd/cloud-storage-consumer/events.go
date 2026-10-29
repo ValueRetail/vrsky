@@ -118,14 +118,28 @@ func (s *sqsEventSource) Ack(ctx context.Context, handle string) error {
 	return nil
 }
 
+// s3MetadataEvents are ObjectCreated names MinIO sends for a change to an
+// object's metadata, not its content. Ingesting them would publish the
+// object again.
+var s3MetadataEvents = map[string]bool{
+	"ObjectCreated:PutTagging":    true,
+	"ObjectCreated:DeleteTagging": true,
+	"ObjectCreated:PutRetention":  true,
+	"ObjectCreated:PutLegalHold":  true,
+}
+
 // s3EventCreated reports whether an S3 record's eventName is an object-created
 // event: ObjectCreated:Put, Post, Copy and CompleteMultipartUpload (the last
 // is how a multipart upload ends, and Copy is how a move lands). AWS writes
-// the name without "s3:" in the record; MinIO writes it with. A record
-// with no eventName is treated as a create, like GCS without eventType: a
-// delete always names its event.
+// the name without "s3:" in the record; MinIO writes it with. MinIO's
+// metadata events under ObjectCreated (tagging, retention, legal hold) are
+// not creates. A record with no eventName is treated as a create, like GCS
+// without eventType: a delete always names its event.
 func s3EventCreated(name string) bool {
 	name = strings.TrimPrefix(name, "s3:")
+	if s3MetadataEvents[name] {
+		return false
+	}
 	return name == "" || strings.HasPrefix(name, "ObjectCreated:")
 }
 

@@ -49,9 +49,10 @@ Config bullets (all under `cloud_storage`):
   `incoming/a/x.csv` and `incoming/b/x.csv` both land on
   `<move_prefix>/x.csv` and the second overwrites the first.
 
-  The start is also refused when `prefix` would select moved objects again
-  (#567, and in event mode #594). The log says `invalid move_prefix` and
-  names both values. `prefix` is matched as text, not as a folder:
+  In poll mode the start is also refused when `prefix` would select moved
+  objects again (#567). The log says `invalid move_prefix` and names both
+  values. Event mode starts anyway, with a warning (below). `prefix` is
+  matched as text, not as a folder:
   - Starts: `prefix: incoming/` with `processed/`, `incoming-done/` or `.`
     (the bucket root); `prefix: incoming/a/` with `incoming` (one level
     up).
@@ -69,10 +70,17 @@ Config bullets (all under `cloud_storage`):
   consumer never moves an object onto its own key: that move fails with
   `after-action failed` in the log and the object stays where it is.
 
-  Event mode needs the same rule because a moved object sends a new
-  notification, and `prefix` is what keeps it out. An event-mode connection
-  with `after_action: move` and an empty `prefix` is therefore refused at
-  start: set a `prefix` and a `move_prefix` outside it.
+  In event mode a moved object sends a new notification, and `prefix` is
+  what keeps it out. When the same rule finds `move_prefix` inside `prefix`
+  (an empty `prefix` included), an event-mode connection still starts and
+  logs a warning, `move_prefix is inside prefix; starting anyway in event
+  mode`. A moved key is always `<move_prefix>/<base name>`, so if its
+  notification reaches the queue the object is published once more, the move
+  onto its own key is refused (`after-action failed`, `already in
+  move_prefix`), and it stays in `move_prefix`: one duplicate, no loss, no
+  loop. To avoid the duplicate, set a `prefix` with `move_prefix` outside
+  it, or scope the bucket notification so moved objects don't reach the
+  queue.
 
 Event mode also reads:
 
@@ -93,17 +101,27 @@ In event mode `prefix` and `file_pattern` apply to the keys a notification
 names, as in poll mode (#594). `prefix` is matched as text, so `in` also
 selects `in-done/a.csv`; `file_pattern` is matched against the base name. A
 key outside them is acknowledged and skipped: nothing is published, moved or
-deleted for it, the message is not redelivered, and the consumer logs the
-key at Debug level. You can still scope the bucket notification itself to
-cut the traffic, but you no longer have to for correctness.
+deleted for it and the message is not redelivered. The first skipped key of
+each run of the connection is logged at Info level (`event key outside
+prefix or file_pattern; skipped`, with the key, prefix and pattern), later
+ones at Debug. Folder placeholders (keys ending in `/`, which the S3
+console's "Create folder" writes) are skipped as in poll mode. Keys are
+matched after decoding, so an S3 key `in+folder/a.csv` is matched as
+`in folder/a.csv`. The editor shows File pattern in both modes. You can
+still scope the bucket notification itself to cut the traffic, but you no
+longer have to for correctness.
 
 Only object-created events are ingested, on every provider: `BlobCreated` on
 Azure, `OBJECT_FINALIZE` on GCS, and `ObjectCreated:*` on S3 (`Put`, `Post`,
-`Copy` and `CompleteMultipartUpload`). Other S3 records (removals,
-lifecycle, restore, tagging) are acknowledged and skipped. Before #594 the
-S3 consumer ingested every record in a notification, and an event-mode
+`Copy` and `CompleteMultipartUpload`). MinIO's metadata events under
+`ObjectCreated` (`PutTagging`, `DeleteTagging`, `PutRetention`,
+`PutLegalHold`) are not creates. Other S3 records (removals, lifecycle,
+restore, tagging) are acknowledged and skipped too. Before #594 the S3
+consumer ingested every record in a notification, and an event-mode
 connection ignored `prefix` and `file_pattern`; a connection that relied on
-that now skips what its `prefix` or `file_pattern` does not select.
+that now skips what its `prefix` or `file_pattern` does not select. That
+includes a `file_pattern` saved while the connection was in poll mode,
+which the editor used to hide in event mode: check it after the upgrade.
 
 ```json
 {
