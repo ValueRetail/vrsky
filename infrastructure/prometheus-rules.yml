@@ -331,3 +331,30 @@ groups:
         annotations:
           summary: "Management-DB backup CronJob suspended for over 7 days"
           description: "The vrsky-mgmt-backup CronJob in vrsky-database has been suspended for over 7 days while the vrsky-backup-config Secret exists, so no backups are being taken. If no restore is in progress, unsuspend it or run Catch up (docs/operator/backup.md). If the deploy keeps it suspended, its log names the key the Secret is missing."
+
+      # The same CronJob is gone while vrsky-backup-config exists (#526).
+      # Deleted by hand or by a re-apply that failed halfway, its series end,
+      # and the two rules above join on them, so they go quiet with it.
+      # `unless`, not a bare absent(): on a morning start, before
+      # kube-state-metrics' first scrape, the Secret's series is absent too,
+      # so the left side is empty and nothing fires. A pending state doesn't
+      # survive a parked night (far over the one-hour outage tolerance), so
+      # each morning starts from inactive; `for: 30m` covers the scrape or
+      # two in which kube-state-metrics can report the Secret before the
+      # CronJob, at start or when its pod is replaced. `max by (namespace)`
+      # drops the pod and instance labels (#473): the Secret one pod reports
+      # is matched against the CronJob any pod reports, and a firing alert
+      # keeps its labels across the change. With no Secret (before the human
+      # setup, or renamed away during a restore) it is silent.
+      - alert: MgmtBackupCronJobAbsent
+        expr: |
+          max by (namespace) (kube_secret_created{namespace="vrsky-database", secret="vrsky-backup-config"})
+            unless on (namespace)
+          max by (namespace) (kube_cronjob_created{namespace="vrsky-database", cronjob="vrsky-mgmt-backup"})
+        for: 30m
+        labels:
+          severity: warning
+          cronjob: vrsky-mgmt-backup
+        annotations:
+          summary: "Management-DB backup CronJob is missing"
+          description: "The vrsky-backup-config Secret exists in vrsky-database but the vrsky-mgmt-backup CronJob does not, so no backups are being taken. Run Catch up, which re-applies it, and read its backup step's log, which says whether the CronJob came back active or suspended (docs/operator/backup.md)."

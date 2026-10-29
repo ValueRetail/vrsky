@@ -1,8 +1,15 @@
-# DEV / SINGLE-NODE ONLY (#137). This single-replica StatefulSet has no HA:
-# a node or pod failure means a control-plane outage and risks data loss.
-# For production use the CloudNativePG cluster (cnpg-cluster.yaml +
-# cnpg-pooler.yaml) or a managed database — see README.md. Kept for local dev
-# and minimal deployments.
+# The management database. Production on AKS runs this StatefulSet
+# (`postgresql`, one replica): infrastructure/azure/deploy-azure.sh applied
+# it at the first bring-up, with local-path swapped for managed-csi, and the
+# deploy job never re-applies it. The local k3d path (deploy-vrsky-platform.sh)
+# applies it as it is.
+#
+# One replica means no HA (#137): a node or pod failure takes the control
+# plane down until the pod is back. Production has two backup layers for it:
+# daily Azure Disk Backup snapshots of its disk and the weekday
+# vrsky-mgmt-backup CronJob's logical dumps (docs/DR.md, which says how to
+# check both run). cnpg-cluster.yaml is a CloudNativePG alternative that
+# nothing deploys today; moving to it needs its own backup (see README.md).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

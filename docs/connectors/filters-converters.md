@@ -81,6 +81,15 @@ tick **Split records** under the mappings.
   the input and its position. Payloads over the rehydrate cap (128 MB)
   cannot be split and go to the DLQ.
 
+`rename` and `each` read `source` as a dotted path (`order.items`) and, with
+the node's `drop_unmapped` off, remove the field at that path, so the value
+moves instead of being copied (#525; before that a dotted source stayed next
+to the new field). The rest of the parent object stays, and so does the
+parent when it ends up empty: `order.id` → `orderId` on `{"order":{"id":1}}`
+gives `{"order":{},"orderId":1}`. Add a `remove` of `order` if the
+destination should not see it. `remove` itself still deletes only a top-level
+field with exactly the name given.
+
 `to_string` writes numbers in plain decimal (`1000000`, not `1e+06`).
 
 The editor warns about a mapping the converter would skip or write wrongly:

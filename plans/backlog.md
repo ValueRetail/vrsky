@@ -563,7 +563,7 @@ Last updated 2026-10-28.
     folder and not write to it. A second variable for `/data/output`, with
     the same fixed target and the guard in
     `compose_files_mount_guard_test.go`, would close that. Found in #422.
-87. **Rename and `each` leave a dotted source in place.** With the node's
+87. ~~**Rename and `each` leave a dotted source in place.**~~ (#525) With the node's
     `drop_unmapped` off, both read `source` as a path but remove it with
     `delete(result, m.Source)` (`src/cmd/data-converter/main.go`, the
     `rename` and `each` cases), which only deletes a top-level key. So
@@ -579,7 +579,7 @@ Last updated 2026-10-28.
     by position or target ("Remove mapping 2", "Item mapping type for
     lineObjectNumber") and point the inputs at the warning list. Found in
     #458.
-89. **A deleted backup CronJob is silent.** If `vrsky-mgmt-backup` is
+89. ~~**A deleted backup CronJob is silent.**~~ (#526) If `vrsky-mgmt-backup` is
     deleted (by hand, or a failed re-apply), its kube-state-metrics series
     end, and both `MgmtBackupMissing` and `MgmtBackupSuspended` match
     nothing, so no backups run and nobody is paged. An `absent()` rule on
@@ -587,8 +587,8 @@ Last updated 2026-10-28.
     while `vrsky-backup-config` exists would catch it; mind the parked
     nights (no samples at all then). Alert rules only. Found in review of
     #473.
-90. **The Postgres manifests call the StatefulSet production uses
-    "dev-only".** `statefulset.yaml` opens with "DEV / SINGLE-NODE ONLY" and
+90. ~~**The Postgres manifests call the StatefulSet production uses
+    "dev-only".**~~ (#527) `statefulset.yaml` opens with "DEV / SINGLE-NODE ONLY" and
     `cnpg-cluster.yaml` says it replaces it, but production runs that
     StatefulSet (`postgresql`, the disk Azure Disk Backup snapshots, see
     `docs/DR.md`) and no CNPG cluster. Either say so in both headers and the
@@ -710,6 +710,21 @@ Last updated 2026-10-28.
     that error. The server did answer, so a `checkAuth` on 403/404 can't
     turn a network blip into a logout; it would drop the stale workspace.
     Found in review of #514.
+104. **The Postgres README's "Architecture" list is out of date.** It says
+    50GB "via Longhorn distributed storage" with "Full durability via
+    Longhorn replication", but `statefulset.yaml` asks for `local-path` and
+    production runs on `managed-csi` (the rewrite in
+    `infrastructure/azure/deploy-azure.sh`), one Azure disk with no
+    replication. Its resources line says requests of 2 CPU and 4GB, but the
+    StatefulSet requests 250m and 512Mi. Fix the three lines. Manifest
+    directory, so PR plus `agent:needs-human`. Found during #527.
+105. **The MinIO manifest calls itself dev-only too.**
+    `infrastructure/kubernetes/minio/deployment.yaml` opens with "MinIO —
+    DEV / SINGLE-NODE ONLY (#136)" and "NOT for production", but
+    `deploy-azure.sh` installs it on AKS and production keeps its data on a
+    managed disk (`docs/operator/cost-parking.md`). Check what production
+    runs, then fix the header as #527 did for Postgres. Manifest, so PR
+    plus `agent:needs-human`. Found in review of #527.
 
 ## Human
 

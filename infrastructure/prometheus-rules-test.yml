@@ -1,7 +1,7 @@
 # promtool unit tests for the VRSky default alert ruleset (#84).
 # Run: docker run --rm -v "$PWD/infrastructure":/cfg --entrypoint promtool \
 #        prom/prometheus:latest test rules /cfg/prometheus-rules-test.yml
-# 12 of the 13 rules are driven to FIRING (all but
+# 13 of the 14 rules are driven to FIRING (all but
 # NATSInstanceApproachingCapacity) — the "staged test" acceptance criterion,
 # deterministic and CI-runnable.
 
@@ -982,4 +982,190 @@ tests:
         exp_alerts: []
       - eval_time: 13440m
         alertname: MgmtBackupSuspended
+        exp_alerts: []
+
+  # 13. MgmtBackupCronJobAbsent (#526). Scraped every minute so the timing
+  #     around `for` is exact. kube_secret_created and kube_cronjob_created
+  #     hold the objects' creation times in seconds; 0 is the test's start.
+  #     kube-state-metrics runs as one pod; its series carry job, instance
+  #     and pod. A deleted object, or a pod Kubernetes removed, gets a stale
+  #     marker on the next scrape; a parked cluster (Prometheus stopped too)
+  #     leaves no marker, its series just end.
+
+  # 13a. The CronJob is deleted while the Secret stays. Both present for an
+  #      hour: quiet. Deleted at 60m: still quiet at 85m, paging by 95m. At
+  #      118m kube-state-metrics is rolled (the Deployment's default surge):
+  #      the new pod reports the Secret, the old pod goes stale at 122m. The
+  #      alert keeps firing across the change with the same labels. Catch up
+  #      re-applies the CronJob at 150m and the alert clears. Another
+  #      CronJob in the namespace (postgres-backup, the README's example)
+  #      runs throughout and doesn't count.
+  - name: backup-cronjob-absent-deleted
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="vrsky-database",cronjob="postgres-backup"}'
+        values: '-800000x199'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '-1000000x121 stale'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '-900000x59 stale'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x118 -1000000x81'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x150 9000x49'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 85m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 95m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupCronJobAbsent
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "Management-DB backup CronJob is missing"
+              description: "The vrsky-backup-config Secret exists in vrsky-database but the vrsky-mgmt-backup CronJob does not, so no backups are being taken. Run Catch up, which re-applies it, and read its backup step's log, which says whether the CronJob came back active or suspended (docs/operator/backup.md)."
+      - eval_time: 125m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: MgmtBackupCronJobAbsent
+              severity: warning
+              namespace: vrsky-database
+              cronjob: vrsky-mgmt-backup
+            exp_annotations:
+              summary: "Management-DB backup CronJob is missing"
+              description: "The vrsky-backup-config Secret exists in vrsky-database but the vrsky-mgmt-backup CronJob does not, so no backups are being taken. Run Catch up, which re-applies it, and read its backup step's log, which says whether the CronJob came back active or suspended (docs/operator/backup.md)."
+      - eval_time: 152m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 199m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+
+  # 13b. A parked night and the morning start. Starts on day 0 at 15:00 UTC
+  #      with the Secret and the CronJob on the old pod: quiet at 15:50. The
+  #      cluster is parked at 16:00 and started at 07:00 (960m), with no
+  #      samples in between. kube-state-metrics comes back as a new pod and
+  #      reports the Secret at 07:00, the CronJob only at 07:09. Quiet at
+  #      07:00 and 07:08, and through to 08:30.
+  - name: backup-cronjob-absent-parked
+    interval: 1m
+    input_series:
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '-1000000x59'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '-900000x59'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x960 -1000000x90'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x969 -900000x81'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 960m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 968m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 990m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 1050m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+
+  # 13c. kube-state-metrics replaced twice in a working day. At 30m its pod
+  #      is evicted: the old series go stale, the new pod reports the Secret
+  #      at 32m and the CronJob at 36m. At 70m it is rolled: the next pod
+  #      reports the Secret from 70m while the previous one still reports
+  #      both until 72m (stale at 73m), and the CronJob only from 78m. Quiet
+  #      throughout, inside both gaps included.
+  - name: backup-cronjob-absent-pod-replaced
+    interval: 1m
+    input_series:
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '-1000000x29 stale'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '-900000x29 stale'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x32 -1000000x40 stale'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.1.12:8080",pod="kube-state-metrics-7d9f-b",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x36 -900000x36 stale'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.13:8080",pod="kube-state-metrics-7d9f-c",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x70 -1000000x40'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.0.13:8080",pod="kube-state-metrics-7d9f-c",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x78 -900000x32'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 34m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 71m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 77m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 110m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+
+  # 13d. No vrsky-backup-config Secret, with and without the CronJob. A
+  #      rebuilt cluster: for the first hour only acr-pull exists in the
+  #      namespace (it is there throughout and never counts), then the
+  #      deploy applies the CronJob, suspended until the setup: quiet at 50m
+  #      and 110m. The human creates the Secret at 120m and the CronJob is
+  #      unsuspended at 121m. A restore suspends it at 180m (present and
+  #      suspended with the Secret: quiet at 230m), renames the Secret to
+  #      vrsky-backup-config-paused at 240m and deletes the CronJob at 245m.
+  #      Quiet for the two hours without either. At 360m the Secret is
+  #      renamed back and Catch up re-applies the CronJob at 362m: quiet.
+  - name: backup-cronjob-absent-no-secret
+    interval: 1m
+    input_series:
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="acr-pull"}'
+        values: '-1000000x400'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config"}'
+        values: '_x120 7200x119 stale _x119 21600x40'
+      - series: 'kube_secret_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",secret="vrsky-backup-config-paused"}'
+        values: '_x240 14400x120 stale'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x60 3600x184 stale _x116 21720x38'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",instance="10.244.0.11:8080",pod="kube-state-metrics-7d9f-a",namespace="vrsky-database",cronjob="vrsky-mgmt-backup"}'
+        values: '_x60 1x60 0x58 1x64 stale _x116 0x38'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 110m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 230m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 300m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 359m
+        alertname: MgmtBackupCronJobAbsent
+        exp_alerts: []
+      - eval_time: 400m
+        alertname: MgmtBackupCronJobAbsent
         exp_alerts: []

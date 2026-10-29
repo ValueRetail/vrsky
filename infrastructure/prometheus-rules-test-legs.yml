@@ -34,11 +34,15 @@
   - backup-b-suspended
   - backup-suspended-parked
   - backup-suspended-pod-replaced
+  - backup-cronjob-absent-deleted
+  - backup-cronjob-absent-pod-replaced
+  - backup-cronjob-absent-no-secret
 
 2/4:
   - backup-b-off-at-weekends
   - backup-b-after-activation
   - backup-b-late-start
+  - backup-cronjob-absent-parked
 
 3/4:
   - backup-c-after-activation

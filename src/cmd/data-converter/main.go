@@ -532,7 +532,7 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 			// Rename: take source field, put as target field
 			if val, ok := getNestedField(obj, m.Source); ok {
 				if !cfg.DropUnmapped {
-					delete(result, m.Source)
+					deleteNestedField(result, m.Source)
 				}
 				setNestedField(result, m.Target, val)
 				applied++
@@ -597,7 +597,7 @@ func applyMappings(obj map[string]interface{}, cfg *ConverterNodeConfig) (map[st
 				}
 			}
 			if !cfg.DropUnmapped {
-				delete(result, m.Source)
+				deleteNestedField(result, m.Source)
 			}
 			setNestedField(result, m.Target, out)
 			applied++
@@ -621,6 +621,30 @@ func getNestedField(obj map[string]interface{}, path string) (interface{}, bool)
 		}
 	}
 	return current, true
+}
+
+// deleteNestedField removes the field at a dotted path, so a rename or each
+// moves a nested source instead of leaving it next to the target (#525). The
+// maps along the path are shared with the input, which later mappings still
+// read, so each one is copied and the copy put back before the last key is
+// deleted. A parent left empty stays as {}. A missing segment, or one that is
+// not an object, deletes nothing.
+func deleteNestedField(obj map[string]interface{}, path string) {
+	parts := strings.Split(path, ".")
+	current := obj
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := current[part].(map[string]interface{})
+		if !ok {
+			return
+		}
+		cp := make(map[string]interface{}, len(next))
+		for k, v := range next {
+			cp[k] = v
+		}
+		current[part] = cp
+		current = cp
+	}
+	delete(current, parts[len(parts)-1])
 }
 
 func setNestedField(obj map[string]interface{}, path string, value interface{}) {
