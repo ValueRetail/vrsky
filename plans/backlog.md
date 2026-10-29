@@ -710,7 +710,7 @@ Last updated 2026-10-28.
     that error. The server did answer, so a `checkAuth` on 403/404 can't
     turn a network blip into a logout; it would drop the stale workspace.
     Found in review of #514.
-104. **The Postgres README's "Architecture" list is out of date.** It says
+104. ~~**The Postgres README's "Architecture" list is out of date.**~~ (#554) It says
     50GB "via Longhorn distributed storage" with "Full durability via
     Longhorn replication", but `statefulset.yaml` asks for `local-path` and
     production runs on `managed-csi` (the rewrite in
@@ -718,7 +718,7 @@ Last updated 2026-10-28.
     replication. Its resources line says requests of 2 CPU and 4GB, but the
     StatefulSet requests 250m and 512Mi. Fix the three lines. Manifest
     directory, so PR plus `agent:needs-human`. Found during #527.
-105. **The MinIO manifest calls itself dev-only too.**
+105. ~~**The MinIO manifest calls itself dev-only too.**~~ (#555)
     `infrastructure/kubernetes/minio/deployment.yaml` opens with "MinIO —
     DEV / SINGLE-NODE ONLY (#136)" and "NOT for production", but
     `deploy-azure.sh` installs it on AKS and production keeps its data on a
@@ -740,6 +740,22 @@ Last updated 2026-10-28.
     read such a row, so a decode error (not a store error) could count as
     "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
     `keepSavedStamps` (#500). Found in review of #536.
+111. **The rest of the Postgres README still talks about Longhorn.** #554
+    fixed the "Architecture" list and the Storage section's first line, but
+    `infrastructure/kubernetes/postgresql/README.md` still says "PVC not
+    bound: Verify Longhorn is running", has Longhorn in "Increase Storage"
+    (expansion on `managed-csi` works differently, and needs checking), and
+    links Longhorn's docs under References. Manifest directory, so PR plus
+    `agent:needs-human`. Found in #554.
+112. **The MinIO README's "Architecture" list is out of date too.**
+    `infrastructure/kubernetes/minio/README.md` says 100GB "via Longhorn
+    distributed storage" and requests of 1 CPU and 2GB, but
+    `deployment.yaml` claims 8Gi on `local-path` (`managed-csi` in
+    production) and requests 50m and 512Mi. Its "High Availability" section
+    still reads as if production didn't run `deployment.yaml`, and its
+    bucket tree gives `temp/` a 15-minute TTL where `setup-job.yaml` sets
+    one day. Manifest directory, so PR plus `agent:needs-human`. Found in
+    #555.
 
 ## Human
 
