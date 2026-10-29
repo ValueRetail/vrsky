@@ -232,9 +232,18 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		s.events.emit(sess.connID, event{Type: "warning", Message: w})
 	}
 	// Outside the lock: a stopping handler dequeues under it.
-	for _, ms := range toStop {
-		ms.cancel() // halted above
-		ms.sub.Stop()
+	if len(toStop) > 0 {
+		subs := make([]*messaging.Subscriber, len(toStop))
+		for i, ms := range toStop {
+			subs[i] = ms.sub
+		}
+		// Halted above; their last polls are handled before their contexts
+		// end, as in endSession.
+		s.stopSubscribers(func() {
+			for _, ms := range toStop {
+				ms.cancel()
+			}
+		}, subs...)
 	}
 	for _, d := range toDelete {
 		if err := messaging.DeleteConsumer(s.js, d); err != nil {
@@ -277,9 +286,7 @@ func (s *gateway) reconcileGroups(ctx context.Context, sess *connSession) {
 		s.mu.Lock()
 		if s.sessions[sess.connID] != sess || sess.memberSubs[id] != nil {
 			s.mu.Unlock()
-			sub.Halt()
-			mcancel()
-			sub.Stop()
+			s.stopSubscribers(mcancel, sub)
 			continue
 		}
 		sess.memberSubs[id] = &memberSub{sub: sub, cancel: mcancel}

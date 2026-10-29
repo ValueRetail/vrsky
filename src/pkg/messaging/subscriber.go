@@ -354,8 +354,8 @@ func (s *Subscriber) Stop() {
 // are dispatched then. Keep whatever the handlers need alive until Stop has
 // returned. A caller that ends the handlers' scope right after Halt has them
 // fail, and each such message is NAK'd with a delivery attempt spent (on its
-// last attempt, dead-lettered). The remote-agent gateway still does that
-// (#576).
+// last attempt, dead-lettered). The remote-agent gateway waits for Stop,
+// bounded, before it ends its handlers' scope (#576).
 func (s *Subscriber) Halt() {
 	s.halt.Do(func() { close(s.stopCh) })
 }

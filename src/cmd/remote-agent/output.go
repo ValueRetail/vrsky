@@ -16,7 +16,8 @@ import (
 )
 
 // errSessionEnded is returned from the output handler when its pipeline stops
-// or the service shuts down while a message is waiting for an agent. The
+// or the service shuts down while a message is waiting for an agent, and the
+// agent has not written it within the stop's grace (stopSubscribers). The
 // message is NAK'd and redelivered to the next session. That costs one
 // delivery attempt per stop, so a message held across five redeploys of an
 // offline agent's pipeline lands in the dead-letter queue, where it can be
