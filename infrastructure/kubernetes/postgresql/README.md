@@ -4,7 +4,7 @@ This directory contains Kubernetes manifests for deploying PostgreSQL 18 as the 
 
 ## Architecture
 
-- **Type**: StatefulSet (1 replica for POC)
+- **Type**: StatefulSet, 1 replica. Production on AKS runs this one.
 - **Version**: PostgreSQL 18 Alpine
 - **Resources**: 4 CPU, 8GB RAM (requests: 2 CPU, 4GB RAM)
 - **Storage**: 50GB via Longhorn distributed storage
@@ -12,9 +12,17 @@ This directory contains Kubernetes manifests for deploying PostgreSQL 18 as the 
 
 ## High Availability (production) — #137
 
-The single-replica `statefulset.yaml` has **no HA**: a pod/node failure is a
-control-plane outage and risks data loss. It is now **dev/single-node only**.
-For production, choose one of:
+Production runs the single-replica `statefulset.yaml` (`postgresql` in
+`vrsky-database`), applied by `infrastructure/azure/deploy-azure.sh` at the
+first bring-up and not by the deploy job. It has **no HA**: a pod or node
+failure is a control-plane outage until the pod is back. It has two backup
+layers: daily Azure Disk Backup snapshots of its disk and the weekday
+`vrsky-mgmt-backup` CronJob's logical dumps. [docs/DR.md](../../../docs/DR.md)
+says how to check that both run.
+
+No CNPG cluster or managed database runs today. To add HA, choose one of the
+options below. Have a backup in place for the new database before moving:
+the disk snapshots only cover the StatefulSet's disk.
 
 ### Option A — CloudNativePG (self-hosted HA)
 
