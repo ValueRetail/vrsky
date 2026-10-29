@@ -29,6 +29,17 @@ func newTestConsumer() (*frontSystemsConsumer, *[]*envelope.Envelope, *sync.Mute
 	return c, &got, &mu
 }
 
+// markStarted records connID as started for tenantID, as a successful start
+// does: since #503 the webhook route publishes only for started connections.
+func markStarted(c *frontSystemsConsumer, connID, tenantID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active == nil {
+		c.active = make(map[string]*activeConn)
+	}
+	c.active[connID] = &activeConn{tenantID: tenantID}
+}
+
 // TestWebhook_PublishesAndExtractsEvent verifies the webhook path resolves the
 // tenant, publishes the body, extracts the event type, and 202s.
 func TestWebhook_PublishesAndExtractsEvent(t *testing.T) {
@@ -39,6 +50,7 @@ func TestWebhook_PublishesAndExtractsEvent(t *testing.T) {
 		}
 		return "", errUnknown
 	}
+	markStarted(c, "conn-1", "tenant-1")
 	h := c.handleWebhook()
 
 	rec := httptest.NewRecorder()
@@ -88,6 +100,11 @@ func TestRegisterWebhooks_SendsDualHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		subKey = r.Header.Get("Ocp-Apim-Subscription-Key")
 		apiKey = r.Header.Get("x-api-key")
+		if r.Method != http.MethodPost {
+			// The lookup of existing webhooks (#503): none.
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		b, _ := io.ReadAll(r.Body)
 		registered = append(registered, string(b))
 		w.WriteHeader(http.StatusOK)
@@ -100,7 +117,7 @@ func TestRegisterWebhooks_SendsDualHeaders(t *testing.T) {
 		CallbackURL: "https://cb.example/frontsystems/events/conn-1",
 		Events:      []string{"SaleCreated", "StockMovementCreated"},
 	}
-	if err := c.registerWebhooks(context.Background(), cfg, c.logger); err != nil {
+	if _, err := c.registerWebhooks(context.Background(), cfg, c.logger); err != nil {
 		t.Fatalf("registerWebhooks: %v", err)
 	}
 	if subKey != "sub-123" || apiKey != "key-456" {
@@ -111,6 +128,48 @@ func TestRegisterWebhooks_SendsDualHeaders(t *testing.T) {
 	}
 	if !strings.Contains(registered[0], "SaleCreated") || !strings.Contains(registered[0], "cb.example") {
 		t.Errorf("registration payload = %s", registered[0])
+	}
+}
+
+// TestListWebhooks_ParsesArrayAndWrappers covers the list response shapes the
+// undocumented GET /api/webhooks may have (#503).
+func TestListWebhooks_ParsesArrayAndWrappers(t *testing.T) {
+	cases := []struct {
+		name, body string
+		wantIDs    []string
+		wantErr    bool
+	}{
+		{"bare array", `[{"id":"a","event":"SaleCreated","url":"u"}]`, []string{"a"}, false},
+		{"empty array", `[]`, nil, false},
+		{"value wrapper", `{"value":[{"id":"b"}]}`, []string{"b"}, false},
+		{"items wrapper", `{"items":[{"id":"c"},{"id":"d"}]}`, []string{"c", "d"}, false},
+		{"data wrapper", `{"data":[{"id":"e"}]}`, []string{"e"}, false},
+		{"object without a list", `{"count":0}`, nil, true},
+		{"not json", `<html>`, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/webhooks" {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, _, _ := newTestConsumer()
+			hooks, err := c.listWebhooks(context.Background(), &FrontSystemsConfig{BaseURL: srv.URL})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			var ids []string
+			for _, h := range hooks {
+				ids = append(ids, h.ID)
+			}
+			if strings.Join(ids, ",") != strings.Join(tc.wantIDs, ",") {
+				t.Errorf("ids = %v, want %v", ids, tc.wantIDs)
+			}
+		})
 	}
 }
 

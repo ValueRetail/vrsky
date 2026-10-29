@@ -17,6 +17,7 @@ import (
 func TestContract_FrontSystemsEnvelopes(t *testing.T) {
 	c, got, mu := newTestConsumer()
 	c.resolveTenant = func(string) (string, error) { return "tenant-vr", nil }
+	markStarted(c, "conn-fs", "tenant-vr")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/frontsystems/events/conn-fs",

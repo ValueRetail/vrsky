@@ -658,7 +658,7 @@ Last updated 2026-10-28.
     /data/input/<tenant-id>/…", or `os.ReadDir`'s own text). Name the
     folder with `folderLabel` and keep only the operating system's reason,
     as `readFailureMessage` does since #409. Found in review of #455.
-97. **Front Systems keeps its webhooks after a stop.** A stop forgets the
+97. ~~**Front Systems keeps its webhooks after a stop.**~~ (#503) A stop forgets the
     connection but never unregisters its callback at Front Systems, and
     `/frontsystems/events/{id}` publishes for any connection that exists,
     running or not. So a stopped pipeline still takes in events, and a
@@ -924,6 +924,29 @@ Last updated 2026-10-28.
     (5 to 30 s; a slow uploader, or a rename that comes late) still goes out
     under its temp name, and again under its final name. Skip the same names in
     `pollOnce`. Found in #562.
+135. **The other consumers still give up on a failed start, and a failed
+    restore list restores nothing.** #503 retries a Front Systems start that
+    fails for a reason that passes (`src/cmd/front-systems-consumer/retry.go`).
+    Every other command-driven consumer still gives up when its start fails
+    (a database blip at boot restore, a partner API down) while the row says
+    `running`, until someone stops and starts it. And `sdk.RestoreRunning`
+    returns 0 when its list query fails, which looks the same as "nothing
+    running", so a blip at that one query restores nothing on any consumer,
+    Front Systems included. Move the retry loop next to `StartGuard` in the
+    SDK (each consumer keeps its own transient/permanent split) and have
+    `RestoreRunning` retry its list with the same backoff. SDK change, so
+    alone. Found in #503.
+136. **Replay Front Systems events refused while a connection wasn't
+    running.** Front Systems doesn't resend: an event answered 503 (start in
+    progress or waiting to retry, boot restore, shutdown) stays failed in
+    `GET /api/WebhooksEvents/{webhookId}?success=false` until someone resends
+    it. #503 left the replay out. The resend call and both response bodies
+    are undocumented beyond the API catalog and there is no live account to
+    check them against, and an event whose 2xx got lost on the way back
+    would be published twice, so it needs the event id as an idempotency key
+    first. After a start activates, read the failed events since the
+    connection last stopped and resend those; events refused with 410 after
+    a stop were refused on purpose and stay. Found in #503.
 
 ## Human
 

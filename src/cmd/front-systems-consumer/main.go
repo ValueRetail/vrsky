@@ -7,7 +7,12 @@
 //   - serves POST /frontsystems/events/{connectionID} on the SDK aux HTTP port
 //     to receive those events (returning 2xx as Front Systems requires), and
 //   - on connection-start, optionally registers its callback URL for the
-//     configured event types via POST /api/webhooks.
+//     configured event types via POST /api/webhooks (reusing registrations
+//     that already exist), and deletes them again on connection-stop.
+//
+// Events are published only for connections this process has started. A
+// start that fails for a reason that passes is retried with backoff; one that
+// fails for good sets the connection's status to "error" (retry.go).
 //
 // It is an SDK Consumer: the runner owns NATS/DB/health/signals/shutdown; this
 // binary implements Configure + Run + Stop and reads per-connection config from

@@ -34,8 +34,8 @@ func t498Consumer(t *testing.T) *frontSystemsConsumer {
 	t.Cleanup(func() { _ = db.Close() })
 	nodes, _ := json.Marshal([]any{map[string]any{"id": "c1", "type": "consumer", "config": map[string]any{
 		"type": "front_systems", "front_systems": map[string]any{"base_url": "http://front-systems.invalid"}}}})
-	mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).WithArgs(t498Conn, t498Tenant).
-		WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(nodes))
+	mock.ExpectQuery(configLookupSQL).WithArgs(t498Conn, t498Tenant).
+		WillReturnRows(configRows(nodes))
 	return &frontSystemsConsumer{db: db, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
