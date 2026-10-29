@@ -739,8 +739,8 @@ Last updated 2026-10-28.
     file as well, so the complete file arrives, after a partial one. Wait
     for the same size and mtime on two polls first, like the file consumer
     (#374). Found in #538.
-108. **The SFTP and cloud-storage connector pages name fields the code
-    doesn't read.** `docs/connectors/sftp.md` says `sftp.path`; the consumer
+108. ~~**The SFTP and cloud-storage connector pages name fields the code
+    doesn't read.**~~ (#564) `docs/connectors/sftp.md` says `sftp.path`; the consumer
     reads `remote_dir` (and `file_pattern`, `poll_interval_seconds`,
     `move_dir`, `host_key`, none documented). `cloud-storage.md` says
     `event_mode`; the consumer reads `mode`, and `after_action`,
@@ -763,8 +763,8 @@ Last updated 2026-10-28.
     and retried. Retry the after-action for done names still listed (with
     `delete`/`move` a done name should not be there), with a backoff.
     Found in review of #538.
-113. **The file connector page still says every check looks at every
-    file.** Since #537 a folder with more than 1 000 published files has
+113. ~~**The file connector page still says every check looks at every
+    file.**~~ (#564) Since #537 a folder with more than 1 000 published files has
     them checked for replacement in turns, so a replaced file there goes
     out up to `ceil(files/1000)` checks later (about 50 s at 10 000 files),
     not after two. `docs/connectors/file.md`, the paragraphs on moving files
@@ -801,6 +801,23 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
+119. **The SFTP and cloud-storage editors show a poll interval they don't
+    save.** Both consumer panels in
+    `ui/src/components/Pipeline/PropertyEditor.tsx` show
+    `poll_interval_seconds ?? 60` but write the field only when it is
+    edited. The consumers read unset as 0, "poll once", so a node saved
+    without touching the field shows 60 in the editor and polls once, then
+    stops. Write 60 on mount, as `PollOrMethod` in the same file does for
+    the retail connectors' 300, or show 0. The connector pages describe the
+    current behaviour (#564). Found in #564.
+120. **Cloud-storage event mode ignores `prefix` and `file_pattern`.**
+    `runEventLoop` (`src/cmd/cloud-storage-consumer/service.go`) ingests
+    every key a notification names, and the S3 parser takes every record,
+    not only `ObjectCreated` ones (Azure and GCS filter by event type). The
+    editor still shows Prefix in event mode. Either apply `prefix` and
+    `file_pattern` to event keys and skip non-create S3 records, or say in
+    the panel that the notification must be scoped. Documented as is in
+    #564. Found in #564.
 
 ## Human
 
