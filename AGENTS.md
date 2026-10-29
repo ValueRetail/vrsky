@@ -255,7 +255,7 @@ the affected images are built in ACR. Then:
 - a change to `infrastructure/prometheus-rules.yml` or
   `infrastructure/kubernetes/monitoring/` runs `install-monitoring.sh`;
 - a smoke check runs; after it, every deploy refreshes the `acr-pull`
-  copy in `vrsky-database` (`copy-acr-pull.sh`), and a backup change
+  copies in `vrsky-database` and `vrsky-ui` (`copy-acr-pull.sh`), and a backup change
   applies the backup CronJob (`deploy-backup-azure.sh`).
 
 A change under `src/pkg` (or `src/go.mod`, or any `src/cmd/*/Dockerfile`)

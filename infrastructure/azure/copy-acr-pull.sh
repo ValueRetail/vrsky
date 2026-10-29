@@ -1,56 +1,46 @@
 #!/usr/bin/env bash
-# copy-acr-pull.sh — refresh the acr-pull copy in vrsky-database (#431).
+# copy-acr-pull.sh — refresh the acr-pull copies in vrsky-database (#431) and
+# vrsky-ui (#497).
 #
-# The backup Job in vrsky-database pulls vrsky-cli from ACR with a copy of
-# vrsky-platform's acr-pull Secret. deploy-backup-azure.sh makes that copy,
-# but only Catch up and a backup change run it, so after an ACR password
-# rotation the copy went stale until the next Catch up. The deploy job now
-# runs this on every deploy as well.
+# The backup Job in vrsky-database and the UI pods in vrsky-ui pull from ACR
+# with a copy of vrsky-platform's acr-pull Secret. deploy-backup-azure.sh and
+# deploy-ui-azure.sh make those copies, but only Catch up, a backup change or
+# a human runs them, so after an ACR password rotation a copy went stale.
+# The deploy job runs this on every deploy.
 #
 # Runs inside the cluster through in-cluster.sh: bash, jq and kubectl only,
 # no sed, no az. No credential is in this script and it prints none of the
-# values.
+# values (the apply goes through acr-pull-lib.sh).
 #
-# It touches that one Secret and nothing else. It never reads or applies
-# the backup CronJob, so it can't change its `suspend` (a CronJob suspended
-# by hand for a restore must stay suspended; see docs/DR.md). That is why
-# the deploy job doesn't simply run deploy-backup-azure.sh every time.
+# It touches those Secrets and nothing else. It never reads or applies the
+# backup CronJob, so it can't change its `suspend` (a CronJob suspended by
+# hand for a restore must stay suspended; see docs/DR.md). That is why the
+# deploy job doesn't simply run deploy-backup-azure.sh every time.
 #
-# A no-op, exit 0, when the source Secret or the target namespace doesn't
-# exist yet (a first install). Any other kubectl error fails.
+# A no-op, exit 0, when the source Secret doesn't exist yet (a first
+# install). A target namespace that doesn't exist is skipped, and the others
+# still get their copy. Any other kubectl error fails.
 set -euo pipefail
 
 SRC_NS=vrsky-platform
-NS=vrsky-database
+TARGETS="vrsky-database vrsky-ui"
+
+# shellcheck source=acr-pull-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/acr-pull-lib.sh"
 
 # Each lookup is a plain assignment, so set -e stops the script when kubectl
 # fails (Forbidden, a timeout). Inside `[ -z "$(…)" ]` it would not, and a
 # failed lookup would pass for a missing object.
 pull="$(kubectl get secret acr-pull -n "$SRC_NS" -o json --ignore-not-found)"
 if [ -z "$pull" ]; then
-  echo "no acr-pull secret in $SRC_NS yet; nothing to copy into $NS"
+  echo "no acr-pull secret in $SRC_NS yet; nothing to copy into $TARGETS"
   exit 0
 fi
-ns="$(kubectl get namespace "$NS" -o name --ignore-not-found)"
-if [ -z "$ns" ]; then
-  echo "no $NS namespace yet; acr-pull not copied"
-  exit 0
-fi
-
-# The source's identity (uid, resourceVersion, ownerReferences, annotations)
-# stays behind: apply would refuse a foreign uid.
-#
-# The deploy log is public to anyone with repo access, and a failed apply on
-# an existing object can print "error when applying patch:" with the patch,
-# which holds the new .dockerconfigjson. So the output is captured, and on a
-# failure only a generic line and the exit code are printed.
-rc=0
-out="$( { printf '%s' "$pull" \
-  | jq --arg ns "$NS" '{apiVersion: "v1", kind: "Secret", type: .type, data: .data,
-                        metadata: {name: "acr-pull", namespace: $ns}}' \
-  | kubectl apply -f - ; } 2>&1 )" || rc=$?
-if [ "$rc" -ne 0 ]; then
-  echo "ERROR: apply of $NS/acr-pull failed (exit $rc); output withheld because it can contain the Secret" >&2
-  exit "$rc"
-fi
-printf '%s\n' "$out"
+for ns in $TARGETS; do
+  found="$(kubectl get namespace "$ns" -o name --ignore-not-found)"
+  if [ -z "$found" ]; then
+    echo "no $ns namespace yet; acr-pull not copied there"
+    continue
+  fi
+  apply_acr_pull "$pull" "$ns"
+done

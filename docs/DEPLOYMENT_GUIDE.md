@@ -255,7 +255,8 @@ Only on an empty cluster, in this order:
    `infrastructure/kubernetes/deploy-vrsky-platform.sh` which it wraps,
    against production (see the warning below).
 2. `bash infrastructure/azure/deploy-ui-azure.sh`: the UI and the public
-   Ingress (below). The file isn't executable, hence `bash`.
+   Ingress (below). The file isn't executable, hence `bash`. It needs `jq`
+   on your machine for the `acr-pull` copy.
 3. `infrastructure/azure/deploy-connectors-azure.sh`: the connectors.
 4. `PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`:
    monitoring and the alert rules. It stops unless the `vrsky-monitoring`
@@ -315,7 +316,7 @@ before any real connection (the script's closing message says which).
 
 | File | On AKS |
 |---|---|
-| `namespace.yaml` | Not applied; the script creates `vrsky-ui` itself and copies the `acr-pull` secret into it |
+| `namespace.yaml` | Not applied; the script creates `vrsky-ui` itself and copies the `acr-pull` secret into it (with jq; every deploy refreshes that copy through `copy-acr-pull.sh`) |
 | `configmap.yaml` | Applied. Its `VITE_*` values have no effect; the file's header explains why |
 | `deployment.yaml` | Applied from a copy: image `vrskyprodacr.azurecr.io/vrsky/ui:latest`, `imagePullPolicy: Always`, 2 replicas, and the `vrsky-ui-nginx` ConfigMap mounted as the nginx config, which proxies `/api` and `/ws` to the management API |
 | `service.yaml` | Applied: ClusterIP `vrsky-ui`, port 80 |

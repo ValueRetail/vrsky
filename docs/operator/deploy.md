@@ -30,9 +30,14 @@ resources. Database migrations run when the management API starts, so they
 ride along with its image as they always have.
 
 After the smoke check, every deploy that reaches a running cluster copies
-`acr-pull` from `vrsky-platform` into `vrsky-database`
-(`copy-acr-pull.sh`), so the backup Job keeps pulling after an ACR password
-rotation. It touches only that Secret ([backup](backup.md)).
+`acr-pull` from `vrsky-platform` into `vrsky-database` and `vrsky-ui`
+(`copy-acr-pull.sh`), so the backup Job and the UI keep pulling after an
+ACR password rotation. A namespace that doesn't exist yet is skipped. It
+touches only those two Secrets ([backup](backup.md)). If the apply fails,
+the log says which namespace and the exit code, and nothing else: kubectl's
+own error can contain the Secret, and the deploy log is readable by anyone
+with repo access. To see kubectl's reason, run the apply yourself in your
+own terminal.
 
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
