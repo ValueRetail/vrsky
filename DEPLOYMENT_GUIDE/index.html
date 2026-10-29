@@ -3430,7 +3430,7 @@ tests and stops.</p>
 <tr>
 <td>Alert rules (promtool <code>1/4</code> … <code>4/4</code>)</td>
 <td>pushes and PRs</td>
-<td><code>promtool check rules</code>, then <code>promtool test rules</code> on the test groups that leg lists, beside Go lint (#446, #464). The four legs together run every group once</td>
+<td><code>promtool check rules</code>, then <code>promtool test rules</code> on the test groups <code>infrastructure/prometheus-rules-test-legs.yml</code> lists for that leg, beside Go lint (#446, #464, #495). The four legs together run every group once. To add a rule test group, name it in <code>prometheus-rules-test.yml</code> and list it under one leg in the legs file; the workflow does not change</td>
 </tr>
 <tr>
 <td>Go Tests</td>
