@@ -6,11 +6,16 @@
  * deployedName both stale, and Deploy sent no name. It now fetches the
  * connection and syncs the name, keeping the canvas's own graph.
  *
+ * #516: the route keeps the builder mounted when only :id changes, and the
+ * flow ran once per mount, so A then B stayed on A's canvas. It now runs once
+ * per connection id, and the name sync stays with the connection it was
+ * found for.
+ *
  * Runs the hook against the real canvas and UI stores; only the HTTP client
  * is mocked.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 
 vi.mock(import('@/services/api'), async (importOriginal) => ({
@@ -170,8 +175,9 @@ describe('edit route on a canvas already linked to the connection (#502)', () =>
     await waitFor(() => expect(get).toHaveBeenCalledWith(connectionUrl('conn-1')))
     await settle()
 
-    // Same builder, now routed to another connection: the linked canvas id
-    // from conn-1 is still in the hook's state.
+    // Same builder, now routed to another connection, with conn-1's linked
+    // canvas fresh in the hook's state. conn-2 has no canvas of its own, so
+    // it is imported (#516); conn-1's canvas must not take its name.
     view.rerender({ id: 'conn-2' })
     await waitFor(() => expect(get).toHaveBeenCalledWith(connectionUrl('conn-2')))
     await act(async () => { answerOther(wireConnection('conn-2', 'Other pipeline')) })
@@ -262,5 +268,338 @@ describe('when the edit flow does nothing', () => {
     expect(get).toHaveBeenCalledWith(connectionUrl('conn-1'))
     await settle()
     expect(store().canvases.filter((c) => c.deployedConnectionId === 'conn-1')).toHaveLength(1)
+  })
+})
+
+// The route /connections/:id/edit keeps the builder mounted when only :id
+// changes, so these rerender the same hook with another id.
+describe('routing an open builder from one connection to another (#516)', () => {
+  const realSync = useCanvasStore.getState().syncDeployedName
+  // The hook is still mounted here (cleanup unmounts it later), hence act.
+  afterEach(() => { act(() => useCanvasStore.setState({ syncDeployedName: realSync })) })
+  // Records every (canvas, connection, server name) the hook asks the store to sync.
+  const spySync = () => {
+    const spy = vi.fn(realSync)
+    useCanvasStore.setState({ syncDeployedName: spy })
+    return spy
+  }
+
+  // A canvas deployed from here for `connId` as `deployedName`, with its own
+  // graph. The default canvas stays current.
+  const seedLinked = (connId: string, deployedName: string) => {
+    const c = store().importCanvas(`Edit: ${deployedName}`, localNodes, [{ id: 'local-e', source: 'local-in', target: 'local-out' }], connId, deployedName)!
+    store().switchCanvas(defaultId)
+    return c.id
+  }
+  // The connections fetched, in order.
+  const fetched = () => connectionGets().map(([url]) => String(url).slice('/api/v1/connections/'.length))
+  // Answers each GET for `id` with the next server name in turn; the last repeats.
+  const names = (id: string, ...ns: string[]) => {
+    let i = 0
+    return () => Promise.resolve(wireConnection(id, ns[Math.min(i++, ns.length - 1)]))
+  }
+  const deferred = () => {
+    let resolve: (v: unknown) => void = () => {}
+    let reject: (e: unknown) => void = () => {}
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+  const linkedTo = (connId: string) => store().canvases.find((c) => c.deployedConnectionId === connId)
+
+  it("A then B, B linked: opens B's canvas and syncs B's name onto it, keeping its graph", async () => {
+    const a = seedLinked('conn-a', 'A')
+    const b = seedLinked('conn-b', 'B old')
+    routeGets({ 'conn-a': names('conn-a', 'A'), 'conn-b': names('conn-b', 'B new') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(canvas(b).deployedName).toBe('B new'))
+    await settle()
+
+    expect(store().currentCanvasId).toBe(b)
+    expect(canvas(b)).toMatchObject({ name: 'Edit: B new', deployedName: 'B new', deployedConnectionId: 'conn-b' })
+    expect(canvas(b).nodes).toEqual(localNodes)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A', deployedName: 'A', deployedConnectionId: 'conn-a' })
+    expect(canvas(a).nodes).toEqual(localNodes)
+    expect(store().canvases).toHaveLength(3)
+    expect(fetched()).toEqual(['conn-a', 'conn-b'])
+    expect(notifications()).toEqual([])
+  })
+
+  it('A then B, B not linked: imports B as "Edit: <name>", linked to B, and opens it', async () => {
+    const a = seedLinked('conn-a', 'A')
+    routeGets({ 'conn-a': names('conn-a', 'A'), 'conn-b': names('conn-b', 'Orders to ERP') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(linkedTo('conn-b')).toBeDefined())
+    await settle()
+
+    const b = linkedTo('conn-b')!
+    expect(b).toMatchObject({ name: 'Edit: Orders to ERP', deployedName: 'Orders to ERP' })
+    expect(b.nodes.map((n) => n.type)).toEqual(['input', 'output'])
+    expect(store().currentCanvasId).toBe(b.id)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A', deployedName: 'A', deployedConnectionId: 'conn-a' })
+    expect(store().canvases).toHaveLength(3)
+    // One GET for B, for the import; the canvas it just imported is not
+    // fetched again (#502).
+    expect(fetched()).toEqual(['conn-a', 'conn-b'])
+    expect(notifications()).toEqual([])
+  })
+
+  it.each([
+    ['linked', true],
+    ['not linked', false],
+  ])("A's canvas is never synced against B (B %s)", async (_, bLinked) => {
+    const a = seedLinked('conn-a', 'A')
+    if (bLinked) seedLinked('conn-b', 'B')
+    const sync = spySync()
+    routeGets({ 'conn-a': names('conn-a', 'A'), 'conn-b': names('conn-b', 'B renamed') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(fetched()).toEqual(['conn-a']))
+    await settle()
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(fetched()).toContain('conn-b'))
+    await settle()
+
+    const b = linkedTo('conn-b')?.id
+    // Every sync pairs a canvas with its own connection, and B's only when B
+    // was linked before (an imported B already has the server's name).
+    expect(sync.mock.calls).toEqual(bLinked ? [[a, 'conn-a', 'A'], [b, 'conn-b', 'B renamed']] : [[a, 'conn-a', 'A']])
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A', deployedName: 'A', deployedConnectionId: 'conn-a' })
+    expect(fetched()).toEqual(['conn-a', 'conn-b'])
+    expect(b).toBeDefined()
+    expect(store().currentCanvasId).toBe(b)
+  })
+
+  it.each([
+    ['answer', true],
+    ['error', false],
+  ])("routed to B while A's import fetch is out: A's late %s imports and shows nothing", async (_, answers) => {
+    const lateA = deferred()
+    routeGets({ 'conn-a': () => lateA.promise, 'conn-b': names('conn-b', 'B') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(fetched()).toEqual(['conn-a']))
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(linkedTo('conn-b')).toBeDefined())
+    await settle()
+    const b = linkedTo('conn-b')!.id
+    expect(store().currentCanvasId).toBe(b)
+
+    // The user moves to another tab before A's answer lands; nothing may
+    // pull them back to B or start B's load again.
+    act(() => store().switchCanvas(defaultId))
+    await act(async () => {
+      if (answers) lateA.resolve(wireConnection('conn-a', 'A'))
+      else lateA.reject(httpErr(500))
+    })
+    await settle()
+
+    expect(linkedTo('conn-a')).toBeUndefined()
+    expect(store().canvases.map((c) => c.id)).toEqual([defaultId, b])
+    expect(canvas(b)).toMatchObject({ name: 'Edit: B', deployedName: 'B', deployedConnectionId: 'conn-b' })
+    expect(store().currentCanvasId).toBe(defaultId)
+    expect(fetched()).toEqual(['conn-a', 'conn-b'])
+    expect(notifications()).toEqual([])
+  })
+
+  it("routed to B while A's name sync is out: A's late answer syncs nothing", async () => {
+    const a = seedLinked('conn-a', 'A')
+    const b = seedLinked('conn-b', 'B')
+    const lateA = deferred()
+    routeGets({ 'conn-a': () => lateA.promise, 'conn-b': names('conn-b', 'B') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(fetched()).toEqual(['conn-a']))
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(store().currentCanvasId).toBe(b))
+    await settle()
+    await act(async () => { lateA.resolve(wireConnection('conn-a', 'A renamed')) })
+    await settle()
+
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A', deployedName: 'A', deployedConnectionId: 'conn-a' })
+    expect(store().currentCanvasId).toBe(b)
+    expect(store().canvases).toHaveLength(3)
+    expect(fetched()).toEqual(['conn-a', 'conn-b'])
+  })
+
+  it("A, B, back to A: returns to A's canvas with a fresh name sync, importing nothing", async () => {
+    const a = seedLinked('conn-a', 'A')
+    const b = seedLinked('conn-b', 'B')
+    // A is renamed elsewhere while the builder is on B.
+    routeGets({ 'conn-a': names('conn-a', 'A', 'A renamed'), 'conn-b': names('conn-b', 'B') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(store().currentCanvasId).toBe(b))
+    await settle()
+    view.rerender({ id: 'conn-a' })
+    await waitFor(() => expect(canvas(a).deployedName).toBe('A renamed'))
+    await settle()
+
+    expect(store().currentCanvasId).toBe(a)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A renamed', deployedConnectionId: 'conn-a' })
+    expect(canvas(a).nodes).toEqual(localNodes)
+    expect(store().canvases).toHaveLength(3)
+    expect(fetched()).toEqual(['conn-a', 'conn-b', 'conn-a'])
+    expect(notifications()).toEqual([])
+  })
+
+  it('a canvas imported here is not fetched again right after, but a later visit syncs it', async () => {
+    const a = seedLinked('conn-a', 'A')
+    routeGets({ 'conn-a': names('conn-a', 'A'), 'conn-b': names('conn-b', 'B', 'B renamed') })
+
+    const view = renderEdit('conn-b')
+    await waitFor(() => expect(linkedTo('conn-b')).toBeDefined())
+    await settle()
+    const b = linkedTo('conn-b')!.id
+    expect(store().currentCanvasId).toBe(b)
+    expect(fetched()).toEqual(['conn-b'])
+
+    view.rerender({ id: 'conn-a' })
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+    // B is renamed elsewhere while the builder is on A.
+    view.rerender({ id: 'conn-b' })
+    await waitFor(() => expect(canvas(b).deployedName).toBe('B renamed'))
+    await settle()
+
+    expect(store().currentCanvasId).toBe(b)
+    expect(canvas(b)).toMatchObject({ name: 'Edit: B renamed', deployedConnectionId: 'conn-b' })
+    expect(store().canvases.filter((c) => c.deployedConnectionId === 'conn-b')).toHaveLength(1)
+    expect(store().canvases).toHaveLength(3)
+    expect(fetched()).toEqual(['conn-b', 'conn-a', 'conn-b'])
+    expect(notifications()).toEqual([])
+  })
+
+  it.each([
+    ['linked', true],
+    ['not linked', false],
+  ])('the same id on a re-render loads only once (%s)', async (_, linked) => {
+    if (linked) seedLinked('conn-a', 'A')
+    routeGets({ 'conn-a': names('conn-a', 'A') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(linkedTo('conn-a')?.id))
+    await settle()
+    expect(fetched()).toEqual(['conn-a'])
+
+    // The user moves to another tab and renames it (a new canvases array,
+    // which the flow's effect depends on); the page re-renders with the same id.
+    act(() => store().switchCanvas(defaultId))
+    act(() => store().renameCanvas(defaultId, 'Scratch'))
+    view.rerender({ id: 'conn-a' })
+    view.rerender({ id: 'conn-a' })
+    await settle()
+
+    expect(fetched()).toEqual(['conn-a'])
+    expect(store().canvases.filter((c) => c.deployedConnectionId === 'conn-a')).toHaveLength(1)
+    expect(store().canvases).toHaveLength(2)
+    expect(store().currentCanvasId).toBe(defaultId)
+    expect(notifications()).toEqual([])
+  })
+
+  // The plain builder at / and the edit route share the mounted page, so
+  // leaving for / and coming back is a rerender with undefined in between.
+  it("A, the plain builder, back to A (linked): reopens A's canvas and syncs it again", async () => {
+    const a = seedLinked('conn-a', 'A')
+    // A is renamed elsewhere while the builder is on /.
+    routeGets({ 'conn-a': names('conn-a', 'A', 'A renamed') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+    view.rerender({ id: undefined })
+    act(() => store().switchCanvas(defaultId))
+    await settle()
+
+    view.rerender({ id: 'conn-a' })
+    await waitFor(() => expect(canvas(a).deployedName).toBe('A renamed'))
+    await settle()
+
+    expect(store().currentCanvasId).toBe(a)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A renamed', deployedConnectionId: 'conn-a' })
+    expect(canvas(a).nodes).toEqual(localNodes)
+    expect(store().canvases).toHaveLength(2)
+    expect(fetched()).toEqual(['conn-a', 'conn-a'])
+    expect(notifications()).toEqual([])
+  })
+
+  it("A, the plain builder, back to A (imported here): reopens the imported canvas, syncs it, imports nothing more", async () => {
+    routeGets({ 'conn-a': names('conn-a', 'A', 'A renamed') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(linkedTo('conn-a')).toBeDefined())
+    await settle()
+    const a = linkedTo('conn-a')!.id
+    expect(fetched()).toEqual(['conn-a'])
+    view.rerender({ id: undefined })
+    act(() => store().switchCanvas(defaultId))
+    await settle()
+
+    view.rerender({ id: 'conn-a' })
+    await waitFor(() => expect(canvas(a).deployedName).toBe('A renamed'))
+    await settle()
+
+    expect(store().currentCanvasId).toBe(a)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A renamed', deployedConnectionId: 'conn-a' })
+    expect(store().canvases.filter((c) => c.deployedConnectionId === 'conn-a')).toHaveLength(1)
+    expect(store().canvases).toHaveLength(2)
+    expect(fetched()).toEqual(['conn-a', 'conn-a'])
+    expect(notifications()).toEqual([])
+  })
+
+  it('on the plain builder the flow makes no request and leaves the open tab alone', async () => {
+    const a = seedLinked('conn-a', 'A')
+    routeGets({ 'conn-a': names('conn-a', 'A') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+    view.rerender({ id: undefined })
+    act(() => store().switchCanvas(defaultId))
+    act(() => store().renameCanvas(defaultId, 'Scratch'))
+    view.rerender({ id: undefined })
+    await settle()
+
+    expect(fetched()).toEqual(['conn-a'])
+    expect(store().currentCanvasId).toBe(defaultId)
+    expect(store().canvases).toHaveLength(2)
+    expect(canvas(a)).toMatchObject({ name: 'Edit: A', deployedName: 'A', deployedConnectionId: 'conn-a' })
+  })
+
+  it("A, the plain builder where A's canvas is closed, back to A: imports A again with one request", async () => {
+    const a = seedLinked('conn-a', 'A')
+    routeGets({ 'conn-a': names('conn-a', 'A') })
+
+    const view = renderEdit('conn-a')
+    await waitFor(() => expect(store().currentCanvasId).toBe(a))
+    await settle()
+    view.rerender({ id: undefined })
+    act(() => store().deleteCanvas(a))
+    await settle()
+
+    view.rerender({ id: 'conn-a' })
+    await waitFor(() => expect(linkedTo('conn-a')).toBeDefined())
+    await settle()
+
+    const reimported = linkedTo('conn-a')!
+    expect(reimported.id).not.toBe(a)
+    expect(reimported).toMatchObject({ name: 'Edit: A', deployedName: 'A' })
+    expect(store().currentCanvasId).toBe(reimported.id)
+    expect(store().canvases).toHaveLength(2)
+    // One request for the import; none for the closed canvas's name.
+    expect(fetched()).toEqual(['conn-a', 'conn-a'])
+    expect(notifications()).toEqual([])
   })
 })

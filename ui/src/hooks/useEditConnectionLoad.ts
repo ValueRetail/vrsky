@@ -23,24 +23,45 @@ export function useEditConnectionLoad(editConnectionId: string | undefined): voi
   const syncDeployedName = useCanvasStore((s) => s.syncDeployedName)
   const showErrorNotification = useUIStore((s) => s.showErrorNotification)
 
-  const [editLoadDone, setEditLoadDone] = useState(false)
+  // The connection id the flow last finished for. Kept per id, not as a flag,
+  // so routing an open builder from /connections/A/edit to B/edit loads B
+  // (#516).
+  const [loadedForId, setLoadedForId] = useState<string | null>(null)
+  const editLoadDone = loadedForId !== null && loadedForId === editConnectionId
   // The already-linked canvas the edit flow switched to, whose name is then
-  // refreshed from the server (#502).
-  const [linkedEditCanvasId, setLinkedEditCanvasId] = useState<string | null>(null)
+  // refreshed from the server (#502), with the connection it was found for.
+  // A canvas found for A is never synced against B (#516).
+  const [linkedEdit, setLinkedEdit] = useState<{ connectionId: string; canvasId: string } | null>(null)
+  const linkedEditCanvasId =
+    linkedEdit && linkedEdit.connectionId === editConnectionId ? linkedEdit.canvasId : null
   // A canvas this flow just imported already has the server's name. The
-  // import re-renders before its own pass finishes, so the next pass finds
-  // it as "linked"; without this it would fetch the connection again.
+  // import's store update renders on its own, ahead of setLoadedForId, so the
+  // next pass finds it as "linked"; without this it would fetch the
+  // connection again. The next linked pass consumes it, so a later visit to
+  // that connection (after the route went elsewhere and came back) syncs as
+  // usual (#516).
   const importedCanvasId = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!editConnectionId || editLoadDone || !isInitialized) return
+    // Off the edit route (the plain builder at /) the page stays mounted, so
+    // forget the last load: coming back to the same connection loads it again
+    // instead of leaving the builder on whatever tab the user picked (#516).
+    if (!editConnectionId) {
+      setLoadedForId(null)
+      setLinkedEdit(null)
+      importedCanvasId.current = null
+      return
+    }
+    if (editLoadDone || !isInitialized) return
     let cancelled = false
 
     const linked = canvases.find((c) => c.deployedConnectionId === editConnectionId)
     if (linked) {
       switchCanvas(linked.id)
-      if (linked.id !== importedCanvasId.current) setLinkedEditCanvasId(linked.id)
-      setEditLoadDone(true)
+      const justImported = linked.id === importedCanvasId.current
+      importedCanvasId.current = null
+      if (!justImported) setLinkedEdit({ connectionId: editConnectionId, canvasId: linked.id })
+      setLoadedForId(editConnectionId)
       return
     }
 
@@ -56,7 +77,7 @@ export function useEditConnectionLoad(editConnectionId: string | undefined): voi
           showErrorNotification('Edit connection', 'Failed to load this connection onto the canvas.')
         }
       } finally {
-        if (!cancelled) setEditLoadDone(true)
+        if (!cancelled) setLoadedForId(editConnectionId)
       }
     })()
 
