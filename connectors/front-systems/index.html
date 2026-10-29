@@ -2471,13 +2471,64 @@ it as <code>base_url</code> (there is no public default).</p>
 <div class="highlight"><pre><span></span><code>POST /frontsystems/events/{connectionID}
 </code></pre></div>
 <p>served on <code>WORKER_HTTP_PORT</code> (9270 in compose). Each event body is published as a
-message; the handler returns <code>202</code> (Front Systems <strong>requires</strong> a 2xx or it treats
-the event as undelivered and retries).</p>
+message and the handler returns <code>202</code>. Front Systems counts only a 2xx as
+delivered and does not resend on its own: a failed event stays in its event log
+(<code>GET /api/WebhooksEvents/{webhookId}?success=false</code>) until someone resends it.</p>
+<p>Events are published only while the connection is running. Otherwise nothing is
+published and the handler answers:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>404</code></td>
+<td>No connection with that id.</td>
+</tr>
+<tr>
+<td><code>410</code></td>
+<td>The connection exists but is stopped, or its start failed for good (status <code>error</code>).</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>The connection is starting, or its start failed for a reason that passes and is waiting to retry; or the connector is starting up and hasn't restored its running connections yet, or is shutting down.</td>
+</tr>
+</tbody>
+</table>
+<p>A start that fails for a reason that passes is retried: the database not
+answering, or Front Systems answering 5xx, 408 or 429, or not answering at
+all. The first retry comes after about 5 seconds, then the wait doubles up to
+5 minutes, with some jitter. Retries stop when the pipeline is stopped or
+deleted, when its status is no longer <code>running</code>, or after 6 hours, when the
+status becomes <code>error</code>. A start that fails in a way no retry fixes (Front
+Systems refusing the registration with another 4xx such as 401 or 403, a
+missing <code>base_url</code> or one without <code>https://</code>, Front Systems refusing the keys
+on the first webhook list with 401 or 403, a secret that can't be read) is not retried: the
+pipeline's status becomes <code>error</code> and its last error names the cause. Fix it
+and start the pipeline again.</p>
+<p>Events refused with <code>503</code> are not replayed once the pipeline is running; they
+stay in Front Systems' failed-events log until someone resends them.</p>
+<p>The route has no authentication of its own (Front Systems documents no
+signature): the connection id in the URL is the secret. The event is published
+for the tenant that owns the connection, and only if that is the tenant the
+connection was started for.</p>
 <p>If <code>callback_url</code> + <code>events</code> are configured, the connector <strong>auto-registers</strong> its
 callback for those event types on connection-start via <code>POST /api/webhooks</code>.
-Otherwise register the webhook out of band.</p>
+It lists the existing webhooks first (<code>GET /api/webhooks</code>) and reuses any with
+the same event and URL, so restarts don't register the callback twice. On
+connection-stop it deletes them again (<code>DELETE /api/webhooks/{id}</code>). That is best
+effort: a failed delete is logged and the pipeline stops anyway, and the next
+start reuses the leftover registration. A restart of the connector itself (deploy,
+cluster start) keeps the registrations. If <code>callback_url</code> is not set, register
+the webhook out of band; the connector then neither registers nor deletes
+anything, but still refuses events while the connection is stopped.</p>
 <ul>
-<li><code>base_url</code> — per-partner Azure APIM host (required).</li>
+<li><code>base_url</code> — per-partner Azure APIM host as a URL, <code>https://&lt;partner-apim-host&gt;</code>
+  (required). A bare host without <code>https://</code> is refused at start and the
+  pipeline goes to <code>error</code>.</li>
 <li><code>subscription_key_secret_id</code> / <code>api_key_secret_id</code> — the two auth keys.</li>
 <li><code>events</code> — event types to register, e.g. <code>SaleCreated</code>, <code>StockMovementCreated</code>,
   <code>POSSettlementCreated</code>, <code>DeliveryItemsReceived</code>, <code>ProductTransferCreated</code>,
@@ -2521,8 +2572,9 @@ are poison and go to the DLQ.</p>
 <ul>
 <li><strong>Missed-event reconciliation</strong> — Front Systems exposes
   <code>GET /api/WebhooksEvents/{webhookId}?success=false&amp;from=&amp;to=</code> plus a resend
-  endpoint. A periodic reconcile poller that replays missed events is a
-  straightforward enhancement.</li>
+  endpoint. Replaying the events refused with <code>503</code> above after a start is
+  backlog item 136; it needs the event id as an idempotency key so an event
+  whose <code>202</code> got lost isn't published twice.</li>
 <li><strong>Webhook signature verification</strong> — no HMAC scheme is documented; confirm
   with Front Systems and add verification if one exists (today the callback
   relies on URL secrecy + the <code>x-api-key</code>).</li>
