@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -171,6 +172,22 @@ func TestFilter_DropSuppressesRepublish(t *testing.T) {
 	}, 1500*time.Millisecond)
 }
 
+// freePort returns a TCP port that was free a moment ago, as a string for use
+// in an environment variable.
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("pick a free port: %v", err)
+	}
+	defer l.Close()
+	_, port, err := net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		t.Fatalf("parse listener address: %v", err)
+	}
+	return port
+}
+
 // httpProducer registers a custom HTTP handler in Configure, exercising the
 // SDK's auxiliary HTTP server (the file-producer /files hook in miniature).
 type httpProducer struct {
@@ -201,8 +218,16 @@ func TestRun_ProductionPath(t *testing.T) {
 		t.Fatalf("ensure streams: %v", err)
 	}
 	t.Setenv("NATS_URL", nc.ConnectedUrl())
-	t.Setenv("HEALTH_PORT", "18195")
-	t.Setenv("WORKER_HTTP_PORT", "18196")
+	// The SDK takes a port number from the environment (it cannot listen on
+	// ":0" and report the port back), so pick free ports at runtime instead of
+	// fixed ones that collide with parallel packages or a previous iteration's
+	// listener that is still shutting down.
+	healthPort := freePort(t)
+	auxPort := freePort(t)
+	t.Setenv("HEALTH_PORT", healthPort)
+	t.Setenv("WORKER_HTTP_PORT", auxPort)
+	healthURL := "http://127.0.0.1:" + healthPort
+	auxURL := "http://127.0.0.1:" + auxPort
 
 	p := &httpProducer{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -211,26 +236,32 @@ func TestRun_ProductionPath(t *testing.T) {
 
 	// Wait for the health server to come up.
 	harness.Eventually(t, 5*time.Second, "health server up", func() bool {
-		resp, err := http.Get("http://127.0.0.1:18195/health")
+		resp, err := http.Get(healthURL + "/health")
 		if err != nil {
 			return false
 		}
 		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
 	})
-	// The auxiliary HTTP server serves the registered handler.
-	resp, err := http.Get("http://127.0.0.1:18196/probe")
-	if err != nil {
-		t.Fatalf("probe aux server: %v", err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("aux /probe = %d, want 204", resp.StatusCode)
+	// The auxiliary HTTP server starts in its own goroutine, so wait for it to
+	// listen the same way, then check that it serves the registered handler.
+	var auxStatus int
+	harness.Eventually(t, 5*time.Second, "aux server up", func() bool {
+		resp, err := http.Get(auxURL + "/probe")
+		if err != nil {
+			return false
+		}
+		_ = resp.Body.Close()
+		auxStatus = resp.StatusCode
+		return true
+	})
+	if auxStatus != http.StatusNoContent {
+		t.Errorf("aux /probe = %d, want 204", auxStatus)
 	}
 
 	// /readyz runs the runner's default upstream checks; NATS is connected so it
 	// must be 200 with the nats check reported ok.
-	rr, err := http.Get("http://127.0.0.1:18195/readyz")
+	rr, err := http.Get(healthURL + "/readyz")
 	if err != nil {
 		t.Fatalf("GET /readyz: %v", err)
 	}
