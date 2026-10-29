@@ -21,7 +21,8 @@ import (
 // message is NAK'd and redelivered to the next session. That costs one
 // delivery attempt per stop, so a message held across five redeploys of an
 // offline agent's pipeline lands in the dead-letter queue, where it can be
-// retried from the UI.
+// retried from the UI. Targets of the message that had already written it are
+// skipped by the redelivery (#587; see writtenSet).
 var errSessionEnded = errors.New("pipeline stopped while the message was waiting for its agent")
 
 // delivery is one file waiting to be written by one agent.
@@ -53,7 +54,9 @@ type outputScope struct {
 // is merely offline: the dispatch loop keeps the message in progress with
 // heartbeats, so it stays in the stream with its delivery count unchanged
 // until the agent comes back. It returns nil (ack) only once every target
-// confirmed the write.
+// confirmed the write. When it returns an error instead (NAK), the targets
+// that did write are remembered in s.written, and the redelivery offers the
+// file only to the others.
 func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.Handler {
 	return func(_ context.Context, m *nats.Msg) error {
 		var env envelope.Envelope
@@ -90,7 +93,17 @@ func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.
 		metaName, _ := env.Metadata["filename"].(string)
 		_, converted := env.Metadata["_converted"]
 
+		// A target that wrote this message in an earlier delivery, which was
+		// then NAK'd because another target had not, is not offered it again
+		// (#587; see writtenSet). A message without stream metadata (none in
+		// production) is not tracked.
+		meta, _ := m.Metadata()
+		tracked := meta != nil
+		now := s.now()
+
 		var waiting []*delivery
+		var keys []writtenKey    // keys[i] is waiting[i]'s write
+		var skipped []writtenKey // written in an earlier delivery
 		for _, t := range targets {
 			n := t.node
 			name := agentproto.GenerateFilename(n.FilenamePattern, env.ID, env.ContentType, env.Source, metaName, converted, env.CreatedAt)
@@ -100,6 +113,17 @@ func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.
 					"node_id", n.NodeID, "envelope_id", env.ID, "error", err)
 				s.events.emit(sess.connID, event{Type: "failed", Message: err.Error(), EnvelopeID: env.ID, Agent: s.agentName(t.agentID)})
 				continue
+			}
+			var key writtenKey
+			if tracked {
+				key = writtenKey{
+					connID: sess.connID, stream: meta.Stream, seq: meta.Sequence.Stream, envelopeID: env.ID,
+					nodeID: n.NodeID, agentID: t.agentID, directory: n.Directory, filename: name,
+				}
+				if s.written.has(key, now) {
+					skipped = append(skipped, key)
+					continue
+				}
 			}
 			d := &delivery{
 				wire: agentproto.Delivery{
@@ -120,44 +144,73 @@ func (s *gateway) outputHandler(sess *connSession, scope outputScope) messaging.
 			}
 			s.enqueue(d)
 			waiting = append(waiting, d)
+			keys = append(keys, key)
 		}
 
 		var firstErr error
-		record := func(err error) {
+		wrote := make([]bool, len(waiting)) // the agent confirmed waiting[i]'s write
+		take := func(i int, err error) {
+			wrote[i] = err == nil
 			if err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
-	wait:
+		ended, unanswered := false, false
 		for i, d := range waiting {
+			if !ended {
+				select {
+				case err := <-d.result:
+					take(i, err)
+					continue
+				case <-scope.done:
+					s.dequeue(waiting[i:]...)
+					ended = true
+				}
+			}
+			// The scope has ended. An agent may have acked between the scope
+			// ending and the dequeue: it got its 204 and wrote the file.
+			// resolve hands the result over under s.mu, and the dequeue took
+			// s.mu, so any such ack is in d.result by now; anything not there
+			// never will be. Every remaining delivery is looked at, not only
+			// those before the first without an answer: a write is
+			// remembered below whichever target it was.
 			select {
 			case err := <-d.result:
-				record(err)
-			case <-scope.done:
-				s.dequeue(waiting[i:]...)
-				// An agent may have acked between the scope ending and the
-				// dequeue: it got its 204 and wrote the file, so a NAK now
-				// would have the next session write it again. resolve hands
-				// the result over under s.mu, and the dequeue took s.mu, so
-				// any such ack is in d.result by now; anything not there
-				// never will be.
-				for _, d := range waiting[i:] {
-					select {
-					case err := <-d.result:
-						record(err)
-					default:
-						return errSessionEnded
+				take(i, err)
+			default:
+				unanswered = true
+			}
+		}
+		if unanswered {
+			firstErr = errSessionEnded
+		}
+		if firstErr != nil {
+			// NAK'd: remember who wrote it, so the redelivery skips them.
+			if tracked {
+				var done []writtenKey
+				for i := range waiting {
+					if wrote[i] {
+						done = append(done, keys[i])
 					}
 				}
-				break wait
+				if len(done) > 0 {
+					s.written.add(s.now(), done...)
+				}
 			}
+			return firstErr
 		}
-		if firstErr == nil {
-			for _, d := range waiting {
-				s.events.emit(sess.connID, event{Type: "delivered", Filename: d.wire.Filename, EnvelopeID: env.ID, Agent: s.agentName(d.agentID)})
-			}
+		if len(skipped) > 0 {
+			s.written.forget(skipped...)
 		}
-		return firstErr
+		for _, d := range waiting {
+			s.events.emit(sess.connID, event{Type: "delivered", Filename: d.wire.Filename, EnvelopeID: env.ID, Agent: s.agentName(d.agentID)})
+		}
+		// Written in an earlier delivery, and not reported then: the message
+		// was not done.
+		for _, k := range skipped {
+			s.events.emit(sess.connID, event{Type: "delivered", Filename: k.filename, EnvelopeID: env.ID, Agent: s.agentName(k.agentID)})
+		}
+		return nil
 	}
 }
 

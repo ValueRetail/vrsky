@@ -958,6 +958,15 @@ Last updated 2026-10-28.
     committed, but it also hides a ~2000 line component from the gate, so it
     needs a human decision. Until then the builder's deploy wiring is pinned
     from `services/deployPipeline.test.ts`. Found in review of #580.
+138. **Remember multi-target writes across remote-agent restarts.** Since
+    #587 a message NAK'd after some of its targets wrote it skips those
+    targets on redelivery, but only within one gateway process (in memory).
+    After a restart or a rolling deploy every target writes it again. Keeping
+    it across processes needs a JetStream key-value bucket (or a table) keyed
+    by stream, sequence and target, with a TTL of the main stream's 72 h.
+    A KV bucket is stream configuration: PR plus `agent:needs-human`. Worth
+    it only if duplicates after a deploy turn out to matter to a customer.
+    Found in #587.
 
 ## Human
 
