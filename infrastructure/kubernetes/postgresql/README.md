@@ -6,9 +6,15 @@ This directory contains Kubernetes manifests for deploying PostgreSQL 18 as the 
 
 - **Type**: StatefulSet, 1 replica. Production on AKS runs this one.
 - **Version**: PostgreSQL 18 Alpine
-- **Resources**: 4 CPU, 8GB RAM (requests: 2 CPU, 4GB RAM)
-- **Storage**: 50GB via Longhorn distributed storage
-- **Persistence**: Full durability via Longhorn replication
+- **Resources**: limits 4 CPU, 8Gi RAM (requests: 250m CPU, 512Mi RAM, a
+  scheduling floor for small nodes)
+- **Storage**: one 50Gi volume. The manifest asks for `local-path` (k3d);
+  `infrastructure/azure/deploy-azure.sh` swaps that for `managed-csi` on AKS,
+  so production keeps it on a single Azure managed disk
+- **Persistence**: one pod, no database replication. The production disk
+  is StandardSSD ZRS, which survives a zone failure but not deletion or bad
+  writes; recovery from those relies on the disk snapshots and the logical
+  dumps (below, and [docs/DR.md](../../../docs/DR.md))
 
 ## High Availability (production) — #137
 
@@ -230,7 +236,8 @@ kubectl logs -n vrsky-database postgresql-0 | grep "CREATE TABLE"
 
 ### Persistent Volume
 
-PostgreSQL data is stored in a 50GB Longhorn volume.
+PostgreSQL data is stored in one 50Gi volume: `local-path` on k3d, an Azure
+managed disk (`managed-csi`) in production.
 
 ```bash
 # List PVCs
