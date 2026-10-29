@@ -672,7 +672,7 @@ Last updated 2026-10-28.
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
     a retry would read better. Found in review of #501.
-99. **No runbook for rotating the ACR password.** The password enters the
+99. ~~**No runbook for rotating the ACR password.**~~ (#539) The password enters the
     cluster in `deploy-azure.sh` step 2 (`vrsky-platform`, `vrsky-storage`)
     and `minio-images-acr.sh --repoint` (`vrsky-storage`), and every deploy
     copies it on into `vrsky-database` and `vrsky-ui` (#497). Nothing says

@@ -32,15 +32,19 @@ ride along with its image as they always have.
 Before anything rolls, every deploy that reaches a running cluster copies
 `acr-pull` from `vrsky-platform` into `vrsky-database` and `vrsky-ui`
 (`copy-acr-pull.sh`), and so does every Catch up. After an ACR password
-rotation you update `acr-pull` in `vrsky-platform` only; the next deploy or
-Catch up carries it over before the first pod pulls, so the backup Job and
-the UI keep pulling. A namespace that doesn't exist yet is skipped. It
-touches only those two Secrets ([backup](backup.md)). A failed copy fails
+rotation you update `acr-pull` by hand in `vrsky-platform` and in
+`vrsky-storage` (MinIO has its own, not a copy); the next deploy or Catch
+up carries `vrsky-platform`'s over before the first pod pulls, so the backup
+Job and the UI keep pulling. The copy skips a namespace that doesn't exist
+yet and touches only the two copies ([backup](backup.md)). A failed copy fails
 the run before the rollout. The log says which namespace and the exit
 code, and nothing else: kubectl's
 own error can contain the Secret, and the deploy log is readable by anyone
 with repo access. To see kubectl's reason, run the apply yourself in your
 own terminal.
+
+The whole rotation, with a check that every namespace pulls again, is in
+[Rotating the ACR password](acr-rotation.md).
 
 Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.
