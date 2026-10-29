@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
@@ -357,13 +360,14 @@ func stOneShot(t *testing.T, conn sftpConn, store *pdStore, settle time.Duration
 	mock.ExpectExec("UPDATE connections SET status").WithArgs("stopped", pdConn, pdTenant).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	c := &sftpConsumer{
-		db:            db,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		active:        make(map[string]*activeConn),
-		publish:       log.publish,
-		dial:          func(*SFTPConfig) (sftpConn, error) { return conn, nil },
-		checkpoints:   store,
-		oneShotSettle: settle,
+		db:          db,
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		active:      make(map[string]*activeConn),
+		publish:     log.publish,
+		dial:        func(*SFTPConfig) (sftpConn, error) { return conn, nil },
+		checkpoints: store,
+		settleMin:   settle,
+		settleMax:   settle,
 	}
 	c.startConnection(context.Background(), pdConn, pdTenant)
 	harness.Eventually(t, pdWait, "the one-shot to end stopped", func() bool {
@@ -453,7 +457,8 @@ func TestStable_EndToEnd_UploadInProgress(t *testing.T) {
 	}}
 	nodes := `[{"id":"c1","type":"consumer","config":{"type":"sftp","sftp":{"host":"sftp","username":"u","password":"p","remote_dir":"/in","after_action":"none","poll_interval_seconds":1}}}]`
 	db := pdMockDB(t, pdConn, pdTenant, nodes, 1)
-	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return conn, nil }, checkpoints: newPDStore()}
+	// settleMin below the 1 s interval: the settle gap is the interval.
+	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return conn, nil }, checkpoints: newPDStore(), settleMin: 100 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: db})
 	data := pdSubscribe(t, h.NATS())
 	time.Sleep(200 * time.Millisecond) // the consumer subscribes to commands in Run
@@ -469,4 +474,218 @@ func TestStable_EndToEnd_UploadInProgress(t *testing.T) {
 	listed := conn.lists.Load()
 	harness.Eventually(t, 5*time.Second, "one more poll", func() bool { return conn.lists.Load() > listed })
 	data.require(t, "after the upload settled", map[string]int{"order.json": 1})
+}
+
+// --- review round 1: the settle gap is not the poll interval -----------------
+
+// Review of #568: a poller that lives shorter than its poll interval (the
+// cluster is parked 16:00-07:00, so a pod lives at most ~9 h; a deploy that
+// touches the SDK restarts it sooner) never saw a file twice, so a file that
+// was finished long ago was never published. Before #562 it went out on each
+// start's first poll. Now the look that publishes comes a settle gap (at most
+// 30 s) after the first, so each day polls until the park, and the file goes
+// out once on the first day.
+func TestReview_RestartsShorterThanTheIntervalNeverPublish(t *testing.T) {
+	r := newPDRig(t, newPDStore(), &fakeSFTP{})
+	r.cfg.PollIntervalSeconds = 24 * 3600       // a daily pickup
+	pdPut(r.fake, "daily.csv", "a,b\n1,2\n", 0) // uploaded and finished long ago
+	start := pdT0.Add(24 * time.Hour)
+	for day := 0; day < 5; day++ {
+		r.clock = start.Add(time.Duration(day) * 24 * time.Hour) // 07:00, the cluster starts
+		r.boot()
+		park := r.clock.Add(9 * time.Hour) // 16:00
+		for polls := 0; r.clock.Add(r.nextStep()).Before(park); polls++ {
+			if polls > 100 {
+				t.Fatal("more than 100 polls in a day with nothing to do")
+			}
+			r.poll()
+		}
+	}
+	if got := r.log.counts()["daily.csv"]; got != 1 {
+		t.Fatalf("after 5 daily starts daily.csv was published %d times, want 1", got)
+	}
+}
+
+// The settle gap is the poll interval, at least 5 s and at most 30 s; a
+// one-shot run gets 5 s.
+func TestStable_SettleGap(t *testing.T) {
+	cases := []struct {
+		interval int
+		want     time.Duration
+	}{
+		{0, 5 * time.Second},
+		{1, 5 * time.Second},
+		{5, 5 * time.Second},
+		{10, 10 * time.Second},
+		{30, 30 * time.Second},
+		{60, 30 * time.Second},
+		{24 * 3600, 30 * time.Second},
+	}
+	c := &sftpConsumer{}
+	for _, tc := range cases {
+		if got := c.settleGap(&SFTPConfig{PollIntervalSeconds: tc.interval}); got != tc.want {
+			t.Errorf("poll_interval_seconds %d: settle gap %v, want %v", tc.interval, got, tc.want)
+		}
+	}
+}
+
+// After a poll that left files waiting to settle the next poll comes a settle
+// gap later, if that is sooner than the interval; otherwise one interval later.
+func TestStable_NextPoll(t *testing.T) {
+	cases := []struct {
+		interval int
+		waiting  int
+		want     time.Duration
+	}{
+		{60, 0, 60 * time.Second},
+		{60, 1, 30 * time.Second},
+		{24 * 3600, 3, 30 * time.Second},
+		{24 * 3600, 0, 24 * time.Hour},
+		{10, 1, 10 * time.Second},
+		{2, 1, 2 * time.Second}, // the 5 s floor does not slow a short interval
+	}
+	c := &sftpConsumer{}
+	for _, tc := range cases {
+		if got := c.nextPoll(&SFTPConfig{PollIntervalSeconds: tc.interval}, tc.waiting); got != tc.want {
+			t.Errorf("interval %d s, %d waiting: next poll in %v, want %v", tc.interval, tc.waiting, got, tc.want)
+		}
+	}
+}
+
+// Through runPoller and real timers: with an hour's poll interval a file is
+// published a settle gap after the first poll, and once nothing is waiting
+// the poller goes back to its interval.
+func TestStable_RunPollerLooksAgainAfterTheSettleGap(t *testing.T) {
+	fake := &fakeSFTP{}
+	pdPut(fake, "a.json", `{"a":1}`, 0)
+	conn := &stHookSFTP{fakeSFTP: fake}
+	log := &pdLog{}
+	c := &sftpConsumer{
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		publish:     log.publish,
+		dial:        func(*SFTPConfig) (sftpConn, error) { return conn, nil },
+		checkpoints: newPDStore(),
+		settleMin:   20 * time.Millisecond,
+		settleMax:   50 * time.Millisecond,
+	}
+	cfg := &SFTPConfig{Host: "sftp", Username: "u", Password: "p", RemoteDir: "/in", AfterAction: "none", PollIntervalSeconds: 3600, nodeID: "c1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		c.runPoller(ctx, &activeConn{cancel: cancel}, pdConn, pdTenant, cfg)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-ended:
+		case <-time.After(2 * time.Second):
+			t.Error("the poller did not end within 2 s of the stop")
+		}
+	}()
+
+	harness.Eventually(t, 3*time.Second, "a.json published a settle gap after the first poll", func() bool {
+		return log.counts()["a.json"] == 1
+	})
+	time.Sleep(300 * time.Millisecond)
+	if got := conn.lists.Load(); got != 2 {
+		t.Errorf("listed the folder %d times, want 2: the first poll and the one a settle gap later", got)
+	}
+	requireCounts(t, log, "after the settle gap", map[string]int{"a.json": 1})
+}
+
+// A stop during the wait for the second look ends the poller at once, without
+// that look: in a one-shot run and in poll mode.
+func TestStable_StopDuringTheSettleWait(t *testing.T) {
+	for _, interval := range []int{0, 3600} {
+		t.Run("poll_interval_seconds "+strconv.Itoa(interval), func(t *testing.T) {
+			fake := &fakeSFTP{}
+			pdPut(fake, "a.json", `{"a":1}`, 0)
+			conn := &stHookSFTP{fakeSFTP: fake}
+			log := &pdLog{}
+			c := &sftpConsumer{
+				logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+				publish:     log.publish,
+				dial:        func(*SFTPConfig) (sftpConn, error) { return conn, nil },
+				checkpoints: newPDStore(),
+				settleMin:   time.Hour,
+				settleMax:   time.Hour,
+			}
+			cfg := &SFTPConfig{Host: "sftp", Username: "u", Password: "p", RemoteDir: "/in", AfterAction: "none", PollIntervalSeconds: interval, nodeID: "c1"}
+			ctx, cancel := context.WithCancel(context.Background())
+			ended := make(chan struct{})
+			go func() {
+				defer close(ended)
+				c.runPoller(ctx, &activeConn{cancel: cancel}, pdConn, pdTenant, cfg)
+			}()
+			harness.Eventually(t, 3*time.Second, "the first poll", func() bool { return conn.lists.Load() == 1 })
+			cancel()
+			select {
+			case <-ended:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the poller did not end within 2 s of the stop")
+			}
+			if got := conn.lists.Load(); got != 1 {
+				t.Errorf("listed the folder %d times, want 1", got)
+			}
+			requireCounts(t, log, "after the stop", map[string]int{})
+		})
+	}
+}
+
+// A name gone from the folder is no longer pending; a failed publish keeps its
+// sighting, is not counted as waiting, and is retried at the next poll.
+func TestStable_PendingBookkeeping(t *testing.T) {
+	t.Run("gone names are pruned", func(t *testing.T) {
+		r := newPDRig(t, newPDStore(), &fakeSFTP{})
+		r.boot()
+		pdPut(r.fake, "a.json", `{"a"`, 0)
+		pdPut(r.fake, "b.json", `{"b"`, 0)
+		r.poll()
+		if len(r.pending) != 2 || r.waiting != 2 {
+			t.Fatalf("pending %d, waiting %d after the first poll; want 2 and 2", len(r.pending), r.waiting)
+		}
+		pdDel(r.fake, "a.json")
+		r.poll()
+		if _, ok := r.pending["a.json"]; ok || len(r.pending) != 0 {
+			t.Errorf("pending after a.json went = %v, want empty (b.json published)", r.pending)
+		}
+		requireCounts(t, r.log, "after the delete", map[string]int{"b.json": 1})
+	})
+
+	t.Run("a failed publish is retried", func(t *testing.T) {
+		r := newPDRig(t, newPDStore(), &fakeSFTP{})
+		r.cfg.PollIntervalSeconds = 60
+		r.boot()
+		fail := true
+		r.c.publish = func(ctx context.Context, env *envelope.Envelope) error {
+			if fail {
+				fail = false
+				return errors.New("bus down")
+			}
+			return r.log.publish(ctx, env)
+		}
+		pdPut(r.fake, "a.json", `{"a":1}`, 0)
+		r.poll()
+		r.poll()
+		requireCounts(t, r.log, "the failed publish", map[string]int{})
+		if _, ok := r.pending["a.json"]; !ok || r.waiting != 0 {
+			t.Fatalf("after the failed publish: pending %v, waiting %d; want a.json kept and 0 waiting", r.pending, r.waiting)
+		}
+		r.poll()
+		requireCounts(t, r.log, "the retry", map[string]int{"a.json": 1})
+	})
+
+	t.Run("a failed connect keeps the files waiting", func(t *testing.T) {
+		r := newPDRig(t, newPDStore(), &fakeSFTP{})
+		r.cfg.PollIntervalSeconds = 3600
+		r.boot()
+		pdPut(r.fake, "a.json", `{"a":1}`, 0)
+		r.poll()
+		r.c.dial = func(*SFTPConfig) (sftpConn, error) { return nil, errors.New("down") }
+		r.poll()
+		if r.waiting != 1 {
+			t.Fatalf("waiting after a failed connect = %d, want 1: the next poll comes a settle gap later", r.waiting)
+		}
+	})
 }

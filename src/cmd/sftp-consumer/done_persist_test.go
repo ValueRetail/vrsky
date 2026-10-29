@@ -238,7 +238,12 @@ type pdRig struct {
 	c       *sftpConsumer
 	done    *doneset.Set
 	pending map[string]sighting
-	// clock is the consumer's clock; each poll moves it one settle interval.
+	// waiting is what the last poll left waiting to settle; fresh is true
+	// from a boot to its first poll, which runPoller makes at once.
+	waiting int
+	fresh   bool
+	// clock is the consumer's clock; each poll moves it as far as runPoller
+	// would wait before that poll.
 	clock time.Time
 }
 
@@ -264,14 +269,30 @@ func (r *pdRig) boot() {
 	}
 	r.done = r.c.doneSet(r.conn, r.tenant, &r.cfg)
 	r.pending = make(map[string]sighting)
+	r.waiting = 0
+	r.fresh = true
 }
 
-// poll is one poll interval passing, then a poll.
+// poll is the wait runPoller would make (#562: none after a boot, the settle
+// gap while files are waiting to settle, else the poll interval), then a
+// poll. A one-shot config has no interval; its polls are a settle gap apart.
 func (r *pdRig) poll() { r.pollCtx(context.Background()) }
 
 func (r *pdRig) pollCtx(ctx context.Context) {
-	r.clock = r.clock.Add(r.c.settleInterval(&r.cfg))
-	r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.pending, r.c.logger)
+	r.clock = r.clock.Add(r.nextStep())
+	r.fresh = false
+	r.waiting = r.c.pollOnce(ctx, r.conn, r.tenant, &r.cfg, r.done, r.pending, r.c.logger)
+}
+
+// nextStep is how long runPoller would wait before the next poll.
+func (r *pdRig) nextStep() time.Duration {
+	if r.fresh {
+		return 0
+	}
+	if step := r.c.nextPoll(&r.cfg, r.waiting); step > 0 {
+		return step
+	}
+	return r.c.settleGap(&r.cfg)
 }
 
 func (r *pdRig) polls(n int) {
@@ -559,7 +580,7 @@ func TestDonePersist_OneShotStatus(t *testing.T) {
 				dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
 				checkpoints: store,
 				// The one-shot's second look (#562), without the 5 s wait.
-				oneShotSettle: 20 * time.Millisecond,
+				settleMin: 20 * time.Millisecond,
 			}
 			c.startConnection(context.Background(), pdConn, pdTenant)
 			harness.Eventually(t, pdWait, "the one-shot to end with status "+tc.status, func() bool {
@@ -761,7 +782,9 @@ func TestDonePersist_EndToEnd_StopAndStart(t *testing.T) {
 	// file arrives once. (A new pod on the same store is a boot in the tests
 	// above.)
 	db := pdMockDB(t, pdConn, pdTenant, nodes, 2)
-	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil }, checkpoints: store}
+	// settleMin below the 1 s interval: the settle gap is the interval, as
+	// before #562's 5 s floor.
+	c := &sftpConsumer{dial: func(*SFTPConfig) (sftpConn, error) { return fake, nil }, checkpoints: store, settleMin: 100 * time.Millisecond}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sftp-consumer", DB: db})
 	data := pdSubscribe(t, h.NATS())
 	time.Sleep(200 * time.Millisecond) // the consumer subscribes to commands in Run

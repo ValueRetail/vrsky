@@ -8,7 +8,8 @@ Backlog item 107. Open questions: none. Calls made without asking are under
 The SFTP consumer (`src/cmd/sftp-consumer`) publishes a remote file only once
 the uploader has finished with it, and publishes the finished file once. Same
 rule as the file consumer's check (#374): the size and mtime must be the same
-on two consecutive looks, at least one poll interval apart.
+on two consecutive looks, at least one settle gap apart (the poll interval
+kept between 5 and 30 s; see "Review round 1").
 
 ## Acceptance criteria
 
@@ -19,7 +20,7 @@ on two consecutive looks, at least one poll interval apart.
    wait starts again from the change. Once it stops changing it is published
    once, with its final contents.
 3. A file that never stops changing is never published.
-4. The two looks must be at least one poll interval apart on the consumer's
+4. The two looks must be at least one settle gap apart on the consumer's
    clock. A look that comes sooner (a slow poll followed straight by the next
    one) does not count, and keeps the first sighting.
 5. Works with every `after_action` (`none`, `delete`, `move`): the after-action
@@ -65,14 +66,15 @@ In `pollOnce`, per listed file, after the done-set and pattern checks:
 
 - done with this stamp: drop any sighting, skip (unchanged from #538).
 - no sighting, or a different stamp: record (stamp, now), skip.
-- same stamp, less than the settle interval since the sighting: skip, keep it.
-- same stamp, at least the interval: publish as today. On success drop the
+- same stamp, less than the settle gap since the sighting: skip, keep it.
+- same stamp, at least the gap: publish as today. On success drop the
   sighting and mark done. On a failed publish keep it, so the next poll
   retries (today's behaviour).
 
-Names gone from the listing lose their sighting. The settle interval is the
-poll interval, or for a one-shot the settle wait (5 s, a field so tests can
-shorten it). The clock is a field (`now`, nil means `time.Now`).
+Names gone from the listing lose their sighting. The settle gap is the poll
+interval kept between 5 and 30 s; a one-shot gets 5 s. While files wait, the
+next poll comes one settle gap later (review round 1). The clock is a field
+(`now`, nil means `time.Now`).
 
 `runPoller` re-arms a timer after each poll instead of a ticker, so polls are
 at least one interval apart even after a slow poll (#374's review round).
@@ -104,8 +106,9 @@ at least one interval apart even after a slow poll (#374's review round).
   changing still gets a partial publish, then the full file once it changes
   again (#538). Uploaders that write to a temp name and rename are safe.
 - A one-shot run now takes up to 5 s longer when it has something to publish.
-- Sightings are memory only. A restart starts the wait again, which only
-  delays.
+- Sightings are memory only. A restart starts the wait again from the
+  start's first poll; the file goes out one settle gap (at most 30 s) after
+  it. See "Review round 1" for why this is no longer one interval.
 
 ## Verification
 
@@ -114,3 +117,39 @@ From `src/`: `go build ./...`, `go vet ./...`, `golangci-lint run ./...`,
 `VRSKY_TEST_POSTGRES_URL` set for the `done_persist_pg_test.go` tests),
 `go test -race ./...`, `make lint-tenant`. New tests run against the code
 without the change first and must fail.
+
+## Review round 1
+
+The reviewer found that a poller restarted more often than its poll interval
+never published anything: sightings are memory only and the second look had
+to be a full interval after the first. A daily pickup (86400 s) on a cluster
+parked 16:00–07:00 (pods live at most ~9 h), or any connection whose consumer
+a deploy restarts, lost every file. They also found that a 1–2 s interval let
+a WAN upload that stalls for a couple of seconds look finished.
+
+Changes:
+- The settle gap is decoupled from the poll interval:
+  `min(max(interval, 5 s), 30 s)`. A one-shot run gets 5 s. The bounds are
+  fields (`settleMin`, `settleMax`) so tests can shorten them.
+- `pollOnce` returns how many files it left waiting to settle (after a failed
+  connect or listing: every pending file). When that is non-zero, `runPoller`
+  arms the next timer for the settle gap instead of the interval, also after
+  the start's first poll. Latency is at most interval + 30 s. A failed
+  publish is not counted, so a file that keeps failing is retried once per
+  interval as before, not every 30 s.
+- A file that never stops changing makes the poller look every settle gap
+  (one SSH session per look) until it settles or goes. Accepted: it is what
+  the check needs to tell when it settles.
+- Tests: the reviewer's `TestReview_RestartsShorterThanTheIntervalNeverPublish`,
+  adapted: as written it polls once per boot, so no fix could pass it; now
+  each day polls as runPoller would until the 16:00 park. Also table tests
+  for the gap and the next-poll wait, a real-timer `runPoller` test (hour
+  interval, published a settle gap after the first poll, then back to the
+  interval), a stop during the settle wait in both modes, gone names pruned
+  from `pending`, a failed publish retried, and a failed connect keeping
+  files waiting. The rig's `poll()` now waits what `runPoller` would.
+- Docs: the paragraph states the gap, the latency and that a restart starts
+  the wait again.
+- Not fixed here: `TestDonePersistPG_RestartAndTenants` is flaky on main too
+  (the one-shot can write "stopped" before the test reads "running"); it gets
+  its own issue.

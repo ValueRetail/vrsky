@@ -101,7 +101,7 @@ func (p *pdPG) start(tenant, conn string, fake *fakeSFTP, log *pdLog) {
 		dial:        func(*SFTPConfig) (sftpConn, error) { return fake, nil },
 		checkpoints: checkpoint.NewPostgresStore(p.db),
 		// The one-shot's second look (#562), without the 5 s wait.
-		oneShotSettle: 20 * time.Millisecond,
+		settleMin: 20 * time.Millisecond,
 	}
 	c.startConnection(context.Background(), conn, tenant)
 	if got := p.status(conn); got != "running" {
