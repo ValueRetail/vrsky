@@ -949,6 +949,15 @@ Last updated 2026-10-28.
     first. After a start activates, read the failed events since the
     connection last stopped and resend those; events refused with 410 after
     a stop were refused on purpose and stay. Found in #503.
+137. **Decide whether `ui/src/pages/PipelineBuilder.tsx` goes into
+    `coverage.exclude` in `ui/vitest.config.ts`.** A page-level deploy test
+    (real page and stores, mocked canvas widgets) works, but rendering the
+    builder counts about 1,667 more lines and takes global coverage to
+    78.4 / 66.8 / 76.8 (statements / branches / functions) against the
+    80 / 75 / 80 thresholds. Excluding the page would let that test be
+    committed, but it also hides a ~2000 line component from the gate, so it
+    needs a human decision. Until then the builder's deploy wiring is pinned
+    from `services/deployPipeline.test.ts`. Found in review of #580.
 
 ## Human
 
