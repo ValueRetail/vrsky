@@ -1,8 +1,11 @@
 # PostgreSQL HA via CloudNativePG (#137).
 #
-# Replaces the single-replica StatefulSet (statefulset.yaml — now dev-only) with
-# a 3-instance cluster: one primary + two streaming replicas, with automated
+# An alternative to the single-replica StatefulSet (statefulset.yaml), which is
+# what production runs. Nothing deploys this cluster today. It would be a
+# 3-instance cluster: one primary + two streaming replicas, with automated
 # failover and one synchronous standby for zero data loss on promotion.
+# Production's disk snapshots target the StatefulSet's disk, so moving here
+# needs its own backup first (see the note after `storage` below).
 #
 # Prerequisites:
 #   1. Install the CloudNativePG operator (once per cluster):
