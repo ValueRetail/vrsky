@@ -662,7 +662,9 @@ services:
       # Same folder and fixed target as file-consumer (#422). Read-only: the
       # producer only stats it (HOST_HOME) and writes to /data/output.
       - "${VRSKY_FILES_HOST_DIR:-./data/input}:/data/input:ro"
-      - ./data/output:/data/output
+      # Host folder behind /data/output (FILE_OUTPUT_DIR), set in .env (any
+      # OS's path style). The target stays a fixed Linux path (#553).
+      - "${VRSKY_FILES_OUTPUT_HOST_DIR:-./data/output}:/data/output"
     networks:
       - vrsky-network
     restart: unless-stopped
