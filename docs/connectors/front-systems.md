@@ -38,8 +38,22 @@ published and the handler answers:
 | Status | When |
 |---|---|
 | `404` | No connection with that id. |
-| `410` | The connection exists but is stopped (or failed to start). |
-| `503` | The connector is starting up and hasn't restored its running connections yet, or is shutting down. |
+| `410` | The connection exists but is stopped, or its start failed for good (status `error`). |
+| `503` | The connection is starting, or its start failed for a reason that passes and is waiting to retry; or the connector is starting up and hasn't restored its running connections yet, or is shutting down. |
+
+A start that fails for a reason that passes is retried: the database not
+answering, or Front Systems answering 5xx, 408 or 429, or not answering at
+all. The first retry comes after about 5 seconds, then the wait doubles up to
+5 minutes, with some jitter. Retries stop when the pipeline is stopped or
+deleted, when its status is no longer `running`, or after 6 hours, when the
+status becomes `error`. A start that fails in a way no retry fixes (Front
+Systems refusing the registration with another 4xx such as 401 or 403, a
+missing `base_url`, a secret that can't be read) is not retried: the
+pipeline's status becomes `error` and its last error names the cause. Fix it
+and start the pipeline again.
+
+Events refused with `503` are not replayed once the pipeline is running; they
+stay in Front Systems' failed-events log until someone resends them.
 
 The route has no authentication of its own (Front Systems documents no
 signature): the connection id in the URL is the secret. The event is published
@@ -107,9 +121,9 @@ are poison and go to the DLQ.
 
 - **Missed-event reconciliation** — Front Systems exposes
   `GET /api/WebhooksEvents/{webhookId}?success=false&from=&to=` plus a resend
-  endpoint. A periodic reconcile poller that replays missed events is a
-  straightforward enhancement. It would also recover events refused with
-  `410`/`503` above.
+  endpoint. Replaying the events refused with `503` above after a start is
+  backlog item 136; it needs the event id as an idempotency key so an event
+  whose `202` got lost isn't published twice.
 - **Webhook signature verification** — no HMAC scheme is documented; confirm
   with Front Systems and add verification if one exists (today the callback
   relies on URL secrecy + the `x-api-key`).

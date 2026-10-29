@@ -63,8 +63,22 @@ type frontSystemsConsumer struct {
 	restoring         bool
 	closed            bool
 
-	// bgCtx is cancelled by Stop; unregisters started by stop commands run
-	// under it and are counted by bg. Created lazily under mu.
+	// pending holds, by connection ID, a start that is wanted but has not
+	// activated yet: one in progress, or one waiting to retry after a
+	// transient failure (retry.go). The webhook route answers 503 for it, not
+	// 410. A stop for its tenant, an activation, a permanent failure, giving
+	// up and Stop remove it. Under mu.
+	pending map[string]*pendingStart
+
+	// Retry timing for failed starts; zero means the defaults in retry.go.
+	// Tests shorten them.
+	retryBase   time.Duration
+	retryMax    time.Duration
+	retryGiveUp time.Duration
+
+	// bgCtx is cancelled by Stop; unregisters started by stop commands and
+	// start retries run under it and are counted by bg. Created lazily under
+	// mu.
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 	bg       sync.WaitGroup
@@ -206,6 +220,12 @@ func (c *frontSystemsConsumer) Stop(ctx context.Context) error {
 	c.active = nil
 	// A start still in flight gives up instead of counting as started.
 	c.starts.StopAllLocked()
+	// Retries waiting for their next attempt end now, not after stopGrace.
+	// The connections stay running in the database for the next process.
+	for _, p := range c.pending {
+		p.cancel()
+	}
+	c.pending = nil
 	c.lifecycleCtxLocked()
 	cancel := c.bgCancel
 	c.mu.Unlock()
@@ -274,6 +294,17 @@ func (c *frontSystemsConsumer) refuseEvent(connectionID, tenantID string) int {
 			"connection_id", connectionID, "tenant_id", tenantID, "started_for", ac.tenantID)
 		return http.StatusGone
 	}
+	// A start is in progress or waiting to retry: the connection is meant to
+	// be running, so try later, not gone. Another tenant's event gets the
+	// same 410 as for an active connection.
+	if p, ok := c.pending[connectionID]; ok {
+		if p.tenantID == tenantID {
+			return http.StatusServiceUnavailable
+		}
+		c.logger.Warn("Front Systems event refused: the connection's tenant is not the one it is starting for",
+			"connection_id", connectionID, "tenant_id", tenantID, "starting_for", p.tenantID)
+		return http.StatusGone
+	}
 	// While boot restore runs, or the process is shutting down, the
 	// connection may be running in the database: try later, not gone.
 	if c.restoring || c.closed {
@@ -293,7 +324,20 @@ func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
 
 // startConnection is the start command's work, also what RestoreRunning calls on
 // boot for every pipeline the database says is running (plans/stable-connections.md).
+// A start that fails in a way a retry may fix is retried in the background
+// (retry.go); one that fails for good marks the connection "error".
 func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
+	res := c.attemptStart(connectionID, tenantID, nil,
+		func() { c.startConnection(ctx, connectionID, tenantID) })
+	c.afterAttempt(connectionID, tenantID, res)
+}
+
+// attemptStart makes one start of the connection. p is the pending start a
+// retry runs for; nil for a start command or boot restore, which attach to
+// the connection's pending start (or make one). retry is what ReserveOrRetry
+// keeps if this start is refused while another is in flight; nil from the
+// retry loop, which tries again itself.
+func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pendingStart, retry func()) startResult {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -301,12 +345,39 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 	// the same connection stops here instead of registering the webhooks again
 	// (#397, #429). A start refused while another is in flight runs again if
 	// that one gives up without activating (#424).
+	//
+	// The connection's pending start is attached in the same critical section
+	// (the check runs with mu held), so any stop after it finds both the claim
+	// and the pending start (#503). A retry whose pending start a stop has
+	// already ended is refused there too.
+	var created, ended bool
 	claim, ok := c.starts.ReserveOrRetry(&c.mu, tenantID, connectionID,
-		func() bool { _, ok := c.active[connectionID]; return ok },
-		func() { c.startConnection(ctx, connectionID, tenantID) })
+		func() bool {
+			if _, ok := c.active[connectionID]; ok {
+				return true
+			}
+			if p != nil {
+				ended = c.pending[connectionID] != p
+				return ended
+			}
+			p, created = c.attachPendingLocked(connectionID, tenantID)
+			return false
+		},
+		retry)
 	if !ok {
+		if ended {
+			return startResult{outcome: startAbandoned, p: p}
+		}
 		logger.Warn("Front Systems connection already started or starting")
-		return
+		if created {
+			// Nobody runs for the pending start this call made: a start for
+			// another tenant holds the claim (one for this tenant would have
+			// made it first).
+			c.mu.Lock()
+			c.dropPendingLocked(connectionID, p)
+			c.mu.Unlock()
+		}
+		return startResult{outcome: startRefused, p: p}
 	}
 	// Frees the claim on every early return below; a no-op once active. It
 	// runs after the hook lock is unlocked (defers run last in, first out),
@@ -328,22 +399,21 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 	c.mu.Unlock()
 	c.drainUnregisters(fsCtx, connectionID, logger)
 
-	cfg, err := c.getConfig(context.Background(), connectionID, tenantID)
+	cfg, err := c.getConfig(fsCtx, connectionID, tenantID)
 	if err != nil {
-		logger.Debug("Not a Front Systems consumer for this connection", "error", err)
-		return
+		return failedStart(p, err, startTransient, "")
 	}
 	// Auto-register our callback for the configured events, if a callback URL is
 	// set. If not, the webhook is expected to be registered out of band and this
 	// connector just receives on /frontsystems/events/{id}. A failed
-	// registration leaves the connection not started, so the next start (or a
-	// start refused meanwhile) tries again.
+	// registration leaves the connection not started; afterAttempt retries it
+	// or marks it "error".
 	ac := &activeConn{tenantID: tenantID}
 	if cfg.CallbackURL != "" && len(cfg.Events) > 0 {
 		ids, err := c.registerWebhooks(fsCtx, cfg, logger)
 		if err != nil {
-			logger.Error("Front Systems webhook registration failed", "error", err)
-			return
+			kind, reason := classifyRegisterError(err)
+			return failedStart(p, err, kind, reason)
 		}
 		ac.hooks = hookSet{cfg: cfg, ids: ids}
 	}
@@ -356,6 +426,8 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 			c.active = make(map[string]*activeConn)
 		}
 		c.active[connectionID] = ac
+		// Active now: the pending start, and any retry waiting with it, is done.
+		c.dropPendingLocked(connectionID, p)
 	}) {
 		logger.Info("Start abandoned: a stop arrived while it was in progress")
 		c.mu.Lock()
@@ -366,7 +438,9 @@ func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID
 			defer cancel()
 			c.unregisterWebhooks(uctx, ac.hooks, logger)
 		}
+		return startResult{outcome: startAbandoned, p: p}
 	}
+	return startResult{outcome: startActivated, p: p}
 }
 
 // handleStopCommand forgets the connection, so the webhook route refuses its
@@ -397,6 +471,19 @@ func (c *frontSystemsConsumer) handleStopCommand(msg *nats.Msg) {
 		logger.Warn("Ignoring stop command for another tenant", "error", err)
 		return
 	}
+	// A start waiting to retry ends here, and one in progress no longer
+	// retries. The guard checked the tenant only if a start holds the claim
+	// right now or the connection was active before, so it is checked again.
+	retrying := false
+	if p, ok := c.pending[cmd.ConnectionID]; ok {
+		if p.tenantID != cmd.TenantID {
+			c.mu.Unlock()
+			logger.Warn("Ignoring stop command for another tenant", "starting_for", p.tenantID)
+			return
+		}
+		c.dropPendingLocked(cmd.ConnectionID, p)
+		retrying = true
+	}
 	if ac, ok := c.active[cmd.ConnectionID]; ok {
 		delete(c.active, cmd.ConnectionID)
 		// Handed over in the critical section that forgets the connection, so
@@ -412,8 +499,11 @@ func (c *frontSystemsConsumer) handleStopCommand(msg *nats.Msg) {
 		}
 	}
 	c.mu.Unlock()
-	if starting {
+	switch {
+	case starting:
 		logger.Info("Stop arrived while the connection was starting; the start is abandoned")
+	case retrying:
+		logger.Info("Stop arrived while the connection's start was waiting to retry; the retries end")
 	}
 	if unregister {
 		go func() {
@@ -518,7 +608,7 @@ func (c *frontSystemsConsumer) registerWebhooks(ctx context.Context, cfg *FrontS
 			return fail(fmt.Errorf("register %s: %w", event, err))
 		}
 		if status < 200 || status >= 300 {
-			return fail(fmt.Errorf("register %s: HTTP %d: %s", event, status, snippet(resp)))
+			return fail(fmt.Errorf("register %s: %w", event, &fsStatusError{status: status, body: snippet(resp)}))
 		}
 		var hook webhook
 		if json.Unmarshal(resp, &hook) == nil && hook.ID != "" {
@@ -595,7 +685,7 @@ func matchingWebhooks(hooks []webhook, event, callback string) []string {
 // do performs a Front Systems API request with the two required auth headers.
 func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, method, path string, body []byte) (int, []byte, error) {
 	if cfg.BaseURL == "" {
-		return 0, nil, errors.New("front_systems base_url is required (per-partner Azure APIM host)")
+		return 0, nil, fmt.Errorf("%w: front_systems base_url is required (per-partner Azure APIM host)", errBadBaseURL)
 	}
 	var rdr io.Reader
 	if body != nil {
@@ -603,7 +693,7 @@ func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(cfg.BaseURL, "/")+path, rdr)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("%w: %v", errBadBaseURL, err)
 	}
 	req.Header.Set("Ocp-Apim-Subscription-Key", cfg.SubscriptionKey)
 	req.Header.Set("x-api-key", cfg.APIKey)
@@ -631,38 +721,54 @@ func snippet(b []byte) string {
 // --- DB helpers ---
 
 // getConfig loads the connection, resolves *_secret_id references, and extracts
-// its Front Systems consumer node config.
+// its Front Systems consumer node config. Its errors are *startError, which
+// say whether a retry may help: a connection that isn't there for this tenant
+// or has no Front Systems consumer node is not ours to start (every consumer
+// sees every start command); a database that doesn't answer is transient; a
+// secret that can't be read or a node config that doesn't parse is permanent.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
 func (c *frontSystemsConsumer) getConfig(ctx context.Context, connectionID, tenantID string) (*FrontSystemsConfig, error) {
 	var nodesJSON json.RawMessage
-	if err := c.db.QueryRow(
+	if err := c.db.QueryRowContext(ctx,
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &startError{kind: startNotOurs, err: fmt.Errorf("connection not found: %w", err)}
+		}
+		return nil, &startError{kind: startTransient, err: fmt.Errorf("look up connection: %w", err)}
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		return nil, fmt.Errorf("parse nodes: %w", err)
+		return nil, &startError{kind: startNotOurs, err: fmt.Errorf("parse nodes: %w", err)}
 	}
 	reader := crypto.NewSQLSecretReader(c.db)
 	for _, n := range nodes {
 		if n.Type != "consumer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// The node's type is read before its secrets, so another consumer's
+		// node never has its secrets resolved here.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "front_systems" || nc.FrontSystems == nil {
 			continue
 		}
-		if nc.Type == "front_systems" && nc.FrontSystems != nil {
-			return nc.FrontSystems, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			if transientDBError(rerr) {
+				return nil, &startError{kind: startTransient, err: fmt.Errorf("resolve secrets: %w", rerr)}
+			}
+			return nil, &startError{kind: startPermanent, err: fmt.Errorf("resolve secrets: %w", rerr),
+				reason: "Front Systems: a secret the connection's keys refer to could not be read"}
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.FrontSystems == nil {
+			return nil, &startError{kind: startPermanent, err: fmt.Errorf("parse front_systems config after resolving secrets: %v", err),
+				reason: "Front Systems: the node's configuration could not be read"}
+		}
+		return nc.FrontSystems, nil
 	}
-	return nil, errors.New("no front_systems consumer node found")
+	return nil, &startError{kind: startNotOurs, err: errors.New("no front_systems consumer node found")}
 }
 
 // getConnectionTenant resolves the owning tenant for a connection id (webhook

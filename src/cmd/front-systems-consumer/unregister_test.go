@@ -74,6 +74,8 @@ type fakeFS struct {
 	listHang     bool   // hold every list until its request context ends or release is called
 	postNoID     bool   // answer a create with an empty body
 	postFail     string // answer the create for this event 500
+	postErrLeft  int    // answer the next postErrLeft creates with postErr (retry_test.go)
+	postErr      int    // their status; 0 drops the connection without an answer
 	onPost       func(n int, event string)
 	onList       func(n int)
 	unhang       chan struct{}
@@ -160,9 +162,26 @@ func (f *fakeFS) serve(w http.ResponseWriter, r *http.Request) {
 		f.log = append(f.log, call)
 		f.posts++
 		n, hook, failEvent := f.posts, f.onPost, f.postFail
+		errStatus, failThis := f.postErr, f.postErrLeft > 0
+		if failThis {
+			f.postErrLeft--
+		}
 		f.mu.Unlock()
 		if hook != nil {
 			hook(n, body.Event)
+		}
+		if failThis {
+			if errStatus == 0 {
+				if hj, ok := w.(http.Hijacker); ok {
+					if conn, _, err := hj.Hijack(); err == nil {
+						_ = conn.Close()
+						return
+					}
+				}
+				errStatus = http.StatusBadGateway
+			}
+			http.Error(w, `{"error":"create failed","detail":"body-must-not-reach-last_error"}`, errStatus)
+			return
 		}
 		if failEvent != "" && body.Event == failEvent {
 			http.Error(w, `{"error":"create failed"}`, http.StatusInternalServerError)
@@ -1464,8 +1483,10 @@ func TestFrontSystemsUnregister_PartialRegistrationFailureUndoesCreated(t *testi
 			if got := f.fs.registeredIDs(u.apiKey()); !sameIDs(got, []string{reused}) {
 				t.Errorf("registered after the failed start = %v, want only the reused %s", got, reused)
 			}
-			if code := postEvent(f.c, u.id, `{}`); code != http.StatusGone {
-				t.Errorf("event after the failed start: status %d, want 410", code)
+			// A 500 is transient: the start waits to retry, so the route says
+			// "try later" (503), not "gone" (410). retry_test.go covers the retry.
+			if code := postEvent(f.c, u.id, `{}`); code != http.StatusServiceUnavailable {
+				t.Errorf("event after the failed start: status %d, want 503 (start waiting to retry)", code)
 			}
 
 			// Front Systems recovers; the next start reuses and fills in.

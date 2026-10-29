@@ -21,8 +21,9 @@ import (
 // from that connection's row. An event is published only while this process
 // has the connection started, for that same tenant (#503). Otherwise nothing
 // is published and the answer is 410 Gone (not running, or the row's tenant
-// is not the one it was started for), 503 while boot restore is still running
-// or the process is shutting down, or 404 for an unknown connection.
+// is not the one it was started for), 503 while its start is in progress or
+// waiting to retry, while boot restore is still running or while the process
+// is shutting down, or 404 for an unknown connection.
 func (c *frontSystemsConsumer) handleWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -43,7 +44,7 @@ func (c *frontSystemsConsumer) handleWebhook() http.HandlerFunc {
 		switch c.refuseEvent(connID, tenantID) {
 		case 0:
 		case http.StatusServiceUnavailable:
-			c.logger.Info("Front Systems event refused: connection not started yet", "connection_id", connID)
+			c.logger.Info("Front Systems event refused: connection starting or not restored yet", "connection_id", connID)
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		default:
