@@ -825,8 +825,8 @@ Last updated 2026-10-28.
     first-start rule for these pollers publishes every file in the folder,
     so decide first whether that or "everything present is done" fits.
     Found in #563.
-119. **The SFTP and cloud-storage editors show a poll interval they don't
-    save.** Both consumer panels in
+119. ~~**The SFTP and cloud-storage editors show a poll interval they don't
+    save.**~~ (#589) Both consumer panels in
     `ui/src/components/Pipeline/PropertyEditor.tsx` show
     `poll_interval_seconds ?? 60` but write the field only when it is
     edited. The consumers read unset as 0, "poll once", so a node saved
@@ -917,7 +917,7 @@ Last updated 2026-10-28.
     `resourceURL` with the event's id unescaped; `url.PathEscape` it. Both
     touch connector security, so the PR gets `agent:needs-human`. Found in
     review of #457 (#472).
-117. **The SFTP consumer publishes temp names too.** The file consumer
+117. ~~**The SFTP consumer publishes temp names too.**~~ (#590) The file consumer
     skips dotfiles, `~*`, `*.tmp` and `*.part` until they are renamed
     (#374); the SFTP consumer has no such skip, so an uploader that writes
     `x.csv.part` and renames it gets both names published unless
@@ -958,6 +958,12 @@ Last updated 2026-10-28.
     committed, but it also hides a ~2000 line component from the gate, so it
     needs a human decision. Until then the builder's deploy wiring is pinned
     from `services/deployPipeline.test.ts`. Found in review of #580.
+139. **The SFTP test-connection preview can sample a temp file.**
+    `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
+    matching `file_pattern`; with no pattern it can sample a `.part` or
+    dotfile that the poller now skips (#590), so the preview can differ from
+    what is published. Skip temp names there too, unless the pattern names
+    them. Found in review of #590.
 
 ## Human
 
