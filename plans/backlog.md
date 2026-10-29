@@ -535,7 +535,7 @@ Last updated 2026-10-28.
     cancelled instead. S3 and Azure abort. A failed `vrsky-cli backup` on
     GCS can leave a cut-off archive that fails restore loudly (no final
     chunk) but still looks like a backup in `list`. Found during #430.
-83. **`pgRestore` in `vrsky-cli` has no unit test.** Its error precedence
+83. ~~**`pgRestore` in `vrsky-cli` has no unit test.**~~ (#523) Its error precedence
     (an archive read error wins over pg_restore's exit status) and the
     drain after pg_restore exits, which is where a chunked archive's final
     chunk and the gzip checksum get checked, are only exercised by the DR
