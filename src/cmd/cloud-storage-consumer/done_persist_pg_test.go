@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -93,18 +94,29 @@ func (p *pdPG) rows(conn string) map[string]string {
 // end "stopped".
 func (p *pdPG) start(tenant, conn string, bucket *fakeStore, log *pdLog) {
 	p.t.Helper()
+	// The poller opens its source first thing. Holding that open until the
+	// status has been read keeps the read off the one-shot's own "stopped"
+	// write, which a poll with nothing new reaches within milliseconds.
+	gate := make(chan struct{})
+	var release sync.Once
+	open := func() { release.Do(func() { close(gate) }) }
+	p.t.Cleanup(open)
 	c := &cloudConsumer{
-		db:          p.db,
-		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		active:      make(map[string]*activeConn),
-		publish:     log.publish,
-		newStore:    func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return bucket, nil },
+		db:      p.db,
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		active:  make(map[string]*activeConn),
+		publish: log.publish,
+		newStore: func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) {
+			<-gate
+			return bucket, nil
+		},
 		checkpoints: checkpoint.NewPostgresStore(p.db),
 	}
 	c.startConnection(context.Background(), conn, tenant)
 	if got := p.status(conn); got != "running" {
 		p.t.Fatalf("status after the start = %q, want running", got)
 	}
+	open()
 	harness.Eventually(p.t, pdWait, "the one-shot to end", func() bool {
 		c.mu.RLock()
 		n := len(c.active)
