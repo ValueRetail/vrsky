@@ -649,7 +649,7 @@ Last updated 2026-10-28.
     `agent:needs-human`. Since #423 the status order is already keyed by
     tenant and connection, so such a stop can't reorder the real tenant's
     writes. Found in review of #487.
-96. **Two more file-consumer messages show the path on the volume.** A
+96. ~~**Two more file-consumer messages show the path on the volume.**~~ (#499) A
     watched file that fails to ingest sends an `error` event with the raw
     Go error (`src/cmd/file-consumer/service.go`, the `ingErr` event in
     `pollOnce`), and `os.Stat`, `os.ReadFile` and `os.Open` put
