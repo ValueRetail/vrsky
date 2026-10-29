@@ -679,7 +679,7 @@ Last updated 2026-10-28.
     which of these to run after `az acr credential renew`, in which order,
     or how to check every namespace pulls again. Write it in
     `docs/operator/`. Split out of item 93.
-100. **The builder's edit route loads only the first connection it sees.**
+100. ~~**The builder's edit route loads only the first connection it sees.**~~ (#516)
     `useEditConnectionLoad` sets `editLoadDone` once and never resets it
     when `:id` changes, so going from `/connections/A/edit` to
     `/connections/B/edit` on an open builder never switches to or imports
