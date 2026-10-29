@@ -13,6 +13,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
+	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
 // Tests for #567: with after_action=move, a move_prefix whose moved objects
@@ -216,5 +217,57 @@ func TestPoll_SiblingMovePrefixPublishesOnce(t *testing.T) {
 	}
 	if _, ok := fs.objects["in/a.csv"]; ok {
 		t.Fatal("source still there after the move")
+	}
+}
+
+// Event mode: a notification for an object already in move_prefix (the
+// notification covers it, so the move came back) publishes it once, acks
+// the message, and leaves the object where it is. The guard's refusal is an
+// after-action failure, so the object still counts as ingested and the
+// message is not left for redelivery.
+func TestEventMode_ObjectAlreadyInMovePrefixIsAckedNotMoved(t *testing.T) {
+	const key = "processed/a.csv"
+	fs := &fakeStore{objects: map[string][]byte{key: []byte("a,b\n")}}
+	fe := &fakeEvents{keys: []string{key}}
+	var published atomic.Int32
+	c := &cloudConsumer{
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		active:    make(map[string]*activeConn),
+		publish:   func(context.Context, *envelope.Envelope) error { published.Add(1); return nil },
+		newStore:  func(context.Context, *objectstore.Config) (objectstore.ObjectStore, error) { return fs, nil },
+		newEvents: func(context.Context, *cloudConfig) (eventSource, error) { return fe, nil },
+	}
+	cfg := &cloudConfig{
+		Config:        objectstore.Config{Bucket: "b"},
+		Mode:          "event",
+		EventQueueURL: "http://sqs.local/q",
+		AfterAction:   "move",
+		MovePrefix:    "processed",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		c.runEventLoop(ctx, &activeConn{cancel: cancel}, "conn", "tenant", cfg)
+	}()
+	harness.Eventually(t, srWait, "event message acked", func() bool {
+		fe.mu.Lock()
+		defer fe.mu.Unlock()
+		return len(fe.acked) == 1 && fe.acked[0] == "h1"
+	})
+	cancel()
+	srAwait(t, stopped, "event loop to stop")
+
+	if n := published.Load(); n != 1 {
+		t.Fatalf("published %d times, want 1", n)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.copied) != 0 || len(fs.deleted) != 0 {
+		t.Fatalf("copied %v, deleted %v; want neither", fs.copied, fs.deleted)
+	}
+	if _, ok := fs.objects[key]; !ok {
+		t.Fatalf("object %q is gone", key)
 	}
 }

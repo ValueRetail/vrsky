@@ -49,7 +49,7 @@ Config bullets (all under `cloud_storage`):
   would find moved objects again (#567). The log says `invalid
   move_prefix` and names both values. The listing matches `prefix` as
   text, not as a folder:
-  - Starts: `prefix: incoming/` with `processed/`, `incoming-done/` or `/`
+  - Starts: `prefix: incoming/` with `processed/`, `incoming-done/` or `.`
     (the bucket root); `prefix: incoming/a/` with `incoming` (one level
     up).
   - Refused: `move_prefix` equal to or under `prefix` (`incoming/`,
@@ -58,8 +58,11 @@ Config bullets (all under `cloud_storage`):
     (`incoming` lists `incoming-done/…` too); `prefix: data/report_` with
     `data` (`data/report_1.csv` would move onto itself).
 
-  Leading slashes and `.`/`..` segments in `move_prefix` don't change the
-  result. In event mode `prefix` is not applied, so the start is not
+  For the bucket root use `.`, not `/`: a move keeps a leading slash, so
+  `/` puts `x.csv` at the key `/x.csv`, which S3 and GCS keep as a
+  separate key from `x.csv`. The check resolves `.` and `..` the way the
+  move does but ignores leading slashes, so it may refuse a config with a
+  leading `/` that would have worked on S3 or GCS. In event mode `prefix` is not applied, so the start is not
   checked: keep `move_prefix` outside what the bucket notification covers,
   or a moved object is ingested a second time. In both modes the consumer
   never moves an object onto its own key: that move fails with

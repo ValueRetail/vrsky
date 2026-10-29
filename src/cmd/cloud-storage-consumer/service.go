@@ -632,7 +632,9 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 		// Copying an object onto its own key and then deleting it loses it on
 		// Azure and GCS (#567). Poll mode refuses such a config at start; in
 		// event mode the notification decides which keys arrive, so a moved
-		// object can come back here.
+		// object can come back here. Trimming leading slashes is deliberately
+		// conservative: it also refuses some real S3/GCS moves (a.csv to
+		// /a.csv), which fails safe by leaving the object in place.
 		if strings.TrimLeft(dst, "/") == strings.TrimLeft(key, "/") {
 			return fmt.Errorf("object %q is already in move_prefix %q; not moved", key, cfg.MovePrefix)
 		}
