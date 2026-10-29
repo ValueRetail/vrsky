@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -36,8 +35,10 @@ func recs(t *testing.T, fields ...string) []json.RawMessage {
 
 // TestCursorTracker_BoundsTheWatermark — a cursor value past the ceiling must
 // not become the watermark, however the page is ordered, and must be reported.
+// The consumer sets the ceiling to now (review of #592: now + skew lost
+// records BC stamped before a watermark that sat in the future).
 func TestCursorTracker_BoundsTheWatermark(t *testing.T) {
-	ceiling := aheadNow.Add(maxCursorSkew)
+	ceiling := aheadNow
 	cases := []struct {
 		name      string
 		ceiling   time.Time
@@ -57,15 +58,21 @@ func TestCursorTracker_BoundsTheWatermark(t *testing.T) {
 		{"only a far-future record leaves no watermark", ceiling,
 			[]string{"f=2099-01-01T00:00:00Z"},
 			"", []aheadRecord{{"f", "2099-01-01T00:00:00Z"}}},
-		{"exactly at the bound is sane", ceiling,
+		{"exactly now is a watermark", ceiling,
+			[]string{"a=" + stamp(0)},
+			stamp(0), nil},
+		{"one second ahead is held back", ceiling,
+			[]string{"a=" + stamp(-time.Hour), "f=" + stamp(time.Second)},
+			stamp(-time.Hour), []aheadRecord{{"f", stamp(time.Second)}}},
+		{"at now + skew is held back", ceiling,
 			[]string{"a=" + stamp(maxCursorSkew)},
-			stamp(maxCursorSkew), nil},
-		{"one second past the bound is ahead", ceiling,
+			"", []aheadRecord{{"a", stamp(maxCursorSkew)}}},
+		{"inside the skew is held back", ceiling,
+			[]string{"a=" + stamp(time.Minute)},
+			"", []aheadRecord{{"a", stamp(time.Minute)}}},
+		{"past the skew is held back", ceiling,
 			[]string{"a=" + stamp(-time.Hour), "f=" + stamp(maxCursorSkew+time.Second)},
 			stamp(-time.Hour), []aheadRecord{{"f", stamp(maxCursorSkew + time.Second)}}},
-		{"inside the skew still counts", ceiling,
-			[]string{"a=" + stamp(time.Minute)},
-			stamp(time.Minute), nil},
 		{"no ceiling behaves as before the bound existed", time.Time{},
 			[]string{"a=" + stamp(-time.Hour), "f=2099-01-01T00:00:00Z"},
 			"2099-01-01T00:00:00Z", nil},
@@ -297,36 +304,10 @@ func TestIncremental_AheadStateSurvivesRestart(t *testing.T) {
 	}
 }
 
-// TestIncremental_PoisonedWatermarkIsDiscarded — a watermark stored before
-// the fix may already sit in 2099. It is dropped, the entity is read once
-// from the start, and the watermark that comes back is a sane one.
-func TestIncremental_PoisonedWatermarkIsDiscarded(t *testing.T) {
-	bc := newAheadBC(t, map[string]string{"a": stamp(-time.Hour), "f": "2099-01-01T00:00:00Z"})
-	c, got, mu := newTestConsumer()
-	c.now = func() time.Time { return aheadNow }
-	err := c.checkpoints.Save(context.Background(), &checkpoint.Checkpoint{
-		TenantID: "tenant-1", ConnectionID: "conn-1", NodeID: "src",
-		LastProcessedMessageID: "2099-01-01T00:00:00Z", LastProcessedAt: aheadNow,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := poll(t, c, got, mu, bc.cfg()); sorted(ids) != "a,f" {
-		t.Fatalf("published %v, want a full re-read (a,f)", ids)
-	}
-	if bc.asks[0] != "" {
-		t.Errorf("first request carried $filter=%q, want none", bc.asks[0])
-	}
-	poll(t, c, got, mu, bc.cfg())
-	if want := "lastModifiedDateTime gt " + stamp(-time.Hour); bc.lastAsk() != want {
-		t.Errorf("next poll asked %q, want %q", bc.lastAsk(), want)
-	}
-}
-
-// TestIncremental_SaneRecordsBehaveAsBefore — nothing ahead: no extra state
-// and no records withheld.
+// TestIncremental_SaneRecordsBehaveAsBefore — nothing dated after now: no
+// extra state and no records withheld.
 func TestIncremental_SaneRecordsBehaveAsBefore(t *testing.T) {
-	bc := newAheadBC(t, map[string]string{"a": stamp(-time.Hour), "b": stamp(time.Minute)})
+	bc := newAheadBC(t, map[string]string{"a": stamp(-time.Hour), "b": stamp(-time.Minute)})
 	c, got, mu := newTestConsumer()
 	c.now = func() time.Time { return aheadNow }
 	cfg := bc.cfg()
@@ -338,6 +319,41 @@ func TestIncremental_SaneRecordsBehaveAsBefore(t *testing.T) {
 	}
 	if ids := poll(t, c, got, mu, cfg); len(ids) != 0 {
 		t.Errorf("second poll published %v, want nothing", ids)
+	}
+	if want := "lastModifiedDateTime gt " + stamp(-time.Minute); bc.lastAsk() != want {
+		t.Errorf("asked %q, want %q", bc.lastAsk(), want)
+	}
+}
+
+// TestIncremental_RecordInsideTheSkewIsHeldBack inverts what the first
+// version of #592 asserted: a record a minute ahead used to become the
+// watermark at once. It is published, but held out of the watermark until
+// the clock passes it, then taken without a second send.
+func TestIncremental_RecordInsideTheSkewIsHeldBack(t *testing.T) {
+	bc := newAheadBC(t, map[string]string{"a": stamp(-time.Hour), "b": stamp(time.Minute)})
+	c, got, mu := newTestConsumer()
+	clock := aheadNow
+	c.now = func() time.Time { return clock }
+	cfg := bc.cfg()
+	if ids := poll(t, c, got, mu, cfg); sorted(ids) != "a,b" {
+		t.Fatalf("published %v", ids)
+	}
+	if ids := poll(t, c, got, mu, cfg); len(ids) != 0 {
+		t.Errorf("second poll published %v, want nothing", ids)
+	}
+	if want := "lastModifiedDateTime gt " + stamp(-time.Hour); bc.lastAsk() != want {
+		t.Errorf("b (a minute ahead) moved the watermark: asked %q, want %q", bc.lastAsk(), want)
+	}
+	clock = aheadNow.Add(2 * time.Minute)
+	if ids := poll(t, c, got, mu, cfg); len(ids) != 0 {
+		t.Errorf("once current, b was sent again: %v", ids)
+	}
+	poll(t, c, got, mu, cfg)
+	if want := "lastModifiedDateTime gt " + stamp(time.Minute); bc.lastAsk() != want {
+		t.Errorf("asked %q, want the watermark caught up to b: %q", bc.lastAsk(), want)
+	}
+	if st := cfg.nodeState(); st != nil {
+		t.Errorf("state = %s, want it empty once b is current", st)
 	}
 }
 

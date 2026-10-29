@@ -230,21 +230,47 @@ node sees) is skipped and the converted record is written.
     watermark but after the fetch read it is not picked up. `ge` would redeliver
     the watermark record on every poll instead.
 
-    **Records dated in the future.** A record whose `cursor_field` is more than
-    5 minutes ahead of the consumer's clock does not move the watermark;
-    otherwise one record stamped years ahead would park the watermark there and
-    every later poll would read nothing. Such a record is still published, once,
-    and the consumer logs a Warn with its `record_id`, the value, and the bound.
-    Because the watermark stays behind it, Business Central keeps returning it
-    on every poll; the node remembers (in the same checkpoint row) the records
-    it has sent this way, with the cursor value each carried, and leaves them
-    out until their value changes. When the clock reaches the value, the
-    record is not sent again and the watermark moves past it. A watermark
-    stored earlier that is already beyond the bound is dropped with a Warn and
-    the entity is read once from the start. A `cursor_field` that is a business
-    date in the future (a due date, say) never advances the watermark, so every
-    poll re-reads those records without re-sending them; pick a
-    last-modified field instead.
+    **Records dated in the future.** The watermark never moves past the
+    consumer's own clock. Business Central stamps what it writes with its own
+    clock, so a watermark in the future would hide every record stamped before
+    it; one record stamped years ahead would hide everything for years. A
+    record whose `cursor_field` is later than now is still published, once,
+    but does not move the watermark. Because the watermark stays behind it,
+    Business Central keeps returning it on every poll; the node remembers (in
+    the same checkpoint row) the records it has sent this way, with the cursor
+    value each carried, and leaves them out until their value changes. When
+    the clock reaches the value, the record is not sent again and the
+    watermark moves past it. A record a few seconds ahead is normal (BC's
+    clock running ahead of the pod's): it is held for one poll and passes
+    without a log line. One more than 5 minutes ahead is logged at Warn with
+    its `record_id`, the value and the bound.
+
+    **Pick a last-modified field.** A `cursor_field` that is a business date
+    (a due date, say) has every future-dated record held this way: each poll
+    reads all of them again, page by page, and the checkpoint row lists each
+    one. They are not sent again, but the poll costs grow with them, and past
+    1,000 such records the node logs a Warn once. A `cursor_field` of type
+    `Edm.Date` (a date with no time) never sets a watermark at all, so every
+    poll reads and sends the whole entity again.
+
+    **Nodes frozen before #591.** Earlier versions took any value as the
+    watermark, so a node may have stored one in the future and read nothing
+    since. On its first poll after the upgrade a stored watermark more than
+    5 minutes ahead is replaced, with a Warn. A node without pictures saved
+    its checkpoint only when the watermark moved, so `last_processed_at` is
+    when it froze: the node reads again from one hour before that, which
+    sends that hour's records a second time and the records it missed since
+    for the first time. A node with pictures saved on every poll, so its
+    `last_processed_at` does not say when it froze; it reads the entity from
+    the start and sends everything again once. That is the costly option, but
+    resuming from a guessed time would drop whatever changed between the
+    freeze and the guess without a trace. If the recovery read fails partway
+    it starts over on the next poll and sends the same records again. One
+    case the one-hour window cannot see: a frozen node that later read an even
+    later future value saved again then; records changed between those two
+    saves are older than the window. The Warn carries `watermark`,
+    `last_processed_at` and `resume_from`; if in doubt, use **Resend
+    everything** on the pipeline, which reads the entity from the start.
 - **UI source-type wiring** — config is API-settable today.
 
 The same OAuth2 client-credentials pattern (via `pkg/oauthcc`) is reused by the

@@ -958,6 +958,14 @@ Last updated 2026-10-28.
     committed, but it also hides a ~2000 line component from the gate, so it
     needs a human decision. Until then the builder's deploy wiring is pinned
     from `services/deployPipeline.test.ts`. Found in review of #580.
+140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.** `cursorTracker.observe` in
+    `src/cmd/business-central-consumer/service.go` parses the value with
+    `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
+    so the node stores no watermark and every incremental poll reads and
+    sends the whole entity. Parse date-only values too (and write them back
+    in the filter as a date literal), or refuse the config with a clear
+    error. Found in review of #592.
 
 ## Human
 
