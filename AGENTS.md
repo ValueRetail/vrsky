@@ -36,7 +36,7 @@ What the platform does keep:
 | `infrastructure/migrations/` | SQL migrations. The management API applies them when it starts. |
 | `infrastructure/kubernetes/` | Manifests and install scripts for the cluster: core services, connectors, monitoring, ingress, NATS, Postgres, MinIO. |
 | `infrastructure/azure/` | The scripts the deploy job and operators run: image builds in ACR, rollouts, smoke check, drift check, budget. |
-| `infrastructure/prometheus-rules.yml` | Alert rules, with unit tests in `prometheus-rules-test.yml`. |
+| `infrastructure/prometheus-rules.yml` | Alert rules, with unit tests in `prometheus-rules-test.yml`; `prometheus-rules-test-legs.yml` says which CI leg runs each test group. |
 | `docs/` | The documentation site (MkDocs): operator runbooks in `docs/operator/`, connector pages in `docs/connectors/`, ADRs in `docs/adr/`. |
 | `plans/` | One `plans/<task>.md` per non-trivial change, linked from its PR. `plans/backlog.md` holds work without an issue yet. |
 | `docker-compose.yml` | The local stack. |
@@ -205,10 +205,12 @@ docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool prom/prom
 ```
 
 A new test group in `prometheus-rules-test.yml` needs a `name:` made of
-`[a-z0-9-]`, and that name must be listed in exactly one leg of the
-`alert-rules` matrix in `.github/workflows/build-push.yml`. A group no leg
-names never runs in CI. `TestRuleTestGroupsRunOnce` fails until it is listed.
-To run one group: `--run '^<name>$'`.
+`[a-z0-9-]`, and that name must be listed under exactly one leg in
+`infrastructure/prometheus-rules-test-legs.yml` (a `  - <name>` line; the
+CI step reads the file with awk, so keep its plain format). The workflow does
+not change. A group no leg lists never runs in CI;
+`TestRuleTestGroupsRunOnce` fails until it is listed. To run one group:
+`--run '^<name>$'`.
 
 ## Docs site
 

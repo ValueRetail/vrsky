@@ -513,7 +513,7 @@ Last updated 2026-10-28.
     (`stripShellComments` in `gotestshards_guard_test.go`). The alert-rules
     step is already covered by running it (`TestRuleTestGroupsRunOnce`).
     Found during #443.
-80. **Every new alert test edits the workflow.** Since #464 a new test
+80. ~~**Every new alert test edits the workflow.**~~ (#495) Since #464 a new test
     group in `infrastructure/prometheus-rules-test.yml` must also be listed
     in a leg of the `alert-rules` matrix in `.github/workflows/build-push.yml`,
     so any PR that adds an alert test touches `.github/` and is
