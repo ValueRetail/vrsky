@@ -32,9 +32,11 @@ Config bullets (all under `cloud_storage`):
 - Credentials — per-provider, as in the table above.
 - `mode` — `poll` (default) or `event` for notification-driven reads.
 - `poll_interval_seconds` — poll mode: seconds between listings. `0` or
-  unset means one listing, after which the connection shows as stopped. The
-  editor shows `60` in this field until you change it, but saves nothing
-  until you do, so type the interval you want.
+  unset means one listing, after which the connection shows as stopped. A new
+  poll-mode source in the editor saves `60` here without you touching the
+  field. A node saved before that change (#589) has no value and lists once:
+  open it, press Save Configuration so it gets the `60`, and redeploy. Type
+  `0` to choose one listing on purpose.
 - `file_pattern` — poll mode: glob matched against the object's base name
   (the part after the last `/`), e.g. `*.csv`. Empty means every object.
 - `after_action` — what to do with an object once it is published: `none`

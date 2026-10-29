@@ -51,7 +51,7 @@ Both roles use an `sftp` block. The connection fields are the same for both:
 Source only:
 
 - `sftp.file_pattern` — glob matched against the file name, e.g. `*.csv`. Empty means every file except temporary names (see "Temporary names"). Subdirectories are never read.
-- `sftp.poll_interval_seconds` — seconds between polls. `0` or unset means one poll, after which the connection shows as stopped. The editor shows `60` in this field until you change it, but saves nothing until you do, so type the interval you want.
+- `sftp.poll_interval_seconds` — seconds between polls. `0` or unset means one poll, after which the connection shows as stopped. A new source in the editor saves `60` here without you touching the field. A node saved before that change (#589) has no value and polls once: open it, press Save Configuration so it gets the `60`, and redeploy. Type `0` to choose one poll on purpose.
 - `sftp.after_action` — what to do with a file once it is published: `"none"` (default, leave it), `"delete"`, or `"move"`.
 - `sftp.move_dir` — directory to move files into when `after_action` is `"move"`; created if missing. With `"move"` and no `move_dir`, every move fails and the files stay where they are.
 
