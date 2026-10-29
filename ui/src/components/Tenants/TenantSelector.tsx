@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import { useUIStore } from '../../store/uiStore'
 import CreateTenantModal from './CreateTenantModal'
-import apiClient from '../../services/api'
+import apiClient, { VRSkyAPIError } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiError'
 
 export default function TenantSelector() {
@@ -25,13 +25,17 @@ export default function TenantSelector() {
         try {
           await apiClient.delete(`/api/v1/tenants/${currentTenant.id}`)
         } catch (err) {
-          // The workspace is still there, so the selector stays as it is.
-          // No checkAuth here: it signs the user out when /me fails, which
-          // on a network error would turn a failed delete into a logout.
           showErrorNotification(
             'Workspace not deleted',
             apiErrorMessage(err, 'Could not delete the workspace. Try again.'),
           )
+          // A 403 or 404 can mean the workspace was deleted elsewhere (no
+          // membership or no workspace left), so refresh to drop it. The
+          // server answered, so the session and network are fine. On any
+          // other failure skip checkAuth: it signs the user out when /me
+          // fails, which on a network error would turn this into a logout.
+          const status = err instanceof VRSkyAPIError ? err.details?.status : undefined
+          if (status === 403 || status === 404) await checkAuth()
           return
         }
         await checkAuth()

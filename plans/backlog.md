@@ -705,7 +705,7 @@ Last updated 2026-10-28.
     makes the other pod skip new files the fallback took as done. Merge
     before that first snapshot, or keep the fallback's names out of it.
     Found in review of #500.
-103. **A workspace deleted elsewhere stays in the selector.** Deleting it
+103. ~~**A workspace deleted elsewhere stays in the selector.**~~ (#552) Deleting it
     again answers 403 or 404, and since #514 `TenantSelector` only shows
     that error. The server did answer, so a `checkAuth` on 403/404 can't
     turn a network blip into a logout; it would drop the stale workspace.
@@ -801,6 +801,17 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
+116. **`checkAuth` signs the user out when `/me` fails for any reason.**
+    `getMe` returns null on every failure, and `ui/src/store/authStore.ts`
+    clears the user and workspaces whenever it gets null, so a network
+    error or a 5xx on `/me` (at app load, after a workspace delete, after a
+    403/404 on a delete since #552) sends a user with a working session to
+    the login page. The session token stays, so a reload recovers. `getMe`
+    drops the token only on a 401 of its own, so `checkAuth` can tell the
+    two apart the way `reportUnauthorized` in `services/sessionExpiry.ts`
+    does: keep the state while the token is still there and say the
+    refresh failed. Auth state, so PR plus `agent:needs-human`. Found in
+    #552.
 119. **The SFTP and cloud-storage editors show a poll interval they don't
     save.** Both consumer panels in
     `ui/src/components/Pipeline/PropertyEditor.tsx` show

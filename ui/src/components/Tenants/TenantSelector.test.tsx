@@ -247,6 +247,80 @@ describe('TenantSelector', () => {
     expect(errors()).toEqual([])
   })
 
+  // #552: a workspace deleted in another tab or by another owner is still in
+  // this selector. Deleting it again gets a 403 (no membership left) or a
+  // 404 (no workspace left). The server answered, so a refresh through /me
+  // is safe, and it drops the stale entry.
+  describe('a delete the server refuses with 403 or 404', () => {
+    const me = (tenants: Tenant[], current: Tenant): MeResponse => ({
+      user, session_expires_at: '2026-10-30T00:00:00Z', tenants, current_tenant: current,
+    })
+
+    it.each([
+      [403, 'Forbidden', 'you are not a member of this tenant'],
+      [404, 'NotFound', 'tenant not found'],
+    ])('%i: says so, refreshes, and drops a workspace that is gone', async (status, code, message) => {
+      signInWithSession([prod, sandbox])
+      localStorage.setItem('vrsky:selectedTenantId', 'tenant-1')
+      meAnswers(me([sandbox], sandbox))
+      del.mockRejectedValue(new VRSkyAPIError(message, code, { status, error: code, message }))
+      render(<TenantSelector />)
+      await confirmDelete()
+
+      expect(errors()).toEqual([expect.objectContaining({ title: 'Workspace not deleted', message })])
+      expect(meRequests()).toHaveLength(1)
+      expect(del.mock.invocationCallOrder[0]).toBeLessThan(transport.mock.invocationCallOrder[0])
+      const s = useAuthStore.getState()
+      expect(s.isAuthenticated).toBe(true)
+      expect(s.tenants.map((t) => t.id)).toEqual(['tenant-2'])
+      expect(s.currentTenant?.id).toBe('tenant-2')
+      expect(sessionStorage.getItem(SESSION_KEY)).toBe('test-session-token')
+      expect(select()).toHaveValue('tenant-2')
+      expect((screen.getAllByRole('option') as HTMLOptionElement[]).map((o) => o.value)).toEqual(['tenant-2'])
+    })
+
+    it('403 for a workspace that still exists (not the owner): refreshes, keeps it', async () => {
+      signInWithSession([prod, sandbox])
+      localStorage.setItem('vrsky:selectedTenantId', 'tenant-1')
+      meAnswers(me([prod, sandbox], prod))
+      del.mockRejectedValue(new VRSkyAPIError('insufficient permissions', 'Forbidden', { status: 403 }))
+      render(<TenantSelector />)
+      await confirmDelete()
+
+      expect(errors()).toEqual([expect.objectContaining({ message: 'insufficient permissions' })])
+      expect(meRequests()).toHaveLength(1)
+      const s = useAuthStore.getState()
+      expect(s.isAuthenticated).toBe(true)
+      expect(s.tenants.map((t) => t.id)).toEqual(['tenant-1', 'tenant-2'])
+      expect(s.currentTenant?.id).toBe('tenant-1')
+      expect(select()).toHaveValue('tenant-1')
+    })
+  })
+
+  describe('any other failed delete leaves the session and selector alone', () => {
+    it.each<[string, unknown]>([
+      ['a network error', new VRSkyAPIError('Network request failed. Please check your connection.', 'NETWORK_ERROR', { originalError: 'boom' })],
+      ['a 401', new VRSkyAPIError('authentication required', 'Unauthorized', { status: 401 })],
+      ['a 409', new VRSkyAPIError('workspace is busy', 'Conflict', { status: 409 })],
+      ['a 500', new VRSkyAPIError('failed to delete workspace', 'ServerError', { status: 500 })],
+      ['a 502', new VRSkyAPIError('HTTP Error 502', 'HTTP_502', { status: 502 })],
+      ['a plain Error', new Error('HTTP Error 404')],
+      ['a bare object', { status: 404 }],
+    ])('%s: no /me request', async (_name, failure) => {
+      signInWithSession([prod, sandbox])
+      // /me would drop the workspace, so a refresh would show in the state.
+      meAnswers({ user, session_expires_at: '2026-10-30T00:00:00Z', tenants: [sandbox], current_tenant: sandbox })
+      del.mockRejectedValue(failure)
+      render(<TenantSelector />)
+      const before = authSnapshot()
+      await confirmDelete()
+      expect(meRequests()).toHaveLength(0)
+      expect(authSnapshot()).toEqual(before)
+      expect(select()).toHaveValue('tenant-1')
+      expect(errors()).toHaveLength(1)
+    })
+  })
+
   it('opens and closes the create dialog', () => {
     signIn([prod])
     render(<TenantSelector />)
