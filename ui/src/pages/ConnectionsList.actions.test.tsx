@@ -217,7 +217,9 @@ describe('ConnectionsList: load failure', () => {
     get.mockRejectedValueOnce(new VRSkyAPIError('Workspace suspended', 'HTTP_402'))
     show()
     await waitFor(() => expect(lastNotification()).toMatchObject({ type: 'error', message: 'Workspace suspended' }))
-    expect(screen.getByText('No connections yet')).toBeInTheDocument()
+    // An error state, not a claim that the workspace is empty (#515).
+    expect(screen.getByText("Couldn't load connections")).toBeInTheDocument()
+    expect(screen.queryByText('No connections yet')).not.toBeInTheDocument()
   })
 
   it('falls back to a generic message for a non-API error', async () => {

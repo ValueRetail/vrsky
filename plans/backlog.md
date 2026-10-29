@@ -667,7 +667,7 @@ Last updated 2026-10-28.
     registrations before posting, and refuse events for connections that
     aren't running. Older than #429, which only stopped two concurrent
     starts from both registering. Found during #429.
-98. **Two small leftovers in the Connections list.** A delete that answers
+98. ~~**Two small leftovers in the Connections list.**~~ (#515) A delete that answers
     after a workspace switch still runs `setTotal(prev => prev - 1)` on the
     new workspace's total, which can skew its page count. And a failed load
     shows "No connections yet" next to the error toast; an error state with
