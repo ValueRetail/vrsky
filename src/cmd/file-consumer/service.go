@@ -178,7 +178,9 @@ type ActiveConnection struct {
 	// holds, for names in knownFiles, the size and mtime the file had when it
 	// was published or taken as done; a different stamp is a new file under
 	// that name (#420). A known name with no stamp takes the file's current
-	// one at the next poll, without publishing. pending holds names seen but
+	// one at the next poll, without publishing, unless another watcher saved
+	// it with a different stamp: then it takes that one, and the file is
+	// published as replaced (#500). pending holds names seen but
 	// not yet stable, with the size and mtime from the last poll (#374).
 	// dirty means knownFiles or knownStamps changed since the last save
 	// (#391). savedGen is the Gen of the snapshot this watcher saved last, ""
@@ -602,6 +604,7 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 		s.noteReadRecovered(ac)
 	}
 	refreshed := false
+	var adopt adoptCheck
 
 	// Detect new files and ingest them into the pipeline. Previously this only
 	// emitted a UI "added" event and never published the file's contents, so
@@ -629,10 +632,24 @@ func (s *fileConsumer) pollOnce(ctx context.Context, ac *ActiveConnection) {
 			done, stamped := ac.knownStamps[name]
 			if !stamped {
 				// Done with no stamp yet (a checkpoint from before #420, or
-				// a failed stat): take this one, publish nothing.
-				ac.knownStamps[name] = stamp
+				// a failed stat): take this one, publish nothing. Unless
+				// another watcher saved it with a different stamp: then it
+				// published that version and this is a newer one (#500).
+				theirs, has, ok := s.savedStampFor(ctx, ac, name, &adopt, logger)
+				if !ok {
+					// Can't tell; look again next poll.
+					continue
+				}
+				if !has || theirs == stamp {
+					ac.knownStamps[name] = stamp
+					ac.touch(name)
+					continue
+				}
+				// Keep the stamp that was published, so the poll sees the
+				// file as replaced and publishes it once it is stable.
+				ac.knownStamps[name] = theirs
 				ac.touch(name)
-				continue
+				done = theirs
 			}
 			if done == stamp {
 				delete(ac.pending, name)
