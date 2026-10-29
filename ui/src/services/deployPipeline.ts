@@ -9,6 +9,7 @@
  */
 
 import type { AxiosInstance } from 'axios'
+import { getErrorMessage } from '../utils/errors'
 
 export class ConnectionGone extends Error {
   readonly connectionId: string
@@ -59,6 +60,22 @@ export async function deployPipeline(
     throw err
   }
   return { connectionId: previousConnectionId, created: false }
+}
+
+export type StartResult = { started: true } | { started: false; message: string }
+
+/**
+ * Starts a connection that was just saved (#580). A failed start is a result,
+ * not an exception and not silence: the pipeline is saved but not running,
+ * and the caller has to say so, with the API's own message.
+ */
+export async function startDeployed(client: Pick<AxiosInstance, 'post'>, connectionId: string): Promise<StartResult> {
+  try {
+    await client.post(`/api/v1/connections/${connectionId}/start`)
+    return { started: true }
+  } catch (err) {
+    return { started: false, message: getErrorMessage(err) }
+  }
 }
 
 /** Creates a new connection for the payload; the "deploy as new" path. */

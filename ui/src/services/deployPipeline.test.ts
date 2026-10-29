@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION, deployPlan, deployCanvas,
+  deployPipeline, create, ConnectionGone, deployIdentity, NEW_PIPELINE_DESCRIPTION, deployPlan, deployCanvas, startDeployed,
 } from './deployPipeline'
 import builderSource from '../pages/PipelineBuilder.tsx?raw'
 
@@ -220,6 +220,24 @@ describe('deployCanvas keeps the canvas link in step', () => {
   })
 })
 
+describe('startDeployed (#580)', () => {
+  it('starts the connection', async () => {
+    post.mockResolvedValue({})
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: true })
+    expect(post).toHaveBeenCalledWith('/api/v1/connections/c1/start')
+  })
+
+  it('returns the API message instead of throwing or swallowing it', async () => {
+    post.mockRejectedValue(Object.assign(new Error('quota reached'), { code: 'HTTP_409' }))
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: false, message: 'quota reached' })
+  })
+
+  it('has a message for a non-Error rejection too', async () => {
+    post.mockRejectedValue(undefined)
+    await expect(startDeployed(client, 'c1')).resolves.toEqual({ started: false, message: 'An unknown error occurred' })
+  })
+})
+
 describe('the builder deploys through deployPlan and deployCanvas', () => {
   // The page is a large canvas component that the coverage gate keeps out of
   // the suite; these pin its few lines of deploy wiring instead.
@@ -245,6 +263,33 @@ describe('the builder deploys through deployPlan and deployCanvas', () => {
     expect(body).toContain('buildConnectionPayload(plan.identity)')
     expect(body).toMatch(/deployCanvas\(apiClient, payload, plan\.previousConnectionId,/)
     expect(src).not.toMatch(/deployIdentity\(/)
+  })
+
+  // #580: the start call used to sit in a try whose catch only logged, and the
+  // success toast followed whatever happened. Rendering the page here would
+  // pull its ~2000 lines into the coverage gate, so its wiring is pinned.
+  it('a failed auto-start is reported, not swallowed (#580)', () => {
+    const body = bodyOf('const deployPipeline = async')
+    expect(body).toContain('await startDeployed(apiClient, connectionId)')
+    expect(body).not.toContain('Failed to auto-start')
+    expect(body).not.toMatch(/\/start`\)/)
+    // "deployed and running" only on the started branch; an error toast with
+    // the API's message on the other.
+    const ok = body.indexOf('if (start.started) {')
+    const running = body.indexOf('deployed and running!')
+    const failed = body.indexOf('} else {', ok)
+    expect(ok).toBeGreaterThan(0)
+    expect(running).toBeGreaterThan(ok)
+    expect(running).toBeLessThan(failed)
+    const elseBranch = body.slice(failed, body.indexOf('\n      }\n', failed))
+    expect(elseBranch).toContain("showErrorNotification(")
+    expect(elseBranch).toContain('start.message')
+    expect(elseBranch).not.toMatch(/running|showSuccessNotification/)
+  })
+
+  it('the status bar follows the start result (#580)', () => {
+    expect(src).toContain('started: start.started })')
+    expect(src).toContain('SAVED, NOT STARTED')
   })
 
   it('"Deploy as new" redeploys with asNew', () => {

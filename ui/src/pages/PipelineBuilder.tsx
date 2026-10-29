@@ -10,7 +10,7 @@ import { materializeSecrets } from '../utils/secrets'
 import ComponentPalette from '../components/Pipeline/ComponentPalette'
 import CanvasSelector from '../components/CanvasSelector'
 import apiClient, { getActiveTenantId } from '../services/api'
-import { ConnectionGone, deployCanvas, deployPlan, type DeployPlan } from '../services/deployPipeline'
+import { ConnectionGone, deployCanvas, deployPlan, startDeployed, type DeployPlan } from '../services/deployPipeline'
 import * as authService from '../services/authService'
 import { getSessionToken } from '../services/authService'
 import { reportUnauthorized } from '@/services/sessionExpiry'
@@ -97,7 +97,7 @@ export default function PipelineBuilder() {
   const [dbProducerPanel, setDbProducerPanel] = useState<{ table: string; connectionId: string } | null>(null)
   const [dbProducerEvents, setDbProducerEvents] = useState<Array<{ type: string; message?: string; time: string; count?: number; payload?: string; table?: string; columns?: string[] }>>([])
   const [expandedDbEvent, setExpandedDbEvent] = useState<number | null>(null)
-  const [deploymentInfo, setDeploymentInfo] = useState<{ connectionId: string; consumerType: string; consumerDetail: string; producerType: string; producerDetail: string; time: string } | null>(null)
+  const [deploymentInfo, setDeploymentInfo] = useState<{ connectionId: string; consumerType: string; consumerDetail: string; producerType: string; producerDetail: string; time: string; started: boolean } | null>(null)
   const [converterPanel, setConverterPanel] = useState<{ connectionId: string } | null>(null)
   const [converterEvents, setConverterEvents] = useState<Array<{ type: string; message?: string; time: string; before?: string; after?: string; fields?: number }>>([])
   const [expandedConverterEvent, setExpandedConverterEvent] = useState<number | null>(null)
@@ -534,12 +534,9 @@ export default function PipelineBuilder() {
         throw err
       }
 
-      // Step 1: Auto-start the pipeline
-      try {
-        await apiClient.post(`/api/v1/connections/${connectionId}/start`)
-      } catch (startError) {
-        console.error('Failed to auto-start pipeline:', startError)
-      }
+      // Step 1: Auto-start the pipeline. A failed start leaves it saved but
+      // not running; say so rather than reporting a deploy that never ran (#580).
+      const start = await startDeployed(apiClient, connectionId)
 
       // Step 3: Extract file path from producer node config for notification
       const producerNode = nodes.find(n => n.type === 'output')
@@ -553,14 +550,20 @@ export default function PipelineBuilder() {
       const isWebhook = consumerNode?.data?.config?.type === 'http'
       const webhookUrl = isWebhook ? `${config.webhookIngressUrl}/webhook/${connectionId}` : ''
 
-      let message = `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
-      if (webhookUrl) {
-        message += ` Webhook URL: ${webhookUrl}`
-      } else if (filePath) {
-        message += ` Output: ${filePath}`
+      if (start.started) {
+        let message = `Pipeline ${connectionId.substring(0, 8)}... deployed and running!`
+        if (webhookUrl) {
+          message += ` Webhook URL: ${webhookUrl}`
+        } else if (filePath) {
+          message += ` Output: ${filePath}`
+        }
+        showSuccessNotification('Pipeline Started', message)
+      } else {
+        showErrorNotification(
+          'Pipeline saved, not started',
+          `Pipeline ${connectionId.substring(0, 8)}... was saved but did not start: ${start.message}`
+        )
       }
-
-      showSuccessNotification('Pipeline Started', message)
 
       // Build deployment info summary
       const consumerType = (consumerNode?.data?.config?.type as string) || 'unknown'
@@ -581,7 +584,7 @@ export default function PipelineBuilder() {
         const dp = (producerNode?.data?.config?.database as DbCfg | undefined) || {}
         producerDetail = `${dp.host || ''}:${dp.port || 5432}/${dp.database || ''} → ${dp.table || ''}`
       }
-      setDeploymentInfo({ connectionId, consumerType, consumerDetail, producerType, producerDetail, time: new Date().toLocaleTimeString() })
+      setDeploymentInfo({ connectionId, consumerType, consumerDetail, producerType, producerDetail, time: new Date().toLocaleTimeString(), started: start.started })
 
       // Show test panels based on consumer/producer type
       const isFileWatcher = consumerNode?.data?.config?.type === 'file'
@@ -1308,9 +1311,12 @@ export default function PipelineBuilder() {
             {deploymentInfo && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: '16px', padding: '4px 16px',
-                backgroundColor: '#f0fdf4', borderBottom: '1px solid #bbf7d0', fontSize: '11px', flexShrink: 0,
+                backgroundColor: deploymentInfo.started ? '#f0fdf4' : '#fef2f2',
+                borderBottom: `1px solid ${deploymentInfo.started ? '#bbf7d0' : '#fecaca'}`, fontSize: '11px', flexShrink: 0,
               }}>
-                <span style={{ color: '#16a34a', fontWeight: 700 }}>● DEPLOYED</span>
+                {deploymentInfo.started
+                  ? <span style={{ color: '#16a34a', fontWeight: 700 }}>● DEPLOYED</span>
+                  : <span style={{ color: '#b91c1c', fontWeight: 700 }}>● SAVED, NOT STARTED</span>}
                 <span style={{ color: '#374151' }}>
                   <span style={{ color: '#6b7280' }}>Source:</span>{' '}
                   <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{deploymentInfo.consumerType}</span>
