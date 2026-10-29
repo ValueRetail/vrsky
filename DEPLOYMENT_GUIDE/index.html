@@ -3517,7 +3517,8 @@ first.</p>
    <code>infrastructure/kubernetes/deploy-vrsky-platform.sh</code> which it wraps,
    against production (see the warning below).</li>
 <li><code>bash infrastructure/azure/deploy-ui-azure.sh</code>: the UI and the public
-   Ingress (below). The file isn't executable, hence <code>bash</code>.</li>
+   Ingress (below). The file isn't executable, hence <code>bash</code>. It needs <code>jq</code>
+   on your machine for the <code>acr-pull</code> copy.</li>
 <li><code>infrastructure/azure/deploy-connectors-azure.sh</code>: the connectors.</li>
 <li><code>PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh</code>:
    monitoring and the alert rules. It stops unless the <code>vrsky-monitoring</code>
@@ -3577,7 +3578,7 @@ already runs. <code>deploy-core-azure.sh</code> sets the new digest.</p>
 <tbody>
 <tr>
 <td><code>namespace.yaml</code></td>
-<td>Not applied; the script creates <code>vrsky-ui</code> itself and copies the <code>acr-pull</code> secret into it</td>
+<td>Not applied; the script creates <code>vrsky-ui</code> itself and copies the <code>acr-pull</code> secret into it (with jq). Every deploy and every Catch up refresh that copy through <code>copy-acr-pull.sh</code> before anything rolls</td>
 </tr>
 <tr>
 <td><code>configmap.yaml</code></td>
