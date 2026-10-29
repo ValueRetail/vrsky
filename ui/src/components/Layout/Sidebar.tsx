@@ -10,15 +10,18 @@ import { config } from '../../config/env'
 
 export default function Sidebar() {
   const { pathname } = useLocation()
-  const { connections = [], total } = useConnectionsStore()
+  const { connections = [], total, statusCounts } = useConnectionsStore()
   // OAuth provider management is owner/admin-only (CRUD is admin-gated
   // server-side); hide the entry for everyone else.
   const role = useAuthStore((s) => s.currentTenant?.user_role)
   const isPlatformOperator = useAuthStore((s) => s.isPlatformOperator)
   const canManageOAuth = role === 'owner' || role === 'admin'
-  const runningCount = (connections || []).filter((c) => c.status === 'running').length
-  const stoppedCount = (connections || []).filter((c) => c.status === 'stopped').length
-  const errorCount = (connections || []).filter((c) => c.status === 'error').length
+  // The API's per-status totals when the workspace outgrows the loaded page;
+  // otherwise the loaded items are all of it and are counted here (#541).
+  const countLoaded = (status: string) => (connections || []).filter((c) => c.status === status).length
+  const runningCount = statusCounts ? statusCounts.running : countLoaded('running')
+  const stoppedCount = statusCounts ? statusCounts.stopped : countLoaded('stopped')
+  const errorCount = statusCounts ? statusCounts.error : countLoaded('error')
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/')
 
