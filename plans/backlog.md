@@ -556,7 +556,7 @@ Last updated 2026-10-28.
     production and the CronJob has run on it. Until then restore still
     opens archives sealed directly under `ENCRYPTION_KEY`; removing it
     finishes the key separation. Found in review of #471.
-86. **The file destination's host folder is fixed to `data/output`.**
+86. ~~**The file destination's host folder is fixed to `data/output`.**~~ (#553)
     #422 lets `.env` pick the host folder behind `/data/input`
     (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
     repository's `data/output`, so a Windows user can read from their home

@@ -176,8 +176,19 @@ source, which means the same folder). Each workspace gets its own subfolder,
 is only ever a mount source; the target is fixed, because Docker rejects a
 Windows path as a target. That's also why setting `HOME` no longer does
 anything here, and why Git Bash, which hands Docker its `HOME` converted to
-`C:\Users\you`, isn't a problem either (#422). Written files still go to the
-repository's `data/output`.
+`C:\Users\you`, isn't a problem either (#422).
+
+Written files go to the repository's `data/output` the same way, unless
+`.env` picks another folder for them:
+
+```
+VRSKY_FILES_OUTPUT_HOST_DIR=C:\Users\you\vrsky-output
+```
+
+Compose mounts it at `/data/output` in the file destination, so its path in
+the editor stays `/data/output/...` and the files land in
+`C:\Users\you\vrsky-output\<workspace id>\` (#553). Files written before you
+set it stay in the repository's `data/output`.
 
 **Ports.** The core set binds 3000, 4222, 5434, 8080, 8222, 9100, 9101, 9310,
 9400, 9600, 9700 and 9900 on loopback. `netstat -ano | findstr :3000` finds a
