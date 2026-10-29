@@ -39,31 +39,51 @@ export default function ConnectionsList() {
 
   const [connections, setConnections] = useState<Connection[]>([])
   const [total, setTotal] = useState(0)
+  // The workspace the rows above were loaded for. Rows from any other
+  // workspace are never rendered, even for the one commit between a switch
+  // and the next load starting (#501).
+  const [rowsTenantId, setRowsTenantId] = useState(currentTenantId)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const ownRows = rowsTenantId === currentTenantId
+  const shownConnections = ownRows ? connections : []
+  const totalPages = ownRows ? Math.ceil(total / PAGE_SIZE) : 0
 
   useEffect(() => {
+    // Only the latest load may write. A workspace (or page) change cancels
+    // the one in flight, so a slow answer for workspace A can't land after
+    // B's and show A's connections under B (#501).
+    let cancelled = false
     const load = async () => {
       try {
         setLoading(true)
         const response = await connectionService.list(page, PAGE_SIZE)
+        if (cancelled) return
         // The list's wire shape is the API's GetConnectionResponse (metrics loosely
         // typed); the pages work with the richer Connection, as getConnection does.
         const items = (response.connections ?? []) as unknown as Connection[]
         setConnections(items)
         setTotal(response.total || 0)
+        setRowsTenantId(currentTenantId)
       } catch (error) {
+        if (cancelled) return
+        // Never keep showing what may be another workspace's connections.
+        setConnections([])
+        setTotal(0)
+        setRowsTenantId(currentTenantId)
         const message = isAPIError(error) ? getErrorMessage(error) : 'Failed to load connections'
         addNotification({ type: 'error', title: 'Error', message })
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => {
+      cancelled = true
+    }
   }, [page, currentTenantId, addNotification])
 
   // Reset to the first page when the workspace changes so we don't land on a
@@ -72,10 +92,10 @@ export default function ConnectionsList() {
     setPage(1)
   }, [currentTenantId])
 
-  const filtered = connections && connections.length > 0
+  const filtered = shownConnections.length > 0
     ? (statusFilter === 'all'
-      ? connections
-      : connections.filter(c => c.status === statusFilter))
+      ? shownConnections
+      : shownConnections.filter(c => c.status === statusFilter))
     : []
 
   const handleDelete = (connection: Connection) => {
@@ -189,7 +209,7 @@ export default function ConnectionsList() {
         </div>
 
         {/* Content Section */}
-        {loading ? (
+        {loading || !ownRows ? (
           <div className="space-y-4">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-20 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />

@@ -1,0 +1,52 @@
+# Which test groups in prometheus-rules-test.yml each leg of the alert-rules
+# job in .github/workflows/build-push.yml runs (#464, #495). Every group must
+# be in exactly one leg; TestRuleTestGroupsRunOnce fails otherwise, and a
+# group no leg lists never runs in CI.
+#
+# Adding a test group: give it a name in prometheus-rules-test.yml and list
+# that name under one leg here. The workflow does not change. Legs are packed
+# by measured time (plans/ci-speed-463-464-443.md): the backup (b) and (c)
+# groups replay days of samples and take 4-12 s each, the rest under a
+# second, so put a slow group in the leg that runs the fewest slow ones.
+#
+# The step reads this file with awk, not a YAML parser, so keep the format:
+# a top-level `<leg>:` key per leg, as the workflow's matrix names it, then
+# one `  - <group>` line per group. Comment lines are fine; a trailing
+# comment on an item line is not and fails the leg.
+
+1/4:
+  - pipeline-down-polled
+  - pipeline-down-after-park
+  - dlq-growing
+  - jetstream-lag-high
+  - cert-expiry-soon
+  - mgmt-api-error-rate
+  - disk-usage-high
+  - connection-in-error
+  - remote-agent-offline
+  - connector-unavailable
+  - node-cpu-requests-high
+  - backup-a-two-failures
+  - backup-a-suspended
+  - backup-a-never-succeeded
+  - backup-a-own-jobs-only
+  - backup-b-weekday-afternoons
+  - backup-b-suspended
+  - backup-suspended-parked
+  - backup-suspended-pod-replaced
+
+2/4:
+  - backup-b-off-at-weekends
+  - backup-b-after-activation
+  - backup-b-late-start
+
+3/4:
+  - backup-c-after-activation
+  - backup-c-backstop
+  - backup-b-late-cluster-never-runs
+
+4/4:
+  - backup-b-stopped-scheduling
+  - backup-b-manual-backup
+  - backup-b-suspend-flicker
+  - backup-suspended-late-secret

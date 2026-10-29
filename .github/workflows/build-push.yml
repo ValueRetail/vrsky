@@ -183,8 +183,10 @@ jobs:
   # rather than giving one leg a step-level `if`. promtool runs nothing and
   # still says SUCCESS when `--run` matches no group, so each leg counts the
   # groups its JUnit report lists against the names it was given.
-  # TestRuleTestGroupsRunOnce checks every group in the file is in exactly
-  # one leg (plans/ci-speed-463-464-443.md).
+  # The lists live in infrastructure/prometheus-rules-test-legs.yml since
+  # #495. TestRuleTestGroupsRunOnce checks every group in the file is in
+  # exactly one leg, and runs this step for each leg
+  # (plans/ci-speed-463-464-443.md, plans/issue-495-rule-legs-file.md).
   alert-rules:
     name: Alert rules (promtool ${{ matrix.leg }})
     runs-on: ubuntu-latest
@@ -192,65 +194,50 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - leg: 1/4
-            groups:
-              - pipeline-down-polled
-              - pipeline-down-after-park
-              - dlq-growing
-              - jetstream-lag-high
-              - cert-expiry-soon
-              - mgmt-api-error-rate
-              - disk-usage-high
-              - connection-in-error
-              - remote-agent-offline
-              - connector-unavailable
-              - node-cpu-requests-high
-              - backup-a-two-failures
-              - backup-a-suspended
-              - backup-a-never-succeeded
-              - backup-a-own-jobs-only
-              - backup-b-weekday-afternoons
-              - backup-b-suspended
-              - backup-suspended-parked
-              - backup-suspended-pod-replaced
-          - leg: 2/4
-            groups:
-              - backup-b-off-at-weekends
-              - backup-b-after-activation
-              - backup-b-late-start
-          - leg: 3/4
-            groups:
-              - backup-c-after-activation
-              - backup-c-backstop
-              - backup-b-late-cluster-never-runs
-          - leg: 4/4
-            groups:
-              - backup-b-stopped-scheduling
-              - backup-b-manual-backup
-              - backup-b-suspend-flicker
-              - backup-suspended-late-secret
+        # The leg names only. Which test groups each leg runs is in
+        # infrastructure/prometheus-rules-test-legs.yml (#495), so adding a
+        # test group does not touch this workflow.
+        leg: ['1/4', '2/4', '3/4', '4/4']
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # RULE_GROUPS, not GROUPS: bash keeps GROUPS for the user's group ids
-      # and ignores an assignment to it. The image runs as nobody, who
-      # cannot write the JUnit report into the runner's temp dir, hence
-      # --user. The checkout is mounted read-only, so the runner user
-      # cannot change it from inside the container.
+      # The leg reads its groups from the legs file with awk, which every
+      # runner has and which the guard runs locally too: a top-level
+      # `<leg>:` key, then `  - <group>` lines. A missing file, no entry for
+      # this leg, an empty entry or a line it cannot read fails the leg.
+      # The image runs as nobody, who cannot write the JUnit report into the
+      # runner's temp dir, hence --user. The checkout is mounted read-only,
+      # so the runner user cannot change it from inside the container.
       - name: Alert rules (promtool)
         env:
-          RULE_GROUPS: ${{ join(matrix.groups, ' ') }}
+          RULE_LEG: ${{ matrix.leg }}
         run: |
+          legs=infrastructure/prometheus-rules-test-legs.yml
+          if [ ! -f "$legs" ]; then
+            echo "::error::$legs is missing; it lists the test groups each alert-rules leg runs"
+            exit 1
+          fi
+          rule_groups=$(awk -v leg="$RULE_LEG" '
+            /^[ \t]*#/ || /^[ \t]*$/ { next }
+            /^[^ \t]/ { mine = ($0 == leg ":"); next }
+            !mine { next }
+            /^  - [a-z0-9-]+$/ { print substr($0, 5); next }
+            { print "line " NR " under leg " leg " is not \"  - <group>\": " $0 > "/dev/stderr"; bad = 1 }
+            END { exit bad }
+          ' "$legs") || { echo "::error::could not read the test groups of leg $RULE_LEG from $legs"; exit 1; }
+          if [ -z "$rule_groups" ]; then
+            echo "::error::leg $RULE_LEG lists no test groups in $legs"
+            exit 1
+          fi
           docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
-          run_re="^($(echo $RULE_GROUPS | tr ' ' '|'))\$"
+          run_re="^($(echo $rule_groups | tr ' ' '|'))\$"
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/infrastructure":/cfg:ro -v "$RUNNER_TEMP":/out --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml --run="$run_re" --junit=/out/rules.xml
-          want=$(echo $RULE_GROUPS | wc -w)
+          want=$(echo $rule_groups | wc -w)
           ran=$(grep -o '<testcase ' "$RUNNER_TEMP/rules.xml" | wc -l)
           echo "ran $ran of the $want test groups this leg names"
           if [ "$ran" -ne "$want" ]; then
-            echo "::error::promtool ran $ran test groups but this leg names $want; a name in the matrix matches no group in prometheus-rules-test.yml"
+            echo "::error::promtool ran $ran test groups but leg $RULE_LEG names $want; a name in $legs matches no group in prometheus-rules-test.yml"
             exit 1
           fi
 
