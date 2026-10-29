@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -118,12 +119,14 @@ func mustJSON(v any) []byte {
 // expectLookups scripts n config lookups, the first fails of them failing.
 func (f *fgFixture) expectLookups(n, fails int) {
 	for i := 0; i < n; i++ {
-		q := f.mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).WithArgs(fgConn, fgTenant)
+		q := f.mock.ExpectQuery(configLookupSQL).WithArgs(fgConn, fgTenant)
 		if i < fails {
-			q.WillReturnError(errors.New("read tcp: connection reset by peer"))
+			// A dropped database connection: transient, so the start queued
+			// behind the failed one still runs.
+			q.WillReturnError(fmt.Errorf("read tcp: %w", syscall.ECONNRESET))
 			continue
 		}
-		q.WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(f.nodes()))
+		q.WillReturnRows(configRows(f.nodes()))
 	}
 }
 
@@ -132,7 +135,7 @@ func (f *fgFixture) expectLookups(n, fails int) {
 // the connection up exactly as often as the test expects.
 func (f *fgFixture) noFurtherLookup(t *testing.T) {
 	t.Helper()
-	if _, err := f.c.getConfig(context.Background(), fgConn, fgTenant); err != nil {
+	if _, _, err := f.c.getConfig(context.Background(), fgConn, fgTenant); err != nil {
 		t.Errorf("the connection was looked up more often than expected: %v", err)
 	}
 	if err := f.mock.ExpectationsWereMet(); err != nil {

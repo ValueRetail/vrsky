@@ -140,17 +140,19 @@ merging.
   pending start's tenant, then the active entry as before.
 - `Stop` cancels every pending start before waiting for the unregisters.
 - Classification. Connection lookup: no row or no Front Systems node is
-  "not ours" (every consumer sees every start command), any other error is
-  transient. The node's type is now read before its secrets, so another
+  "not ours" (every consumer sees every start command), a database that
+  doesn't answer is transient, any other error permanent (round 3). The node's type is now read before its secrets, so another
   consumer's node never has its secrets resolved here. Secrets: a database
   that doesn't answer (net errors, EOF, `driver.ErrBadConn`, timeouts, pq
   classes 08, 40, 53, 57) is transient, anything else (not found, can't
   decrypt) permanent. Front Systems: 408, 429, 5xx and no answer at all are
-  transient; any other status and a missing or broken base URL are
-  permanent.
+  transient; any other status, a 401 or 403 on the first list, and a
+  missing or broken base URL (no http(s) scheme or no host) are permanent.
 - The `error` write is `UPDATE ... SET status = 'error', last_error = $1,
-  updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND status = 'running'`.
-  The guard keeps it off a row a stop already set to `stopped`.
+  updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND status = 'running'
+  AND updated_at = $4`, with the version the start read (round 3). It keeps
+  off a row a stop set to `stopped`, and off a new run after a stop and
+  start.
 
 ### Decisions
 
@@ -186,6 +188,39 @@ merging.
 - A failed `RestoreRunning` list query (backlog 135).
 - An event that arrives while a start command's first attempt runs gets 503
   now; before this PR it was published, before the retry it got 410.
+
+## Review of the retry commit (round 3)
+
+A fresh reviewer asked for one fix and four smaller changes; all taken.
+
+- Required: a `base_url` without a scheme (`fs-apim.example.net`, likely
+  since the docs call it the APIM host) failed in `http.Client.Do` with no
+  status and was retried for 6 hours. `do()` now parses it and requires
+  http or https and a host, else `errBadBaseURL` (permanent). The docs say
+  to write `https://`.
+- A start command naming the wrong tenant that held the claim made the
+  right tenant's queued start run untracked: `Release` ran it before
+  `afterAttempt` had dropped the wrong tenant's pending start, so its
+  transient failure was never retried. `attemptStart` now hands the claim
+  back still held, and `startConnection` and the retry loop release it
+  after `afterAttempt`.
+- A start queued behind one that fails for good is dropped: a
+  per-connection count of permanent failures, read when the start is asked
+  for and checked when the queue runs it. Without that, boot restore and a
+  start command would both try the refused keys. Reordering the release
+  alone doesn't stop it, and dropping the claim's queue would need an SDK
+  change.
+- The `error` write is guarded by the row version: `getConfig` and the
+  retry loop's status check read `updated_at`, the pending start keeps the
+  latest, and the UPDATE adds `AND updated_at = $4`. The management API
+  bumps `updated_at` on every start and stop, so a stop and a new start
+  that landed meanwhile keep the new run. Without a version (the row was
+  never read) nothing is written.
+- The connection lookup uses `transientDBError` like the secrets: other
+  errors (an id that isn't a UUID, 22P02) are permanent, not retried for 6
+  hours. A 401 or 403 on the first `GET /api/webhooks` is permanent too (a
+  bad base URL already fails the create permanently, before any request).
+  DNS and x509 errors stay transient.
 
 ## Review (round 1)
 
@@ -253,6 +288,8 @@ Not touched: `src/pkg/sdk`, `src/pkg/messaging`, other connectors,
   Systems keeps them as failed (backlog 136).
 - Response shapes for create and list are undocumented. If neither carries
   ids, nothing can be unregistered (logged), which is today's behaviour.
+- A row edited (anything that bumps `updated_at`) while a start fails for
+  good is left as it is rather than marked `error`; the failure is logged.
 
 ## Verification
 

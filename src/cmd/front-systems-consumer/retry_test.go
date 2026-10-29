@@ -39,8 +39,8 @@ import (
 // implementation the chance to do something it must not.
 
 const (
-	statusCheckSQL = `SELECT status FROM connections WHERE id = \$1 AND tenant_id = \$2`
-	markErrorSQL   = `UPDATE connections SET status = 'error', last_error = \$1, updated_at = NOW\(\)\s+WHERE id = \$2 AND tenant_id = \$3 AND status = 'running'`
+	statusCheckSQL = `SELECT status, updated_at FROM connections WHERE id = \$1 AND tenant_id = \$2`
+	markErrorSQL   = `UPDATE connections SET status = 'error', last_error = \$1, updated_at = NOW\(\)\s+WHERE id = \$2 AND tenant_id = \$3 AND status = 'running' AND updated_at = \$4`
 )
 
 // newRetryFixture is the direct fixture with retries every base to 4*base.
@@ -60,9 +60,9 @@ func expectStatusChecks(mock sqlmock.Sqlmock, u urConn, n int, status string, er
 		case err != nil:
 			q.WillReturnError(err)
 		case status == "":
-			q.WillReturnRows(sqlmock.NewRows([]string{"status"}))
+			q.WillReturnRows(sqlmock.NewRows([]string{"status", "updated_at"}))
 		default:
-			q.WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(status))
+			q.WillReturnRows(sqlmock.NewRows([]string{"status", "updated_at"}).AddRow(status, cfgVersion))
 		}
 	}
 }
@@ -70,7 +70,7 @@ func expectStatusChecks(mock sqlmock.Sqlmock, u urConn, n int, status string, er
 // expectLookupErrors scripts n config lookups of u that fail with err.
 func expectLookupErrors(mock sqlmock.Sqlmock, u urConn, n int, err error) {
 	for i := 0; i < n; i++ {
-		mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).
+		mock.ExpectQuery(configLookupSQL).
 			WithArgs(u.id, u.tenant).WillReturnError(err)
 	}
 }
@@ -85,7 +85,7 @@ func (a reasonArg) Match(v driver.Value) bool {
 }
 
 func expectMarkError(mock sqlmock.Sqlmock, u urConn, want string) {
-	mock.ExpectExec(markErrorSQL).WithArgs(reasonArg{want}, u.id, u.tenant).
+	mock.ExpectExec(markErrorSQL).WithArgs(reasonArg{want}, u.id, u.tenant, cfgVersion).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -399,9 +399,9 @@ func TestFrontSystemsRetry_PermanentFailureMarksError(t *testing.T) {
 			f.owners.set(u.id, u.tenant)
 			switch {
 			case tc.noBaseURL:
-				f.mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).
+				f.mock.ExpectQuery(configLookupSQL).
 					WithArgs(u.id, u.tenant).
-					WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(u.nodes("")))
+					WillReturnRows(configRows(u.nodes("")))
 			case tc.noSecret:
 				nodes := mustJSON([]any{map[string]any{"id": "n1", "type": "consumer", "config": map[string]any{
 					"type": "front_systems",
@@ -410,8 +410,8 @@ func TestFrontSystemsRetry_PermanentFailureMarksError(t *testing.T) {
 						"events": u.evs(), "callback_url": u.callback(),
 					},
 				}}})
-				f.mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).
-					WithArgs(u.id, u.tenant).WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(nodes))
+				f.mock.ExpectQuery(configLookupSQL).
+					WithArgs(u.id, u.tenant).WillReturnRows(configRows(nodes))
 				f.mock.ExpectQuery(`SELECT ciphertext FROM secrets`).WithArgs("sec-gone", u.tenant).
 					WillReturnRows(sqlmock.NewRows([]string{"ciphertext"}))
 			default:

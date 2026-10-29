@@ -133,6 +133,32 @@ func TestFrontSystemsRetryPG(t *testing.T) {
 		}
 	})
 
+	t.Run("a stop and a new start meanwhile keep the new run", func(t *testing.T) {
+		// While the failing start talks to Front Systems, the pipeline is
+		// stopped and started again (the management API bumps updated_at on
+		// each). The new run's row must not get the old start's "error".
+		e := newRetryPGEnv(t)
+		u := e.connection("running")
+		e.fs.set(func(fs *fakeFS) {
+			fs.postErr, fs.postErrLeft = http.StatusUnauthorized, 1000
+			fs.onPost = func(n int, _ string) {
+				if n != 1 {
+					return
+				}
+				for _, status := range []string{"stopped", "running"} {
+					if _, err := e.db.Exec(`UPDATE connections SET status = $3, updated_at = clock_timestamp()
+						WHERE id = $1 AND tenant_id = $2`, u.id, u.tenant, status); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+		})
+		e.c.startConnection(context.Background(), u.id, u.tenant)
+		if status, lastErr := e.row(u); status != "running" || lastErr.Valid {
+			t.Errorf("row = %q, %v; want running with no last_error (the new run's)", status, lastErr)
+		}
+	})
+
 	t.Run("a row stopped during the backoff ends the retries", func(t *testing.T) {
 		// The stop command never arrived here; the row says stopped.
 		e := newRetryPGEnv(t)

@@ -368,11 +368,21 @@ func (u urConn) nodes(baseURL string) []byte {
 	}}})
 }
 
+// configLookupSQL is getConfig's lookup; configRows answers it with nodes and
+// the row version cfgVersion.
+const configLookupSQL = `SELECT nodes, updated_at FROM connections WHERE id = \$1 AND tenant_id = \$2`
+
+var cfgVersion = time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
+
+func configRows(nodes []byte) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"nodes", "updated_at"}).AddRow(nodes, cfgVersion)
+}
+
 func expectConfig(mock sqlmock.Sqlmock, fs *fakeFS, u urConn, n int) {
 	for i := 0; i < n; i++ {
-		mock.ExpectQuery(`SELECT nodes FROM connections WHERE id = \$1 AND tenant_id = \$2`).
+		mock.ExpectQuery(configLookupSQL).
 			WithArgs(u.id, u.tenant).
-			WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow(u.nodes(fs.srv.URL)))
+			WillReturnRows(configRows(u.nodes(fs.srv.URL)))
 	}
 }
 

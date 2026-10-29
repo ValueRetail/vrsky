@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
 // Retrying failed starts (#503, decided by the owner before merge).
@@ -63,12 +65,18 @@ const (
 // startResult is one attempt's outcome. p is the pending start it ran for
 // (nil when it ran untracked: the consumer is closed, or a start for another
 // tenant is pending). reason is the last_error text for a permanent failure:
-// no response bodies, no secrets.
+// no response bodies, no secrets. updatedAt is the row's updated_at as the
+// attempt read it (zero if it didn't get that far), the version an "error"
+// write is allowed to replace. claim is the attempt's claim, still held: the
+// caller releases it after afterAttempt, so a start queued behind it runs
+// only once this attempt's outcome is recorded (#503 review).
 type startResult struct {
-	outcome startOutcome
-	p       *pendingStart
-	err     error
-	reason  string
+	outcome   startOutcome
+	p         *pendingStart
+	err       error
+	reason    string
+	updatedAt time.Time
+	claim     *sdk.StartClaim
 }
 
 // startError is a start failure that knows which outcome it is.
@@ -103,6 +111,7 @@ type pendingStart struct {
 	looping      bool      // a retry loop runs for it
 	firstFailure time.Time // when the first transient failure was seen
 	attempts     int       // retries made so far
+	updatedAt    time.Time // the row's updated_at as last read, zero if never
 }
 
 // attachPendingLocked returns the connection's pending start for tenantID,
@@ -144,6 +153,11 @@ func (c *frontSystemsConsumer) dropPendingLocked(connectionID string, p *pending
 func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res startResult) {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 	p := res.p
+	if p != nil && !res.updatedAt.IsZero() {
+		c.mu.Lock()
+		p.updatedAt = res.updatedAt
+		c.mu.Unlock()
+	}
 	switch res.outcome {
 	case startRefused, startActivated:
 		// Refused: whoever holds the claim, or the active connection, owns the
@@ -161,12 +175,14 @@ func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res s
 			p.firstFailure = now
 		}
 		if since := p.firstFailure; now.Sub(since) >= c.giveUpAfter() {
+			version := p.updatedAt
 			c.dropPendingLocked(connectionID, p)
 			c.mu.Unlock()
 			logger.Error("Front Systems start still failing; giving up and marking the connection error",
 				"error", res.err, "since", since)
 			c.markError(connectionID, tenantID,
-				fmt.Sprintf("Front Systems: could not start for %s; the last attempt failed: %s", c.giveUpAfter(), failureClass(res.err)), logger)
+				fmt.Sprintf("Front Systems: could not start for %s; the last attempt failed: %s", c.giveUpAfter(), failureClass(res.err)),
+				version, logger)
 			return
 		}
 		if !p.looping {
@@ -179,11 +195,21 @@ func (c *frontSystemsConsumer) afterAttempt(connectionID, tenantID string, res s
 	case startPermanent:
 		c.mu.Lock()
 		current := p != nil && c.pending[connectionID] == p
+		var version time.Time
+		if p != nil {
+			version = p.updatedAt
+		}
 		c.dropPendingLocked(connectionID, p)
+		// Starts queued behind this one (boot restore and a start command, say)
+		// were asked for before it failed for good; they'd fail the same way.
+		if c.permanentFailures == nil {
+			c.permanentFailures = make(map[string]uint64)
+		}
+		c.permanentFailures[connectionID]++
 		c.mu.Unlock()
 		logger.Error("Front Systems start failed and will not be retried", "error", res.err)
 		if current {
-			c.markError(connectionID, tenantID, res.reason, logger)
+			c.markError(connectionID, tenantID, res.reason, version, logger)
 		}
 	default: // startNotOurs, startAbandoned
 		if res.outcome == startNotOurs {
@@ -220,7 +246,7 @@ func (c *frontSystemsConsumer) retryLoop(connectionID string, p *pendingStart) {
 		}
 
 		// A stop command can be missed (core NATS); the row is the record.
-		running, err := c.rowRunning(p.ctx, connectionID, p.tenantID)
+		running, updatedAt, err := c.rowRunning(p.ctx, connectionID, p.tenantID)
 		var res startResult
 		switch {
 		case p.ctx.Err() != nil:
@@ -232,12 +258,16 @@ func (c *frontSystemsConsumer) retryLoop(connectionID string, p *pendingStart) {
 			logger.Info("Front Systems start not retried any more: the connection is no longer running")
 			return
 		default:
+			c.mu.Lock()
+			p.updatedAt = updatedAt
+			c.mu.Unlock()
 			logger.Info("Retrying Front Systems start", "attempt", p.attempts)
 			res = c.attemptStart(connectionID, p.tenantID, p, nil)
 		}
 		// Once p has ended (activated, stopped, given up), its ctx is done and
 		// the wait above returns at once.
 		c.afterAttempt(connectionID, p.tenantID, res)
+		res.claim.Release()
 	}
 }
 
@@ -270,41 +300,56 @@ func (c *frontSystemsConsumer) giveUpAfter() time.Duration {
 	return defaultRetryGiveUp
 }
 
-// rowRunning reports whether the connection's row still says "running". A
-// row that is gone reports false.
+// rowRunning reports whether the connection's row still says "running", and
+// its updated_at. A row that is gone reports false.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
-func (c *frontSystemsConsumer) rowRunning(ctx context.Context, connectionID, tenantID string) (bool, error) {
+func (c *frontSystemsConsumer) rowRunning(ctx context.Context, connectionID, tenantID string) (bool, time.Time, error) {
 	ctx, cancel := context.WithTimeout(ctx, statusWriteTimeout)
 	defer cancel()
-	var status string
+	var (
+		status    string
+		updatedAt time.Time
+	)
 	err := c.db.QueryRowContext(ctx,
-		`SELECT status FROM connections WHERE id = $1 AND tenant_id = $2`,
+		`SELECT status, updated_at FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
-	).Scan(&status)
+	).Scan(&status, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, time.Time{}, nil
 	}
 	if err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
-	return status == "running", nil
+	return status == "running", updatedAt, nil
 }
 
 // markError records a start that won't be retried: status "error" and the
-// reason in last_error. Only a row still saying "running" is changed, so a
-// stop that got there first keeps its "stopped".
+// reason in last_error. Only the row version the start read is changed: it
+// must still say "running" and have the updated_at the start saw. The
+// management API bumps updated_at on every start and stop, so a stop, or a
+// stop and a new start, that landed meanwhile keeps its status. Without a
+// version (the start never read the row) nothing is written.
 // lint:tenant-ok — update is scoped by (id, tenant_id).
-func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, logger *slog.Logger) {
+func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, updatedAt time.Time, logger *slog.Logger) {
+	if updatedAt.IsZero() {
+		logger.Warn("Not marking the connection error: its row was never read")
+		return
+	}
 	c.mu.Lock()
 	ctx := c.lifecycleCtxLocked()
 	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, statusWriteTimeout)
 	defer cancel()
-	if _, err := c.db.ExecContext(ctx,
+	res, err := c.db.ExecContext(ctx,
 		`UPDATE connections SET status = 'error', last_error = $1, updated_at = NOW()
-		 WHERE id = $2 AND tenant_id = $3 AND status = 'running'`,
-		reason, connectionID, tenantID); err != nil {
+		 WHERE id = $2 AND tenant_id = $3 AND status = 'running' AND updated_at = $4`,
+		reason, connectionID, tenantID, updatedAt)
+	if err != nil {
 		logger.Warn("Could not mark the connection error", "error", err)
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		logger.Info("Not marking the connection error: it was stopped or started again meanwhile")
 	}
 }
 

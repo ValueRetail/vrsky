@@ -48,7 +48,8 @@ all. The first retry comes after about 5 seconds, then the wait doubles up to
 deleted, when its status is no longer `running`, or after 6 hours, when the
 status becomes `error`. A start that fails in a way no retry fixes (Front
 Systems refusing the registration with another 4xx such as 401 or 403, a
-missing `base_url`, a secret that can't be read) is not retried: the
+missing `base_url` or one without `https://`, Front Systems refusing the keys
+on the first webhook list with 401 or 403, a secret that can't be read) is not retried: the
 pipeline's status becomes `error` and its last error names the cause. Fix it
 and start the pipeline again.
 
@@ -71,7 +72,9 @@ cluster start) keeps the registrations. If `callback_url` is not set, register
 the webhook out of band; the connector then neither registers nor deletes
 anything, but still refuses events while the connection is stopped.
 
-- `base_url` — per-partner Azure APIM host (required).
+- `base_url` — per-partner Azure APIM host as a URL, `https://<partner-apim-host>`
+  (required). A bare host without `https://` is refused at start and the
+  pipeline goes to `error`.
 - `subscription_key_secret_id` / `api_key_secret_id` — the two auth keys.
 - `events` — event types to register, e.g. `SaleCreated`, `StockMovementCreated`,
   `POSSettlementCreated`, `DeliveryItemsReceived`, `ProductTransferCreated`,

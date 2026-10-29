@@ -70,6 +70,12 @@ type frontSystemsConsumer struct {
 	// up and Stop remove it. Under mu.
 	pending map[string]*pendingStart
 
+	// permanentFailures counts, by connection ID, starts that failed for
+	// good. A start queued behind another (ReserveOrRetry) is skipped when
+	// the count moved since it was asked for: it would fail the same way.
+	// Never pruned, like the guard's seq. Under mu.
+	permanentFailures map[string]uint64
+
 	// Retry timing for failed starts; zero means the defaults in retry.go.
 	// Tests shorten them.
 	retryBase   time.Duration
@@ -327,17 +333,34 @@ func (c *frontSystemsConsumer) handleStartCommand(msg *nats.Msg) {
 // A start that fails in a way a retry may fix is retried in the background
 // (retry.go); one that fails for good marks the connection "error".
 func (c *frontSystemsConsumer) startConnection(ctx context.Context, connectionID, tenantID string) {
-	res := c.attemptStart(connectionID, tenantID, nil,
-		func() { c.startConnection(ctx, connectionID, tenantID) })
+	c.mu.Lock()
+	failures := c.permanentFailures[connectionID]
+	c.mu.Unlock()
+	res := c.attemptStart(connectionID, tenantID, nil, func() {
+		c.mu.Lock()
+		failedMeanwhile := c.permanentFailures[connectionID] != failures
+		c.mu.Unlock()
+		if failedMeanwhile {
+			c.logger.Info("Queued Front Systems start dropped: the start ahead of it failed for good",
+				"connection_id", connectionID, "tenant_id", tenantID)
+			return
+		}
+		c.startConnection(ctx, connectionID, tenantID)
+	})
+	// The outcome is recorded before the claim is released: Release runs the
+	// starts queued behind this one, and they must find this one's pending
+	// start ended (or retrying) and its failure counted (#503 review).
 	c.afterAttempt(connectionID, tenantID, res)
+	res.claim.Release()
 }
 
 // attemptStart makes one start of the connection. p is the pending start a
 // retry runs for; nil for a start command or boot restore, which attach to
 // the connection's pending start (or make one). retry is what ReserveOrRetry
 // keeps if this start is refused while another is in flight; nil from the
-// retry loop, which tries again itself.
-func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pendingStart, retry func()) startResult {
+// retry loop, which tries again itself. When the claim was taken it comes
+// back in the result, still held; the caller releases it.
+func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pendingStart, retry func()) (res startResult) {
 	logger := c.logger.With("connection_id", connectionID, "tenant_id", tenantID)
 
 	// Restore and the start-command handler call this on different goroutines.
@@ -379,10 +402,10 @@ func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pe
 		}
 		return startResult{outcome: startRefused, p: p}
 	}
-	// Frees the claim on every early return below; a no-op once active. It
-	// runs after the hook lock is unlocked (defers run last in, first out),
-	// so a start it retries can take that lock.
-	defer claim.Release()
+	// The caller frees the claim (a no-op once active) after it has acted on
+	// the outcome, and so after the hook lock below is unlocked: a start it
+	// runs from the queue can take that lock.
+	defer func() { res.claim = claim }()
 
 	// Every webhook call for this connection runs under its hook lock. A
 	// stop's deletes still pending are done first, so the lookup below cannot
@@ -399,7 +422,10 @@ func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pe
 	c.mu.Unlock()
 	c.drainUnregisters(fsCtx, connectionID, logger)
 
-	cfg, err := c.getConfig(fsCtx, connectionID, tenantID)
+	cfg, updatedAt, err := c.getConfig(fsCtx, connectionID, tenantID)
+	// Every result from here on carries the row version this start read
+	// (zero if the lookup itself failed).
+	defer func() { res.updatedAt = updatedAt }()
 	if err != nil {
 		return failedStart(p, err, startTransient, "")
 	}
@@ -574,6 +600,12 @@ func (c *frontSystemsConsumer) registerWebhooks(ctx context.Context, cfg *FrontS
 	callback := strings.TrimRight(cfg.CallbackURL, "/")
 	existing, err := c.listWebhooks(ctx, cfg)
 	if err != nil {
+		// Keys Front Systems refuses would fail the registration the same way.
+		// (A bad base URL fails the create below before any request.)
+		var se *fsStatusError
+		if errors.As(err, &se) && (se.status == http.StatusUnauthorized || se.status == http.StatusForbidden) {
+			return nil, fmt.Errorf("list webhooks: %w", err)
+		}
 		logger.Warn("Could not list Front Systems webhooks; registering without checking for existing ones", "error", err)
 	}
 	var ids []string
@@ -643,7 +675,7 @@ func (c *frontSystemsConsumer) listWebhooks(ctx context.Context, cfg *FrontSyste
 		return nil, err
 	}
 	if status < 200 || status >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", status, snippet(resp))
+		return nil, &fsStatusError{status: status, body: snippet(resp)}
 	}
 	// The response body is not documented: a bare array is expected, and the
 	// usual wrappers are accepted too.
@@ -687,6 +719,11 @@ func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, 
 	if cfg.BaseURL == "" {
 		return 0, nil, fmt.Errorf("%w: front_systems base_url is required (per-partner Azure APIM host)", errBadBaseURL)
 	}
+	// A bare host (the docs call it the APIM host) has no scheme, and
+	// http.Client would fail it with an error no retry fixes (#503 review).
+	if u, err := url.Parse(cfg.BaseURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return 0, nil, fmt.Errorf("%w: front_systems base_url must be an http(s) URL with a host, like https://<partner-apim-host>", errBadBaseURL)
+	}
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -725,19 +762,33 @@ func snippet(b []byte) string {
 // say whether a retry may help: a connection that isn't there for this tenant
 // or has no Front Systems consumer node is not ours to start (every consumer
 // sees every start command); a database that doesn't answer is transient; a
-// secret that can't be read or a node config that doesn't parse is permanent.
+// secret that can't be read, a node config that doesn't parse or any other
+// database error is permanent. updatedAt is the row's updated_at, the version
+// an "error" write for this start may replace.
 // lint:tenant-ok — lookup is scoped by (id, tenant_id).
-func (c *frontSystemsConsumer) getConfig(ctx context.Context, connectionID, tenantID string) (*FrontSystemsConfig, error) {
+func (c *frontSystemsConsumer) getConfig(ctx context.Context, connectionID, tenantID string) (cfg *FrontSystemsConfig, updatedAt time.Time, err error) {
 	var nodesJSON json.RawMessage
 	if err := c.db.QueryRowContext(ctx,
-		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
+		`SELECT nodes, updated_at FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
-	).Scan(&nodesJSON); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &startError{kind: startNotOurs, err: fmt.Errorf("connection not found: %w", err)}
+	).Scan(&nodesJSON, &updatedAt); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, time.Time{}, &startError{kind: startNotOurs, err: fmt.Errorf("connection not found: %w", err)}
+		case transientDBError(err):
+			return nil, time.Time{}, &startError{kind: startTransient, err: fmt.Errorf("look up connection: %w", err)}
+		default: // e.g. an id that isn't a UUID (22P02)
+			return nil, time.Time{}, &startError{kind: startPermanent, err: fmt.Errorf("look up connection: %w", err),
+				reason: "Front Systems: the connection could not be read"}
 		}
-		return nil, &startError{kind: startTransient, err: fmt.Errorf("look up connection: %w", err)}
 	}
+	cfg, err = c.frontSystemsNode(ctx, nodesJSON, tenantID)
+	return cfg, updatedAt, err
+}
+
+// frontSystemsNode finds the Front Systems consumer node in a connection's
+// nodes and resolves its secrets. Errors as for getConfig.
+func (c *frontSystemsConsumer) frontSystemsNode(ctx context.Context, nodesJSON json.RawMessage, tenantID string) (*FrontSystemsConfig, error) {
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nil, &startError{kind: startNotOurs, err: fmt.Errorf("parse nodes: %w", err)}
