@@ -687,7 +687,7 @@ Last updated 2026-10-28.
     canvas id with it). The #502 name sync stays safe meanwhile, because the
     store only applies a name to a canvas linked to that connection. Found
     in review of #502.
-101. **A stale edit-route answer can undo a rename deployed meanwhile.** The
+101. ~~**A stale edit-route answer can undo a rename deployed meanwhile.**~~ (#540) The
     #502 sync reads the canvas when the GET answers. If the user renames the
     tab and Deploys before that, `deployedName` already equals the new tab,
     so the old answer counts as "not renamed" and puts the old name back on
