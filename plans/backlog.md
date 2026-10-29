@@ -571,7 +571,7 @@ Last updated 2026-10-28.
     Either delete along the path (a behaviour change for existing
     pipelines, so say so in the PR) or document it. The editor's `each`
     help text says so since #458. Found in #458.
-88. **Converter editor accessibility.** Nested mapping rows repeat the
+88. ~~**Converter editor accessibility.**~~ (#542) Nested mapping rows repeat the
     accessible names "Mapping type" and "Remove mapping" with no row
     context, so a screen reader can't tell rows apart, and a row's
     warnings aren't tied to its inputs with `aria-describedby`
