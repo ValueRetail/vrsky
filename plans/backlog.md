@@ -480,7 +480,7 @@ Last updated 2026-10-28.
     guard, so on a slow switch from A to B, A's answer can land after B's
     and the list shows A's connections under B. Give it the same guard as
     the connections store's `load()`. Found in review of #450 (#466).
-75. **The sidebar's status counts cover at most 100 connections.** They
+75. ~~**The sidebar's status counts cover at most 100 connections.**~~ (#541) They
     come from the store's loaded items (`limit=100`), while the badge shows
     the API total, so a workspace with more than 100 shows a badge that
     disagrees with the running/stopped/error cards. Count by status on the
