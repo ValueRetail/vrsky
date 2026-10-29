@@ -936,7 +936,7 @@ Last updated 2026-10-28.
    check every pod comes back and the smoke check passes.
 7. **Rename the three production pipelines** in the builder (open, rename
    the tab, Deploy); they are still named after the time of a deploy.
-8. **Delete the four disk snapshots after 2026-10-29**
+8. ~~**Delete the four disk snapshots after 2026-10-29**~~ (#434, done 2026-10-29)
    (`nats-{0,1,2}-before-shrink-20261022`, `minio-before-shrink-20261022`
    in `MC_vrsky-prod_vrsky-prod_norwayeast`).
 9. **Sitoo ⇄ Business Central templates.** Need a field mapping tested
