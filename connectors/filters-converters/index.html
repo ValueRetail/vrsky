@@ -2542,6 +2542,14 @@ tick <strong>Split records</strong> under the mappings.</p>
   cannot be split and go to the DLQ.</p>
 </li>
 </ul>
+<p><code>rename</code> and <code>each</code> read <code>source</code> as a dotted path (<code>order.items</code>) and, with
+the node's <code>drop_unmapped</code> off, remove the field at that path, so the value
+moves instead of being copied (#525; before that a dotted source stayed next
+to the new field). The rest of the parent object stays, and so does the
+parent when it ends up empty: <code>order.id</code> → <code>orderId</code> on <code>{"order":{"id":1}}</code>
+gives <code>{"order":{},"orderId":1}</code>. Add a <code>remove</code> of <code>order</code> if the
+destination should not see it. <code>remove</code> itself still deletes only a top-level
+field with exactly the name given.</p>
 <p><code>to_string</code> writes numbers in plain decimal (<code>1000000</code>, not <code>1e+06</code>).</p>
 <p>The editor warns about a mapping the converter would skip or write wrongly:
 a missing source or target, a template with no expression, a type the
