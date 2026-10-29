@@ -61,15 +61,6 @@ describe('Connections Store', () => {
       expect(state.connections).toHaveLength(0)
     })
 
-    it('should set multiple connections', () => {
-      const store = useConnectionsStore.getState()
-      const connections = [mockConnection, { ...mockConnection, id: 'conn-2' }]
-      store.setConnections(connections)
-
-      const state = useConnectionsStore.getState()
-      expect(state.connections).toHaveLength(2)
-    })
-
     it('should clear all connections', () => {
       const store = useConnectionsStore.getState()
       store.addConnection(mockConnection)
@@ -137,34 +128,6 @@ describe('Connections Store', () => {
       const errors = store.getErrorConnections()
       expect(errors).toHaveLength(1)
       expect(errors[0].id).toBe('conn-2')
-    })
-  })
-
-  describe('Loading State', () => {
-    it('should set loading state', () => {
-      const store = useConnectionsStore.getState()
-      store.setLoading(true)
-
-      let state = useConnectionsStore.getState()
-      expect(state.loading).toBe(true)
-
-      store.setLoading(false)
-      state = useConnectionsStore.getState()
-      expect(state.loading).toBe(false)
-    })
-  })
-
-  describe('Error State', () => {
-    it('should set error state', () => {
-      const store = useConnectionsStore.getState()
-      store.setError('Connection failed')
-
-      let state = useConnectionsStore.getState()
-      expect(state.error).toBe('Connection failed')
-
-      store.setError(null)
-      state = useConnectionsStore.getState()
-      expect(state.error).toBeNull()
     })
   })
 

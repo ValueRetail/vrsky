@@ -127,17 +127,11 @@ describe('connectionsStore.load', () => {
   })
 })
 
-describe('connectionsStore total outside load', () => {
+describe('connectionsStore.clear', () => {
   const conn = (id: string) => ({ id, name: id, status: 'running' }) as unknown as Connection
 
-  it('setConnections sets total to the list length; clear resets it', () => {
-    state().setConnections([conn('x'), conn('y'), conn('z')])
-    expect(state().total).toBe(3)
-
-    state().setConnections([])
-    expect(state().total).toBe(0)
-
-    state().setConnections([conn('x')])
+  it('clear resets the connections and the total', () => {
+    useConnectionsStore.setState({ connections: [conn('x')], total: 7 })
     state().clear()
     expect(state().total).toBe(0)
     expect(state().connections).toEqual([])
