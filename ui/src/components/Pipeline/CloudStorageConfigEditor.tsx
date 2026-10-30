@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useId } from 'react'
 import SecretInput from './SecretInput'
 import TestConnectionButton from './TestConnectionButton'
 import { StyledInput, StyledSelect } from './StyledFields'
@@ -24,6 +24,7 @@ export default function CloudStorageConfigEditor({
   const provider = (cs.provider as string) || 's3'
   const afterAction = (cs.after_action as string) || 'none'
   const mode = (cs.mode as string) || 'poll'
+  const patternHelpId = useId()
 
   // Same as the SFTP panel (#589): a source in poll mode saves the 60 the
   // field shows, because a missing value means "poll once". Event mode has no
@@ -242,14 +243,25 @@ export default function CloudStorageConfigEditor({
                 </>
               )}
             </>
-          ) : (
+          ) : null}
+
+          {/* Shown in both modes: event mode applies prefix and file_pattern
+              to the keys a notification names since #594, so a pattern set
+              in poll mode must stay visible after a switch to event mode. */}
+          <div>
             <StyledInput
               label="File pattern (optional)"
               placeholder="*.csv"
               value={(cs.file_pattern as string) || ''}
               onChange={(v) => update({ file_pattern: v })}
+              describedBy={patternHelpId}
             />
-          )}
+            <div id={patternHelpId} style={{ fontSize: '11px', color: '#6b7280', marginTop: '-12px', marginBottom: '12px' }}>
+              {mode === 'event'
+                ? 'Matched against the file name (after the last /). Applies in event mode too: a notified object outside the prefix or not matching the pattern is skipped, and its notification is acked.'
+                : 'Matched against the file name (after the last /), e.g. *.csv. Empty reads every object under the prefix.'}
+            </div>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             {mode !== 'event' && (
@@ -322,7 +334,9 @@ export default function CloudStorageConfigEditor({
 
       <div style={{ fontSize: '11px', color: '#6b7280' }}>
         {role === 'consumer'
-          ? 'The bucket is polled under the prefix and each new object is ingested.'
+          ? mode === 'event'
+            ? 'Each notified object under the prefix that matches the file pattern is ingested.'
+            : 'The bucket is polled under the prefix and each new object is ingested.'
           : 'Each message is written as an object. The key template can reference payload fields plus the timestamp and uuid built-ins; it defaults to the message id.'}{' '}
         Credentials are stored encrypted in the secrets vault on deploy.
       </div>

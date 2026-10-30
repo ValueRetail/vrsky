@@ -118,13 +118,42 @@ func (s *sqsEventSource) Ack(ctx context.Context, handle string) error {
 	return nil
 }
 
+// s3MetadataEvents are ObjectCreated names MinIO sends for a change to an
+// object's metadata, not its content. Ingesting them would publish the
+// object again.
+var s3MetadataEvents = map[string]bool{
+	"ObjectCreated:PutTagging":    true,
+	"ObjectCreated:DeleteTagging": true,
+	"ObjectCreated:PutRetention":  true,
+	"ObjectCreated:PutLegalHold":  true,
+}
+
+// s3EventCreated reports whether an S3 record's eventName is an object-created
+// event: ObjectCreated:Put, Post, Copy and CompleteMultipartUpload (the last
+// is how a multipart upload ends, and Copy is how a move lands). AWS writes
+// the name without "s3:" in the record; MinIO writes it with. MinIO's
+// metadata events under ObjectCreated (tagging, retention, legal hold) are
+// not creates. A record with no eventName is treated as a create, like GCS
+// without eventType: a delete always names its event.
+func s3EventCreated(name string) bool {
+	name = strings.TrimPrefix(name, "s3:")
+	if s3MetadataEvents[name] {
+		return false
+	}
+	return name == "" || strings.HasPrefix(name, "ObjectCreated:")
+}
+
 // parseS3Notification extracts object keys from an S3 event-notification body.
 // Keys are URL-encoded in the notification (spaces as '+'); they are decoded
-// here. Non-object messages (e.g. the s3:TestEvent sent at setup) yield no keys.
+// here. Only object-created records yield keys (as Azure keeps BlobCreated and
+// GCS OBJECT_FINALIZE); removals, restores, tagging and the like drain without
+// ingesting. Non-object messages (e.g. the s3:TestEvent sent at setup) yield
+// no keys.
 func parseS3Notification(body []byte) []string {
 	var n struct {
 		Records []struct {
-			S3 struct {
+			EventName string `json:"eventName"`
+			S3        struct {
 				Object struct {
 					Key string `json:"key"`
 				} `json:"object"`
@@ -136,6 +165,9 @@ func parseS3Notification(body []byte) []string {
 	}
 	var keys []string
 	for _, r := range n.Records {
+		if !s3EventCreated(r.EventName) {
+			continue
+		}
 		k := r.S3.Object.Key
 		if k == "" {
 			continue

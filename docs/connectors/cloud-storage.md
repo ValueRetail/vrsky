@@ -25,7 +25,8 @@ Config bullets (all under `cloud_storage`):
   Required.
 - `prefix` — key prefix to scope the listing (e.g. `incoming/`). Empty means
   the whole bucket. The listing is recursive: objects under deeper keys
-  (`incoming/2026/a.csv`) are ingested too.
+  (`incoming/2026/a.csv`) are ingested too. In event mode it selects the
+  keys a notification names, in the same way (see below).
 - `region` — provider region (S3).
 - `endpoint` — custom endpoint: MinIO or another S3-compatible store (path-style
   addressing is then used), or a private or emulated GCS endpoint.
@@ -37,8 +38,9 @@ Config bullets (all under `cloud_storage`):
   field. A node saved before that change (#589) has no value and lists once:
   open it, press Save Configuration so it gets the `60`, and redeploy. Type
   `0` to choose one listing on purpose.
-- `file_pattern` — poll mode: glob matched against the object's base name
-  (the part after the last `/`), e.g. `*.csv`. Empty means every object.
+- `file_pattern` — glob matched against the object's base name (the part
+  after the last `/`), e.g. `*.csv`. Empty means every object. Applies in
+  both modes.
 - `after_action` — what to do with an object once it is published: `none`
   (default, leave it), `delete`, or `move`. Applies in both modes.
 - `move_prefix` — where `move` puts the object: it is copied to
@@ -47,10 +49,10 @@ Config bullets (all under `cloud_storage`):
   `incoming/a/x.csv` and `incoming/b/x.csv` both land on
   `<move_prefix>/x.csv` and the second overwrites the first.
 
-  In poll mode the start is also refused when the listing of `prefix`
-  would find moved objects again (#567). The log says `invalid
-  move_prefix` and names both values. The listing matches `prefix` as
-  text, not as a folder:
+  In poll mode the start is also refused when `prefix` would select moved
+  objects again (#567). The log says `invalid move_prefix` and names both
+  values. Event mode starts anyway, with a warning (below). `prefix` is
+  matched as text, not as a folder:
   - Starts: `prefix: incoming/` with `processed/`, `incoming-done/` or `.`
     (the bucket root); `prefix: incoming/a/` with `incoming` (one level
     up).
@@ -64,11 +66,21 @@ Config bullets (all under `cloud_storage`):
   `/` puts `x.csv` at the key `/x.csv`, which S3 and GCS keep as a
   separate key from `x.csv`. The check resolves `.` and `..` the way the
   move does but ignores leading slashes, so it may refuse a config with a
-  leading `/` that would have worked on S3 or GCS. In event mode `prefix` is not applied, so the start is not
-  checked: keep `move_prefix` outside what the bucket notification covers,
-  or a moved object is ingested a second time. In both modes the consumer
-  never moves an object onto its own key: that move fails with
+  leading `/` that would have worked on S3 or GCS. In both modes the
+  consumer never moves an object onto its own key: that move fails with
   `after-action failed` in the log and the object stays where it is.
+
+  In event mode a moved object sends a new notification, and `prefix` is
+  what keeps it out. When the same rule finds `move_prefix` inside `prefix`
+  (an empty `prefix` included), an event-mode connection still starts and
+  logs a warning, `move_prefix is inside prefix; starting anyway in event
+  mode`. A moved key is always `<move_prefix>/<base name>`, so if its
+  notification reaches the queue the object is published once more, the move
+  onto its own key is refused (`after-action failed`, `already in
+  move_prefix`), and it stays in `move_prefix`: one duplicate, no loss, no
+  loop. To avoid the duplicate, set a `prefix` with `move_prefix` outside
+  it, or scope the bucket notification so moved objects don't reach the
+  queue.
 
 Event mode also reads:
 
@@ -85,11 +97,31 @@ Event mode also reads:
   `account_name` + `account_key`; with `connection_string` the queue
   address comes from the connection string.
 
-In event mode `prefix` and `file_pattern` are not applied: every object a
-notification names is ingested. Scope the bucket notification itself to the
-prefix and suffix you want. Azure and GCS ingest only object-created events
-(`BlobCreated`, `OBJECT_FINALIZE`); on S3 every record in a notification is
-ingested, so send only `s3:ObjectCreated:*` events to the queue.
+In event mode `prefix` and `file_pattern` apply to the keys a notification
+names, as in poll mode (#594). `prefix` is matched as text, so `in` also
+selects `in-done/a.csv`; `file_pattern` is matched against the base name. A
+key outside them is acknowledged and skipped: nothing is published, moved or
+deleted for it and the message is not redelivered. The first skipped key of
+each run of the connection is logged at Info level (`event key outside
+prefix or file_pattern; skipped`, with the key, prefix and pattern), later
+ones at Debug. Folder placeholders (keys ending in `/`, which the S3
+console's "Create folder" writes) are skipped as in poll mode. Keys are
+matched after decoding, so an S3 key `in+folder/a.csv` is matched as
+`in folder/a.csv`. The editor shows File pattern in both modes. You can
+still scope the bucket notification itself to cut the traffic, but you no
+longer have to for correctness.
+
+Only object-created events are ingested, on every provider: `BlobCreated` on
+Azure, `OBJECT_FINALIZE` on GCS, and `ObjectCreated:*` on S3 (`Put`, `Post`,
+`Copy` and `CompleteMultipartUpload`). MinIO's metadata events under
+`ObjectCreated` (`PutTagging`, `DeleteTagging`, `PutRetention`,
+`PutLegalHold`) are not creates. Other S3 records (removals, lifecycle,
+restore, tagging) are acknowledged and skipped too. Before #594 the S3
+consumer ingested every record in a notification, and an event-mode
+connection ignored `prefix` and `file_pattern`; a connection that relied on
+that now skips what its `prefix` or `file_pattern` does not select. That
+includes a `file_pattern` saved while the connection was in poll mode,
+which the editor used to hide in event mode: check it after the upgrade.
 
 ```json
 {
