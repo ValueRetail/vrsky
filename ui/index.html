@@ -7,6 +7,42 @@
     <meta name="theme-color" content="#3b82f6" />
     
     <title>VRSky - Integration Platform</title>
+
+    <!--
+      Entry-script retry (#600). During a UI rollout an old pod can answer
+      404 (served as index.html) for the new build's script, which leaves a
+      blank page. If a /assets/ script fails to load, reload once after a
+      short wait, unless #root has children by then (the app started). The
+      sessionStorage flag keeps it to one try; src/main.tsx clears it once the
+      app has started. Classic script on purpose: it has
+      to run even when the module script cannot load.
+    -->
+    <script>
+      window.addEventListener(
+        'error',
+        function (e) {
+          var el = e.target
+          if (!el || el.tagName !== 'SCRIPT' || !el.src) return
+          try {
+            var url = new URL(el.src, location.href)
+            if (url.origin !== location.origin || url.pathname.indexOf('/assets/') !== 0) return
+            if (sessionStorage.getItem('vrsky:asset-retry')) return
+            sessionStorage.setItem('vrsky:asset-retry', '1')
+          } catch (_) {
+            // No sessionStorage: a retry could not be limited to one.
+            return
+          }
+          setTimeout(function () {
+            // The app started in the meantime (a later, optional script
+            // failed): a reload would only risk a loop.
+            var root = document.getElementById('root')
+            if (root && root.children.length > 0) return
+            location.reload()
+          }, 2000)
+        },
+        true
+      )
+    </script>
     
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><path d='M13 10V3L4 14h7v7l9-11h-7z'/></svg>" />
   </head>

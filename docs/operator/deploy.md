@@ -74,11 +74,19 @@ runner; *Deploy to production* shows each rollout and the smoke output.
 About four minutes for a UI change, ten for a change under `src/pkg`.
 
 Browser tabs left open across a UI deploy keep running the old bundle.
-Within five minutes, or when the tab is focused again, they show a
+Within about six minutes, or when the tab is focused again, they show a
 "A new version of VRSky is available" banner with a Reload button; nothing
 reloads by itself (#551). The tab compares the hashed `/assets/` names in
 its own page with a fresh `index.html`, so a deploy that leaves the built
-UI unchanged shows no banner.
+UI unchanged shows no banner. The banner appears only after two checks at
+least 30 seconds apart have seen the same new set, which is why it can lag
+a minute behind the first new pod: during a rolling update old and new UI
+pods answer side by side, and a reload that gets a new `index.html` but an
+old pod for its script (404, served as HTML) would show a blank page
+(#600). If that still happens, `index.html` carries a small inline guard:
+when a `/assets/` script fails to load it reloads the page once after two
+seconds. A `sessionStorage` flag keeps it to one try per tab, and the app
+clears the flag when it starts.
 
 `infrastructure/azure/smoke-prod.sh [deployment …]` is the same check run
 by hand: `/readyz` and the UI answer 200, each named consumer logged
