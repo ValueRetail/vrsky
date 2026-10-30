@@ -32,7 +32,9 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
   and ask only for what changed since. Off by default: switching it on changes
   what a running pipeline delivers, so it is the connection owner's decision.
 - `cursor_field` — the field the watermark is read from (default
-  `lastModifiedDateTime`). A custom API page may name it something else.
+  `lastModifiedDateTime`). A custom API page may name it something else. The
+  field may be a DateTime or a date with no time (`Edm.Date`); see
+  "Date fields" under Incremental polling.
 - `page_size` — ask BC to page the response, sent as
   `Prefer: odata.maxpagesize`. Unset leaves BC on its own default, which
   returns most entities whole — 80 CRONUS items came back in a single page.
@@ -226,7 +228,7 @@ node sees) is skipped and the converted record is written.
     so its records arrive twice rather than being skipped — the same
     at-least-once bargain the rest of the pipeline makes.
 
-    The comparison is `gt`, so a record written in the same millisecond as the
+    For a DateTime the comparison is `gt`, so a record written in the same millisecond as the
     watermark but after the fetch read it is not picked up. `ge` would redeliver
     the watermark record on every poll instead.
 
@@ -249,9 +251,40 @@ node sees) is skipped and the converted record is written.
     (a due date, say) has every future-dated record held this way: each poll
     reads all of them again, page by page, and the checkpoint row lists each
     one. They are not sent again, but the poll costs grow with them, and past
-    1,000 such records the node logs a Warn once. A `cursor_field` of type
-    `Edm.Date` (a date with no time) never sets a watermark at all, so every
-    poll reads and sends the whole entity again.
+    1,000 such records the node logs a Warn once.
+
+    **Date fields (`Edm.Date`).** A `cursor_field` whose values are dates with
+    no time (`2026-10-29`) works like a DateTime field, with three
+    differences:
+
+    - The filter is `<field> ge 2026-10-29`: the date written without quotes,
+      which is the OData v4 `Edm.Date` literal, and `ge`, not `gt`. A date has
+      no time of day, so `gt` would hide every record added later on the
+      watermark day. The node remembers (in the checkpoint row, next to the
+      future-dated records) the records it has sent that carry the watermark
+      date, and leaves them out when BC returns the day again. A record added
+      later that day is sent. Only the newest day is kept; when the watermark
+      moves, the older day is dropped.
+    - The ceiling is yesterday, not now. BC's own date can be up to 14 hours
+      ahead of, or 12 behind, the pod's UTC date, so a watermark on today's
+      UTC date could be a day ahead of BC's today and hide the records BC
+      dates with it. A record dated today, or later, is sent once and kept out
+      of the watermark, like a future-dated DateTime record, and is picked up
+      without a second send once its date is yesterday or earlier. A Warn
+      names a record dated later than tomorrow (UTC).
+    - A date says nothing about modification. An edit that leaves the date
+      alone is not seen again (a record without `id` or `number` is
+      identified by its content, so there it is). A record whose date is
+      earlier than the watermark when it is added is never read, and nothing
+      is logged. Business dates are often backdated — for example, Saturday's
+      sales posted on Monday with posting date Saturday — so use
+      `lastModifiedDateTime` as the cursor unless you are sure the date field
+      is never backdated. The blank date BC returns for an empty field
+      (`0001-01-01`) is ignored.
+
+    The cost of a date cursor is the watermark day: each poll reads it again
+    and the checkpoint lists its records. A day with more than 1,000 records
+    logs a Warn once. A last-modified DateTime field avoids that.
 
     **Nodes frozen before #591.** Earlier versions took any value as the
     watermark, so a node may have stored one in the future and read nothing

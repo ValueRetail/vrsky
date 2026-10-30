@@ -240,8 +240,19 @@ func (s *cloudConsumer) startConnection(ctx context.Context, connectionID, tenan
 		return
 	}
 	if err := cfg.validateMoveOutsideListing(); err != nil {
-		logger.Error("invalid move_prefix", "error", err)
-		return
+		if cfg.Mode != "event" {
+			logger.Error("invalid move_prefix", "error", err)
+			return
+		}
+		// Event mode starts anyway. A move there always writes
+		// move_prefix/<base name>, so a moved object that comes back as a new
+		// notification is published once more and then left where it is: the
+		// afterAction guard refuses to move it onto its own key. Refusing the
+		// start instead would stop connections the docs used to recommend
+		// (empty prefix, notification scoped to a folder): RestoreRunning
+		// would leave them "running" with nothing reading the queue.
+		logger.Warn("move_prefix is inside prefix; starting anyway in event mode: a moved object the bucket notification covers is published once more, then left in move_prefix",
+			"error", err)
 	}
 	if cfg.Mode == "event" {
 		if err := cfg.validateEventConfig(); err != nil {
@@ -441,10 +452,8 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 		if done.Done(o.Key, stamp) {
 			continue
 		}
-		if cfg.FilePattern != "" {
-			if match, _ := path.Match(cfg.FilePattern, path.Base(o.Key)); !match {
-				continue
-			}
+		if !cfg.matchesFilePattern(o.Key) {
+			continue
 		}
 		if !refreshed {
 			// Once per poll, before the first publish: another poller of
@@ -495,6 +504,7 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 	}
 
 	logger.Info("cloud-storage event loop started", "event_target", cfg.eventTarget())
+	skipLogged := false
 	for {
 		if ctx.Err() != nil {
 			return
@@ -518,13 +528,31 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 			}
 			ok := true
 			for _, key := range m.objectKeys {
+				// Same selection as poll mode, which lists under prefix and
+				// then applies file_pattern (#594). A key outside it is not
+				// an error: it is skipped and the message is acked below, so
+				// the queue does not redeliver it. Nothing is published,
+				// moved or deleted for it. The first skip of this run is
+				// logged at Info, so a filter that drops more than intended
+				// shows in production logs; the rest at Debug.
+				if !cfg.wantsEventKey(key) {
+					level := slog.LevelDebug
+					if !skipLogged {
+						skipLogged = true
+						level = slog.LevelInfo
+					}
+					logger.Log(ctx, level, "event key outside prefix or file_pattern; skipped (further skips for this connection log at Debug)",
+						"key", key, "prefix", cfg.Prefix, "file_pattern", cfg.FilePattern)
+					continue
+				}
 				if err := s.ingestObject(ctx, connID, tenantID, store, cfg, key, logger); err != nil {
 					logger.Error("ingest failed; leaving message for redelivery", "key", key, "error", err)
 					ok = false
 				}
 			}
 			// Ack only when every referenced object was published (and an empty
-			// message — e.g. s3:TestEvent — is acked to drain it).
+			// message — e.g. s3:TestEvent, or one whose keys were all skipped
+			// above — is acked to drain it).
 			if ok {
 				if err := src.Ack(ctx, m.ackHandle); err != nil {
 					logger.Warn("event ack failed", "error", err)
@@ -630,9 +658,9 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 		}
 		dst := path.Join(cfg.MovePrefix, path.Base(key))
 		// Copying an object onto its own key and then deleting it loses it on
-		// Azure and GCS (#567). Poll mode refuses such a config at start; in
-		// event mode the notification decides which keys arrive, so a moved
-		// object can come back here. Trimming leading slashes is deliberately
+		// Azure and GCS (#567). Poll mode refuses such a config at start; event
+		// mode only warns (#594), so a moved object the notification covers
+		// comes back here and this check leaves it in place. Trimming leading slashes is deliberately
 		// conservative: it also refuses some real S3/GCS moves (a.csv to
 		// /a.csv), which fails safe by leaving the object in place.
 		if strings.TrimLeft(dst, "/") == strings.TrimLeft(key, "/") {
@@ -754,23 +782,54 @@ func (c *cloudConfig) validateEventConfig() error {
 	return nil
 }
 
-// validateMoveOutsideListing refuses, in poll mode, an after_action=move whose
-// moved objects the listing of prefix would return again (#567). They would be
-// published a second time and then moved onto their own key and deleted, which
-// loses them on Azure and GCS.
+// matchesFilePattern reports whether the object's base name matches
+// file_pattern; an empty pattern matches everything. A pattern path.Match
+// rejects (a malformed glob) matches nothing, as in poll mode before #594.
+func (c *cloudConfig) matchesFilePattern(key string) bool {
+	if c.FilePattern == "" {
+		return true
+	}
+	match, _ := path.Match(c.FilePattern, path.Base(key))
+	return match
+}
+
+// wantsEventKey reports whether a key named by a bucket notification is one
+// this connection ingests: under prefix and matching file_pattern, the same
+// selection poll mode makes (#594). The providers match prefix as a plain
+// string, not a folder, when they list, so it is a plain string prefix here
+// too: prefix "in" selects "in-done/a.csv". A folder placeholder (a key
+// ending in "/", what the S3 console's "Create folder" writes) is skipped,
+// as the S3 listing skips it in poll mode.
+func (c *cloudConfig) wantsEventKey(key string) bool {
+	if strings.HasSuffix(key, "/") {
+		return false
+	}
+	return strings.HasPrefix(key, c.Prefix) && c.matchesFilePattern(key)
+}
+
+// validateMoveOutsideListing reports an after_action=move whose moved objects
+// prefix would select again (#567, #594). In poll mode they would be published
+// a second time and then moved onto their own key and deleted, which loses
+// them on Azure and GCS, so the start is refused.
 //
 // The providers match prefix as a plain string, not a folder: prefix "in"
 // lists "in-done/a.csv" too. A move writes path.Join(move_prefix, base name),
 // so every destination is dir+b with b a base name (not empty, no "/"). One of
-// them is listed when dir starts with prefix (equal, under it, or an empty
+// them is selected when dir starts with prefix (equal, under it, or an empty
 // prefix), or when prefix starts with dir and the rest of prefix has no "/"
-// (a base name starting with that rest is listed). Leading slashes are
+// (a base name starting with that rest is selected). Leading slashes are
 // ignored on both sides, which refuses more rather than less.
 //
-// Event mode does not apply prefix (the bucket notification decides), so it
-// is not checked here; afterAction refuses a move onto the object's own key.
+// Poll mode selects by listing prefix. Event mode selects the keys of the
+// bucket notification that are under prefix (wantsEventKey), so the same
+// rule describes it: a moved object notifies as a new object, and prefix is
+// what keeps it out. But there the cost is bounded: the moved key is always
+// move_prefix/<base name>, so when it comes back afterAction refuses to move
+// it onto its own key and it is published once more, not lost. startConnection
+// therefore only warns in event mode, so a setup the docs used to recommend
+// (empty prefix, notification scoped to a folder) keeps running.
 func (c *cloudConfig) validateMoveOutsideListing() error {
-	if c.AfterAction != "move" || c.MovePrefix == "" || c.Mode == "event" {
+	if c.AfterAction != "move" || c.MovePrefix == "" {
 		return nil
 	}
 	prefix := strings.TrimLeft(c.Prefix, "/")

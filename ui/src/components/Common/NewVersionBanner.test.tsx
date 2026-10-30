@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import NewVersionBanner from './NewVersionBanner'
-import { VERSION_POLL_MS } from '../../hooks/useNewVersion'
+import { VERSION_POLL_MS, VERSION_RECHECK_MS } from '../../hooks/useNewVersion'
 
 const A = ['/assets/index-AAA.js', '/assets/index-AAA.css']
 const B = ['/assets/index-BBB.js', '/assets/index-BBB.css']
@@ -42,9 +42,19 @@ function loadTab(assets: string[]) {
   }
 }
 
-async function poll() {
+async function poll(ms = VERSION_POLL_MS) {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(VERSION_POLL_MS)
+    await vi.advanceTimersByTimeAsync(ms)
+  })
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+}
+
+/** The confirming check that follows a first sighting (#600). */
+async function recheck() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(VERSION_RECHECK_MS)
   })
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0)
@@ -87,6 +97,9 @@ describe('NewVersionBanner', () => {
     fetchMock.mockResolvedValue(answer(html(B)))
     render(<NewVersionBanner />)
     await poll()
+    // One sighting is not enough while old and new pods may both serve.
+    expect(banner()).not.toBeInTheDocument()
+    await recheck()
     expect(screen.getByRole('status')).toHaveTextContent(/new version of VRSky is available/i)
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Later' })).toBeInTheDocument()
@@ -106,13 +119,15 @@ describe('NewVersionBanner', () => {
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(answer(html(B), 503))
       .mockResolvedValueOnce(answer('<html><body>502 Bad Gateway</body></html>'))
-      .mockResolvedValueOnce(answer(html(B)))
+      .mockResolvedValue(answer(html(B)))
     const { container } = render(<NewVersionBanner />)
     await poll()
     await poll()
     await poll()
     expect(container).toBeEmptyDOMElement()
     await poll()
+    expect(container).toBeEmptyDOMElement()
+    await recheck()
     expect(banner()).toBeInTheDocument()
   })
 
@@ -120,6 +135,7 @@ describe('NewVersionBanner', () => {
     fetchMock.mockResolvedValue(answer(html(B)))
     render(<NewVersionBanner />)
     await poll()
+    await recheck()
     await poll()
     await poll()
     expect(banner()).toBeInTheDocument()
@@ -132,12 +148,13 @@ describe('NewVersionBanner', () => {
     fetchMock.mockResolvedValue(answer(html(B)))
     render(<NewVersionBanner />)
     await poll()
+    await recheck()
     fireEvent.click(screen.getByRole('button', { name: 'Later' }))
     expect(banner()).not.toBeInTheDocument()
     // The same version on later checks stays dismissed.
     await poll()
     await poll()
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(banner()).not.toBeInTheDocument()
     expect(reload).not.toHaveBeenCalled()
   })
@@ -146,13 +163,15 @@ describe('NewVersionBanner', () => {
     fetchMock
       .mockResolvedValueOnce(answer(html(B)))
       .mockResolvedValueOnce(answer(html(B)))
-      .mockResolvedValueOnce(answer(html(C)))
+      .mockResolvedValue(answer(html(C)))
     render(<NewVersionBanner />)
     await poll()
+    await recheck()
     fireEvent.click(screen.getByRole('button', { name: 'Later' }))
-    await poll()
+    // The next timer check (at 10:00) sees C for the first time.
+    await poll(VERSION_POLL_MS - VERSION_RECHECK_MS + 1_000)
     expect(banner()).not.toBeInTheDocument()
-    await poll()
+    await recheck()
     expect(banner()).toBeInTheDocument()
   })
 })

@@ -146,10 +146,13 @@ type BCConfig struct {
 	pictureSeen map[string]seenPicture
 
 	// aheadSeen is record key → the cursor value it carried when it was
-	// published dated after now (#591). Such a record does not move the
-	// watermark while it is ahead, so the "gt watermark" filter keeps returning it; this is
-	// what stops it being sent again every poll. Persisted in the node's
-	// checkpoint state. nil = not loaded yet.
+	// published, for the records the next poll's filter returns again: the
+	// ones dated after now (#591), which do not move the watermark while they
+	// are ahead, and, for an Edm.Date cursor read back with `ge`, the ones
+	// dated on the watermark day (#602). It is what stops them being sent
+	// again every poll. Persisted in the node's checkpoint state. nil = not
+	// loaded yet.
+
 	aheadSeen map[string]string
 	// aheadWarned is set once the size Warn for aheadSeen was logged, so it
 	// is logged once per process rather than every poll.
@@ -493,6 +496,11 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	case rec.active:
 		newCursor, replace = cursor, true
 	}
+	// A date watermark is read back with `ge`, so the records dated on that
+	// day come back on every poll, like the future-dated ones. Remember both.
+	for k, v := range watermark.atWatermark {
+		ahead[k] = v
+	}
 	aheadChanged := cfg.Incremental && !sameAhead(cfg.aheadSeen, ahead)
 	if cfg.Incremental {
 		cfg.aheadSeen = ahead
@@ -519,9 +527,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 // cursorTracker keeps the newest cursor-field value seen in a fetch.
 //
 // The raw string is kept beside the parsed time because that string came from
-// Business Central, so it is by construction a datetime literal BC accepts
-// back in a $filter. Comparison goes through the parsed time: "…:00.5Z" sorts
-// before "…:00Z" as text while being the later instant.
+// Business Central, so it is by construction a literal BC accepts back in a
+// $filter. Comparison goes through the parsed time: "…:00.5Z" sorts before
+// "…:00Z" as text while being the later instant.
 //
 // A value later than ceiling (when set) is not a watermark candidate (#591).
 // The caller sets the ceiling to now: the next poll asks for records after
@@ -529,16 +537,64 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 // watermark in the future would hide every record BC writes until the clock
 // passes it (forever, for a record stamped 2099). observe reports such
 // records instead.
+//
+// A value can be an Edm.Date ("2026-10-29", no time of day) as well as a
+// DateTime (#602). A date has its own ceiling, the day before the ceiling's
+// UTC date (dateCeiling), and its watermark is read back with `ge`, so the
+// tracker also keeps the records dated on the watermark day (atWatermark).
 type cursorTracker struct {
-	newest  time.Time
-	raw     string
-	ceiling time.Time // zero = no bound
+	newest   time.Time
+	raw      string
+	dateOnly bool      // raw is an Edm.Date
+	ceiling  time.Time // zero = no bound
+
+	// atWatermark is record key → cursor value for the records dated on the
+	// current date watermark (a DateTime watermark keeps none). The next
+	// poll's `ge` filter returns them again.
+	atWatermark map[string]string
 }
 
 // aheadRecord is a record whose cursor lies after the tracker's ceiling.
 type aheadRecord struct {
 	Key    string // the record's id, for dedupe and the log
 	Cursor string // the cursor value as Business Central wrote it
+}
+
+// cursorDateLayout is the OData v4 Edm.Date literal, which BC writes in
+// responses and accepts unquoted in a $filter.
+const cursorDateLayout = "2006-01-02"
+
+// parseCursor reads a cursor value: an RFC 3339 DateTime, or an Edm.Date.
+func parseCursor(s string) (t time.Time, dateOnly, ok bool) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, false, true
+	}
+	if t, err := time.Parse(cursorDateLayout, s); err == nil {
+		return t, true, true
+	}
+	return time.Time{}, false, false
+}
+
+// isDateCursor reports whether s is an Edm.Date value.
+func isDateCursor(s string) bool {
+	_, dateOnly, ok := parseCursor(s)
+	return ok && dateOnly
+}
+
+// dateCeiling is the latest date that may become a date watermark when the
+// ceiling for a DateTime is now: the day before now's UTC date.
+//
+// A date has no time of day and the watermark is read back with `ge`, so
+// nothing dated on or after it is lost. What the ceiling protects is a date
+// ahead of the day BC itself is on. BC's local date is up to 14 hours ahead
+// of or 12 behind UTC; a watermark on today's UTC date could be a day ahead
+// of BC's today and hide the records BC stamps with its own date. Yesterday
+// (UTC) is never ahead of BC's today in any time zone. The records dated
+// after it are still sent, once, and are remembered like any future-dated
+// record.
+func dateCeiling(now time.Time) time.Time {
+	u := now.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day()-1, 0, 0, 0, 0, time.UTC)
 }
 
 func (t *cursorTracker) observe(records []json.RawMessage, field string) []aheadRecord {
@@ -556,16 +612,29 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) []ahead
 		if err := json.Unmarshal(raw, &s); err != nil {
 			continue
 		}
-		parsed, err := time.Parse(time.RFC3339, s)
-		if err != nil {
+		parsed, dateOnly, ok := parseCursor(s)
+		if !ok {
 			continue
 		}
-		if !t.ceiling.IsZero() && parsed.After(t.ceiling) {
-			ahead = append(ahead, aheadRecord{Key: recordKey(rec, fields), Cursor: s})
-			continue
+		if !t.ceiling.IsZero() {
+			limit := t.ceiling
+			if dateOnly {
+				limit = dateCeiling(t.ceiling)
+			}
+			if parsed.After(limit) {
+				ahead = append(ahead, aheadRecord{Key: recordKey(rec, fields), Cursor: s})
+				continue
+			}
 		}
-		if parsed.After(t.newest) {
-			t.newest, t.raw = parsed, s
+		switch {
+		case parsed.After(t.newest):
+			t.newest, t.raw, t.dateOnly = parsed, s, dateOnly
+			t.atWatermark = nil
+			if dateOnly {
+				t.atWatermark = map[string]string{recordKey(rec, fields): s}
+			}
+		case dateOnly && t.dateOnly && parsed.Equal(t.newest):
+			t.atWatermark[recordKey(rec, fields)] = s
 		}
 	}
 	return ahead
@@ -606,19 +675,29 @@ func (c *bcConsumer) clock() time.Time {
 func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records []json.RawMessage,
 	ahead map[string]string, logger *slog.Logger) []json.RawMessage {
 	field := cfg.effectiveCursorField()
-	warnAfter := w.ceiling.Add(maxCursorSkew)
 	for _, h := range w.observe(records, field) {
 		ahead[h.Key] = h.Cursor
 		if prev, ok := cfg.aheadSeen[h.Key]; ok && prev == h.Cursor {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339, h.Cursor); err != nil || !t.After(warnAfter) {
+		t, dateOnly, ok := parseCursor(h.Cursor)
+		if !ok {
+			continue
+		}
+		// A DateTime is logged when more than maxCursorSkew ahead. A date
+		// when it is later than tomorrow's UTC date: today's and tomorrow's
+		// are just BC's own date in another time zone.
+		warnAfter, layout := w.ceiling.Add(maxCursorSkew), time.RFC3339
+		if dateOnly {
+			warnAfter, layout = dateCeiling(w.ceiling).AddDate(0, 0, 2), cursorDateLayout
+		}
+		if !t.After(warnAfter) {
 			continue
 		}
 		logger.Warn("Business Central record is dated in the future; "+
 			"published, but the incremental watermark ignores it",
 			"record_id", h.Key, "cursor_field", field,
-			"cursor_value", h.Cursor, "bound", warnAfter.UTC().Format(time.RFC3339))
+			"cursor_value", h.Cursor, "bound", warnAfter.UTC().Format(layout))
 	}
 	if len(cfg.aheadSeen) == 0 {
 		return records
@@ -639,11 +718,12 @@ func (c *bcConsumer) withoutSentAhead(cfg *BCConfig, w *cursorTracker, records [
 	return out
 }
 
-// warnAheadSize logs once when the remembered set of future-dated records
-// grows past aheadWarnSize. A last-modified stamp is only ever a little
-// ahead, so a large set means cursor_field is a business date (a due date):
-// every poll then re-reads all those records, and the checkpoint carries
-// each one.
+// warnAheadSize logs once when the remembered set grows past aheadWarnSize.
+// For a DateTime cursor that is future-dated records. A last-modified stamp
+// is only ever a little ahead, so a large set means cursor_field is a
+// business date (a due date): every poll then re-reads all those records, and
+// the checkpoint carries each one. For a date cursor it is the records dated
+// on the watermark day and later, which every poll reads again.
 func (c *bcConsumer) warnAheadSize(cfg *BCConfig, logger *slog.Logger) {
 	if len(cfg.aheadSeen) <= aheadWarnSize {
 		cfg.aheadWarned = false
@@ -653,6 +733,18 @@ func (c *bcConsumer) warnAheadSize(cfg *BCConfig, logger *slog.Logger) {
 		return
 	}
 	cfg.aheadWarned = true
+	dateOnly := false
+	for _, v := range cfg.aheadSeen { // one field, one type: any value tells
+		dateOnly = isDateCursor(v)
+		break
+	}
+	if dateOnly {
+		logger.Warn("many Business Central records are dated on or after the date watermark; every poll "+
+			"re-reads them and the checkpoint lists each one. A date cursor_field has no time of day, "+
+			"so the whole watermark day is read again; a last-modified DateTime field avoids that",
+			"cursor_field", cfg.effectiveCursorField(), "records", len(cfg.aheadSeen))
+		return
+	}
 	logger.Warn("many Business Central records are dated in the future; every poll re-reads them. "+
 		"Is cursor_field a last-modified field?",
 		"cursor_field", cfg.effectiveCursorField(), "records", len(cfg.aheadSeen))
@@ -949,16 +1041,25 @@ func (cfg *BCConfig) effectiveCursorField() string {
 // cannot swallow the cursor clause: `a or b and cursor` binds as
 // `a or (b and cursor)`, which would re-read everything matching `a`.
 //
-// `gt` rather than `ge`: the watermark is the newest value already published,
-// so `ge` would redeliver it on every poll forever. The cost is a record
-// written in the same instant as the watermark but after the fetch read it —
-// BC timestamps to the millisecond, so that is a narrow window, and it is the
-// standard trade for a timestamp watermark.
+// `gt` rather than `ge` for a DateTime: the watermark is the newest value
+// already published, so `ge` would redeliver it on every poll forever. The
+// cost is a record written in the same instant as the watermark but after the
+// fetch read it — BC timestamps to the millisecond, so that is a narrow
+// window, and it is the standard trade for a timestamp watermark.
+//
+// A date (Edm.Date, `2026-10-29`, written without quotes in OData v4) has no
+// time of day: `gt` would hide every record added later on the watermark day.
+// So it is `ge`, and the consumer leaves out the records of that day it has
+// already sent (cursorTracker.atWatermark, cfg.aheadSeen).
 func (cfg *BCConfig) filterWithCursor(cursor string) string {
 	if cursor == "" {
 		return cfg.Filter
 	}
-	clause := fmt.Sprintf("%s gt %s", cfg.effectiveCursorField(), cursor)
+	op := "gt"
+	if isDateCursor(cursor) {
+		op = "ge"
+	}
+	clause := fmt.Sprintf("%s %s %s", cfg.effectiveCursorField(), op, cursor)
 	if cfg.Filter == "" {
 		return clause
 	}

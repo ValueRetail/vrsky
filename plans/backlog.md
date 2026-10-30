@@ -796,7 +796,7 @@ Last updated 2026-10-28.
     bucket tree gives `temp/` a 15-minute TTL where `setup-job.yaml` sets
     one day. Manifest directory, so PR plus `agent:needs-human`. Found in
     #555.
-115. **A reload during a UI rollout can load a blank page.** With three UI
+115. ~~**A reload during a UI rollout can load a blank page.**~~ (#600) With three UI
     replicas and `maxSurge: 1`, `index.html` from a new pod can name
     `/assets/index-<new>.js`, which an old pod answers with 404 (its
     `error_page 404 /index.html` sends HTML for the script). The #551 banner
@@ -834,7 +834,7 @@ Last updated 2026-10-28.
     stops. Write 60 on mount, as `PollOrMethod` in the same file does for
     the retail connectors' 300, or show 0. The connector pages describe the
     current behaviour (#564). Found in #564.
-120. **Cloud-storage event mode ignores `prefix` and `file_pattern`.**
+120. ~~**Cloud-storage event mode ignores `prefix` and `file_pattern`.**~~ (#594)
     `runEventLoop` (`src/cmd/cloud-storage-consumer/service.go`) ingests
     every key a notification names, and the S3 parser takes every record,
     not only `ObjectCreated` ones (Azure and GCS filter by event type). The
@@ -878,19 +878,23 @@ Last updated 2026-10-28.
     orchestrator has deployed, and `RestoreRunning` keeps it. The consumer's
     refusals in `startConnection` (`src/cmd/cloud-storage-consumer/service.go`,
     `move` without `move_prefix`, and since #567 a `move_prefix` the listing
-    of `prefix` returns) return before `claim.Activate` and write no status,
+    of `prefix` returns, in poll mode only: event mode warns since #594) return before `claim.Activate` and write no status,
     so only the worker log says why. Refuse these configs in the start-time
     validator (`src/pkg/managementapi/nodeconfig.go`, so the user gets a 400
     with the reason) and/or have the worker write `error`; and show the
     rule at the "Move to prefix" field in
     `ui/src/components/Pipeline/PropertyEditor.tsx`. The rule is the
     consumer's `validateMoveOutsideListing`. Found in review of #567.
-134. **Check `move_prefix` in cloud-storage event mode once it applies
-    `prefix`.** Event mode ignores `prefix` (item 120), so #567 checks the
+134. ~~**Check `move_prefix` in cloud-storage event mode once it applies
+    `prefix`.**~~ (#594) Event mode ignores `prefix` (item 120), so #567 checks the
     start in poll mode only and relies on `afterAction` refusing a move
     onto the object's own key. A moved object that the bucket notification
     covers is still ingested a second time. If item 120 makes event mode
-    apply `prefix`, run the same start check there. Found in #567.
+    apply `prefix`, run the same start check there. Found in #567. #594
+    runs it there but only warns: a moved key comes back as
+    `move_prefix/<base>`, which the own-key guard refuses, so the cost is
+    one duplicate publish, and refusing would stop connections already in
+    production.
 126. **Turn on Sitoo incremental polling in the POS sales template**
     (`ui/src/onboarding/templates.ts`). #457 added `incremental` for
     `orders`, but the template polls `transactions`, which the Sitoo API
@@ -967,20 +971,46 @@ Last updated 2026-10-28.
     A KV bucket is stream configuration: PR plus `agent:needs-human`. Worth
     it only if duplicates after a deploy turn out to matter to a customer.
     Found in #587.
-139. **The SFTP test-connection preview can sample a temp file.**
+139. ~~**The SFTP test-connection preview can sample a temp file.**~~ (#601)
     `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
     matching `file_pattern`; with no pattern it can sample a `.part` or
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
-140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
-    watermark.** `cursorTracker.observe` in
+140. ~~**An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.**~~ (#602) `cursorTracker.observe` in
     `src/cmd/business-central-consumer/service.go` parses the value with
     `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
     so the node stores no watermark and every incremental poll reads and
     sends the whole entity. Parse date-only values too (and write them back
     in the filter as a date literal), or refuse the config with a clear
     error. Found in review of #592.
+141. ~~**Show "File pattern" in the cloud-storage editor in event mode.**~~
+    (#594) `CloudStorageConfigEditor.tsx` rendered the field only in poll
+    mode. Event mode applies `file_pattern` since #594, so the editor shows
+    it for both modes. Done in #594.
+142. **One failed key in a multi-key event message with `after_action`
+    `delete` or `move` makes the message loop.** `runEventLoop` in
+    `src/cmd/cloud-storage-consumer/service.go` leaves the whole message
+    for redelivery when any key fails, but the keys that succeeded were
+    already deleted or moved. On redelivery their `get` fails (the object
+    is gone), so the message never acks and redelivers until the queue's
+    retention drops it, logging `ingest failed` each time. S3 and Event Grid
+    mostly send one record per message, so it is rare, but a batched or
+    forwarded notification hits it. Suggestion: in event mode treat "object
+    not found" on `get` as already done (log at Info, count the key as
+    ingested), which needs a not-found error from `pkg/objectstore` for each
+    provider. Found in review of #594.
+143. **A date `cursor_field` can't see backdated records.** Records dated
+    before the watermark (posting last week's documents today) are never
+    read. Add a `lookback_days` option that filters `ge W − N` and remembers
+    the whole window in the existing remembered set. Found in review of #602.
+144. **Changing `cursor_field` keeps the old watermark.** Nothing resets the
+    Business Central checkpoint when the field changes, so
+    `postingDate gt <old DateTime>` is sent (likely a 400 every poll), or an
+    old date is applied to a new field silently. Store the field name in the
+    checkpoint state and drop the watermark when it changes. Found in review
+    of #602.
 
 ## Human
 
