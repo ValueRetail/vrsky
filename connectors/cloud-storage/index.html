@@ -2522,7 +2522,8 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   Required.</li>
 <li><code>prefix</code> — key prefix to scope the listing (e.g. <code>incoming/</code>). Empty means
   the whole bucket. The listing is recursive: objects under deeper keys
-  (<code>incoming/2026/a.csv</code>) are ingested too.</li>
+  (<code>incoming/2026/a.csv</code>) are ingested too. In event mode it selects the
+  keys a notification names, in the same way (see below).</li>
 <li><code>region</code> — provider region (S3).</li>
 <li><code>endpoint</code> — custom endpoint: MinIO or another S3-compatible store (path-style
   addressing is then used), or a private or emulated GCS endpoint.</li>
@@ -2534,8 +2535,9 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   field. A node saved before that change (#589) has no value and lists once:
   open it, press Save Configuration so it gets the <code>60</code>, and redeploy. Type
   <code>0</code> to choose one listing on purpose.</li>
-<li><code>file_pattern</code> — poll mode: glob matched against the object's base name
-  (the part after the last <code>/</code>), e.g. <code>*.csv</code>. Empty means every object.</li>
+<li><code>file_pattern</code> — glob matched against the object's base name (the part
+  after the last <code>/</code>), e.g. <code>*.csv</code>. Empty means every object. Applies in
+  both modes.</li>
 <li><code>after_action</code> — what to do with an object once it is published: <code>none</code>
   (default, leave it), <code>delete</code>, or <code>move</code>. Applies in both modes.</li>
 <li><code>move_prefix</code> — where <code>move</code> puts the object: it is copied to
@@ -2544,10 +2546,10 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   <code>incoming/a/x.csv</code> and <code>incoming/b/x.csv</code> both land on
   <code>&lt;move_prefix&gt;/x.csv</code> and the second overwrites the first.</li>
 </ul>
-<p>In poll mode the start is also refused when the listing of <code>prefix</code>
-  would find moved objects again (#567). The log says <code>invalid
-  move_prefix</code> and names both values. The listing matches <code>prefix</code> as
-  text, not as a folder:
+<p>In poll mode the start is also refused when <code>prefix</code> would select moved
+  objects again (#567). The log says <code>invalid move_prefix</code> and names both
+  values. Event mode starts anyway, with a warning (below). <code>prefix</code> is
+  matched as text, not as a folder:
   - Starts: <code>prefix: incoming/</code> with <code>processed/</code>, <code>incoming-done/</code> or <code>.</code>
     (the bucket root); <code>prefix: incoming/a/</code> with <code>incoming</code> (one level
     up).
@@ -2560,11 +2562,20 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   <code>/</code> puts <code>x.csv</code> at the key <code>/x.csv</code>, which S3 and GCS keep as a
   separate key from <code>x.csv</code>. The check resolves <code>.</code> and <code>..</code> the way the
   move does but ignores leading slashes, so it may refuse a config with a
-  leading <code>/</code> that would have worked on S3 or GCS. In event mode <code>prefix</code> is not applied, so the start is not
-  checked: keep <code>move_prefix</code> outside what the bucket notification covers,
-  or a moved object is ingested a second time. In both modes the consumer
-  never moves an object onto its own key: that move fails with
+  leading <code>/</code> that would have worked on S3 or GCS. In both modes the
+  consumer never moves an object onto its own key: that move fails with
   <code>after-action failed</code> in the log and the object stays where it is.</p>
+<p>In event mode a moved object sends a new notification, and <code>prefix</code> is
+  what keeps it out. When the same rule finds <code>move_prefix</code> inside <code>prefix</code>
+  (an empty <code>prefix</code> included), an event-mode connection still starts and
+  logs a warning, <code>move_prefix is inside prefix; starting anyway in event
+  mode</code>. A moved key is always <code>&lt;move_prefix&gt;/&lt;base name&gt;</code>, so if its
+  notification reaches the queue the object is published once more, the move
+  onto its own key is refused (<code>after-action failed</code>, <code>already in
+  move_prefix</code>), and it stays in <code>move_prefix</code>: one duplicate, no loss, no
+  loop. To avoid the duplicate, set a <code>prefix</code> with <code>move_prefix</code> outside
+  it, or scope the bucket notification so moved objects don't reach the
+  queue.</p>
 <p>Event mode also reads:</p>
 <ul>
 <li><code>event_queue_url</code> — S3: the SQS queue URL. Required.</li>
@@ -2580,11 +2591,30 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   <code>account_name</code> + <code>account_key</code>; with <code>connection_string</code> the queue
   address comes from the connection string.</li>
 </ul>
-<p>In event mode <code>prefix</code> and <code>file_pattern</code> are not applied: every object a
-notification names is ingested. Scope the bucket notification itself to the
-prefix and suffix you want. Azure and GCS ingest only object-created events
-(<code>BlobCreated</code>, <code>OBJECT_FINALIZE</code>); on S3 every record in a notification is
-ingested, so send only <code>s3:ObjectCreated:*</code> events to the queue.</p>
+<p>In event mode <code>prefix</code> and <code>file_pattern</code> apply to the keys a notification
+names, as in poll mode (#594). <code>prefix</code> is matched as text, so <code>in</code> also
+selects <code>in-done/a.csv</code>; <code>file_pattern</code> is matched against the base name. A
+key outside them is acknowledged and skipped: nothing is published, moved or
+deleted for it and the message is not redelivered. The first skipped key of
+each run of the connection is logged at Info level (<code>event key outside
+prefix or file_pattern; skipped</code>, with the key, prefix and pattern), later
+ones at Debug. Folder placeholders (keys ending in <code>/</code>, which the S3
+console's "Create folder" writes) are skipped as in poll mode. Keys are
+matched after decoding, so an S3 key <code>in+folder/a.csv</code> is matched as
+<code>in folder/a.csv</code>. The editor shows File pattern in both modes. You can
+still scope the bucket notification itself to cut the traffic, but you no
+longer have to for correctness.</p>
+<p>Only object-created events are ingested, on every provider: <code>BlobCreated</code> on
+Azure, <code>OBJECT_FINALIZE</code> on GCS, and <code>ObjectCreated:*</code> on S3 (<code>Put</code>, <code>Post</code>,
+<code>Copy</code> and <code>CompleteMultipartUpload</code>). MinIO's metadata events under
+<code>ObjectCreated</code> (<code>PutTagging</code>, <code>DeleteTagging</code>, <code>PutRetention</code>,
+<code>PutLegalHold</code>) are not creates. Other S3 records (removals, lifecycle,
+restore, tagging) are acknowledged and skipped too. Before #594 the S3
+consumer ingested every record in a notification, and an event-mode
+connection ignored <code>prefix</code> and <code>file_pattern</code>; a connection that relied on
+that now skips what its <code>prefix</code> or <code>file_pattern</code> does not select. That
+includes a <code>file_pattern</code> saved while the connection was in poll mode,
+which the editor used to hide in event mode: check it after the upgrade.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cloud_storage"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"cloud_storage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>

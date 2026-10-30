@@ -2537,7 +2537,9 @@ permission), grant it access to the BC environment, and configure:</p>
   and ask only for what changed since. Off by default: switching it on changes
   what a running pipeline delivers, so it is the connection owner's decision.</li>
 <li><code>cursor_field</code> — the field the watermark is read from (default
-  <code>lastModifiedDateTime</code>). A custom API page may name it something else.</li>
+  <code>lastModifiedDateTime</code>). A custom API page may name it something else. The
+  field may be a DateTime or a date with no time (<code>Edm.Date</code>); see
+  "Date fields" under Incremental polling.</li>
 <li><code>page_size</code> — ask BC to page the response, sent as
   <code>Prefer: odata.maxpagesize</code>. Unset leaves BC on its own default, which
   returns most entities whole — 80 CRONUS items came back in a single page.
@@ -2735,7 +2737,7 @@ node sees) is skipped and the converted record is written.</p>
 published. A fetch that fails halfway resumes from the previous watermark,
 so its records arrive twice rather than being skipped — the same
 at-least-once bargain the rest of the pipeline makes.</p>
-<p>The comparison is <code>gt</code>, so a record written in the same millisecond as the
+<p>For a DateTime the comparison is <code>gt</code>, so a record written in the same millisecond as the
 watermark but after the fetch read it is not picked up. <code>ge</code> would redeliver
 the watermark record on every poll instead.</p>
 <p><strong>Records dated in the future.</strong> The watermark never moves past the
@@ -2756,9 +2758,39 @@ its <code>record_id</code>, the value and the bound.</p>
 (a due date, say) has every future-dated record held this way: each poll
 reads all of them again, page by page, and the checkpoint row lists each
 one. They are not sent again, but the poll costs grow with them, and past
-1,000 such records the node logs a Warn once. A <code>cursor_field</code> of type
-<code>Edm.Date</code> (a date with no time) never sets a watermark at all, so every
-poll reads and sends the whole entity again.</p>
+1,000 such records the node logs a Warn once.</p>
+<p><strong>Date fields (<code>Edm.Date</code>).</strong> A <code>cursor_field</code> whose values are dates with
+no time (<code>2026-10-29</code>) works like a DateTime field, with three
+differences:</p>
+<ul>
+<li>The filter is <code>&lt;field&gt; ge 2026-10-29</code>: the date written without quotes,
+  which is the OData v4 <code>Edm.Date</code> literal, and <code>ge</code>, not <code>gt</code>. A date has
+  no time of day, so <code>gt</code> would hide every record added later on the
+  watermark day. The node remembers (in the checkpoint row, next to the
+  future-dated records) the records it has sent that carry the watermark
+  date, and leaves them out when BC returns the day again. A record added
+  later that day is sent. Only the newest day is kept; when the watermark
+  moves, the older day is dropped.</li>
+<li>The ceiling is yesterday, not now. BC's own date can be up to 14 hours
+  ahead of, or 12 behind, the pod's UTC date, so a watermark on today's
+  UTC date could be a day ahead of BC's today and hide the records BC
+  dates with it. A record dated today, or later, is sent once and kept out
+  of the watermark, like a future-dated DateTime record, and is picked up
+  without a second send once its date is yesterday or earlier. A Warn
+  names a record dated later than tomorrow (UTC).</li>
+<li>A date says nothing about modification. An edit that leaves the date
+  alone is not seen again (a record without <code>id</code> or <code>number</code> is
+  identified by its content, so there it is). A record whose date is
+  earlier than the watermark when it is added is never read, and nothing
+  is logged. Business dates are often backdated — for example, Saturday's
+  sales posted on Monday with posting date Saturday — so use
+  <code>lastModifiedDateTime</code> as the cursor unless you are sure the date field
+  is never backdated. The blank date BC returns for an empty field
+  (<code>0001-01-01</code>) is ignored.</li>
+</ul>
+<p>The cost of a date cursor is the watermark day: each poll reads it again
+and the checkpoint lists its records. A day with more than 1,000 records
+logs a Warn once. A last-modified DateTime field avoids that.</p>
 <p><strong>Nodes frozen before #591.</strong> Earlier versions took any value as the
 watermark, so a node may have stored one in the future and read nothing
 since. On its first poll after the upgrade a stored watermark more than

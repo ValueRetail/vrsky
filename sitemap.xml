@@ -2,294 +2,294 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://valueretail.github.io/vrsky/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/CONNECTION_NODE_SPEC/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/DEPLOYMENT_GUIDE/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/DR/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/LOAD/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/NATS_ARCHITECTURE/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/OBSERVABILITY/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/SECURITY/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/SLA/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/TENANT_MODEL/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/TIER3_VALIDATION/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/TRACING/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/oauth-framework/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/pricing-proposal/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/scalability/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/adr/0001-streaming-payload-contract/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/adr/0002-transform-large-payloads/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/adr/0003-transform-input-formats/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/adr/0004-standing-connector-services/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/adr/0005-nats-placement-scope/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/api/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/brightpearl/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/business-central/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/cloud-storage/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/database/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/file/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/filters-converters/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/front-systems/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/http/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/kafka/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/rabbitmq/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/remote-agent/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/salesforce/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/sap-s4hana/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/sftp/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/sitoo/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/tenant/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/connectors/visma/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/building-a-pipeline/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/connectors-and-nodes/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/credentials-and-oauth/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/data-sharing/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/deploying-and-monitoring/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/getting-started/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/settings/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/troubleshooting/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/guide/workspaces-and-members/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/img/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/acr-rotation/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/alert-responder/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/backup/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/billing/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/cost-parking/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/deploy/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/encryption-at-rest/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/install/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/mail/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/monitoring/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/remote-access/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/remote-agent/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/troubleshooting/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/upgrade/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/operator/windows/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/reference/api/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/sdk/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/sdk/interfaces/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/sdk/migration/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/sdk/adr/0001-sdk-package-structure/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/sdk/tutorial/first-connector/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/security/whitepaper/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://valueretail.github.io/vrsky/tutorials/first-pipeline/</loc>
-         <lastmod>2026-10-29</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
 </urlset>
