@@ -973,14 +973,24 @@ Last updated 2026-10-28.
     dotfile that the poller now skips (#590), so the preview can differ from
     what is published. Skip temp names there too, unless the pattern names
     them. Found in review of #590.
-140. **An `Edm.Date` `cursor_field` never sets the BC consumer's
-    watermark.** `cursorTracker.observe` in
+140. ~~**An `Edm.Date` `cursor_field` never sets the BC consumer's
+    watermark.**~~ (#602) `cursorTracker.observe` in
     `src/cmd/business-central-consumer/service.go` parses the value with
     `time.Parse(time.RFC3339)`, and a date-only value (`2026-11-01`) fails,
     so the node stores no watermark and every incremental poll reads and
     sends the whole entity. Parse date-only values too (and write them back
     in the filter as a date literal), or refuse the config with a clear
     error. Found in review of #592.
+143. **A date `cursor_field` can't see backdated records.** Records dated
+    before the watermark (posting last week's documents today) are never
+    read. Add a `lookback_days` option that filters `ge W − N` and remembers
+    the whole window in the existing remembered set. Found in review of #602.
+144. **Changing `cursor_field` keeps the old watermark.** Nothing resets the
+    Business Central checkpoint when the field changes, so
+    `postingDate gt <old DateTime>` is sent (likely a 400 every poll), or an
+    old date is applied to a new field silently. Store the field name in the
+    checkpoint state and drop the watermark when it changes. Found in review
+    of #602.
 
 ## Human
 
