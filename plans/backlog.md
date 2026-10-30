@@ -967,7 +967,7 @@ Last updated 2026-10-28.
     A KV bucket is stream configuration: PR plus `agent:needs-human`. Worth
     it only if duplicates after a deploy turn out to matter to a customer.
     Found in #587.
-139. **The SFTP test-connection preview can sample a temp file.**
+139. ~~**The SFTP test-connection preview can sample a temp file.**~~ (#601)
     `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
     matching `file_pattern`; with no pattern it can sample a `.part` or
     dotfile that the poller now skips (#590), so the preview can differ from

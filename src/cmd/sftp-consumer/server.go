@@ -86,7 +86,8 @@ func (s *sftpConsumer) handleTestConnection() http.HandlerFunc {
 }
 
 // handleSampleData dials the draft SFTP config, reads the first file in the
-// remote dir (matching the optional glob), parses it, and returns a structure
+// remote dir (matching the optional glob, and not a temp name the poller skips,
+// #601), parses it, and returns a structure
 // preview — so the UI's filter/converter can show fields before the pipeline is
 // deployed. tenant_id (optional) resolves <field>_secret_id references.
 func (s *sftpConsumer) handleSampleData() http.HandlerFunc {
@@ -140,6 +141,11 @@ func (s *sftpConsumer) handleSampleData() http.HandlerFunc {
 				if ok, _ := path.Match(cfg.FilePattern, f.Name); !ok {
 					continue
 				}
+			}
+			if isTempName(f.Name) && !patternNamesTemp(cfg.FilePattern) {
+				// The poller leaves these alone until they are renamed
+				// (#590), so the preview must not show one (#601).
+				continue
 			}
 			chosen = f.Name
 			break
