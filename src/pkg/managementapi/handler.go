@@ -967,9 +967,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Test a draft connector config without persisting it (#82).
 	mux.Handle("POST /api/v1/connections/test", editor(http.HandlerFunc(h.TestConnection)))
 
-	// Metrics streaming via Server-Sent Events
+	// Metrics: polled snapshot, and the live stream
 	mux.Handle("GET /api/v1/connections/{id}/metrics", viewer(http.HandlerFunc(h.HandleConnectionMetrics)))
-	mux.Handle("GET /api/v1/connections/{id}/metrics/stream", viewer(http.HandlerFunc(h.HandleMetricsSSE)))
 	mux.Handle("GET /api/v1/connections/{id}/metrics/ws", viewer(http.HandlerFunc(h.HandleMetricsWebSocket)))
 
 	// Live worker event streams for the builder's test panels. The workers

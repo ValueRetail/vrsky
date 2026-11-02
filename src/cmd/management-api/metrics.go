@@ -51,8 +51,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 // Flush and Hijack forward to the underlying ResponseWriter so this metrics
 // wrapper does not hide http.Flusher / http.Hijacker. Without them, SSE
-// endpoints (metrics/stream, tenant status/stream) and the WebSocket upgrade
-// (metrics/ws) failed with 500 "streaming not supported" — the metrics
+// endpoints (metrics/ws, tenant status/stream) failed with 500 "streaming not supported" — the metrics
 // middleware is always in the chain, and on GET requests the audit middleware
 // passes this recorder straight through to the handler.
 // Unwrap lets http.ResponseController reach the connection, e.g. to lift the

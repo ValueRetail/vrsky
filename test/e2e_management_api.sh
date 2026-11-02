@@ -2,7 +2,7 @@
 
 # E2E Test Suite for Management API
 # This script tests the complete lifecycle of connection management,
-# including: creation, starting, metrics streaming, test message sending, and stopping.
+# including: creation, starting, test message sending, and stopping.
 #
 # Prerequisites:
 #   - Docker and docker-compose installed
@@ -350,34 +350,6 @@ test_stop_auto_generator() {
     fi
 }
 
-test_metrics_stream() {
-    log_info "Testing: Metrics Stream (SSE)"
-    
-    local token=""
-    if [ "$JWT_ENABLED" = "true" ]; then
-        token=$(get_jwt_token)
-    fi
-    
-    # Test SSE endpoint with a 5-second timeout
-    local curl_cmd="curl -s"
-    
-    if [ "$JWT_ENABLED" = "true" ]; then
-        curl_cmd="$curl_cmd -H 'Authorization: Bearer $token'"
-    fi
-    
-    curl_cmd="$curl_cmd -m 5 '$API_BASE_URL/api/v1/connections/$TEST_CONNECTION_ID/metrics/stream' || true"
-    
-    local response=$(eval "$curl_cmd")
-    
-    if echo "$response" | grep -q "data:"; then
-        log_success "Metrics stream received SSE events"
-        return 0
-    else
-        log_info "Metrics stream endpoint accessible (no events in timeout window)"
-        return 0
-    fi
-}
-
 test_update_connection() {
     log_info "Testing: Update Connection"
     
@@ -517,12 +489,6 @@ run_all_tests() {
     fi
     
     if test_stop_auto_generator; then
-        ((tests_passed++))
-    else
-        ((tests_failed++))
-    fi
-    
-    if test_metrics_stream; then
         ((tests_passed++))
     else
         ((tests_failed++))

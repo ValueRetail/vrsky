@@ -497,8 +497,8 @@ Last updated 2026-10-28.
     thousands of files costs one SMB round trip per file per poll. Consider
     a cheaper change signal (directory mtime, or stat known files less
     often). Related to #426. Found in review of #420 (#465).
-78. **Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
-    any more.** Its only client was `ui/src/services/websocket.ts`, deleted
+78. ~~**Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
+    any more.**~~ (#651, dropped the route) Its only client was `ui/src/services/websocket.ts`, deleted
     in #428 without ever being imported. `HandleMetricsSSE` is still
     mounted (`src/pkg/managementapi/handler.go`) and listed in the OpenAPI
     registry, and `infrastructure/scripts/e2e-test.sh` probes it. Either
