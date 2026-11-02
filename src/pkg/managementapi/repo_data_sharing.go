@@ -17,6 +17,11 @@ var (
 	ErrDataConnectionNotFound    = errors.New("data connection not found")
 )
 
+// ErrAPIKeyNotFound means no active API key matches the hash, or the key's
+// tenant is deleted. It is the only error GetTenantByAPIKeyHash returns for a
+// rejected key; every other error is a failed lookup (see isAPIKeyRejection).
+var ErrAPIKeyNotFound = errors.New("api key not found")
+
 func (r *PostgresRepository) CreateConnectionRequest(ctx context.Context, req *DataConnectionRequest) error {
 	allowedJSON, _ := json.Marshal(req.AllowedFields)
 	deniedJSON, _ := json.Marshal(req.DeniedFields)
@@ -394,11 +399,11 @@ func (r *PostgresRepository) GetTenantByAPIKeyHash(ctx context.Context, keyHash 
 		&t.Status, &t.NATSSlug,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("no tenant found for API key")
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAPIKeyNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get tenant by api key: %w", err)
 	}
 	return &t, nil
 }

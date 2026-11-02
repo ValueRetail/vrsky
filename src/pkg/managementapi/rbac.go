@@ -115,6 +115,9 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 
 	// 2. Tenant API key?
 	tenant, err := repo.GetTenantByAPIKeyHash(ctx, hashed)
+	if err != nil && !isAPIKeyRejection(err) {
+		return ctx, "", false, err
+	}
 	if err == nil && tenant != nil && tenant.ID == tenantID && tenant.Status == "active" {
 		ctx = context.WithValue(ctx, requestingTenantKey, tenant)
 		return withPrincipalRole(ctx, "admin"), "admin", true, nil

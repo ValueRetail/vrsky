@@ -47,7 +47,7 @@ func (s *sessionStub) GetUserTenantRole(_ context.Context, _, _ string) (string,
 }
 
 func (s *sessionStub) GetTenantByAPIKeyHash(_ context.Context, _ string) (*Tenant, error) {
-	return nil, errors.New("no tenant found for API key")
+	return nil, ErrAPIKeyNotFound
 }
 
 func (s *sessionStub) GetUserTenants(_ context.Context, _ string) ([]*TenantResponse, error) {
@@ -132,7 +132,7 @@ func TestSessionAuthMiddleware_ErrorClassification(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Status != http.StatusServiceUnavailable {
 					t.Fatalf("body = %s (%v)", rec.Body.String(), err)
 				}
-				if !strings.Contains(logs.String(), "session validation failed") {
+				if !strings.Contains(logs.String(), "credential lookup failed") {
 					t.Fatalf("the error was not logged server-side: %q", logs.String())
 				}
 			}

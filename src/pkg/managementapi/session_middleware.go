@@ -101,7 +101,7 @@ func writeSessionError(w http.ResponseWriter, r *http.Request, err error) {
 		writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
 		return
 	}
-	slog.Default().Error("session validation failed",
+	slog.Default().Error("credential lookup failed",
 		"error", err, "method", r.Method, "path", r.URL.Path)
 	_ = writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", sessionUnavailableMessage, nil)
 }

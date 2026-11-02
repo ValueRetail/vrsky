@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,12 @@ func (h *Handler) CreateConnectionRequest(w http.ResponseWriter, r *http.Request
 	if payload.TargetAPIKey != "" && payload.TargetTenantID == "" {
 		keyHash := auth.HashToken(payload.TargetAPIKey)
 		target, err := h.repo.GetTenantByAPIKeyHash(r.Context(), keyHash)
+		if err != nil && !isAPIKeyRejection(err) {
+			slog.Default().Error("api key lookup failed",
+				"error", err, "method", r.Method, "path", r.URL.Path)
+			_ = writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", sessionUnavailableMessage, nil)
+			return
+		}
 		if err != nil || target == nil {
 			_ = writeError(w, http.StatusNotFound, "NotFound", "no tenant found for this API key", nil)
 			return
