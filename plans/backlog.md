@@ -814,8 +814,8 @@ Last updated 2026-10-28.
     does: keep the state while the token is still there and say the
     refresh failed. Auth state, so PR plus `agent:needs-human`. Found in
     #552.
-118. **An SFTP or cloud-storage done set that can't be decoded stops the
-    poller for good.** `doneset.Set.Load` (`src/pkg/doneset`) returns the
+118. ~~**An SFTP or cloud-storage done set that can't be decoded stops the
+    poller for good.**~~ (#617) `doneset.Set.Load` (`src/pkg/doneset`) returns the
     same error for a row it can't decode as for a store error, and both
     pollers publish nothing until `Load` works, logging an Error every poll.
     A row that fails to decode never loads, so the connection publishes
