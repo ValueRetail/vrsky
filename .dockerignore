@@ -1,4 +1,4 @@
-# Build context for `az acr build` and any repo-root `docker build`.
+# Build context for the Buildx build in CI, `az acr build` and any repo-root `docker build`.
 # Every VRSky Dockerfile uses the repo ROOT as its build context. This
 # allowlists only the sources the images actually COPY, keeping the ~1.8 GB
 # working copy out of the upload: .git, data/, node_modules, ui/node_modules,

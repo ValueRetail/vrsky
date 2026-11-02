@@ -189,12 +189,13 @@ tests and stops.
 | Remote agent on Windows | pushes and PRs | Agent tests and the install script on a Windows runner |
 | Build remote agent binaries | pushes and PRs | `make build-agent`, uploaded as the `vrsky-agent` artifact |
 | Plan the rollout | pushes to `main`, once the jobs above passed or were skipped | Feeds the merge's changed paths to `affected.sh` |
-| Build `<image>` in ACR | one runner per image the plan named | `az acr build --registry vrskyprodacr --image vrsky/<image>:latest` with the image's Dockerfile and the repo root as context |
+| Build `<image>` in ACR | one runner per image the plan named | Docker Buildx on the runner, `linux/amd64`, the image's Dockerfile with the repo root as context, pushed to `vrskyprodacr.azurecr.io/vrsky/<image>:latest` |
 | Deploy to production | after the builds | Rolls out what the plan named, then the smoke check |
 
-`az acr build` runs in the registry: the runner uploads the build context
-and ACR builds it for `linux/amd64`. There is no layer cache on the GitHub
-side. What a merge deploys, how the deploy job reaches the cluster and what
+The runner builds the image itself (Docker Buildx, `linux/amd64`) and pushes
+it after `az acr login`, with a GitHub Actions layer cache; it no longer uses
+`az acr build`, which bills per build minute (#628). The manual script
+`build-push-acr.sh` still builds in ACR. What a merge deploys, how the deploy job reaches the cluster and what
 happens while the cluster is parked are all in
 [Deploying](operator/deploy.md).
 

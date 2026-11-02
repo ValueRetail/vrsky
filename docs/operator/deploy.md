@@ -78,11 +78,38 @@ lands in the gap while the new pod can't read the saved list of published
 files at start (a database error, logged at Error). It counts as already
 there and is never published.
 
+## How the images are built
+
+The *Build … in ACR* jobs build on the GitHub runner, not in ACR Tasks
+(#628). Each job checks out the full history, signs in with the same
+OpenID Connect identity, runs `az acr login --name vrskyprodacr`, and builds
+with Docker Buildx (`docker/build-push-action`): the image's own Dockerfile,
+the repo root as context, `linux/amd64`, pushed as
+`vrskyprodacr.azurecr.io/vrsky/<image>:latest`. management-api gets
+`AGENT_VERSION` from `git describe`, as before. Provenance and SBOM
+attestations are off, so `:latest` stays a plain single-platform manifest
+and the deploy job and Catch up read its digest with `az acr repository
+show`, unchanged. The runner minutes of a public repository are free; ACR
+Tasks bill for every minute (433 minutes for 159 builds on 2026-10-29).
+
+Layers are cached in the GitHub Actions cache: one scope for all Go images
+(they share the Go base image, the `go mod download` layer and the copy of
+`src/`), one for the UI. The cache is only a speed-up. The repository's
+10 GB limit evicts old entries, a miss means a slower build, and a cache
+error does not fail the job (`ignore-error`). The compiled packages are not
+shared between images: each Dockerfile compiles in its own `RUN`, and a
+BuildKit cache mount would not survive the runner anyway.
+
+`infrastructure/azure/build-push-acr.sh`, the by-hand path, still uses
+`az acr build`: it needs no Docker on the machine, and it bills only when
+someone runs it. To roll back the CI change, revert the PR that introduced
+it.
+
 ## Watching a deploy
 
 GitHub → Actions → the run for the merge. The *Plan the rollout* job lists
-the changed paths and the targets; *Build … in ACR* runs one image per
-runner; *Deploy to production* shows each rollout and the smoke output.
+the changed paths and the targets; *Build … in ACR* builds one image per
+runner and pushes it; *Deploy to production* shows each rollout and the smoke output.
 About four minutes for a UI change, ten for a change under `src/pkg`.
 
 Browser tabs left open across a UI deploy keep running the old bundle.
@@ -174,8 +201,9 @@ runtime has bash, awk, grep, curl, jq, kubectl and helm 3, and **no sed,
 python or envsubst**; `TestInClusterScriptsUseOnlyRuntimeTools` keeps the
 scripts the jobs run in-cluster inside that set.
 
-Roles the app holds: `AcrPush` and `Contributor` on `vrskyprodacr` (a
-server-side `az acr build` needs to read the registry and queue a run);
+Roles the app holds: `AcrPush` and `Contributor` on `vrskyprodacr` (`AcrPush`
+is what the image push needs; `Contributor` is for the registry reads and for
+`az acr build` in the by-hand script);
 `Contributor` on `vrsky-prod` (the command runner). One-time setup, by a
 subscription Owner:
 
