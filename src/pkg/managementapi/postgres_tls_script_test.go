@@ -56,7 +56,11 @@ case "$1" in
       configmap) echo present ;;
       pod) printf '%s' "${STUB_PHASE:-Succeeded}" ;;
     esac ;;
-  exec) echo on ;;
+  exec)
+    case "$*" in
+      *tls.crt*) cat "$STUB_CA_PEM" ;;
+      *) echo on ;;
+    esac ;;
   apply | diff) cat > /dev/null ;;
   logs) echo "ssl=true TLSv1.3" ;;
 esac
@@ -101,6 +105,10 @@ func newKubeStub(t *testing.T, connectors int) *kubeStub {
 		t.Fatal(err)
 	}
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	caPEMFile := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPEMFile, caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	caB64 := filepath.Join(dir, "ca.b64")
 	if err := os.WriteFile(caB64, []byte(base64.StdEncoding.EncodeToString(caPEM)), 0o644); err != nil {
 		t.Fatal(err)
@@ -122,6 +130,7 @@ func newKubeStub(t *testing.T, connectors int) *kubeStub {
 		"HOME=" + dir,
 		"STUB_LOG=" + s.log,
 		"STUB_CA_B64=" + caB64,
+		"STUB_CA_PEM=" + caPEMFile,
 		"STUB_CONNECTORS=" + conns,
 	}
 
@@ -374,5 +383,20 @@ func TestPostgresTLS_RotateSecretsConfirmsItsOwnCASync(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "CONFIRM=1 bash infrastructure/azure/postgres-tls.sh ca-sync") {
 		t.Error("rotate-secrets.sh calls postgres-tls.sh ca-sync without CONFIRM=1; the call would stop at the gate mid-rotation")
+	}
+}
+
+// check compares the certificate Postgres serves with the Secret's. The file in
+// the pod ends in a newline and the Secret's copy, read through $(...), does
+// not; the first version hashed the bytes and always reported an older
+// certificate (seen on the first production rollout, 2026-11-02).
+func TestPostgresTLS_CheckMatchesTheServedCertificate(t *testing.T) {
+	s := newKubeStub(t, 31)
+	_, stdout, stderr := s.run(t, nil, "check")
+	if !strings.Contains(stdout, "Postgres serves the Secret's current certificate") {
+		t.Fatalf("check did not match the served certificate\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if strings.Contains(stdout, "OLDER certificate") {
+		t.Fatalf("check reported an older certificate for an identical one:\n%s", stdout)
 	}
 }

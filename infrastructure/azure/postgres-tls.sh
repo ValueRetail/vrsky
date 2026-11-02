@@ -155,7 +155,10 @@ ca_from_secret() { # prints the CA certificate (public) from the server Secret
   kubectl get secret "$TLS_SECRET" -n "$DB_NS" -o 'jsonpath={.data.ca\.crt}' | base64 -d
 }
 
-sha256_of() { openssl dgst -sha256 | awk '{print $NF}'; }
+# cert_fingerprint: SHA-256 fingerprint of the first certificate on stdin.
+# Comparing fingerprints, not raw bytes: a certificate read through $(...)
+# loses its trailing newline, so a byte hash never matched the file.
+cert_fingerprint() { openssl x509 -noout -fingerprint -sha256 2>/dev/null; }
 
 # names_have_ca <volume names, space separated> — is postgres-ca among them. The
 # names go through a variable, not a pipe: `grep -q` quits early, and with
@@ -380,9 +383,9 @@ cmd_check() {
   if [ -n "$crt" ]; then
     echo "    server certificate: $(printf '%s' "$crt" | openssl x509 -noout -enddate)"
     local want have
-    want="$(printf '%s' "$crt" | sha256_of)"
-    have="$(kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- cat /etc/postgresql/tls/tls.crt 2>/dev/null | sha256_of || true)"
-    if [ "$want" = "$have" ]; then echo "    Postgres serves the Secret's current certificate"; else echo "    Postgres has an OLDER certificate than the Secret: kubectl rollout restart statefulset/postgresql -n $DB_NS"; fi
+    want="$(printf '%s\n' "$crt" | cert_fingerprint || true)"
+    have="$(kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- cat /etc/postgresql/tls/tls.crt 2>/dev/null | cert_fingerprint || true)"
+    if [ -n "$want" ] && [ "$want" = "$have" ]; then echo "    Postgres serves the Secret's current certificate"; else echo "    Postgres has an OLDER certificate than the Secret: kubectl rollout restart statefulset/postgresql -n $DB_NS"; fi
   fi
 
   echo "--- server"
