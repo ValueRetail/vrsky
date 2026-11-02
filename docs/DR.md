@@ -36,7 +36,7 @@ replication to Norway West is a later option.
 
 | Objective | Target | Measured (2026-10-30) |
 |-----------|--------|-----------------------|
-| **RPO** (max data loss) | **≤ 24h** | Disk snapshot alone: at most one working day. With both layers: about half a day. |
+| **RPO** (max data loss) | **≤ 24h** | Disk snapshot alone: at most one working day. With both layers: at most a morning (start-up to the noon dump, about five hours). |
 | **RTO** (max time to restore) | **≤ 1h** | Snapshot to a queryable database: 1–2 minutes. An in-place restore, with the scale-down and scale-up steps below: ≤ 15 minutes, realistic. The Layer 2 restore was not timed. |
 
 Both numbers come from the rehearsal in
@@ -45,8 +45,10 @@ Both numbers come from the rehearsal in
 Why the RPO is what it is: the 03:00 UTC snapshot is taken while the cluster is
 parked, so it holds the state at the previous evening's park (the cluster stops
 at 16:00 Oslo time). Work done during the working day is not in it. The Layer 2
-dump runs at noon on weekdays and covers that gap up to noon, which is why the
-two layers together come out at about half a day.
+dump runs at noon on weekdays and covers that gap up to noon. The worst case
+with both layers is a loss just before the noon dump: the morning's work since
+the cluster started (07:00) is gone. After noon, the most you lose is the
+afternoon up to the 16:00 park.
 
 > **The `ENCRYPTION_KEY` is not in the backup.** The dumps are encrypted with
 > it, and the dump's `*_secret_id` ciphertext only decrypts with it. Keep a
