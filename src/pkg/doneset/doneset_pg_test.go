@@ -3,6 +3,7 @@ package doneset
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -140,4 +141,85 @@ func TestSetPG_RestartAndTenants(t *testing.T) {
 	if got := pgRowTenants(t, db, connB); len(got) != 2 {
 		t.Errorf("rows for B after deleting A = %v, want 2", got)
 	}
+}
+
+// A snapshot or changes row of the wrong shape in a real jsonb column (#617):
+// the Set loads as if nothing were saved (or, for the changes row, as if the
+// snapshot had no changes), the first save replaces the row, and the next
+// start finds it. A store failure is still an error and leaves the Set
+// unloaded.
+func TestSetPG_UndecodableRowIsReplaced(t *testing.T) {
+	cases := []struct {
+		name      string
+		snapshot  string // jsonb for the snapshot row; "" keeps the good one
+		changes   string // jsonb for the changes row; "" keeps the good one
+		wantFound bool
+		wantLen   int // names loaded
+	}{
+		{name: "snapshot is an array", snapshot: `["a","b"]`, wantFound: false, wantLen: 0},
+		{name: "snapshot has a wrong field type", snapshot: `{"scope":"sftp://u@host:22/in","files":"x"}`, wantFound: false, wantLen: 0},
+		{name: "changes row is a string", changes: `"x"`, wantFound: true, wantLen: 2},
+		{name: "changes row has a wrong field type", changes: `{"scope":"sftp://u@host:22/in","base":7}`, wantFound: true, wantLen: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := pgDB(t)
+			store := checkpoint.NewPostgresStore(db)
+			tenant, conn := pgConnection(t, db)
+			key := Key{TenantID: tenant, ConnectionID: conn, NodeID: tNode}
+
+			// A good set, as an earlier run left it: two names in the snapshot.
+			good, _ := loaded(t, store, key, tScope)
+			good.Mark("a", st(1, 0))
+			good.Mark("b", st(1, 0))
+			save(t, good)
+
+			for node, bad := range map[string]string{tNode: tc.snapshot, tNode + changesSuffix: tc.changes} {
+				if bad == "" {
+					continue
+				}
+				res, err := db.Exec(`UPDATE connection_node_checkpoints SET state = $1::jsonb
+					WHERE connection_id = $2 AND node_id = $3`, bad, conn, node)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if n, _ := res.RowsAffected(); n != 1 {
+					t.Fatalf("planted the bad row for %s in %d rows, want 1", node, n)
+				}
+			}
+
+			s := New(store, key, tScope)
+			found, err := s.Load(context.Background())
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if found != tc.wantFound || s.Len() != tc.wantLen || !s.Loaded() || s.Undecodable() == nil {
+				t.Fatalf("found %v, len %d, loaded %v, undecodable %v; want found %v, len %d, loaded, a cause",
+					found, s.Len(), s.Loaded(), s.Undecodable(), tc.wantFound, tc.wantLen)
+			}
+			s.Mark("x", st(5, 0))
+			save(t, s)
+
+			r, found := loaded(t, store, key, tScope)
+			if !found || r.Undecodable() != nil || !r.Done("x", st(5, 0)) {
+				t.Errorf("next start: found %v, undecodable %v, x done %v", found, r.Undecodable(), r.Done("x", st(5, 0)))
+			}
+		})
+	}
+
+	t.Run("store error", func(t *testing.T) {
+		db := pgDB(t)
+		store := checkpoint.NewPostgresStore(db)
+		tenant, conn := pgConnection(t, db)
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s := New(store, Key{TenantID: tenant, ConnectionID: conn, NodeID: tNode}, tScope)
+		if _, err := s.Load(context.Background()); err == nil || errors.Is(err, ErrUndecodable) {
+			t.Errorf("Load on a closed database = %v, want a store error", err)
+		}
+		if s.Loaded() {
+			t.Error("Loaded() = true after a store error")
+		}
+	})
 }

@@ -70,6 +70,10 @@ func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
 			writeErr(err.Error())
 			return
 		}
+		if err := cfg.checkBaseURL(s.allowPrivate); err != nil {
+			writeErr(err.Error())
+			return
+		}
 		body, err := s.get(r.Context(), &cfg, cfg.collectionURL(0, sitooSampleLimit, nil))
 		if err != nil {
 			writeErr(err.Error())
@@ -227,6 +231,12 @@ func (s *sitooConsumer) dereferenceEvent(
 		return body, rawMeta(eventType), 0, nil
 	}
 
+	// Check the tenant's base_url as start does, before it builds a URL (#616).
+	// 202: redelivering the event will not make the config valid.
+	if err := cfg.checkBaseURL(s.allowPrivate); err != nil {
+		return nil, nil, http.StatusAccepted, fmt.Errorf("base_url refused: %w", err)
+	}
+
 	idField := cfg.eventIDField()
 	raw, ok := ev[idField]
 	if !ok {
@@ -237,6 +247,12 @@ func (s *sitooConsumer) dereferenceEvent(
 	id := strings.Trim(string(raw), `"`)
 	if id == "" {
 		return nil, nil, http.StatusAccepted, fmt.Errorf("event %q field is empty", idField)
+	}
+
+	// PathEscape leaves dots alone, so "." and ".." would still walk the path
+	// up a segment (#616). No real Sitoo id looks like that; ack and drop.
+	if id == "." || id == ".." {
+		return nil, nil, http.StatusAccepted, fmt.Errorf("event %q field is not a valid id", idField)
 	}
 
 	resourceBody, err := s.get(ctx, cfg, cfg.resourceURL(id))

@@ -32,7 +32,9 @@ paging through all results, and emits each page as a JSON-array message.
   A `#` is refused.
 - `poll_interval_seconds` — poll cadence. Set `0` (or omit) for **webhook-only**.
 - `page_size` — Sitoo `num` (default `1000`; 1000–5000 is optimal).
-- `base_url` — optional override (default `https://api.mysitoo.com/v2`).
+- `base_url` — optional override (default `https://api.mysitoo.com/v2`). It
+  must be `https` and may not carry a user name, query string or fragment. See
+  [The base URL](#the-base-url).
 - `webhook_raw_event` — forward SPI event bodies verbatim instead of
   dereferencing them. See below; leave unset unless you mean it.
 - `webhook_id_field` — override the event field holding the resource id. The
@@ -171,7 +173,8 @@ and the converted one is written.
 - `account_id` / `site_id` / `api_id` / `api_password_secret_id` — as above.
 - `resource` — the target collection (default `warehouseitems`; e.g. `prices`).
 - `method` — `POST` (default) or `PUT`.
-- `base_url` — optional override.
+- `base_url` — optional override, under the same rules as on the source: see
+  [The base URL](#the-base-url).
 
 ```json
 {
@@ -191,6 +194,53 @@ Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `5xx`/network errors are retried (with the rate-limit backoff hint); `4xx`
 (bad request/data) and `401`/`403` (auth) are treated as poison and sent to the
 DLQ rather than retried forever.
+
+### The base URL
+
+Every request carries the node's API ID and password, and `base_url` is set in
+the node, so the connector only calls addresses it can trust:
+
+- It must be `https`, with a host, and no user name, query string or fragment.
+  A node that breaks this is refused when the connection is started, with the
+  reason in the error.
+- The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. Redirects are not followed.
+- A webhook event id is escaped before it goes into the request path; an id of
+  `.` or `..` is dropped.
+
+There is no list of allowed Sitoo hosts: Sitoo serves every account from
+`api.mysitoo.com` with the account in the path, and a sandbox or proxy needs a
+different host. A `base_url` can still point at any public https host, so only
+put it in a node for a host you trust with the API password.
+
+**Local development with a mock Sitoo.** The operator (not the node) can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on `sitoo-consumer`, `sitoo-producer` and
+`management-api`. That allows `http` and private addresses for `base_url`. Never
+set it in production; it is off in `docker-compose.yml` and the Kubernetes
+manifests.
+
+Compose lists the environment per service, so for a local run add the line to
+the `environment:` block of each of those three services in
+`docker-compose.yml` (or a local override file):
+
+```yaml
+      ALLOW_PRIVATE_UPSTREAMS: "true"
+```
+
+The repo has no mock Sitoo. You bring your own, for example a small HTTP server
+on the compose network, and point `base_url` at it (`http://my-mock:8080/v2`).
+
+**Existing connections.** A node whose `base_url` is `http://` or points at a
+private address stops working when this change is deployed: a running consumer
+keeps its settings until its next restart, then refuses to start the poll (webhook events are checked on every event, so
+they stop at once); a producer refuses the next delivery. The management API refuses to start such a
+connection. Change the `base_url` to an `https` host, or clear it to use the
+default.
 
 ## Templates: Sitoo ⇄ Business Central (beta)
 

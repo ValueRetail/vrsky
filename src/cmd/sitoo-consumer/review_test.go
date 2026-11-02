@@ -137,7 +137,7 @@ func TestReview5_SampleDataRefusesABadResource(t *testing.T) {
 				fmt.Fprint(w, `{"totalcount":1,"items":[{"orderid":1}]}`)
 			}))
 			defer apiSrv.Close()
-			c := &sitooConsumer{httpClient: http.DefaultClient}
+			c := &sitooConsumer{httpClient: http.DefaultClient, allowPrivate: true}
 			body := fmt.Sprintf(`{"api_id":"id","api_password":"pw","account_id":1,"site_id":2,"base_url":%q,"resource":%q}`, apiSrv.URL, res)
 			req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
 			w := httptest.NewRecorder()

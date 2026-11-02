@@ -187,6 +187,14 @@ published once, not again at every start (#538).
   already published`. It tries again at every poll and carries on as normal
   once the read works. A one-shot connection (`poll_interval_seconds: 0`)
   ends with status `error` instead.
+- **Checkpoint damaged.** If the saved list is there but can't be decoded (a
+  hand edit, or another version's format), it counts as no saved list: the
+  consumer logs one warning, `The saved list of published objects can't be
+  decoded`, publishes every object under the prefix as on a first start, and
+  replaces the row at its next save. Objects published before may go out
+  once more; none is skipped. If only the small row of recent changes is
+  damaged, the rest of the list is kept and only the objects published since
+  the last full save go out again (#617).
 - **Crash.** The list is saved every 32 objects and at the end of each poll,
   so a crash in the middle of a long poll publishes at most the objects since
   the last save again.
