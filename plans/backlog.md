@@ -727,7 +727,7 @@ Last updated 2026-10-28.
     managed disk (`docs/operator/cost-parking.md`). Check what production
     runs, then fix the header as #527 did for Postgres. Manifest, so PR
     plus `agent:needs-human`. Found in review of #527.
-106. **Run the SFTP and cloud-storage consumers with `strategy: Recreate`.**
+106. ~~**Run the SFTP and cloud-storage consumers with `strategy: Recreate`.**~~ (#620)
     Since #538 they keep their done set, so a restart no longer publishes
     everything again, but a rolling deploy still runs two pods for a few
     seconds. With `after_action: delete` or `move` both can list and
@@ -780,14 +780,14 @@ Last updated 2026-10-28.
     read such a row, so a decode error (not a store error) could count as
     "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
     `keepSavedStamps` (#500). Found in review of #536.
-111. **The rest of the Postgres README still talks about Longhorn.** #554
+111. ~~**The rest of the Postgres README still talks about Longhorn.**~~ (#618) #554
     fixed the "Architecture" list and the Storage section's first line, but
     `infrastructure/kubernetes/postgresql/README.md` still says "PVC not
     bound: Verify Longhorn is running", has Longhorn in "Increase Storage"
     (expansion on `managed-csi` works differently, and needs checking), and
     links Longhorn's docs under References. Manifest directory, so PR plus
     `agent:needs-human`. Found in #554.
-112. **The MinIO README's "Architecture" list is out of date too.**
+112. ~~**The MinIO README's "Architecture" list is out of date too.**~~ (#619)
     `infrastructure/kubernetes/minio/README.md` says 100GB "via Longhorn
     distributed storage" and requests of 1 CPU and 2GB, but
     `deployment.yaml` claims 8Gi on `local-path` (`managed-csi` in
@@ -803,7 +803,7 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
-116. **`checkAuth` signs the user out when `/me` fails for any reason.**
+116. ~~**`checkAuth` signs the user out when `/me` fails for any reason.**~~ (#611)
     `getMe` returns null on every failure, and `ui/src/store/authStore.ts`
     clears the user and workspaces whenever it gets null, so a network
     error or a 5xx on `/me` (at app load, after a workspace delete, after a
@@ -989,28 +989,42 @@ Last updated 2026-10-28.
     (#594) `CloudStorageConfigEditor.tsx` rendered the field only in poll
     mode. Event mode applies `file_pattern` since #594, so the editor shows
     it for both modes. Done in #594.
-142. **One failed key in a multi-key event message with `after_action`
-    `delete` or `move` makes the message loop.** `runEventLoop` in
-    `src/cmd/cloud-storage-consumer/service.go` leaves the whole message
-    for redelivery when any key fails, but the keys that succeeded were
-    already deleted or moved. On redelivery their `get` fails (the object
-    is gone), so the message never acks and redelivers until the queue's
-    retention drops it, logging `ingest failed` each time. S3 and Event Grid
-    mostly send one record per message, so it is rare, but a batched or
-    forwarded notification hits it. Suggestion: in event mode treat "object
-    not found" on `get` as already done (log at Info, count the key as
-    ingested), which needs a not-found error from `pkg/objectstore` for each
-    provider. Found in review of #594.
+142. ~~**One failed key in a multi-key event message with `after_action`
+    `delete` or `move` makes the message loop.**~~ (#609) `runEventLoop` in
+    `src/cmd/cloud-storage-consumer/service.go` left the whole message
+    for redelivery when any key failed, but the keys that succeeded were
+    already deleted or moved, so on redelivery their `get` failed and the
+    message looped until the queue's retention dropped it. `pkg/objectstore`
+    now returns `ErrNotFound` from `Get` and `GetStream` on S3, Azure and
+    GCS, and event mode counts such a key as already handled (Info log, no
+    publish, no after-action). Done in #609.
 143. **A date `cursor_field` can't see backdated records.** Records dated
     before the watermark (posting last week's documents today) are never
     read. Add a `lookback_days` option that filters `ge W − N` and remembers
     the whole window in the existing remembered set. Found in review of #602.
-144. **Changing `cursor_field` keeps the old watermark.** Nothing resets the
-    Business Central checkpoint when the field changes, so
-    `postingDate gt <old DateTime>` is sent (likely a 400 every poll), or an
-    old date is applied to a new field silently. Store the field name in the
-    checkpoint state and drop the watermark when it changes. Found in review
-    of #602.
+144. ~~**Changing `cursor_field` keeps the old watermark.**~~ (#610) Nothing
+    reset the Business Central checkpoint when the field changed, so
+    `postingDate gt <old DateTime>` was sent (likely a 400 every poll), or an
+    old date was applied to a new field silently. The checkpoint state now
+    records the field and the watermark is dropped when it changes; a legacy
+    row without a field is taken to match. Found in review of #602.
+145. **A failed checkpoint save after a `cursor_field` change re-sends the
+    whole entity.** `saveProgress` in
+    `src/cmd/business-central-consumer/service.go` only logs a failed save.
+    After a field change the stored row still names the old field, so a save
+    that fails, or a context cancelled at shutdown before it runs, makes the
+    next poll drop the watermark and read from the start again. The records
+    are already published, so it costs repeats, not data. Return the error
+    from `saveProgress` and retry it once with a fresh short context, or skip
+    the next field-change reset when the save of the previous one is known
+    to have failed. Found in review of #614.
+146. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
+    (`src/pkg/managementapi/session_middleware.go`) turns every
+    `ValidateSession` error, DB errors included, into a 401 "invalid or
+    expired session", so a transient database error looks like a rejected
+    session and the UI (#611) signs the user out. Tell "not found or
+    expired" apart from other errors and answer 5xx for the latter. Found in
+    review of #613.
 
 ## Human
 

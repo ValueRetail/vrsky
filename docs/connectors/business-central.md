@@ -286,6 +286,24 @@ node sees) is skipped and the converted record is written.
     and the checkpoint lists its records. A day with more than 1,000 records
     logs a Warn once. A last-modified DateTime field avoids that.
 
+    **Changing `cursor_field`.** The checkpoint row records which field its
+    watermark was read from. When the configured field differs from the
+    recorded one, the node drops the watermark and the records it remembers
+    for it, logs a Warn, and reads the entity from the start on the first
+    poll, so every record is sent once more. Without this, the old value would
+    be sent as a filter on the new field: a DateTime against a date field
+    makes BC answer 400 on every poll, and a date from another column would
+    silently hide records. Changing back is a change like any other. A
+    checkpoint saved by an earlier version has no recorded field; it is taken
+    to belong to the configured one, so an upgrade reads nothing again, and
+    the next poll records the field. If you changed `cursor_field` on such a
+    node before upgrading, its stored watermark may still belong to the old
+    field. There is no checkpoint reset, and stopping and starting the
+    connection keeps the checkpoint. Use **Resend everything** (`POST
+    /api/v1/connections/{id}/resend`): that poll ignores the stored watermark
+    and reads the entity from the start, and it stores a watermark from the
+    new field with the field recorded. Every record is sent once more.
+
     **Nodes frozen before #591.** Earlier versions took any value as the
     watermark, so a node may have stored one in the future and read nothing
     since. On its first poll after the upgrade a stored watermark more than

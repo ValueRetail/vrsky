@@ -25,6 +25,17 @@ const (
 	ProviderGCS   = "gcs"
 )
 
+// ErrNotFound is wrapped by Get and GetStream (on every backend) when the
+// object does not exist. A missing bucket or container, a denied request and a
+// server error are not ErrNotFound. Test for it with errors.Is.
+var ErrNotFound = errors.New("objectstore: object not found")
+
+// notFound wraps a provider SDK error that says the object is missing so that
+// errors.Is(err, ErrNotFound) holds and the original error stays in the chain.
+func notFound(err error) error {
+	return fmt.Errorf("%w: %w", ErrNotFound, err)
+}
+
 // Object is a single stored object as returned by List.
 type Object struct {
 	Key          string
@@ -48,7 +59,8 @@ type ObjectStore interface {
 	List(ctx context.Context, prefix string) ([]Object, error)
 	// Get fetches an object's bytes and its content type (may be empty). It
 	// buffers the whole object in memory, so it's for small payloads only; use
-	// GetStream for anything that may be large.
+	// GetStream for anything that may be large. A missing object returns an
+	// error wrapping ErrNotFound.
 	Get(ctx context.Context, key string) (body []byte, contentType string, err error)
 	// Put writes body under key with the given content type (empty = backend
 	// default). It holds the whole object in memory; use PutStream for large
@@ -56,7 +68,8 @@ type ObjectStore interface {
 	Put(ctx context.Context, key string, body []byte, contentType string) error
 	// GetStream opens an object for streaming reads without buffering it in
 	// memory — the path for large (multi-GB) payloads. The caller MUST Close the
-	// returned reader. contentType may be empty.
+	// returned reader. contentType may be empty. A missing object returns an
+	// error wrapping ErrNotFound.
 	GetStream(ctx context.Context, key string) (body io.ReadCloser, contentType string, err error)
 	// PutStream writes an object by streaming from body, without holding the
 	// whole object in memory. Backends use the provider's native multipart /

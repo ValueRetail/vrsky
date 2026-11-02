@@ -124,8 +124,12 @@ export async function getMe(): Promise<MeResponse | null> {
     })
     return response.data
   } catch (error) {
-    // If unauthorized, clear the invalid token
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
+    // The server rejected the session: 401 (invalid or expired) or 403
+    // (the account can no longer log in: suspended, deleted, unverified).
+    // Clear the token. Anything else (network error, 5xx) leaves it, which
+    // is how callers tell a rejected session from a failed request.
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined
+    if (status === 401 || status === 403) {
       clearSessionToken()
     }
     return null

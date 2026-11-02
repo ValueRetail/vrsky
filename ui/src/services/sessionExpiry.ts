@@ -35,7 +35,7 @@ export function reportUnauthorized(): Promise<void> {
   checking = (async () => {
     try {
       const me = await authService.getMe()
-      // getMe drops the token only on a 401 of its own. A network failure
+      // getMe drops the token only on a 401 or 403 of its own. A network failure
       // or a 5xx leaves it in place: that is not proof of an expired session.
       if (!me && !authService.hasSessionToken()) handler?.()
     } finally {

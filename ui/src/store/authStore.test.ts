@@ -98,12 +98,85 @@ describe('authStore session lifecycle', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(false)
     expect(getMe).not.toHaveBeenCalled()
 
+    // A 401 on /me: getMe drops the token and returns null.
     hasToken = true
-    getMe.mockResolvedValue(null)
+    getMe.mockImplementation(async () => { hasToken = false; return null })
     useAuthStore.setState({ isAuthenticated: true, user: user as never })
     await useAuthStore.getState().checkAuth()
     expect(useAuthStore.getState().isAuthenticated).toBe(false)
     expect(useAuthStore.getState().user).toBeNull()
+    expect(useAuthStore.getState().tenants).toEqual([])
+    expect(useAuthStore.getState().loadFailed).toBe(false)
+  })
+
+  describe('checkAuth when /me fails without a 401 (#611)', () => {
+    // getMe returns null for a network error or a 5xx too, but keeps the token.
+    beforeEach(() => {
+      useUIStore.getState().clearNotifications()
+      getMe.mockImplementation(async () => null)
+    })
+
+    it('keeps the user and workspaces and says the refresh failed', async () => {
+      await useAuthStore.getState().checkAuth()
+      const s = useAuthStore.getState()
+      expect(s.isAuthenticated).toBe(true)
+      expect(s.user).toEqual(user)
+      expect(s.tenants).toEqual([tenant])
+      expect(s.currentTenant).toEqual(tenant)
+      expect(s.isLoading).toBe(false)
+      expect(s.sessionExpired).toBe(false)
+      expect(useUIStore.getState().notifications.map((n) => n.title)).toEqual(['Could not refresh your account'])
+    })
+
+    it('at app load with nothing cached stays signed out but flags loadFailed', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, isInitialized: false })
+      await useAuthStore.getState().checkAuth()
+      const s = useAuthStore.getState()
+      expect(s.isInitialized).toBe(true)
+      expect(s.isLoading).toBe(false)
+      expect(s.isAuthenticated).toBe(false)
+      expect(s.loadFailed).toBe(true)
+      expect(clearSessionToken).not.toHaveBeenCalled()
+    })
+
+    it('treats a throw from getMe the same way', async () => {
+      getMe.mockRejectedValue(new Error('boom'))
+      await useAuthStore.getState().checkAuth()
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().tenants).toEqual([tenant])
+    })
+
+    it('a retry that works clears loadFailed', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, loadFailed: true })
+      getMe.mockResolvedValue({ user, tenants: [tenant], current_tenant: tenant })
+      await useAuthStore.getState().checkAuth()
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+    })
+
+    it('a successful login clears loadFailed', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, loadFailed: true })
+      login.mockResolvedValue({ success: true, user })
+      // /me still fails after the login, so only login itself can clear the flag.
+      getMe.mockImplementation(async () => null)
+      expect(await useAuthStore.getState().login('a@b.c', 'pw')).toBe(true)
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    })
+
+    it('logout clears loadFailed', async () => {
+      useAuthStore.setState({ loadFailed: true })
+      await useAuthStore.getState().logout()
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+    })
+
+    it('a 401 on the retry clears loadFailed and signs out', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, loadFailed: true })
+      getMe.mockImplementation(async () => { hasToken = false; return null })
+      await useAuthStore.getState().checkAuth()
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+    })
   })
 
   it('logout signs out, forgets the workspace choice and the expiry notice', async () => {

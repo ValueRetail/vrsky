@@ -77,13 +77,28 @@ func connectorStrategies(t *testing.T, manifest []byte) map[string]connectorStra
 	return got
 }
 
-// file-consumer must never run two pods at once (#425).
+// recreateConsumers are the connectors that must never run two pods at once.
+// file-consumer since #425; sftp-consumer and cloud-storage-consumer since
+// #620, once #538 gave them a saved done set. Add a connector here when it
+// lists a shared source and removes or moves what it publishes.
+var recreateConsumers = []string{
+	"vrsky-file-consumer",
+	"vrsky-sftp-consumer",
+	"vrsky-cloud-storage-consumer",
+}
+
+// The consumers in recreateConsumers must never run two pods at once (#425,
+// #620).
 //
-// It watches folders on a shared volume. With the default RollingUpdate the
-// new pod starts, restores every file pipeline and polls before the old one
-// stops, and a file that settles in those seconds can be published by both.
+// file-consumer watches folders on a shared volume. With the default
+// RollingUpdate the new pod starts, restores every file pipeline and polls
+// before the old one stops, and a file that settles in those seconds can be
+// published by both.
 // Recreate stops the old pod first; files that land in the gap are published
 // by the new pod's first polls, since they are not in the saved done set.
+// sftp-consumer and cloud-storage-consumer list a remote folder or bucket
+// and, with after_action delete or move, two pods can both publish a file
+// before either removes it; Recreate closes that the same way.
 //
 // Checked three ways, because each fails on its own:
 //   - in a fresh render of the script, since the deploy job regenerates the
@@ -95,7 +110,7 @@ func connectorStrategies(t *testing.T, manifest []byte) map[string]connectorStra
 //     apply would drop that block itself (strategy merges with retainKeys);
 //     the patch is a safeguard, the one Grafana needed under helm (#320,
 //     kubernetes/kubernetes#24198), and this keeps it from rotting.
-func TestFileConsumerRecreates(t *testing.T) {
+func TestPollingConsumersRecreate(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	script, err := os.ReadFile(filepath.Join(root, "infrastructure", "azure", "deploy-connectors-azure.sh"))
 	if err != nil {
@@ -121,16 +136,18 @@ func TestFileConsumerRecreates(t *testing.T) {
 		if len(strategies) < 2 {
 			t.Fatalf("%s manifest: found %d Deployments; the layout probably moved", m.name, len(strategies))
 		}
-		fc, ok := strategies["vrsky-file-consumer"]
-		switch {
-		case !ok:
-			t.Errorf("%s manifest has no vrsky-file-consumer Deployment", m.name)
-		case fc.Type != "Recreate":
-			t.Errorf("%s manifest: vrsky-file-consumer strategy is %q, want Recreate: a rolling update has "+
-				"two pods polling the same folders, and either can publish a file", m.name, fc.Type)
-		case fc.RollingUpdate != nil:
-			t.Errorf("%s manifest: vrsky-file-consumer is Recreate with a rollingUpdate block; the API server "+
-				"rejects a Recreate Deployment that carries one", m.name)
+		for _, name := range recreateConsumers {
+			c, ok := strategies[name]
+			switch {
+			case !ok:
+				t.Errorf("%s manifest has no %s Deployment", m.name, name)
+			case c.Type != "Recreate":
+				t.Errorf("%s manifest: %s strategy is %q, want Recreate: a rolling update has "+
+					"two pods polling the same source, and either can publish a file", m.name, name, c.Type)
+			case c.RollingUpdate != nil:
+				t.Errorf("%s manifest: %s is Recreate with a rollingUpdate block; the API server "+
+					"rejects a Recreate Deployment that carries one", m.name, name)
+			}
 		}
 	}
 

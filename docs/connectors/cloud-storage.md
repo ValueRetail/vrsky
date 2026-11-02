@@ -123,6 +123,28 @@ that now skips what its `prefix` or `file_pattern` does not select. That
 includes a `file_pattern` saved while the connection was in poll mode,
 which the editor used to hide in event mode: check it after the upgrade.
 
+A notification can name several objects. The message is acknowledged once
+every object in it is published or no longer in the bucket. If one object
+fails, the message comes back from the queue, and the objects that were
+already published (and deleted or moved by `after_action`) are not there any
+more. Such an object is treated as already handled: the consumer logs
+`event key no longer in the bucket; treated as already handled` at Info with
+the key, publishes nothing and does not move or delete anything for it. Only
+a "not found" answer counts. A denied or failed read still leaves the message
+for redelivery. The same applies to an object someone else removed before the
+consumer reached it: it is dropped with that Info line, since fetching it
+again can't succeed. Before #609 such a message was redelivered until the
+queue's retention dropped it.
+
+On GCS this has a catch. The GCS client reports a 404 for a missing bucket as
+a missing object too, so a mistyped or deleted `bucket` is not told apart from
+a missing key. In event mode every message then gets acknowledged and its keys
+are dropped, each with the Info line above, instead of failing at Error level
+and coming back. If a GCS event-mode connection ingests nothing and logs only
+`event key no longer in the bucket`, check the `bucket` name first. S3 and
+Azure report a missing bucket or container as an error, so there the message
+stays in the queue.
+
 ```json
 {
   "type": "cloud_storage",
@@ -173,6 +195,14 @@ An object replaced with the same size within the same second (S3 keeps
 last-modified times in whole seconds) looks unchanged and is not published
 again. Event mode doesn't use this list: there the queue's acknowledgement
 decides what was handled.
+
+During a deploy the old cloud-storage consumer stops before the new one
+starts (#620), so only one ever lists a bucket and two can't both publish
+the same object before `delete` or `move` removes it. For those few seconds
+nothing is listing: objects that land then are published a little later, by
+the new consumer's first polls. If the new one can't read its saved list at
+start it publishes nothing until it can, so no object is skipped. In event
+mode the queue keeps the messages meanwhile.
 
 After the release that added this, each running poll-mode connection's first
 start has no saved list yet, so it publishes what is under its prefix once

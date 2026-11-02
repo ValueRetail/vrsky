@@ -34,13 +34,21 @@ az dataprotection backup-instance list -g vrsky-prod --vault-name vrsky-backup -
 There is no copy in a second region. Geo-redundant storage or object
 replication to Norway West is a later option.
 
-| Objective | Target | Status |
-|-----------|--------|--------|
-| **RPO** (max data loss) | **≤ 24h** | Layer 1 once the vault runs (daily). Layer 2 once its Secret exists: the last weekday noon; nothing changes while the cluster is parked. Not measured yet. |
-| **RTO** (max time to restore) | **≤ 1h** | An estimate: a restore of the small management dump runs in minutes in the CI drill. Not measured on a production-sized dump or from a snapshot. |
+| Objective | Target | Measured (2026-10-30) |
+|-----------|--------|-----------------------|
+| **RPO** (max data loss) | **≤ 24h** | Disk snapshot alone: at most one working day. With both layers: at most a morning (start-up to the noon dump, about five hours). |
+| **RTO** (max time to restore) | **≤ 1h** | Snapshot to a queryable database: 1–2 minutes. An in-place restore, with the scale-down and scale-up steps below: ≤ 15 minutes, realistic. The Layer 2 restore was not timed. |
 
-Replace the Status column with measured numbers after the first real restore
-from each layer.
+Both numbers come from the rehearsal in
+[Rehearse without touching production](#rehearse-without-touching-production).
+
+Why the RPO is what it is: the 03:00 UTC snapshot is taken while the cluster is
+parked, so it holds the state at the previous evening's park (the cluster stops
+at 16:00 Oslo time). Work done during the working day is not in it. The Layer 2
+dump runs at noon on weekdays and covers that gap up to noon. The worst case
+with both layers is a loss just before the noon dump: the morning's work since
+the cluster started (07:00) is gone. After noon, the most you lose is the
+afternoon up to the 16:00 park.
 
 > **The `ENCRYPTION_KEY` is not in the backup.** The dumps are encrypted with
 > it, and the dump's `*_secret_id` ciphertext only decrypts with it. Keep a
@@ -124,8 +132,10 @@ has been gone for 30 minutes while `vrsky-backup-config` exists.
 
 Use this when the disk is lost or corrupted, or after a bad migration, and
 the cluster still exists. It brings back the whole database as of the
-snapshot. **Not yet rehearsed**: run it once against a scratch namespace
-before you rely on it, and fix this page where reality differs.
+snapshot. **Rehearsed 2026-10-30** into a scratch `dr-rehearsal` namespace,
+with production left alone (see
+[Rehearse without touching production](#rehearse-without-touching-production)).
+Fix this page where a real restore differs.
 
 ```bash
 SUB=8c020b54-b237-4d6e-82ba-190f6a415d1d
@@ -212,6 +222,96 @@ STAMP=$(date +%Y%m%d)
 7. Resume the dumps: rename the Secret back if you moved it, then run Catch
    up or `kubectl -n vrsky-database patch cronjob vrsky-mgmt-backup --type merge -p '{"spec":{"suspend":false}}'`.
 
+### Rehearse without touching production
+
+This shows that a snapshot restores to a working database, without changing
+production's disk or connections. Nothing in the rehearsal points at the
+platform. Use the `$NRG` and `$STAMP` variables from above.
+
+1. **Make a disk from a snapshot.** Pick the snapshot from the list, then
+   create the disk in the node resource group under a rehearsal name:
+   ```bash
+   az snapshot list -g "$NRG" -o table
+   az disk create -g "$NRG" -n "postgres-rehearsal-$STAMP" --sku StandardSSD_ZRS \
+     --source "$(az snapshot show -g "$NRG" -n <snapshot> --query id -o tsv)"
+   ```
+2. **Bind it to a scratch PV and PVC** in a throwaway namespace. The PV is
+   `Retain`, so deleting the claim leaves the disk for you to delete on
+   purpose. If the disk is not 50Gi, use its size (`az disk show ... --query diskSizeGb`).
+   ```bash
+   kubectl create namespace dr-rehearsal
+   DISK_ID=$(az disk show -g "$NRG" -n "postgres-rehearsal-$STAMP" --query id -o tsv)
+   kubectl apply -f - <<EOF
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: postgres-rehearsal-$STAMP
+   spec:
+     capacity: { storage: 50Gi }
+     accessModes: [ReadWriteOnce]
+     persistentVolumeReclaimPolicy: Retain
+     storageClassName: managed-csi
+     claimRef: { namespace: dr-rehearsal, name: postgres-data }
+     csi: { driver: disk.csi.azure.com, volumeHandle: "$DISK_ID" }
+   ---
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: postgres-data
+     namespace: dr-rehearsal
+   spec:
+     accessModes: [ReadWriteOnce]
+     storageClassName: managed-csi
+     volumeName: postgres-rehearsal-$STAMP
+     resources: { requests: { storage: 50Gi } }
+   EOF
+   ```
+3. **Start `postgres:18-alpine` on the claim**, with the same `PGDATA` as
+   production (`/var/lib/postgresql/data/pgdata`, a subdirectory of the mount,
+   because the root of a new disk holds `lost+found`):
+   ```bash
+   kubectl apply -f - <<'EOF'
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: postgres
+     namespace: dr-rehearsal
+   spec:
+     containers:
+       - name: postgres
+         image: postgres:18-alpine
+         env:
+           - name: PGDATA
+             value: /var/lib/postgresql/data/pgdata
+           - name: POSTGRES_PASSWORD
+             value: <scratch password>
+         volumeMounts:
+           - name: data
+             mountPath: /var/lib/postgresql/data
+     volumes:
+       - name: data
+         persistentVolumeClaim:
+           claimName: postgres-data
+   EOF
+   kubectl -n dr-rehearsal logs postgres
+   ```
+   The log should say the database was shut down cleanly at the previous
+   evening's park, so Postgres needs no WAL replay.
+4. **Compare with production.** Run the tenant query from step 5 of
+   [Restore from a disk snapshot](#restore-from-a-disk-snapshot) against the
+   scratch database. Its tenant and connection counts should match production's.
+   ```bash
+   kubectl -n dr-rehearsal exec postgres -- psql -U vrsky -d vrsky -c \
+     "SELECT t.slug, count(c.id) FROM tenants t LEFT JOIN connections c ON c.tenant_id = t.id::text GROUP BY t.slug ORDER BY 1"
+   ```
+5. **Delete the rehearsal, then the PV and the disk.** Check the disk name
+   first. Production's disk is the `pvc-152a98c3-…` one in the node resource group.
+   ```bash
+   kubectl delete namespace dr-rehearsal
+   kubectl delete pv "postgres-rehearsal-$STAMP"
+   az disk delete -g "$NRG" -n "postgres-rehearsal-$STAMP" --yes
+   ```
+
 ## Restore from a logical dump
 
 Use this when the cluster or its resource group is gone, to restore into a
@@ -297,6 +397,10 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
 
 Clean up a rehearsal with
 `kubectl -n vrsky-database delete pod,svc pg-restore-test`.
+
+Rehearsed 2026-10-30: `vrsky-cli restore` of the 2026-10-28 dump (a manual
+run) into a scratch Postgres 18 in Docker finished, and the row counts of every
+table in `public` matched production exactly. The restore time was not recorded.
 
 ## The CI restore drill
 

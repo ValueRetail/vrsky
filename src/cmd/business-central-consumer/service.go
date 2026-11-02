@@ -154,6 +154,10 @@ type BCConfig struct {
 	// loaded yet.
 
 	aheadSeen map[string]string
+	// stateField is the cursor_field recorded in the checkpoint state with
+	// the watermark (#610). Set by each incremental fetch; "" = not
+	// incremental, nothing recorded.
+	stateField string
 	// aheadWarned is set once the size Warn for aheadSeen was logged, so it
 	// is logged once per process rather than every poll.
 	aheadWarned bool
@@ -404,8 +408,28 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		return err
 	}
 	cursor, rec := "", recovery{}
-	if cfg.Incremental && !cfg.resendAll {
-		cursor, rec = c.startCursor(cfg, c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger), logger)
+	fieldChanged, fieldUnrecorded := false, false
+	if cfg.Incremental {
+		cp := c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
+		field, stored := cfg.effectiveCursorField(), storedCursorField(cp)
+		cfg.stateField = field
+		// A watermark is a value of one field. After cursor_field changes it
+		// is neither a valid literal for the new field (a date against a
+		// DateTime: a 400 every poll) nor a meaningful bound (a date from
+		// another column, silently). Drop it and what is remembered about it,
+		// and read from the start. A row with no recorded field (saved before
+		// #610) is taken to match, so an upgrade does not re-read everything;
+		// the save below records the field.
+		fieldChanged = cp != nil && stored != "" && stored != field
+		fieldUnrecorded = cp != nil && stored != field
+		if fieldChanged {
+			logger.Warn("Business Central cursor_field changed since the watermark was stored; "+
+				"dropping the watermark and reading the entity from the start, so every record is sent again once",
+				"cursor_field", field, "stored_cursor_field", stored, "watermark", cp.LastProcessedMessageID)
+			cfg.aheadSeen = map[string]string{}
+		} else if !cfg.resendAll {
+			cursor, rec = c.startCursor(cfg, cp, logger)
+		}
 	}
 	if cfg.resendAll {
 		cfg.pictureSeen = map[string]seenPicture{}
@@ -496,6 +520,11 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	case rec.active:
 		newCursor, replace = cursor, true
 	}
+	if fieldChanged && newCursor == "" {
+		// Nothing in this fetch gave the new field a watermark: store none,
+		// so the old field's value does not stay behind.
+		replace = true
+	}
 	// A date watermark is read back with `ge`, so the records dated on that
 	// day come back on every poll, like the future-dated ones. Remember both.
 	for k, v := range watermark.atWatermark {
@@ -506,8 +535,8 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cfg.aheadSeen = ahead
 		c.warnAheadSize(cfg, logger)
 	}
-	if newCursor != "" || replace || cfg.Pictures || aheadChanged {
-		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), cfg.nodeState(), logger)
+	if newCursor != "" || replace || cfg.Pictures || aheadChanged || fieldUnrecorded {
+		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), cfg.checkpointState(), logger)
 	}
 
 	if cfg.Pictures {
