@@ -123,6 +123,19 @@ that now skips what its `prefix` or `file_pattern` does not select. That
 includes a `file_pattern` saved while the connection was in poll mode,
 which the editor used to hide in event mode: check it after the upgrade.
 
+A notification can name several objects. The message is acknowledged once
+every object in it is published or no longer in the bucket. If one object
+fails, the message comes back from the queue, and the objects that were
+already published (and deleted or moved by `after_action`) are not there any
+more. Such an object is treated as already handled: the consumer logs
+`event key no longer in the bucket; treated as already handled` at Info with
+the key, publishes nothing and does not move or delete anything for it. Only
+a "not found" answer counts. A denied or failed read still leaves the message
+for redelivery. The same applies to an object someone else removed before the
+consumer reached it: it is dropped with that Info line, since fetching it
+again can't succeed. Before #609 such a message was redelivered until the
+queue's retention dropped it.
+
 ```json
 {
   "type": "cloud_storage",

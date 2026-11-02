@@ -16,6 +16,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.20
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.34.9
+	github.com/aws/smithy-go v1.24.2
 	github.com/coreos/go-oidc/v3 v3.10.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -77,7 +78,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.22.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.8 // indirect
-	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
