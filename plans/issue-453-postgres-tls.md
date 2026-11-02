@@ -15,7 +15,8 @@ agent did not touch the cluster for any of it (one slip is in
 None block the PR. Each has a default the PR already follows; say so if you
 want one changed.
 
-1. **Postgres restarts once** (about a minute with no database, step 2).
+1. **Postgres restarts once** (a minute or more with no database, step 2: the
+   disk detaches and re-attaches).
    Default: do it right after `az aks start`, when nothing is happening.
 2. **Is cert-manager in production recent enough?** The repo installs v1.13.3
    (`install-cert-manager.sh`); the manifests use `cert-manager.io/v1` only.
@@ -23,11 +24,11 @@ want one changed.
 3. **Refuse plain connections too (`hostssl`)?** Default: not in this PR's
    rollout. It is step 10, optional, after a few days with no plain
    connection. The PR documents and rehearses the command; it is not in a
-   manifest (backlog item 150).
+   manifest (backlog item 156).
 4. **No alert on certificate expiry.** cert-manager's metrics are not scraped
    here. The certificate is renewed 90 days before it ends and picked up at
    the next Postgres start (every cluster start), and `postgres-tls.sh check`
-   says when Postgres still serves an older one. An alert is backlog item 150.
+   says when Postgres still serves an older one. An alert is backlog item 156.
 
 ## Goal
 
@@ -145,10 +146,10 @@ Decisions, each of which I made without asking:
 | Risk | What happens | Mitigation |
 | --- | --- | --- |
 | A client without the CA on `verify-full` | that service cannot reach the database after its next restart | `urls verify-full` refuses until every client mounts it; the canary proves the path first; `restart` goes one deployment at a time, management-api first; a rolling update keeps the old pod until the new one is Ready |
-| Postgres does not start after step 2 | the control plane is down until fixed | the init-container logic was rehearsed on `postgres:18-alpine` with the same caps and args (below); step 2 starts with a dry run and a diff; `kubectl rollout undo statefulset/postgresql -n vrsky-database` goes back |
-| Certificate expires | `verify-full` clients fail everywhere | 1-year certificate, renewed at 90 days left, picked up at the next start; `check` flags a stale copy; no alert yet (backlog 150) |
+| Postgres does not start after step 2 | the control plane is down until fixed | the init-container logic was rehearsed on `postgres:18-alpine` with the same caps and args (below); step 2 starts with a dry run and a diff; `kubectl rollout undo statefulset/postgresql -n vrsky-database` plus `kubectl -n vrsky-database delete pod postgresql-0` goes back (a rolling update does not replace a pod that never became Ready; the disk re-attach can take longer than a minute) |
+| Certificate expires | `verify-full` clients fail everywhere | 1-year certificate, renewed at 90 days left, picked up at the next start; `check` flags a stale copy; no alert yet (backlog 156) |
 | The CA certificate renews and a ConfigMap is stale | not for ten years; clients keep verifying against the old certificate until it expires | `check` compares the copies; run `ca-sync` |
-| Restart of Postgres drops connections | about a minute of errors | do it right after cluster start; services reconnect on their own, as at every start |
+| Restart of Postgres drops connections | a minute or more of errors | do it right after cluster start; services reconnect on their own, as at every start |
 | Drift in the live StatefulSet | `apply` also applies unrelated differences, or fails on immutable fields | step 2 shows `kubectl diff` first; a failed apply changes nothing |
 | `rotate-secrets.sh` on a cluster without TLS | would write strings nothing can serve | it checks `SHOW ssl` and aborts |
 | k3d path is untested here | `deploy-vrsky-platform.sh` now needs cert-manager | it installs it when the CRD is missing; the dev Secrets stay `disable` so a failure of the CA copy cannot break k3d |
@@ -172,6 +173,13 @@ Done in this PR, with no cluster:
   path and the script checks `SHOW ssl`; no manifest, script or backup doc
   says `sslmode=disable` except the listed exceptions; `retarget_url` changes
   only `sslmode` and `sslrootcert`; the script never prints a URL.
+- The script itself runs in tests against a `kubectl` stand-in that only logs
+  its arguments (`postgres_tls_script_test.go`; `KUBECONFIG=/dev/null`, and the
+  test refuses to run unless the stub is the only `kubectl` on `PATH`): no
+  subcommand writes without `CONFIRM=1`; `DRY_RUN` and `check` write nothing;
+  `ca-sync` exits 0 under `/bin/bash` (3.2 on the Mac); the canary pod is
+  deleted last whether the canary passes or fails; `restart` and `urls
+  verify-full` stop when the connector list is empty, short of 31, or fails.
 - Rehearsal on `postgres:18-alpine` in Docker: an init container with
   `--cap-drop ALL --cap-add CHOWN` left the key `70:70 0600`; the server
   started with the same `-c` arguments; `psql` with `verify-full` and the CA
@@ -188,8 +196,10 @@ Done in this PR, with no cluster:
 ## Steps for Ludvik
 
 Run from a checkout of main after the merge. `postgres-tls.sh` never prints a
-connection string. `DRY_RUN=1` on any mutating subcommand prints what it would
-do. Run `postgres-tls.sh check` between steps; it only reads.
+connection string. Every subcommand except `check` prints the kube context
+and refuses to run unless `CONFIRM=1` is set, so look at the context line, then
+run it with `CONFIRM=1`. `DRY_RUN=1` prints what a step would do and needs no
+`CONFIRM`. Run `postgres-tls.sh check` between steps; it only reads.
 
 **Step 0, before anything (read-only)**
 ```bash
@@ -208,47 +218,55 @@ let Production check roll it forward. Then `check` should list only the three
 core Deployments under "clients that mount the CA" (no connector, not the
 backup job).
 
-**Step 2, TLS on the server.** Best right after a cluster start.
+**Step 2, TLS on the server.** Best right after a cluster start. The dry run
+prints `kubectl diff` of the StatefulSet against the live one: read it before
+you confirm. It should show only the init container, the `args`, the two
+volumes and the mount; anything else is drift in the live object, and the
+apply would change that too.
 ```bash
-DRY_RUN=1 infrastructure/azure/postgres-tls.sh server   # the diff should show only the init container, args, volumes
-infrastructure/azure/postgres-tls.sh server             # certificates Ready, StatefulSet restarts, prints "ssl is on"
+DRY_RUN=1 infrastructure/azure/postgres-tls.sh server   # read the diff
+CONFIRM=1 infrastructure/azure/postgres-tls.sh server   # certificates Ready, StatefulSet restarts, prints "ssl is on"
 infrastructure/azure/postgres-tls.sh check
 ```
 Expect: both certificates `Ready: True`, "Postgres serves the Secret's
-current certificate", `ssl = on`, connections still `ssl=false`.
+current certificate", `ssl = on`, connections still `ssl=false`. The restart
+takes a minute or more: the disk detaches and attaches again.
 Failure: `kubectl -n vrsky-database logs postgresql-0 -c tls-perms` and
-`-c postgresql`; `kubectl -n vrsky-database rollout undo statefulset/postgresql`.
+`-c postgresql`. To go back, `kubectl -n vrsky-database rollout undo
+statefulset/postgresql` and then `kubectl -n vrsky-database delete pod
+postgresql-0`: a rolling update does not replace a pod that never became Ready,
+so without the delete the old spec is never started.
 
 **Step 3, copy the public CA.**
 ```bash
-infrastructure/azure/postgres-tls.sh ca-sync
+CONFIRM=1 infrastructure/azure/postgres-tls.sh ca-sync
 infrastructure/azure/postgres-tls.sh check              # both postgres-ca ConfigMaps "match the CA"
 ```
 
 **Step 4, mount the CA in the three core services.**
 ```bash
-infrastructure/azure/postgres-tls.sh clients            # rolls management-api, data-filter, data-converter
+CONFIRM=1 infrastructure/azure/postgres-tls.sh clients            # rolls management-api, data-filter, data-converter
 infrastructure/azure/postgres-tls.sh check              # "all mount it"
 ```
 
 **Step 5, canary.** One throwaway pod connects with `verify-full` and the live
 Secret's host and password, and prints the session.
 ```bash
-infrastructure/azure/postgres-tls.sh canary             # prints "ssl=true TLSv1.3"
+CONFIRM=1 infrastructure/azure/postgres-tls.sh canary             # prints "ssl=true TLSv1.3"
 ```
 If it fails, stop: the strings must not change.
 
 **Step 6, switch the strings.**
 ```bash
 DRY_RUN=1 infrastructure/azure/postgres-tls.sh urls verify-full
-infrastructure/azure/postgres-tls.sh urls verify-full   # postgres-credentials in both namespaces, BACKUP_DB_URL
+CONFIRM=1 infrastructure/azure/postgres-tls.sh urls verify-full   # postgres-credentials in both namespaces, BACKUP_DB_URL
 infrastructure/azure/postgres-tls.sh check              # the three strings say verify-full
 ```
 Running pods still use the old value.
 
 **Step 7, restart the clients.** One at a time; management-api first.
 ```bash
-infrastructure/azure/postgres-tls.sh restart
+CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 ```
 It stops at the first rollout that does not become Ready.
 
@@ -282,8 +300,8 @@ item 58 in `plans/backlog.md`.
 
 **Rollback at any point after step 6:**
 ```bash
-infrastructure/azure/postgres-tls.sh urls disable
-infrastructure/azure/postgres-tls.sh restart
+CONFIRM=1 infrastructure/azure/postgres-tls.sh urls disable
+CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 ```
 
 ## Rollout record

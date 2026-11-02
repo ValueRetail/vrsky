@@ -30,7 +30,9 @@ where the deployment supports it).
 On the hosted service, the database, message store and object storage keep
 their data on Azure managed disks, which Azure encrypts at rest with
 platform-managed keys. Traffic from the platform's services to its Postgres is
-TLS-encrypted and verified against a private CA (see
+prepared for TLS verified against a private CA; it is enabled after the
+operator steps in `plans/issue-453-postgres-tls.md`, and until then it runs
+over the cluster's private network unencrypted (see
 [Transport & gateway](#transport-gateway)).
 
 ## 3. Audit log
@@ -71,11 +73,12 @@ access logged.
 
 The UI and API share an origin. In production, TLS terminates at the
 ingress (ingress-nginx, with a Let's Encrypt certificate from cert-manager);
-inside the cluster, the services' connections to Postgres use TLS with the
-server's certificate and name checked (`sslmode=verify-full`, a private CA
-that cert-manager manages), while the other service-to-service traffic (NATS,
-the management API's HTTP, MinIO) runs over the cluster's private network
-without TLS. A gateway (Traefik) that applies **per-tenant rate limiting** keyed to
+inside the cluster, service-to-service traffic (NATS, the management API's
+HTTP, MinIO) runs over the cluster's private network without TLS. The
+connections to Postgres are prepared for TLS with the server's certificate and
+name checked (`sslmode=verify-full`, a private CA that cert-manager manages);
+that is switched on by the operator steps in `plans/issue-453-postgres-tls.md`,
+and until they have run those connections are unencrypted too. A gateway (Traefik) that applies **per-tenant rate limiting** keyed to
 the subscription plan exists for the Docker Compose stack but is not part of
 the production deployment. Production relies on the limits built into the
 services: plan quotas, failed-attempt limits on login, sign-up and

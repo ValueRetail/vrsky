@@ -82,7 +82,9 @@ required keys and either the account name and key or
 
 `BACKUP_AZURE_CONNECTION_STRING` can replace the account name and key. The
 database URL is the same one as `connection_string` in the
-`postgres-credentials` Secret in `vrsky-database`.
+`postgres-credentials` Secret in `vrsky-database`. Until Postgres has TLS
+(#453, `plans/issue-453-postgres-tls.md`) leave `sslmode` and `sslrootcert`
+out of it.
 
 Then activate the CronJob: run Catch up (Actions, Catch up, Run workflow), or
 

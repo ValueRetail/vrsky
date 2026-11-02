@@ -9,9 +9,10 @@
 #   check              read-only: what is on, what is missing, who still talks
 #                      to Postgres without TLS
 #   server             apply tls.yaml and statefulset.yaml: Postgres gets a
-#                      certificate and ssl = on. Restarts Postgres (about a
-#                      minute with no database). It still accepts plain
-#                      connections afterwards.
+#                      certificate and ssl = on. Restarts Postgres: a minute
+#                      or more with no database (the disk detaches and
+#                      re-attaches). It still accepts plain connections
+#                      afterwards.
 #   ca-sync            copy the PUBLIC ca.crt into the ConfigMap postgres-ca in
 #                      vrsky-platform and vrsky-database. Run again whenever the
 #                      CA certificate is renewed (every nine years).
@@ -31,7 +32,10 @@
 #   restart            roll the Deployments that read DATABASE_URL, so they pick
 #                      up the Secret.
 #
-# DRY_RUN=1 prints what a mutating step would do and changes nothing.
+# Every subcommand except `check` writes to the cluster. Each prints the kube
+# context first and refuses to run unless CONFIRM=1 is set, so a command pasted
+# into the wrong terminal does nothing. DRY_RUN=1 prints what a step would do,
+# changes nothing and needs no CONFIRM; `check` only reads.
 set -euo pipefail
 set +x
 
@@ -51,6 +55,33 @@ CORE_DEPLOYS="vrsky-management-api vrsky-data-filter vrsky-data-converter"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 say() { echo ">>> $*"; }
+
+# write_gate — the first thing every writing subcommand calls, before any
+# kubectl call that could change something. Prints the context it would use.
+write_gate() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "kube context: $(kubectl config current-context 2>/dev/null || echo unknown)"
+  if [ -n "$DRY_RUN" ]; then return 0; fi
+  [ "${CONFIRM:-}" = 1 ] || die "this step changes the cluster named above; check the context, then run it again with CONFIRM=1 (DRY_RUN=1 shows what it would do)"
+}
+
+# The connector Deployments (label tier=connector) in vrsky-platform; the
+# generated manifest has 31. Fewer means a half-listed fleet, and a step that
+# trusts it would switch or restart only part of it.
+EXPECTED_CONNECTORS="${EXPECTED_CONNECTORS:-31}"
+CONNECTORS=""
+
+# load_connectors — fills CONNECTORS or dies. Call it directly, never inside
+# $(...): a die in a subshell would not stop the script.
+load_connectors() {
+  local out n
+  out="$(kubectl get deploy -n "$PLATFORM_NS" -l tier=connector -o name)" \
+    || die "could not list the connector Deployments in $PLATFORM_NS"
+  CONNECTORS="$(printf '%s\n' "$out" | sed 's#.*/##' | sed '/^$/d')"
+  n="$(printf '%s\n' "$CONNECTORS" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  [ "$n" -ge "$EXPECTED_CONNECTORS" ] \
+    || die "found $n connector Deployments in $PLATFORM_NS, expected at least $EXPECTED_CONNECTORS (set EXPECTED_CONNECTORS if the fleet really shrank)"
+}
 
 # act <description> <command…> — run a mutating command unless DRY_RUN is set.
 act() {
@@ -146,13 +177,10 @@ cronjob_has_ca() {
   names_have_ca "$names"
 }
 
-connector_deploys() { kubectl get deploy -n "$PLATFORM_NS" -l tier=connector -o name 2>/dev/null | sed 's#.*/##'; }
-
 pg_sql() { kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- psql -U vrsky -d vrsky -tAc "$1"; }
 
 cmd_server() {
-  command -v kubectl >/dev/null || die "kubectl not found"
-  say "cluster: $(kubectl config current-context)"
+  write_gate
   kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 \
     || die "cert-manager is not installed (infrastructure/kubernetes/ingress/install-cert-manager.sh)"
   local pg="$REPO_ROOT/infrastructure/kubernetes/postgresql"
@@ -172,30 +200,36 @@ cmd_server() {
     return 0
   fi
   printf '%s\n' "$rendered" | kubectl apply -f -
-  kubectl rollout status statefulset/postgresql -n "$DB_NS" --timeout=300s
+  # The disk detaches from the old pod and attaches to the new one; that can
+  # take longer than a minute. If it does not come up: kubectl rollout undo
+  # statefulset/postgresql, and kubectl delete pod postgresql-0 (a rolling
+  # update does not replace a pod that never became Ready).
+  kubectl rollout status statefulset/postgresql -n "$DB_NS" --timeout=600s
   say "ssl is $(pg_sql 'SHOW ssl')"
 }
 
 cmd_ca_sync() {
+  write_gate
   command -v openssl >/dev/null || die "openssl not found"
-  local tmp
-  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
-  ca_from_secret > "$tmp/ca.crt"
-  [ -s "$tmp/ca.crt" ] || die "no ca.crt in $DB_NS/$TLS_SECRET (is the Certificate Ready?)"
-  openssl x509 -in "$tmp/ca.crt" -noout >/dev/null 2>&1 || die "ca.crt is not a certificate"
-  say "CA $(openssl x509 -in "$tmp/ca.crt" -noout -subject -enddate | tr '\n' ' ')"
-  local ns
+  # No temporary file and no trap: the CA is public, so it can sit in a
+  # variable and go to kubectl as a literal. (A RETURN trap fires again when
+  # main returns on bash 3.2, the macOS default, and aborts the script.)
+  local ca ns
+  ca="$(ca_from_secret)" || die "could not read ca.crt from $DB_NS/$TLS_SECRET"
+  [ -n "$ca" ] || die "no ca.crt in $DB_NS/$TLS_SECRET (is the Certificate Ready?)"
+  printf '%s\n' "$ca" | openssl x509 -noout >/dev/null 2>&1 || die "ca.crt is not a certificate"
+  say "CA $(printf '%s\n' "$ca" | openssl x509 -noout -subject -enddate | tr '\n' ' ')"
   for ns in "$PLATFORM_NS" "$DB_NS"; do
     if [ -n "$DRY_RUN" ]; then echo "    would: ConfigMap $ns/$CA_CONFIGMAP <- ca.crt"; continue; fi
     kubectl get namespace "$ns" >/dev/null
-    kubectl create configmap "$CA_CONFIGMAP" -n "$ns" --from-file=ca.crt="$tmp/ca.crt" \
+    kubectl create configmap "$CA_CONFIGMAP" -n "$ns" --from-literal=ca.crt="$ca"$'\n' \
       --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     echo "    $ns/$CA_CONFIGMAP updated"
   done
 }
 
 cmd_clients() {
-  command -v kubectl >/dev/null || die "kubectl not found"
+  write_gate
   local d c patch
   for d in $CORE_DEPLOYS; do
     c="${d#vrsky-}"
@@ -215,7 +249,8 @@ cmd_clients() {
 # or its next restart on verify-full cannot start a connection.
 require_clients_ready() {
   local missing="" d
-  for d in $CORE_DEPLOYS $(connector_deploys); do
+  load_connectors
+  for d in $CORE_DEPLOYS $CONNECTORS; do
     has_ca_volume deploy "$d" -n "$PLATFORM_NS" || missing="$missing $d"
   done
   if kubectl get cronjob vrsky-mgmt-backup -n "$DB_NS" >/dev/null 2>&1 && ! cronjob_has_ca; then
@@ -227,8 +262,7 @@ require_clients_ready() {
 cmd_urls() {
   local mode="${1:-}"
   case "$mode" in verify-full | disable) ;; *) die "usage: urls <verify-full|disable>" ;; esac
-  command -v kubectl >/dev/null || die "kubectl not found"
-  say "cluster: $(kubectl config current-context)"
+  write_gate
   if [ "$mode" = verify-full ]; then
     # Fail closed: the strings must not point at a server or a CA that is not there.
     [ "$(pg_sql 'SHOW ssl' | tr -d '[:space:]')" = on ] || die "Postgres does not have ssl on yet (run 'server')"
@@ -249,11 +283,18 @@ cmd_urls() {
 # Secret into its own environment and swaps only the query part of the URL.
 # The pod's output is psql's answer or psql's error, neither of which holds the
 # password.
+canary_cleanup() {
+  kubectl delete pod pg-tls-canary -n "$PLATFORM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+
 cmd_canary() {
-  command -v kubectl >/dev/null || die "kubectl not found"
-  say "cluster: $(kubectl config current-context)"
+  write_gate
   local pod=pg-tls-canary
   if [ -n "$DRY_RUN" ]; then echo "    would: run pod $PLATFORM_NS/$pod and print its result"; return 0; fi
+  # However this ends (success, failure, Ctrl-C, a signal), the pod goes.
+  trap canary_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   kubectl delete pod "$pod" -n "$PLATFORM_NS" --ignore-not-found >/dev/null
   kubectl apply -f - >/dev/null <<EOF
 apiVersion: v1
@@ -306,15 +347,15 @@ EOF
   done
   echo "    pod phase: ${phase:-unknown}"
   kubectl logs "$pod" -n "$PLATFORM_NS" 2>&1 | sed 's/^/    /' || true
-  kubectl delete pod "$pod" -n "$PLATFORM_NS" --ignore-not-found --wait=false >/dev/null
+  canary_cleanup
   [ "$phase" = Succeeded ] || die "the canary did not connect over TLS; do not switch the strings"
 }
 
 cmd_restart() {
-  command -v kubectl >/dev/null || die "kubectl not found"
-  say "cluster: $(kubectl config current-context)"
+  write_gate
   local d all
-  all="$CORE_DEPLOYS $(connector_deploys)"
+  load_connectors
+  all="$CORE_DEPLOYS $CONNECTORS"
   # One at a time: management-api first, so a bad string shows up on the one
   # service that has a readiness check on the database.
   for d in $all; do
@@ -325,7 +366,7 @@ cmd_restart() {
 
 cmd_check() {
   command -v kubectl >/dev/null || die "kubectl not found"
-  say "cluster: $(kubectl config current-context)"
+  say "kube context: $(kubectl config current-context 2>/dev/null || echo unknown)"
   local bad=0
 
   echo "--- cert-manager and certificates"
@@ -365,8 +406,11 @@ cmd_check() {
   echo "    $DB_NS/vrsky-backup-config BACKUP_DB_URL: $(url_sslmode "$(secret_value $DB_NS vrsky-backup-config BACKUP_DB_URL)")"
 
   echo "--- clients that mount the CA"
-  local d
-  for d in $CORE_DEPLOYS $(connector_deploys); do
+  local d conns n
+  conns="$(kubectl get deploy -n "$PLATFORM_NS" -l tier=connector -o name 2>/dev/null | sed 's#.*/##' | sed '/^$/d' || true)"
+  n="$(printf '%s\n' "$conns" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  if [ "$n" -lt "$EXPECTED_CONNECTORS" ]; then echo "    only $n connector Deployments listed, expected $EXPECTED_CONNECTORS"; bad=1; fi
+  for d in $CORE_DEPLOYS $conns; do
     has_ca_volume deploy "$d" -n "$PLATFORM_NS" || { echo "    $d: NO $CA_CONFIGMAP volume"; bad=1; }
   done
   cronjob_has_ca || { echo "    cronjob/vrsky-mgmt-backup: NO $CA_CONFIGMAP volume"; bad=1; }

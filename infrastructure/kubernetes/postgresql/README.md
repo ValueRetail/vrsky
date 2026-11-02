@@ -118,15 +118,18 @@ Why these choices:
   restart that happens anyway. If the cluster ever runs 90 days without a
   start, `postgres-tls.sh check` says so ("Postgres has an OLDER
   certificate") and a `kubectl rollout restart statefulset/postgresql -n
-  vrsky-database` fixes it (about a minute without a database).
+  vrsky-database` fixes it (a minute or more without a database: the disk
+  detaches and re-attaches).
 - **Plain connections still work** (`pg_hba.conf` is the image's default, a
   `host` rule), which is what makes the rollout safe in any order.
 
 ### Rolling out (production)
 
 The deploy job never applies this directory; a human runs
-`infrastructure/azure/postgres-tls.sh`, one step at a time. The order, with
-the check after each step, is in the plan. In short: server TLS on, copy the
+`infrastructure/azure/postgres-tls.sh`, one step at a time. Every subcommand
+except `check` prints the kube context and refuses to run without `CONFIRM=1`
+(`DRY_RUN=1` shows what it would do without it). The order, with the check
+after each step, is in the plan. In short: server TLS on, copy the
 CA, merge (the deploy job rolls the connectors and the backup job with the CA
 mounted), patch the three core Deployments, prove `verify-full` with the
 canary pod, switch the strings, restart, check that no network connection is
@@ -162,9 +165,15 @@ Set the strings back and restart. Nothing else needs undoing: the server
 accepts both.
 
 ```bash
-infrastructure/azure/postgres-tls.sh urls disable
-infrastructure/azure/postgres-tls.sh restart
+CONFIRM=1 infrastructure/azure/postgres-tls.sh urls disable
+CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 ```
+
+If Postgres itself does not come back after `postgres-tls.sh server`:
+`kubectl -n vrsky-database rollout undo statefulset/postgresql`, then
+`kubectl -n vrsky-database delete pod postgresql-0` (a rolling update does
+not replace a pod that never became Ready). The disk detaches and attaches
+again, which can take longer than a minute.
 
 Turning TLS off on the server as well is never needed for a client rollback.
 If you want it anyway, revert the StatefulSet change in git and run
@@ -178,7 +187,7 @@ Postgres turn away the rest. The image's last `pg_hba.conf` rule is
 `host all all all scram-sha-256`; making it `hostssl` keeps the in-pod
 `trust` rules (probes, `kubectl exec psql`) and refuses a client from another
 pod that does not use TLS. This edits the file on the volume, so it is not
-in the manifests (backlog item 150 would move it there):
+in the manifests (backlog item 156 would move it there):
 
 ```bash
 kubectl exec -n vrsky-database postgresql-0 -c postgresql -- sh -c \

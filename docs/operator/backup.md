@@ -117,11 +117,13 @@ unset DB_URL ENC_KEY SA_NAME SA_KEY
 ```
 
 - `BACKUP_DB_URL` is the `connection_string` of the `postgres-credentials`
-  Secret in `vrsky-database`. It checks Postgres' certificate (#453):
+  Secret in `vrsky-database`. Once Postgres has TLS (#453, the operator steps
+  in `plans/issue-453-postgres-tls.md`) it checks the certificate:
   `sslmode=verify-full`, with the CA at
   `/etc/vrsky/postgres-ca/ca.crt`, where the CronJob mounts the `postgres-ca`
-  ConfigMap. `infrastructure/azure/postgres-tls.sh urls verify-full` changes
-  an existing Secret to that without printing it.
+  ConfigMap. `CONFIRM=1 infrastructure/azure/postgres-tls.sh urls verify-full`
+  changes an existing Secret to that without printing it. Before the rollout,
+  leave `sslmode` and `sslrootcert` out of the URL.
 - `ENCRYPTION_KEY` is the `encryption_key` of `postgres-credentials` in
   `vrsky-platform`. The two copies must match. If the key is ever rotated,
   update this Secret too.

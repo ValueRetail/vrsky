@@ -1092,7 +1092,7 @@ Last updated 2026-10-28.
     legacy `PUT /api/v1/tenants/{id}/plan` and quota routes have the same
     gap. File them under the path's `tenant_id`. Found in review of #637.
 
-150. **Postgres TLS: the loose ends of #453.** (1) Refusing plain
+156. **Postgres TLS: the loose ends of #453.** (1) Refusing plain
     connections is an edit of `pg_hba.conf` on the volume
     (`infrastructure/kubernetes/postgresql/README.md`, "Optional last step").
     Move it into the manifests with `hba_file` pointing at a ConfigMap, after

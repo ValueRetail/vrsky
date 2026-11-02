@@ -97,7 +97,7 @@ chmod 600 infrastructure/kubernetes/postgresql/secret.yaml \
           infrastructure/kubernetes/minio/secret.yaml
 
 echo ">>> copying the public CA certificate to the client namespaces"
-bash infrastructure/azure/postgres-tls.sh ca-sync
+CONFIRM=1 bash infrastructure/azure/postgres-tls.sh ca-sync
 
 echo ">>> applying secrets"
 kubectl apply -f infrastructure/kubernetes/postgresql/secret.yaml

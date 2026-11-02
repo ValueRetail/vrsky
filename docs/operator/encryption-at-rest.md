@@ -16,12 +16,14 @@ the `ENCRYPTION_KEY` environment variable. This checklist keeps that safe.
 - [ ] **Confirm ciphertext, not plaintext, is stored.** Create a secret, then
       check the DB: the value column is `aes256:<base64…>`, never the raw value.
 - [ ] **Use TLS to the databases** where you can (`sslmode=require` or better).
-      Production on AKS does (#453): the in-cluster Postgres serves a
-      certificate from a private CA that cert-manager issues, and every
-      platform service connects with `sslmode=verify-full` against that CA
-      (`infrastructure/azure/rotate-secrets.sh` builds the strings,
-      `infrastructure/azure/postgres-tls.sh check` shows the state).
-      Postgres still accepts plain connections until the optional last step
+      Production on AKS is prepared for it (#453): the repo has the cert-manager
+      certificate for the in-cluster Postgres, and the services are ready to
+      connect with `sslmode=verify-full` against its private CA
+      (`infrastructure/azure/rotate-secrets.sh` builds those strings). TLS is
+      enabled after the operator steps in the plan have run;
+      `infrastructure/azure/postgres-tls.sh check` shows whether it is on.
+      Until then the connections are plain. Once on, Postgres still accepts
+      plain connections until the optional last step
       in [the Postgres README](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/postgresql/README.md#tls-453)
       turns them away. The rollout record is in
       [plans/issue-453-postgres-tls.md](https://github.com/ValueRetail/vrsky/blob/main/plans/issue-453-postgres-tls.md).
