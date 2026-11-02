@@ -572,6 +572,7 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 
 	refreshed := false
 	sinceSave := 0
+	retries := 0
 	for _, f := range files {
 		select {
 		case <-ctx.Done():
@@ -581,6 +582,11 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		stamp := listing[f.Name]
 		if done.Done(f.Name, stamp) {
 			delete(pending, f.Name)
+			// Published, but still here: its after-action failed (#640).
+			if retries < doneset.MaxRetriesPerPoll && s.wantsAfterRetry(cfg, f.Name) && done.RetryDue(f.Name, listedAt) {
+				retries++
+				s.retryAfterAction(conn, cfg, done, f.Name, listedAt, logger)
+			}
 			continue
 		}
 		if cfg.FilePattern != "" {
@@ -618,6 +624,7 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		}
 		delete(pending, f.Name)
 		done.Mark(f.Name, stamp)
+		done.RetryDone(f.Name)
 		logger.Info("SFTP file ingested", "file", f.Name, "size", f.Size, "streamed", streamed)
 		if sinceSave++; sinceSave >= saveEvery {
 			s.saveDone(ctx, done, logger)
@@ -625,10 +632,43 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 		}
 
 		if err := s.afterAction(conn, cfg, f.Name, remotePath); err != nil {
-			logger.Warn("after-action failed", "file", f.Name, "action", cfg.AfterAction, "error", err)
+			failures, wait := done.RetryFailed(f.Name, listedAt)
+			logger.Warn("after-action failed; will retry", "file", f.Name, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", err)
 		}
 	}
 	return waiting, false
+}
+
+// wantsAfterRetry reports whether a done file that is still listed gets its
+// after-action tried again (#640): the action removes the file, and it is one
+// this connection publishes (its name matches file_pattern and is not a temp
+// name), so a file the config no longer selects is never touched.
+func (s *sftpConsumer) wantsAfterRetry(cfg *SFTPConfig, name string) bool {
+	if cfg.AfterAction != "delete" && cfg.AfterAction != "move" {
+		return false
+	}
+	if cfg.FilePattern != "" {
+		if match, _ := path.Match(cfg.FilePattern, name); !match {
+			return false
+		}
+	}
+	return !isTempName(name) || patternNamesTemp(cfg.FilePattern)
+}
+
+// retryAfterAction runs the after-action again for a file that was published
+// and is still in the folder, without publishing it. A failure backs off,
+// doubling from a minute up to an hour, and logs once per try, not per poll.
+// A move whose target already exists (the file moved but the listing still
+// showed it, or a file of that name went there before) is a rename over it,
+// as at the first try.
+func (s *sftpConsumer) retryAfterAction(conn sftpConn, cfg *SFTPConfig, done *doneset.Set, name string, now time.Time, logger *slog.Logger) {
+	if err := s.afterAction(conn, cfg, name, joinRemote(cfg.RemoteDir, name)); err != nil {
+		failures, wait := done.RetryFailed(name, now)
+		logger.Warn("after-action failed again; will retry", "file", name, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", err)
+		return
+	}
+	done.RetryDone(name)
+	logger.Info("after-action done on retry", "file", name, "action", cfg.AfterAction)
 }
 
 // isTempName reports whether a file name looks like one a writer is still

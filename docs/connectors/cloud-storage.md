@@ -179,9 +179,21 @@ published once, not again at every start (#538).
 - **Deleted, then added again.** An object that a poll finds gone from the
   listing is forgotten; if it comes back it is published again.
 - **Failed after-action.** If `delete` or `move` fails, the object is still
-  counted as published and stays where it is; it is not published or moved
-  again, also after a restart. The failure is in the log (`after-action
-  failed`).
+  counted as published and is not published again. The consumer tries the
+  `delete` or `move` again at later polls: one minute after the failure,
+  then 2, 4, 8 minutes and so on, up to one hour between tries (#640). Each try that fails logs one warning (`after-action failed`,
+  with `failures` and `retry_in`); a try that works logs `after-action done
+  on retry`. An object someone else removes in the meantime is dropped from
+  the retries. After a restart the consumer tries every such object once at
+  its first poll, and at most 20 objects per poll, so a bucket full of
+  leftovers is cleared over a few polls. The object must still match
+  `file_pattern`; one the pattern no longer selects is left alone. This also
+  means that changing `after_action` from `none` to `delete` or `move`
+  removes the objects already published and still under the prefix. A `move`
+  whose copy worked and whose delete failed copies over the same
+  destination again before it deletes. Event mode has no listing and does
+  not retry: a failed after-action there is only logged and the object
+  stays.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

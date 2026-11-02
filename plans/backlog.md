@@ -759,8 +759,8 @@ Last updated 2026-10-28.
     publishes those names again. Bound it: compare the snapshot's gen every
     Nth save, or force a snapshot after N changes-only saves or X minutes.
     Found in review of #538.
-110. **The SFTP and cloud-storage consumers never retry a failed
-    after-action.** A file whose `delete` or `move` failed is done, so it
+110. ~~**The SFTP and cloud-storage consumers never retry a failed
+    after-action.**~~ (#640) A file whose `delete` or `move` failed is done, so it
     stays in the folder for good; before #538 a restart published it again
     and retried. Retry the after-action for done names still listed (with
     `delete`/`move` a done name should not be there), with a backoff.
@@ -1046,6 +1046,13 @@ Last updated 2026-10-28.
     an empty tenant list and a 200, so a database blip right after the
     session check shows a signed-in user with no workspaces. Answer 503, as
     for the session lookup. Found in #634.
+150. **Cloud-storage event mode never retries a failed after-action.**
+    `ingestObject` logs it, the message is acked, and the object stays in
+    the bucket; there is no listing in event mode to find it again, and no
+    done set. Poll mode retries since #640. Options: re-fetch nothing and
+    only retry the after-action from a small in-memory queue of keys
+    (lost on restart), or list the prefix now and then in event mode just
+    to sweep leftovers. Found in #640.
 
 ## Human
 
