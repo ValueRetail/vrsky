@@ -727,7 +727,7 @@ Last updated 2026-10-28.
     managed disk (`docs/operator/cost-parking.md`). Check what production
     runs, then fix the header as #527 did for Postgres. Manifest, so PR
     plus `agent:needs-human`. Found in review of #527.
-106. **Run the SFTP and cloud-storage consumers with `strategy: Recreate`.**
+106. ~~**Run the SFTP and cloud-storage consumers with `strategy: Recreate`.**~~ (#620)
     Since #538 they keep their done set, so a restart no longer publishes
     everything again, but a rolling deploy still runs two pods for a few
     seconds. With `after_action: delete` or `move` both can list and

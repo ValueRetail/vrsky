@@ -1665,6 +1665,8 @@ metadata:
     role: consumer
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: vrsky-cloud-storage-consumer
@@ -1765,6 +1767,8 @@ metadata:
     role: consumer
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: vrsky-sftp-consumer

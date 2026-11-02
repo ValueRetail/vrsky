@@ -236,9 +236,18 @@ emit() {  # $1=name  $2=role  $3=port ("-" for none)
   # the saved done set, so the new pod's first polls publish them; /upload
   # fails for those seconds. On a live cluster drop_rolling_update (below)
   # also switches it before the apply, as a safeguard.
+  #
+  # sftp-consumer and cloud-storage-consumer are Recreate for the same reason
+  # (#620). They list a remote folder or bucket, and with after_action delete
+  # or move two pods can both publish a file before either removes it. Since
+  # #538 they keep a saved done set, so files that land in the gap are
+  # published by the new pod's first polls. Keep the drop_rolling_update
+  # calls below in step with this list.
   local strategy=""
-  [ "$name" = file-consumer ] && strategy="  strategy:
-    type: Recreate"
+  case "$name" in
+    file-consumer|sftp-consumer|cloud-storage-consumer) strategy="  strategy:
+    type: Recreate" ;;
+  esac
 
   cat <<EOF
 ---
@@ -421,6 +430,8 @@ drop_rolling_update() {
   fi
 }
 drop_rolling_update vrsky-file-consumer
+drop_rolling_update vrsky-sftp-consumer
+drop_rolling_update vrsky-cloud-storage-consumer
 
 echo ">>> applying"
 kubectl apply -f "$MANIFEST"
