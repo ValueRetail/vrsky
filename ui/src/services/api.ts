@@ -49,7 +49,9 @@ const apiClient: AxiosInstance = axios.create({
 // Request interceptor: Add X-Tenant-ID header
 apiClient.interceptors.request.use(
   (requestConfig) => {
-    requestConfig.headers['X-Tenant-ID'] = activeTenantId
+    // No workspace selected: send no header (the API answers 400) rather
+    // than an empty one or another workspace's id.
+    if (activeTenantId) requestConfig.headers['X-Tenant-ID'] = activeTenantId
     const token = getSessionToken()
     if (token) {
       requestConfig.headers['Authorization'] = `Bearer ${token}`

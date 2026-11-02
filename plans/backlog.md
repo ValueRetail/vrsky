@@ -850,7 +850,7 @@ Last updated 2026-10-28.
     survives in `canvasStore`). Since #552 a non-owner's 403 does this too.
     A refresh that doesn't touch `isLoading` would avoid it; that changes
     the auth store, so PR plus `agent:needs-human`. Found in review of #552.
-125. **`checkAuth` can select a workspace that isn't active.** When the saved
+125. ~~**`checkAuth` can select a workspace that isn't active.**~~ (#637) When the saved
     workspace is gone it falls back to `meData.current_tenant`
     (`ui/src/store/authStore.ts` ~193), the server's `tenants[0]`, without
     checking `status === 'active'`, which `switchTenant` would refuse. Auth

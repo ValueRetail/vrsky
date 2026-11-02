@@ -220,12 +220,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const savedTenant = savedTenantId
         ? tenants.find((t) => t.id === savedTenantId && t.status === 'active')
         : null
-      const currentTenant = savedTenant || meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
+      // Otherwise the server's pick, if it is active, then the first active
+      // workspace. /me's current_tenant is just tenants[0] (oldest first) and
+      // can be provisioning or failed, which switchTenant refuses. With no
+      // active workspace at all the user has none selected, the state a user
+      // with no workspaces is already in.
+      const serverTenant = meData.current_tenant
+      const currentTenant =
+        savedTenant ||
+        (serverTenant && serverTenant.status === 'active' ? serverTenant : null) ||
+        tenants.find((t) => t.status === 'active') ||
+        null
 
       // Update the API client's tenant ID
       if (currentTenant) {
         setActiveTenantId(currentTenant.id)
         localStorage.setItem(SELECTED_TENANT_KEY, currentTenant.id)
+      } else {
+        // No active workspace: do not keep sending the build-time default or
+        // the previous workspace's id. Requests go without the header and the
+        // server answers 400.
+        setActiveTenantId('')
       }
 
       set({
