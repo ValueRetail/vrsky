@@ -6,8 +6,8 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 
 - **Type**: Deployment, 1 replica. Production on AKS runs this one, with no HA → see **High Availability** below
 - **Storage Backend**: S3-compatible object storage
-- **Resources**: 2 CPU, 4GB RAM (requests: 1 CPU, 2GB RAM)
-- **Storage**: 100GB via Longhorn distributed storage
+- **Resources**: limits 2 CPU, 4GB RAM (requests: 50m CPU, 512Mi RAM)
+- **Storage**: one 8Gi claim (`minio-data-small`), `local-path` on k3d and `managed-csi` in production
 - **Access**: Internal cluster access only (ClusterIP)
 
 > ⚠️ `deployment.yaml` is a **single replica with a single drive** — a node or PVC
@@ -30,20 +30,23 @@ This directory contains Kubernetes manifests for deploying MinIO as the S3-compa
 
 ```
 vrsky-objects/                    # Main bucket
-├── temp/                         # Temporary objects (15min TTL)
+├── temp/                         # Temporary objects (1 day TTL)
+├── spill/                        # Claim-check payloads over 256 KiB (8 day TTL)
 │   └── {tenant-id}/
-│       └── messages/
-│           └── {message-id}.bin
+│       └── {integration-id}/
+│           └── {envelope-id}
 └── tenants/                      # Tenant-specific storage
     └── {tenant-id}/
         ├── attachments/
         └── exports/
 ```
 
-**Lifecycle Policy**:
+**Lifecycle Policy** (`setup-job.yaml`):
 
-- Objects in `temp/` prefix: Auto-deleted after 1 day
-- Default TTL for large message payloads: 15 minutes (application-managed)
+- Objects in `temp/` prefix: auto-deleted after 1 day
+- Objects in `spill/` prefix: auto-deleted after 8 days. A message can wait 72 h
+  in the main stream and be replayed from the DLQ for 7 days, so the payload
+  has to outlive both. `src/pkg/claimcheck/claimcheck.go` writes the keys.
 
 ## Deployment
 
@@ -194,7 +197,9 @@ kubectl run -it --rm mc-test --image=pgsty/mc:RELEASE.2026-09-16T00-00-00Z --res
 
 ### Persistent Volume
 
-MinIO data is stored in a 100GB Longhorn volume.
+MinIO data is stored in one 8Gi volume, claim `minio-data-small`: `local-path`
+on k3d and `managed-csi` (an Azure disk) in production. The claim used to be
+`minio-data` at 100Gi. It got a new name because a claim cannot shrink.
 
 ```bash
 # List PVCs
@@ -264,11 +269,9 @@ mc mirror /path/to/backup/ vrsky-minio/vrsky-objects
 
 ### Backup Entire PVC
 
-```bash
-# Create snapshot via Longhorn
-kubectl annotate pvc minio-data-small -n vrsky-storage \
-  snapshot.storage.kubernetes.io/snapshot-name=minio-backup-$(date +%Y%m%d-%H%M%S)
-```
+The repo has no backup for this volume (`deployment.yaml` says so).
+`docs/DR.md` describes a disk backup for the Postgres disk only. Until this claim
+has one, the `mc mirror` copies above are the backup.
 
 ## Troubleshooting
 
@@ -282,7 +285,8 @@ kubectl describe pod -l app=minio -n vrsky-storage
 kubectl logs -l app=minio -n vrsky-storage
 
 # Common issues:
-# - PVC not bound: Verify Longhorn is running
+# - PVC not bound: `kubectl describe pvc minio-data-small -n vrsky-storage` shows why;
+#   check that the StorageClass exists (`local-path` on k3d, `managed-csi` on AKS)
 # - Secret not found: Apply secret.yaml first
 # - Port conflicts: Ensure ports 9000/9001 are available
 ```
@@ -329,25 +333,31 @@ kubectl run -it --rm dns-test --image=busybox --restart=Never -n vrsky-platform 
 ### Increase Storage
 
 ```bash
-# Edit PVC
+# The claim cannot shrink, and its StorageClass must allow expansion
+# (kubectl get storageclass managed-csi -o jsonpath='{.allowVolumeExpansion}')
 kubectl edit pvc minio-data-small -n vrsky-storage
 
-# Change storage: 100Gi to 200Gi
-# Longhorn will automatically expand the volume
+# Change storage: 8Gi to a larger size
 ```
+
+If `kubectl describe pvc minio-data-small -n vrsky-storage` shows
+`FileSystemResizePending`, the filesystem still has to grow. On AKS, check the
+Azure disk docs before resizing: some sizes need the disk detached, which stops
+MinIO until it is back.
 
 ### Increase Resources
 
-Edit `deployment.yaml`:
+Edit `deployment.yaml`. Its current values are requests 50m CPU and 512Mi, and
+limits 2 CPU and 4Gi:
 
 ```yaml
 resources:
   requests:
+    cpu: 50m
+    memory: 512Mi
+  limits:
     cpu: 2
     memory: 4Gi
-  limits:
-    cpu: 4
-    memory: 8Gi
 ```
 
 Apply and restart:
@@ -359,8 +369,10 @@ kubectl rollout restart deployment/minio -n vrsky-storage
 
 ## High Availability (production) — #136
 
-`deployment.yaml` is single-node and not durable. For production choose **one**
-of the two options below. Both are drop-in for VRSky's object-storage workers —
+Production runs `deployment.yaml` today: one replica, one 8Gi disk, no erasure
+coding and no backup. A pod or node failure takes object storage down, and a
+lost disk loses the spilled payloads. To get off it, choose **one** of the two
+options below. Both are drop-in for VRSky's object-storage workers —
 the cloud-storage consumer/producer already speak the S3 API and select GCS /
 Azure via the `objectstore` backend, so switching is endpoint + credentials, not
 code.
@@ -388,8 +400,8 @@ env:
 
 Prefer cloud-native auth (IAM Roles for Service Accounts on EKS, Workload
 Identity on GKE, Managed Identity on AKS) over long-lived static keys. Lifecycle
-rules (the `temp/` 1-day expiry) are set on the managed bucket instead of via
-`setup-job.yaml`.
+rules (the `temp/` 1-day and `spill/` 8-day expiries) are set on the managed
+bucket instead of via `setup-job.yaml`.
 
 ### Option B — Self-hosted distributed MinIO (`statefulset-distributed.yaml`)
 
@@ -423,8 +435,9 @@ kubectl apply -f setup-job.yaml
 - A distributed pool's server count is **fixed**. To grow capacity, add a *new*
   server pool — append another `https://...{4...7}` range to the `server` args
   and raise `replicas` — never resize an existing pool in place.
-- Use a real block / replicated `StorageClass` (Longhorn, EBS, PD), not
-  `local-path`, so a PVC survives node loss. Minimum 4 drives for erasure coding.
+- Use a block `StorageClass` that keeps a volume across node loss (`managed-csi`
+  on AKS, EBS or PD elsewhere), not `local-path`. Each server gets its own 100Gi
+  claim from `volumeClaimTemplates`. Minimum 4 drives for erasure coding.
 - Spread servers across nodes (the manifest sets a `topologySpreadConstraint`)
   so one node failure costs at most one drive.
 
@@ -463,7 +476,7 @@ func main() {
     // Upload object
     info, err := minioClient.FPutObject(context.Background(),
         "vrsky-objects",
-        "temp/tenant-a/messages/msg-123.bin",
+        "spill/tenant-a/integration-a/msg-123",
         "/path/to/file",
         minio.PutObjectOptions{})
 }
@@ -495,7 +508,8 @@ env:
 
 ### Temporary Object Cleanup
 
-Objects in `temp/` are auto-deleted after 1 day by lifecycle policy.
+Objects in `temp/` are auto-deleted after 1 day, and `spill/` objects after 8 days,
+by lifecycle policy.
 
 Application should also delete objects manually after successful delivery:
 
