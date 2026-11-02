@@ -64,9 +64,10 @@ Cache: `type=gha`, `mode=max`, `ignore-error=true`.
   fits the stage layout: the base image, the module download layer and the
   `COPY src/` layer are identical across Go images, so one warm entry serves
   all 35. Per-image scopes would store those layers 35 times against the 10 GB
-  limit. Parallel writers to one scope race on the manifest, but each manifest
-  lists the full chain of its own build, so the shared layers are in whichever
-  one wins.
+  limit. Every job reads the scope; only `data-filter` (Go) and `ui` write it
+  (review, #633), so 35 jobs do not each export a big, mostly unique builder
+  layer into the shared Actions cache, and there are no concurrent writers.
+  A merge that rebuilds neither leaves the cache as it was.
 - What it does not give: the compiled packages. The final `RUN go build` layer
   differs per image and the Go build cache lives inside it, not in a cache
   mount. Cache mounts are not exported to `type=gha`, so a mount would only
@@ -86,10 +87,13 @@ Cache: `type=gha`, `mode=max`, `ignore-error=true`.
 - **Cache eviction or a full 10 GB**: slower builds, never a failed one
   (`ignore-error`). A cold build compiles from scratch, like ACR did.
 - **Docker Hub pulls** from 35 runners at once: rate limits are per IP and
-  GitHub's runners are shared. ACR Tasks pulled from Docker Hub too. If it
-  bites, the fix is a Docker Hub login or mirroring bases into ACR (now
-  possible, the login comes first).
-- **Index vs manifest**: handled by `provenance: false`, `sbom: false`.
+  GitHub's runners are shared, ACR Tasks pulled from Azure IPs. The job logs
+  in to Docker Hub when `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` exist (the
+  `integration.yml` pattern), before `setup-buildx`, which pulls
+  `moby/buildkit`.
+- **Index vs manifest**: `provenance: false`, `sbom: false` keep `:latest` a
+  single manifest as before and leave no untagged attestation manifests in
+  ACR.
 - **Docker context default**: `build-push-action` defaults to the Git URL, not
   the checkout, so `context: .` is explicit and guarded.
 - **Roles**: `AcrPush` is enough for the push. `Contributor` stays for the

@@ -107,7 +107,7 @@ info: ## Show build information
 	@echo ""
 
 # ui/Dockerfile copies ui/... paths, so the context is the repo root (..),
-# the same one `az acr build` uses in production. Local only; nothing pushes it.
+# the same one the Buildx build in CI uses. Local only; nothing pushes it.
 docker-build-ui: ## Build UI Docker image: vrsky/ui:latest
 	@echo "$(BLUE)Building UI Docker image...$(NC)"
 	@docker build -f ../ui/Dockerfile -t vrsky/ui:latest ..

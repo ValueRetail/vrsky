@@ -86,17 +86,23 @@ OpenID Connect identity, runs `az acr login --name vrskyprodacr`, and builds
 with Docker Buildx (`docker/build-push-action`): the image's own Dockerfile,
 the repo root as context, `linux/amd64`, pushed as
 `vrskyprodacr.azurecr.io/vrsky/<image>:latest`. management-api gets
-`AGENT_VERSION` from `git describe`, as before. Provenance and SBOM
-attestations are off, so `:latest` stays a plain single-platform manifest
-and the deploy job and Catch up read its digest with `az acr repository
-show`, unchanged. The runner minutes of a public repository are free; ACR
+`AGENT_VERSION` from `git describe`, as before. When the `DOCKERHUB_USERNAME`
+and `DOCKERHUB_TOKEN` secrets exist, the job logs in to Docker Hub first, so
+the base-image pulls are not anonymous pulls from shared runner IPs. Provenance
+and SBOM attestations are off, so `:latest` stays a plain single-platform
+manifest, as `az acr build` left it, with no untagged attestation manifests
+next to it. The deploy job and Catch up read its digest with `az acr
+repository show`, unchanged. The runner minutes of a public repository are free; ACR
 Tasks bill for every minute (433 minutes for 159 builds on 2026-10-29).
 
 Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the `go mod download` layer and the copy of
-`src/`), one for the UI. The cache is only a speed-up. The repository's
-10 GB limit evicts old entries, a miss means a slower build, and a cache
-error does not fail the job (`ignore-error`). The compiled packages are not
+`src/`), one for the UI. Every job reads the cache; only the `data-filter` and
+`ui` jobs write it, so 35 jobs do not each export their own builder layer into
+the repository's shared 10 GB Actions cache (a merge that does not rebuild
+those two leaves the cache as it was). The cache is only a speed-up: old
+entries get evicted, a miss means a slower build, and a cache error does not
+fail the job (`ignore-error`). The compiled packages are not
 shared between images: each Dockerfile compiles in its own `RUN`, and a
 BuildKit cache mount would not survive the runner anyway.
 

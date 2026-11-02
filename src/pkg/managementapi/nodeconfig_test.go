@@ -1139,9 +1139,10 @@ func TestCPURequestsStayWithinBudget(t *testing.T) {
 // workflowFile is the part of a GitHub workflow the guards look at.
 type workflowFile struct {
 	Jobs map[string]struct {
-		Needs       any    `yaml:"needs"`
-		If          string `yaml:"if"`
-		Environment string `yaml:"environment"`
+		Needs       any               `yaml:"needs"`
+		If          string            `yaml:"if"`
+		Environment string            `yaml:"environment"`
+		Env         map[string]string `yaml:"env"`
 		Concurrency struct {
 			Group string `yaml:"group"`
 		} `yaml:"concurrency"`
@@ -1668,8 +1669,17 @@ func TestBuildImagesBuildOnTheRunner(t *testing.T) {
 	if !ok {
 		t.Fatal("no build-images job")
 	}
-	login, buildStep := -1, -1
+	login, buildStep, hubLogin, buildx := -1, -1, -1, -1
 	for i, st := range build.Steps {
+		if strings.HasPrefix(st.Uses, "docker/login-action@") && hubLogin < 0 {
+			hubLogin = i
+			if !strings.Contains(st.If, "env.DOCKERHUB_USERNAME != ''") || !strings.Contains(st.If, "env.DOCKERHUB_TOKEN != ''") {
+				t.Errorf("the Docker Hub login must be conditional on both secrets (the build must still run without them): if=%q", st.If)
+			}
+		}
+		if strings.HasPrefix(st.Uses, "docker/setup-buildx-action@") && buildx < 0 {
+			buildx = i
+		}
 		if strings.Contains(st.Run, "az acr build") {
 			t.Errorf("build-images step %q runs az acr build; the images are built on the runner (#628)", st.Name)
 		}
@@ -1687,6 +1697,24 @@ func TestBuildImagesBuildOnTheRunner(t *testing.T) {
 		t.Error("build-images never runs `az acr login --name vrskyprodacr`; the push would be refused")
 	} else if login > buildStep {
 		t.Errorf("az acr login (step %d) comes after the build (step %d); a FROM of a mirrored base image would fail", login, buildStep)
+	}
+	// 35 anonymous Docker Hub pulls of golang/alpine (and moby/buildkit from
+	// setup-buildx) from shared runner IPs get rate-limited; the login has to
+	// come before anything pulls.
+	if buildx < 0 {
+		t.Error("build-images has no docker/setup-buildx-action step; the default docker driver cannot export a gha cache")
+	} else if buildx > buildStep {
+		t.Errorf("setup-buildx (step %d) comes after the build (step %d)", buildx, buildStep)
+	}
+	if hubLogin < 0 {
+		t.Error("build-images has no docker/login-action step; anonymous Docker Hub pulls from shared runner IPs get rate-limited (integration.yml)")
+	} else if buildx >= 0 && hubLogin > buildx {
+		t.Errorf("the Docker Hub login (step %d) comes after setup-buildx (step %d), which pulls moby/buildkit", hubLogin, buildx)
+	}
+	for _, k := range []string{"DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"} {
+		if !strings.Contains(build.Env[k], "secrets."+k) {
+			t.Errorf("build-images env %s = %q, want the %s secret", k, build.Env[k], k)
+		}
 	}
 	with := build.Steps[buildStep].With
 	str := func(k string) string { s, _ := with[k].(string); return s }
@@ -1715,8 +1743,19 @@ func TestBuildImagesBuildOnTheRunner(t *testing.T) {
 	if depth, ok := build.Steps[0].With["fetch-depth"].(int); !strings.HasPrefix(build.Steps[0].Uses, "actions/checkout@") || !ok || depth != 0 {
 		t.Error("the first build-images step must be actions/checkout with fetch-depth: 0, or git describe has no tags for AGENT_VERSION")
 	}
-	if !strings.Contains(str("file"), "ui/Dockerfile") || !strings.Contains(str("file"), "src/cmd/{0}/Dockerfile") {
-		t.Errorf("file = %q; want ui/Dockerfile for the UI and src/cmd/<image>/Dockerfile for the rest", str("file"))
+	// The expression picks a Dockerfile by matrix.image: ui/Dockerfile for the
+	// UI, a path under src/cmd for the rest. Pin what it names, not how it is
+	// spelled.
+	if f := str("file"); !strings.Contains(f, "matrix.image") || !strings.Contains(f, "ui/Dockerfile") || !strings.Contains(f, "src/cmd/") || !strings.Contains(f, "/Dockerfile") {
+		t.Errorf("file = %q; want ui/Dockerfile for the UI and src/cmd/<image>/Dockerfile for the rest, chosen by matrix.image", f)
+	}
+	// Every job reads the cache; only a couple write it, and a cache that
+	// cannot be written must not fail a push.
+	if !strings.Contains(str("cache-from"), "type=gha") {
+		t.Errorf("cache-from = %q, want a gha cache", str("cache-from"))
+	}
+	if ct := str("cache-to"); !strings.Contains(ct, "type=gha") || !strings.Contains(ct, "ignore-error=true") {
+		t.Errorf("cache-to = %q; want type=gha with ignore-error=true so a full or failing cache never fails a push", ct)
 	}
 }
 

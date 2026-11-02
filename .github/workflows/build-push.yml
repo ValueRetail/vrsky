@@ -528,6 +528,11 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    # Surface the Docker Hub secrets as env so the login step's `if` can test
+    # them (the `secrets` context isn't available in step-level conditionals).
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -545,6 +550,17 @@ jobs:
       # (none does today). AcrPush is all the push needs.
       - name: Log in to the registry
         run: az acr login --name vrskyprodacr
+      # Authenticated Docker Hub pulls when the secrets exist: 35 jobs pulling
+      # golang and alpine (and setup-buildx pulling moby/buildkit) anonymously
+      # from shared runner IPs get rate-limited (see integration.yml). Placed
+      # before setup-buildx, which pulls the builder image. No-op without the
+      # secrets.
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
       # management-api ships the downloadable agent, stamped with the commit
       # (build-push-acr.sh does the same). Runs on the host: the root
@@ -553,13 +569,17 @@ jobs:
         id: version
         run: echo "agent_version=$(git describe --always --dirty)" >> "$GITHUB_OUTPUT"
       # Built on the runner (public repo: free minutes), pushed as the same tag
-      # az acr build pushed. provenance/sbom off: the default attestation turns
-      # the tag into an index, and the deploy reads the digest of a plain
-      # single-platform manifest, as before. `context: .` is explicit because
-      # the action's default is the Git URL, not the checkout.
+      # az acr build pushed. provenance/sbom off: by default Buildx attaches
+      # attestations, which turns the tag into an image index and leaves
+      # untagged attestation manifests in ACR. Off keeps :latest a single
+      # manifest, as before. `context: .` is explicit because the action's
+      # default is the Git URL, not the checkout.
       # Cache: one scope for all Go images (they share the golang base, the
-      # go.mod download layer and the COPY src layer), one for the UI.
-      # ignore-error: a full or evicted cache costs build time, never the push.
+      # go.mod download layer and the COPY src layer), one for the UI. Every
+      # job reads it; only data-filter (Go) and ui write it, so 35 jobs don't
+      # each export their own big builder layer into the repository's shared
+      # 10 GB Actions cache. ignore-error: a full or evicted cache costs build
+      # time, never the push.
       - name: Build and push ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
@@ -572,7 +592,7 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=gha,scope=${{ matrix.image == 'ui' && 'image-ui' || 'image-go' }}
-          cache-to: type=gha,mode=max,ignore-error=true,scope=${{ matrix.image == 'ui' && 'image-ui' || 'image-go' }}
+          cache-to: ${{ (matrix.image == 'ui' && 'type=gha,mode=max,ignore-error=true,scope=image-ui') || (matrix.image == 'data-filter' && 'type=gha,mode=max,ignore-error=true,scope=image-go') || '' }}
 
   deploy:
     name: Deploy to production
