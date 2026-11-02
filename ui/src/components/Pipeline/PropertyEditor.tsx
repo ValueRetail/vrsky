@@ -2927,6 +2927,14 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
               onChange={(v) => update({ cursor_field: v })}
             />
           )}
+          {Boolean(c.incremental) && (
+            <StyledInput
+              label="Lookback days (date fields only)"
+              placeholder="0 (off, max 365)"
+              value={c.lookback_days ? String(c.lookback_days) : ''}
+              onChange={(v) => update({ lookback_days: v ? Number(v) : undefined })}
+            />
+          )}
           <StyledInput
             label="Page size (optional)"
             placeholder="BC default"

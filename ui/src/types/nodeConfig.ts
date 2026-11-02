@@ -82,11 +82,11 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     block: 'business_central',
     keys: [
       'aad_tenant_id', 'environment', 'company_id', 'client_id', 'client_secret', 'entity', 'filter',
-      'incremental', 'cursor_field', 'page_size', 'api_base_url', 'token_url', 'scope',
+      'incremental', 'cursor_field', 'lookback_days', 'page_size', 'api_base_url', 'token_url', 'scope',
       'poll_interval_seconds', 'pictures',
     ],
     required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
-    numeric: ['page_size', 'poll_interval_seconds'],
+    numeric: ['lookback_days', 'page_size', 'poll_interval_seconds'],
   },
   // business-central-producer (BCProducerConfig in src/cmd/business-central-producer/service.go)
   'producer/business_central': {
