@@ -1011,6 +1011,16 @@ Last updated 2026-10-28.
     old date was applied to a new field silently. The checkpoint state now
     records the field and the watermark is dropped when it changes; a legacy
     row without a field is taken to match. Found in review of #602.
+145. **A failed checkpoint save after a `cursor_field` change re-sends the
+    whole entity.** `saveProgress` in
+    `src/cmd/business-central-consumer/service.go` only logs a failed save.
+    After a field change the stored row still names the old field, so a save
+    that fails, or a context cancelled at shutdown before it runs, makes the
+    next poll drop the watermark and read from the start again. The records
+    are already published, so it costs repeats, not data. Return the error
+    from `saveProgress` and retry it once with a fresh short context, or skip
+    the next field-change reset when the save of the previous one is known
+    to have failed. Found in review of #614.
 
 ## Human
 

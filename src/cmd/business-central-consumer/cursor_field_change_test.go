@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/checkpoint"
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 // Changing cursor_field must not carry the old field's watermark over to the
@@ -30,11 +31,14 @@ type twoFieldBC struct {
 	tok  *httptest.Server
 	mu   sync.Mutex
 	recs []fieldRec
-	asks []string // $filter of every request
+	// created is id → createdDateTime, a second DateTime field; a record not
+	// listed carries its lastModifiedDateTime.
+	created map[string]string
+	asks    []string // $filter of every request
 }
 
 var (
-	fieldFilter = regexp.MustCompile(`^(lastModifiedDateTime|postingDate) (gt|ge) (\S+)$`)
+	fieldFilter = regexp.MustCompile(`^(lastModifiedDateTime|createdDateTime|postingDate) (gt|ge) (\S+)$`)
 	dateLiteral = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
@@ -55,7 +59,7 @@ func newTwoFieldBC(t *testing.T, recs ...fieldRec) *twoFieldBC {
 			}
 			field, op, lit = m[1], m[2], m[3]
 			// The literal must be of the field's type.
-			if _, err := time.Parse(time.RFC3339, lit); (field == "lastModifiedDateTime") != (err == nil) ||
+			if _, err := time.Parse(time.RFC3339, lit); (field != "postingDate") != (err == nil) ||
 				(field == "postingDate") != dateLiteral.MatchString(lit) {
 				http.Error(w, `{"error":{"message":"The type of the literal does not match the type of `+field+`"}}`,
 					http.StatusBadRequest)
@@ -66,12 +70,20 @@ func newTwoFieldBC(t *testing.T, recs ...fieldRec) *twoFieldBC {
 		sort.Slice(recs, func(i, j int) bool { return recs[i].id < recs[j].id })
 		var out []string
 		for _, rc := range recs {
+			created := rc.lm
+			if v, ok := b.created[rc.id]; ok {
+				created = v
+			}
 			v := rc.date
-			if field == "lastModifiedDateTime" {
+			switch field {
+			case "lastModifiedDateTime":
 				v = rc.lm
+			case "createdDateTime":
+				v = created
 			}
 			if f == "" || (op == "gt" && v > lit) || (op == "ge" && v >= lit) {
-				out = append(out, fmt.Sprintf(`{"id":%q,"lastModifiedDateTime":%q,"postingDate":%q}`, rc.id, rc.lm, rc.date))
+				out = append(out, fmt.Sprintf(`{"id":%q,"lastModifiedDateTime":%q,"createdDateTime":%q,"postingDate":%q}`,
+					rc.id, rc.lm, created, rc.date))
 			}
 		}
 		fmt.Fprintf(w, `{"value":[%s]}`, strings.Join(out, ","))
@@ -313,4 +325,42 @@ func TestCursorFieldChange_OtherStateIsKept(t *testing.T) {
 	if want := map[string]seenPicture{"a": {PictureID: "p1", Number: "N1"}}; !reflect.DeepEqual(st.Pictures, want) || st.CursorField != dateField {
 		t.Errorf("state = %s, want the pictures kept and the field %s", cp.State, dateField)
 	}
+}
+
+// TestCursorFieldChange_RememberedSetOfTheOldFieldIsDropped — the remembered
+// set maps a record to the cursor value it was sent with. Between two
+// DateTime fields a value can be the same, and a record would then be taken
+// for one already sent on the new field. Here f is dated 2099 on both
+// lastModifiedDateTime and createdDateTime: it is remembered as sent ahead on
+// the first, and must go out again when the field switches to the second.
+func TestCursorFieldChange_RememberedSetOfTheOldFieldIsDropped(t *testing.T) {
+	const far = "2099-01-01T00:00:00Z"
+	setup := func(t *testing.T) (*twoFieldBC, *bcConsumer, *[]*envelope.Envelope, *sync.Mutex) {
+		bc := newTwoFieldBC(t, append(twoFieldRecs(), fieldRec{"f", far, "2026-10-25"})...)
+		bc.created = map[string]string{"f": far}
+		c, got, mu := newTestConsumer()
+		c.now = func() time.Time { return aheadNow }
+		return bc, c, got, mu
+	}
+	t.Run("same config object", func(t *testing.T) {
+		bc, c, got, mu := setup(t)
+		cfg := bc.cfg(lmField)
+		if ids := poll(t, c, got, mu, cfg); sorted(ids) != "a,b,f" {
+			t.Fatalf("poll 1 published %q", sorted(ids))
+		}
+		cfg.CursorField = "createdDateTime"
+		if ids := poll(t, c, got, mu, cfg); sorted(ids) != "a,b,f" {
+			t.Errorf("poll 2 published %q, want a,b,f: f was sent on the other field", sorted(ids))
+		}
+		if ids := poll(t, c, got, mu, cfg); len(ids) != 0 {
+			t.Errorf("poll 3 published %q, want nothing", sorted(ids))
+		}
+	})
+	t.Run("after a restart", func(t *testing.T) {
+		bc, c, got, mu := setup(t)
+		poll(t, c, got, mu, bc.cfg(lmField))
+		if ids := poll(t, c, got, mu, bc.cfg("createdDateTime")); sorted(ids) != "a,b,f" {
+			t.Errorf("published %q, want a,b,f", sorted(ids))
+		}
+	})
 }

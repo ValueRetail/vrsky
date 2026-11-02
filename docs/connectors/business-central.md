@@ -297,7 +297,12 @@ node sees) is skipped and the converted record is written.
     checkpoint saved by an earlier version has no recorded field; it is taken
     to belong to the configured one, so an upgrade reads nothing again, and
     the next poll records the field. If you changed `cursor_field` on such a
-    node before upgrading, resend or reset the connection by hand.
+    node before upgrading, its stored watermark may still belong to the old
+    field. There is no checkpoint reset, and stopping and starting the
+    connection keeps the checkpoint. Use **Resend everything** (`POST
+    /api/v1/connections/{id}/resend`): that poll ignores the stored watermark
+    and reads the entity from the start, and it stores a watermark from the
+    new field with the field recorded. Every record is sent once more.
 
     **Nodes frozen before #591.** Earlier versions took any value as the
     watermark, so a node may have stored one in the future and read nothing

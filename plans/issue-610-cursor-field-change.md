@@ -34,7 +34,7 @@ hidden without an error).
   benefit small. The fetch forces a save so the field is recorded at once
   (`fieldUnrecorded`), after which a change is seen. Known gap: a node whose
   field was changed before this upgrade is not detected; the docs say to
-  resend or reset it by hand.
+  use Resend everything (there is no checkpoint reset).
 - **No row, no change.** A first run has nothing to drop.
 - **Pictures state is kept.** `pictures` is keyed by record id and is
   independent of the cursor field.
