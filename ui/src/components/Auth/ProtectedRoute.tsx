@@ -13,7 +13,7 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
-  const { isAuthenticated, isInitialized, isLoading, loadFailed, checkAuth } = useAuthStore()
+  const { isAuthenticated, isInitialized, isLoading, loadFailed, checkAuth, logout } = useAuthStore()
 
   // Check authentication on mount
   useEffect(() => {
@@ -49,6 +49,13 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
             className="px-4 py-2 text-sm font-medium rounded-md bg-primary-600 text-white hover:bg-primary-700"
           >
             Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => { logout().catch(() => { /* the local session is cleared either way */ }) }}
+            className="text-sm text-neutral-600 dark:text-neutral-400 underline hover:text-neutral-900 dark:hover:text-neutral-100"
+          >
+            Sign in again
           </button>
         </div>
       </div>

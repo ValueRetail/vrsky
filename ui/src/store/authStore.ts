@@ -92,6 +92,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isLoading: false,
           error: null,
           sessionExpired: false,
+          loadFailed: false,
         })
         // Fetch tenants after login
         await get().checkAuth()
@@ -225,7 +226,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
 
-    // getMe drops the token only on a 401 of its own (the way
+    // getMe drops the token only when the server rejects the session (401 or 403) (the way
     // reportUnauthorized in services/sessionExpiry tells them apart).
     // A network error or a 5xx leaves it, and that is no reason to sign
     // out a user whose session still stands.

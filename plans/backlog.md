@@ -1011,6 +1011,13 @@ Last updated 2026-10-28.
     old date is applied to a new field silently. Store the field name in the
     checkpoint state and drop the watermark when it changes. Found in review
     of #602.
+145. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
+    (`src/pkg/managementapi/session_middleware.go`) turns every
+    `ValidateSession` error, DB errors included, into a 401 "invalid or
+    expired session", so a transient database error looks like a rejected
+    session and the UI (#611) signs the user out. Tell "not found or
+    expired" apart from other errors and answer 5xx for the latter. Found in
+    review of #613.
 
 ## Human
 

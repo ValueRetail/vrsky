@@ -5,12 +5,12 @@ Open questions: none. Calls made without asking are under "Decisions".
 ## Goal
 
 A failed `/me` that is not a rejected session (network error, 5xx) no
-longer sends a user with a working session to the login page. Only a 401
-from the server signs the user out.
+longer sends a user with a working session to the login page. Only a 401 or
+403 from the server (a rejected session) signs the user out.
 
 ## Acceptance criteria
 
-1. `/me` answers 401: `checkAuth` signs the user out (as today).
+1. `/me` answers 401 or 403: `checkAuth` signs the user out (as today).
 2. `/me` fails for any other reason (network error, 5xx) while a user is
    already loaded: user, workspaces and current workspace stay, the user
    stays authenticated, and an error toast says the refresh failed.
@@ -24,21 +24,26 @@ from the server signs the user out.
 ## What the server does
 
 `GET /api/v1/auth/me` (`GetMe` in `src/pkg/managementapi/auth_handler.go`)
-answers 401 for every invalid or expired session (`getAuthenticatedUser`
-failing) and 200 otherwise. There is no other "your session is gone"
-status, so 401 is the only sign-out signal.
+sits behind `SessionAuthMiddleware` (`session_middleware.go`), which
+answers 401 for a missing, invalid or expired session (including any
+`ValidateSession` error) and 403 when `user.CanLogin()` fails (suspended,
+deleted, email not verified). Both mean the session is no good, so 401 and
+403 are the sign-out signals. Everything else (network error, 5xx, 408,
+429) is transient.
 
 ## Files
 
-- `ui/src/store/authStore.ts`: `checkAuth` and a new `loadFailed` flag.
-- `ui/src/components/Auth/ProtectedRoute.tsx`: the retry state.
+- `ui/src/services/authService.ts`: `getMe` drops the token on 403 too.
+- `ui/src/store/authStore.ts`: `checkAuth`, a new `loadFailed` flag that `login`, `logout` and `expireSession` reset.
+- `ui/src/components/Auth/ProtectedRoute.tsx`: the retry state, with Retry and "Sign in again".
 - `ui/src/store/authStore.test.ts`: new tests.
 - `ui/src/components/Auth/ProtectedRoute.test.tsx`: new test file.
 - `plans/backlog.md`: strike item 116.
 
 ## Approach
 
-`getMe` clears the session token only on its own 401 and returns null for
+`getMe` clears the session token only when the server rejects the session
+(401, and 403 after review) and returns null for
 every failure. `checkAuth` already runs after `hasSessionToken()` was true,
 so when `getMe` returns null it asks `hasSessionToken()` again, the way
 `reportUnauthorized` in `services/sessionExpiry.ts` does:
@@ -48,7 +53,8 @@ so when `getMe` returns null it asks `hasSessionToken()` again, the way
   `isLoading: false`, show an error toast. With no user, set
   `loadFailed: true` (and `isInitialized: true`).
 
-No change to `getMe`, so `sessionExpiry` and its tests are untouched. The
+`getMe` changes only by also dropping the token on 403, so `sessionExpiry`
+and its tests are untouched. The
 `catch` branch (getMe does not throw today) is treated as transient too,
 rather than signing out on an unexpected exception.
 
@@ -59,17 +65,24 @@ rather than signing out on an unexpected exception.
   whose token is still valid.
 - Toast, not a banner, for the signed-in case: the toast mechanism exists
   and the page keeps working.
-- `getMe` stays as is; the token check is the signal, same as
-  `reportUnauthorized`.
+- The token check is the signal, same as `reportUnauthorized`. `getMe`
+  treats 401 and 403 as rejection rather than "any HTTP answer except
+  5xx/408/429": the server uses exactly those two for a bad session, and a
+  list of known statuses can't turn a new transient status (a proxy's 404,
+  say) into a sign-out.
+- The retry screen has a "Sign in again" button next to Retry that calls
+  `logout`, so a persistent 502 is not a dead end.
 - Backlog items 124 (spinner remount) and 125 (inactive workspace
   fallback) are not touched. `isLoading` is still set around the call.
 
 ## Risks
 
-- A permanently failing `/me` with a token the server would reject but
-  can't answer for (e.g. 502 forever) leaves the user on the retry screen
-  at load. Retry and reload are both available; the alternative is the
-  bug.
+- A permanently failing `/me` (e.g. 502 forever) leaves the user on the
+  retry screen at load. Retry, reload and "Sign in again" are all there;
+  the alternative is the bug.
+- `ValidateSession` errors, DB errors included, still become 401 on the
+  server, so a database blip signs users out. Server side, out of scope
+  here: backlog item 145.
 - `loadFailed` must be cleared on every other outcome, or the retry screen
   could stick after a logout. `logout`, `expireSession` and the success
   path reset it.

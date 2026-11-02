@@ -154,6 +154,22 @@ describe('authStore session lifecycle', () => {
       expect(useAuthStore.getState().loadFailed).toBe(false)
     })
 
+    it('a successful login clears loadFailed', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, loadFailed: true })
+      login.mockResolvedValue({ success: true, user })
+      // /me still fails after the login, so only login itself can clear the flag.
+      getMe.mockImplementation(async () => null)
+      expect(await useAuthStore.getState().login('a@b.c', 'pw')).toBe(true)
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    })
+
+    it('logout clears loadFailed', async () => {
+      useAuthStore.setState({ loadFailed: true })
+      await useAuthStore.getState().logout()
+      expect(useAuthStore.getState().loadFailed).toBe(false)
+    })
+
     it('a 401 on the retry clears loadFailed and signs out', async () => {
       useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, loadFailed: true })
       getMe.mockImplementation(async () => { hasToken = false; return null })

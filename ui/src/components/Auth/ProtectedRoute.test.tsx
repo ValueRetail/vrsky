@@ -8,8 +8,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 let state = { isAuthenticated: false, isInitialized: true, isLoading: false, loadFailed: false }
 const checkAuth = vi.fn()
+const logout = vi.fn()
 vi.mock('@/store/authStore', () => ({
-  useAuthStore: () => ({ ...state, checkAuth }),
+  useAuthStore: () => ({ ...state, checkAuth, logout }),
 }))
 
 import ProtectedRoute from './ProtectedRoute'
@@ -27,6 +28,7 @@ const show = () =>
 beforeEach(() => {
   state = { isAuthenticated: false, isInitialized: true, isLoading: false, loadFailed: false }
   checkAuth.mockReset()
+  logout.mockReset()
 })
 
 describe('ProtectedRoute', () => {
@@ -43,6 +45,23 @@ describe('ProtectedRoute', () => {
     checkAuth.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(checkAuth).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers "Sign in again" next to Retry, so a persistent failure is not a dead end', async () => {
+    state.loadFailed = true
+    logout.mockResolvedValue(undefined)
+    show()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(logout).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failing logout call is not an unhandled rejection (vitest fails the run on one)', async () => {
+    state.loadFailed = true
+    logout.mockRejectedValue(new Error('network down'))
+    show()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(logout).toHaveBeenCalledTimes(1)
   })
 
   it('renders the page for a signed-in user', () => {
