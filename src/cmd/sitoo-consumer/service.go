@@ -21,6 +21,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -44,6 +45,11 @@ type sitooConsumer struct {
 	logger  *slog.Logger
 
 	httpClient *http.Client
+
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets base_url be http or point at a private address, for a mock Sitoo.
+	// Off in production; a tenant cannot set it.
+	allowPrivate bool
 
 	// checkpoints keeps the incremental cursor per (tenant, connection, node).
 	// Defaulted in Configure to the Postgres store; tests inject their own.
@@ -117,8 +123,10 @@ func (c *SitooConfig) eventIDField() string {
 // resourceURL builds the single-resource URL for an id, mirroring the
 // collection URL the poller uses.
 func (c *SitooConfig) resourceURL(id string) string {
+	// The id comes from a webhook body, so it is escaped: an id with "/", "..",
+	// "?" or "#" must not change which URL is fetched (#616).
 	return fmt.Sprintf("%s/accounts/%d/sites/%d/%s/%s",
-		c.effectiveBaseURL(), c.AccountID, c.SiteID, c.effectiveResource(), id)
+		c.effectiveBaseURL(), c.AccountID, c.SiteID, c.effectiveResource(), url.PathEscape(id))
 }
 
 type nodeConfig struct {
@@ -149,14 +157,14 @@ func (s *sitooConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	if s.checkpoints == nil {
 		s.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
+	s.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if s.httpClient == nil {
-		// No redirect following: requests carry the Sitoo Basic-auth credential,
-		// which Go would forward on a same-host redirect. We only ever call the
-		// configured Sitoo host, so a redirect is unexpected — surface it.
-		s.httpClient = &http.Client{
-			Timeout:       60 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
+		// base_url is tenant config and every request carries the Sitoo
+		// Basic-auth credential, so the client refuses private, loopback and
+		// link-local addresses at dial time (#616). It does not follow
+		// redirects either: Go would forward the credential on a same-host
+		// one, and we only ever call the configured host.
+		s.httpClient = safeurl.NewClient(60*time.Second, s.allowPrivate)
 	}
 
 	if s.resolveTenant == nil {
@@ -270,6 +278,10 @@ func (s *sitooConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 	if err := cfg.checkResource(); err != nil {
 		logger.Error("Sitoo resource invalid", "error", err)
+		return
+	}
+	if err := cfg.checkBaseURL(s.allowPrivate); err != nil {
+		logger.Error("Sitoo base_url refused", "error", err)
 		return
 	}
 	if cfg.Incremental {
@@ -489,6 +501,17 @@ func (c *SitooConfig) effectiveBaseURL() string {
 		return strings.TrimRight(c.BaseURL, "/")
 	}
 	return defaultBaseURL
+}
+
+// checkBaseURL refuses a base_url the connector must not call: it is tenant
+// config and every request carries the Sitoo credential (#616). The default
+// (no base_url) always passes. The dial-time check in the HTTP client is the
+// enforcement; this gives an early, readable error.
+func (c *SitooConfig) checkBaseURL(allowPrivate bool) error {
+	if c.BaseURL == "" {
+		return nil
+	}
+	return safeurl.CheckBaseURL(c.BaseURL, allowPrivate)
 }
 
 // effectiveResource is the resource path, without any query string the

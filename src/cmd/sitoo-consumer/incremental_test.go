@@ -1170,6 +1170,9 @@ func TestIncremental_ThroughHarness(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"nodes"}).AddRow([]byte(nodes)))
 
 	store := &lockedStore{s: checkpoint.NewInMemoryStore()}
+	// The fake Sitoo API is an httptest server on http://127.0.0.1; Configure
+	// reads this to allow it.
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
 	c := &sitooConsumer{checkpoints: store}
 	h := harness.NewConsumerHarness(t, c, harness.Options{Name: "sitoo-consumer", DB: db})
 

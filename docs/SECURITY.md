@@ -281,6 +281,28 @@ Every OIDC login attempt — success, failure, denial-by-domain — emits a row
 in `auth_audit_log` with event type `oidc_login`. The general audit log
 (#72) records the callback hit as `oauth.write`.
 
+## Outbound URLs taken from tenant config (#616)
+
+A connector that builds a request URL from a node's config and sends a
+credential with it can be aimed at the cluster network or the cloud metadata
+service. `pkg/safeurl` is the guard: `CheckBaseURL` gives an early error
+(https only, no userinfo, query or fragment, no literal private IP), and
+`NewClient` returns an HTTP client that refuses loopback, private, link-local,
+CGNAT, multicast and the Azure platform address at dial time, on the address
+actually connected to, so a hostname that resolves to one is refused and DNS
+rebinding cannot swap it in. It ignores proxy environment variables and does
+not follow redirects.
+
+Only the Sitoo consumer and producer use it so far
+([Sitoo](connectors/sitoo.md#the-base-url)); the management API also checks the
+Sitoo `base_url` when a connection is started. Other connectors that take a
+tenant-supplied host (Visma, Front Systems, the API consumer, the HTTP
+producer) have not been moved to it.
+
+For local development with a mock upstream, the operator can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow `http` and private
+addresses. A node cannot set it, and it must stay off in production.
+
 ## Threat model
 
 In scope:
