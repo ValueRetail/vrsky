@@ -179,6 +179,82 @@ describe('authStore session lifecycle', () => {
     })
   })
 
+  // #637: the fallback used to be /me's current_tenant (tenants[0]) whatever
+  // its status, a workspace switchTenant would refuse.
+  describe('which workspace is selected (#637)', () => {
+    const inactive = { id: 'p1', name: 'Setting up', status: 'provisioning' }
+    const failed = { id: 'f1', name: 'Broken', status: 'failed' }
+    const first = { id: 'a1', name: 'First active', status: 'active' }
+    const second = { id: 'a2', name: 'Second active', status: 'active' }
+    const fresh = () =>
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, isInitialized: false })
+
+    // checkAuth with the spinner, and refreshAuth with a user (no spinner).
+    const paths: [string, () => Promise<void>][] = [
+      ['checkAuth', () => { fresh(); return useAuthStore.getState().checkAuth() }],
+      ['refreshAuth', () => useAuthStore.getState().refreshAuth()],
+    ]
+
+    describe.each(paths)('%s', (_name, run) => {
+      it('saved workspace gone, first one inactive: selects the first active one', async () => {
+        localStorage.setItem('vrsky:selectedTenantId', 'gone')
+        getMe.mockResolvedValue({ user, tenants: [inactive, failed, first, second], current_tenant: inactive })
+        await run()
+        expect(useAuthStore.getState().currentTenant?.id).toBe('a1')
+        expect(localStorage.getItem('vrsky:selectedTenantId')).toBe('a1')
+      })
+
+      it('no saved workspace, first one inactive: the same', async () => {
+        getMe.mockResolvedValue({ user, tenants: [failed, second], current_tenant: failed })
+        await run()
+        expect(useAuthStore.getState().currentTenant?.id).toBe('a2')
+      })
+
+      it('server current_tenant is used when it is active', async () => {
+        getMe.mockResolvedValue({ user, tenants: [first, second], current_tenant: first })
+        await run()
+        expect(useAuthStore.getState().currentTenant?.id).toBe('a1')
+      })
+
+      it('saved workspace gone, none active: nothing is selected and the saved choice is left alone', async () => {
+        localStorage.setItem('vrsky:selectedTenantId', 'gone')
+        getMe.mockResolvedValue({ user, tenants: [inactive, failed], current_tenant: inactive })
+        await run()
+        const s = useAuthStore.getState()
+        expect(s.currentTenant).toBeNull()
+        expect(s.tenants).toHaveLength(2)
+        expect(s.isAuthenticated).toBe(true)
+        expect(localStorage.getItem('vrsky:selectedTenantId')).toBe('gone')
+      })
+
+      it('saved workspace still active: kept, even when it is not the first', async () => {
+        localStorage.setItem('vrsky:selectedTenantId', 'a2')
+        getMe.mockResolvedValue({ user, tenants: [inactive, first, second], current_tenant: inactive })
+        await run()
+        expect(useAuthStore.getState().currentTenant?.id).toBe('a2')
+      })
+
+      it('saved workspace now inactive: not kept', async () => {
+        localStorage.setItem('vrsky:selectedTenantId', 'p1')
+        getMe.mockResolvedValue({ user, tenants: [inactive, first], current_tenant: inactive })
+        await run()
+        expect(useAuthStore.getState().currentTenant?.id).toBe('a1')
+      })
+    })
+
+    it('refreshAuth with the current workspace deleted moves to an active one without isLoading', async () => {
+      useAuthStore.setState({ tenants: [inactive, first] as never, currentTenant: first as never })
+      localStorage.setItem('vrsky:selectedTenantId', 'a1')
+      getMe.mockResolvedValue({ user, tenants: [inactive, second], current_tenant: inactive })
+      const seen: boolean[] = []
+      const off = useAuthStore.subscribe((s) => { seen.push(s.isLoading) })
+      await useAuthStore.getState().refreshAuth()
+      off()
+      expect(seen).not.toContain(true)
+      expect(useAuthStore.getState().currentTenant?.id).toBe('a2')
+    })
+  })
+
   // #630: a refresh with a page on screen must not raise isLoading, because
   // ProtectedRoute answers isLoading with the spinner and remounts the page.
   describe('refreshAuth (background refresh, #630)', () => {
