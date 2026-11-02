@@ -1041,13 +1041,14 @@ Last updated 2026-10-28.
     `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
     `api_base_url`, `token_url`) and Business Central (`api_base_url`,
     `token_url`).
-148. **Tenant API-key lookups turn a database error into a 401.**
+148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
-    treat every `GetTenantByAPIKeyHash` error as "invalid API key", and the
-    repository returns a plain string error for "not found", so the two
-    cannot be told apart. Add a sentinel, then answer 503 for the rest like
-    #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
-    rejected key for a database blip. Found in #634.
+    treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
+    repository now returns `ErrAPIKeyNotFound` for no row (unknown, rotated,
+    revoked, deleted tenant); that is a 401 and anything else is a 503 with a
+    fixed body and a log line, as for sessions (#634). The target-API-key
+    lookup in `CreateConnectionRequest` classifies the same way. Found in
+    #634.
 149. ~~**`GetMe` hides a failed tenant lookup.**~~ (#645) `GetUserTenants` errors
     became an empty tenant list and a 200, so a database blip right after the
     session check showed a signed-in user with no workspaces. Now a 503, as

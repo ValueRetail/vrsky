@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
@@ -26,7 +27,11 @@ func TenantAPIKeyMiddleware(repo Repository) func(http.Handler) http.Handler {
 			keyHash := auth.HashToken(token)
 
 			tenant, err := repo.GetTenantByAPIKeyHash(r.Context(), keyHash)
-			if err != nil || tenant == nil {
+			if err != nil {
+				writeAPIKeyError(w, r, err)
+				return
+			}
+			if tenant == nil {
 				_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid API key", nil)
 				return
 			}
@@ -40,6 +45,28 @@ func TenantAPIKeyMiddleware(repo Repository) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// isAPIKeyRejection reports whether err means the server looked the key up and
+// turned it down: no active key has that hash (unknown, rotated away or
+// revoked), or its tenant is deleted. PostgresRepository.GetTenantByAPIKeyHash
+// returns ErrAPIKeyNotFound for exactly those and wraps every other error, so
+// anything else (a closed pool, a cancelled context, a lost connection) says
+// nothing about the key and is not a rejection.
+func isAPIKeyRejection(err error) bool {
+	return errors.Is(err, ErrAPIKeyNotFound)
+}
+
+// writeAPIKeyError answers a failed API-key lookup: 401 for a rejected key,
+// otherwise a logged 503 with a fixed body, so a database error does not look
+// like a bad key and its text does not reach the client. Neither the key nor
+// its hash is logged. 503 never lets the request through.
+func writeAPIKeyError(w http.ResponseWriter, r *http.Request, err error) {
+	if isAPIKeyRejection(err) {
+		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid API key", nil)
+		return
+	}
+	writeServiceUnavailable(w, r, "api key lookup failed", err)
 }
 
 // GetRequestingTenantFromContext retrieves the API-key-authenticated tenant from context.
