@@ -308,15 +308,17 @@ CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 
 | Step | Done (date, who) | Note |
 | --- | --- | --- |
-| 1 merge | | |
-| 2 server TLS | | |
-| 3 CA copied | | |
-| 4 core mounts | | |
-| 5 canary | | |
-| 6 strings | | |
-| 7 restarts | | |
-| 8 confirmed | | |
-| 9 backup job | | |
+| 1 merge | 2026-11-02, Ludvik (#657, 77e661db) | Deploy rolled the connectors and the backup CronJob with the optional CA mount; smoke ok |
+| 2 server TLS | 2026-11-02 ~14:57, Ludvik | Diff showed only args, mount, init container and volumes. Certificates Ready; ssl = on. `check` wrongly said "OLDER certificate"; fingerprints matched by hand (fixed in #659) |
+| 3 CA copied | 2026-11-02, Ludvik | Both postgres-ca ConfigMaps match the CA |
+| 4 core mounts | 2026-11-02, Ludvik | management-api, data-filter, data-converter rolled |
+| 5 canary | 2026-11-02, Ludvik | ssl=true TLSv1.3 |
+| 6 strings | 2026-11-02, Ludvik | All three strings disable -> verify-full |
+| 7 restarts | 2026-11-02, Ludvik | 34 Deployments, all Ready |
+| 8 confirmed | 2026-11-02, Ludvik | ssl=true 15, none without ssl (two leftover sessions from removed pods closed) |
+| 9 backup job | 2026-11-02 15:15, Ludvik | backup complete over TLS: management_db-20261102T141504Z.dump.gz.enc |
+
+Step 10 (`hostssl` only) is left for later, after a few days with no plain connections.
 
 ## What happened in the session
 
