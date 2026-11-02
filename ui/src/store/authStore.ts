@@ -36,7 +36,13 @@ interface AuthState {
   login: (email: string, password: string) => Promise<boolean>
   register: (email: string, password: string, fullName: string, workspaceName: string) => Promise<{ success: boolean; message?: string }>
   logout: () => Promise<void>
-  checkAuth: () => Promise<void>
+  checkAuth: (options?: { background?: boolean }) => Promise<void>
+  /**
+   * Re-read /me for a signed-in user without raising isLoading, so
+   * ProtectedRoute keeps the page mounted. Same sign-out rules as checkAuth.
+   * Without a user to keep it is a plain checkAuth.
+   */
+  refreshAuth: () => Promise<void>
   switchTenant: (tenant: Tenant) => void
   clearError: () => void
 }
@@ -172,9 +178,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   /**
-   * Check if user is authenticated (on app load)
+   * Check if user is authenticated (on app load).
+   *
+   * background: skip isLoading, which ProtectedRoute answers with the spinner
+   * instead of the page (and the page remounts: open panels, selection and
+   * history are lost). Everything else is the same: a 401/403 (getMe dropped
+   * the token) signs out, a transient failure keeps the user.
    */
-  checkAuth: async (): Promise<void> => {
+  checkAuth: async (options?: { background?: boolean }): Promise<void> => {
+    const background = options?.background === true
+    // Spread into every set() that would touch isLoading.
+    const loading = (value: boolean) => (background ? {} : { isLoading: value })
+
     // If no session token, mark as initialized but not authenticated
     if (!authService.hasSessionToken()) {
       set({
@@ -189,7 +204,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
 
-    set({ isLoading: true })
+    set(loading(true))
 
     let meData: Awaited<ReturnType<typeof authService.getMe>> = null
     try {
@@ -220,7 +235,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         currentTenant,
         isAuthenticated: true,
         isInitialized: true,
-        isLoading: false,
+        ...loading(false),
         loadFailed: false,
       })
       return
@@ -232,13 +247,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // out a user whose session still stands.
     if (authService.hasSessionToken()) {
       if (get().user) {
-        set({ isInitialized: true, isLoading: false })
+        set({ isInitialized: true, ...loading(false) })
         useUIStore.getState().showErrorNotification(
           'Could not refresh your account',
           'The server did not answer. You are still signed in; workspaces and settings may be out of date.',
         )
       } else {
-        set({ isAuthenticated: false, isInitialized: true, isLoading: false, loadFailed: true })
+        set({ isAuthenticated: false, isInitialized: true, ...loading(false), loadFailed: true })
       }
       return
     }
@@ -250,10 +265,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       currentTenant: null,
       isAuthenticated: false,
       isInitialized: true,
-      isLoading: false,
+      ...loading(false),
       loadFailed: false,
     })
   },
+
+  refreshAuth: (): Promise<void> => get().checkAuth({ background: get().user !== null }),
 
   /**
    * Switch to a different tenant

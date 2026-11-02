@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { useEffect, useState } from 'react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import type { AxiosAdapter } from 'axios'
 
 vi.mock(import('@/services/api'), async (importOriginal) => ({
@@ -30,6 +32,7 @@ import apiClient, { VRSkyAPIError } from '@/services/api'
 import { useAuthStore } from '@/store/authStore'
 import { useUIStore } from '@/store/uiStore'
 import type { MeResponse, Tenant, TenantStatus, User } from '@/types/models'
+import ProtectedRoute from '@/components/Auth/ProtectedRoute'
 import TenantSelector from './TenantSelector'
 
 const del = vi.mocked(apiClient.delete)
@@ -294,6 +297,122 @@ describe('TenantSelector', () => {
       expect(s.tenants.map((t) => t.id)).toEqual(['tenant-1', 'tenant-2'])
       expect(s.currentTenant?.id).toBe('tenant-1')
       expect(select()).toHaveValue('tenant-1')
+    })
+  })
+
+  // #630: the refresh after a refused delete must not swap the page for the
+  // spinner. A Probe stands for the builder: it counts its mounts and holds
+  // state (open panels, selection) that a remount would reset.
+  describe('the refresh after a refused delete keeps the page mounted (#630)', () => {
+    const mounts = vi.fn()
+    const Probe = () => {
+      const [clicks, setClicks] = useState(0)
+      useEffect(() => { mounts() }, [])
+      return <button onClick={() => setClicks(clicks + 1)}>panel opened {clicks}</button>
+    }
+
+    const page = () => render(
+      <MemoryRouter initialEntries={['/app']}>
+        <Routes>
+          <Route path="/login" element={<div>login page</div>} />
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <TenantSelector />
+                <Probe />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const me = (tenants: Tenant[]): MeResponse => ({
+      user, session_expires_at: '2026-10-30T00:00:00Z', tenants, current_tenant: tenants[0],
+    })
+
+    // Mount the page and let ProtectedRoute's own load at mount settle, so
+    // what follows is only the refresh after the delete.
+    const openPage = async () => {
+      signInWithSession([prod, sandbox])
+      page()
+      await waitFor(() => expect(screen.getByText('panel opened 0')).toBeInTheDocument())
+      await waitFor(() => expect(useAuthStore.getState().isLoading).toBe(false))
+      fireEvent.click(screen.getByText('panel opened 0'))
+      expect(screen.getByText('panel opened 1')).toBeInTheDocument()
+      mounts.mockClear()
+      transport.mockClear()
+    }
+
+    // Confirm the delete outside act(): inside it React holds every render
+    // until the callback returns, so a spinner shown while /me is pending
+    // would never be drawn, and the remount this guards against would not
+    // happen even without the fix.
+    const confirmDeleteLive = async () => {
+      fireEvent.click(screen.getByTitle('Delete current workspace'))
+      const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+      g.IS_REACT_ACT_ENVIRONMENT = false
+      try {
+        await useUIStore.getState().confirmDialog!.onConfirm()
+        // onConfirm has awaited the refresh, so the store is settled; wait
+        // for React to draw it (the spinner, if one was shown, is gone).
+        await waitFor(() => {
+          expect(useAuthStore.getState().isLoading).toBe(false)
+          expect(screen.queryByText('Loading...')).not.toBeInTheDocument()
+        })
+      } finally {
+        g.IS_REACT_ACT_ENVIRONMENT = true
+      }
+    }
+
+    beforeEach(() => {
+      mounts.mockReset()
+      meAnswers(me([prod, sandbox]))
+    })
+
+    it.each([403, 404])('%i: asks /me, never raises isLoading, and the page keeps its state', async (status) => {
+      await openPage()
+      const loading: boolean[] = []
+      const off = useAuthStore.subscribe((s) => { loading.push(s.isLoading) })
+      meAnswers(me([sandbox]))
+      del.mockRejectedValue(new VRSkyAPIError('gone', 'Err', { status }))
+      await confirmDeleteLive()
+      off()
+
+      expect(meRequests()).toHaveLength(1)
+      expect(loading).not.toContain(true)
+      expect(mounts).not.toHaveBeenCalled()
+      expect(screen.getByText('panel opened 1')).toBeInTheDocument()
+      // The refresh still did its job.
+      expect(useAuthStore.getState().tenants.map((t) => t.id)).toEqual(['tenant-2'])
+    })
+
+    it('a 401 from /me during the refresh still signs the user out', async () => {
+      await openPage()
+      transport.mockImplementation(async (config) => {
+        throw Object.assign(new Error('unauthorized'), {
+          isAxiosError: true,
+          response: { status: 401, statusText: 'Unauthorized', data: {}, headers: {}, config },
+        })
+      })
+      del.mockRejectedValue(new VRSkyAPIError('forbidden', 'Forbidden', { status: 403 }))
+      await confirmDeleteLive()
+
+      expect(meRequests()).toHaveLength(1)
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(sessionStorage.getItem(SESSION_KEY)).toBeNull()
+      expect(screen.getByText('login page')).toBeInTheDocument()
+      expect(screen.queryByText(/panel opened/)).not.toBeInTheDocument()
+    })
+
+    it('a successful delete still resets the page: its workspace is gone', async () => {
+      await openPage()
+      meAnswers(me([sandbox]))
+      del.mockResolvedValue({ data: {} } as never)
+      await confirmDeleteLive()
+      await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1))
+      expect(screen.getByText('panel opened 0')).toBeInTheDocument()
     })
   })
 
