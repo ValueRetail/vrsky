@@ -12,6 +12,9 @@ export function StyledInput({
   onChange,
   type = 'text',
   describedBy,
+  min,
+  max,
+  step,
 }: {
   label: string
   placeholder?: string
@@ -20,6 +23,10 @@ export function StyledInput({
   type?: string
   /** Space-separated ids of the elements that describe the input, such as warnings. */
   describedBy?: string
+  /** For a number input. */
+  min?: number
+  max?: number
+  step?: number
 }) {
   const [focused, setFocused] = useState(false)
   const id = useId()
@@ -43,6 +50,9 @@ export function StyledInput({
       <input
         id={id}
         type={type}
+        min={min}
+        max={max}
+        step={step}
         aria-describedby={describedBy}
         placeholder={placeholder}
         value={value}

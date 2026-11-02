@@ -998,10 +998,11 @@ Last updated 2026-10-28.
     now returns `ErrNotFound` from `Get` and `GetStream` on S3, Azure and
     GCS, and event mode counts such a key as already handled (Info log, no
     publish, no after-action). Done in #609.
-143. **A date `cursor_field` can't see backdated records.** Records dated
-    before the watermark (posting last week's documents today) are never
-    read. Add a `lookback_days` option that filters `ge W − N` and remembers
-    the whole window in the existing remembered set. Found in review of #602.
+143. ~~**A date `cursor_field` can't see backdated records.**~~ (#629)
+    Records dated before the watermark (posting last week's documents today)
+    were never read. `lookback_days` (0 to 365, date fields only) filters
+    `ge W − N` and remembers the whole window in the existing remembered set.
+    Found in review of #602.
 144. ~~**Changing `cursor_field` keeps the old watermark.**~~ (#610) Nothing
     reset the Business Central checkpoint when the field changed, so
     `postingDate gt <old DateTime>` was sent (likely a 400 every poll), or an
