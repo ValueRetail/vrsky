@@ -63,8 +63,10 @@ func (g *gcsStore) List(ctx context.Context, prefix string) ([]Object, error) {
 	return out, nil
 }
 
-// gcsGetErr marks a missing object as ErrNotFound. A missing bucket
-// (storage.ErrBucketNotExist) is a configuration error and stays one.
+// gcsGetErr marks a missing object as ErrNotFound. Unlike S3 and Azure, GCS
+// cannot tell a missing object from a missing bucket on a read: the client
+// maps the 404 for either to storage.ErrObjectNotExist (NewReader never
+// returns storage.ErrBucketNotExist), so a missing bucket is ErrNotFound too.
 func gcsGetErr(err error) error {
 	if errors.Is(err, storage.ErrObjectNotExist) {
 		return notFound(err)

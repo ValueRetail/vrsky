@@ -136,6 +136,15 @@ consumer reached it: it is dropped with that Info line, since fetching it
 again can't succeed. Before #609 such a message was redelivered until the
 queue's retention dropped it.
 
+On GCS this has a catch. The GCS client reports a 404 for a missing bucket as
+a missing object too, so a mistyped or deleted `bucket` is not told apart from
+a missing key. In event mode every message then gets acknowledged and its keys
+are dropped, each with the Info line above, instead of failing at Error level
+and coming back. If a GCS event-mode connection ingests nothing and logs only
+`event key no longer in the bucket`, check the `bucket` name first. S3 and
+Azure report a missing bucket or container as an error, so there the message
+stays in the queue.
+
 ```json
 {
   "type": "cloud_storage",
