@@ -355,7 +355,12 @@ describe('TenantSelector', () => {
       g.IS_REACT_ACT_ENVIRONMENT = false
       try {
         await useUIStore.getState().confirmDialog!.onConfirm()
-        await new Promise((r) => setTimeout(r, 20))
+        // onConfirm has awaited the refresh, so the store is settled; wait
+        // for React to draw it (the spinner, if one was shown, is gone).
+        await waitFor(() => {
+          expect(useAuthStore.getState().isLoading).toBe(false)
+          expect(screen.queryByText('Loading...')).not.toBeInTheDocument()
+        })
       } finally {
         g.IS_REACT_ACT_ENVIRONMENT = true
       }
