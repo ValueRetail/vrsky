@@ -58,7 +58,7 @@ escape hatch (`allow_insecure_http`), as agent config.
 - Existing sitoo test fixtures that use `httptest` servers on 127.0.0.1 set the
   dev flag.
 - `docs/connectors/sitoo.md`, `docs/SECURITY.md`, `plans/backlog.md` (item 129
-  struck; new item 145 for the other connectors).
+  struck; new item 147 for the other connectors).
 - A `.` or `..` event id is dropped: `url.PathEscape` leaves dots alone, so
   they would still walk the path up one segment.
 

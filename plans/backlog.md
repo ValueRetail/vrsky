@@ -1011,7 +1011,7 @@ Last updated 2026-10-28.
     old date is applied to a new field silently. Store the field name in the
     checkpoint state and drop the watermark when it changes. Found in review
     of #602.
-145. **Other connectors still call a tenant-supplied host unchecked.** #616
+147. **Other connectors still call a tenant-supplied host unchecked.** #616
     added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
     link-local and metadata addresses) for Sitoo. The same hole is open in
     every connector that builds a URL from node config and sends a credential

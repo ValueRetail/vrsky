@@ -224,6 +224,24 @@ put it in a node for a host you trust with the API password.
 set it in production; it is off in `docker-compose.yml` and the Kubernetes
 manifests.
 
+Compose lists the environment per service, so for a local run add the line to
+the `environment:` block of each of those three services in
+`docker-compose.yml` (or a local override file):
+
+```yaml
+      ALLOW_PRIVATE_UPSTREAMS: "true"
+```
+
+The repo has no mock Sitoo. You bring your own, for example a small HTTP server
+on the compose network, and point `base_url` at it (`http://my-mock:8080/v2`).
+
+**Existing connections.** A node whose `base_url` is `http://` or points at a
+private address stops working when this change is deployed: a running consumer
+keeps its settings until its next restart, then refuses to start the poll (webhook events are checked on every event, so
+they stop at once); a producer refuses the next delivery. The management API refuses to start such a
+connection. Change the `base_url` to an `https` host, or clear it to use the
+default.
+
 ## Templates: Sitoo ⇄ Business Central (beta)
 
 The onboarding gallery has two templates between Sitoo and Business Central.
