@@ -9,7 +9,7 @@ import type { AxiosAdapter } from 'axios'
 const reportUnauthorized = vi.fn(() => Promise.resolve())
 vi.mock('@/services/sessionExpiry', () => ({ reportUnauthorized: () => reportUnauthorized() }))
 
-import apiClient, { VRSkyAPIError } from './api'
+import apiClient, { VRSkyAPIError, setActiveTenantId, getActiveTenantId } from './api'
 
 function respondWith(status: number, data: unknown): AxiosAdapter {
   return async (config) => {
@@ -20,6 +20,30 @@ function respondWith(status: number, data: unknown): AxiosAdapter {
 }
 
 beforeEach(() => reportUnauthorized.mockClear())
+
+describe('apiClient X-Tenant-ID header (#637)', () => {
+  const headerSent = async () => {
+    let sent: unknown = 'not called'
+    await apiClient.get('/x', {
+      adapter: async (config) => {
+        sent = config.headers['X-Tenant-ID']
+        return { status: 200, statusText: '', data: {}, headers: {}, config }
+      },
+    })
+    return sent
+  }
+
+  it('sends the active workspace', async () => {
+    setActiveTenantId('t-9')
+    expect(getActiveTenantId()).toBe('t-9')
+    expect(await headerSent()).toBe('t-9')
+  })
+
+  it('sends no header, not an empty one, when no workspace is selected', async () => {
+    setActiveTenantId('')
+    expect(await headerSent()).toBeUndefined()
+  })
+})
 
 describe('apiClient response interceptor', () => {
   it('reports a 401 and still rejects with the server message', async () => {

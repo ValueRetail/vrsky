@@ -236,6 +236,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (currentTenant) {
         setActiveTenantId(currentTenant.id)
         localStorage.setItem(SELECTED_TENANT_KEY, currentTenant.id)
+      } else {
+        // No active workspace: do not keep sending the build-time default or
+        // the previous workspace's id. Requests go without the header and the
+        // server answers 400.
+        setActiveTenantId('')
       }
 
       set({

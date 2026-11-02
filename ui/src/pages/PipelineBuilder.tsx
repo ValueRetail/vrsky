@@ -34,7 +34,9 @@ import type { Node, Edge } from '../types/pipeline'
  *  the session from the bearer token, so the API can check this workspace owns
  *  the connection before it talks to a worker. */
 const fileApiHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = { 'X-Tenant-ID': getActiveTenantId() }
+  const headers: Record<string, string> = {}
+  const tenantId = getActiveTenantId()
+  if (tenantId) headers['X-Tenant-ID'] = tenantId
   const token = getSessionToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
   return headers

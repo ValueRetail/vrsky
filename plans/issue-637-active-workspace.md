@@ -37,6 +37,21 @@ localStorage is left alone, so a workspace that finishes provisioning is
 picked again at the next refresh. `setActiveTenantId` is not called when
 nothing is selected, as before for an empty list.
 
+## Review follow-up: no stale tenant id, and a placeholder
+
+With nothing selected, the API client's active tenant id would stay at the
+build-time default or the previous workspace's id, and loaders that do not
+check `currentTenant` would send it as `X-Tenant-ID`. So:
+
+- `checkAuth` calls `setActiveTenantId('')` when no workspace is selected.
+- The request interceptor (`services/api.ts`), `fileApiHeaders`
+  (`PipelineBuilder.tsx`) and `workerEvents.ts` leave the header out when the
+  id is empty. The server's `TenantIDMiddleware` answers a missing header
+  with 400 "Missing or invalid tenant ID header", which is the honest answer.
+- `TenantSelector` shows a disabled "No active workspace" option when
+  `currentTenant` is null, so the browser does not show the first (disabled)
+  workspace as if it were selected.
+
 ## Not changed
 
 The #611 sign-out and `loadFailed` paths and the #630 `refreshAuth` rule

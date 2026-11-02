@@ -74,10 +74,9 @@ export function subscribeWorkerEvents(
     `${config.apiUrl}/api/v1/connections/${encodeURIComponent(connectionId)}` +
     `/workers/${worker}/events`
 
-  const headers: Record<string, string> = {
-    Accept: 'text/event-stream',
-    'X-Tenant-ID': getActiveTenantId(),
-  }
+  const headers: Record<string, string> = { Accept: 'text/event-stream' }
+  const tenantId = getActiveTenantId()
+  if (tenantId) headers['X-Tenant-ID'] = tenantId
   const token = getSessionToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
 

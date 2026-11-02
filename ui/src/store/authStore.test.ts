@@ -21,6 +21,7 @@ vi.mock('@/services/authService', () => ({
 }))
 
 import { useAuthStore } from './authStore'
+import { getActiveTenantId, setActiveTenantId } from '@/services/api'
 import { reportUnauthorized } from '@/services/sessionExpiry'
 import { useUIStore } from '@/store/uiStore'
 
@@ -201,6 +202,7 @@ describe('authStore session lifecycle', () => {
         getMe.mockResolvedValue({ user, tenants: [inactive, failed, first, second], current_tenant: inactive })
         await run()
         expect(useAuthStore.getState().currentTenant?.id).toBe('a1')
+        expect(getActiveTenantId()).toBe('a1')
         expect(localStorage.getItem('vrsky:selectedTenantId')).toBe('a1')
       })
 
@@ -218,10 +220,13 @@ describe('authStore session lifecycle', () => {
 
       it('saved workspace gone, none active: nothing is selected and the saved choice is left alone', async () => {
         localStorage.setItem('vrsky:selectedTenantId', 'gone')
+        setActiveTenantId('gone')
         getMe.mockResolvedValue({ user, tenants: [inactive, failed], current_tenant: inactive })
         await run()
         const s = useAuthStore.getState()
         expect(s.currentTenant).toBeNull()
+        // No stale id left for requests to send as X-Tenant-ID.
+        expect(getActiveTenantId()).toBe('')
         expect(s.tenants).toHaveLength(2)
         expect(s.isAuthenticated).toBe(true)
         expect(localStorage.getItem('vrsky:selectedTenantId')).toBe('gone')
