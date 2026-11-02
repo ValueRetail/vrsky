@@ -2539,7 +2539,9 @@ Queue, GCS → Pub/Sub) for low-latency, event-driven ingestion (#106).</p>
   after the last <code>/</code>), e.g. <code>*.csv</code>. Empty means every object. Applies in
   both modes.</li>
 <li><code>after_action</code> — what to do with an object once it is published: <code>none</code>
-  (default, leave it), <code>delete</code>, or <code>move</code>. Applies in both modes.</li>
+  (default, leave it), <code>delete</code>, or <code>move</code>. Applies in both modes. In poll
+  mode, switching from <code>none</code> to <code>delete</code> or <code>move</code> also removes the objects
+  already published and still under the prefix.</li>
 <li><code>move_prefix</code> — where <code>move</code> puts the object: it is copied to
   <code>&lt;move_prefix&gt;/&lt;base name&gt;</code>, then deleted. Required with <code>move</code>; without
   it the consumer doesn't start. Moves keep only the base name, so
@@ -2666,9 +2668,29 @@ published once, not again at every start (#538).</p>
 <li><strong>Deleted, then added again.</strong> An object that a poll finds gone from the
   listing is forgotten; if it comes back it is published again.</li>
 <li><strong>Failed after-action.</strong> If <code>delete</code> or <code>move</code> fails, the object is still
-  counted as published and stays where it is; it is not published or moved
-  again, also after a restart. The failure is in the log (<code>after-action
-  failed</code>).</li>
+  counted as published and is not published again. The consumer tries the
+  <code>delete</code> or <code>move</code> again at later polls: one minute after the failure,
+  then 2, 4, 8 minutes and so on, up to one hour between tries (#640).</li>
+<li>Each try that fails logs one warning (<code>after-action failed</code>, with
+    <code>failures</code> and <code>retry_in</code>); a try that works logs <code>after-action done on
+    retry</code>.</li>
+<li>An object someone else removes in the meantime is dropped from the
+    retries.</li>
+<li>After a restart the consumer tries every such object once at its first
+    poll. A poll makes at most 20 tries, before it publishes anything, so a
+    bucket full of leftovers is cleared over a few polls.</li>
+<li>The object must still match <code>file_pattern</code>; one the pattern no longer
+    selects is left alone.</li>
+<li>Only an object that looks as it did when it was published is retried
+    (same size and last-modified time). A replaced one is published again
+    first. An object replaced after the poll listed the bucket, but before
+    its retry a moment later, is deleted or moved unpublished; so is one
+    replaced with the same size and last-modified time, which the done list
+    can't tell from the old one.</li>
+<li>A <code>move</code> whose copy worked and whose delete failed copies over the same
+    destination again before it deletes.</li>
+<li>Event mode has no listing and does not retry: a failed after-action
+    there is only logged and the object stays.</li>
 <li><strong>Checkpoint unreadable.</strong> If the database can't be read at start, the
   consumer publishes nothing and logs <code>Could not read which objects were
   already published</code>. It tries again at every poll and carries on as normal

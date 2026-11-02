@@ -1460,6 +1460,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2397,6 +2414,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a source (consumer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2430,27 +2464,78 @@
 <h1 id="rest-api-polling">REST API polling<a class="headerlink" href="#rest-api-polling" title="Permanent link">&para;</a></h1>
 <p>The API connector (<code>config.type: "api"</code>) is a source-only connector that polls a REST endpoint on a schedule and emits each response into the pipeline.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
-<p>The api-consumer calls the configured URL on a fixed interval. It sets a <code>User-Agent</code> header automatically and supports OAuth bearer tokens, retrying a request once on a <code>401</code> response (to recover from an expired token).</p>
-<p>Config reference:</p>
+<p>The api-consumer calls each configured endpoint on a fixed interval. It sets a <code>User-Agent</code> header automatically and supports OAuth bearer tokens, retrying a request once on a <code>401</code> response (to recover from an expired token).</p>
+<p>Config reference (the <code>api</code> block):</p>
 <ul>
-<li><code>type</code> — <code>"api"</code>.</li>
-<li><code>api.url</code> — REST endpoint to poll.</li>
-<li><code>api.method</code> — HTTP method (e.g. <code>GET</code>).</li>
-<li><code>api.interval</code> — polling interval as a duration string (e.g. <code>"60s"</code>).</li>
-<li><code>api.auth_type</code> — <code>"none"</code> or <code>"oauth"</code>.</li>
-<li><code>api.oauth_grant_id</code> — OAuth grant UUID, required when <code>auth_type</code> is <code>"oauth"</code>.</li>
+<li><code>base_url</code> — scheme and host of the API, without the path (e.g. <code>https://api.met.no</code>).</li>
+<li><code>endpoints</code> — a list; each has <code>path</code> (appended to <code>base_url</code>, or a full <code>http(s)://</code> URL used as it is), <code>params</code> (query string), <code>auth_type</code> (<code>none</code>, <code>bearer</code>, <code>api_key</code> or <code>oauth</code>), the secret for bearer and API key, and <code>oauth_grant_id</code> for <code>oauth</code>. With no endpoint the consumer calls <code>/</code>.</li>
+<li><code>poll_interval_seconds</code> — poll cadence.</li>
+<li><code>one_time_only</code> — fetch once and stop.</li>
 </ul>
-<p>Additional request options (such as extra headers or query parameters) are set via the in-app pipeline editor (Property panel).</p>
+<p>Additional request options are set via the in-app pipeline editor (Property panel).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"api"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"api"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=51.5&amp;lon=-0.1"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GET"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"60s"</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"auth_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span>
+<span class="w">    </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://api.met.no"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"endpoints"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/weatherapi/locationforecast/2.0/compact"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lat=51.5&amp;lon=-0.1"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"auth_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"poll_interval_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="which-addresses-it-will-call">Which addresses it will call<a class="headerlink" href="#which-addresses-it-will-call" title="Permanent link">&para;</a></h3>
+<p><code>base_url</code> and every endpoint path come from the node, and the request carries
+the node's credential. So the consumer only calls addresses outside the cluster
+and the cloud platform:</p>
+<ul>
+<li>It will not connect to loopback, private (10/8, 172.16/12, 192.168/16,
+  fc00::/7), link-local (169.254/16, which includes the cloud metadata address
+  169.254.169.254, and fe80::/10), carrier-grade NAT (100.64/10), unspecified or
+  multicast addresses, or to the Azure platform address 168.63.129.16. This is
+  checked on the address it actually connects to, after the name is resolved,
+  so a hostname that points at one of these is refused too. It applies to
+  polls, the retry after a <code>401</code>, and the editor's data preview.</li>
+<li>Both <code>http</code> and <code>https</code> are allowed. Many public APIs only speak <code>http</code>, and
+  the scheme does not change which address is reached. An <code>http</code> endpoint sends
+  its token or key in clear text, so use <code>https</code> wherever the API offers it.</li>
+<li>Redirects are followed only when they stay on the same host (and port; an
+  <code>http</code> to <code>https</code> upgrade on the default ports counts), never from <code>https</code>
+  back to <code>http</code>, at most five. A redirect to another host is an error, so the
+  token or key is never sent somewhere the node did not name.</li>
+<li>Proxy environment variables are ignored.</li>
+<li>A node whose <code>base_url</code> or endpoint is not an absolute <code>http(s)</code> URL, or is a
+  literal private address, is refused when the connection is started, with the
+  reason in the error.</li>
+</ul>
+<p><strong>Local development with a mock API.</strong> The operator (not the node) can set
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>api-consumer</code> and <code>management-api</code>. That
+allows private and loopback addresses. Never set it in production; it is off in
+<code>docker-compose.yml</code> and the Kubernetes manifests. Compose lists the environment
+per service, so add</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="nt">ALLOW_PRIVATE_UPSTREAMS</span><span class="p">:</span><span class="w"> </span><span class="s">"true"</span>
+</code></pre></div>
+<p>to the <code>environment:</code> block of <code>api-consumer</code> and <code>management-api</code> in
+<code>docker-compose.yml</code> (or a local override file).</p>
+<p><strong>Existing connections.</strong> After this change is deployed, these stop working:</p>
+<ul>
+<li>A node that points at a private, loopback or link-local address, an in-cluster
+  service name that resolves to one (for example <code>http://management-api:3000</code>),
+  or a host on a private network. A running connection keeps its settings until
+  the api-consumer restarts, then does not start; the management API refuses to
+  start it. A connection that already polls fails each poll with "connection to
+  a private, loopback or link-local address refused".</li>
+<li>An endpoint that answers with a redirect to a different host. The poll fails
+  with "redirect to another host refused". Set the endpoint to the final URL.</li>
+<li>A <code>base_url</code> that is empty or has no scheme, with a relative path. It never
+  worked; it is now refused at start instead of failing every poll.</li>
+</ul>
+<p>Public <code>http</code> and <code>https</code> endpoints, and redirects within one host, keep
+working.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Source only.</strong> There is no API producer; use the <a href="../http/">HTTP connector</a> to make outbound calls as a destination.</li>
