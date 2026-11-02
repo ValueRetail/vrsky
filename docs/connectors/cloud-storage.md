@@ -174,6 +174,14 @@ last-modified times in whole seconds) looks unchanged and is not published
 again. Event mode doesn't use this list: there the queue's acknowledgement
 decides what was handled.
 
+During a deploy the old cloud-storage consumer stops before the new one
+starts (#620), so only one ever lists a bucket and two can't both publish
+the same object before `delete` or `move` removes it. For those few seconds
+nothing is listing: objects that land then are published a little later, by
+the new consumer's first polls. If the new one can't read its saved list at
+start it publishes nothing until it can, so no object is skipped. In event
+mode the queue keeps the messages meanwhile.
+
 After the release that added this, each running poll-mode connection's first
 start has no saved list yet, so it publishes what is under its prefix once
 more, as every restart did before.
