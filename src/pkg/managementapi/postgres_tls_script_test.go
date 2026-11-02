@@ -400,3 +400,31 @@ func TestPostgresTLS_CheckMatchesTheServedCertificate(t *testing.T) {
 		t.Fatalf("check reported an older certificate for an identical one:\n%s", stdout)
 	}
 }
+
+// A pod serving a different certificate than the Secret still gets the warning.
+func TestPostgresTLS_CheckReportsADifferentCertificate(t *testing.T) {
+	s := newKubeStub(t, 31)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "some-other-certificate"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(s.dir, "other.pem")
+	if err := os.WriteFile(other, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ := s.run(t, []string{"STUB_CA_PEM=" + other}, "check")
+	if !strings.Contains(stdout, "OLDER certificate") {
+		t.Fatalf("check did not notice a different served certificate:\n%s", stdout)
+	}
+}
