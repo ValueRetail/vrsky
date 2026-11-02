@@ -1041,10 +1041,17 @@ Last updated 2026-10-28.
     cannot be told apart. Add a sentinel, then answer 503 for the rest like
     #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
     rejected key for a database blip. Found in #634.
-149. **`GetMe` hides a failed tenant lookup.** `GetUserTenants` errors become
-    an empty tenant list and a 200, so a database blip right after the
-    session check shows a signed-in user with no workspaces. Answer 503, as
+149. ~~**`GetMe` hides a failed tenant lookup.**~~ (#645) `GetUserTenants` errors
+    became an empty tenant list and a 200, so a database blip right after the
+    session check showed a signed-in user with no workspaces. Now a 503, as
     for the session lookup. Found in #634.
+150. **`TenantMemberMiddleware` turns a failed tenant read into a 404.** After
+    the membership check, any `GetTenantByID` error answers 404 "tenant not
+    found", so a database blip on a tenant route looks like a deleted
+    workspace. Tell `sql.ErrNoRows` (or the repository's not-found error)
+    from the rest and answer 503 for the rest, like #634 and #645. The
+    membership lookup just above it answers 500 for a database error; make
+    that a 503 too. Found in #645.
 
 ## Human
 
