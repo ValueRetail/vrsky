@@ -362,7 +362,10 @@ kubectl describe pod postgresql-0 -n vrsky-database
 kubectl logs postgresql-0 -n vrsky-database
 
 # Common issues:
-# - PVC not bound: Verify Longhorn is running
+# - PVC Pending (not bound): `kubectl describe pvc postgres-data-postgresql-0 -n vrsky-database`
+#   shows why. Check that the StorageClass exists (`local-path` on k3d,
+#   `managed-csi` on AKS) and that the CSI driver pods are running
+#   (`kubectl get pods -n kube-system | grep csi`)
 # - Secret not found: Apply secret.yaml first
 # - Init script failed: Check init-schema.sql syntax
 ```
@@ -404,13 +407,31 @@ kubectl top pod postgresql-0 -n vrsky-database
 
 ### Increase Storage
 
-```bash
-# Edit PVC (requires Longhorn volume expansion support)
-kubectl edit pvc postgres-data-postgresql-0 -n vrsky-database
+Production's volume is an Azure managed disk from the `managed-csi`
+StorageClass. The claim is `postgres-data-postgresql-0`, 50Gi today.
 
-# Change storage: 50Gi to 100Gi
-# Longhorn will automatically expand the volume
+```bash
+# The StorageClass must allow expansion (prints "true" when it does)
+kubectl get storageclass managed-csi -o jsonpath='{.allowVolumeExpansion}'
+
+# Raise the claim's size. A claim cannot shrink.
+kubectl patch pvc postgres-data-postgresql-0 -n vrsky-database \
+  -p '{"spec":{"resources":{"requests":{"storage":"100Gi"}}}}'
+
+# Watch the resize
+kubectl get pvc postgres-data-postgresql-0 -n vrsky-database
+kubectl describe pvc postgres-data-postgresql-0 -n vrsky-database
 ```
+
+- Do not delete the PVC to resize it. The disk is dynamically provisioned, and
+  its reclaim policy deletes the Azure disk when the claim goes
+  ([docs/DR.md](../../../docs/DR.md) has the details).
+- `volumeClaimTemplates` in `statefulset.yaml` sets the size of new claims
+  only. Editing it does not resize the existing claim.
+- If `describe` shows `FileSystemResizePending`, the disk is bigger but the
+  filesystem has not grown yet. Check the Azure disk docs for whether your
+  target size needs the disk detached. That means stopping Postgres, which is
+  downtime with one replica.
 
 ### Increase Resources
 
@@ -475,5 +496,6 @@ kubectl exec -n vrsky-database postgresql-0 -- \
 ## References
 
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/15/)
-- [Longhorn Storage](https://longhorn.io/docs/)
+- [Kubernetes: expanding PersistentVolumeClaims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#expanding-persistent-volumes-claims)
+- [Azure Disks CSI driver on AKS](https://learn.microsoft.com/azure/aks/azure-disk-csi)
 - [VRSky Database Schema](init-schema.sql)

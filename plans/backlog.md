@@ -780,7 +780,7 @@ Last updated 2026-10-28.
     read such a row, so a decode error (not a store error) could count as
     "no checkpoint" in `settleGuess`, the deferred baseline (#409) and
     `keepSavedStamps` (#500). Found in review of #536.
-111. **The rest of the Postgres README still talks about Longhorn.** #554
+111. ~~**The rest of the Postgres README still talks about Longhorn.**~~ (#618) #554
     fixed the "Architecture" list and the Storage section's first line, but
     `infrastructure/kubernetes/postgresql/README.md` still says "PVC not
     bound: Verify Longhorn is running", has Longhorn in "Increase Storage"
