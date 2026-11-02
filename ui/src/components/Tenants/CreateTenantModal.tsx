@@ -14,7 +14,7 @@ interface CreateTenantModalProps {
 }
 
 export default function CreateTenantModal({ isOpen, onClose }: CreateTenantModalProps) {
-  const { checkAuth } = useAuthStore()
+  const { refreshAuth } = useAuthStore()
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -55,7 +55,8 @@ export default function CreateTenantModal({ isOpen, onClose }: CreateTenantModal
     setProvisioningTenantId(null)
     setName('')
     setIsSubmitting(false)
-    checkAuth()
+    // The user stays where they are; don't swap the page for the spinner.
+    refreshAuth()
     onClose()
   }
 

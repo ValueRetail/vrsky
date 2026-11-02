@@ -842,7 +842,7 @@ Last updated 2026-10-28.
     `file_pattern` to event keys and skip non-create S3 records, or say in
     the panel that the notification must be scoped. Documented as is in
     #564. Found in #564.
-124. **A refresh after a refused workspace delete resets the page.**
+124. ~~**A refresh after a refused workspace delete resets the page.**~~ (#630)
     `TenantSelector` calls `checkAuth()` after a 403 or 404, `checkAuth`
     sets `isLoading: true`, and `ui/src/components/Auth/ProtectedRoute.tsx:24`
     swaps the page for the spinner and remounts the builder, so open

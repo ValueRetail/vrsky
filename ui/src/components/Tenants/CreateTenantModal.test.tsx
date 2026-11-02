@@ -120,6 +120,21 @@ describe('CreateTenantModal form', () => {
   })
 })
 
+describe('CreateTenantModal refresh (#630)', () => {
+  it('refreshes in the background, so the page behind the dialog is not swapped for the spinner', async () => {
+    const refreshAuth = vi.fn().mockResolvedValue(undefined)
+    const checkAuth = vi.fn().mockResolvedValue(undefined)
+    useAuthStore.setState({ refreshAuth, checkAuth })
+    post.mockResolvedValueOnce({ data: { tenant: {} } } as never)
+    show()
+    fireEvent.change(nameInput(), { target: { value: 'Acme Corp' } })
+    submit()
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(refreshAuth).toHaveBeenCalledTimes(1)
+    expect(checkAuth).not.toHaveBeenCalled()
+  })
+})
+
 describe('CreateTenantModal provisioning progress', () => {
   const startProvisioning = async () => {
     sessionStorage.setItem(SESSION_KEY, 'test-session-token')
