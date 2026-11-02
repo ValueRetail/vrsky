@@ -152,7 +152,7 @@ Last updated 2026-10-28.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
-32. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+32. ~~**The production UI bundle ships its source maps.**~~ (#650) `ui/vite.config.ts`
     sets `build.sourcemap: true`, so the image serves
     `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
     read the original TypeScript. Decide whether that's wanted; if not, turn
