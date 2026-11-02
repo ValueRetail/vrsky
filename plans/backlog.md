@@ -368,7 +368,7 @@ Last updated 2026-10-28.
     (kube-state-metrics has `kube_secret_info`), or have Catch up warn.
     Alert rules: PR plus `agent:needs-human` if it touches workflows. Found
     in review of #404.
-58. **Production talks to Postgres without TLS.** The AKS connection
+58. ~~**Production talks to Postgres without TLS.**~~ (#453, rolled out 2026-11-02) The AKS connection
     strings use `sslmode=disable` (`infrastructure/azure/rotate-secrets.sh`)
     and the in-cluster Postgres has no certificate. Turn on TLS for it (a
     cert-manager certificate, `ssl = on`, `sslmode=verify-full` in the
