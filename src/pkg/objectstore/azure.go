@@ -8,6 +8,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 )
 
 // azureStore is the Azure Blob Storage ObjectStore backend. The bucket field
@@ -82,10 +83,19 @@ func (a *azureStore) List(ctx context.Context, prefix string) ([]Object, error) 
 	return out, nil
 }
 
+// azureGetErr marks a missing blob as ErrNotFound. A missing container
+// (ContainerNotFound) is a configuration error and stays one.
+func azureGetErr(err error) error {
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		return notFound(err)
+	}
+	return err
+}
+
 func (a *azureStore) Get(ctx context.Context, key string) ([]byte, string, error) {
 	resp, err := a.client.DownloadStream(ctx, a.container, key, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("azure get %q: %w", key, err)
+		return nil, "", fmt.Errorf("azure get %q: %w", key, azureGetErr(err))
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -104,7 +114,7 @@ func (a *azureStore) Get(ctx context.Context, key string) ([]byte, string, error
 func (a *azureStore) GetStream(ctx context.Context, key string) (io.ReadCloser, string, error) {
 	resp, err := a.client.DownloadStream(ctx, a.container, key, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("azure get %q: %w", key, err)
+		return nil, "", fmt.Errorf("azure get %q: %w", key, azureGetErr(err))
 	}
 	ct := ""
 	if resp.ContentType != nil {

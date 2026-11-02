@@ -63,10 +63,21 @@ func (g *gcsStore) List(ctx context.Context, prefix string) ([]Object, error) {
 	return out, nil
 }
 
+// gcsGetErr marks a missing object as ErrNotFound. Unlike S3 and Azure, GCS
+// cannot tell a missing object from a missing bucket on a read: the client
+// maps the 404 for either to storage.ErrObjectNotExist (NewReader never
+// returns storage.ErrBucketNotExist), so a missing bucket is ErrNotFound too.
+func gcsGetErr(err error) error {
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return notFound(err)
+	}
+	return err
+}
+
 func (g *gcsStore) Get(ctx context.Context, key string) ([]byte, string, error) {
 	rc, err := g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("gcs get %q: %w", key, err)
+		return nil, "", fmt.Errorf("gcs get %q: %w", key, gcsGetErr(err))
 	}
 	defer rc.Close()
 	body, err := io.ReadAll(rc)
@@ -81,7 +92,7 @@ func (g *gcsStore) Get(ctx context.Context, key string) ([]byte, string, error) 
 func (g *gcsStore) GetStream(ctx context.Context, key string) (io.ReadCloser, string, error) {
 	rc, err := g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("gcs get %q: %w", key, err)
+		return nil, "", fmt.Errorf("gcs get %q: %w", key, gcsGetErr(err))
 	}
 	return rc, rc.Attrs.ContentType, nil
 }

@@ -3,6 +3,7 @@ package objectstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 // s3Store is the S3 (and S3-compatible, e.g. MinIO) ObjectStore backend.
@@ -85,13 +87,28 @@ func (s *s3Store) List(ctx context.Context, prefix string) ([]Object, error) {
 	return out, nil
 }
 
+// s3GetErr marks a missing key as ErrNotFound. S3 answers NoSuchKey; other
+// S3-compatible stores (MinIO) use the same error code. NoSuchBucket is a
+// configuration error and stays one.
+func s3GetErr(err error) error {
+	var nsk *s3types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return notFound(err)
+	}
+	var api smithy.APIError
+	if errors.As(err, &api) && api.ErrorCode() == "NoSuchKey" {
+		return notFound(err)
+	}
+	return err
+}
+
 func (s *s3Store) Get(ctx context.Context, key string) ([]byte, string, error) {
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("s3 get %q: %w", key, err)
+		return nil, "", fmt.Errorf("s3 get %q: %w", key, s3GetErr(err))
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -110,7 +127,7 @@ func (s *s3Store) GetStream(ctx context.Context, key string) (io.ReadCloser, str
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("s3 get %q: %w", key, err)
+		return nil, "", fmt.Errorf("s3 get %q: %w", key, s3GetErr(err))
 	}
 	return resp.Body, aws.ToString(resp.ContentType), nil
 }

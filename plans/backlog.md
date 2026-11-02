@@ -989,18 +989,15 @@ Last updated 2026-10-28.
     (#594) `CloudStorageConfigEditor.tsx` rendered the field only in poll
     mode. Event mode applies `file_pattern` since #594, so the editor shows
     it for both modes. Done in #594.
-142. **One failed key in a multi-key event message with `after_action`
-    `delete` or `move` makes the message loop.** `runEventLoop` in
-    `src/cmd/cloud-storage-consumer/service.go` leaves the whole message
-    for redelivery when any key fails, but the keys that succeeded were
-    already deleted or moved. On redelivery their `get` fails (the object
-    is gone), so the message never acks and redelivers until the queue's
-    retention drops it, logging `ingest failed` each time. S3 and Event Grid
-    mostly send one record per message, so it is rare, but a batched or
-    forwarded notification hits it. Suggestion: in event mode treat "object
-    not found" on `get` as already done (log at Info, count the key as
-    ingested), which needs a not-found error from `pkg/objectstore` for each
-    provider. Found in review of #594.
+142. ~~**One failed key in a multi-key event message with `after_action`
+    `delete` or `move` makes the message loop.**~~ (#609) `runEventLoop` in
+    `src/cmd/cloud-storage-consumer/service.go` left the whole message
+    for redelivery when any key failed, but the keys that succeeded were
+    already deleted or moved, so on redelivery their `get` failed and the
+    message looped until the queue's retention dropped it. `pkg/objectstore`
+    now returns `ErrNotFound` from `Get` and `GetStream` on S3, Azure and
+    GCS, and event mode counts such a key as already handled (Info log, no
+    publish, no after-action). Done in #609.
 143. **A date `cursor_field` can't see backdated records.** Records dated
     before the watermark (posting last week's documents today) are never
     read. Add a `lookback_days` option that filters `ge W − N` and remembers

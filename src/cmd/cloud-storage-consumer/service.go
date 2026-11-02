@@ -546,6 +546,18 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 					continue
 				}
 				if err := s.ingestObject(ctx, connID, tenantID, store, cfg, key, logger); err != nil {
+					// An object that is not in the bucket any more is done, not
+					// failed (#609). The usual cause is a redelivered message:
+					// a sibling key failed, so the queue sent the message again,
+					// and after_action delete or move has already removed this
+					// key. Redelivering can't bring it back, so counting it as a
+					// failure would loop the message until retention drops it.
+					// Nothing is published or moved for it. Any other error
+					// still leaves the message for redelivery.
+					if errors.Is(err, objectstore.ErrNotFound) {
+						logger.Info("event key no longer in the bucket; treated as already handled", "key", key)
+						continue
+					}
 					logger.Error("ingest failed; leaving message for redelivery", "key", key, "error", err)
 					ok = false
 				}
