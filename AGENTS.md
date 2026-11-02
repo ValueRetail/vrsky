@@ -35,7 +35,7 @@ What the platform does keep:
 | `ui/` | The admin UI: React 18, TypeScript, Vite, Tailwind, Vitest. |
 | `infrastructure/migrations/` | SQL migrations. The management API applies them when it starts. |
 | `infrastructure/kubernetes/` | Manifests and install scripts for the cluster: core services, connectors, monitoring, ingress, NATS, Postgres, MinIO. |
-| `infrastructure/azure/` | The scripts the deploy job and operators run: image builds in ACR, rollouts, smoke check, drift check, budget. |
+| `infrastructure/azure/` | The scripts the deploy job and operators run: image builds for ACR, rollouts, smoke check, drift check, budget. |
 | `infrastructure/prometheus-rules.yml` | Alert rules, with unit tests in `prometheus-rules-test.yml`; `prometheus-rules-test-legs.yml` says which CI leg runs each test group. |
 | `docs/` | The documentation site (MkDocs): operator runbooks in `docs/operator/`, connector pages in `docs/connectors/`, ADRs in `docs/adr/`. |
 | `plans/` | One `plans/<task>.md` per non-trivial change, linked from its PR. `plans/backlog.md` holds work without an issue yet. |
@@ -256,7 +256,7 @@ A merge to `main` is a production deploy. `.github/workflows/build-push.yml`
 runs the Go tests, the UI tests with coverage, the remote-agent builds and
 the Windows agent tests on the merge commit. When they are green,
 `infrastructure/azure/affected.sh` maps the changed paths to targets and
-the affected images are built in ACR. Then:
+the affected images are built on the runner with Buildx and pushed to ACR. Then:
 
 - before anything rolls, every deploy refreshes the `acr-pull` copies in
   `vrsky-database` and `vrsky-ui` (`copy-acr-pull.sh`); Catch up does too;
