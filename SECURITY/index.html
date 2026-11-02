@@ -3303,7 +3303,13 @@ re-checks server-side.</p>
 <ul>
 <li><strong>Session token</strong> (issued by <code>/auth/login</code> or OIDC callback) — present as
   <code>Authorization: Bearer &lt;token&gt;</code> or via the <code>vrsky_session</code> cookie. The
-  server looks up the user's role in the tenant from <code>X-Tenant-ID</code>.</li>
+  server looks up the user's role in the tenant from <code>X-Tenant-ID</code>.
+  A session the server rejects (unknown token, revoked, expired, or its user
+  gone) answers <code>401</code>. If the lookup itself fails (the database is down or
+  slow) the answer is <code>503 ServiceUnavailable</code> with a fixed message, and the
+  error goes to the log, not to the client. The UI signs a user out on a
+  <code>401</code> and keeps the session on a <code>503</code>, so a database blip does not end
+  anyone's session.</li>
 <li><strong>Tenant API key</strong> — opaque token bound to one tenant. Treated as
   effective role <strong>admin</strong>: enough to deploy / manage resources, but
   cannot transfer ownership or change tenant-wide settings.</li>
