@@ -1005,12 +1005,12 @@ Last updated 2026-10-28.
     before the watermark (posting last week's documents today) are never
     read. Add a `lookback_days` option that filters `ge W − N` and remembers
     the whole window in the existing remembered set. Found in review of #602.
-144. **Changing `cursor_field` keeps the old watermark.** Nothing resets the
-    Business Central checkpoint when the field changes, so
-    `postingDate gt <old DateTime>` is sent (likely a 400 every poll), or an
-    old date is applied to a new field silently. Store the field name in the
-    checkpoint state and drop the watermark when it changes. Found in review
-    of #602.
+144. ~~**Changing `cursor_field` keeps the old watermark.**~~ (#610) Nothing
+    reset the Business Central checkpoint when the field changed, so
+    `postingDate gt <old DateTime>` was sent (likely a 400 every poll), or an
+    old date was applied to a new field silently. The checkpoint state now
+    records the field and the watermark is dropped when it changes; a legacy
+    row without a field is taken to match. Found in review of #602.
 
 ## Human
 

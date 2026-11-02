@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/ValueRetail/vrsky/pkg/agentproto"
+	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
 )
@@ -86,6 +87,36 @@ type seenPicture struct {
 type pictureState struct {
 	Pictures map[string]seenPicture `json:"pictures"`
 	Ahead    map[string]string      `json:"ahead,omitempty"`
+	// CursorField is the cursor_field the watermark in this checkpoint row
+	// was read from (#610). Rows saved before then have none.
+	CursorField string `json:"cursor_field,omitempty"`
+}
+
+// checkpointState is what a poll saves in the checkpoint row: nodeState plus
+// the cursor field the watermark belongs to. It is nodeState alone for a node
+// that does not poll incrementally, which has no watermark to tie a field to.
+func (cfg *BCConfig) checkpointState() json.RawMessage {
+	if cfg.stateField == "" {
+		return cfg.nodeState()
+	}
+	b, err := json.Marshal(pictureState{Pictures: cfg.pictureSeen, Ahead: cfg.aheadSeen, CursorField: cfg.stateField})
+	if err != nil {
+		return cfg.nodeState()
+	}
+	return b
+}
+
+// storedCursorField is the cursor_field a checkpoint row's watermark was
+// read from, or "" for a first run or a row saved before #610.
+func storedCursorField(cp *checkpoint.Checkpoint) string {
+	if cp == nil || len(cp.State) == 0 {
+		return ""
+	}
+	var st pictureState
+	if json.Unmarshal(cp.State, &st) != nil {
+		return ""
+	}
+	return st.CursorField
 }
 
 // nodeState serialises what the node remembers, for the checkpoint row.
