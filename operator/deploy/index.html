@@ -2589,18 +2589,29 @@ own terminal.</p>
 <a href="../acr-rotation/">Rotating the ACR password</a>.</p>
 <p>Connectors restart on their own and restore their running pipelines on boot,
 so a rollout needs no redeploy from the builder afterwards.</p>
-<p>Most connectors roll: the new pod starts before the old one stops. The file
-consumer doesn't (#425). It uses the <code>Recreate</code> strategy, so the old pod
-stops first and nothing watches the file folders for the few seconds until
-the new one is up. Files that land in that gap are published by the new
-pod's first checks; uploads from the editor fail until it is up. With a
-rolling update both pods watched the same folders for a moment, and a file
-could be published twice. As a safeguard, <code>deploy-connectors-azure.sh</code>
-switches a live Deployment that is still on RollingUpdate before it applies
-the manifest. A plain <code>kubectl apply</code> handles the switch on its own; the
-patch is the one Grafana needed under helm (see <a href="../monitoring/">monitoring</a>)
-and does nothing once the Deployment is Recreate.</p>
-<p>One case loses a file that a rolling update would have caught: a file that
+<p>Most connectors roll: the new pod starts before the old one stops. Three
+don't: the file consumer (#425), the SFTP consumer and the cloud-storage
+consumer (#620). They use the <code>Recreate</code> strategy, so the old pod stops
+first and nothing watches the folders or the bucket for the few seconds
+until the new one is up. Files that land in that gap are published by the
+new pod's first checks; uploads from the file editor fail until its pod is
+up. With a rolling update both pods watched the same source for a moment,
+and a file could be published twice (with <code>after_action: delete</code> or <code>move</code>
+on SFTP and cloud storage, both could publish it before either removed
+it). As a safeguard, <code>deploy-connectors-azure.sh</code> switches a live
+Deployment that is still on RollingUpdate before it applies the manifest.
+A plain <code>kubectl apply</code> handles the switch on its own; the patch is the one
+Grafana needed under helm (see <a href="../monitoring/">monitoring</a>) and does
+nothing once the Deployment is Recreate.</p>
+<p>The SFTP and cloud-storage change (#620) reaches the cluster only through
+a full connector apply: the deploy of a merge that touches
+<code>deploy-connectors-azure.sh</code> or <code>connectors.yaml</code>, or Catch up with
+<em>connectors</em> ticked. An image-only deploy does not apply the manifest. If
+the cluster is parked when the change merges, run Catch up with
+<em>connectors</em> ticked after the next start; until then the two consumers
+still roll.</p>
+<p>One case loses a file that a rolling update would have caught, and only for
+the file consumer: a file that
 lands in the gap while the new pod can't read the saved list of published
 files at start (a database error, logged at Error). It counts as already
 there and is never published.</p>

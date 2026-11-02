@@ -2791,6 +2791,23 @@ differences:</p>
 <p>The cost of a date cursor is the watermark day: each poll reads it again
 and the checkpoint lists its records. A day with more than 1,000 records
 logs a Warn once. A last-modified DateTime field avoids that.</p>
+<p><strong>Changing <code>cursor_field</code>.</strong> The checkpoint row records which field its
+watermark was read from. When the configured field differs from the
+recorded one, the node drops the watermark and the records it remembers
+for it, logs a Warn, and reads the entity from the start on the first
+poll, so every record is sent once more. Without this, the old value would
+be sent as a filter on the new field: a DateTime against a date field
+makes BC answer 400 on every poll, and a date from another column would
+silently hide records. Changing back is a change like any other. A
+checkpoint saved by an earlier version has no recorded field; it is taken
+to belong to the configured one, so an upgrade reads nothing again, and
+the next poll records the field. If you changed <code>cursor_field</code> on such a
+node before upgrading, its stored watermark may still belong to the old
+field. There is no checkpoint reset, and stopping and starting the
+connection keeps the checkpoint. Use <strong>Resend everything</strong> (<code>POST
+/api/v1/connections/{id}/resend</code>): that poll ignores the stored watermark
+and reads the entity from the start, and it stores a watermark from the
+new field with the field recorded. Every record is sent once more.</p>
 <p><strong>Nodes frozen before #591.</strong> Earlier versions took any value as the
 watermark, so a node may have stored one in the future and read nothing
 since. On its first poll after the upgrade a stored watermark more than

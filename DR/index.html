@@ -1339,6 +1339,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Restore from a disk snapshot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rehearse-without-touching-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rehearse without touching production
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2463,6 +2480,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Restore from a disk snapshot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rehearse-without-touching-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rehearse without touching production
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2568,24 +2602,31 @@ replication to Norway West is a later option.</p>
 <tr>
 <th>Objective</th>
 <th>Target</th>
-<th>Status</th>
+<th>Measured (2026-10-30)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>RPO</strong> (max data loss)</td>
 <td><strong>≤ 24h</strong></td>
-<td>Layer 1 once the vault runs (daily). Layer 2 once its Secret exists: the last weekday noon; nothing changes while the cluster is parked. Not measured yet.</td>
+<td>Disk snapshot alone: at most one working day. With both layers: at most a morning (start-up to the noon dump, about five hours).</td>
 </tr>
 <tr>
 <td><strong>RTO</strong> (max time to restore)</td>
 <td><strong>≤ 1h</strong></td>
-<td>An estimate: a restore of the small management dump runs in minutes in the CI drill. Not measured on a production-sized dump or from a snapshot.</td>
+<td>Snapshot to a queryable database: 1–2 minutes. An in-place restore, with the scale-down and scale-up steps below: ≤ 15 minutes, realistic. The Layer 2 restore was not timed.</td>
 </tr>
 </tbody>
 </table>
-<p>Replace the Status column with measured numbers after the first real restore
-from each layer.</p>
+<p>Both numbers come from the rehearsal in
+<a href="#rehearse-without-touching-production">Rehearse without touching production</a>.</p>
+<p>Why the RPO is what it is: the 03:00 UTC snapshot is taken while the cluster is
+parked, so it holds the state at the previous evening's park (the cluster stops
+at 16:00 Oslo time). Work done during the working day is not in it. The Layer 2
+dump runs at noon on weekdays and covers that gap up to noon. The worst case
+with both layers is a loss just before the noon dump: the morning's work since
+the cluster started (07:00) is gone. After noon, the most you lose is the
+afternoon up to the 16:00 park.</p>
 <blockquote>
 <p><strong>The <code>ENCRYPTION_KEY</code> is not in the backup.</strong> The dumps are encrypted with
 it, and the dump's <code>*_secret_id</code> ciphertext only decrypts with it. Keep a
@@ -2661,8 +2702,10 @@ has been gone for 30 minutes while <code>vrsky-backup-config</code> exists.</p>
 <h2 id="restore-from-a-disk-snapshot">Restore from a disk snapshot<a class="headerlink" href="#restore-from-a-disk-snapshot" title="Permanent link">&para;</a></h2>
 <p>Use this when the disk is lost or corrupted, or after a bad migration, and
 the cluster still exists. It brings back the whole database as of the
-snapshot. <strong>Not yet rehearsed</strong>: run it once against a scratch namespace
-before you rely on it, and fix this page where reality differs.</p>
+snapshot. <strong>Rehearsed 2026-10-30</strong> into a scratch <code>dr-rehearsal</code> namespace,
+with production left alone (see
+<a href="#rehearse-without-touching-production">Rehearse without touching production</a>).
+Fix this page where a real restore differs.</p>
 <div class="highlight"><pre><span></span><code><span class="nv">SUB</span><span class="o">=</span>8c020b54-b237-4d6e-82ba-190f6a415d1d
 <span class="nv">NRG</span><span class="o">=</span>MC_vrsky-prod_vrsky-prod_norwayeast
 <span class="nv">STAMP</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%Y%m%d<span class="k">)</span>
@@ -2739,6 +2782,90 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
    disk ID), and delete the old disk once you're sure.</li>
 <li>Resume the dumps: rename the Secret back if you moved it, then run Catch
    up or <code>kubectl -n vrsky-database patch cronjob vrsky-mgmt-backup --type merge -p '{"spec":{"suspend":false}}'</code>.</li>
+</ol>
+<h3 id="rehearse-without-touching-production">Rehearse without touching production<a class="headerlink" href="#rehearse-without-touching-production" title="Permanent link">&para;</a></h3>
+<p>This shows that a snapshot restores to a working database, without changing
+production's disk or connections. Nothing in the rehearsal points at the
+platform. Use the <code>$NRG</code> and <code>$STAMP</code> variables from above.</p>
+<ol>
+<li><strong>Make a disk from a snapshot.</strong> Pick the snapshot from the list, then
+   create the disk in the node resource group under a rehearsal name:
+   <div class="highlight"><pre><span></span><code>az<span class="w"> </span>snapshot<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-o<span class="w"> </span>table
+az<span class="w"> </span>disk<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"postgres-rehearsal-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span>--sku<span class="w"> </span>StandardSSD_ZRS<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--source<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>az<span class="w"> </span>snapshot<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span>&lt;snapshot&gt;<span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span><span class="s2">"</span>
+</code></pre></div></li>
+<li><strong>Bind it to a scratch PV and PVC</strong> in a throwaway namespace. The PV is
+   <code>Retain</code>, so deleting the claim leaves the disk for you to delete on
+   purpose. If the disk is not 50Gi, use its size (<code>az disk show ... --query diskSizeGb</code>).
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>namespace<span class="w"> </span>dr-rehearsal
+<span class="nv">DISK_ID</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>disk<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"postgres-rehearsal-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span>--query<span class="w"> </span>id<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+<span class="s">apiVersion: v1</span>
+<span class="s">kind: PersistentVolume</span>
+<span class="s">metadata:</span>
+<span class="s">  name: postgres-rehearsal-$STAMP</span>
+<span class="s">spec:</span>
+<span class="s">  capacity: { storage: 50Gi }</span>
+<span class="s">  accessModes: [ReadWriteOnce]</span>
+<span class="s">  persistentVolumeReclaimPolicy: Retain</span>
+<span class="s">  storageClassName: managed-csi</span>
+<span class="s">  claimRef: { namespace: dr-rehearsal, name: postgres-data }</span>
+<span class="s">  csi: { driver: disk.csi.azure.com, volumeHandle: "$DISK_ID" }</span>
+<span class="s">---</span>
+<span class="s">apiVersion: v1</span>
+<span class="s">kind: PersistentVolumeClaim</span>
+<span class="s">metadata:</span>
+<span class="s">  name: postgres-data</span>
+<span class="s">  namespace: dr-rehearsal</span>
+<span class="s">spec:</span>
+<span class="s">  accessModes: [ReadWriteOnce]</span>
+<span class="s">  storageClassName: managed-csi</span>
+<span class="s">  volumeName: postgres-rehearsal-$STAMP</span>
+<span class="s">  resources: { requests: { storage: 50Gi } }</span>
+<span class="s">EOF</span>
+</code></pre></div></li>
+<li><strong>Start <code>postgres:18-alpine</code> on the claim</strong>, with the same <code>PGDATA</code> as
+   production (<code>/var/lib/postgresql/data/pgdata</code>, a subdirectory of the mount,
+   because the root of a new disk holds <code>lost+found</code>):
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'EOF'</span>
+<span class="s">apiVersion: v1</span>
+<span class="s">kind: Pod</span>
+<span class="s">metadata:</span>
+<span class="s">  name: postgres</span>
+<span class="s">  namespace: dr-rehearsal</span>
+<span class="s">spec:</span>
+<span class="s">  containers:</span>
+<span class="s">    - name: postgres</span>
+<span class="s">      image: postgres:18-alpine</span>
+<span class="s">      env:</span>
+<span class="s">        - name: PGDATA</span>
+<span class="s">          value: /var/lib/postgresql/data/pgdata</span>
+<span class="s">        - name: POSTGRES_PASSWORD</span>
+<span class="s">          value: &lt;scratch password&gt;</span>
+<span class="s">      volumeMounts:</span>
+<span class="s">        - name: data</span>
+<span class="s">          mountPath: /var/lib/postgresql/data</span>
+<span class="s">  volumes:</span>
+<span class="s">    - name: data</span>
+<span class="s">      persistentVolumeClaim:</span>
+<span class="s">        claimName: postgres-data</span>
+<span class="s">EOF</span>
+kubectl<span class="w"> </span>-n<span class="w"> </span>dr-rehearsal<span class="w"> </span>logs<span class="w"> </span>postgres
+</code></pre></div>
+   The log should say the database was shut down cleanly at the previous
+   evening's park, so Postgres needs no WAL replay.</li>
+<li><strong>Compare with production.</strong> Run the tenant query from step 5 of
+   <a href="#restore-from-a-disk-snapshot">Restore from a disk snapshot</a> against the
+   scratch database. Its tenant and connection counts should match production's.
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>dr-rehearsal<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>postgres<span class="w"> </span>--<span class="w"> </span>psql<span class="w"> </span>-U<span class="w"> </span>vrsky<span class="w"> </span>-d<span class="w"> </span>vrsky<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"SELECT t.slug, count(c.id) FROM tenants t LEFT JOIN connections c ON c.tenant_id = t.id::text GROUP BY t.slug ORDER BY 1"</span>
+</code></pre></div></li>
+<li><strong>Delete the rehearsal, then the PV and the disk.</strong> Check the disk name
+   first. Production's disk is the <code>pvc-152a98c3-…</code> one in the node resource group.
+   <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span>dr-rehearsal
+kubectl<span class="w"> </span>delete<span class="w"> </span>pv<span class="w"> </span><span class="s2">"postgres-rehearsal-</span><span class="nv">$STAMP</span><span class="s2">"</span>
+az<span class="w"> </span>disk<span class="w"> </span>delete<span class="w"> </span>-g<span class="w"> </span><span class="s2">"</span><span class="nv">$NRG</span><span class="s2">"</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"postgres-rehearsal-</span><span class="nv">$STAMP</span><span class="s2">"</span><span class="w"> </span>--yes
+</code></pre></div></li>
 </ol>
 <h2 id="restore-from-a-logical-dump">Restore from a logical dump<a class="headerlink" href="#restore-from-a-logical-dump" title="Permanent link">&para;</a></h2>
 <p>Use this when the cluster or its resource group is gone, to restore into a
@@ -2817,6 +2944,9 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
    decrypt only with the matching <code>ENCRYPTION_KEY</code>).</p>
 <p>Clean up a rehearsal with
 <code>kubectl -n vrsky-database delete pod,svc pg-restore-test</code>.</p>
+<p>Rehearsed 2026-10-30: <code>vrsky-cli restore</code> of the 2026-10-28 dump (a manual
+run) into a scratch Postgres 18 in Docker finished, and the row counts of every
+table in <code>public</code> matched production exactly. The restore time was not recorded.</p>
 <h2 id="the-ci-restore-drill">The CI restore drill<a class="headerlink" href="#the-ci-restore-drill" title="Permanent link">&para;</a></h2>
 <p><code>.github/workflows/dr-drill.yml</code> runs every Wednesday at 06:00 UTC, on
 pushes and pull requests to <code>main</code> or <code>develop</code> that change
