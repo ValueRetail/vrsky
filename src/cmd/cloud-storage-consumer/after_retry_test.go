@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/doneset"
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 // Tests for #640: an object whose delete or move failed is done, so it stays
@@ -30,6 +31,8 @@ type flakyStore struct {
 	failCopy   int
 	deleteAt   []time.Time
 	copyAt     []time.Time
+	// onDelete, if set, is told how each delete went.
+	onDelete func(ok bool)
 }
 
 func (f *flakyStore) Delete(ctx context.Context, key string) error {
@@ -40,6 +43,9 @@ func (f *flakyStore) Delete(ctx context.Context, key string) error {
 		f.failDelete--
 	}
 	f.mu.Unlock()
+	if f.onDelete != nil {
+		f.onDelete(!fail)
+	}
 	if fail {
 		return errors.New("delete refused")
 	}
@@ -318,6 +324,86 @@ func TestAfterRetry_LeftoversAreBoundedAndPatternBound(t *testing.T) {
 	for _, n := range r.log.counts() {
 		if n != 1 {
 			t.Fatalf("an object was published %d times, want once: %s", n, pdFmt(r.log.counts()))
+		}
+	}
+}
+
+// events records publishes and deletes in order.
+type arEvents struct {
+	mu sync.Mutex
+	e  []string
+}
+
+func (a *arEvents) add(e string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.e = append(a.e, e)
+}
+
+func (a *arEvents) String() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return strings.Join(a.e, "|")
+}
+
+// watch makes the rig's publishes and the store's deletes land in ev.
+func (r *arRig) watch(ev *arEvents) {
+	r.fk.onDelete = func(ok bool) {
+		if ok {
+			ev.add("delete")
+		} else {
+			ev.add("delete-failed")
+		}
+	}
+	base := r.c.publish
+	r.c.publish = func(ctx context.Context, env *envelope.Envelope) error {
+		ev.add("publish " + string(env.Payload))
+		return base(ctx, env)
+	}
+}
+
+// An object whose delete failed and that was replaced afterwards (new size and
+// last-modified time) is a new object: it is published again, and only then
+// deleted. The retry never removes content that was not published.
+func TestAfterRetry_ReplacedObjectIsPublishedBeforeItIsDeleted(t *testing.T) {
+	fk := &flakyStore{fakeStore: &fakeStore{}}
+	fk.set(-1, 0)
+	pdPut(fk.fakeStore, "in/a.json", `{"a":1}`, 0)
+	r := newARRig(t, "delete", fk)
+	var ev arEvents
+	r.watch(&ev)
+
+	r.ticks(1)
+	pdPut(fk.fakeStore, "in/a.json", `{"a":22}`, 60) // replaced while the delete keeps failing
+	fk.set(0, 0)
+	r.ticks(2)
+
+	want := `publish {"a":1}|delete-failed|publish {"a":22}|delete`
+	if ev.String() != want {
+		t.Fatalf("events %s, want %s", ev.String(), want)
+	}
+	requireCounts(t, r.log, "after the replacement", map[string]int{"in/a.json": 2})
+}
+
+// Retries run before anything is published in the same poll, so the time
+// between the listing and a delete is as short as it can be.
+func TestAfterRetry_RetriesRunBeforePublishing(t *testing.T) {
+	for i := 0; i < 20; i++ { // listing order is random
+		fk := &flakyStore{fakeStore: &fakeStore{}}
+		fk.set(1, 0)
+		pdPut(fk.fakeStore, "in/a.json", `{"a":1}`, 0)
+		r := newARRig(t, "delete", fk)
+		var ev arEvents
+		r.watch(&ev)
+
+		r.ticks(1)                                     // a is published, its delete fails
+		pdPut(fk.fakeStore, "in/b.json", `{"b":1}`, 0) // new, published in the retry's poll
+		r.clock = r.clock.Add(2 * time.Minute)
+		r.tick()
+
+		want := `publish {"a":1}|delete-failed|delete|publish {"b":1}|delete`
+		if ev.String() != want {
+			t.Fatalf("run %d: events %s, want %s", i, ev.String(), want)
 		}
 	}
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/doneset"
+	"github.com/ValueRetail/vrsky/pkg/envelope"
 )
 
 // Tests for #640: a file whose delete or move failed is done, so it stays in
@@ -29,6 +32,8 @@ type flakySFTP struct {
 	failRename int
 	removeAt   []time.Time
 	renameAt   []time.Time
+	// onRemove, if set, is told how each remove went.
+	onRemove func(ok bool)
 }
 
 func (f *flakySFTP) Remove(p string) error {
@@ -40,7 +45,13 @@ func (f *flakySFTP) Remove(p string) error {
 	}
 	f.mu.Unlock()
 	if fail {
+		if f.onRemove != nil {
+			f.onRemove(false)
+		}
 		return errors.New("remove refused")
+	}
+	if f.onRemove != nil {
+		f.onRemove(true)
 	}
 	return f.fakeSFTP.Remove(p)
 }
@@ -312,6 +323,143 @@ func TestAfterRetry_LeftoversAreBoundedAndPatternBound(t *testing.T) {
 	for _, n := range r.log.counts() {
 		if n != 1 {
 			t.Fatalf("a file was published %d times, want once: %s", n, pdFmt(r.log.counts()))
+		}
+	}
+}
+
+// A move_dir that is the watched directory would put a moved file back in the
+// listing: the no-op rename "works", the file stays done and listed, and it
+// would be moved again at every poll. The start refuses it, as cloud storage
+// does for move_prefix (#567).
+func TestAfterRetry_MoveDirIsRemoteDir(t *testing.T) {
+	cases := []struct {
+		name       string
+		action     string
+		remote     string
+		moveDir    string
+		wantReject bool
+	}{
+		{"equal", "move", "/in", "/in", true},
+		{"trailing slash", "move", "/in", "/in/", true},
+		{"dot segments", "move", "/in", "/in/./x/..", true},
+		{"relative equal", "move", "in", "in/", true},
+		{"sibling", "move", "/in", "/done", false},
+		{"below", "move", "/in", "/in/done", false},
+		{"delete ignores move_dir", "delete", "/in", "/in", false},
+		{"no move_dir", "move", "/in", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := SFTPConfig{RemoteDir: tc.remote, AfterAction: tc.action, MoveDir: tc.moveDir}
+			if got := cfg.moveIntoWatchedDir(); got != tc.wantReject {
+				t.Fatalf("moveIntoWatchedDir() = %v, want %v", got, tc.wantReject)
+			}
+		})
+	}
+
+	// And the start itself refuses: no poller, an Error in the log.
+	f := newSRFixture(t)
+	var logBuf strings.Builder
+	f.c.logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+	f.nodes = `[{"id":"c1","type":"consumer","config":{"type":"sftp","sftp":{"host":"sftp","username":"u","password":"p","remote_dir":"/in","after_action":"move","move_dir":"/in/","poll_interval_seconds":3600}}}]`
+	f.expectLookup(nil)
+	srAwait(t, f.goStart(), "start")
+	if n := f.activeCount(); n != 0 {
+		t.Fatalf("%d poller(s) started with move_dir equal to remote_dir", n)
+	}
+	if !strings.Contains(logBuf.String(), "invalid move_dir") {
+		t.Fatalf("no 'invalid move_dir' error in the log: %s", logBuf.String())
+	}
+}
+
+// A file whose delete failed and that was replaced afterwards (new size and
+// mtime) is a new file: it is published again, and only then deleted. The
+// retry never removes content that was not published.
+func TestAfterRetry_ReplacedFileIsPublishedBeforeItIsDeleted(t *testing.T) {
+	fk := &flakySFTP{fakeSFTP: &fakeSFTP{}, failRemove: -1}
+	pdPut(fk.fakeSFTP, "a.json", `{"a":1}`, 0)
+	r := newARRig(t, "delete", fk)
+	r.boot()
+	rigDial(r, fk)
+
+	var mu sync.Mutex
+	var events []string
+	record := func(e string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	}
+	fk.onRemove = func(ok bool) {
+		if ok {
+			record("delete")
+		} else {
+			record("delete-failed")
+		}
+	}
+	basePub := r.c.publish
+	r.c.publish = func(ctx context.Context, env *envelope.Envelope) error {
+		record("publish " + string(env.Payload))
+		return basePub(ctx, env)
+	}
+
+	r.polls(2)
+	pdPut(fk.fakeSFTP, "a.json", `{"a":22}`, 60) // replaced while the delete keeps failing
+	fk.mu.Lock()
+	fk.failRemove = 0
+	fk.mu.Unlock()
+	r.polls(2)
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{`publish {"a":1}`, "delete-failed", `publish {"a":22}`, "delete"}
+	if strings.Join(events, "|") != strings.Join(want, "|") {
+		t.Fatalf("events %v, want %v", events, want)
+	}
+	requireCounts(t, r.log, "after the replacement", map[string]int{"a.json": 2})
+}
+
+// Retries run before anything is published in the same poll, so the time
+// between the listing and a delete is as short as it can be.
+func TestAfterRetry_RetriesRunBeforePublishing(t *testing.T) {
+	for i := 0; i < 20; i++ { // listing order is random
+		fk := &flakySFTP{fakeSFTP: &fakeSFTP{}, failRemove: 1}
+		pdPut(fk.fakeSFTP, "a.json", `{"a":1}`, 0)
+		r := newARRig(t, "delete", fk)
+		r.boot()
+		rigDial(r, fk)
+
+		var mu sync.Mutex
+		var events []string
+		record := func(e string) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, e)
+		}
+		fk.onRemove = func(ok bool) {
+			if ok {
+				record("delete")
+			} else {
+				record("delete-failed")
+			}
+		}
+		basePub := r.c.publish
+		r.c.publish = func(ctx context.Context, env *envelope.Envelope) error {
+			record("publish " + string(env.Payload))
+			return basePub(ctx, env)
+		}
+
+		r.polls(2)                                 // a is published, its delete fails
+		pdPut(fk.fakeSFTP, "b.json", `{"b":1}`, 0) // new
+		r.poll()                                   // b's first look
+		r.clock = r.clock.Add(2 * time.Minute)     // a's retry is due, b has settled
+		r.poll()
+
+		mu.Lock()
+		got := strings.Join(events, "|")
+		mu.Unlock()
+		want := `publish {"a":1}|delete-failed|delete|publish {"b":1}|delete`
+		if got != want {
+			t.Fatalf("run %d: events %s, want %s", i, got, want)
 		}
 	}
 }

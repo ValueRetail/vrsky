@@ -70,7 +70,29 @@ backoff, without publishing again.
   Behaviour is unchanged (`ingestObject` still logs and moves on). Filed as
   backlog item 150.
 
+## Review changes (round 2)
+
+- Retries run as a first pass (`retryPass`) right after the listing and
+  Observe, before any publishing, instead of inside the publish loop. The
+  window between the listing and a retry is then the pass itself, not the
+  time the loop spends on other files.
+- SFTP refuses `after_action: move` with `move_dir` equal to `remote_dir`
+  (after `path.Clean`) at start, like cloud storage does for `move_prefix`
+  since #567. Otherwise the no-op rename "succeeds", the file stays listed
+  and done, and the retry re-runs for it at every poll.
+- Tests: a replaced file is published again before it is deleted (both
+  consumers), retries come before publishing in the same poll (both), the
+  move_dir guard (SFTP).
+
 ## Risks
+
+- A file replaced after the listing and before its retry (now only the
+  length of the retry pass) is deleted or moved unpublished. Narrow but not
+  closed: SFTP and object stores have no delete-if-unchanged.
+- A replacement with the same size and mtime (`scp -p`, `rsync -t`) looks
+  like the published file, so a pending retry removes it unpublished. Before
+  this change it stayed in the folder, unpublished. Same limit as the done
+  set itself (#538). Both are in the docs.
 
 - A deleting retry racing an old pod in a rolling deploy: both try, one gets
   a not-found error and logs a Warn. No data loss.

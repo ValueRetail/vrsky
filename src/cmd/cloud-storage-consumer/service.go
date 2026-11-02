@@ -450,9 +450,12 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 
 	// The time of this look, for the after-action backoff (#640).
 	listedAt := s.clock()
+	// Retry failed after-actions first, before any publishing, so the time
+	// between the listing and a delete is as short as it can be (#640).
+	s.retryPass(ctx, store, cfg, done, objs, listing, listedAt, logger)
+
 	refreshed := false
 	sinceSave := 0
-	retries := 0
 	for _, o := range objs {
 		select {
 		case <-ctx.Done():
@@ -461,11 +464,6 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 		}
 		stamp := listing[o.Key]
 		if done.Done(o.Key, stamp) {
-			// Published, but still here: its after-action failed (#640).
-			if retries < doneset.MaxRetriesPerPoll && cfg.wantsAfterRetry(o.Key) && done.RetryDue(o.Key, listedAt) {
-				retries++
-				s.retryAfterAction(ctx, store, cfg, done, o.Key, listedAt, logger)
-			}
 			continue
 		}
 		if !cfg.matchesFilePattern(o.Key) {
@@ -505,6 +503,30 @@ func (s *cloudConsumer) clock() time.Time {
 		return s.now()
 	}
 	return time.Now()
+}
+
+// retryPass retries the after-action of every object that is done at the
+// stamp the listing shows and still there (#640): published, but its delete
+// or move failed. It runs right after the listing and before anything is
+// published, and does at most doneset.MaxRetriesPerPoll tries. An object
+// replaced since it was published has another stamp, is not done, and is left
+// for the publish loop. An object replaced after the listing, before its turn
+// here, is not noticed (see the plan, Risks).
+func (s *cloudConsumer) retryPass(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, objs []objectstore.Object, listing map[string]doneset.Stamp, now time.Time, logger *slog.Logger) {
+	if cfg.AfterAction != "delete" && cfg.AfterAction != "move" {
+		return
+	}
+	tries := 0
+	for _, o := range objs {
+		if tries >= doneset.MaxRetriesPerPoll || ctx.Err() != nil {
+			return
+		}
+		if !done.Done(o.Key, listing[o.Key]) || !cfg.wantsAfterRetry(o.Key) || !done.RetryDue(o.Key, now) {
+			continue
+		}
+		tries++
+		s.retryAfterAction(ctx, store, cfg, done, o.Key, now, logger)
+	}
 }
 
 // retryAfterAction runs the after-action again for an object that was
