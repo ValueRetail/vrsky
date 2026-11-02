@@ -25,6 +25,7 @@ package doneset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -32,6 +33,11 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/checkpoint"
 )
+
+// ErrUndecodable marks an error from reading a checkpoint row that is there
+// but can't be decoded. It is not a store error: no later read will work, so
+// Load treats the row as not saved and the next Save replaces it (#617).
+var ErrUndecodable = errors.New("could not decode the saved done set")
 
 // opTimeout bounds one checkpoint read or write.
 const opTimeout = 5 * time.Second
@@ -107,6 +113,8 @@ type Set struct {
 	dirty bool
 	// present is the last listing passed to Observe.
 	present map[string]Stamp
+	// undecodable is the decode error of a row the last Load set aside.
+	undecodable error
 }
 
 // New returns an empty Set for key and scope. With a nil store nothing is
@@ -132,12 +140,18 @@ func (s *Set) Len() int { return len(s.done) }
 // Load reads the saved set. found is false on a first start: no saved set, or
 // one for another scope. Then the Set starts empty and its first Save records
 // it. On an error the Set is left as it was and stays unloaded.
+//
+// A row that is there but can't be decoded is not an error (#617): it carries
+// nothing anyone can read. A snapshot like that counts as no saved set, so
+// found is false and the consumer follows its first-start rule; a changes row
+// like that is dropped and the snapshot under it is used. Either way
+// Undecodable returns the cause and the first Save replaces the rows.
 func (s *Set) Load(ctx context.Context) (found bool, err error) {
 	if s.store == nil {
 		s.loaded = true
 		return false, nil
 	}
-	saved, found, err := s.loadSaved(ctx)
+	saved, found, undecodable, err := s.loadSaved(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -148,11 +162,16 @@ func (s *Set) Load(ctx context.Context) (found bool, err error) {
 	if s.done == nil {
 		s.done = make(map[string]Stamp)
 	}
+	s.undecodable = undecodable
 	// A first start is saved even if nothing is published, so the next start
-	// is not a first one.
-	s.dirty = !found
+	// is not a first one. So is a damaged row, so it does not stay damaged.
+	s.dirty = !found || undecodable != nil
 	return found, nil
 }
+
+// Undecodable returns why the last Load set a saved row aside, or nil if every
+// row it read decoded. The consumer logs it once, after that Load.
+func (s *Set) Undecodable() error { return s.undecodable }
 
 // Observe takes the poll's listing: name to current stamp. Done names missing
 // from it are no longer done, so a file deleted and added again is published
@@ -209,7 +228,9 @@ func (s *Set) Refresh(ctx context.Context) error {
 // mergeSaved reads the whole saved set and merges it. The next save is a
 // snapshot: changes on this Set's old snapshot would no longer be read.
 func (s *Set) mergeSaved(ctx context.Context) error {
-	saved, found, err := s.loadSaved(ctx)
+	// A row that can't be decoded has nothing to merge, and the write that
+	// follows replaces it.
+	saved, found, _, err := s.loadSaved(ctx)
 	if err != nil {
 		return err
 	}
@@ -310,6 +331,10 @@ func (s *Set) ownsSaved(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	ch, found, err := s.loadChanges(ctx)
+	if errors.Is(err, ErrUndecodable) {
+		// Not this Set's: it wrote a readable one.
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -317,30 +342,39 @@ func (s *Set) ownsSaved(ctx context.Context) (bool, error) {
 }
 
 // loadSaved reads the snapshot, and the changes row on top of it when that
-// row's Base is the snapshot's Gen.
-func (s *Set) loadSaved(ctx context.Context) (map[string]Stamp, bool, error) {
+// row's Base is the snapshot's Gen. A row that is there but can't be decoded
+// is not an error: undecodable is its cause. An undecodable snapshot is no
+// saved set (found is false); an undecodable changes row leaves the snapshot
+// as it is (#617). Any other error from the store is returned.
+func (s *Set) loadSaved(ctx context.Context) (saved map[string]Stamp, found bool, undecodable, err error) {
 	var st snapshotState
-	found, err := s.read(ctx, s.key.NodeID, &st)
+	found, err = s.read(ctx, s.key.NodeID, &st)
+	if errors.Is(err, ErrUndecodable) {
+		return nil, false, fmt.Errorf("read the done set: %w", err), nil
+	}
 	if err != nil {
-		return nil, false, fmt.Errorf("read the done set: %w", err)
+		return nil, false, nil, fmt.Errorf("read the done set: %w", err)
 	}
 	if !found || st.Scope != s.scope {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
-	saved := make(map[string]Stamp, len(st.Files))
+	saved = make(map[string]Stamp, len(st.Files))
 	for name, f := range st.Files {
 		saved[name] = f
 	}
 	if st.Gen == "" {
-		return saved, true, nil
+		return saved, true, nil, nil
 	}
 	ch, chFound, err := s.loadChanges(ctx)
+	if errors.Is(err, ErrUndecodable) {
+		return saved, true, err, nil
+	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if !chFound || ch.Base != st.Gen {
 		// None yet, or stale: written on an older snapshot.
-		return saved, true, nil
+		return saved, true, nil, nil
 	}
 	for name, f := range ch.Files {
 		saved[name] = f
@@ -348,7 +382,7 @@ func (s *Set) loadSaved(ctx context.Context) (map[string]Stamp, bool, error) {
 	for _, name := range ch.Gone {
 		delete(saved, name)
 	}
-	return saved, true, nil
+	return saved, true, nil, nil
 }
 
 // loadChanges reads the changes row. found is false when there is none, or it
@@ -388,7 +422,7 @@ func (s *Set) read(ctx context.Context, nodeID string, into any) (bool, error) {
 		return false, nil
 	}
 	if err := json.Unmarshal(cp.State, into); err != nil {
-		return false, fmt.Errorf("decode: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrUndecodable, err)
 	}
 	return true, nil
 }

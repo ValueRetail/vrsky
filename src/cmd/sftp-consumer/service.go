@@ -525,6 +525,10 @@ func (s *sftpConsumer) pollOnce(ctx context.Context, connID, tenantID string, cf
 			logger.Error("Could not read which files were already published; publishing nothing until it can be read", "error", err)
 			return 0, false
 		}
+		if cause := done.Undecodable(); cause != nil {
+			// Once: Load runs until it first works, and this is that time (#617).
+			logger.Warn("The saved list of published files can't be decoded; it is replaced at the next save, so files already published may be published once more", "error", cause)
+		}
 		if found {
 			logger.Info("Resuming: files already published are not published again", "already_done", done.Len())
 		} else {

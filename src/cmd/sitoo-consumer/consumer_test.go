@@ -23,6 +23,8 @@ func newTestConsumer() (*sitooConsumer, *[]*envelope.Envelope, *sync.Mutex) {
 	c := &sitooConsumer{
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: http.DefaultClient,
+		// The fake Sitoo API is an httptest server on http://127.0.0.1.
+		allowPrivate: true,
 		publish: func(_ context.Context, env *envelope.Envelope) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -177,7 +179,7 @@ func TestSampleData_Sitoo(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	c := &sitooConsumer{httpClient: http.DefaultClient}
+	c := &sitooConsumer{httpClient: http.DefaultClient, allowPrivate: true}
 	body := fmt.Sprintf(`{"api_id":"id","api_password":"pw","account_id":1,"site_id":2,"base_url":%q,"resource":"transactions"}`, apiSrv.URL)
 	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
 	w := httptest.NewRecorder()

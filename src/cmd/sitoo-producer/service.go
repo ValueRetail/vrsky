@@ -18,6 +18,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -35,6 +36,11 @@ type sitooProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets base_url be http or point at a private address, for a mock Sitoo.
+	// Off in production; a tenant cannot set it.
+	allowPrivate bool
 }
 
 // SitooProducerConfig is the per-node configuration (config.sitoo). The API
@@ -68,13 +74,13 @@ func (p *sitooProducer) Configure(ctx context.Context, res *sdk.Resources) error
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
-		// Surface redirects instead of following them — requests carry the Sitoo
-		// Basic-auth credential, which Go would forward on a same-host redirect.
-		p.httpClient = &http.Client{
-			Timeout:       60 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
+		// base_url is tenant config and every request carries the Sitoo
+		// Basic-auth credential, so the client refuses private, loopback and
+		// link-local addresses at dial time (#616). Redirects are surfaced, not
+		// followed: Go would forward the credential on a same-host one.
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
 	}
 	p.logger.Info("sitoo-producer configured")
 	return nil
@@ -100,6 +106,14 @@ func (p *sitooProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	if cfg.AccountID == 0 || cfg.SiteID == 0 || cfg.APIID == "" || cfg.APIPassword == "" {
 		// Misconfiguration can't be fixed by retrying this message.
 		return sdk.Permanent(fmt.Errorf("sitoo producer config incomplete for connection %s", env.IntegrationID))
+	}
+
+	// base_url is tenant config; refuse one the connector must not call. The
+	// client's dial-time check is the enforcement, this is the early error.
+	if cfg.BaseURL != "" {
+		if err := safeurl.CheckBaseURL(cfg.BaseURL, p.allowPrivate); err != nil {
+			return sdk.Permanent(fmt.Errorf("sitoo producer base_url refused for connection %s: %w", env.IntegrationID, err))
+		}
 	}
 
 	// Payload must be valid JSON (an object or array) that Sitoo accepts.

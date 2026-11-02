@@ -15,6 +15,8 @@ func testProducer() *sitooProducer {
 	return &sitooProducer{
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: http.DefaultClient,
+		// The fake Sitoo API is an httptest server on http://127.0.0.1.
+		allowPrivate: true,
 	}
 }
 

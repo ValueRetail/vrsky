@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import type { ConverterMapping, FileCfg, HttpCfg } from '@/types/nodeConfig'
+import { BC_MAX_LOOKBACK_DAYS, nextLookbackDays } from '@/types/nodeConfig'
 import { useNodeEditorState } from './useNodeEditorState'
 import {
   DndContext,
@@ -2925,6 +2926,19 @@ function BusinessCentralConfigEditor({ config, setConfig, nodeType }: ConnEditor
               placeholder="lastModifiedDateTime"
               value={(c.cursor_field as string) || ''}
               onChange={(v) => update({ cursor_field: v })}
+            />
+          )}
+          {Boolean(c.incremental) && (
+            <StyledInput
+              label="Lookback days (date fields only)"
+              placeholder="0 (off, max 365)"
+              type="number"
+              min={0}
+              max={BC_MAX_LOOKBACK_DAYS}
+              step={1}
+              value={c.lookback_days === undefined ? '' : String(c.lookback_days)}
+              // Whole numbers 0..365 only; anything else puts the saved value back.
+              onChange={(v) => update({ lookback_days: nextLookbackDays(v, c.lookback_days) })}
             />
           )}
           <StyledInput

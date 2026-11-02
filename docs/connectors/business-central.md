@@ -35,6 +35,10 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
   `lastModifiedDateTime`). A custom API page may name it something else. The
   field may be a DateTime or a date with no time (`Edm.Date`); see
   "Date fields" under Incremental polling.
+- `lookback_days` — only with `incremental` and a date `cursor_field`: also read
+  this many days before the watermark, so a document posted today with an
+  older date is not missed. A whole number from 0 to 365; default 0 (off).
+  See "Backdated records" under Incremental polling.
 - `page_size` — ask BC to page the response, sent as
   `Prefer: odata.maxpagesize`. Unset leaves BC on its own default, which
   returns most entities whole — 80 CRONUS items came back in a single page.
@@ -276,8 +280,9 @@ node sees) is skipped and the converted record is written.
       alone is not seen again (a record without `id` or `number` is
       identified by its content, so there it is). A record whose date is
       earlier than the watermark when it is added is never read, and nothing
-      is logged. Business dates are often backdated — for example, Saturday's
-      sales posted on Monday with posting date Saturday — so use
+      is logged, unless `lookback_days` is set (below). Business dates are
+      often backdated — for example, Saturday's sales posted on Monday with
+      posting date Saturday — so use
       `lastModifiedDateTime` as the cursor unless you are sure the date field
       is never backdated. The blank date BC returns for an empty field
       (`0001-01-01`) is ignored.
@@ -285,6 +290,43 @@ node sees) is skipped and the converted record is written.
     The cost of a date cursor is the watermark day: each poll reads it again
     and the checkpoint lists its records. A day with more than 1,000 records
     logs a Warn once. A last-modified DateTime field avoids that.
+
+    **Backdated records (`lookback_days`).** With `lookback_days: N` and a
+    date `cursor_field`, the filter is `<field> ge W - N days` (W is the
+    watermark), so a document posted today with a date inside the last N days
+    is read. The node remembers every record it has read dated from W - N
+    onward, in the same checkpoint list as the watermark day, and leaves them
+    out when BC returns the window again. A record is sent once; an edit that
+    changes its date sends it again, as without the option.
+
+    - The range is 0 to 365. 0 is the behaviour described above; a negative
+      value or one above 365 stops the node from starting (an Error in the
+      log) and fails the poll of a running one. The management API does not
+      check the setting.
+    - It applies to date fields only. A DateTime `cursor_field` such as
+      `lastModifiedDateTime` is stamped by BC when the record is written, so
+      nothing can arrive with an older stamp, and a window would only read
+      days of changes on every poll. With a DateTime field the option does
+      nothing, and the node logs a Warn once. Without `incremental` it does
+      nothing either.
+    - A record dated before W - N is still never read. Pick N from how late
+      your bookkeepers post.
+    - The remembered list is rebuilt from each poll, so it holds only the
+      records dated from the newest date minus N onward (plus the future-dated
+      ones). A record that falls out of the window, or is deleted in BC,
+      leaves the checkpoint on the next poll. It is as large as the window: one
+      entry is about 55 bytes (a GUID and a date), so 10,000 records in the
+      window are about 550 KB of checkpoint JSON, which every poll reads and
+      writes when it changes. Past 1,000 the node logs the Warn above; if it
+      does, lower `lookback_days` or use a last-modified field. The poll
+      itself reads the whole window each time, so a large window is mostly a
+      cost in BC calls, not in the checkpoint.
+    - The watermark itself does not move back: it is the newest date seen,
+      or the stored one if the window found nothing newer.
+    - Changing `lookback_days` needs no reset. Lowering it, or setting it to
+      0, prunes the remembered list on the next poll and sends nothing.
+      Raising it reads the extra days; the node did not remember those records
+      before, so the ones that were already sent are sent once more.
 
     **Changing `cursor_field`.** The checkpoint row records which field its
     watermark was read from. When the configured field differs from the

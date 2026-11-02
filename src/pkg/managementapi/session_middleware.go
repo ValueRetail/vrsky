@@ -2,6 +2,8 @@ package managementapi
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -40,7 +42,7 @@ func SessionAuthMiddleware(repo Repository) func(http.Handler) http.Handler {
 			// Validate the session
 			session, user, err := repo.ValidateSession(r.Context(), hashedToken)
 			if err != nil {
-				writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
+				writeSessionError(w, r, err)
 				return
 			}
 
@@ -58,6 +60,50 @@ func SessionAuthMiddleware(repo Repository) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// errNoSessionToken is what getAuthenticatedUser returns when the request
+// carries no session token at all.
+var errNoSessionToken = errors.New("no session token provided")
+
+// sessionUnavailableMessage is the only thing a client is told when the
+// session lookup failed for a reason that says nothing about the token.
+const sessionUnavailableMessage = "authentication service temporarily unavailable"
+
+// isSessionRejection reports whether err means the server looked the session
+// up and turned it down: the token is unknown, revoked or expired, or its user
+// is gone. Every other error (a closed pool, a cancelled context, a lost
+// connection) says nothing about the token and is not a rejection.
+//
+// PostgresRepository.ValidateSession returns the three auth sentinels for
+// every rejection and wraps all other errors, so the list below is complete
+// for it. NotFoundError and UnauthorizedError are what the repository test
+// doubles return for an unknown session.
+func isSessionRejection(err error) bool {
+	if errors.Is(err, auth.ErrSessionInvalid) ||
+		errors.Is(err, auth.ErrSessionExpired) ||
+		errors.Is(err, auth.ErrUserNotFound) ||
+		errors.Is(err, errNoSessionToken) {
+		return true
+	}
+	var nf *NotFoundError
+	var ua *UnauthorizedError
+	return errors.As(err, &nf) || errors.As(err, &ua)
+}
+
+// writeSessionError answers a failed session validation. A rejected session is
+// a 401. Any other error is a 503 with a fixed body, so a database error does
+// not look like a rejected session (the UI signs the user out on a 401 from
+// /auth/me) and the error text does not reach the client. 503 never lets a
+// request through, so a misclassified error cannot authenticate anyone.
+func writeSessionError(w http.ResponseWriter, r *http.Request, err error) {
+	if isSessionRejection(err) {
+		writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
+		return
+	}
+	slog.Default().Error("session validation failed",
+		"error", err, "method", r.Method, "path", r.URL.Path)
+	_ = writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", sessionUnavailableMessage, nil)
 }
 
 // OptionalSessionMiddleware extracts session if present, but doesn't require it.

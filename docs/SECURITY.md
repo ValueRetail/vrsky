@@ -153,6 +153,12 @@ Two ways to authenticate against mutating endpoints:
 - **Session token** (issued by `/auth/login` or OIDC callback) — present as
   `Authorization: Bearer <token>` or via the `vrsky_session` cookie. The
   server looks up the user's role in the tenant from `X-Tenant-ID`.
+  A session the server rejects (unknown token, revoked, expired, or its user
+  gone) answers `401`. If the lookup itself fails (the database is down or
+  slow) the answer is `503 ServiceUnavailable` with a fixed message, and the
+  error goes to the log, not to the client. The UI signs a user out on a
+  `401` and keeps the session on a `503`, so a database blip does not end
+  anyone's session.
 - **Tenant API key** — opaque token bound to one tenant. Treated as
   effective role **admin**: enough to deploy / manage resources, but
   cannot transfer ownership or change tenant-wide settings.
@@ -280,6 +286,28 @@ is allowed as a special case for local dev.
 Every OIDC login attempt — success, failure, denial-by-domain — emits a row
 in `auth_audit_log` with event type `oidc_login`. The general audit log
 (#72) records the callback hit as `oauth.write`.
+
+## Outbound URLs taken from tenant config (#616)
+
+A connector that builds a request URL from a node's config and sends a
+credential with it can be aimed at the cluster network or the cloud metadata
+service. `pkg/safeurl` is the guard: `CheckBaseURL` gives an early error
+(https only, no userinfo, query or fragment, no literal private IP), and
+`NewClient` returns an HTTP client that refuses loopback, private, link-local,
+CGNAT, multicast and the Azure platform address at dial time, on the address
+actually connected to, so a hostname that resolves to one is refused and DNS
+rebinding cannot swap it in. It ignores proxy environment variables and does
+not follow redirects.
+
+Only the Sitoo consumer and producer use it so far
+([Sitoo](connectors/sitoo.md#the-base-url)); the management API also checks the
+Sitoo `base_url` when a connection is started. Other connectors that take a
+tenant-supplied host (Visma, Front Systems, the API consumer, the HTTP
+producer) have not been moved to it.
+
+For local development with a mock upstream, the operator can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow `http` and private
+addresses. A node cannot set it, and it must stay off in production.
 
 ## Threat model
 

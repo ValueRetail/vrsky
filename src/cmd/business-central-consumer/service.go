@@ -58,6 +58,19 @@ const (
 	// records past which the node logs that its cursor_field is probably a
 	// business date rather than a last-modified stamp.
 	aheadWarnSize = 1000
+
+	// maxLookbackDays is the largest lookback_days a node accepts (#629). A
+	// year covers any posting-date correction a bookkeeper makes; beyond it the
+	// remembered window is a full-entity read on every poll, which is what a
+	// non-incremental node is for.
+	maxLookbackDays = 365
+
+	// windowPruneMin is the size a lookback window may reach before the
+	// tracker first drops what has fallen below the floor. After that it
+	// prunes when the window has doubled, so a first poll over a large entity
+	// holds memory proportional to the window, not to the entity, and pruning
+	// stays linear in the records read.
+	windowPruneMin = 1024
 )
 
 // bcConsumer polls a Business Central OData entity per active connection and
@@ -116,6 +129,12 @@ type BCConfig struct {
 	Incremental bool   `json:"incremental"`
 	CursorField string `json:"cursor_field"`
 
+	// LookbackDays widens the filter of an Edm.Date cursor_field to `ge
+	// W - N days` and remembers every record in that window, so a document
+	// posted today with an older date is still read (#629). 0 = off. Ignored
+	// for a DateTime cursor_field and without incremental.
+	LookbackDays int `json:"lookback_days"`
+
 	// PageSize asks Business Central to page the response, via
 	// `Prefer: odata.maxpagesize`. Server-driven paging is the only thing that
 	// makes BC emit @odata.nextLink — $top caps the result set instead of
@@ -161,6 +180,9 @@ type BCConfig struct {
 	// aheadWarned is set once the size Warn for aheadSeen was logged, so it
 	// is logged once per process rather than every poll.
 	aheadWarned bool
+	// lookbackWarned is set once the "lookback_days ignored for a DateTime
+	// cursor" Warn was logged, so it is logged once per process.
+	lookbackWarned bool
 
 	// resendAll makes the next fetch ignore the incremental watermark and the
 	// seen pictures, so everything goes out again — for a till that just
@@ -311,6 +333,10 @@ func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID
 		logger.Error("Business Central consumer not started", "error", err)
 		return
 	}
+	if err := cfg.validateLookback(); err != nil {
+		logger.Error("Business Central consumer not started", "error", err)
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &poller{cancel: cancel, resend: make(chan struct{}, 1)}
@@ -407,6 +433,9 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	if err := cfg.validatePictures(); err != nil {
 		return err
 	}
+	if err := cfg.validateLookback(); err != nil {
+		return err
+	}
 	cursor, rec := "", recovery{}
 	fieldChanged, fieldUnrecorded := false, false
 	if cfg.Incremental {
@@ -443,10 +472,17 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		cfg.aheadSeen = c.loadAheadState(ctx, tenantID, connID, cfg.NodeID, logger)
 	}
 
+	watermark := cursorTracker{ceiling: c.clock(), lookbackDays: cfg.effectiveLookback()}
+	if watermark.lookbackDays > 0 && isDateCursor(cursor) {
+		// The stored date is the floor of the watermark, so a window that
+		// finds nothing newer cannot move it back, and the filter starts N
+		// days before it.
+		watermark.seed(cursor)
+		cursor = shiftDate(cursor, -watermark.lookbackDays)
+	}
 	next := cfg.entityURL(cursor)
 	page, total := 0, 0
 	var pics pictureCounts
-	watermark := cursorTracker{ceiling: c.clock()}
 	ahead := map[string]string{} // records dated after now this poll carried
 	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
 	for next != "" {
@@ -530,6 +566,18 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	for k, v := range watermark.atWatermark {
 		ahead[k] = v
 	}
+	// With lookback_days the whole window is read again, so the whole window
+	// is remembered. It is rebuilt from this poll's feed, so a record that
+	// fell below W - N, or was deleted, drops out of what the checkpoint holds.
+	for k, v := range watermark.remembered() {
+		ahead[k] = v
+	}
+	if watermark.lookbackDays > 0 && watermark.raw != "" && !watermark.dateOnly && !cfg.lookbackWarned {
+		cfg.lookbackWarned = true
+		logger.Warn("lookback_days is set but cursor_field is a DateTime, so it has no effect; "+
+			"a last-modified stamp cannot be backdated. Use it with a date field such as postingDate",
+			"cursor_field", cfg.effectiveCursorField(), "lookback_days", cfg.LookbackDays)
+	}
 	aheadChanged := cfg.Incremental && !sameAhead(cfg.aheadSeen, ahead)
 	if cfg.Incremental {
 		cfg.aheadSeen = ahead
@@ -581,6 +629,72 @@ type cursorTracker struct {
 	// current date watermark (a DateTime watermark keeps none). The next
 	// poll's `ge` filter returns them again.
 	atWatermark map[string]string
+
+	// lookbackDays > 0 (#629): the next poll reads back N days before the
+	// date watermark, so the tracker keeps every date record on or after
+	// newest - N in window (key to cursor value).
+	lookbackDays int
+	window       map[string]string
+	pruneAt      int
+}
+
+// seed starts the tracker at a stored date watermark: newest is its floor.
+// raw stays empty, so a poll that reads nothing newer stores nothing and the
+// stored watermark stays.
+func (t *cursorTracker) seed(date string) {
+	if parsed, dateOnly, ok := parseCursor(date); ok && dateOnly {
+		t.newest, t.dateOnly = parsed, true
+		t.atWatermark = map[string]string{}
+	}
+}
+
+// keep adds a date record to the lookback window if it is on or after
+// newest - lookbackDays.
+func (t *cursorTracker) keep(key, cursor string, parsed time.Time) {
+	if t.lookbackDays <= 0 || !t.dateOnly || parsed.Before(t.floor()) {
+		return
+	}
+	if t.window == nil {
+		t.window = map[string]string{}
+	}
+	t.window[key] = cursor
+	if t.pruneAt == 0 {
+		t.pruneAt = windowPruneMin
+	}
+	if len(t.window) >= t.pruneAt {
+		t.prune()
+		t.pruneAt = max(windowPruneMin, 2*len(t.window))
+	}
+}
+
+func (t *cursorTracker) floor() time.Time { return t.newest.AddDate(0, 0, -t.lookbackDays) }
+
+// prune drops the window records that fell below the floor of the newest date.
+func (t *cursorTracker) prune() {
+	floor := t.floor()
+	for k, v := range t.window {
+		if d, _, ok := parseCursor(v); !ok || d.Before(floor) {
+			delete(t.window, k)
+		}
+	}
+}
+
+// remembered is the lookback window as it stands at the end of the poll.
+func (t *cursorTracker) remembered() map[string]string {
+	if t.lookbackDays <= 0 || !t.dateOnly {
+		return nil
+	}
+	t.prune()
+	return t.window
+}
+
+// shiftDate moves an Edm.Date literal by n days.
+func shiftDate(date string, n int) string {
+	d, err := time.Parse(cursorDateLayout, date)
+	if err != nil {
+		return date
+	}
+	return d.AddDate(0, 0, n).Format(cursorDateLayout)
 }
 
 // aheadRecord is a record whose cursor lies after the tracker's ceiling.
@@ -660,10 +774,16 @@ func (t *cursorTracker) observe(records []json.RawMessage, field string) []ahead
 			t.newest, t.raw, t.dateOnly = parsed, s, dateOnly
 			t.atWatermark = nil
 			if dateOnly {
-				t.atWatermark = map[string]string{recordKey(rec, fields): s}
+				key := recordKey(rec, fields)
+				t.atWatermark = map[string]string{key: s}
+				t.keep(key, s, parsed)
 			}
 		case dateOnly && t.dateOnly && parsed.Equal(t.newest):
-			t.atWatermark[recordKey(rec, fields)] = s
+			key := recordKey(rec, fields)
+			t.atWatermark[key] = s
+			t.keep(key, s, parsed)
+		case dateOnly && t.dateOnly && t.lookbackDays > 0:
+			t.keep(recordKey(rec, fields), s, parsed)
 		}
 	}
 	return ahead
@@ -771,7 +891,8 @@ func (c *bcConsumer) warnAheadSize(cfg *BCConfig, logger *slog.Logger) {
 		logger.Warn("many Business Central records are dated on or after the date watermark; every poll "+
 			"re-reads them and the checkpoint lists each one. A date cursor_field has no time of day, "+
 			"so the whole watermark day is read again; a last-modified DateTime field avoids that",
-			"cursor_field", cfg.effectiveCursorField(), "records", len(cfg.aheadSeen))
+			"cursor_field", cfg.effectiveCursorField(), "records", len(cfg.aheadSeen),
+			"lookback_days", cfg.LookbackDays)
 		return
 	}
 	logger.Warn("many Business Central records are dated in the future; every poll re-reads them. "+
@@ -1063,6 +1184,25 @@ func (cfg *BCConfig) effectiveCursorField() string {
 		return cfg.CursorField
 	}
 	return defaultCursorField
+}
+
+// effectiveLookback is lookback_days as the poll uses it: 0 without
+// incremental, where there is no watermark to look back from.
+func (cfg *BCConfig) effectiveLookback() int {
+	if !cfg.Incremental || cfg.LookbackDays < 0 {
+		return 0
+	}
+	return cfg.LookbackDays
+}
+
+// validateLookback rejects a lookback_days outside 0..maxLookbackDays. It
+// runs at start and on every fetch, like validatePictures. The management API
+// does not look inside the business_central block, so this is the only check.
+func (cfg *BCConfig) validateLookback() error {
+	if cfg.LookbackDays < 0 || cfg.LookbackDays > maxLookbackDays {
+		return fmt.Errorf("lookback_days must be between 0 and %d (is %d)", maxLookbackDays, cfg.LookbackDays)
+	}
+	return nil
 }
 
 // filterWithCursor composes the configured $filter with the incremental

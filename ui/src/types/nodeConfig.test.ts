@@ -19,6 +19,7 @@ import {
   CONVERTER_MAPPING_LABELS,
   CONVERTER_MAPPING_TYPES,
   converterMappingWarnings,
+  nextLookbackDays,
   type ConverterMapping,
 } from './nodeConfig'
 
@@ -116,5 +117,21 @@ describe('converter mapping types', () => {
 
   it('has a label for every type', () => {
     for (const t of CONVERTER_MAPPING_TYPES) expect(CONVERTER_MAPPING_LABELS[t], t).toBeTruthy()
+  })
+})
+
+describe('nextLookbackDays (#629)', () => {
+  it.each([['7', 7], ['0', 0], ['365', 365], [' 14 ', 14]])('saves %j as %i', (v, n) => {
+    expect(nextLookbackDays(v, undefined)).toBe(n)
+  })
+
+  it.each(['7.5', '-1', '366', '1e3', 'abc', '0x10'])('refuses %j and keeps the saved value', (v) => {
+    expect(nextLookbackDays(v, 14)).toBe(14)
+    expect(nextLookbackDays(v, undefined)).toBeUndefined()
+  })
+
+  it('clears the setting when emptied', () => {
+    expect(nextLookbackDays('', 14)).toBeUndefined()
+    expect(nextLookbackDays('  ', 14)).toBeUndefined()
   })
 })
