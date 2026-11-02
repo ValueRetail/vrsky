@@ -58,6 +58,7 @@ export default function TenantSelector() {
         className="px-2 py-1 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-primary-500"
         aria-label="Select workspace"
       >
+        {!currentTenant && <option value="" disabled>No active workspace</option>}
         {tenants.map(t => (
           <option key={t.id} value={t.id} disabled={t.status !== 'active'}>
             {t.name} ({t.user_role}){t.status === 'provisioning' ? ' - setting up...' : t.status === 'failed' ? ' - failed' : ''}

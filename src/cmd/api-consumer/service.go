@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/oauthtoken"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/nats-io/nats.go"
 )
@@ -39,6 +41,13 @@ type apiConsumer struct {
 	// be injected.
 	oauthTokens *oauthtoken.Client
 
+	// httpClient is what every outbound request goes through: built in
+	// Configure with safeurl, which refuses private, loopback and link-local
+	// addresses at dial time (#639). allowPrivate is the operator's dev switch
+	// (ALLOW_PRIVATE_UPSTREAMS), never set by a node.
+	httpClient   *http.Client
+	allowPrivate bool
+
 	// Active pipelines: connectionId → this start's entry
 	activePipelines map[string]*activeConn
 	mu              sync.RWMutex
@@ -64,6 +73,14 @@ func (s *apiConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	s.pollTimeout = envDuration("API_CONSUMER_POLL_TIMEOUT", 30*time.Second)
 	s.defaultPollInterval = envDuration("API_CONSUMER_DEFAULT_POLL_INTERVAL", 60*time.Second)
 
+	s.allowPrivate = safeurl.AllowPrivateFromEnv()
+	if s.allowPrivate {
+		s.logger.Warn("ALLOW_PRIVATE_UPSTREAMS is on: private and loopback addresses are reachable. Never set this in production.")
+	}
+	if s.httpClient == nil {
+		s.httpClient = s.newHTTPClient()
+	}
+
 	// OAuth token resolution (#75): wire the client when both env vars are set.
 	if s.oauthTokens == nil {
 		mgmtURL := os.Getenv("MGMT_API_URL")
@@ -77,6 +94,38 @@ func (s *apiConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	s.RegisterHTTPHandler("/sample-data/", s.handleSampleData())
 
 	res.Health.SetReady(true)
+	return nil
+}
+
+// newHTTPClient builds the guarded client. A tenant may point the consumer at
+// a public API over http or https, so the scheme is not restricted; the dial
+// refuses blocked addresses either way. Redirects stay on the same host.
+func (s *apiConsumer) newHTTPClient() *http.Client {
+	return safeurl.NewClientWith(s.pollTimeout, safeurl.Options{
+		AllowPrivate:      s.allowPrivate,
+		SameHostRedirects: true,
+	})
+}
+
+// client returns the guarded client. Configure sets it; a consumer that was
+// not configured still gets the guarded one, never a plain http.Client.
+func (s *apiConsumer) client() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return s.newHTTPClient()
+}
+
+// checkURLs refuses a config whose base_url or endpoint URLs the consumer
+// must not call: not an absolute http(s) URL, or a literal private address.
+// A hostname that resolves to one is caught at dial time, not here.
+func (c *APIConsumerConfig) checkURLs(allowPrivate bool) error {
+	for _, ep := range c.Endpoints {
+		u := safeurl.EndpointURL(c.BaseURL, ep.Path, ep.Params)
+		if err := safeurl.CheckRequestURL(u, allowPrivate); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -187,6 +236,13 @@ func (s *apiConsumer) startConnection(ctx context.Context, connectionID, tenantI
 	apiConfig, ok := s.extractAPIConsumerConfig(conn)
 	if !ok {
 		s.logger.Debug("Not an API consumer, ignoring", "connection_id", connectionID)
+		return
+	}
+
+	// The readable early error. The dial check is what enforces it for a
+	// hostname. Refused here, nothing polls and no credential is sent (#639).
+	if err := apiConfig.checkURLs(s.allowPrivate); err != nil {
+		s.logger.Error("API consumer URL refused; not starting", "connection_id", connectionID, "error", err)
 		return
 	}
 

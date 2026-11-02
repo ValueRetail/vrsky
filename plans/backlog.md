@@ -759,8 +759,8 @@ Last updated 2026-10-28.
     publishes those names again. Bound it: compare the snapshot's gen every
     Nth save, or force a snapshot after N changes-only saves or X minutes.
     Found in review of #538.
-110. **The SFTP and cloud-storage consumers never retry a failed
-    after-action.** A file whose `delete` or `move` failed is done, so it
+110. ~~**The SFTP and cloud-storage consumers never retry a failed
+    after-action.**~~ (#640) A file whose `delete` or `move` failed is done, so it
     stays in the folder for good; before #538 a restart published it again
     and retried. Retry the after-action for done names still listed (with
     `delete`/`move` a done name should not be there), with a backoff.
@@ -850,7 +850,7 @@ Last updated 2026-10-28.
     survives in `canvasStore`). Since #552 a non-owner's 403 does this too.
     A refresh that doesn't touch `isLoading` would avoid it; that changes
     the auth store, so PR plus `agent:needs-human`. Found in review of #552.
-125. **`checkAuth` can select a workspace that isn't active.** When the saved
+125. ~~**`checkAuth` can select a workspace that isn't active.**~~ (#637) When the saved
     workspace is gone it falls back to `meData.current_tenant`
     (`ui/src/store/authStore.ts` ~193), the server's `tenants[0]`, without
     checking `status === 'active'`, which `switchTenant` would refuse. Auth
@@ -1009,16 +1009,15 @@ Last updated 2026-10-28.
     old date was applied to a new field silently. The checkpoint state now
     records the field and the watermark is dropped when it changes; a legacy
     row without a field is taken to match. Found in review of #602.
-145. **A failed checkpoint save after a `cursor_field` change re-sends the
-    whole entity.** `saveProgress` in
-    `src/cmd/business-central-consumer/service.go` only logs a failed save.
-    After a field change the stored row still names the old field, so a save
-    that fails, or a context cancelled at shutdown before it runs, makes the
-    next poll drop the watermark and read from the start again. The records
-    are already published, so it costs repeats, not data. Return the error
-    from `saveProgress` and retry it once with a fresh short context, or skip
-    the next field-change reset when the save of the previous one is known
-    to have failed. Found in review of #614.
+145. ~~**A failed checkpoint save after a `cursor_field` change re-sends the
+    whole entity.**~~ (#638) `saveProgress` only logged a failed save. After
+    a field change the stored row still names the old field, so a save that
+    failed, or a context cancelled at shutdown before it ran, made the next
+    poll drop the watermark and read from the start again. `saveProgress`
+    now returns the error and retries once on a fresh context, each attempt
+    bounded; a poll after a field change that still cannot store keeps the
+    checkpoint in memory and stores it before the next read. Found in review
+    of #614.
 146. ~~**A database blip on `/me` still signs users out.**~~ (#634)
     `SessionAuthMiddleware` answered 401 for every `ValidateSession` error,
     database errors included, so the UI (#611) signed users out. Only a
@@ -1034,7 +1033,14 @@ Last updated 2026-10-28.
     Visma, Front Systems, Brightpearl and SAP S/4HANA. Move each to
     `safeurl.NewClient` and `CheckBaseURL`, one connector per PR; the API
     consumer and HTTP producer are the most exposed because their URL is
-    free-form. Found in #616.
+    free-form. Found in #616. API consumer done in #639 (plan
+    `plans/issue-639-api-consumer-safeurl.md`; it allows public http and
+    same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
+    Still open, one PR each: HTTP producer (builds its own client for mTLS),
+    Visma (`base_url`, `token_url`), Front Systems (`base_url`,
+    `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
+    `api_base_url`, `token_url`) and Business Central (`api_base_url`,
+    `token_url`).
 148. **Tenant API-key lookups turn a database error into a 401.**
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treat every `GetTenantByAPIKeyHash` error as "invalid API key", and the
@@ -1042,10 +1048,24 @@ Last updated 2026-10-28.
     cannot be told apart. Add a sentinel, then answer 503 for the rest like
     #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
     rejected key for a database blip. Found in #634.
-149. **`GetMe` hides a failed tenant lookup.** `GetUserTenants` errors become
-    an empty tenant list and a 200, so a database blip right after the
-    session check shows a signed-in user with no workspaces. Answer 503, as
+149. ~~**`GetMe` hides a failed tenant lookup.**~~ (#645) `GetUserTenants` errors
+    became an empty tenant list and a 200, so a database blip right after the
+    session check showed a signed-in user with no workspaces. Now a 503, as
     for the session lookup. Found in #634.
+150. **`TenantMemberMiddleware` turns a failed tenant read into a 404.** After
+    the membership check, any `GetTenantByID` error answers 404 "tenant not
+    found", so a database blip on a tenant route looks like a deleted
+    workspace. Tell `sql.ErrNoRows` (or the repository's not-found error)
+    from the rest and answer 503 for the rest, like #634 and #645. The
+    membership lookup just above it answers 500 for a database error; make
+    that a 503 too. Found in #645.
+151. **Cloud-storage event mode never retries a failed after-action.**
+    `ingestObject` logs it, the message is acked, and the object stays in
+    the bucket; there is no listing in event mode to find it again, and no
+    done set. Poll mode retries since #640. Options: re-fetch nothing and
+    only retry the after-action from a small in-memory queue of keys
+    (lost on restart), or list the prefix now and then in event mode just
+    to sweep leftovers. Found in #640.
 
 ## Human
 

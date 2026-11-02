@@ -333,10 +333,12 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch user's tenants
+	// Fetch user's tenants. A failed lookup is not an empty list: answer 503 so
+	// the UI offers a retry instead of showing a user with no workspaces (#645).
 	tenants, err := h.repo.GetUserTenants(ctx, user.ID)
 	if err != nil {
-		tenants = []*TenantResponse{}
+		writeServiceUnavailable(w, r, "tenant lookup failed", err)
+		return
 	}
 	if tenants == nil {
 		tenants = []*TenantResponse{}

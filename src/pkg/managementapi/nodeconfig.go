@@ -202,6 +202,46 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
+	if configType == "api" && node.Type == "consumer" {
+		errs = append(errs, validateAPIConsumerURLs(node, raw)...)
+	}
+	return errs
+}
+
+// validateAPIConsumerURLs refuses a base_url or endpoint the API consumer would
+// not call (#639): not an absolute http(s) URL, or a literal private address.
+// It builds each URL the way the consumer does (safeurl.EndpointURL, with the
+// "/" endpoint when none is set). http is fine, since public APIs use it; a
+// hostname that resolves to a private address is refused by the consumer's
+// dial, which this cannot see.
+func validateAPIConsumerURLs(node *Node, raw map[string]json.RawMessage) []string {
+	var block struct {
+		BaseURL   string `json:"base_url"`
+		Endpoints []struct {
+			Path   string `json:"path"`
+			Params string `json:"params"`
+		} `json:"endpoints"`
+	}
+	if json.Unmarshal(raw["api"], &block) != nil {
+		return nil
+	}
+	if len(block.Endpoints) == 0 {
+		block.Endpoints = append(block.Endpoints, struct {
+			Path   string `json:"path"`
+			Params string `json:"params"`
+		}{Path: "/"})
+	}
+	allowPrivate := safeurl.AllowPrivateFromEnv()
+	var errs []string
+	seen := map[string]bool{}
+	for _, ep := range block.Endpoints {
+		err := safeurl.CheckRequestURL(safeurl.EndpointURL(block.BaseURL, ep.Path, ep.Params), allowPrivate)
+		if err == nil || seen[err.Error()] {
+			continue
+		}
+		seen[err.Error()] = true
+		errs = append(errs, fmt.Sprintf("node %s (api): %s (served by api-consumer)", node.ID, err))
+	}
 	return errs
 }
 
