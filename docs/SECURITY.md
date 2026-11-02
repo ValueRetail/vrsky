@@ -297,17 +297,27 @@ service. `pkg/safeurl` is the guard: `CheckBaseURL` gives an early error
 CGNAT, multicast and the Azure platform address at dial time, on the address
 actually connected to, so a hostname that resolves to one is refused and DNS
 rebinding cannot swap it in. It ignores proxy environment variables and does
-not follow redirects.
+not follow redirects, unless the connector asks for same-host redirects
+(`NewClientWith`): up to five, never to another host or from https to http.
 
-Only the Sitoo consumer and producer use it so far
-([Sitoo](connectors/sitoo.md#the-base-url)); the management API also checks the
-Sitoo `base_url` when a connection is started. Other connectors that take a
-tenant-supplied host (Visma, Front Systems, the API consumer, the HTTP
-producer) have not been moved to it.
+Used so far:
+
+- The Sitoo consumer and producer ([Sitoo](connectors/sitoo.md#the-base-url)),
+  https only; the management API also checks the Sitoo `base_url` when a
+  connection is started.
+- The API consumer (#639, [REST API polling](connectors/api.md#which-addresses-it-will-call)),
+  which allows public `http` too because its URL is free-form and public APIs
+  use it, follows same-host redirects, and is checked by the management API at
+  start the same way.
+
+Other connectors that take a tenant-supplied host (the HTTP producer, Visma,
+Front Systems, Brightpearl, SAP S/4HANA, Business Central) have not been moved
+to it; they are tracked in #639.
 
 For local development with a mock upstream, the operator can set
-`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow `http` and private
-addresses. A node cannot set it, and it must stay off in production.
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
+`http` for the connectors that are https only). A node cannot set it, and it
+must stay off in production.
 
 ## Threat model
 

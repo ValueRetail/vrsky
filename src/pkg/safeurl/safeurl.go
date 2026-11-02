@@ -123,6 +123,46 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 	return nil
 }
 
+// CheckRequestURL checks a complete request URL for a connector whose target is
+// free-form (the API consumer): http or https, a host, and not a literal
+// blocked IP. Unlike CheckBaseURL it allows http, a query string and userinfo,
+// none of which changes which address is reached; the dial in NewClient is the
+// check on that. allowPrivate is the operator's dev switch.
+func CheckRequestURL(raw string, allowPrivate bool) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("url %q is not an absolute URL", raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url %q must use http or https", raw)
+	}
+	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && BlockedAddr(addr) {
+		return fmt.Errorf("url %q points at a private, loopback or link-local address", raw)
+	}
+	return nil
+}
+
+// EndpointURL builds the URL an endpoint of the API consumer calls: path is
+// used as it is when it is already a full http(s) URL, otherwise it is
+// appended to base_url; params is added as the query string. The consumer and
+// the management API both use it, so what is checked is what is called.
+func EndpointURL(baseURL, path, params string) string {
+	var u string
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		u = path
+	} else {
+		u = strings.TrimSuffix(baseURL, "/") + path
+	}
+	if params != "" {
+		if strings.Contains(u, "?") {
+			u += "&" + params
+		} else {
+			u += "?" + params
+		}
+	}
+	return u
+}
+
 // ErrBlockedAddress is returned (wrapped) when a connection is refused.
 var ErrBlockedAddress = errors.New("connection to a private, loopback or link-local address refused")
 
@@ -148,7 +188,31 @@ func dialControl(allowPrivate bool) func(network, address string, c syscall.RawC
 // into one on the proxy) and does not follow redirects, so a credential is
 // never forwarded to a host the configured URL did not name.
 func NewClient(timeout time.Duration, allowPrivate bool) *http.Client {
-	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: dialControl(allowPrivate)}
+	return NewClientWith(timeout, Options{AllowPrivate: allowPrivate})
+}
+
+// maxRedirects bounds a same-host redirect chain.
+const maxRedirects = 5
+
+// Options tune NewClientWith.
+type Options struct {
+	// AllowPrivate is the operator's dev switch (see AllowPrivateFromEnv).
+	AllowPrivate bool
+	// SameHostRedirects follows up to five redirects that stay on the host
+	// the request started on (an http to https upgrade on the default ports
+	// counts as the same host), never https to http. Any other redirect is an
+	// error. Without it no redirect is followed and the 3xx is returned.
+	SameHostRedirects bool
+}
+
+// NewClientWith is NewClient with options. The dial check applies on every
+// hop whatever the options.
+func NewClientWith(timeout time.Duration, o Options) *http.Client {
+	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: dialControl(o.AllowPrivate)}
+	check := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	if o.SameHostRedirects {
+		check = sameHostRedirect(o.AllowPrivate)
+	}
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
@@ -162,6 +226,45 @@ func NewClient(timeout time.Duration, allowPrivate bool) *http.Client {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
 		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		CheckRedirect: check,
 	}
+}
+
+// sameHostRedirect is the CheckRedirect for Options.SameHostRedirects. Every
+// hop is checked as a request URL again; the dial check covers the address.
+func sameHostRedirect(allowPrivate bool) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) > maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
+		if err := CheckRequestURL(req.URL.String(), allowPrivate); err != nil {
+			return fmt.Errorf("redirect refused: %w", err)
+		}
+		first, prev := via[0].URL, via[len(via)-1].URL
+		if prev.Scheme == "https" && req.URL.Scheme == "http" {
+			return fmt.Errorf("redirect from https to http refused (%s)", req.URL.Redacted())
+		}
+		sameHost := strings.EqualFold(first.Hostname(), req.URL.Hostname())
+		samePort := effectivePort(prev) == effectivePort(req.URL) || isHTTPUpgrade(prev, req.URL)
+		if !sameHost || !samePort {
+			return fmt.Errorf("redirect to another host refused (%s to %s)", first.Host, req.URL.Host)
+		}
+		return nil
+	}
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
+}
+
+// isHTTPUpgrade reports an http to https hop between the default ports.
+func isHTTPUpgrade(from, to *url.URL) bool {
+	return from.Scheme == "http" && to.Scheme == "https" &&
+		effectivePort(from) == "80" && effectivePort(to) == "443"
 }

@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
 // HTTP handler served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT, 9800 in
@@ -41,19 +42,12 @@ func (s *apiConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
-		// Build URL
-		var url string
-		if strings.HasPrefix(req.Path, "http://") || strings.HasPrefix(req.Path, "https://") {
-			url = req.Path
-		} else {
-			url = strings.TrimSuffix(req.BaseURL, "/") + req.Path
-		}
-		if req.Params != "" {
-			if strings.Contains(url, "?") {
-				url += "&" + req.Params
-			} else {
-				url += "?" + req.Params
-			}
+		// The caller is a tenant and the URL is theirs: refuse what the poller
+		// would refuse before anything is sent (#639).
+		url := safeurl.EndpointURL(req.BaseURL, req.Path, req.Params)
+		if err := safeurl.CheckRequestURL(url, s.allowPrivate); err != nil {
+			writeJSON(w, map[string]interface{}{"ok": false, "error": err.Error()})
+			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -68,8 +62,7 @@ func (s *apiConsumer) handleSampleData() http.HandlerFunc {
 		httpReq.Header.Set("Accept", "*/*")
 		applyAuth(httpReq, req.AuthType, req.AuthValue)
 
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Do(httpReq)
+		resp, err := s.client().Do(httpReq)
 		if err != nil {
 			writeJSON(w, map[string]interface{}{"ok": false, "error": err.Error()})
 			return

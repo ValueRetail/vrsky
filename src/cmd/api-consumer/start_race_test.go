@@ -90,6 +90,8 @@ func newSRFixture(t *testing.T) *srFixture {
 		db:              db,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		activePipelines: make(map[string]*activeConn),
+		// The fake API is an httptest server on http://127.0.0.1.
+		allowPrivate: true,
 		publish: func(context.Context, *envelope.Envelope) error {
 			f.published.Add(1)
 			return nil
