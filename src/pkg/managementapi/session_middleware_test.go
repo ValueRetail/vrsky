@@ -132,7 +132,7 @@ func TestSessionAuthMiddleware_ErrorClassification(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Status != http.StatusServiceUnavailable {
 					t.Fatalf("body = %s (%v)", rec.Body.String(), err)
 				}
-				if !strings.Contains(logs.String(), "credential lookup failed") {
+				if !strings.Contains(logs.String(), "session validation failed") {
 					t.Fatalf("the error was not logged server-side: %q", logs.String())
 				}
 			}

@@ -37,12 +37,14 @@ server has turned down is a 401, anything else is a 503.
   rejection, otherwise `slog` the error with method and path (never the key
   or hash) and send 503 `sessionUnavailableMessage`.
 - `rbac.go`, `data_connection_handler.go`: use the classifier.
-- `writeSessionError` logs "session validation failed"; the RBAC path now
-  reaches it for an API-key error too, so the log line becomes "credential
-  lookup failed". The existing test that greps for the old text is updated
-  to the new text (a log-text change, not a weakened assertion).
-- The two repository test doubles that return `ErrTenantNotFound` for an
-  unknown key now return `ErrAPIKeyNotFound`; the classifier accepts only the
+- Logging goes through `writeServiceUnavailable` (added in #647) with the
+  message "api key lookup failed", so an API-key error never logs "session
+  validation failed". The RBAC path wraps its API-key error in a small
+  `apiKeyLookupError` so `RequireTenantRoleFromHeader` can tell it from a
+  session error. `writeSessionError` is untouched.
+- The three repository test doubles (`MockRepository`, `rbacMock`,
+  `sessionStub`) that return `ErrTenantNotFound` or a string for an unknown
+  key now return `ErrAPIKeyNotFound`; the classifier accepts only the
   sentinel, so a double that returns something else gets a 503, the safe side.
 
 ### Left alone, and why
@@ -56,8 +58,7 @@ server has turned down is a 401, anything else is a 503.
 ## Files
 
 - `src/pkg/managementapi/errors.go`, `repo_data_sharing.go`,
-  `tenant_apikey_middleware.go`, `rbac.go`, `session_middleware.go`,
-  `data_connection_handler.go`
+  `tenant_apikey_middleware.go`, `rbac.go`, `data_connection_handler.go`
 - tests: `tenant_apikey_middleware_test.go` (unit),
   `tenant_apikey_middleware_db_test.go` (`testdb`), mock updates in
   `handler_test.go`, `rbac_test.go`, `session_middleware_test.go`

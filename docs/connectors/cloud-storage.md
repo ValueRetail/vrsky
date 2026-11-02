@@ -42,7 +42,9 @@ Config bullets (all under `cloud_storage`):
   after the last `/`), e.g. `*.csv`. Empty means every object. Applies in
   both modes.
 - `after_action` — what to do with an object once it is published: `none`
-  (default, leave it), `delete`, or `move`. Applies in both modes.
+  (default, leave it), `delete`, or `move`. Applies in both modes. In poll
+  mode, switching from `none` to `delete` or `move` also removes the objects
+  already published and still under the prefix.
 - `move_prefix` — where `move` puts the object: it is copied to
   `<move_prefix>/<base name>`, then deleted. Required with `move`; without
   it the consumer doesn't start. Moves keep only the base name, so
@@ -179,9 +181,29 @@ published once, not again at every start (#538).
 - **Deleted, then added again.** An object that a poll finds gone from the
   listing is forgotten; if it comes back it is published again.
 - **Failed after-action.** If `delete` or `move` fails, the object is still
-  counted as published and stays where it is; it is not published or moved
-  again, also after a restart. The failure is in the log (`after-action
-  failed`).
+  counted as published and is not published again. The consumer tries the
+  `delete` or `move` again at later polls: one minute after the failure,
+  then 2, 4, 8 minutes and so on, up to one hour between tries (#640).
+  - Each try that fails logs one warning (`after-action failed`, with
+    `failures` and `retry_in`); a try that works logs `after-action done on
+    retry`.
+  - An object someone else removes in the meantime is dropped from the
+    retries.
+  - After a restart the consumer tries every such object once at its first
+    poll. A poll makes at most 20 tries, before it publishes anything, so a
+    bucket full of leftovers is cleared over a few polls.
+  - The object must still match `file_pattern`; one the pattern no longer
+    selects is left alone.
+  - Only an object that looks as it did when it was published is retried
+    (same size and last-modified time). A replaced one is published again
+    first. An object replaced after the poll listed the bucket, but before
+    its retry a moment later, is deleted or moved unpublished; so is one
+    replaced with the same size and last-modified time, which the done list
+    can't tell from the old one.
+  - A `move` whose copy worked and whose delete failed copies over the same
+    destination again before it deletes.
+  - Event mode has no listing and does not retry: a failed after-action
+    there is only logged and the object stays.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

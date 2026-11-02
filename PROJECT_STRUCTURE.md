@@ -12,4 +12,4 @@ The layout, the commands and where to run them are in
 - [Go](AGENTS.md#go): build, test and lint commands, run from `src/`
 - [Local stack](AGENTS.md#local-stack): `make up-core` and `docker compose`
 - [How a merge deploys](AGENTS.md#how-a-merge-deploys): how images are built
-  in ACR and rolled out
+  and pushed to ACR and rolled out

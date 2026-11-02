@@ -3,7 +3,6 @@ package managementapi
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/ValueRetail/vrsky/pkg/auth"
@@ -67,9 +66,7 @@ func writeAPIKeyError(w http.ResponseWriter, r *http.Request, err error) {
 		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", "invalid API key", nil)
 		return
 	}
-	slog.Default().Error("api key lookup failed",
-		"error", err, "method", r.Method, "path", r.URL.Path)
-	_ = writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", sessionUnavailableMessage, nil)
+	writeServiceUnavailable(w, r, "api key lookup failed", err)
 }
 
 // GetRequestingTenantFromContext retrieves the API-key-authenticated tenant from context.

@@ -115,6 +115,8 @@ type Set struct {
 	present map[string]Stamp
 	// undecodable is the decode error of a row the last Load set aside.
 	undecodable error
+	// retry holds the names whose after-action failed (#640); memory only.
+	retry map[string]retryState
 }
 
 // New returns an empty Set for key and scope. With a nil store nothing is
@@ -178,6 +180,13 @@ func (s *Set) Undecodable() error { return s.undecodable }
 // again.
 func (s *Set) Observe(listing map[string]Stamp) {
 	s.present = listing
+	// A name gone from the listing needs no after-action any more, whoever
+	// removed it (#640).
+	for name := range s.retry {
+		if _, ok := listing[name]; !ok {
+			delete(s.retry, name)
+		}
+	}
 	for name := range s.done {
 		if _, ok := listing[name]; !ok {
 			delete(s.done, name)

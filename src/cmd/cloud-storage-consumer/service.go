@@ -64,6 +64,10 @@ type cloudConsumer struct {
 	// Defaulted to Postgres in Configure; nil keeps it in memory only.
 	checkpoints checkpoint.Store
 
+	// now is the poller's clock for the after-action backoff (#640); nil
+	// means time.Now. Tests set it.
+	now func() time.Time
+
 	active map[string]*activeConn
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
@@ -444,6 +448,12 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 	// Also when a stop cuts the poll short: what it published is saved.
 	defer s.saveDone(ctx, done, logger)
 
+	// The time of this look, for the after-action backoff (#640).
+	listedAt := s.clock()
+	// Retry failed after-actions first, before any publishing, so the time
+	// between the listing and a delete is as short as it can be (#640).
+	s.retryPass(ctx, store, cfg, done, objs, listing, listedAt, logger)
+
 	refreshed := false
 	sinceSave := 0
 	for _, o := range objs {
@@ -469,16 +479,69 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 				continue
 			}
 		}
-		if err := s.ingestObject(ctx, connID, tenantID, store, cfg, o.Key, logger); err != nil {
+		afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, o.Key, logger)
+		if err != nil {
 			logger.Error("ingest failed; will retry next cycle", "key", o.Key, "error", err)
 			continue // leave the object in place
 		}
 		done.Mark(o.Key, stamp)
+		done.RetryDone(o.Key)
+		if afterErr != nil {
+			failures, wait := done.RetryFailed(o.Key, listedAt)
+			logger.Warn("after-action failed; will retry", "key", o.Key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", afterErr)
+		}
 		if sinceSave++; sinceSave >= saveEvery {
 			s.saveDone(ctx, done, logger)
 			sinceSave = 0
 		}
 	}
+}
+
+// clock returns the poller's current time.
+func (s *cloudConsumer) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// retryPass retries the after-action of every object that is done at the
+// stamp the listing shows and still there (#640): published, but its delete
+// or move failed. It runs right after the listing and before anything is
+// published, and does at most doneset.MaxRetriesPerPoll tries. An object
+// replaced since it was published has another stamp, is not done, and is left
+// for the publish loop. An object replaced after the listing, before its turn
+// here, is not noticed (see the plan, Risks).
+func (s *cloudConsumer) retryPass(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, objs []objectstore.Object, listing map[string]doneset.Stamp, now time.Time, logger *slog.Logger) {
+	if cfg.AfterAction != "delete" && cfg.AfterAction != "move" {
+		return
+	}
+	tries := 0
+	for _, o := range objs {
+		if tries >= doneset.MaxRetriesPerPoll || ctx.Err() != nil {
+			return
+		}
+		if !done.Done(o.Key, listing[o.Key]) || !cfg.wantsAfterRetry(o.Key) || !done.RetryDue(o.Key, now) {
+			continue
+		}
+		tries++
+		s.retryAfterAction(ctx, store, cfg, done, o.Key, now, logger)
+	}
+}
+
+// retryAfterAction runs the after-action again for an object that was
+// published and is still in the bucket, without publishing it. A failure
+// backs off, doubling from a minute up to an hour, and logs once per try, not
+// per poll. A move whose copy already landed (the delete is what failed) just
+// copies over the same key again, then deletes.
+func (s *cloudConsumer) retryAfterAction(ctx context.Context, store objectstore.ObjectStore, cfg *cloudConfig, done *doneset.Set, key string, now time.Time, logger *slog.Logger) {
+	if err := s.afterAction(ctx, store, cfg, key); err != nil {
+		failures, wait := done.RetryFailed(key, now)
+		logger.Warn("after-action failed again; will retry", "key", key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", err)
+		return
+	}
+	done.RetryDone(key)
+	logger.Info("after-action done on retry", "key", key, "action", cfg.AfterAction)
 }
 
 // saveDone saves the done set; a failure is retried at the next save.
@@ -579,17 +642,41 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 }
 
 // ingestObject fetches one object, publishes it into the pipeline, and applies
-// the after-action. Shared by poll and event modes.
+// the after-action. Event mode uses it: a failed after-action is only logged,
+// as event mode has no listing to find the object in again (#640, backlog).
 func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) error {
-	size, streamed, err := s.fetchAndPublish(ctx, connID, tenantID, store, cfg, key)
+	afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, key, logger)
 	if err != nil {
 		return err
 	}
-	logger.Info("cloud-storage object ingested", "key", key, "size", size, "streamed", streamed)
-	if err := s.afterAction(ctx, store, cfg, key); err != nil {
-		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", err)
+	if afterErr != nil {
+		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", afterErr)
 	}
 	return nil
+}
+
+// ingest is ingestObject without the log line for a failed after-action: that
+// error is returned apart from err, which is a failure to fetch or publish.
+// Poll mode keeps the object's done entry and retries the after-action later
+// (#640).
+func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) (afterErr, err error) {
+	size, streamed, err := s.fetchAndPublish(ctx, connID, tenantID, store, cfg, key)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("cloud-storage object ingested", "key", key, "size", size, "streamed", streamed)
+	return s.afterAction(ctx, store, cfg, key), nil
+}
+
+// wantsAfterRetry reports whether a done object that is still listed gets its
+// after-action tried again (#640): the action removes the object, and it is
+// one this connection publishes (its name matches file_pattern), so an object
+// the config no longer selects is never touched.
+func (c *cloudConfig) wantsAfterRetry(key string) bool {
+	if c.AfterAction != "delete" && c.AfterAction != "move" {
+		return false
+	}
+	return c.matchesFilePattern(key)
 }
 
 // fetchAndPublish reads one object and publishes it, streaming when this worker

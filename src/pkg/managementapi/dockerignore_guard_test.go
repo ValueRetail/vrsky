@@ -243,7 +243,7 @@ func excludedCopySources(t *testing.T, pm *patternmatcher.PatternMatcher, root s
 // repoRootDockerfiles lists the Dockerfiles built with the repo root as the
 // build context, from the tracked files: ui/Dockerfile and
 // src/cmd/*/Dockerfile (what infrastructure/azure/build-push-acr.sh and the
-// build-images job in build-push.yml pass to `az acr build --file ... .`),
+// build-images job in build-push.yml pass to Buildx `file:` with `context: .`),
 // and every Dockerfile a `build:` in a docker-compose*.yml names. A compose
 // build with another context, or a <Dockerfile>.dockerignore that BuildKit
 // would read instead of the root file, stops the test: this guard only

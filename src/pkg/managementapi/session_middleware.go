@@ -101,7 +101,13 @@ func writeSessionError(w http.ResponseWriter, r *http.Request, err error) {
 		writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
 		return
 	}
-	slog.Default().Error("credential lookup failed",
+	writeServiceUnavailable(w, r, "session validation failed", err)
+}
+
+// writeServiceUnavailable logs err and answers the fixed 503 body. The error
+// text stays in the log and never reaches the client. msg names what failed.
+func writeServiceUnavailable(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	slog.Default().Error(msg,
 		"error", err, "method", r.Method, "path", r.URL.Path)
 	_ = writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", sessionUnavailableMessage, nil)
 }

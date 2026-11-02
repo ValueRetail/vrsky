@@ -52,6 +52,17 @@ func assertNoKeyMaterial(t *testing.T, where, text string) {
 	}
 }
 
+// A failed API-key lookup is logged as that, never as a session failure.
+func assertAPIKeyLog(t *testing.T, status int, logs string) {
+	t.Helper()
+	if status != http.StatusServiceUnavailable {
+		return
+	}
+	if !strings.Contains(logs, "api key lookup failed") || strings.Contains(logs, "session validation failed") {
+		t.Fatalf("log = %q, want 'api key lookup failed' and no 'session validation failed'", logs)
+	}
+}
+
 var errDriverFailure = errors.New("pq: could not connect to 10.0.0.7: connection refused")
 
 var apiKeyLookupCases = []struct {
@@ -196,6 +207,7 @@ func TestRBAC_APIKeyLookupErrors(t *testing.T) {
 			assertNoLeak(t, rec.Body.String())
 			assertNoKeyMaterial(t, "body", rec.Body.String())
 			assertNoKeyMaterial(t, "log", logs.String())
+			assertAPIKeyLog(t, tc.want, logs.String())
 		})
 	}
 }
@@ -227,6 +239,7 @@ func TestCreateConnectionRequest_TargetAPIKeyLookup(t *testing.T) {
 			assertNoLeak(t, rec.Body.String())
 			assertNoKeyMaterial(t, "body", rec.Body.String())
 			assertNoKeyMaterial(t, "log", logs.String())
+			assertAPIKeyLog(t, tc.want, logs.String())
 		})
 	}
 }

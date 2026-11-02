@@ -3,6 +3,10 @@
 # Registry (ACR) using `az acr build` (server-side, linux/amd64 — no local
 # Docker needed, and no Mac-ARM cross-build headaches).
 #
+# This is the by-hand path. The merge-to-main workflow no longer uses it: it
+# builds with Docker Buildx on the GitHub runner and pushes to the same tags
+# (#628, docs/operator/deploy.md), because ACR Tasks bill per build minute.
+#
 # Every Dockerfile uses the REPO ROOT as its build context, so this script
 # must be run from the repo root (it cd's there itself). The root
 # .dockerignore trims the uploaded context to just src/ and ui/.
