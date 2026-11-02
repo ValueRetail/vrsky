@@ -2754,7 +2754,7 @@ encrypted connector credentials. Keep it as tight as access to the database.</p>
 <h3 id="layer-2-the-vrsky-backup-config-secret">Layer 2: the <code>vrsky-backup-config</code> Secret<a class="headerlink" href="#layer-2-the-vrsky-backup-config-secret" title="Permanent link">&para;</a></h3>
 <p>Paste each value at a silent prompt, so none of them lands in your shell
 history or on screen, and never put them in a file in the repo:</p>
-<div class="highlight"><pre><span></span><code><span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>DB_URL<span class="p">;</span><span class="w">  </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># postgres://vrsky:&lt;DB_PASSWORD&gt;@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable</span>
+<div class="highlight"><pre><span></span><code><span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>DB_URL<span class="p">;</span><span class="w">  </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># postgres://vrsky:&lt;DB_PASSWORD&gt;@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=verify-full&amp;sslrootcert=/etc/vrsky/postgres-ca/ca.crt</span>
 <span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>ENC_KEY<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># the platform ENCRYPTION_KEY, 64 hex characters</span>
 <span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>SA_NAME<span class="p">;</span><span class="w"> </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># the storage account name</span>
 <span class="nb">read</span><span class="w"> </span>-rs<span class="w"> </span>SA_KEY<span class="p">;</span><span class="w">  </span><span class="nb">echo</span><span class="w">   </span><span class="c1"># az storage account keys list -g vrsky-prod -n &lt;account&gt; --query "[0].value" -o tsv</span>
@@ -2771,7 +2771,13 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
 </code></pre></div>
 <ul>
 <li><code>BACKUP_DB_URL</code> is the <code>connection_string</code> of the <code>postgres-credentials</code>
-  Secret in <code>vrsky-database</code>.</li>
+  Secret in <code>vrsky-database</code>. Once Postgres has TLS (#453, the operator steps
+  in <code>plans/issue-453-postgres-tls.md</code>) it checks the certificate:
+  <code>sslmode=verify-full</code>, with the CA at
+  <code>/etc/vrsky/postgres-ca/ca.crt</code>, where the CronJob mounts the <code>postgres-ca</code>
+  ConfigMap. <code>CONFIRM=1 infrastructure/azure/postgres-tls.sh urls verify-full</code>
+  changes an existing Secret to that without printing it. Before the rollout,
+  leave <code>sslmode</code> and <code>sslrootcert</code> out of the URL.</li>
 <li><code>ENCRYPTION_KEY</code> is the <code>encryption_key</code> of <code>postgres-credentials</code> in
   <code>vrsky-platform</code>. The two copies must match. If the key is ever rotated,
   update this Secret too.</li>

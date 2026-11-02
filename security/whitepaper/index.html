@@ -2582,8 +2582,11 @@ covers go-live verification (ciphertext-only storage, key backup, TLS to the DB
 where the deployment supports it).</p>
 <p>On the hosted service, the database, message store and object storage keep
 their data on Azure managed disks, which Azure encrypts at rest with
-platform-managed keys. Traffic to the database stays on the cluster's private
-network and isn't TLS-encrypted (see <a href="#transport-gateway">Transport &amp; gateway</a>).</p>
+platform-managed keys. Traffic from the platform's services to its Postgres is
+prepared for TLS verified against a private CA; it is enabled after the
+operator steps in <code>plans/issue-453-postgres-tls.md</code>, and until then it runs
+over the cluster's private network unencrypted (see
+<a href="#transport-gateway">Transport &amp; gateway</a>).</p>
 <h2 id="3-audit-log">3. Audit log<a class="headerlink" href="#3-audit-log" title="Permanent link">&para;</a></h2>
 <p>Privileged and security-relevant actions (secret create/rotate/delete, role
 changes, connection lifecycle, plan changes) are recorded in an append-only,
@@ -2615,8 +2618,12 @@ access logged.</p>
 <h2 id="transport-gateway">Transport &amp; gateway<a class="headerlink" href="#transport-gateway" title="Permanent link">&para;</a></h2>
 <p>The UI and API share an origin. In production, TLS terminates at the
 ingress (ingress-nginx, with a Let's Encrypt certificate from cert-manager);
-inside the cluster, services talk over the cluster's private network without
-TLS. A gateway (Traefik) that applies <strong>per-tenant rate limiting</strong> keyed to
+inside the cluster, service-to-service traffic (NATS, the management API's
+HTTP, MinIO) runs over the cluster's private network without TLS. The
+connections to Postgres are prepared for TLS with the server's certificate and
+name checked (<code>sslmode=verify-full</code>, a private CA that cert-manager manages);
+that is switched on by the operator steps in <code>plans/issue-453-postgres-tls.md</code>,
+and until they have run those connections are unencrypted too. A gateway (Traefik) that applies <strong>per-tenant rate limiting</strong> keyed to
 the subscription plan exists for the Docker Compose stack but is not part of
 the production deployment. Production relies on the limits built into the
 services: plan quotas, failed-attempt limits on login, sign-up and

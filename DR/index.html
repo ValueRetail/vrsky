@@ -2919,6 +2919,14 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
    and the target is left as it was. It requires <code>--target-db-url</code> and
    <code>--confirm</code>, and refuses to overwrite <code>BACKUP_DB_URL</code> unless you also pass
    <code>--allow-source-db</code>.</p>
+<p>The scratch pod is a stock <code>postgres:18-alpine</code> with no TLS, so
+   <code>TARGET</code> says <code>sslmode=disable</code>: this is a throwaway database on the
+   cluster network, not a platform client. <code>restore</code> never connects to
+   <code>BACKUP_DB_URL</code> (it only compares the two), so the <code>sslrootcert</code> path in
+   that Secret, which exists only in pods that mount the <code>postgres-ca</code>
+   ConfigMap, does not matter for this ad-hoc pod. A restore into a database
+   that does have TLS: use <code>sslmode=require</code>, or mount the CA as the backup
+   CronJob does and use <code>verify-full</code>.</p>
 <p>Without the cluster, run the same image anywhere with Docker and the
    environment from the <a href="../operator/backup/#layer-2-the-vrsky-backup-config-secret">Secret</a>,
    with <code>ENCRYPTION_KEY</code> from the password manager. Verify first with the
@@ -2940,7 +2948,12 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>vrsky-database<span cla
 7. <strong>Switch the platform to it.</strong> Update <code>connection_string</code> in the
    <code>postgres-credentials</code> Secrets (<code>vrsky-database</code> and <code>vrsky-platform</code>) to
    the restored database, restart the management-api and the connectors, and
-   check: log in, list connections, open a connection's credentials (they
+   check. If the restored database is a new in-cluster Postgres, it needs the
+   certificate from <code>infrastructure/kubernetes/postgresql/tls.yaml</code> (the
+   StatefulSet manifest mounts it) and the strings keep
+   <code>sslmode=verify-full</code>; if it is somewhere else, set the <code>sslmode</code> that
+   server supports (<code>infrastructure/azure/postgres-tls.sh urls</code> only knows
+   <code>verify-full</code> and <code>disable</code>). Then check: log in, list connections, open a connection's credentials (they
    decrypt only with the matching <code>ENCRYPTION_KEY</code>).</p>
 <p>Clean up a rehearsal with
 <code>kubectl -n vrsky-database delete pod,svc pg-restore-test</code>.</p>

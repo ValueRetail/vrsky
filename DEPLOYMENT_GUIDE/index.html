@@ -3550,7 +3550,11 @@ first.</p>
 <li><code>bash infrastructure/azure/deploy-ui-azure.sh</code>: the UI and the public
    Ingress (below). The file isn't executable, hence <code>bash</code>. It needs <code>jq</code>
    on your machine for the <code>acr-pull</code> copy.</li>
-<li><code>infrastructure/azure/deploy-connectors-azure.sh</code>: the connectors.</li>
+<li><code>infrastructure/azure/deploy-connectors-azure.sh</code>: the connectors.
+   Postgres has TLS from step 1; <code>infrastructure/azure/rotate-secrets.sh</code>
+   (which you run before real data goes in) copies the CA to the client
+   namespaces and builds <code>verify-full</code> strings. Until then the dev Secrets
+   keep plain connections, which the server still accepts.</li>
 <li><code>PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh</code>:
    monitoring and the alert rules. It stops unless the <code>vrsky-monitoring</code>
    namespace and its <code>alerts-webhook-token</code> and <code>grafana-admin</code> Secrets
@@ -3569,7 +3573,10 @@ first.</p>
   <code>infrastructure/kubernetes/ingress/webhooks-ingress.yaml</code> and
   <code>agent-ingress.yaml</code>; read each file's header before applying it.</li>
 </ul>
-<p>None of the Azure scripts installs ingress-nginx or cert-manager. The UI's
+<p>None of the Azure scripts installs ingress-nginx. <code>deploy-vrsky-platform.sh</code>
+(which <code>deploy-azure.sh</code> wraps) installs cert-manager when the cluster has
+none, because Postgres' certificate (#453) needs it, so <strong>a fresh bring-up now
+needs <code>helm</code> on your machine</strong> (<code>install-cert-manager.sh</code> runs it). The UI's
 Ingress assumes both, with a <code>letsencrypt-prod</code> ClusterIssuer
 (<code>infrastructure/kubernetes/ingress/cert-issuers.yaml</code>;
 <code>install-cert-manager.sh</code> next to it installs cert-manager, and
@@ -3759,7 +3766,7 @@ repo applies:</p>
 <tr>
 <td>Transit</td>
 <td>Client traffic to the public host</td>
-<td>TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer <code>letsencrypt-prod</code>, secret <code>vrsky-tls</code>, set on the <code>vrsky</code> Ingress in <code>infrastructure/kubernetes/ui/ingress.yaml</code>). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over <code>http://</code>, Postgres URLs use <code>sslmode=disable</code>, the NATS manifests set no TLS).</td>
+<td>TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer <code>letsencrypt-prod</code>, secret <code>vrsky-tls</code>, set on the <code>vrsky</code> Ingress in <code>infrastructure/kubernetes/ui/ingress.yaml</code>). There is no service mesh: behind the ingress, most traffic between services is unencrypted (the UI proxies to the management API over <code>http://</code>, the NATS manifests set no TLS). Postgres is prepared for TLS (#453): <code>infrastructure/kubernetes/postgresql/tls.yaml</code> issues a certificate from a private CA with cert-manager, and the services are ready to connect with <code>sslmode=verify-full</code>. It is enabled after the operator steps in <code>plans/issue-453-postgres-tls.md</code>; until then those connections are unencrypted.</td>
 </tr>
 </tbody>
 </table>

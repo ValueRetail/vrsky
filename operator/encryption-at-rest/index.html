@@ -2465,11 +2465,20 @@ the <code>ENCRYPTION_KEY</code> environment variable. This checklist keeps that 
 <li>[ ] <strong>Confirm ciphertext, not plaintext, is stored.</strong> Create a secret, then
       check the DB: the value column is <code>aes256:&lt;base64…&gt;</code>, never the raw value.</li>
 <li>[ ] <strong>Use TLS to the databases</strong> where you can (<code>sslmode=require</code> or better).
-      Production on AKS doesn't yet: Postgres runs inside the cluster, the
-      connection strings use <code>sslmode=disable</code>
-      (<code>infrastructure/azure/rotate-secrets.sh</code>), and that traffic crosses the
-      cluster's private network unencrypted. A managed Postgres, or TLS on the
-      in-cluster one, would close this.</li>
+      Production on AKS is prepared for it (#453): the repo has the cert-manager
+      certificate for the in-cluster Postgres, and the services are ready to
+      connect with <code>sslmode=verify-full</code> against its private CA
+      (<code>infrastructure/azure/rotate-secrets.sh</code> builds those strings). TLS is
+      enabled after the operator steps in the plan have run;
+      <code>infrastructure/azure/postgres-tls.sh check</code> shows whether it is on.
+      Until then the connections are plain. Once on, Postgres still accepts
+      plain connections until the optional last step
+      in <a href="https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/postgresql/README.md#tls-453">the Postgres README</a>
+      turns them away. The rollout record is in
+      <a href="https://github.com/ValueRetail/vrsky/blob/main/plans/issue-453-postgres-tls.md">plans/issue-453-postgres-tls.md</a>.
+      Local Docker Compose and the k3d dev Secrets stay on plain connections.
+      Connections that tenants configure to their own databases choose their
+      <code>sslmode</code> themselves.</li>
 <li>[ ] <strong>Back up the key</strong> alongside (but stored separately from) the database
       backup — a DB restore is useless without the key. See
       <a href="../backup/">Backup &amp; restore</a>.</li>
