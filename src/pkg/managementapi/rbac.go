@@ -54,7 +54,11 @@ func RequireTenantRoleFromHeader(repo Repository, minRole string) func(http.Hand
 				return
 			}
 
-			ctx, role, ok := resolvePrincipalRole(r.Context(), r, repo, tenantID)
+			ctx, role, ok, err := resolvePrincipalRole(r.Context(), r, repo, tenantID)
+			if err != nil {
+				writeSessionError(w, r, err)
+				return
+			}
 			if !ok {
 				_ = writeError(w, http.StatusUnauthorized, "Unauthorized",
 					"valid session or API key required", nil)
@@ -81,32 +85,40 @@ func RequireTenantRoleFromHeader(repo Repository, minRole string) func(http.Hand
 //     requested tenant.
 //
 // Returning ok=false means the request is anonymous and should be
-// rejected with 401.
-func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository, tenantID string) (context.Context, string, bool) {
+// rejected with 401. A non-nil error means the lookup itself failed (the
+// database, not the credential), and the caller answers 503 through
+// writeSessionError; the request is not let through.
+func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository, tenantID string) (context.Context, string, bool, error) {
 	token := extractBearerTokenFromHeader(r)
 	if token == "" {
-		return ctx, "", false
+		return ctx, "", false, nil
 	}
 	hashed := auth.HashToken(token)
 
 	// 1. Session?
 	session, user, err := repo.ValidateSession(ctx, hashed)
 	if err == nil && user != nil && session != nil {
-		role, _ := repo.GetUserTenantRole(ctx, user.ID, tenantID)
+		role, err := repo.GetUserTenantRole(ctx, user.ID, tenantID)
+		if err != nil {
+			return ctx, "", false, err
+		}
 		if role == "" {
-			return ctx, "", false
+			return ctx, "", false, nil
 		}
 		ctx = context.WithValue(ctx, UserContextKey, user)
 		ctx = context.WithValue(ctx, SessionContextKey, session)
-		return withPrincipalRole(ctx, role), role, true
+		return withPrincipalRole(ctx, role), role, true, nil
+	}
+	if err != nil && !isSessionRejection(err) {
+		return ctx, "", false, err
 	}
 
 	// 2. Tenant API key?
 	tenant, err := repo.GetTenantByAPIKeyHash(ctx, hashed)
 	if err == nil && tenant != nil && tenant.ID == tenantID && tenant.Status == "active" {
 		ctx = context.WithValue(ctx, requestingTenantKey, tenant)
-		return withPrincipalRole(ctx, "admin"), "admin", true
+		return withPrincipalRole(ctx, "admin"), "admin", true, nil
 	}
 
-	return ctx, "", false
+	return ctx, "", false, nil
 }

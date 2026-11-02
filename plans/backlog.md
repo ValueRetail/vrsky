@@ -1019,13 +1019,13 @@ Last updated 2026-10-28.
     from `saveProgress` and retry it once with a fresh short context, or skip
     the next field-change reset when the save of the previous one is known
     to have failed. Found in review of #614.
-146. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
-    (`src/pkg/managementapi/session_middleware.go`) turns every
-    `ValidateSession` error, DB errors included, into a 401 "invalid or
-    expired session", so a transient database error looks like a rejected
-    session and the UI (#611) signs the user out. Tell "not found or
-    expired" apart from other errors and answer 5xx for the latter. Found in
-    review of #613.
+146. ~~**A database blip on `/me` still signs users out.**~~ (#634)
+    `SessionAuthMiddleware` answered 401 for every `ValidateSession` error,
+    database errors included, so the UI (#611) signed users out. Only a
+    rejected session (unknown, revoked, expired, user gone) is a 401 now;
+    anything else is a 503 with a fixed body and a server-side log line.
+    `GetMe`, `ChangePassword`, `DeleteAccount` and the tenant-header RBAC
+    check classify the same way. Found in review of #613.
 147. **Other connectors still call a tenant-supplied host unchecked.** #616
     added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
     link-local and metadata addresses) for Sitoo. The same hole is open in
@@ -1035,6 +1035,17 @@ Last updated 2026-10-28.
     `safeurl.NewClient` and `CheckBaseURL`, one connector per PR; the API
     consumer and HTTP producer are the most exposed because their URL is
     free-form. Found in #616.
+148. **Tenant API-key lookups turn a database error into a 401.**
+    `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
+    treat every `GetTenantByAPIKeyHash` error as "invalid API key", and the
+    repository returns a plain string error for "not found", so the two
+    cannot be told apart. Add a sentinel, then answer 503 for the rest like
+    #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
+    rejected key for a database blip. Found in #634.
+149. **`GetMe` hides a failed tenant lookup.** `GetUserTenants` errors become
+    an empty tenant list and a 200, so a database blip right after the
+    session check shows a signed-in user with no workspaces. Answer 503, as
+    for the session lookup. Found in #634.
 
 ## Human
 

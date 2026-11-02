@@ -329,7 +329,7 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	// Get session and user from context (set by SessionMiddleware)
 	user, session, err := h.getAuthenticatedUser(ctx, r)
 	if err != nil {
-		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error(), nil)
+		writeSessionError(w, r, err)
 		return
 	}
 
@@ -513,7 +513,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Get authenticated user
 	user, _, err := h.getAuthenticatedUser(ctx, r)
 	if err != nil {
-		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error(), nil)
+		writeSessionError(w, r, err)
 		return
 	}
 
@@ -578,7 +578,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	// Get authenticated user
 	user, _, err := h.getAuthenticatedUser(ctx, r)
 	if err != nil {
-		_ = writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error(), nil)
+		writeSessionError(w, r, err)
 		return
 	}
 
@@ -611,7 +611,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getAuthenticatedUser(ctx context.Context, r *http.Request) (*User, *Session, error) {
 	token := extractBearerTokenFromHeader(r)
 	if token == "" {
-		return nil, nil, errors.New("no session token provided")
+		return nil, nil, errNoSessionToken
 	}
 
 	hashedToken := auth.HashToken(token)
