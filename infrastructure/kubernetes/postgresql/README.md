@@ -81,6 +81,115 @@ ConfigMap). To move data off the existing single-node StatefulSet, dump/restore
 with the `vrsky-cli` backup/restore tooling (#86) into the new cluster before
 cutting `connection_string` over.
 
+## TLS (#453)
+
+The connections from the platform to this Postgres are encrypted and the
+server is checked: clients use `sslmode=verify-full`. Plan, client inventory
+and rollout record: [plans/issue-453-postgres-tls.md](../../../plans/issue-453-postgres-tls.md).
+
+| Piece | Where |
+| --- | --- |
+| Private CA and server certificate (cert-manager `Issuer`s and `Certificate`s in `vrsky-database`) | `tls.yaml` |
+| `ssl = on`, certificate and key copied by an init container into memory with mode 0600 for uid 70 | `statefulset.yaml` |
+| The public CA, as ConfigMap `postgres-ca` in `vrsky-platform` and `vrsky-database`, mounted at `/etc/vrsky/postgres-ca` by every client | `infrastructure/azure/postgres-tls.sh ca-sync`; the mounts are in each client's manifest |
+| Connection strings: `?sslmode=verify-full&sslrootcert=/etc/vrsky/postgres-ca/ca.crt` | built by `infrastructure/azure/rotate-secrets.sh`, changed in place by `postgres-tls.sh urls` |
+
+Why these choices:
+
+- **cert-manager, not a managed Postgres.** It is already in the cluster for
+  the ingress. The CA key stays in the namespace; only the public `ca.crt`
+  leaves it.
+- **The CA is copied, not issued per namespace.** A Secret cannot be read
+  across namespaces and trust-manager is not installed. `ca-sync` copies the
+  public certificate into one ConfigMap per client namespace. It is public,
+  so nothing secret moves. The ConfigMap volume is `optional`, so a pod starts
+  before it exists.
+- **An init container instead of `fsGroup`.** Postgres refuses a key that
+  others can read, and a Secret volume is root's. `fsGroup` would fix the key
+  but also make the data directory group-writable, which Postgres refuses to
+  start on. The init container copies the pair into a memory volume,
+  `chmod 0600`, `chown 70:70`; the key is never written to a disk.
+- **Renewal is a restart.** The certificate lasts a year and cert-manager
+  renews it 90 days before the end. The copy is made when the pod starts, so
+  the new certificate is served from the next start. Production's pods all
+  restart at every cluster start ([cost-parking](../../../docs/operator/cost-parking.md)),
+  so that happens within a working day or two. A reload sidecar would pick
+  it up without a restart, but it is another container to get wrong for a
+  restart that happens anyway. If the cluster ever runs 90 days without a
+  start, `postgres-tls.sh check` says so ("Postgres has an OLDER
+  certificate") and a `kubectl rollout restart statefulset/postgresql -n
+  vrsky-database` fixes it (about a minute without a database).
+- **Plain connections still work** (`pg_hba.conf` is the image's default, a
+  `host` rule), which is what makes the rollout safe in any order.
+
+### Rolling out (production)
+
+The deploy job never applies this directory; a human runs
+`infrastructure/azure/postgres-tls.sh`, one step at a time. The order, with
+the check after each step, is in the plan. In short: server TLS on, copy the
+CA, merge (the deploy job rolls the connectors and the backup job with the CA
+mounted), patch the three core Deployments, prove `verify-full` with the
+canary pod, switch the strings, restart, check that no network connection is
+without TLS.
+
+```bash
+infrastructure/azure/postgres-tls.sh check      # read-only; safe any time
+```
+
+`check` ends with the connection counts, which are also this query:
+
+```sql
+SELECT s.ssl, count(*) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid)
+WHERE a.backend_type = 'client backend' AND a.client_addr IS NOT NULL
+GROUP BY s.ssl;
+```
+
+### Connecting by hand
+
+`kubectl port-forward` and `kubectl exec` reach the server as `localhost`,
+which the certificate lists, so `verify-full` works with the CA from the
+Secret (public data):
+
+```bash
+kubectl get secret postgresql-tls -n vrsky-database -o 'jsonpath={.data.ca\.crt}' | base64 -d > /tmp/vrsky-pg-ca.crt
+kubectl port-forward -n vrsky-database svc/postgresql 5432:5432 &
+psql "host=localhost port=5432 user=vrsky dbname=vrsky sslmode=verify-full sslrootcert=/tmp/vrsky-pg-ca.crt"
+```
+
+### Rollback
+
+Set the strings back and restart. Nothing else needs undoing: the server
+accepts both.
+
+```bash
+infrastructure/azure/postgres-tls.sh urls disable
+infrastructure/azure/postgres-tls.sh restart
+```
+
+Turning TLS off on the server as well is never needed for a client rollback.
+If you want it anyway, revert the StatefulSet change in git and run
+`postgres-tls.sh server` from that commit: it applies whatever the file says
+(with the production storage class) and restarts Postgres.
+
+### Optional last step: refuse plain connections
+
+Once `check` shows every connection with `ssl=true` for a few days, make
+Postgres turn away the rest. The image's last `pg_hba.conf` rule is
+`host all all all scram-sha-256`; making it `hostssl` keeps the in-pod
+`trust` rules (probes, `kubectl exec psql`) and refuses a client from another
+pod that does not use TLS. This edits the file on the volume, so it is not
+in the manifests (backlog item 150 would move it there):
+
+```bash
+kubectl exec -n vrsky-database postgresql-0 -c postgresql -- sh -c \
+  "sed -i 's/^host all all all /hostssl all all all /' \$PGDATA/pg_hba.conf && psql -U vrsky -d vrsky -c 'SELECT pg_reload_conf()'"
+kubectl exec -n vrsky-database postgresql-0 -c postgresql -- psql -U vrsky -d vrsky -tAc \
+  "SELECT type, address FROM pg_hba_file_rules WHERE address = 'all'"   # hostssl
+```
+
+Undo with the opposite `sed` (`hostssl` to `host`) and another reload. A
+snapshot restore or a new empty volume starts with `host` again.
+
 ## Components
 
 ### Files
@@ -92,6 +201,7 @@ cutting `connection_string` over.
 5. **init-configmap.yaml** - Schema initialization script
 6. **statefulset.yaml** - PostgreSQL StatefulSet
 7. **service.yaml** - ClusterIP service
+8. **tls.yaml** - cert-manager `Issuer`s and `Certificate`s for the server's TLS (#453)
 
 ### Database Schema
 

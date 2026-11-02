@@ -16,11 +16,18 @@ the `ENCRYPTION_KEY` environment variable. This checklist keeps that safe.
 - [ ] **Confirm ciphertext, not plaintext, is stored.** Create a secret, then
       check the DB: the value column is `aes256:<base64…>`, never the raw value.
 - [ ] **Use TLS to the databases** where you can (`sslmode=require` or better).
-      Production on AKS doesn't yet: Postgres runs inside the cluster, the
-      connection strings use `sslmode=disable`
-      (`infrastructure/azure/rotate-secrets.sh`), and that traffic crosses the
-      cluster's private network unencrypted. A managed Postgres, or TLS on the
-      in-cluster one, would close this.
+      Production on AKS does (#453): the in-cluster Postgres serves a
+      certificate from a private CA that cert-manager issues, and every
+      platform service connects with `sslmode=verify-full` against that CA
+      (`infrastructure/azure/rotate-secrets.sh` builds the strings,
+      `infrastructure/azure/postgres-tls.sh check` shows the state).
+      Postgres still accepts plain connections until the optional last step
+      in [the Postgres README](https://github.com/ValueRetail/vrsky/blob/main/infrastructure/kubernetes/postgresql/README.md#tls-453)
+      turns them away. The rollout record is in
+      [plans/issue-453-postgres-tls.md](https://github.com/ValueRetail/vrsky/blob/main/plans/issue-453-postgres-tls.md).
+      Local Docker Compose and the k3d dev Secrets stay on plain connections.
+      Connections that tenants configure to their own databases choose their
+      `sslmode` themselves.
 - [ ] **Back up the key** alongside (but stored separately from) the database
       backup — a DB restore is useless without the key. See
       [Backup & restore](backup.md).

@@ -100,7 +100,7 @@ Paste each value at a silent prompt, so none of them lands in your shell
 history or on screen, and never put them in a file in the repo:
 
 ```bash
-read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable
+read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=verify-full&sslrootcert=/etc/vrsky/postgres-ca/ca.crt
 read -rs ENC_KEY; echo   # the platform ENCRYPTION_KEY, 64 hex characters
 read -rs SA_NAME; echo   # the storage account name
 read -rs SA_KEY;  echo   # az storage account keys list -g vrsky-prod -n <account> --query "[0].value" -o tsv
@@ -117,7 +117,11 @@ unset DB_URL ENC_KEY SA_NAME SA_KEY
 ```
 
 - `BACKUP_DB_URL` is the `connection_string` of the `postgres-credentials`
-  Secret in `vrsky-database`.
+  Secret in `vrsky-database`. It checks Postgres' certificate (#453):
+  `sslmode=verify-full`, with the CA at
+  `/etc/vrsky/postgres-ca/ca.crt`, where the CronJob mounts the `postgres-ca`
+  ConfigMap. `infrastructure/azure/postgres-tls.sh urls verify-full` changes
+  an existing Secret to that without printing it.
 - `ENCRYPTION_KEY` is the `encryption_key` of `postgres-credentials` in
   `vrsky-platform`. The two copies must match. If the key is ever rotated,
   update this Secret too.

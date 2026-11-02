@@ -370,6 +370,15 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
    `--confirm`, and refuses to overwrite `BACKUP_DB_URL` unless you also pass
    `--allow-source-db`.
 
+   The scratch pod is a stock `postgres:18-alpine` with no TLS, so
+   `TARGET` says `sslmode=disable`: this is a throwaway database on the
+   cluster network, not a platform client. `restore` never connects to
+   `BACKUP_DB_URL` (it only compares the two), so the `sslrootcert` path in
+   that Secret, which exists only in pods that mount the `postgres-ca`
+   ConfigMap, does not matter for this ad-hoc pod. A restore into a database
+   that does have TLS: use `sslmode=require`, or mount the CA as the backup
+   CronJob does and use `verify-full`.
+
    Without the cluster, run the same image anywhere with Docker and the
    environment from the [Secret](operator/backup.md#layer-2-the-vrsky-backup-config-secret),
    with `ENCRYPTION_KEY` from the password manager. Verify first with the
@@ -392,7 +401,12 @@ need the **same `ENCRYPTION_KEY`** as when the dump was taken.
 7. **Switch the platform to it.** Update `connection_string` in the
    `postgres-credentials` Secrets (`vrsky-database` and `vrsky-platform`) to
    the restored database, restart the management-api and the connectors, and
-   check: log in, list connections, open a connection's credentials (they
+   check. If the restored database is a new in-cluster Postgres, it needs the
+   certificate from `infrastructure/kubernetes/postgresql/tls.yaml` (the
+   StatefulSet manifest mounts it) and the strings keep
+   `sslmode=verify-full`; if it is somewhere else, set the `sslmode` that
+   server supports (`infrastructure/azure/postgres-tls.sh urls` only knows
+   `verify-full` and `disable`). Then check: log in, list connections, open a connection's credentials (they
    decrypt only with the matching `ENCRYPTION_KEY`).
 
 Clean up a rehearsal with

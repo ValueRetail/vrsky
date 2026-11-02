@@ -1,0 +1,97 @@
+# TLS for the management Postgres (#453).
+#
+# A private CA that lives only in this namespace, and a server certificate
+# for the Postgres Service. cert-manager is already in the cluster for the
+# ingress (infrastructure/kubernetes/ingress/install-cert-manager.sh).
+#
+#   postgresql-selfsigned  (Issuer, selfSigned)
+#     -> postgresql-ca      (Certificate, isCA; Secret postgresql-ca)
+#       -> postgresql-ca    (Issuer, ca: signs with that Secret)
+#         -> postgresql-tls (Certificate, server; Secret postgresql-tls)
+#
+# statefulset.yaml mounts postgresql-tls (tls.crt, tls.key). Clients verify
+# the server with the CA, which is `ca.crt` in the postgresql-tls Secret. The
+# CA key never leaves this namespace. Only the public ca.crt is copied to the
+# client namespaces, as the ConfigMap `postgres-ca`, by
+# infrastructure/azure/postgres-tls.sh ca-sync.
+#
+# Applied by hand in production (the deploy job never applies this directory):
+# infrastructure/azure/postgres-tls.sh server. The k3d path applies it from
+# deploy-vrsky-platform.sh.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: postgresql-selfsigned
+  namespace: vrsky-database
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgresql-ca
+  namespace: vrsky-database
+spec:
+  isCA: true
+  commonName: vrsky-postgresql-ca
+  secretName: postgresql-ca
+  # Ten years. The ConfigMap copies in the client namespaces hold the CA
+  # certificate itself, so a CA that renews (one year before the end) must be
+  # copied again with `postgres-tls.sh ca-sync` within that year.
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    # Keep the CA key across renewals, so a client that still holds the old CA
+    # certificate keeps verifying until that certificate itself expires.
+    rotationPolicy: Never
+  issuerRef:
+    name: postgresql-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: postgresql-ca
+  namespace: vrsky-database
+spec:
+  ca:
+    secretName: postgresql-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgresql-tls
+  namespace: vrsky-database
+spec:
+  secretName: postgresql-tls
+  commonName: postgresql.vrsky-database.svc
+  # One year, renewed 90 days before the end. Renewal replaces the Secret;
+  # Postgres copies it at pod start (see statefulset.yaml), so the new
+  # certificate is served from the next restart. The pod restarts at every
+  # cluster start (docs/operator/cost-parking.md), well inside 90 days.
+  duration: 8760h
+  renewBefore: 2160h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  # The names clients use (all connection strings say
+  # postgresql.vrsky-database.svc.cluster.local), the shorter forms of the
+  # same Service, and localhost for `kubectl port-forward` and `kubectl exec`.
+  dnsNames:
+    - postgresql
+    - postgresql.vrsky-database
+    - postgresql.vrsky-database.svc
+    - postgresql.vrsky-database.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: postgresql-ca
+    kind: Issuer

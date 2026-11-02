@@ -70,6 +70,15 @@ spec:
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+                # The CA that signed Postgres' certificate (#453), the public
+                # ca.crt that infrastructure/azure/postgres-tls.sh ca-sync
+                # copies into this namespace. BACKUP_DB_URL (in
+                # vrsky-backup-config, made by a human) names it with
+                # sslrootcert=/etc/vrsky/postgres-ca/ca.crt. Optional, so the
+                # Job starts before the ConfigMap exists.
+                - name: postgres-ca
+                  mountPath: /etc/vrsky/postgres-ca
+                  readOnly: true
               resources:
                 requests:
                   cpu: "100m"
@@ -81,3 +90,7 @@ spec:
             - name: tmp
               emptyDir:
                 sizeLimit: 256Mi
+            - name: postgres-ca
+              configMap:
+                name: postgres-ca
+                optional: true

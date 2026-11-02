@@ -96,6 +96,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -196,6 +205,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -296,6 +314,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -396,6 +423,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -496,6 +532,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -596,6 +641,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -703,6 +757,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -806,6 +869,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -909,6 +981,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -1012,6 +1093,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -1115,6 +1205,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -1218,6 +1317,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -1322,6 +1430,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -1422,6 +1539,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -1532,9 +1658,16 @@ spec:
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
         volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
         - name: files
           mountPath: /data
       volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
       - name: files
         persistentVolumeClaim:
           claimName: vrsky-files
@@ -1638,6 +1771,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -1740,6 +1882,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -1842,6 +1993,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -1942,6 +2102,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2042,6 +2211,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2150,6 +2328,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2245,6 +2432,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -2330,6 +2526,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2438,6 +2643,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2538,6 +2752,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -2648,9 +2871,16 @@ spec:
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
         volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
         - name: files
           mountPath: /data
       volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
       - name: files
         persistentVolumeClaim:
           claimName: vrsky-files
@@ -2761,6 +2991,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -2864,6 +3103,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -2967,6 +3215,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -3070,6 +3327,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -3181,6 +3447,15 @@ spec:
             # cap (PAYLOAD_REHYDRATE_MAX_BYTES, 128 MiB default). A 128Mi limit
             # OOM-kills the pod before the cap can reject anything.
             memory: 512Mi
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

@@ -10,6 +10,13 @@
 # vrsky-mgmt-backup CronJob's logical dumps (docs/DR.md, which says how to
 # check both run). cnpg-cluster.yaml is a CloudNativePG alternative that
 # nothing deploys today; moving to it needs its own backup (see README.md).
+#
+# TLS (#453): ssl = on, with the certificate cert-manager issues in tls.yaml.
+# Postgres still accepts plain connections as well (pg_hba.conf is unchanged),
+# so a client on sslmode=disable keeps working while the clients move over;
+# README.md has the order and the later step that refuses plain ones. The
+# production StatefulSet is applied by hand
+# (infrastructure/azure/postgres-tls.sh server), not by the deploy job.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -30,9 +37,59 @@ spec:
         app: postgresql
         component: database
     spec:
+      initContainers:
+        # Postgres refuses a private key that others can read, and a Secret
+        # volume is root's. So copy the pair into memory-backed storage owned
+        # by the postgres user (uid/gid 70 in the Alpine image) with mode
+        # 0600. fsGroup would do it for the key, but it would also change the
+        # modes under the data directory, and Postgres rejects a group-writable
+        # one. The copy is made at every pod start, which is how a renewed
+        # certificate gets picked up (see tls.yaml). Order matters: chmod
+        # before chown, because after chown root is no longer the owner and
+        # the container has no CAP_FOWNER.
+        - name: tls-perms
+          image: postgres:18-alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              cp /tls-src/tls.crt /tls/tls.crt
+              cp /tls-src/tls.key /tls/tls.key
+              chmod 0644 /tls/tls.crt
+              chmod 0600 /tls/tls.key
+              chown 70:70 /tls/tls.crt /tls/tls.key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          volumeMounts:
+            - name: tls-src
+              mountPath: /tls-src
+              readOnly: true
+            - name: tls
+              mountPath: /tls
       containers:
         - name: postgresql
           image: postgres:18-alpine
+          # The image passes arguments that start with a dash on to `postgres`.
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgresql/tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/postgresql/tls/tls.key
+            - -c
+            - ssl_min_protocol_version=TLSv1.2
           ports:
             - containerPort: 5432
               name: postgres
@@ -62,6 +119,9 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: tls
+              mountPath: /etc/postgresql/tls
+              readOnly: true
             # NOTE: init-schema.sql is intentionally NOT mounted. golang-migrate
             # (management-api entrypoint) is the single source of truth for the
             # schema; loading the legacy init-schema.sql here created the tables
@@ -99,7 +159,19 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
 
-      volumes: []
+      volumes:
+        # The certificate and key cert-manager issued (tls.yaml). Read by the
+        # init container only.
+        - name: tls-src
+          secret:
+            secretName: postgresql-tls
+            defaultMode: 0444
+        # The copy Postgres reads. In memory, so the key is never written to
+        # a disk.
+        - name: tls
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
 
   volumeClaimTemplates:
     - metadata:

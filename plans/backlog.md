@@ -374,7 +374,11 @@ Last updated 2026-10-28.
     cert-manager certificate, `ssl = on`, `sslmode=verify-full` in the
     Secrets) or move to a managed Postgres. Then drop the "doesn't yet" notes
     in `docs/operator/encryption-at-rest.md` and the whitepaper. Manifests
-    and secrets: PR plus `agent:needs-human`. Found in #407.
+    and secrets: PR plus `agent:needs-human`. Found in #407. Built in #453:
+    cert-manager CA and certificate, `ssl = on`, `verify-full` strings, the
+    docs and `infrastructure/azure/postgres-tls.sh`. Strike this line when a
+    human has run the rollout in `plans/issue-453-postgres-tls.md` and
+    `postgres-tls.sh check` is clean.
 59. **Inbound webhook mTLS can't reach production.** No manifest sets
     `WORKER_MTLS_PORT`, and the webhook Ingress terminates TLS, so the
     worker never sees a client certificate. Wiring it up needs the TLS port
@@ -1046,6 +1050,16 @@ Last updated 2026-10-28.
     an empty tenant list and a 200, so a database blip right after the
     session check shows a signed-in user with no workspaces. Answer 503, as
     for the session lookup. Found in #634.
+
+150. **Postgres TLS: the loose ends of #453.** (1) Refusing plain
+    connections is an edit of `pg_hba.conf` on the volume
+    (`infrastructure/kubernetes/postgresql/README.md`, "Optional last step").
+    Move it into the manifests with `hba_file` pointing at a ConfigMap, after
+    the rollout has shown every client on TLS. (2) Nothing alerts on the
+    server certificate: cert-manager's metrics are not scraped. Add a
+    PodMonitor and a rule on `certmanager_certificate_expiration_timestamp_seconds`
+    for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
+    touches workflows). Found in #453.
 
 ## Human
 

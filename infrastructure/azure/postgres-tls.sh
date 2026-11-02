@@ -1,0 +1,392 @@
+#!/usr/bin/env bash
+# postgres-tls.sh — TLS between the services and the in-cluster Postgres (#453).
+#
+# Run by a human against production, one step at a time, in the order in
+# plans/issue-453-postgres-tls.md. The deploy job never runs it. Nothing here
+# prints a connection string or any other secret: connection strings are read
+# into shell variables, changed there, and written back through stdin.
+#
+#   check              read-only: what is on, what is missing, who still talks
+#                      to Postgres without TLS
+#   server             apply tls.yaml and statefulset.yaml: Postgres gets a
+#                      certificate and ssl = on. Restarts Postgres (about a
+#                      minute with no database). It still accepts plain
+#                      connections afterwards.
+#   ca-sync            copy the PUBLIC ca.crt into the ConfigMap postgres-ca in
+#                      vrsky-platform and vrsky-database. Run again whenever the
+#                      CA certificate is renewed (every nine years).
+#   clients            add the postgres-ca volume to the three core Deployments
+#                      the deploy job only updates by image (management-api,
+#                      data-filter, data-converter). The connectors and the
+#                      backup CronJob get theirs from the deploy job.
+#   urls <mode>        set sslmode in the connection strings of the Secrets
+#                      postgres-credentials (vrsky-platform and vrsky-database)
+#                      and vrsky-backup-config (BACKUP_DB_URL). Mode is
+#                      verify-full (with sslrootcert) or disable (the rollback).
+#                      Running pods keep the old value until `restart`.
+#   canary             run one throwaway pod in vrsky-platform that connects with
+#                      sslmode=verify-full and the mounted CA, using the live
+#                      Secret's host, user and password, and prints whether the
+#                      session used TLS. Do this before `urls verify-full`.
+#   restart            roll the Deployments that read DATABASE_URL, so they pick
+#                      up the Secret.
+#
+# DRY_RUN=1 prints what a mutating step would do and changes nothing.
+set -euo pipefail
+set +x
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+DB_NS=vrsky-database
+PLATFORM_NS=vrsky-platform
+PG_POD=postgresql-0
+TLS_SECRET=postgresql-tls
+CA_CONFIGMAP=postgres-ca
+# Where every client pod mounts the CA (the postgres-ca volume).
+CA_PATH=/etc/vrsky/postgres-ca/ca.crt
+STORAGE_CLASS="${STORAGE_CLASS:-managed-csi}"
+DRY_RUN="${DRY_RUN:-}"
+
+CORE_DEPLOYS="vrsky-management-api vrsky-data-filter vrsky-data-converter"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+say() { echo ">>> $*"; }
+
+# act <description> <command…> — run a mutating command unless DRY_RUN is set.
+act() {
+  local what="$1"; shift
+  if [ -n "$DRY_RUN" ]; then echo "    would: $what"; return 0; fi
+  "$@"
+}
+
+# retarget_url <url> <verify-full|disable> — the URL with its sslmode (and
+# sslrootcert) replaced; every other query parameter stays. Prints the result
+# on stdout, so call it only into a variable.
+retarget_url() {
+  local url="$1" mode="$2" base query="" part out=""
+  base="${url%%\?*}"
+  if [ "$base" != "$url" ]; then query="${url#*\?}"; fi
+  local oldifs="$IFS"; IFS='&'
+  set -f
+  # shellcheck disable=SC2086
+  set -- $query
+  set +f
+  IFS="$oldifs"
+  for part in "$@"; do
+    case "$part" in
+      sslmode=* | sslrootcert=* | "") ;;
+      *) out="${out}${part}&" ;;
+    esac
+  done
+  case "$mode" in
+    verify-full) out="${out}sslmode=verify-full&sslrootcert=${CA_PATH}" ;;
+    disable) out="${out}sslmode=disable" ;;
+    *) die "unknown mode '$mode' (verify-full or disable)" ;;
+  esac
+  printf '%s?%s' "$base" "$out"
+}
+
+# url_sslmode <url> — the sslmode value, or "none". Safe to print.
+url_sslmode() {
+  local m
+  m="$(printf '%s' "$1" | sed -n 's/.*[?&]sslmode=\([A-Za-z-]*\).*/\1/p')"
+  printf '%s' "${m:-none}"
+}
+
+secret_value() { # ns secret key — empty when the Secret or key is missing
+  kubectl get secret "$2" -n "$1" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null || true
+}
+
+# set_conn <ns> <secret> <key> <mode> — change sslmode inside one Secret value.
+set_conn() {
+  local ns="$1" name="$2" key="$3" mode="$4" cur new b64
+  cur="$(secret_value "$ns" "$name" "$key")"
+  if [ -z "$cur" ]; then
+    echo "    $ns/$name has no $key — skipped"
+    return 0
+  fi
+  new="$(retarget_url "$cur" "$mode")"
+  if [ "$new" = "$cur" ]; then
+    echo "    $ns/$name $key already $mode"
+    return 0
+  fi
+  if [ -n "$DRY_RUN" ]; then
+    echo "    would: set sslmode=$mode in $ns/$name $key (now $(url_sslmode "$cur"))"
+    return 0
+  fi
+  b64="$(printf '%s' "$new" | base64 | tr -d '\n')"
+  printf '{"data":{"%s":"%s"}}' "$key" "$b64" \
+    | kubectl patch secret "$name" -n "$ns" --type merge --patch-file /dev/stdin >/dev/null
+  echo "    $ns/$name $key: sslmode $(url_sslmode "$cur") -> $mode"
+}
+
+ca_from_secret() { # prints the CA certificate (public) from the server Secret
+  kubectl get secret "$TLS_SECRET" -n "$DB_NS" -o 'jsonpath={.data.ca\.crt}' | base64 -d
+}
+
+sha256_of() { openssl dgst -sha256 | awk '{print $NF}'; }
+
+# names_have_ca <volume names, space separated> — is postgres-ca among them. The
+# names go through a variable, not a pipe: `grep -q` quits early, and with
+# pipefail the writer's SIGPIPE would turn a match into a failure.
+names_have_ca() {
+  case " $1 " in *" $CA_CONFIGMAP "*) return 0 ;; esac
+  return 1
+}
+
+has_ca_volume() { # <kubectl get args…> — does the pod template carry postgres-ca
+  local names
+  names="$(kubectl get "$@" -o 'jsonpath={.spec.template.spec.volumes[*].name}' 2>/dev/null || true)"
+  names_have_ca "$names"
+}
+
+cronjob_has_ca() {
+  local names
+  names="$(kubectl get cronjob vrsky-mgmt-backup -n "$DB_NS" -o 'jsonpath={.spec.jobTemplate.spec.template.spec.volumes[*].name}' 2>/dev/null || true)"
+  names_have_ca "$names"
+}
+
+connector_deploys() { kubectl get deploy -n "$PLATFORM_NS" -l tier=connector -o name 2>/dev/null | sed 's#.*/##'; }
+
+pg_sql() { kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- psql -U vrsky -d vrsky -tAc "$1"; }
+
+cmd_server() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "cluster: $(kubectl config current-context)"
+  kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 \
+    || die "cert-manager is not installed (infrastructure/kubernetes/ingress/install-cert-manager.sh)"
+  local pg="$REPO_ROOT/infrastructure/kubernetes/postgresql"
+  say "certificates (tls.yaml)"
+  act "kubectl apply -f tls.yaml" kubectl apply -f "$pg/tls.yaml"
+  if [ -z "$DRY_RUN" ]; then
+    kubectl wait --for=condition=Ready certificate/postgresql-ca certificate/postgresql-tls \
+      -n "$DB_NS" --timeout=120s
+  fi
+  say "StatefulSet (storage class $STORAGE_CLASS, as at the first bring-up)"
+  local rendered
+  rendered="$(perl -pe 's/(storageClassName:\s*)local-path/${1}'"$STORAGE_CLASS"'/' "$pg/statefulset.yaml")"
+  # kubectl diff exits 1 when there is a difference; that is the point.
+  printf '%s\n' "$rendered" | kubectl diff -f - || true
+  if [ -n "$DRY_RUN" ]; then
+    echo "    would: kubectl apply the StatefulSet above (restarts postgresql-0)"
+    return 0
+  fi
+  printf '%s\n' "$rendered" | kubectl apply -f -
+  kubectl rollout status statefulset/postgresql -n "$DB_NS" --timeout=300s
+  say "ssl is $(pg_sql 'SHOW ssl')"
+}
+
+cmd_ca_sync() {
+  command -v openssl >/dev/null || die "openssl not found"
+  local tmp
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+  ca_from_secret > "$tmp/ca.crt"
+  [ -s "$tmp/ca.crt" ] || die "no ca.crt in $DB_NS/$TLS_SECRET (is the Certificate Ready?)"
+  openssl x509 -in "$tmp/ca.crt" -noout >/dev/null 2>&1 || die "ca.crt is not a certificate"
+  say "CA $(openssl x509 -in "$tmp/ca.crt" -noout -subject -enddate | tr '\n' ' ')"
+  local ns
+  for ns in "$PLATFORM_NS" "$DB_NS"; do
+    if [ -n "$DRY_RUN" ]; then echo "    would: ConfigMap $ns/$CA_CONFIGMAP <- ca.crt"; continue; fi
+    kubectl get namespace "$ns" >/dev/null
+    kubectl create configmap "$CA_CONFIGMAP" -n "$ns" --from-file=ca.crt="$tmp/ca.crt" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    echo "    $ns/$CA_CONFIGMAP updated"
+  done
+}
+
+cmd_clients() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  local d c patch
+  for d in $CORE_DEPLOYS; do
+    c="${d#vrsky-}"
+    if has_ca_volume deploy "$d" -n "$PLATFORM_NS"; then
+      echo "    $d already mounts $CA_CONFIGMAP"
+      continue
+    fi
+    patch='{"spec":{"template":{"spec":{"volumes":[{"name":"'"$CA_CONFIGMAP"'","configMap":{"name":"'"$CA_CONFIGMAP"'","optional":true}}],"containers":[{"name":"'"$c"'","volumeMounts":[{"name":"'"$CA_CONFIGMAP"'","mountPath":"'"${CA_PATH%/*}"'","readOnly":true}]}]}}}}'
+    act "mount $CA_CONFIGMAP in $d" kubectl patch deploy "$d" -n "$PLATFORM_NS" --type strategic -p "$patch"
+  done
+  if [ -z "$DRY_RUN" ]; then
+    for d in $CORE_DEPLOYS; do kubectl rollout status deploy/"$d" -n "$PLATFORM_NS" --timeout=240s; done
+  fi
+}
+
+# Every Deployment that reads the connection string must already mount the CA,
+# or its next restart on verify-full cannot start a connection.
+require_clients_ready() {
+  local missing="" d
+  for d in $CORE_DEPLOYS $(connector_deploys); do
+    has_ca_volume deploy "$d" -n "$PLATFORM_NS" || missing="$missing $d"
+  done
+  if kubectl get cronjob vrsky-mgmt-backup -n "$DB_NS" >/dev/null 2>&1 && ! cronjob_has_ca; then
+    missing="$missing cronjob/vrsky-mgmt-backup"
+  fi
+  [ -z "$missing" ] || die "these do not mount $CA_CONFIGMAP yet:$missing (merge the PR so the deploy job rolls the connectors and the backup job; run 'clients' for the core services)"
+}
+
+cmd_urls() {
+  local mode="${1:-}"
+  case "$mode" in verify-full | disable) ;; *) die "usage: urls <verify-full|disable>" ;; esac
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "cluster: $(kubectl config current-context)"
+  if [ "$mode" = verify-full ]; then
+    # Fail closed: the strings must not point at a server or a CA that is not there.
+    [ "$(pg_sql 'SHOW ssl' | tr -d '[:space:]')" = on ] || die "Postgres does not have ssl on yet (run 'server')"
+    local ns
+    for ns in "$PLATFORM_NS" "$DB_NS"; do
+      [ -n "$(kubectl get configmap "$CA_CONFIGMAP" -n "$ns" -o 'jsonpath={.data.ca\.crt}' 2>/dev/null)" ] \
+        || die "no $ns/$CA_CONFIGMAP with ca.crt (run 'ca-sync')"
+    done
+    require_clients_ready
+  fi
+  set_conn "$PLATFORM_NS" postgres-credentials connection_string "$mode"
+  set_conn "$DB_NS" postgres-credentials connection_string "$mode"
+  set_conn "$DB_NS" vrsky-backup-config BACKUP_DB_URL "$mode"
+  say "running pods keep the old value until: $0 restart"
+}
+
+# One pod, one query, no change to anything that exists. It reads the live
+# Secret into its own environment and swaps only the query part of the URL.
+# The pod's output is psql's answer or psql's error, neither of which holds the
+# password.
+cmd_canary() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "cluster: $(kubectl config current-context)"
+  local pod=pg-tls-canary
+  if [ -n "$DRY_RUN" ]; then echo "    would: run pod $PLATFORM_NS/$pod and print its result"; return 0; fi
+  kubectl delete pod "$pod" -n "$PLATFORM_NS" --ignore-not-found >/dev/null
+  kubectl apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $pod
+  namespace: $PLATFORM_NS
+  labels:
+    app: $pod
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: psql
+      image: postgres:18-alpine
+      command: ["sh", "-c"]
+      args:
+        - |
+          psql "\${DATABASE_URL%%\?*}?sslmode=verify-full&sslrootcert=$CA_PATH" -tAc "SELECT 'ssl=' || ssl || ' ' || version FROM pg_stat_ssl WHERE pid = pg_backend_pid()"
+      env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: connection_string
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: ca
+          mountPath: ${CA_PATH%/*}
+          readOnly: true
+  volumes:
+    - name: ca
+      configMap:
+        name: $CA_CONFIGMAP
+EOF
+  local phase="" i
+  for i in $(seq 1 45); do
+    phase="$(kubectl get pod "$pod" -n "$PLATFORM_NS" -o 'jsonpath={.status.phase}' 2>/dev/null || true)"
+    case "$phase" in Succeeded | Failed) break ;; esac
+    sleep 2
+  done
+  echo "    pod phase: ${phase:-unknown}"
+  kubectl logs "$pod" -n "$PLATFORM_NS" 2>&1 | sed 's/^/    /' || true
+  kubectl delete pod "$pod" -n "$PLATFORM_NS" --ignore-not-found --wait=false >/dev/null
+  [ "$phase" = Succeeded ] || die "the canary did not connect over TLS; do not switch the strings"
+}
+
+cmd_restart() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "cluster: $(kubectl config current-context)"
+  local d all
+  all="$CORE_DEPLOYS $(connector_deploys)"
+  # One at a time: management-api first, so a bad string shows up on the one
+  # service that has a readiness check on the database.
+  for d in $all; do
+    act "rollout restart $d" kubectl rollout restart deploy/"$d" -n "$PLATFORM_NS"
+    if [ -z "$DRY_RUN" ]; then kubectl rollout status deploy/"$d" -n "$PLATFORM_NS" --timeout=240s; fi
+  done
+}
+
+cmd_check() {
+  command -v kubectl >/dev/null || die "kubectl not found"
+  say "cluster: $(kubectl config current-context)"
+  local bad=0
+
+  echo "--- cert-manager and certificates"
+  kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 && echo "    cert-manager CRDs: present" || { echo "    cert-manager CRDs: MISSING"; bad=1; }
+  local c
+  for c in postgresql-ca postgresql-tls; do
+    echo "    certificate/$c Ready: $(kubectl get certificate "$c" -n "$DB_NS" -o 'jsonpath={.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+  done
+  local crt
+  crt="$(kubectl get secret "$TLS_SECRET" -n "$DB_NS" -o 'jsonpath={.data.tls\.crt}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [ -n "$crt" ]; then
+    echo "    server certificate: $(printf '%s' "$crt" | openssl x509 -noout -enddate)"
+    local want have
+    want="$(printf '%s' "$crt" | sha256_of)"
+    have="$(kubectl exec -n "$DB_NS" "$PG_POD" -c postgresql -- cat /etc/postgresql/tls/tls.crt 2>/dev/null | sha256_of || true)"
+    if [ "$want" = "$have" ]; then echo "    Postgres serves the Secret's current certificate"; else echo "    Postgres has an OLDER certificate than the Secret: kubectl rollout restart statefulset/postgresql -n $DB_NS"; fi
+  fi
+
+  echo "--- server"
+  echo "    ssl = $(pg_sql 'SHOW ssl' 2>/dev/null | tr -d '[:space:]')"
+  echo "    network client connections by ssl (a session on the unix socket, like this one, is not counted):"
+  pg_sql "SELECT '      ssl=' || s.ssl || '  ' || count(*) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid) WHERE a.backend_type = 'client backend' AND a.client_addr IS NOT NULL GROUP BY s.ssl ORDER BY s.ssl DESC" 2>/dev/null || echo "      (could not query)"
+  echo "    client addresses WITHOUT ssl (match them to pods with: kubectl get pods -A -o wide):"
+  pg_sql "SELECT '      ' || a.client_addr || '  x' || count(*) FROM pg_stat_ssl s JOIN pg_stat_activity a USING (pid) WHERE a.backend_type = 'client backend' AND NOT s.ssl AND a.client_addr IS NOT NULL GROUP BY a.client_addr ORDER BY 1" 2>/dev/null || true
+
+  echo "--- CA copies"
+  local ns ca_want ca_have
+  ca_want="$(ca_from_secret 2>/dev/null || true)"
+  for ns in "$PLATFORM_NS" "$DB_NS"; do
+    ca_have="$(kubectl get configmap "$CA_CONFIGMAP" -n "$ns" -o 'jsonpath={.data.ca\.crt}' 2>/dev/null || true)"
+    if [ -n "$ca_want" ] && [ "$ca_have" = "$ca_want" ]; then echo "    $ns/$CA_CONFIGMAP: matches the CA"; else echo "    $ns/$CA_CONFIGMAP: MISSING or different (run ca-sync)"; bad=1; fi
+  done
+
+  echo "--- connection strings (sslmode only)"
+  echo "    $PLATFORM_NS/postgres-credentials: $(url_sslmode "$(secret_value $PLATFORM_NS postgres-credentials connection_string)")"
+  echo "    $DB_NS/postgres-credentials: $(url_sslmode "$(secret_value $DB_NS postgres-credentials connection_string)")"
+  echo "    $DB_NS/vrsky-backup-config BACKUP_DB_URL: $(url_sslmode "$(secret_value $DB_NS vrsky-backup-config BACKUP_DB_URL)")"
+
+  echo "--- clients that mount the CA"
+  local d
+  for d in $CORE_DEPLOYS $(connector_deploys); do
+    has_ca_volume deploy "$d" -n "$PLATFORM_NS" || { echo "    $d: NO $CA_CONFIGMAP volume"; bad=1; }
+  done
+  cronjob_has_ca || { echo "    cronjob/vrsky-mgmt-backup: NO $CA_CONFIGMAP volume"; bad=1; }
+  [ "$bad" = 0 ] && echo "    all mount it" || true
+  return 0
+}
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    check) cmd_check ;;
+    server) cmd_server ;;
+    ca-sync) cmd_ca_sync ;;
+    clients) cmd_clients ;;
+    urls) cmd_urls "$@" ;;
+    canary) cmd_canary ;;
+    restart) cmd_restart ;;
+    *) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2; exit 2 ;;
+  esac
+}
+
+# Sourced by the guard test (src/pkg/managementapi) to exercise retarget_url.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
