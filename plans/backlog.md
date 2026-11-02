@@ -787,7 +787,7 @@ Last updated 2026-10-28.
     (expansion on `managed-csi` works differently, and needs checking), and
     links Longhorn's docs under References. Manifest directory, so PR plus
     `agent:needs-human`. Found in #554.
-112. **The MinIO README's "Architecture" list is out of date too.**
+112. ~~**The MinIO README's "Architecture" list is out of date too.**~~ (#619)
     `infrastructure/kubernetes/minio/README.md` says 100GB "via Longhorn
     distributed storage" and requests of 1 CPU and 2GB, but
     `deployment.yaml` claims 8Gi on `local-path` (`managed-csi` in
