@@ -226,8 +226,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
 
-    // getMe drops the token only when the server rejects the session (401 or 403) (the way
-    // reportUnauthorized in services/sessionExpiry tells them apart).
+    // getMe drops the token only when the server rejects the session with a 401
+    // or 403, the way reportUnauthorized in services/sessionExpiry tells them apart.
     // A network error or a 5xx leaves it, and that is no reason to sign
     // out a user whose session still stands.
     if (authService.hasSessionToken()) {
