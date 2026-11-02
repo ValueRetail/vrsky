@@ -447,7 +447,7 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	fieldChanged, fieldUnrecorded := false, false
 	if cfg.Incremental {
 		if u := cfg.unsaved; u != nil {
-			if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, u.cursor, u.replace, u.count, u.state, logger); err != nil {
+			if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, u.cursor, u.replace, u.count, u.state, u.at, logger); err != nil {
 				return fmt.Errorf("store the watermark of the previous poll: %w", err)
 			}
 			cfg.unsaved = nil
@@ -597,15 +597,15 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		c.warnAheadSize(cfg, logger)
 	}
 	if newCursor != "" || replace || cfg.Pictures || aheadChanged || fieldUnrecorded {
-		state := cfg.checkpointState()
-		if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), state, logger); err != nil {
+		state, at := cfg.checkpointState(), c.clock().UTC()
+		if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), state, at, logger); err != nil {
 			// The records are published and cursor is the new watermark. Past
 			// a cursor_field change the row still names the old field, so a
 			// poll that finds it drops the watermark and sends everything
 			// again; keep what was to be stored and try again first thing.
 			// Anything else only repeats a few records, as before.
 			if fieldChanged {
-				cfg.unsaved = &pendingSave{cursor: newCursor, replace: replace, count: int64(total), state: state}
+				cfg.unsaved = &pendingSave{cursor: newCursor, replace: replace, count: int64(total), state: state, at: at}
 			}
 			return fmt.Errorf("save Business Central watermark: %w", err)
 		}
@@ -1094,6 +1094,7 @@ type pendingSave struct {
 	replace bool
 	count   int64
 	state   json.RawMessage
+	at      time.Time // when the poll finished, kept for a later flush
 }
 
 // saveProgress stores the watermark and the node's state in one checkpoint
@@ -1107,21 +1108,21 @@ type pendingSave struct {
 // cannot hold up the shutdown for more than two of them. The error of the
 // second attempt is returned; the caller decides what a lost save costs.
 func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID, cursor string, replace bool,
-	count int64, state json.RawMessage, logger *slog.Logger) error {
+	count int64, state json.RawMessage, at time.Time, logger *slog.Logger) error {
 	if c.checkpoints == nil || nodeID == "" {
 		return nil
 	}
-	err := c.saveOnce(ctx, tenantID, connID, nodeID, cursor, replace, count, state)
+	err := c.saveOnce(ctx, tenantID, connID, nodeID, cursor, replace, count, state, at)
 	if err == nil {
 		return nil
 	}
 	logger.Warn("save Business Central watermark failed; trying once more",
 		"error", err, "poll_cancelled", ctx.Err() != nil)
-	return c.saveOnce(context.WithoutCancel(ctx), tenantID, connID, nodeID, cursor, replace, count, state)
+	return c.saveOnce(context.WithoutCancel(ctx), tenantID, connID, nodeID, cursor, replace, count, state, at)
 }
 
 func (c *bcConsumer) saveOnce(ctx context.Context, tenantID, connID, nodeID, cursor string, replace bool,
-	count int64, state json.RawMessage) error {
+	count int64, state json.RawMessage, at time.Time) error {
 	timeout := c.saveTimeout
 	if timeout <= 0 {
 		timeout = defaultSaveTimeout
@@ -1144,7 +1145,7 @@ func (c *bcConsumer) saveOnce(ctx context.Context, tenantID, connID, nodeID, cur
 		ConnectionID:           connID,
 		NodeID:                 nodeID,
 		LastProcessedMessageID: cursor,
-		LastProcessedAt:        c.clock().UTC(),
+		LastProcessedAt:        at,
 		MessageCount:           count,
 		State:                  state,
 	})

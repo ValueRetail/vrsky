@@ -24,6 +24,7 @@ type flakyStore struct {
 	checkpoint.Store
 	mu        sync.Mutex
 	failSaves int  // Saves to refuse; negative = every one
+	failGets  int  // Gets to refuse with a plain error
 	block     bool // Save waits for its context instead of answering
 	saveCalls int
 	cancelled int // Saves that arrived with an already cancelled context
@@ -32,6 +33,15 @@ type flakyStore struct {
 func (s *flakyStore) Get(ctx context.Context, tenantID, connID, nodeID string) (*checkpoint.Checkpoint, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	s.mu.Lock()
+	fail := s.failGets > 0
+	if fail {
+		s.failGets--
+	}
+	s.mu.Unlock()
+	if fail {
+		return nil, errStoreDown
 	}
 	return s.Store.Get(ctx, tenantID, connID, nodeID)
 }
@@ -260,12 +270,75 @@ func TestSaveProgress_UnreadableStoreDoesNotEraseTheWatermark(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// Read fails on the cancelled context; the retry has a fresh one and works.
-	if err := c.saveProgress(ctx, "t", "c", "n", "", false, 1, nil, c.logger); err != nil {
+	if err := c.saveProgress(ctx, "t", "c", "n", "", false, 1, nil, aheadNow, c.logger); err != nil {
 		t.Fatal(err)
 	}
 	cp, _ := mem.Get(context.Background(), "t", "c", "n")
 	if cp == nil || cp.LastProcessedMessageID != "W" {
 		t.Errorf("row = %+v, want watermark W kept", cp)
+	}
+}
+
+// A Get that fails for a reason other than the context (the connection
+// dropped) while the Save would work: the row must keep its watermark, not get
+// an empty one.
+func TestSaveProgress_FailedReadDoesNotEraseTheWatermark(t *testing.T) {
+	c, _, _ := newTestConsumer()
+	mem := checkpoint.NewInMemoryStore()
+	store := &flakyStore{Store: mem, failGets: 1}
+	c.checkpoints = store
+	if err := mem.Save(context.Background(), &checkpoint.Checkpoint{
+		TenantID: "t", ConnectionID: "c", NodeID: "n", LastProcessedMessageID: "W",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.saveProgress(context.Background(), "t", "c", "n", "", false, 1, nil, aheadNow, c.logger); err != nil {
+		t.Fatal(err)
+	}
+	cp, _ := mem.Get(context.Background(), "t", "c", "n")
+	if cp == nil || cp.LastProcessedMessageID != "W" {
+		t.Errorf("row = %+v, want watermark W kept", cp)
+	}
+	// And when the read keeps failing the save fails, with the row untouched.
+	store.mu.Lock()
+	store.failGets = 2
+	store.mu.Unlock()
+	if err := c.saveProgress(context.Background(), "t", "c", "n", "", false, 1, nil, aheadNow, c.logger); err == nil {
+		t.Error("want an error when the stored watermark can't be read")
+	}
+	if cp, _ := mem.Get(context.Background(), "t", "c", "n"); cp == nil || cp.LastProcessedMessageID != "W" {
+		t.Errorf("row = %+v, want watermark W kept", cp)
+	}
+}
+
+// A checkpoint stored by a later poll's flush carries the time of the poll
+// that produced it.
+func TestSaveProgress_FlushKeepsTheTimeOfThePoll(t *testing.T) {
+	bc := newTwoFieldBC(t, twoFieldRecs()...)
+	c, got, mu := newTestConsumer()
+	store := &flakyStore{Store: checkpoint.NewInMemoryStore()}
+	c.checkpoints = store
+	now := aheadNow
+	c.now = func() time.Time { return now }
+	c.saveTimeout = 20 * time.Millisecond
+	poll(t, c, got, mu, bc.cfg(lmField))
+
+	cfg := bc.cfg(dateField)
+	now = aheadNow.Add(time.Minute)
+	store.set(-1, false)
+	if _, err := pollWith(context.Background(), c, got, mu, cfg); err == nil {
+		t.Fatal("poll 2: want the save error")
+	}
+	store.set(0, false)
+	now = aheadNow.Add(time.Hour)
+	// A poll cancelled at once: the flush still runs (it has its own context),
+	// and the read after it fails, so nothing else is saved over it.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = pollWith(ctx, c, got, mu, cfg)
+	cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src")
+	if cp == nil || !cp.LastProcessedAt.Equal(aheadNow.Add(time.Minute)) {
+		t.Errorf("row = %+v, want LastProcessedAt %v", cp, aheadNow.Add(time.Minute))
 	}
 }
 
@@ -279,7 +352,7 @@ func TestSaveProgress_ShutdownIsBounded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	start := time.Now()
-	err := c.saveProgress(ctx, "t", "c", "n", "W", true, 1, nil, c.logger)
+	err := c.saveProgress(ctx, "t", "c", "n", "W", true, 1, nil, aheadNow, c.logger)
 	if err == nil {
 		t.Error("want the timeout error")
 	}
