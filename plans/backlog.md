@@ -803,7 +803,7 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
-116. **`checkAuth` signs the user out when `/me` fails for any reason.**
+116. ~~**`checkAuth` signs the user out when `/me` fails for any reason.**~~ (#611)
     `getMe` returns null on every failure, and `ui/src/store/authStore.ts`
     clears the user and workspaces whenever it gets null, so a network
     error or a 5xx on `/me` (at app load, after a workspace delete, after a

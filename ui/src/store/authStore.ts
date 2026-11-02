@@ -24,6 +24,12 @@ interface AuthState {
   error: string | null
   /** The session ran out while the app was open; the login page says so. */
   sessionExpired: boolean
+  /**
+   * /me could not be answered (network error, 5xx) while there was no user
+   * to keep. The session is probably fine, so ProtectedRoute offers a retry
+   * instead of the login page.
+   */
+  loadFailed: boolean
 
   // Actions
   expireSession: () => void
@@ -46,6 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isInitialized: false,
   error: null,
   sessionExpired: false,
+  loadFailed: false,
 
   /**
    * The server no longer accepts the session (see services/sessionExpiry).
@@ -65,6 +72,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isLoading: false,
       error: null,
       sessionExpired: true,
+      loadFailed: false,
     })
   },
 
@@ -157,6 +165,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
         error: null,
         sessionExpired: false,
+        loadFailed: false,
       })
     }
   },
@@ -174,60 +183,75 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isPlatformOperator: false,
         tenants: [],
         currentTenant: null,
+        loadFailed: false,
       })
       return
     }
 
     set({ isLoading: true })
 
+    let meData: Awaited<ReturnType<typeof authService.getMe>> = null
     try {
-      const meData = await authService.getMe()
-
-      if (meData && meData.user) {
-        const tenants = meData.tenants || []
-        // Restore previously selected tenant if still valid
-        const savedTenantId = localStorage.getItem(SELECTED_TENANT_KEY)
-        const savedTenant = savedTenantId
-          ? tenants.find((t) => t.id === savedTenantId && t.status === 'active')
-          : null
-        const currentTenant = savedTenant || meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
-
-        // Update the API client's tenant ID
-        if (currentTenant) {
-          setActiveTenantId(currentTenant.id)
-          localStorage.setItem(SELECTED_TENANT_KEY, currentTenant.id)
-        }
-
-        set({
-          user: meData.user,
-          isPlatformOperator: meData.is_platform_operator === true,
-          tenants,
-          currentTenant,
-          isAuthenticated: true,
-          isInitialized: true,
-          isLoading: false,
-        })
-      } else {
-        set({
-          user: null,
-          tenants: [],
-          currentTenant: null,
-          isAuthenticated: false,
-          isInitialized: true,
-          isLoading: false,
-        })
-      }
+      meData = await authService.getMe()
     } catch {
+      // getMe does not throw today; treat a surprise like any failed answer.
+    }
+
+    if (meData && meData.user) {
+      const tenants = meData.tenants || []
+      // Restore previously selected tenant if still valid
+      const savedTenantId = localStorage.getItem(SELECTED_TENANT_KEY)
+      const savedTenant = savedTenantId
+        ? tenants.find((t) => t.id === savedTenantId && t.status === 'active')
+        : null
+      const currentTenant = savedTenant || meData.current_tenant || (tenants.length > 0 ? tenants[0] : null)
+
+      // Update the API client's tenant ID
+      if (currentTenant) {
+        setActiveTenantId(currentTenant.id)
+        localStorage.setItem(SELECTED_TENANT_KEY, currentTenant.id)
+      }
+
       set({
-        user: null,
-        isPlatformOperator: false,
-        tenants: [],
-        currentTenant: null,
-        isAuthenticated: false,
+        user: meData.user,
+        isPlatformOperator: meData.is_platform_operator === true,
+        tenants,
+        currentTenant,
+        isAuthenticated: true,
         isInitialized: true,
         isLoading: false,
+        loadFailed: false,
       })
+      return
     }
+
+    // getMe drops the token only on a 401 of its own (the way
+    // reportUnauthorized in services/sessionExpiry tells them apart).
+    // A network error or a 5xx leaves it, and that is no reason to sign
+    // out a user whose session still stands.
+    if (authService.hasSessionToken()) {
+      if (get().user) {
+        set({ isInitialized: true, isLoading: false })
+        useUIStore.getState().showErrorNotification(
+          'Could not refresh your account',
+          'The server did not answer. You are still signed in; workspaces and settings may be out of date.',
+        )
+      } else {
+        set({ isAuthenticated: false, isInitialized: true, isLoading: false, loadFailed: true })
+      }
+      return
+    }
+
+    set({
+      user: null,
+      isPlatformOperator: false,
+      tenants: [],
+      currentTenant: null,
+      isAuthenticated: false,
+      isInitialized: true,
+      isLoading: false,
+      loadFailed: false,
+    })
   },
 
   /**
