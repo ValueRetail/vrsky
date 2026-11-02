@@ -872,6 +872,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-the-images-are-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the images are built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-a-deploy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2444,6 +2455,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-the-images-are-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the images are built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-a-deploy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2615,10 +2637,39 @@ the file consumer: a file that
 lands in the gap while the new pod can't read the saved list of published
 files at start (a database error, logged at Error). It counts as already
 there and is never published.</p>
+<h2 id="how-the-images-are-built">How the images are built<a class="headerlink" href="#how-the-images-are-built" title="Permanent link">&para;</a></h2>
+<p>The <em>Build … in ACR</em> jobs build on the GitHub runner, not in ACR Tasks
+(#628). Each job checks out the full history, signs in with the same
+OpenID Connect identity, runs <code>az acr login --name vrskyprodacr</code>, and builds
+with Docker Buildx (<code>docker/build-push-action</code>): the image's own Dockerfile,
+the repo root as context, <code>linux/amd64</code>, pushed as
+<code>vrskyprodacr.azurecr.io/vrsky/&lt;image&gt;:latest</code>. management-api gets
+<code>AGENT_VERSION</code> from <code>git describe</code>, as before. When the <code>DOCKERHUB_USERNAME</code>
+and <code>DOCKERHUB_TOKEN</code> secrets exist, the job logs in to Docker Hub first, so
+the base-image pulls are not anonymous pulls from shared runner IPs. Provenance
+and SBOM attestations are off, so <code>:latest</code> stays a plain single-platform
+manifest, as <code>az acr build</code> left it, with no untagged attestation manifests
+next to it. The deploy job and Catch up read its digest with <code>az acr
+repository show</code>, unchanged. The runner minutes of a public repository are free; ACR
+Tasks bill for every minute (433 minutes for 159 builds on 2026-10-29).</p>
+<p>Layers are cached in the GitHub Actions cache: one scope for all Go images
+(they share the Go base image, the <code>go mod download</code> layer and the copy of
+<code>src/</code>), one for the UI. Every job reads the cache; only the <code>data-filter</code> and
+<code>ui</code> jobs write it, so 35 jobs do not each export their own builder layer into
+the repository's shared 10 GB Actions cache (a merge that does not rebuild
+those two leaves the cache as it was). The cache is only a speed-up: old
+entries get evicted, a miss means a slower build, and a cache error does not
+fail the job (<code>ignore-error</code>). The compiled packages are not
+shared between images: each Dockerfile compiles in its own <code>RUN</code>, and a
+BuildKit cache mount would not survive the runner anyway.</p>
+<p><code>infrastructure/azure/build-push-acr.sh</code>, the by-hand path, still uses
+<code>az acr build</code>: it needs no Docker on the machine, and it bills only when
+someone runs it. To roll back the CI change, revert the PR that introduced
+it.</p>
 <h2 id="watching-a-deploy">Watching a deploy<a class="headerlink" href="#watching-a-deploy" title="Permanent link">&para;</a></h2>
 <p>GitHub → Actions → the run for the merge. The <em>Plan the rollout</em> job lists
-the changed paths and the targets; <em>Build … in ACR</em> runs one image per
-runner; <em>Deploy to production</em> shows each rollout and the smoke output.
+the changed paths and the targets; <em>Build … in ACR</em> builds one image per
+runner and pushes it; <em>Deploy to production</em> shows each rollout and the smoke output.
 About four minutes for a UI change, ten for a change under <code>src/pkg</code>.</p>
 <p>Browser tabs left open across a UI deploy keep running the old bundle.
 Within about six minutes, or when the tab is focused again, they show a
@@ -2696,8 +2747,9 @@ them, and runs the same scripts an operator runs by hand. The in-cluster
 runtime has bash, awk, grep, curl, jq, kubectl and helm 3, and <strong>no sed,
 python or envsubst</strong>; <code>TestInClusterScriptsUseOnlyRuntimeTools</code> keeps the
 scripts the jobs run in-cluster inside that set.</p>
-<p>Roles the app holds: <code>AcrPush</code> and <code>Contributor</code> on <code>vrskyprodacr</code> (a
-server-side <code>az acr build</code> needs to read the registry and queue a run);
+<p>Roles the app holds: <code>AcrPush</code> and <code>Contributor</code> on <code>vrskyprodacr</code> (<code>AcrPush</code>
+is what the image push needs; <code>Contributor</code> is for the registry reads and for
+<code>az acr build</code> in the by-hand script);
 <code>Contributor</code> on <code>vrsky-prod</code> (the command runner). One-time setup, by a
 subscription Owner:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">APP</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>ad<span class="w"> </span>app<span class="w"> </span>create<span class="w"> </span>--display-name<span class="w"> </span><span class="s2">"VRSky deploy"</span><span class="w"> </span>--query<span class="w"> </span>appId<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>

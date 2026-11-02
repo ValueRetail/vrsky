@@ -3485,7 +3485,7 @@ tests and stops.</p>
 <tr>
 <td>Build <code>&lt;image&gt;</code> in ACR</td>
 <td>one runner per image the plan named</td>
-<td><code>az acr build --registry vrskyprodacr --image vrsky/&lt;image&gt;:latest</code> with the image's Dockerfile and the repo root as context</td>
+<td>Docker Buildx on the runner, <code>linux/amd64</code>, the image's Dockerfile with the repo root as context, pushed to <code>vrskyprodacr.azurecr.io/vrsky/&lt;image&gt;:latest</code></td>
 </tr>
 <tr>
 <td>Deploy to production</td>
@@ -3494,9 +3494,10 @@ tests and stops.</p>
 </tr>
 </tbody>
 </table>
-<p><code>az acr build</code> runs in the registry: the runner uploads the build context
-and ACR builds it for <code>linux/amd64</code>. There is no layer cache on the GitHub
-side. What a merge deploys, how the deploy job reaches the cluster and what
+<p>The runner builds the image itself (Docker Buildx, <code>linux/amd64</code>) and pushes
+it after <code>az acr login</code>, with a GitHub Actions layer cache; it no longer uses
+<code>az acr build</code>, which bills per build minute (#628). The manual script
+<code>build-push-acr.sh</code> still builds in ACR. What a merge deploys, how the deploy job reaches the cluster and what
 happens while the cluster is parked are all in
 <a href="../operator/deploy/">Deploying</a>.</p>
 <hr />
