@@ -1005,13 +1005,23 @@ Last updated 2026-10-28.
     before the watermark (posting last week's documents today) are never
     read. Add a `lookback_days` option that filters `ge W − N` and remembers
     the whole window in the existing remembered set. Found in review of #602.
-144. **Changing `cursor_field` keeps the old watermark.** Nothing resets the
-    Business Central checkpoint when the field changes, so
-    `postingDate gt <old DateTime>` is sent (likely a 400 every poll), or an
-    old date is applied to a new field silently. Store the field name in the
-    checkpoint state and drop the watermark when it changes. Found in review
-    of #602.
-145. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
+144. ~~**Changing `cursor_field` keeps the old watermark.**~~ (#610) Nothing
+    reset the Business Central checkpoint when the field changed, so
+    `postingDate gt <old DateTime>` was sent (likely a 400 every poll), or an
+    old date was applied to a new field silently. The checkpoint state now
+    records the field and the watermark is dropped when it changes; a legacy
+    row without a field is taken to match. Found in review of #602.
+145. **A failed checkpoint save after a `cursor_field` change re-sends the
+    whole entity.** `saveProgress` in
+    `src/cmd/business-central-consumer/service.go` only logs a failed save.
+    After a field change the stored row still names the old field, so a save
+    that fails, or a context cancelled at shutdown before it runs, makes the
+    next poll drop the watermark and read from the start again. The records
+    are already published, so it costs repeats, not data. Return the error
+    from `saveProgress` and retry it once with a fresh short context, or skip
+    the next field-change reset when the save of the previous one is known
+    to have failed. Found in review of #614.
+146. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
     (`src/pkg/managementapi/session_middleware.go`) turns every
     `ValidateSession` error, DB errors included, into a 401 "invalid or
     expired session", so a transient database error looks like a rejected
