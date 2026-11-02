@@ -1745,6 +1745,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a destination (producer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The base URL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2530,6 +2547,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="As a destination (producer)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The base URL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2603,7 +2637,9 @@ paging through all results, and emits each page as a JSON-array message.</p>
   A <code>#</code> is refused.</li>
 <li><code>poll_interval_seconds</code> — poll cadence. Set <code>0</code> (or omit) for <strong>webhook-only</strong>.</li>
 <li><code>page_size</code> — Sitoo <code>num</code> (default <code>1000</code>; 1000–5000 is optimal).</li>
-<li><code>base_url</code> — optional override (default <code>https://api.mysitoo.com/v2</code>).</li>
+<li><code>base_url</code> — optional override (default <code>https://api.mysitoo.com/v2</code>). It
+  must be <code>https</code> and may not carry a user name, query string or fragment. See
+  <a href="#the-base-url">The base URL</a>.</li>
 <li><code>webhook_raw_event</code> — forward SPI event bodies verbatim instead of
   dereferencing them. See below; leave unset unless you mean it.</li>
 <li><code>webhook_id_field</code> — override the event field holding the resource id. The
@@ -2725,7 +2761,8 @@ and the converted one is written.</p>
 <li><code>account_id</code> / <code>site_id</code> / <code>api_id</code> / <code>api_password_secret_id</code> — as above.</li>
 <li><code>resource</code> — the target collection (default <code>warehouseitems</code>; e.g. <code>prices</code>).</li>
 <li><code>method</code> — <code>POST</code> (default) or <code>PUT</code>.</li>
-<li><code>base_url</code> — optional override.</li>
+<li><code>base_url</code> — optional override, under the same rules as on the source: see
+  <a href="#the-base-url">The base URL</a>.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sitoo"</span><span class="p">,</span>
@@ -2743,6 +2780,45 @@ and the converted one is written.</p>
 and <code>5xx</code>/network errors are retried (with the rate-limit backoff hint); <code>4xx</code>
 (bad request/data) and <code>401</code>/<code>403</code> (auth) are treated as poison and sent to the
 DLQ rather than retried forever.</p>
+<h3 id="the-base-url">The base URL<a class="headerlink" href="#the-base-url" title="Permanent link">&para;</a></h3>
+<p>Every request carries the node's API ID and password, and <code>base_url</code> is set in
+the node, so the connector only calls addresses it can trust:</p>
+<ul>
+<li>It must be <code>https</code>, with a host, and no user name, query string or fragment.
+  A node that breaks this is refused when the connection is started, with the
+  reason in the error.</li>
+<li>The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. Redirects are not followed.</li>
+<li>A webhook event id is escaped before it goes into the request path; an id of
+  <code>.</code> or <code>..</code> is dropped.</li>
+</ul>
+<p>There is no list of allowed Sitoo hosts: Sitoo serves every account from
+<code>api.mysitoo.com</code> with the account in the path, and a sandbox or proxy needs a
+different host. A <code>base_url</code> can still point at any public https host, so only
+put it in a node for a host you trust with the API password.</p>
+<p><strong>Local development with a mock Sitoo.</strong> The operator (not the node) can set
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>sitoo-consumer</code>, <code>sitoo-producer</code> and
+<code>management-api</code>. That allows <code>http</code> and private addresses for <code>base_url</code>. Never
+set it in production; it is off in <code>docker-compose.yml</code> and the Kubernetes
+manifests.</p>
+<p>Compose lists the environment per service, so for a local run add the line to
+the <code>environment:</code> block of each of those three services in
+<code>docker-compose.yml</code> (or a local override file):</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="nt">ALLOW_PRIVATE_UPSTREAMS</span><span class="p">:</span><span class="w"> </span><span class="s">"true"</span>
+</code></pre></div>
+<p>The repo has no mock Sitoo. You bring your own, for example a small HTTP server
+on the compose network, and point <code>base_url</code> at it (<code>http://my-mock:8080/v2</code>).</p>
+<p><strong>Existing connections.</strong> A node whose <code>base_url</code> is <code>http://</code> or points at a
+private address stops working when this change is deployed: a running consumer
+keeps its settings until its next restart, then refuses to start the poll (webhook events are checked on every event, so
+they stop at once); a producer refuses the next delivery. The management API refuses to start such a
+connection. Change the <code>base_url</code> to an <code>https</code> host, or clear it to use the
+default.</p>
 <h2 id="templates-sitoo-business-central-beta">Templates: Sitoo ⇄ Business Central (beta)<a class="headerlink" href="#templates-sitoo-business-central-beta" title="Permanent link">&para;</a></h2>
 <p>The onboarding gallery has two templates between Sitoo and Business Central.
 Both are <strong>beta</strong>: their field mapping is tested against the converter, not

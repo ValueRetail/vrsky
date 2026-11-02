@@ -2248,6 +2248,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#outbound-urls-taken-from-tenant-config-616" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outbound URLs taken from tenant config (#616)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#threat-model" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2966,6 +2977,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#outbound-urls-taken-from-tenant-config-616" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outbound URLs taken from tenant config (#616)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#threat-model" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3412,6 +3434,24 @@ is allowed as a special case for local dev.</p>
 <p>Every OIDC login attempt — success, failure, denial-by-domain — emits a row
 in <code>auth_audit_log</code> with event type <code>oidc_login</code>. The general audit log
 (#72) records the callback hit as <code>oauth.write</code>.</p>
+<h2 id="outbound-urls-taken-from-tenant-config-616">Outbound URLs taken from tenant config (#616)<a class="headerlink" href="#outbound-urls-taken-from-tenant-config-616" title="Permanent link">&para;</a></h2>
+<p>A connector that builds a request URL from a node's config and sends a
+credential with it can be aimed at the cluster network or the cloud metadata
+service. <code>pkg/safeurl</code> is the guard: <code>CheckBaseURL</code> gives an early error
+(https only, no userinfo, query or fragment, no literal private IP), and
+<code>NewClient</code> returns an HTTP client that refuses loopback, private, link-local,
+CGNAT, multicast and the Azure platform address at dial time, on the address
+actually connected to, so a hostname that resolves to one is refused and DNS
+rebinding cannot swap it in. It ignores proxy environment variables and does
+not follow redirects.</p>
+<p>Only the Sitoo consumer and producer use it so far
+(<a href="../connectors/sitoo/#the-base-url">Sitoo</a>); the management API also checks the
+Sitoo <code>base_url</code> when a connection is started. Other connectors that take a
+tenant-supplied host (Visma, Front Systems, the API consumer, the HTTP
+producer) have not been moved to it.</p>
+<p>For local development with a mock upstream, the operator can set
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the service to allow <code>http</code> and private
+addresses. A node cannot set it, and it must stay off in production.</p>
 <h2 id="threat-model">Threat model<a class="headerlink" href="#threat-model" title="Permanent link">&para;</a></h2>
 <p>In scope:
 - Database dump leak → all credentials remain encrypted, requiring the
