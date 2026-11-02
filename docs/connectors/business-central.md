@@ -280,8 +280,9 @@ node sees) is skipped and the converted record is written.
       alone is not seen again (a record without `id` or `number` is
       identified by its content, so there it is). A record whose date is
       earlier than the watermark when it is added is never read, and nothing
-      is logged, unless `lookback_days` is set (below). Business dates are often backdated — for example, Saturday's
-      sales posted on Monday with posting date Saturday — so use
+      is logged, unless `lookback_days` is set (below). Business dates are
+      often backdated — for example, Saturday's sales posted on Monday with
+      posting date Saturday — so use
       `lastModifiedDateTime` as the cursor unless you are sure the date field
       is never backdated. The blank date BC returns for an empty field
       (`0001-01-01`) is ignored.

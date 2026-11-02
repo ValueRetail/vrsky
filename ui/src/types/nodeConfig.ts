@@ -194,3 +194,19 @@ export function connectorKeysFor(nodeType: string, config: Record<string, unknow
   if (nodeType === 'converter' || nodeType === 'filter') return CONNECTOR_KEYS[nodeType]
   return CONNECTOR_KEYS[`${nodeType}/${String(config.type ?? '')}`]
 }
+
+/** The largest lookback_days the Business Central consumer accepts. */
+export const BC_MAX_LOOKBACK_DAYS = 365
+
+/**
+ * What the lookback_days field saves for the text `v`, given the value saved
+ * now. The consumer reads an int from 0 to 365: a decimal makes it skip the
+ * node, so anything but a whole number in range is refused and the saved
+ * value stays. Empty clears the setting.
+ */
+export function nextLookbackDays(v: string, current: unknown): number | undefined {
+  if (v.trim() === '') return undefined
+  const n = /^\d+$/.test(v.trim()) ? Number(v) : NaN
+  if (n >= 0 && n <= BC_MAX_LOOKBACK_DAYS) return n
+  return typeof current === 'number' ? current : undefined
+}
