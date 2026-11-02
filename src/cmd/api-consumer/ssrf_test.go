@@ -153,7 +153,7 @@ func TestAPIConsumerConfig_CheckURLs(t *testing.T) {
 		allowPrivate bool
 		ok           bool
 	}{
-		{"https public", APIConsumerConfig{BaseURL: "https://api.met.no", Endpoints: ep("/weatherapi")}, false, true},
+		{"https public", APIConsumerConfig{BaseURL: "https://api.example.org", Endpoints: ep("/forecast")}, false, true},
 		{"http public", APIConsumerConfig{BaseURL: "http://api.example.com", Endpoints: ep("/v1")}, false, true},
 		{"full url in the path", APIConsumerConfig{BaseURL: "", Endpoints: ep("https://api.example.com/v1")}, false, true},
 		{"hostname", APIConsumerConfig{BaseURL: "http://localhost:8080", Endpoints: ep("/v1")}, false, true}, // the dial refuses it

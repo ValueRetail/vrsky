@@ -15,7 +15,7 @@ func TestValidateNodeConfigs_APIConsumerURLs(t *testing.T) {
 		api     string // the api block
 		wantErr string // substring; empty = accepted
 	}{
-		{"https public", `{"base_url":"https://api.met.no","endpoints":[{"path":"/weatherapi/locationforecast/2.0/compact","params":"lat=59.9&lon=10.7"}]}`, ""},
+		{"https public", `{"base_url":"https://api.example.org","endpoints":[{"path":"/forecast/compact","params":"lat=59.9&lon=10.7"}]}`, ""},
 		{"http public", `{"base_url":"http://api.example.com","endpoints":[{"path":"/v1/items"}]}`, ""},
 		{"no endpoints defaults to /", `{"base_url":"https://api.example.com"}`, ""},
 		{"full url in the path", `{"base_url":"","endpoints":[{"path":"https://api.example.com/v1"}]}`, ""},

@@ -22,7 +22,7 @@ func TestCheckRequestURL(t *testing.T) {
 		allowPrivate bool
 		wantErr      string // substring; empty = ok
 	}{
-		{"https public host", "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=51.5&lon=-0.1", false, ""},
+		{"https public host", "https://api.example.org/forecast/compact?lat=51.5&lon=-0.1", false, ""},
 		{"http public host", "http://api.example.com/v1/items", false, ""},
 		{"http public ip", "http://93.184.216.34/x", false, ""},
 		{"userinfo is the tenant's own basic auth", "https://u:p@api.example.com/", false, ""},
