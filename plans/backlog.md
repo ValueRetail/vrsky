@@ -1067,6 +1067,27 @@ Last updated 2026-10-28.
     (lost on restart), or list the prefix now and then in event mode just
     to sweep leftovers. Found in #640.
 
+152. **The builder's "connection gone" redeploy has no page-level test.**
+    `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
+    when the linked one was deleted, which changes the webhook URL. Add a
+    case to `PipelineBuilder.deploy.test.tsx`. Found in review of #654.
+153. **Unit tests for `useNodeDrag`, `useCanvasPersistence` and
+    `useConnectionDrawing`.** The page test in #654 loads them for the
+    first time and covers them only partly, so global branch and function
+    coverage have about 2.5 points of room left. Tests for these hooks win
+    the margin back. Found in review of #654.
+154. **`GET /api/v1/connections/{id}/metrics/ws` has no caller either.**
+    #651 removed `/metrics/stream`; the WebSocket route runs the same
+    handler and nothing in the UI opens it. Remove it with `ClientRegistry`
+    and `MetricsCache` if they have no other use. Public route, so PR plus
+    `agent:needs-human`. Found in #651.
+155. **Platform plan and quota changes are audited under the wrong tenant.**
+    The audit middleware files an entry under the caller's context tenant,
+    so `platform.plan.set` lands in the operator's own workspace log, and
+    since #637 nothing when the operator has no workspace selected. The
+    legacy `PUT /api/v1/tenants/{id}/plan` and quota routes have the same
+    gap. File them under the path's `tenant_id`. Found in review of #637.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource
