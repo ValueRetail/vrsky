@@ -68,7 +68,7 @@ backoff, without publishing again.
   no listing and no done set, the message is acked after the publish, and
   returning the error would redeliver the message and publish a duplicate.
   Behaviour is unchanged (`ingestObject` still logs and moves on). Filed as
-  backlog item 150.
+  backlog item 151.
 
 ## Review changes (round 2)
 
