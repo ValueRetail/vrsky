@@ -162,6 +162,12 @@ Two ways to authenticate against mutating endpoints:
 - **Tenant API key** — opaque token bound to one tenant. Treated as
   effective role **admin**: enough to deploy / manage resources, but
   cannot transfer ownership or change tenant-wide settings.
+  The same split applies: a key the server rejects (unknown, rotated away,
+  revoked, or its workspace deleted) answers `401`. If the lookup itself
+  fails (the database is down or slow) the answer is `503
+  ServiceUnavailable` with a fixed message and the error goes to the log,
+  never the key or its hash. A client should retry a `503` and fix its key
+  on a `401`.
 
 ### Last-owner protection
 
@@ -297,17 +303,27 @@ service. `pkg/safeurl` is the guard: `CheckBaseURL` gives an early error
 CGNAT, multicast and the Azure platform address at dial time, on the address
 actually connected to, so a hostname that resolves to one is refused and DNS
 rebinding cannot swap it in. It ignores proxy environment variables and does
-not follow redirects.
+not follow redirects, unless the connector asks for same-host redirects
+(`NewClientWith`): up to five, never to another host or from https to http.
 
-Only the Sitoo consumer and producer use it so far
-([Sitoo](connectors/sitoo.md#the-base-url)); the management API also checks the
-Sitoo `base_url` when a connection is started. Other connectors that take a
-tenant-supplied host (Visma, Front Systems, the API consumer, the HTTP
-producer) have not been moved to it.
+Used so far:
+
+- The Sitoo consumer and producer ([Sitoo](connectors/sitoo.md#the-base-url)),
+  https only; the management API also checks the Sitoo `base_url` when a
+  connection is started.
+- The API consumer (#639, [REST API polling](connectors/api.md#which-addresses-it-will-call)),
+  which allows public `http` too because its URL is free-form and public APIs
+  use it, follows same-host redirects, and is checked by the management API at
+  start the same way.
+
+Other connectors that take a tenant-supplied host (the HTTP producer, Visma,
+Front Systems, Brightpearl, SAP S/4HANA, Business Central) have not been moved
+to it; they are tracked in #639.
 
 For local development with a mock upstream, the operator can set
-`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow `http` and private
-addresses. A node cannot set it, and it must stay off in production.
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
+`http` for the connectors that are https only). A node cannot set it, and it
+must stay off in production.
 
 ## Threat model
 

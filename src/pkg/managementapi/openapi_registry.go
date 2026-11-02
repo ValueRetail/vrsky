@@ -57,7 +57,6 @@ var apiRoutes = []apiRoute{
 
 	// --- Metrics & sample data ---
 	{"GET /api/v1/connections/{id}/metrics", "get", "/api/v1/connections/{id}/metrics", "Metrics", "Point-in-time pipeline metrics for a connection (from Prometheus)", nil, nil},
-	{"GET /api/v1/connections/{id}/metrics/stream", "get", "/api/v1/connections/{id}/metrics/stream", "Metrics", "Server-sent stream of live pipeline metrics", nil, nil},
 	{"GET /api/v1/connections/{id}/metrics/ws", "get", "/api/v1/connections/{id}/metrics/ws", "Metrics", "WebSocket stream of live pipeline metrics", nil, nil},
 	{"GET /api/v1/connections/{id}/sample-data", "get", "/api/v1/connections/{id}/sample-data", "Metrics", "Last payload seen by a deployed connection", nil, nil},
 	{"GET /api/v1/connections/{id}/workers/{worker}/events", "get", "/api/v1/connections/{id}/workers/{worker}/events", "Metrics", "Server-sent stream of a worker's live events for a connection (worker is one of file-consumer, http-producer, db-producer, data-converter, data-filter, remote-agent)", nil, nil},

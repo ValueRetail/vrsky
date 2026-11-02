@@ -92,6 +92,17 @@ func TenantIDMiddleware(tenantHeader string) func(http.Handler) http.Handler {
 
 			tenantID := r.Header.Get(tenantHeader)
 
+			// The platform operator's routes act on workspaces by the {tenant_id}
+			// in the path and are gated by RequireOperator, not by a workspace
+			// header. An operator with no active workspace of their own has no
+			// header to send, so a missing one is fine here. When one is sent it
+			// still goes into the context, which is how the audit log files
+			// platform.plan.set under a workspace.
+			if strings.HasPrefix(r.URL.Path, "/api/v1/platform/") && strings.TrimSpace(tenantID) == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Validate tenant ID is present and non-empty
 			if strings.TrimSpace(tenantID) == "" {
 				// Return JSON error response consistent with API handlers

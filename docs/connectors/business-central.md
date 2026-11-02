@@ -346,6 +346,15 @@ node sees) is skipped and the converted record is written.
     and reads the entity from the start, and it stores a watermark from the
     new field with the field recorded. Every record is sent once more.
 
+    The read of that first poll is stored in one checkpoint save at its end.
+    If the save fails, it is tried once more on a fresh context (so one cut
+    off by a stop still completes; each attempt gives up after 5 seconds). If
+    both fail, the poll returns an error and keeps what it meant to store in
+    memory; the next poll stores it first and reads nothing until that works,
+    so the field change does not turn into a second full read. A restart
+    before that loses the memory, and the entity is read from the start once
+    more.
+
     **Nodes frozen before #591.** Earlier versions took any value as the
     watermark, so a node may have stored one in the future and read nothing
     since. On its first poll after the upgrade a stored watermark more than

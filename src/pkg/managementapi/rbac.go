@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -56,6 +57,11 @@ func RequireTenantRoleFromHeader(repo Repository, minRole string) func(http.Hand
 
 			ctx, role, ok, err := resolvePrincipalRole(r.Context(), r, repo, tenantID)
 			if err != nil {
+				var keyErr *apiKeyLookupError
+				if errors.As(err, &keyErr) {
+					writeServiceUnavailable(w, r, "api key lookup failed", err)
+					return
+				}
 				writeSessionError(w, r, err)
 				return
 			}
@@ -74,6 +80,13 @@ func RequireTenantRoleFromHeader(repo Repository, minRole string) func(http.Hand
 		})
 	}
 }
+
+// apiKeyLookupError marks a failed (not rejected) API-key lookup, so the caller
+// logs it as that and not as a session failure.
+type apiKeyLookupError struct{ err error }
+
+func (e *apiKeyLookupError) Error() string { return e.err.Error() }
+func (e *apiKeyLookupError) Unwrap() error { return e.err }
 
 // resolvePrincipalRole identifies the caller and returns the role they
 // hold in the requested tenant.
@@ -115,6 +128,9 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 
 	// 2. Tenant API key?
 	tenant, err := repo.GetTenantByAPIKeyHash(ctx, hashed)
+	if err != nil && !isAPIKeyRejection(err) {
+		return ctx, "", false, &apiKeyLookupError{err: err}
+	}
 	if err == nil && tenant != nil && tenant.ID == tenantID && tenant.Status == "active" {
 		ctx = context.WithValue(ctx, requestingTenantKey, tenant)
 		return withPrincipalRole(ctx, "admin"), "admin", true, nil

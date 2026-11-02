@@ -802,7 +802,7 @@ func (m *MockRepository) PauseConnectionsByDataConnection(ctx context.Context, t
 }
 
 func (m *MockRepository) GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error) {
-	return nil, ErrTenantNotFound
+	return nil, ErrAPIKeyNotFound
 }
 
 // ----- Tenant quotas (Phase 1I — #74) -----

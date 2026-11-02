@@ -31,6 +31,8 @@ func TestAPIConsumer_PollWithResolvedAuthValue(t *testing.T) {
 		token    = "super-secret-token"
 	)
 	t.Setenv("ENCRYPTION_KEY", testKey)
+	// The test API is an httptest server on http://127.0.0.1.
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
 
 	// Test API records the Authorization header it received.
 	var gotAuth atomic.Value

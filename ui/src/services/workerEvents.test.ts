@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { subscribeWorkerEvents } from './workerEvents'
 
 vi.mock('@/config/env', () => ({ config: { apiUrl: 'http://api.test' } }))
-vi.mock('@/services/api', () => ({ getActiveTenantId: () => 'tenant-1' }))
+const tenant = vi.hoisted(() => ({ id: 'tenant-1' }))
+vi.mock('@/services/api', () => ({ getActiveTenantId: () => tenant.id }))
 vi.mock('@/services/authService', () => ({ getSessionToken: () => 'tok' }))
 
 /** A response body that emits the given frames and then ends, like a proxy
@@ -35,10 +36,27 @@ const settle = async (ms = 800) => {
 describe('subscribeWorkerEvents', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    tenant.id = 'tenant-1'
   })
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('sends the workspace header, and none when no workspace is selected (#637)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(streamOf())
+    vi.stubGlobal('fetch', fetchMock)
+    let stop = subscribeWorkerEvents('conn-1', 'http-producer', { onEvent: vi.fn() })
+    await settle(10)
+    stop()
+    expect(fetchMock.mock.calls[0][1].headers['X-Tenant-ID']).toBe('tenant-1')
+
+    fetchMock.mockClear()
+    tenant.id = ''
+    stop = subscribeWorkerEvents('conn-1', 'http-producer', { onEvent: vi.fn() })
+    await settle(10)
+    stop()
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Tenant-ID')
   })
 
   // The bug this file exists for: a worker stream that ends is routine — the

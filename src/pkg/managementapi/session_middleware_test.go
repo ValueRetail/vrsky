@@ -47,7 +47,7 @@ func (s *sessionStub) GetUserTenantRole(_ context.Context, _, _ string) (string,
 }
 
 func (s *sessionStub) GetTenantByAPIKeyHash(_ context.Context, _ string) (*Tenant, error) {
-	return nil, errors.New("no tenant found for API key")
+	return nil, ErrAPIKeyNotFound
 }
 
 func (s *sessionStub) GetUserTenants(_ context.Context, _ string) ([]*TenantResponse, error) {

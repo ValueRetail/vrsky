@@ -7,10 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/google/uuid"
 )
 
@@ -23,10 +23,8 @@ func (s *apiConsumer) pollConnection(ctx context.Context, own *activeConn, conne
 		"poll_interval", config.PollIntervalSeconds,
 		"one_time_only", config.OneTimeOnly)
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: s.pollTimeout,
-	}
+	// The guarded client (timeout, dial-time address check, same-host redirects)
+	client := s.client()
 
 	// If one-time-only mode, just poll once and return
 	if config.OneTimeOnly {
@@ -82,20 +80,7 @@ func (s *apiConsumer) pollAllEndpoints(ctx context.Context, client *http.Client,
 		}
 
 		// Build full URL — if path is already a full URL, use it directly
-		var url string
-		if strings.HasPrefix(endpoint.Path, "http://") || strings.HasPrefix(endpoint.Path, "https://") {
-			url = endpoint.Path
-		} else {
-			url = strings.TrimSuffix(config.BaseURL, "/") + endpoint.Path
-		}
-		if endpoint.Params != "" {
-			// Add query parameters
-			if strings.Contains(url, "?") {
-				url += "&" + endpoint.Params
-			} else {
-				url += "?" + endpoint.Params
-			}
-		}
+		url := safeurl.EndpointURL(config.BaseURL, endpoint.Path, endpoint.Params)
 
 		logger.Debug("Polling endpoint", "url", url, "endpoint_index", i)
 

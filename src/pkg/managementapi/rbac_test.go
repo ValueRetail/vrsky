@@ -64,7 +64,7 @@ func (m *rbacMock) GetUserTenantRole(ctx context.Context, userID, tenantID strin
 func (m *rbacMock) GetTenantByAPIKeyHash(ctx context.Context, keyHash string) (*Tenant, error) {
 	t, ok := m.apiKeys[keyHash]
 	if !ok {
-		return nil, ErrTenantNotFound
+		return nil, ErrAPIKeyNotFound
 	}
 	return t, nil
 }

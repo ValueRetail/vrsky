@@ -138,6 +138,20 @@ describe('TenantSelector', () => {
     expect(select()).toHaveValue('tenant-1')
   })
 
+  it('with no active workspace shows a placeholder, not the first (disabled) one (#637)', () => {
+    signIn([pending, broken])
+    useAuthStore.setState({ currentTenant: null })
+    render(<TenantSelector />)
+    expect(select()).toHaveValue('')
+    const options = screen.getAllByRole('option') as HTMLOptionElement[]
+    expect(options[0].textContent).toBe('No active workspace')
+    expect(options[0].disabled).toBe(true)
+    expect(options.slice(1).map((o) => o.textContent)).toEqual([
+      'New one (owner) - setting up...',
+      'Broken (owner) - failed',
+    ])
+  })
+
   it('switches to an active workspace', () => {
     signIn([prod, sandbox])
     render(<TenantSelector />)

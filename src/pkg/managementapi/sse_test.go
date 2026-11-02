@@ -84,10 +84,10 @@ func assertSSEHeaders(t *testing.T, resp *http.Response) {
 	}
 }
 
-// TestMetricsSSE_OutlivesWriteTimeout: the builder's live metrics are one
+// TestMetricsStream_OutlivesWriteTimeout: the live metrics stream is one
 // long response. A metrics update published after the server's WriteTimeout
 // has passed must still reach the browser.
-func TestMetricsSSE_OutlivesWriteTimeout(t *testing.T) {
+func TestMetricsStream_OutlivesWriteTimeout(t *testing.T) {
 	const (
 		tenant = "tenant-a"
 		connID = "conn-1"
@@ -100,7 +100,7 @@ func TestMetricsSSE_OutlivesWriteTimeout(t *testing.T) {
 
 	srv := startSSEServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.SetPathValue("id", connID)
-		h.HandleMetricsSSE(w, r.WithContext(ContextWithTenantID(r.Context(), tenant)))
+		h.HandleMetricsWebSocket(w, r.WithContext(ContextWithTenantID(r.Context(), tenant)))
 	}))
 	resp := openSSE(t, srv.URL)
 	assertSSEHeaders(t, resp)
@@ -111,6 +111,35 @@ func TestMetricsSSE_OutlivesWriteTimeout(t *testing.T) {
 	registry.BroadcastToConnection(connID, []byte(`{"type":"metrics","data":"late"}`))
 
 	waitForFrame(t, resp, `"late"`)
+}
+
+// TestMetricsStreamRouteRemoved: GET .../metrics/stream was dropped in #651
+// because no client read it. The route must stay gone, while the polled
+// snapshot at .../metrics and the stream at .../metrics/ws stay mounted.
+func TestMetricsStreamRouteRemoved(t *testing.T) {
+	mux := http.NewServeMux()
+	NewHandler(NewMockRepository(), nil).RegisterRoutes(mux)
+
+	for _, tc := range []struct {
+		path        string
+		wantMounted bool
+	}{
+		{"/api/v1/connections/conn-1/metrics/stream", false},
+		{"/api/v1/connections/conn-1/metrics", true},
+		{"/api/v1/connections/conn-1/metrics/ws", true},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		_, pattern := mux.Handler(req)
+		if mounted := pattern != ""; mounted != tc.wantMounted {
+			t.Errorf("GET %s: mounted = %v (pattern %q), want %v", tc.path, mounted, pattern, tc.wantMounted)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/connections/conn-1/metrics/stream", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET metrics/stream = %d, want 404", rec.Code)
+	}
 }
 
 // TestTenantStatusSSE_OutlivesWriteTimeout: provisioning a workspace takes
