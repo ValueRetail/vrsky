@@ -87,6 +87,24 @@ describe('getMe', () => {
     expect(getSessionToken()).toBeNull()
   })
 
+  it('clears the token on 403 — a suspended or unverified account is a rejected session', async () => {
+    setSessionToken('suspended')
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(true)
+    client.get.mockRejectedValue(axiosErr(403))
+
+    await expect(getMe()).resolves.toBeNull()
+    expect(getSessionToken()).toBeNull()
+  })
+
+  it('keeps the token on a network error', async () => {
+    setSessionToken('good')
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(false)
+    client.get.mockRejectedValue(new Error('Network Error'))
+
+    await expect(getMe()).resolves.toBeNull()
+    expect(getSessionToken()).toBe('good')
+  })
+
   it('keeps the token on a 500 — a server blip is not a bad credential', async () => {
     setSessionToken('good')
     vi.spyOn(axios, 'isAxiosError').mockReturnValue(true)

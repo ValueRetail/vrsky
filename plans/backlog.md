@@ -803,7 +803,7 @@ Last updated 2026-10-28.
     can show as soon as the first new pod serves, so a quick Reload can hit
     this. Keep the previous build's assets in the new image, or have the
     banner wait for two matching checks. Found in review of #551.
-116. **`checkAuth` signs the user out when `/me` fails for any reason.**
+116. ~~**`checkAuth` signs the user out when `/me` fails for any reason.**~~ (#611)
     `getMe` returns null on every failure, and `ui/src/store/authStore.ts`
     clears the user and workspaces whenever it gets null, so a network
     error or a 5xx on `/me` (at app load, after a workspace delete, after a
@@ -1011,6 +1011,13 @@ Last updated 2026-10-28.
     old date is applied to a new field silently. Store the field name in the
     checkpoint state and drop the watermark when it changes. Found in review
     of #602.
+145. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
+    (`src/pkg/managementapi/session_middleware.go`) turns every
+    `ValidateSession` error, DB errors included, into a 401 "invalid or
+    expired session", so a transient database error looks like a rejected
+    session and the UI (#611) signs the user out. Tell "not found or
+    expired" apart from other errors and answer 5xx for the latter. Found in
+    review of #613.
 
 ## Human
 
