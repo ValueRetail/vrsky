@@ -82,7 +82,7 @@ rather than signing out on an unexpected exception.
   the alternative is the bug.
 - `ValidateSession` errors, DB errors included, still become 401 on the
   server, so a database blip signs users out. Server side, out of scope
-  here: backlog item 145.
+  here: backlog item 146.
 - `loadFailed` must be cleared on every other outcome, or the retry screen
   could stick after a logout. `logout`, `expireSession` and the success
   path reset it.
