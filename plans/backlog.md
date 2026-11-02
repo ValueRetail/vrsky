@@ -1009,16 +1009,15 @@ Last updated 2026-10-28.
     old date was applied to a new field silently. The checkpoint state now
     records the field and the watermark is dropped when it changes; a legacy
     row without a field is taken to match. Found in review of #602.
-145. **A failed checkpoint save after a `cursor_field` change re-sends the
-    whole entity.** `saveProgress` in
-    `src/cmd/business-central-consumer/service.go` only logs a failed save.
-    After a field change the stored row still names the old field, so a save
-    that fails, or a context cancelled at shutdown before it runs, makes the
-    next poll drop the watermark and read from the start again. The records
-    are already published, so it costs repeats, not data. Return the error
-    from `saveProgress` and retry it once with a fresh short context, or skip
-    the next field-change reset when the save of the previous one is known
-    to have failed. Found in review of #614.
+145. ~~**A failed checkpoint save after a `cursor_field` change re-sends the
+    whole entity.**~~ (#638) `saveProgress` only logged a failed save. After
+    a field change the stored row still names the old field, so a save that
+    failed, or a context cancelled at shutdown before it ran, made the next
+    poll drop the watermark and read from the start again. `saveProgress`
+    now returns the error and retries once on a fresh context, each attempt
+    bounded; a poll after a field change that still cannot store keeps the
+    checkpoint in memory and stores it before the next read. Found in review
+    of #614.
 146. ~~**A database blip on `/me` still signs users out.**~~ (#634)
     `SessionAuthMiddleware` answered 401 for every `ValidateSession` error,
     database errors included, so the UI (#611) signed users out. Only a

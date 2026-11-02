@@ -90,6 +90,7 @@ type bcConsumer struct {
 	publishStream sdk.PublishStreamFunc
 	inlineMax     int
 	checkpoints   checkpoint.Store
+	saveTimeout   time.Duration // per attempt to store a checkpoint; 0 = defaultSaveTimeout
 
 	// now is the clock the watermark ceiling is measured against; nil =
 	// time.Now.
@@ -177,6 +178,12 @@ type BCConfig struct {
 	// the watermark (#610). Set by each incremental fetch; "" = not
 	// incremental, nothing recorded.
 	stateField string
+	// unsaved is the checkpoint a poll after a cursor_field change could not
+	// store, even after a retry (#638). The stored row still names the old
+	// field, so the next poll would drop the watermark and read the entity
+	// from the start. It is stored again before the next poll reads anything;
+	// until that works the poll is skipped. In memory only: a restart loses it.
+	unsaved *pendingSave
 	// aheadWarned is set once the size Warn for aheadSeen was logged, so it
 	// is logged once per process rather than every poll.
 	aheadWarned bool
@@ -439,6 +446,12 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	cursor, rec := "", recovery{}
 	fieldChanged, fieldUnrecorded := false, false
 	if cfg.Incremental {
+		if u := cfg.unsaved; u != nil {
+			if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, u.cursor, u.replace, u.count, u.state, u.at, logger); err != nil {
+				return fmt.Errorf("store the watermark of the previous poll: %w", err)
+			}
+			cfg.unsaved = nil
+		}
 		cp := c.loadCursor(ctx, tenantID, connID, cfg.NodeID, logger)
 		field, stored := cfg.effectiveCursorField(), storedCursorField(cp)
 		cfg.stateField = field
@@ -584,7 +597,18 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 		c.warnAheadSize(cfg, logger)
 	}
 	if newCursor != "" || replace || cfg.Pictures || aheadChanged || fieldUnrecorded {
-		c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), cfg.checkpointState(), logger)
+		state, at := cfg.checkpointState(), c.clock().UTC()
+		if err := c.saveProgress(ctx, tenantID, connID, cfg.NodeID, newCursor, replace, int64(total), state, at, logger); err != nil {
+			// The records are published and cursor is the new watermark. Past
+			// a cursor_field change the row still names the old field, so a
+			// poll that finds it drops the watermark and sends everything
+			// again; keep what was to be stored and try again first thing.
+			// Anything else only repeats a few records, as before.
+			if fieldChanged {
+				cfg.unsaved = &pendingSave{cursor: newCursor, replace: replace, count: int64(total), state: state, at: at}
+			}
+			return fmt.Errorf("save Business Central watermark: %w", err)
+		}
 	}
 
 	if cfg.Pictures {
@@ -1061,34 +1085,70 @@ func stateHasPictures(state json.RawMessage) bool {
 	return ok && string(v) != "null"
 }
 
+// defaultSaveTimeout bounds one attempt to store a checkpoint.
+const defaultSaveTimeout = 5 * time.Second
+
+// pendingSave is a checkpoint that could not be stored; see BCConfig.unsaved.
+type pendingSave struct {
+	cursor  string
+	replace bool
+	count   int64
+	state   json.RawMessage
+	at      time.Time // when the poll finished, kept for a later flush
+}
+
 // saveProgress stores the watermark and the node's state in one checkpoint
 // row. An empty cursor keeps the stored watermark, unless replace is set:
 // then cursor is stored as given, "" included (the next poll reads from the
 // start).
+//
+// A failed attempt is tried once more on a context that outlives ctx, so a
+// poll cancelled by a stop right after it published still stores where it
+// got to. Each attempt is bounded by saveTimeout, so a store that hangs
+// cannot hold up the shutdown for more than two of them. The error of the
+// second attempt is returned; the caller decides what a lost save costs.
 func (c *bcConsumer) saveProgress(ctx context.Context, tenantID, connID, nodeID, cursor string, replace bool,
-	count int64, state json.RawMessage, logger *slog.Logger) {
+	count int64, state json.RawMessage, at time.Time, logger *slog.Logger) error {
 	if c.checkpoints == nil || nodeID == "" {
-		return
+		return nil
 	}
+	err := c.saveOnce(ctx, tenantID, connID, nodeID, cursor, replace, count, state, at)
+	if err == nil {
+		return nil
+	}
+	logger.Warn("save Business Central watermark failed; trying once more",
+		"error", err, "poll_cancelled", ctx.Err() != nil)
+	return c.saveOnce(context.WithoutCancel(ctx), tenantID, connID, nodeID, cursor, replace, count, state, at)
+}
+
+func (c *bcConsumer) saveOnce(ctx context.Context, tenantID, connID, nodeID, cursor string, replace bool,
+	count int64, state json.RawMessage, at time.Time) error {
+	timeout := c.saveTimeout
+	if timeout <= 0 {
+		timeout = defaultSaveTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	if cursor == "" && !replace {
-		if cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID); err == nil && cp != nil {
+		// A store that cannot say what is stored must not be answered with an
+		// empty watermark: that would erase it.
+		cp, err := c.checkpoints.Get(ctx, tenantID, connID, nodeID)
+		if err != nil {
+			return fmt.Errorf("read the stored watermark: %w", err)
+		}
+		if cp != nil {
 			cursor = cp.LastProcessedMessageID
 		}
 	}
-	err := c.checkpoints.Save(ctx, &checkpoint.Checkpoint{
+	return c.checkpoints.Save(ctx, &checkpoint.Checkpoint{
 		TenantID:               tenantID,
 		ConnectionID:           connID,
 		NodeID:                 nodeID,
 		LastProcessedMessageID: cursor,
-		LastProcessedAt:        c.clock().UTC(),
+		LastProcessedAt:        at,
 		MessageCount:           count,
 		State:                  state,
 	})
-	if err != nil {
-		// The records are already published; failing to remember how far we got
-		// costs a repeat next poll, not data.
-		logger.Error("save Business Central watermark", "error", err, "cursor", cursor)
-	}
 }
 
 func (c *bcConsumer) get(ctx context.Context, tok *oauthcc.Client, fullURL string, pageSize int) ([]byte, error) {
