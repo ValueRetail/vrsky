@@ -842,7 +842,7 @@ Last updated 2026-10-28.
     `file_pattern` to event keys and skip non-create S3 records, or say in
     the panel that the notification must be scoped. Documented as is in
     #564. Found in #564.
-124. **A refresh after a refused workspace delete resets the page.**
+124. ~~**A refresh after a refused workspace delete resets the page.**~~ (#630)
     `TenantSelector` calls `checkAuth()` after a 403 or 404, `checkAuth`
     sets `isLoading: true`, and `ui/src/components/Auth/ProtectedRoute.tsx:24`
     swaps the page for the spinner and remounts the builder, so open
@@ -998,10 +998,11 @@ Last updated 2026-10-28.
     now returns `ErrNotFound` from `Get` and `GetStream` on S3, Azure and
     GCS, and event mode counts such a key as already handled (Info log, no
     publish, no after-action). Done in #609.
-143. **A date `cursor_field` can't see backdated records.** Records dated
-    before the watermark (posting last week's documents today) are never
-    read. Add a `lookback_days` option that filters `ge W − N` and remembers
-    the whole window in the existing remembered set. Found in review of #602.
+143. ~~**A date `cursor_field` can't see backdated records.**~~ (#629)
+    Records dated before the watermark (posting last week's documents today)
+    were never read. `lookback_days` (0 to 365, date fields only) filters
+    `ge W − N` and remembers the whole window in the existing remembered set.
+    Found in review of #602.
 144. ~~**Changing `cursor_field` keeps the old watermark.**~~ (#610) Nothing
     reset the Business Central checkpoint when the field changed, so
     `postingDate gt <old DateTime>` was sent (likely a 400 every poll), or an
@@ -1018,13 +1019,13 @@ Last updated 2026-10-28.
     from `saveProgress` and retry it once with a fresh short context, or skip
     the next field-change reset when the save of the previous one is known
     to have failed. Found in review of #614.
-146. **A database blip on `/me` still signs users out.** `SessionAuthMiddleware`
-    (`src/pkg/managementapi/session_middleware.go`) turns every
-    `ValidateSession` error, DB errors included, into a 401 "invalid or
-    expired session", so a transient database error looks like a rejected
-    session and the UI (#611) signs the user out. Tell "not found or
-    expired" apart from other errors and answer 5xx for the latter. Found in
-    review of #613.
+146. ~~**A database blip on `/me` still signs users out.**~~ (#634)
+    `SessionAuthMiddleware` answered 401 for every `ValidateSession` error,
+    database errors included, so the UI (#611) signed users out. Only a
+    rejected session (unknown, revoked, expired, user gone) is a 401 now;
+    anything else is a 503 with a fixed body and a server-side log line.
+    `GetMe`, `ChangePassword`, `DeleteAccount` and the tenant-header RBAC
+    check classify the same way. Found in review of #613.
 147. **Other connectors still call a tenant-supplied host unchecked.** #616
     added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
     link-local and metadata addresses) for Sitoo. The same hole is open in
@@ -1034,6 +1035,17 @@ Last updated 2026-10-28.
     `safeurl.NewClient` and `CheckBaseURL`, one connector per PR; the API
     consumer and HTTP producer are the most exposed because their URL is
     free-form. Found in #616.
+148. **Tenant API-key lookups turn a database error into a 401.**
+    `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
+    treat every `GetTenantByAPIKeyHash` error as "invalid API key", and the
+    repository returns a plain string error for "not found", so the two
+    cannot be told apart. Add a sentinel, then answer 503 for the rest like
+    #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
+    rejected key for a database blip. Found in #634.
+149. **`GetMe` hides a failed tenant lookup.** `GetUserTenants` errors become
+    an empty tenant list and a 200, so a database blip right after the
+    session check shows a signed-in user with no workspaces. Answer 503, as
+    for the session lookup. Found in #634.
 
 ## Human
 

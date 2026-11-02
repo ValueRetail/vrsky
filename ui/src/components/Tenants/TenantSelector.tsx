@@ -6,7 +6,7 @@ import apiClient, { VRSkyAPIError } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiError'
 
 export default function TenantSelector() {
-  const { tenants, currentTenant, switchTenant, checkAuth } = useAuthStore()
+  const { tenants, currentTenant, switchTenant, checkAuth, refreshAuth } = useAuthStore()
   const { showConfirmDialog, hideConfirmDialog, showErrorNotification } = useUIStore()
   const [showCreateModal, setShowCreateModal] = useState(false)
 
@@ -32,12 +32,16 @@ export default function TenantSelector() {
           // A 403 or 404 can mean the workspace was deleted elsewhere (no
           // membership or no workspace left), so refresh to drop it. The
           // server answered, so the session and network are fine. On any
-          // other failure skip checkAuth: it signs the user out when /me
-          // fails, which on a network error would turn this into a logout.
+          // other failure skip the refresh: nothing is known to have changed.
+          // refreshAuth leaves isLoading alone, so ProtectedRoute keeps the
+          // page (open panels, selection, event history) instead of
+          // swapping it for the spinner.
           const status = err instanceof VRSkyAPIError ? err.details?.status : undefined
-          if (status === 403 || status === 404) await checkAuth()
+          if (status === 403 || status === 404) await refreshAuth()
           return
         }
+        // The current workspace is gone, so the page showing it is stale:
+        // checkAuth's spinner and remount are wanted here.
         await checkAuth()
       },
     })

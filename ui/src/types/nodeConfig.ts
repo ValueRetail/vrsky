@@ -82,11 +82,11 @@ export const CONNECTOR_KEYS: Record<string, ConnectorKeys> = {
     block: 'business_central',
     keys: [
       'aad_tenant_id', 'environment', 'company_id', 'client_id', 'client_secret', 'entity', 'filter',
-      'incremental', 'cursor_field', 'page_size', 'api_base_url', 'token_url', 'scope',
+      'incremental', 'cursor_field', 'lookback_days', 'page_size', 'api_base_url', 'token_url', 'scope',
       'poll_interval_seconds', 'pictures',
     ],
     required: ['aad_tenant_id', 'company_id', 'client_id', 'client_secret'],
-    numeric: ['page_size', 'poll_interval_seconds'],
+    numeric: ['lookback_days', 'page_size', 'poll_interval_seconds'],
   },
   // business-central-producer (BCProducerConfig in src/cmd/business-central-producer/service.go)
   'producer/business_central': {
@@ -193,4 +193,20 @@ export function converterMappingWarnings(m: ConverterMapping): string[] {
 export function connectorKeysFor(nodeType: string, config: Record<string, unknown>): ConnectorKeys | undefined {
   if (nodeType === 'converter' || nodeType === 'filter') return CONNECTOR_KEYS[nodeType]
   return CONNECTOR_KEYS[`${nodeType}/${String(config.type ?? '')}`]
+}
+
+/** The largest lookback_days the Business Central consumer accepts. */
+export const BC_MAX_LOOKBACK_DAYS = 365
+
+/**
+ * What the lookback_days field saves for the text `v`, given the value saved
+ * now. The consumer reads an int from 0 to 365: a decimal makes it skip the
+ * node, so anything but a whole number in range is refused and the saved
+ * value stays. Empty clears the setting.
+ */
+export function nextLookbackDays(v: string, current: unknown): number | undefined {
+  if (v.trim() === '') return undefined
+  const n = /^\d+$/.test(v.trim()) ? Number(v) : NaN
+  if (n >= 0 && n <= BC_MAX_LOOKBACK_DAYS) return n
+  return typeof current === 'number' ? current : undefined
 }

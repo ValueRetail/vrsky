@@ -179,6 +179,80 @@ describe('authStore session lifecycle', () => {
     })
   })
 
+  // #630: a refresh with a page on screen must not raise isLoading, because
+  // ProtectedRoute answers isLoading with the spinner and remounts the page.
+  describe('refreshAuth (background refresh, #630)', () => {
+    const other = { id: 't2', name: 'Other', status: 'active' }
+    // Every isLoading value the store holds from now on.
+    const watchLoading = () => {
+      const seen: boolean[] = []
+      const off = useAuthStore.subscribe((s) => { seen.push(s.isLoading) })
+      return { seen, off }
+    }
+
+    it('updates user and workspaces without isLoading ever going true', async () => {
+      localStorage.setItem('vrsky:selectedTenantId', 't2')
+      getMe.mockResolvedValue({ user, tenants: [other], current_tenant: other })
+      const { seen, off } = watchLoading()
+      await useAuthStore.getState().refreshAuth()
+      off()
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen).not.toContain(true)
+      const s = useAuthStore.getState()
+      expect(s.tenants).toEqual([other])
+      expect(s.currentTenant).toEqual(other)
+      expect(s.isAuthenticated).toBe(true)
+    })
+
+    it('a 401 or 403 (getMe dropped the token) still signs out', async () => {
+      getMe.mockImplementation(async () => { hasToken = false; return null })
+      const { seen, off } = watchLoading()
+      await useAuthStore.getState().refreshAuth()
+      off()
+      expect(seen).not.toContain(true)
+      const s = useAuthStore.getState()
+      expect(s.isAuthenticated).toBe(false)
+      expect(s.user).toBeNull()
+      expect(s.tenants).toEqual([])
+      expect(s.isInitialized).toBe(true)
+      expect(s.loadFailed).toBe(false)
+    })
+
+    it('a transient failure keeps the user and says so, as checkAuth does (#611)', async () => {
+      useUIStore.getState().clearNotifications()
+      getMe.mockImplementation(async () => null)
+      const { seen, off } = watchLoading()
+      await useAuthStore.getState().refreshAuth()
+      off()
+      expect(seen).not.toContain(true)
+      const s = useAuthStore.getState()
+      expect(s.isAuthenticated).toBe(true)
+      expect(s.user).toEqual(user)
+      expect(s.tenants).toEqual([tenant])
+      expect(useUIStore.getState().notifications.map((n) => n.title)).toEqual(['Could not refresh your account'])
+    })
+
+    it('with no user to keep it is the plain check, spinner included', async () => {
+      useAuthStore.setState({ user: null, tenants: [], currentTenant: null, isAuthenticated: false, isInitialized: false })
+      getMe.mockResolvedValue({ user, tenants: [tenant], current_tenant: tenant })
+      const { seen, off } = watchLoading()
+      await useAuthStore.getState().refreshAuth()
+      off()
+      expect(seen).toContain(true)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    })
+
+    it('checkAuth itself still raises isLoading for the initial load', async () => {
+      getMe.mockResolvedValue({ user, tenants: [tenant], current_tenant: tenant })
+      const { seen, off } = watchLoading()
+      await useAuthStore.getState().checkAuth()
+      off()
+      expect(seen).toContain(true)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+    })
+  })
+
   it('logout signs out, forgets the workspace choice and the expiry notice', async () => {
     localStorage.setItem('vrsky:selectedTenantId', 't1')
     useAuthStore.setState({ sessionExpired: true })
