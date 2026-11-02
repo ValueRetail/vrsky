@@ -345,7 +345,7 @@ func TestSampleData_RefusesPrivateTargets(t *testing.T) {
 		want string
 	}{
 		{"loopback base_url (dial)", fmt.Sprintf(`{"base_url":%q,"path":"/x"}`, api.URL), "private"},
-		{"loopback hostname (dial)", fmt.Sprintf(`{"base_url":"http://localhost:%s","path":"/x"}`, apiPath[strings.LastIndex(apiPath, ":")+1:]), "private"},
+		{"loopback hostname (dial)", fmt.Sprintf(`{"base_url":"http://localhost:%s","path":"/x"}`, apiPath[strings.LastIndex(apiPath, ":")+1:]), "target address not allowed"},
 		{"metadata literal", `{"base_url":"http://169.254.169.254","path":"/latest/meta-data/"}`, "private"},
 		{"private literal in the path", `{"base_url":"https://api.example.com","path":"http://10.0.0.5/admin"}`, "private"},
 		{"no host", `{"base_url":"","path":"/x"}`, "not an absolute URL"},
@@ -363,6 +363,34 @@ func TestSampleData_RefusesPrivateTargets(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Errorf("the API received %d requests, want none", hits.Load())
+	}
+}
+
+// A name that resolves to a private address is refused at dial. The caller
+// gets a fixed message: which address the name resolved to is internal detail
+// and stays in the server log.
+func TestSampleData_BlockedDialDoesNotLeakTheAddress(t *testing.T) {
+	port, accepted := tcpCounter(t)
+	var logs strings.Builder
+	c := &apiConsumer{logger: slog.New(slog.NewTextHandler(&logs, nil))} // allowPrivate false
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, httptest.NewRequest(http.MethodPost, "/sample-data/",
+		strings.NewReader(fmt.Sprintf(`{"base_url":"http://localhost:%s","path":"/x"}`, port))))
+
+	out := w.Body.String()
+	if !strings.Contains(out, "target address not allowed") {
+		t.Errorf("body = %s, want the fixed message", out)
+	}
+	for _, leak := range []string{"127.0.0.1", "::1", "refused"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("body %s leaks %q", out, leak)
+		}
+	}
+	if !strings.Contains(logs.String(), "127.0.0.1") && !strings.Contains(logs.String(), "::1") {
+		t.Errorf("the detail should be in the server log, got %q", logs.String())
+	}
+	if n := accepted.Load(); n != 0 {
+		t.Errorf("the listener saw %d connections, want 0", n)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
 const sitooSampleLimit = 5
@@ -76,6 +78,15 @@ func (s *sitooConsumer) handleSampleData() http.HandlerFunc {
 		}
 		body, err := s.get(r.Context(), &cfg, cfg.collectionURL(0, sitooSampleLimit, nil))
 		if err != nil {
+			if errors.Is(err, safeurl.ErrBlockedAddress) {
+				// Which address a name resolved to is internal detail: log
+				// it, do not hand it to the caller.
+				if s.logger != nil {
+					s.logger.Warn("sample-data target refused at dial", "error", err)
+				}
+				writeErr("target address not allowed")
+				return
+			}
 			writeErr(err.Error())
 			return
 		}
