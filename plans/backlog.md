@@ -152,7 +152,7 @@ Last updated 2026-10-28.
     `infrastructure/kubernetes/ui/configmap.yaml` has the same two keys,
     already commented as dead; dropping them there is a manifest change
     for a human-reviewed PR. Found in #377.
-32. **The production UI bundle ships its source maps.** `ui/vite.config.ts`
+32. ~~**The production UI bundle ships its source maps.**~~ (#650) `ui/vite.config.ts`
     sets `build.sourcemap: true`, so the image serves
     `assets/index-*.js.map` (about 3.8 MB) next to the bundle, and anyone can
     read the original TypeScript. Decide whether that's wanted; if not, turn
@@ -497,8 +497,8 @@ Last updated 2026-10-28.
     thousands of files costs one SMB round trip per file per poll. Consider
     a cheaper change signal (directory mtime, or stat known files less
     often). Related to #426. Found in review of #420 (#465).
-78. **Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
-    any more.** Its only client was `ui/src/services/websocket.ts`, deleted
+78. ~~**Nothing in the UI reads `GET /api/v1/connections/{id}/metrics/stream`
+    any more.**~~ (#651, dropped the route) Its only client was `ui/src/services/websocket.ts`, deleted
     in #428 without ever being imported. `HandleMetricsSSE` is still
     mounted (`src/pkg/managementapi/handler.go`) and listed in the OpenAPI
     registry, and `infrastructure/scripts/e2e-test.sh` probes it. Either
@@ -953,15 +953,14 @@ Last updated 2026-10-28.
     first. After a start activates, read the failed events since the
     connection last stopped and resend those; events refused with 410 after
     a stop were refused on purpose and stay. Found in #503.
-137. **Decide whether `ui/src/pages/PipelineBuilder.tsx` goes into
-    `coverage.exclude` in `ui/vitest.config.ts`.** A page-level deploy test
-    (real page and stores, mocked canvas widgets) works, but rendering the
-    builder counts about 1,667 more lines and takes global coverage to
-    78.4 / 66.8 / 76.8 (statements / branches / functions) against the
-    80 / 75 / 80 thresholds. Excluding the page would let that test be
-    committed, but it also hides a ~2000 line component from the gate, so it
-    needs a human decision. Until then the builder's deploy wiring is pinned
-    from `services/deployPipeline.test.ts`. Found in review of #580.
+137. ~~**Decide whether `ui/src/pages/PipelineBuilder.tsx` goes into
+    `coverage.exclude` in `ui/vitest.config.ts`.**~~ (#652) Decided: yes. A
+    page-level deploy test (real page and stores, mocked canvas widgets)
+    works, but rendering the builder counts about 1,667 more lines and took
+    global coverage to 78.4 / 66.8 / 76.8 (statements / branches /
+    functions) against the 80 / 75 / 80 thresholds. The page is excluded
+    from the gate and `src/pages/PipelineBuilder.deploy.test.tsx` covers
+    its deploy handler instead. Found in review of #580.
 138. **Remember multi-target writes across remote-agent restarts.** Since
     #587 a message NAK'd after some of its targets wrote it skips those
     targets on redelivery, but only within one gateway process (in memory).
@@ -1041,13 +1040,14 @@ Last updated 2026-10-28.
     `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
     `api_base_url`, `token_url`) and Business Central (`api_base_url`,
     `token_url`).
-148. **Tenant API-key lookups turn a database error into a 401.**
+148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
-    treat every `GetTenantByAPIKeyHash` error as "invalid API key", and the
-    repository returns a plain string error for "not found", so the two
-    cannot be told apart. Add a sentinel, then answer 503 for the rest like
-    #634 does for sessions. No UI sign-out follows, but a CI/CD client sees a
-    rejected key for a database blip. Found in #634.
+    treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
+    repository now returns `ErrAPIKeyNotFound` for no row (unknown, rotated,
+    revoked, deleted tenant); that is a 401 and anything else is a 503 with a
+    fixed body and a log line, as for sessions (#634). The target-API-key
+    lookup in `CreateConnectionRequest` classifies the same way. Found in
+    #634.
 149. ~~**`GetMe` hides a failed tenant lookup.**~~ (#645) `GetUserTenants` errors
     became an empty tenant list and a 200, so a database blip right after the
     session check showed a signed-in user with no workspaces. Now a 503, as
@@ -1066,6 +1066,27 @@ Last updated 2026-10-28.
     only retry the after-action from a small in-memory queue of keys
     (lost on restart), or list the prefix now and then in event mode just
     to sweep leftovers. Found in #640.
+
+152. **The builder's "connection gone" redeploy has no page-level test.**
+    `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
+    when the linked one was deleted, which changes the webhook URL. Add a
+    case to `PipelineBuilder.deploy.test.tsx`. Found in review of #654.
+153. **Unit tests for `useNodeDrag`, `useCanvasPersistence` and
+    `useConnectionDrawing`.** The page test in #654 loads them for the
+    first time and covers them only partly, so global branch and function
+    coverage have about 2.5 points of room left. Tests for these hooks win
+    the margin back. Found in review of #654.
+154. **`GET /api/v1/connections/{id}/metrics/ws` has no caller either.**
+    #651 removed `/metrics/stream`; the WebSocket route runs the same
+    handler and nothing in the UI opens it. Remove it with `ClientRegistry`
+    and `MetricsCache` if they have no other use. Public route, so PR plus
+    `agent:needs-human`. Found in #651.
+155. **Platform plan and quota changes are audited under the wrong tenant.**
+    The audit middleware files an entry under the caller's context tenant,
+    so `platform.plan.set` lands in the operator's own workspace log, and
+    since #637 nothing when the operator has no workspace selected. The
+    legacy `PUT /api/v1/tenants/{id}/plan` and quota routes have the same
+    gap. File them under the path's `tenant_id`. Found in review of #637.
 
 ## Human
 

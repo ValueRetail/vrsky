@@ -36,7 +36,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // No source maps in the production bundle (#650). A map would serve the
+    // original TypeScript next to the bundle for anyone to read.
+    sourcemap: false,
     target: 'esnext',
   },
 })

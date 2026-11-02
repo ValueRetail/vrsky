@@ -2,7 +2,7 @@
 set -e
 
 # VRSky Phase 3 E2E Integration Test
-# Tests Management API and WebSocket metrics streaming end-to-end
+# Tests Management API end-to-end
 
 API_ENDPOINT="${API_ENDPOINT:-http://localhost:8080}"
 NAMESPACE="${NAMESPACE:-vrsky-platform}"
@@ -184,73 +184,9 @@ test_send_test_message() {
 	fi
 }
 
-# Test 4: WebSocket connection established
-test_websocket_connection() {
-	log_test "Test 4: WebSocket connection established"
-
-	if [ -z "$CONN_ID" ]; then
-		test_result 1 "Skipping - no connection ID"
-		return 1
-	fi
-
-	# Check if websocat is available
-	if ! command -v websocat &>/dev/null; then
-		log_error "websocat not found. Install with: cargo install websocat or apt-get install websocat"
-		test_result 1 "websocat not available for WebSocket testing"
-		return 1
-	fi
-
-	# Attempt WebSocket connection with timeout
-	# Derive WebSocket URL from API_ENDPOINT (http:// -> ws://, https:// -> wss://)
-	local ws_base=$(echo "$API_ENDPOINT" | sed 's|^http://|ws://|; s|^https://|wss://|')
-	local ws_url="$ws_base/api/v1/connections/$CONN_ID/metrics/stream"
-	timeout 5 websocat "$ws_url" 2>/dev/null | head -1 | grep -q "metrics" 2>/dev/null
-	local result=$?
-
-	if [ $result -eq 0 ]; then
-		test_result 0 "WebSocket connection established"
-		return 0
-	elif [ $result -eq 124 ]; then
-		test_result 1 "WebSocket connection timed out"
-		return 1
-	else
-		test_result 1 "Failed to establish WebSocket connection"
-		return 1
-	fi
-}
-
-# Test 5: Metrics broadcast to WebSocket client
-test_metrics_broadcast() {
-	log_test "Test 5: Metrics broadcast to WebSocket client"
-
-	if [ -z "$CONN_ID" ]; then
-		test_result 1 "Skipping - no connection ID"
-		return 1
-	fi
-
-	# Check if websocat is available
-	if ! command -v websocat &>/dev/null; then
-		test_result 1 "websocat not available for WebSocket testing"
-		return 1
-	fi
-
-	# Listen for metrics on WebSocket (5 second timeout)
-	# Derive WebSocket URL from API_ENDPOINT (http:// -> ws://, https:// -> wss://)
-	local ws_base=$(echo "$API_ENDPOINT" | sed 's|^http://|ws://|; s|^https://|wss://|')
-	local metrics_received=$(timeout 5 websocat "$ws_base/api/v1/connections/$CONN_ID/metrics/stream" 2>/dev/null | grep -c "messagesProcessed" 2>/dev/null || echo 0)
-
-	if [ "$metrics_received" -gt 0 ]; then
-		test_result 0 "Metrics received via WebSocket"
-		return 0
-	else
-		test_result 1 "No metrics received via WebSocket"
-		return 1
-	fi
-}
-
-# Test 6: Database persistence
+# Test 4: Database persistence
 test_database_persistence() {
-	log_test "Test 6: Database persistence (connection in database)"
+	log_test "Test 4: Database persistence (connection in database)"
 
 	if [ -z "$CONN_ID" ]; then
 		test_result 1 "Skipping - no connection ID"
@@ -360,13 +296,6 @@ main() {
 	test_create_connection
 	test_start_connection
 	test_send_test_message
-
-	if command -v websocat &>/dev/null; then
-		test_websocket_connection
-		test_metrics_broadcast
-	else
-		log_error "websocat not found - skipping WebSocket tests"
-	fi
 
 	test_database_persistence
 	check_pod_health

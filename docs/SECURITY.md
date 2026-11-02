@@ -162,6 +162,12 @@ Two ways to authenticate against mutating endpoints:
 - **Tenant API key** — opaque token bound to one tenant. Treated as
   effective role **admin**: enough to deploy / manage resources, but
   cannot transfer ownership or change tenant-wide settings.
+  The same split applies: a key the server rejects (unknown, rotated away,
+  revoked, or its workspace deleted) answers `401`. If the lookup itself
+  fails (the database is down or slow) the answer is `503
+  ServiceUnavailable` with a fixed message and the error goes to the log,
+  never the key or its hash. A client should retry a `503` and fix its key
+  on a `401`.
 
 ### Last-owner protection
 
