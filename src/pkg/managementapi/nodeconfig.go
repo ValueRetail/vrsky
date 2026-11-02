@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
 // Node config validation for the graph model (#212).
@@ -197,7 +199,29 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "remote_agent" {
 		errs = append(errs, validateRemoteAgentTarget(node, raw)...)
 	}
+	if configType == "sitoo" {
+		errs = append(errs, validateSitooBaseURL(node, raw)...)
+	}
 	return errs
+}
+
+// validateSitooBaseURL refuses a base_url the Sitoo connectors would not call
+// (#616): not https, userinfo, a query, or a literal private address. It is the
+// early, visible error; the connectors enforce it again at dial time, which is
+// the check that sees where a hostname resolves. Unset means the default.
+func validateSitooBaseURL(node *Node, raw map[string]json.RawMessage) []string {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw["sitoo"], &block) != nil {
+		return nil
+	}
+	baseURL := stringField(block, "base_url")
+	if baseURL == "" {
+		return nil
+	}
+	if err := safeurl.CheckBaseURL(baseURL, safeurl.AllowPrivateFromEnv()); err != nil {
+		return []string{fmt.Sprintf("node %s (sitoo): sitoo.%s (served by %s)", node.ID, err, nodeConfigRules[nodeKind{node.Type, "sitoo"}].service)}
+	}
+	return nil
 }
 
 // validateRemoteAgentTarget: a remote_agent node names either one agent

@@ -915,7 +915,7 @@ Last updated 2026-10-28.
     (`cursorTracker`).~~ (#591) One record stamped years ahead sets the watermark
     there, and every later poll asks only for records after it. Ignore or
     log values above now + overlap. Found in review of #457 (#472).
-129. **The Sitoo `base_url` is unvalidated tenant config.** A tenant can
+129. ~~**The Sitoo `base_url` is unvalidated tenant config.**~~ (#616) A tenant can
     point the consumer, with its Basic-auth credential, at any host,
     internal ones included (SSRF). The webhook path also builds
     `resourceURL` with the event's id unescaped; `url.PathEscape` it. Both
@@ -1025,6 +1025,15 @@ Last updated 2026-10-28.
     session and the UI (#611) signs the user out. Tell "not found or
     expired" apart from other errors and answer 5xx for the latter. Found in
     review of #613.
+147. **Other connectors still call a tenant-supplied host unchecked.** #616
+    added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
+    link-local and metadata addresses) for Sitoo. The same hole is open in
+    every connector that builds a URL from node config and sends a credential
+    with it; audit them, starting with the API consumer, the HTTP producer,
+    Visma, Front Systems, Brightpearl and SAP S/4HANA. Move each to
+    `safeurl.NewClient` and `CheckBaseURL`, one connector per PR; the API
+    consumer and HTTP producer are the most exposed because their URL is
+    free-form. Found in #616.
 
 ## Human
 
