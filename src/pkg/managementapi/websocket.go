@@ -208,9 +208,3 @@ func (h *Handler) InitializeWebSocketSupport(clientRegistry *ClientRegistry, met
 	h.clientRegistry = clientRegistry
 	h.metricsCache = metricsCache
 }
-
-// HandleMetricsSSE is an alias for HandleMetricsWebSocket for backward compatibility
-// Deprecated: Use HandleMetricsWebSocket instead
-func (h *Handler) HandleMetricsSSE(w http.ResponseWriter, r *http.Request) {
-	h.HandleMetricsWebSocket(w, r)
-}

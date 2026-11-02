@@ -103,7 +103,7 @@ func (rw *auditResponseWriter) Write(b []byte) (int, error) {
 }
 
 // Flush forwards to the underlying ResponseWriter's Flusher. Without it the
-// wrapper hides http.Flusher, so SSE endpoints (metrics/stream, tenant
+// wrapper hides http.Flusher, so SSE endpoints (metrics/ws, tenant
 // status/stream) failed the w.(http.Flusher) assertion with 500 "streaming
 // not supported" whenever the audit middleware was in the chain.
 func (rw *auditResponseWriter) Flush() {
