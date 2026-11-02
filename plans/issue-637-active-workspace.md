@@ -52,6 +52,25 @@ check `currentTenant` would send it as `X-Tenant-ID`. So:
   `currentTenant` is null, so the browser does not show the first (disabled)
   workspace as if it were selected.
 
+## Second review follow-up: platform routes without a header
+
+An operator with no active workspace has no id to send, and
+`TenantIDMiddleware` (`src/cmd/management-api/cors.go`) answered 400 on
+`/api/v1/platform/*`, which the `tenant-1` default used to hide. Checked the
+three handlers (`HandlePlatformListTenants`, `HandlePlatformListPlanRequests`,
+`HandlePlatformSetPlan` in `billing_handler.go`) and what they call: they use
+`r.PathValue("tenant_id")` and repository methods with explicit ids, never
+`GetTenantIDFromContext`, and all three sit behind `RequireOperator`.
+
+The middleware now lets `/api/v1/platform/` through when the header is empty.
+A header that is sent still goes into the context, because the audit
+middleware files `platform.plan.set` under the context tenant; without a
+header that call is not audited (it was filed under the operator's own
+workspace before, which is not the workspace changed; the audit detail still
+has the target `tenant_id`, but the entry is skipped when the context has no
+tenant). Test in `src/cmd/management-api/tenant_exempt_test.go`: operator OK,
+non-operator 403, workspace route 400, all without the header.
+
 ## Not changed
 
 The #611 sign-out and `loadFailed` paths and the #630 `refreshAuth` rule
