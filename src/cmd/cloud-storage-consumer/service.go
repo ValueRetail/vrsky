@@ -417,6 +417,10 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 			logger.Error("Could not read which objects were already published; publishing nothing until it can be read", "error", err)
 			return
 		}
+		if cause := done.Undecodable(); cause != nil {
+			// Once: Load runs until it first works, and this is that time (#617).
+			logger.Warn("The saved list of published objects can't be decoded; it is replaced at the next save, so objects already published may be published once more", "error", cause)
+		}
 		if found {
 			logger.Info("Resuming: objects already published are not published again", "already_done", done.Len())
 		} else {
