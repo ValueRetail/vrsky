@@ -3312,7 +3312,13 @@ re-checks server-side.</p>
   anyone's session.</li>
 <li><strong>Tenant API key</strong> — opaque token bound to one tenant. Treated as
   effective role <strong>admin</strong>: enough to deploy / manage resources, but
-  cannot transfer ownership or change tenant-wide settings.</li>
+  cannot transfer ownership or change tenant-wide settings.
+  The same split applies: a key the server rejects (unknown, rotated away,
+  revoked, or its workspace deleted) answers <code>401</code>. If the lookup itself
+  fails (the database is down or slow) the answer is <code>503
+  ServiceUnavailable</code> with a fixed message and the error goes to the log,
+  never the key or its hash. A client should retry a <code>503</code> and fix its key
+  on a <code>401</code>.</li>
 </ul>
 <h3 id="last-owner-protection">Last-owner protection<a class="headerlink" href="#last-owner-protection" title="Permanent link">&para;</a></h3>
 <p>Every tenant must keep at least one <code>owner</code>. The server refuses with 409
