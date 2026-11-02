@@ -153,6 +153,12 @@ Two ways to authenticate against mutating endpoints:
 - **Session token** (issued by `/auth/login` or OIDC callback) — present as
   `Authorization: Bearer <token>` or via the `vrsky_session` cookie. The
   server looks up the user's role in the tenant from `X-Tenant-ID`.
+  A session the server rejects (unknown token, revoked, expired, or its user
+  gone) answers `401`. If the lookup itself fails (the database is down or
+  slow) the answer is `503 ServiceUnavailable` with a fixed message, and the
+  error goes to the log, not to the client. The UI signs a user out on a
+  `401` and keeps the session on a `503`, so a database blip does not end
+  anyone's session.
 - **Tenant API key** — opaque token bound to one tenant. Treated as
   effective role **admin**: enough to deploy / manage resources, but
   cannot transfer ownership or change tenant-wide settings.
