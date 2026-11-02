@@ -97,3 +97,19 @@ spec:
           capabilities:
             drop:
             - ALL
+
+        volumeMounts:
+        # The CA that signed Postgres' certificate (#453): the public ca.crt,
+        # copied here by infrastructure/azure/postgres-tls.sh ca-sync. The
+        # connection string names it (sslrootcert). Optional, so a pod starts
+        # before the ConfigMap exists; while the string still says
+        # sslmode=disable nothing reads the file.
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true

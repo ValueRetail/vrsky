@@ -26,6 +26,10 @@ container `vrsky-backups` as
 - `concurrencyPolicy: Forbid`, one run at most an hour, two retries.
 - runs as uid 70 (`postgres` in the image) with a read-only root filesystem
   and an `emptyDir` at `/tmp`.
+- mounts the ConfigMap `postgres-ca` (the public CA that signed Postgres'
+  certificate, #453) at `/etc/vrsky/postgres-ca`. `BACKUP_DB_URL` names it
+  with `sslrootcert`. The mount is optional, so the Job starts before the
+  ConfigMap exists.
 - every credential comes from the `vrsky-backup-config` Secret. The manifest
   has none.
 
@@ -56,7 +60,7 @@ history, never from a file in this repo. On AKS the database and its user
 are both `vrsky`.
 
 ```sh
-read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=disable
+read -rs DB_URL;  echo   # postgres://vrsky:<DB_PASSWORD>@postgresql.vrsky-database.svc.cluster.local:5432/vrsky?sslmode=verify-full&sslrootcert=/etc/vrsky/postgres-ca/ca.crt
 read -rs ENC_KEY; echo   # the platform ENCRYPTION_KEY, 64 hex characters
 read -rs SA_NAME; echo   # the storage account name
 read -rs SA_KEY;  echo   # the storage account key
@@ -78,7 +82,9 @@ required keys and either the account name and key or
 
 `BACKUP_AZURE_CONNECTION_STRING` can replace the account name and key. The
 database URL is the same one as `connection_string` in the
-`postgres-credentials` Secret in `vrsky-database`.
+`postgres-credentials` Secret in `vrsky-database`. Until Postgres has TLS
+(#453, `plans/issue-453-postgres-tls.md`) leave `sslmode` and `sslrootcert`
+out of it.
 
 Then activate the CronJob: run Catch up (Actions, Catch up, Run workflow), or
 

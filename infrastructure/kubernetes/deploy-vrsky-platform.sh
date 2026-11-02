@@ -131,6 +131,23 @@ deploy_postgresql() {
 		-n vrsky-database \
 		--dry-run=client -o yaml | kubectl apply -f -
 
+	# TLS (#453): the StatefulSet mounts the Secret that cert-manager issues
+	# from tls.yaml, so cert-manager and the certificate come first.
+	if ! kubectl get crd certificates.cert-manager.io &>/dev/null; then
+		print_warning "cert-manager not found - installing it (Postgres TLS needs it)"
+		"$SCRIPT_DIR/ingress/install-cert-manager.sh" || {
+			print_error "cert-manager did not install. Postgres needs it for its certificate."
+			exit 1
+		}
+	fi
+	kubectl apply -f tls.yaml
+	kubectl wait --for=condition=Ready certificate/postgresql-ca certificate/postgresql-tls \
+		-n vrsky-database --timeout=120s || {
+		print_error "Postgres certificate was not issued in time"
+		kubectl get certificate,issuer -n vrsky-database
+		exit 1
+	}
+
 	kubectl apply -f service.yaml
 	kubectl apply -f statefulset.yaml
 

@@ -149,12 +149,23 @@ EOF
   esac
 }
 
-# volume_mounts / volumes — only the file connectors touch the shared share.
+# volume_mounts / volumes — every connector mounts the Postgres CA (#453); only
+# the file connectors also touch the shared share.
+#
+# postgres-ca is the public ca.crt that postgres-tls.sh ca-sync copies into this
+# namespace. DATABASE_URL names it (sslrootcert=/etc/vrsky/postgres-ca/ca.crt).
+# The ConfigMap is optional so a pod starts before it exists, and while the
+# Secret still says sslmode=disable nothing reads the file.
 volume_mounts() {
+  cat <<EOF
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/vrsky/postgres-ca
+          readOnly: true
+EOF
   case "$1" in
     file-consumer|file-producer)
       cat <<EOF
-        volumeMounts:
         - name: files
           mountPath: /data
 EOF
@@ -163,10 +174,16 @@ EOF
 }
 
 volumes() {
+  cat <<EOF
+      volumes:
+      - name: postgres-ca
+        configMap:
+          name: postgres-ca
+          optional: true
+EOF
   case "$1" in
     file-consumer|file-producer)
       cat <<EOF
-      volumes:
       - name: files
         persistentVolumeClaim:
           claimName: $FILES_PVC

@@ -259,6 +259,10 @@ Only on an empty cluster, in this order:
    Ingress (below). The file isn't executable, hence `bash`. It needs `jq`
    on your machine for the `acr-pull` copy.
 3. `infrastructure/azure/deploy-connectors-azure.sh`: the connectors.
+   Postgres has TLS from step 1; `infrastructure/azure/rotate-secrets.sh`
+   (which you run before real data goes in) copies the CA to the client
+   namespaces and builds `verify-full` strings. Until then the dev Secrets
+   keep plain connections, which the server still accepts.
 4. `PROFILE=azure infrastructure/kubernetes/monitoring/install-monitoring.sh`:
    monitoring and the alert rules. It stops unless the `vrsky-monitoring`
    namespace and its `alerts-webhook-token` and `grafana-admin` Secrets
@@ -277,7 +281,10 @@ Then by hand:
   `infrastructure/kubernetes/ingress/webhooks-ingress.yaml` and
   `agent-ingress.yaml`; read each file's header before applying it.
 
-None of the Azure scripts installs ingress-nginx or cert-manager. The UI's
+None of the Azure scripts installs ingress-nginx. `deploy-vrsky-platform.sh`
+(which `deploy-azure.sh` wraps) installs cert-manager when the cluster has
+none, because Postgres' certificate (#453) needs it, so **a fresh bring-up now
+needs `helm` on your machine** (`install-cert-manager.sh` runs it). The UI's
 Ingress assumes both, with a `letsencrypt-prod` ClusterIssuer
 (`infrastructure/kubernetes/ingress/cert-issuers.yaml`;
 `install-cert-manager.sh` next to it installs cert-manager, and
@@ -462,7 +469,7 @@ repo applies:
 | Application | Connection credentials (DB passwords, bearer tokens, OAuth secrets, webhook signing keys) | AES-256-GCM via `pkg/crypto` (#66 secrets table). Master key from `ENCRYPTION_KEY`. In production. |
 | Block device | Postgres `$PGDATA`, MinIO `/data`, NATS JetStream `/data`, the connectors' shared file volume, monitoring data | Production: `deploy-azure.sh` puts every PVC on the built-in `managed-csi` class (the file volume on `azurefile-csi`). Azure encrypts managed disks and Azure Files at rest by default, with platform-managed keys. The repo sets no customer-managed key; whether one was added outside the repo can't be told from here. Optional overlay, not applied in production: the `vrsky-encrypted` StorageClass (customer-managed key) or LUKS on bare metal, below. |
 | Object storage | MinIO bucket contents | Production: no object-level encryption; MinIO's data sits on the encrypted disk above. Optional overlay, not applied in production: SSE-S3 via a KES sidecar wrapping a KMS data key, below. |
-| Transit | Client traffic to the public host | TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer `letsencrypt-prod`, secret `vrsky-tls`, set on the `vrsky` Ingress in `infrastructure/kubernetes/ui/ingress.yaml`). There is no service mesh: behind the ingress, traffic between services is unencrypted (the UI proxies to the management API over `http://`, Postgres URLs use `sslmode=disable`, the NATS manifests set no TLS). |
+| Transit | Client traffic to the public host | TLS terminated at ingress-nginx, with a Let's Encrypt certificate from cert-manager (ClusterIssuer `letsencrypt-prod`, secret `vrsky-tls`, set on the `vrsky` Ingress in `infrastructure/kubernetes/ui/ingress.yaml`). There is no service mesh: behind the ingress, most traffic between services is unencrypted (the UI proxies to the management API over `http://`, the NATS manifests set no TLS). Postgres is prepared for TLS (#453): `infrastructure/kubernetes/postgresql/tls.yaml` issues a certificate from a private CA with cert-manager, and the services are ready to connect with `sslmode=verify-full`. It is enabled after the operator steps in `plans/issue-453-postgres-tls.md`; until then those connections are unencrypted. |
 
 ### Per-target setup
 

@@ -9,6 +9,9 @@
 #   * refuses to run if the `secrets` table is non-empty (rotating the master
 #     key would orphan already-encrypted tenant credentials)
 #   * ALTER ROLEs the live Postgres password (data preserved)
+#   * builds the connection string with sslmode=verify-full against the CA that
+#     postgres-tls.sh ca-sync copies into the client namespaces (#453). Postgres
+#     must already have TLS on (`postgres-tls.sh server`); the script checks.
 #   * writes the real values into the git-ignored secret.yaml files and applies
 #     them, then restarts management-api + MinIO to pick them up
 #
@@ -31,7 +34,17 @@ DB_PW="$(openssl rand -hex 16)"          # 32 hex chars
 ENC_KEY="$(openssl rand -hex 32)"        # 64 hex chars = 32 bytes (AES-256)
 MINIO_AK="vrsky$(openssl rand -hex 8)"   # 21 chars
 MINIO_SK="$(openssl rand -hex 24)"       # 48 chars
-CONN="postgresql://vrsky:${DB_PW}@${PG_HOST}:5432/vrsky?sslmode=disable"
+# verify-full: the pods mount the CA at this path (the postgres-ca ConfigMap).
+PG_CA_PATH=/etc/vrsky/postgres-ca/ca.crt
+CONN="postgresql://vrsky:${DB_PW}@${PG_HOST}:5432/vrsky?sslmode=verify-full&sslrootcert=${PG_CA_PATH}"
+
+# --- safety: the string above names a CA and a certificate that must exist ---
+SSL="$(kubectl exec -n "$PG_NS" "$PG_POD" -- psql -U vrsky -d vrsky -tAc 'SHOW ssl;' | tr -d '[:space:]')"
+if [ "$SSL" != "on" ]; then
+  echo "ABORT: Postgres has ssl=$SSL, and the new connection string says verify-full." >&2
+  echo "Run infrastructure/azure/postgres-tls.sh server first." >&2
+  exit 1
+fi
 
 # --- safety: never rotate the master key while encrypted data exists --------
 CNT="$(kubectl exec -n "$PG_NS" "$PG_POD" -- psql -U vrsky -d vrsky -tAc 'SELECT count(*) FROM secrets;' | tr -d '[:space:]')"
@@ -82,6 +95,9 @@ EOF
 chmod 600 infrastructure/kubernetes/postgresql/secret.yaml \
           infrastructure/kubernetes/management-api/secret.yaml \
           infrastructure/kubernetes/minio/secret.yaml
+
+echo ">>> copying the public CA certificate to the client namespaces"
+CONFIRM=1 bash infrastructure/azure/postgres-tls.sh ca-sync
 
 echo ">>> applying secrets"
 kubectl apply -f infrastructure/kubernetes/postgresql/secret.yaml
