@@ -69,8 +69,13 @@ would then deliver it twice. Each producer now picks its nodes by `type`
 from the stored config (the type and the sub-object key are never secrets)
 and resolves secrets for those only.
 
-data-filter and data-converter do not run on the SDK runner, so they use
-`sdk.ConfigReadError` and log and return the error themselves.
+data-filter and data-converter do not run on the SDK runner, so they log and
+return the error themselves. The split itself lives in `pkg/configread`
+(`ErrUnavailable`, `Unavailable`, `IsUnavailable`, `ReadError`); `pkg/sdk`
+re-exports it under the `Config*` names. The filter and converter import
+`pkg/configread`, not `pkg/sdk`: `make lint-connector` treats any importer of
+`pkg/sdk` as an SDK connector that must call `sdk.Run*` and keep off
+`pkg/messaging`, which these two don't.
 
 ## Affected files
 

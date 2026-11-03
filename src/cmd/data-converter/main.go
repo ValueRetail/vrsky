@@ -20,10 +20,10 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/claimcheck"
+	"github.com/ValueRetail/vrsky/pkg/configread"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
-	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
 type Config struct {
@@ -300,7 +300,7 @@ func (s *ConverterService) handleMessage(ctx context.Context, msg *nats.Msg) err
 	}
 
 	info, err := s.getPipelineInfo(ctx, connectionID)
-	if sdk.IsConfigUnavailable(err) {
+	if configread.IsUnavailable(err) {
 		// Couldn't read the connection: NAK so the message is retried and
 		// lands in the DLQ if the read keeps failing, never acked (#704).
 		s.logger.Error("connection config unavailable; message not acked, will retry",
@@ -949,7 +949,7 @@ func (s *ConverterService) getPipelineInfo(ctx context.Context, connectionID str
 	var nodesJSON, edgesJSON []byte
 	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
-		return nil, sdk.ConfigReadError(err)
+		return nil, configread.ReadError(err)
 	}
 
 	var nodes []struct {

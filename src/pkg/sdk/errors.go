@@ -1,10 +1,10 @@
 package sdk
 
 import (
-	"database/sql"
 	"errors"
-	"fmt"
 	"time"
+
+	"github.com/ValueRetail/vrsky/pkg/configread"
 )
 
 // Error classification for connector Deliver/Evaluate/Convert results. The SDK
@@ -92,33 +92,18 @@ func RetryAfter(err error) (time.Duration, bool) {
 // NAKs, logs at Error with the connection id, and the message goes to the DLQ
 // once the retries are spent) and ServesConnection answers true so Deliver
 // runs. A connection that does not exist, or has no node of the worker's type,
-// is a definite "not mine" and still acks.
-var ErrConfigUnavailable = errors.New("connection config unavailable")
+// is a definite "not mine" and still acks. It is configread.ErrUnavailable.
+var ErrConfigUnavailable = configread.ErrUnavailable
 
 // ConfigUnavailable wraps a failed config or secret read so errors.Is matches
 // both ErrConfigUnavailable and err. It is retriable, never Permanent.
-func ConfigUnavailable(err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%w: %w", ErrConfigUnavailable, err)
-}
+func ConfigUnavailable(err error) error { return configread.Unavailable(err) }
 
 // IsConfigUnavailable reports whether err (or anything it wraps) is a failed
 // config or secret read.
-func IsConfigUnavailable(err error) bool {
-	return errors.Is(err, ErrConfigUnavailable)
-}
+func IsConfigUnavailable(err error) bool { return configread.IsUnavailable(err) }
 
 // ConfigReadError classifies the error from reading a connection's row:
 // sql.ErrNoRows means the connection is gone, a definite "not mine", and is
 // returned as a plain error; any other failure is ConfigUnavailable.
-func ConfigReadError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("connection not found: %w", err)
-	}
-	return ConfigUnavailable(fmt.Errorf("read connection: %w", err))
-}
+func ConfigReadError(err error) error { return configread.ReadError(err) }

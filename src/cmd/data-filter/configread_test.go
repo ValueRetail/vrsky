@@ -10,8 +10,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/configread"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
-	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
 // A failed read of the connection must NAK the message, not ack it (#704). A
@@ -69,8 +69,8 @@ func TestFilter_ConfigReadFailureIsNotAcked(t *testing.T) {
 			if tc.wantAcked && err != nil {
 				t.Errorf("handleMessage = %v, want nil (ack)", err)
 			}
-			if !tc.wantAcked && !sdk.IsConfigUnavailable(err) {
-				t.Errorf("handleMessage = %v, want an error marked sdk.ErrConfigUnavailable (NAK)", err)
+			if !tc.wantAcked && !configread.IsUnavailable(err) {
+				t.Errorf("handleMessage = %v, want an error marked configread.ErrUnavailable (NAK)", err)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Errorf("config reads: %v", err)
