@@ -45,6 +45,9 @@ func TestFollowNext(t *testing.T) {
 		{"encoded dot segments, upper case", "https://evil.example" + svcPath + "/%2E%2E/%2E%2E/admin", ""},
 		{"encoded dots and slash in one segment", "https://evil.example" + svcPath + "/%2E%2E%2F%2E%2E%2Fadmin", ""},
 		{"encoded slash", "https://evil.example" + svcPath + "/A%2fB", ""},
+		{"literal backslash dot segments", "https://evil.example" + svcPath + `/..\..\admin`, ""},
+		{"encoded backslash dot segments", "https://evil.example" + svcPath + "/..%5C..%5Cadmin", ""},
+		{"encoded backslash, lower case", "https://evil.example" + svcPath + "/..%5c..%5cadmin", ""},
 		{"literal dot segments leave the root", "https://evil.example" + svcPath + "/../../admin", ""},
 		{"literal dot segments stay under the root", "https://evil.example" + svcPath + "/x/../A?$skiptoken=1", root + "/x/../A?$skiptoken=1"},
 	}

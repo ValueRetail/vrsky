@@ -140,9 +140,9 @@ addresses it can trust (#678):
   answer with one), is fetched from the configured root instead, with the
   link's path and query, as long as that path, with `.` and `..` resolved, is
   under the service root's path and holds no encoded dot or slash (`%2e`,
-  `%2f`). A link anywhere else stops the poll with an error; the pages before
-  it are already published. Relative links, which is what SAP and `mock-sap`
-  send, are not affected.
+  `%2f`) and no backslash (`\` or `%5c`). A link anywhere else stops the
+  poll with an error; the pages before it are already published. Relative
+  links, which is what SAP and `mock-sap` send, are not affected.
 
 Where it is checked: a source refuses to start its poll (the error is in the
 consumer's log), the "show data structure" preview answers with the reason,

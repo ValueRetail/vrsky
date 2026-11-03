@@ -371,11 +371,13 @@ func (cfg *SAPConfig) followNext(next string) (string, error) {
 
 // rebasable reports whether a link on another origin may be fetched from the
 // configured one: its path, dot segments resolved, is under the service root's
-// path. Encoded dots or slashes are refused outright, since a server may
+// path. Encoded dots or slashes and backslashes (literal or %5c; IIS and
+// .NET servers treat them as slashes) are refused outright, since a server may
 // decode them after the check and leave the root path that way.
 func rebasable(n, root *url.URL) bool {
 	esc := strings.ToLower(n.EscapedPath())
-	if strings.Contains(esc, "%2e") || strings.Contains(esc, "%2f") {
+	if strings.Contains(esc, "%2e") || strings.Contains(esc, "%2f") || strings.Contains(esc, "%5c") ||
+		strings.Contains(n.Path, `\`) {
 		return false
 	}
 	return underPath(path.Clean("/"+n.Path), path.Clean("/"+root.Path))
