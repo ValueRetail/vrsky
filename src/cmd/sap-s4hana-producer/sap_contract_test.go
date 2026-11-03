@@ -36,7 +36,8 @@ func TestContract_SAPProducerSendsWhatWasPublished(t *testing.T) {
 			}
 			cfg := basicCfg(srv.URL)
 			p := testProducer()
-			if err := p.write(context.Background(), cfg, newAuthorizer(cfg, p.httpClient), ce.Payload); err != nil {
+			hc := p.sessionClient()
+			if err := p.write(context.Background(), hc, cfg, newAuthorizer(cfg, hc), ce.Payload); err != nil {
 				t.Fatalf("write: %v", err)
 			}
 			// The CSRF handshake has to survive whatever the consumer produced:

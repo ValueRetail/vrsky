@@ -35,13 +35,15 @@ const (
 // sapProducer delivers pipeline envelopes into SAP S/4HANA via its OData REST
 // API — e.g. creating sales orders (deep insert with to_Item) or posting goods
 // movements. It is an SDK Producer: Configure wires deps, Deliver writes one
-// envelope. Writes require an SAP CSRF token, so the shared HTTP client carries
-// a cookie jar to hold the session cookie the token is bound to.
+// envelope. Writes require an SAP CSRF token bound to the session cookie the
+// fetch sets, so each delivery runs in a session of its own (sessionClient).
 type sapProducer struct {
 	sdk.BaseProducer
 
-	db         *sql.DB
-	logger     *slog.Logger
+	db     *sql.DB
+	logger *slog.Logger
+	// httpClient holds the shared transport, timeout and redirect policy. It
+	// has no cookie jar: deliveries go through sessionClient (#682).
 	httpClient *http.Client
 	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
 	// allows http and private addresses, for mock-sap.
@@ -92,11 +94,9 @@ func (p *sapProducer) Configure(ctx context.Context, res *sdk.Resources) error {
 		// carries the tenant's SAP credential, so the client refuses private,
 		// loopback and link-local addresses at dial time and follows no
 		// redirects (#678). The OAuth2 token call uses this client too.
-		// A cookie jar is required: the SAP CSRF token is bound to the session
-		// cookie returned by the Fetch request and must be echoed on the write.
-		jar, _ := cookiejar.New(nil)
+		// No cookie jar here: a jar on this client would carry one tenant's
+		// SAP session to every connection on the same host (#682).
 		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
-		p.httpClient.Jar = jar
 	}
 	p.logger.Info("sap-s4hana-producer configured")
 	return nil
@@ -124,27 +124,43 @@ func (p *sapProducer) Deliver(ctx context.Context, env *envelope.Envelope) error
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
 		return sdk.Permanent(errors.New("payload is not valid JSON"))
 	}
-	auth := newAuthorizer(cfg, p.httpClient)
-	return p.write(ctx, cfg, auth, env.Payload)
+	hc := p.sessionClient()
+	auth := newAuthorizer(cfg, hc)
+	return p.write(ctx, hc, cfg, auth, env.Payload)
+}
+
+// sessionClient returns the client for one delivery: the shared transport
+// (safeurl dialer, connection pool), timeout and redirect policy, with a
+// cookie jar of its own. SAP binds the CSRF token to the session cookie the
+// fetch sets, so the fetch and the write must share a jar; nothing else may.
+// A jar shared by all deliveries keys cookies by host only, and connection B
+// would send connection A's SAP session, which can run B's write as A's SAP
+// user (#682). The jar is dropped when the delivery returns.
+func (p *sapProducer) sessionClient() *http.Client {
+	jar, _ := cookiejar.New(nil) // never fails with nil options
+	hc := *p.httpClient
+	hc.Jar = jar
+	return &hc
 }
 
 // write fetches a CSRF token then POSTs/PATCHes the payload. A 403 with
 // "x-csrf-token: Required" means the token/session expired — re-fetch once.
-func (p *sapProducer) write(ctx context.Context, cfg *SAPProducerConfig, auth authorizer, payload []byte) error {
-	token, err := p.fetchCSRF(ctx, cfg, auth)
+// hc is the delivery's session client (sessionClient).
+func (p *sapProducer) write(ctx context.Context, hc *http.Client, cfg *SAPProducerConfig, auth authorizer, payload []byte) error {
+	token, err := p.fetchCSRF(ctx, hc, cfg, auth)
 	if err != nil {
 		return p.requestErr("fetch csrf token", err)
 	}
-	resp, body, err := p.send(ctx, cfg, auth, token, payload)
+	resp, body, err := p.send(ctx, hc, cfg, auth, token, payload)
 	if err != nil {
 		return p.requestErr("sap s/4hana request", err)
 	}
 	if resp.StatusCode == http.StatusForbidden && strings.EqualFold(resp.Header.Get("X-CSRF-Token"), "Required") {
-		token, err = p.fetchCSRF(ctx, cfg, auth)
+		token, err = p.fetchCSRF(ctx, hc, cfg, auth)
 		if err != nil {
 			return p.requestErr("re-fetch csrf token", err)
 		}
-		resp, body, err = p.send(ctx, cfg, auth, token, payload)
+		resp, body, err = p.send(ctx, hc, cfg, auth, token, payload)
 		if err != nil {
 			return p.requestErr("sap s/4hana request", err)
 		}
@@ -180,8 +196,9 @@ func (p *sapProducer) requestErr(step string, err error) error {
 }
 
 // fetchCSRF does a GET with "X-CSRF-Token: Fetch"; the response header carries
-// the token and Set-Cookie carries the session cookie (stored by the jar).
-func (p *sapProducer) fetchCSRF(ctx context.Context, cfg *SAPProducerConfig, auth authorizer) (string, error) {
+// the token and Set-Cookie carries the session cookie (stored in hc's jar,
+// which belongs to this delivery).
+func (p *sapProducer) fetchCSRF(ctx context.Context, hc *http.Client, cfg *SAPProducerConfig, auth authorizer) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.csrfURL(), nil)
 	if err != nil {
 		return "", err
@@ -191,7 +208,7 @@ func (p *sapProducer) fetchCSRF(ctx context.Context, cfg *SAPProducerConfig, aut
 	}
 	req.Header.Set("X-CSRF-Token", "Fetch")
 	req.Header.Set("Accept", "application/json")
-	resp, err := p.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -207,7 +224,7 @@ func (p *sapProducer) fetchCSRF(ctx context.Context, cfg *SAPProducerConfig, aut
 	return token, nil
 }
 
-func (p *sapProducer) send(ctx context.Context, cfg *SAPProducerConfig, auth authorizer, token string, payload []byte) (*http.Response, []byte, error) {
+func (p *sapProducer) send(ctx context.Context, hc *http.Client, cfg *SAPProducerConfig, auth authorizer, token string, payload []byte) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, cfg.effectiveMethod(), cfg.entityURL(), bytes.NewReader(payload))
 	if err != nil {
 		return nil, nil, err
@@ -221,7 +238,7 @@ func (p *sapProducer) send(ctx context.Context, cfg *SAPProducerConfig, auth aut
 	if cfg.effectiveMethod() == http.MethodPatch {
 		req.Header.Set("If-Match", "*")
 	}
-	resp, err := p.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
