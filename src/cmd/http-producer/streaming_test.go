@@ -21,6 +21,7 @@ import (
 func newStreamingProducer(t *testing.T, configs []*HTTPConfig) *httpProducer {
 	t.Helper()
 	p := &httpProducer{
+		allowPrivate:    true, // the httptest servers are on 127.0.0.1
 		logger:          slog.New(slog.NewTextHandler(iolib.Discard, nil)),
 		configCache:     map[string][]*HTTPConfig{"conn-1": configs},
 		configCacheTime: map[string]time.Time{"conn-1": time.Now()},

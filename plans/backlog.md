@@ -1039,8 +1039,10 @@ Last updated 2026-10-28.
     free-form. Found in #616. API consumer done in #639 (plan
     `plans/issue-639-api-consumer-safeurl.md`; it allows public http and
     same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
-    Still open, one PR each: HTTP producer (builds its own client for mTLS),
-    Visma (`base_url`, `token_url`), Front Systems (`base_url`,
+    HTTP producer done in #660 (plan
+    `plans/issue-660-http-producer-safeurl.md`; mTLS client built on the same
+    dialer via `safeurl.Options.TLSConfig`).
+    Still open, one PR each: Visma (`base_url`, `token_url`), Front Systems (`base_url`,
     `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
     `api_base_url`, `token_url`) and Business Central (`api_base_url`,
     `token_url`).
@@ -1116,6 +1118,24 @@ Last updated 2026-10-28.
     the canvas is unlinked, so the next Deploy click creates a new
     connection without asking and the webhook URL changes silently. Clear
     the link only on Confirm, or ask again on the next Deploy. Found in #665.
+
+159. **A refused fan-out node redelivers to its healthy siblings.** In the
+    HTTP producer's `Deliver`, if one target node fails (now certain for a
+    refused private URL) and a sibling succeeds, the whole message is retried
+    five times and then dead-lettered, so the healthy sibling gets duplicates,
+    and again on DLQ replay. Per-node ack/DLQ, or skipping nodes that already
+    succeeded on redelivery (as #587 does for remote-agent multi-target
+    writes), would fix it. Found in review of #669.
+
+160. **`safeurl` dial errors show the resolved private address to the tenant.**
+    The error text includes the resolved IP and reaches the tenant's activity
+    feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
+    the address in the server log and give the user "target address not
+    allowed". Part of #639. Found in review of #669.
+
+161. **The HTTP producer logs its URL with userinfo.** Logs and events print
+    `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
+    Predates #669. Found in review of #669.
 
 ## Human
 
