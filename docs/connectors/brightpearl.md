@@ -83,8 +83,9 @@ A producer node writes each message to a Brightpearl resource (`POST`/`PUT`/`PAT
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors retry, and after the last attempt the message
-goes to the DLQ. `4xx` (including `401`/`403`) and an incomplete node config
-are permanent: the message is logged and dropped, not dead-lettered. A base URL
+goes to the DLQ. `4xx` (including `401`/`403`), an incomplete node config and
+a payload that is not JSON are permanent: the message is logged and dropped,
+not dead-lettered. A base URL
 the connector refuses (below) is retried like a network error, so those
 messages end in the DLQ and can be retried from there once the node is fixed.
 

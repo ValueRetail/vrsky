@@ -25,19 +25,9 @@ func Check(baseURL, tokenURL string, allowPrivate bool) error {
 		}
 	}
 	if strings.TrimSpace(tokenURL) != "" {
-		if err := safeurl.CheckBaseURL(tokenURL, allowPrivate); err != nil {
-			return renamed{err}
+		if err := safeurl.CheckURL("token_url", tokenURL, allowPrivate); err != nil {
+			return err
 		}
 	}
 	return nil
 }
-
-// renamed reports a safeurl error about the token URL under its own name,
-// since safeurl words every message as being about "base_url".
-type renamed struct{ err error }
-
-func (r renamed) Error() string {
-	return "token_url" + strings.TrimPrefix(r.err.Error(), "base_url")
-}
-
-func (r renamed) Unwrap() error { return r.err }

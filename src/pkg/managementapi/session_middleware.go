@@ -52,6 +52,9 @@ func SessionAuthMiddleware(repo Repository) func(http.Handler) http.Handler {
 				return
 			}
 
+			// The audit entry for this request names the user (#695).
+			recordAuditUser(r.Context(), user)
+
 			// Add user and session to context
 			ctx := context.WithValue(r.Context(), UserContextKey, user)
 			ctx = context.WithValue(ctx, SessionContextKey, session)

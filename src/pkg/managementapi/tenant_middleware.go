@@ -66,6 +66,11 @@ func TenantMemberMiddleware(repo Repository) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Only now, with membership checked, may the audit entry go into
+			// this workspace's log (#695). Recording it earlier would let
+			// anyone file entries into any workspace by naming it in the path.
+			recordAuditVerifiedTenant(r.Context(), tenantID)
+
 			// Add tenant info to context (keeps ContextWithTenantID for existing connection handlers)
 			ctx := ContextWithTenantID(r.Context(), tenantID)
 			ctx = ContextWithTenant(ctx, tenant, role)

@@ -111,6 +111,10 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 	// 1. Session?
 	session, user, err := repo.ValidateSession(ctx, hashed)
 	if err == nil && user != nil && session != nil {
+		// Who tried is recorded even when the role check below refuses them.
+		// The entry goes into the workspace only once membership is known
+		// (#695); a non-member's refusal is filed nowhere.
+		recordAuditUser(ctx, user)
 		role, err := repo.GetUserTenantRole(ctx, user.ID, tenantID)
 		if err != nil {
 			return ctx, "", false, err
@@ -118,6 +122,9 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 		if role == "" {
 			return ctx, "", false, nil
 		}
+		// A member, so the entry belongs in this workspace's log even when
+		// the role is too low for the route.
+		recordAuditVerifiedTenant(ctx, tenantID)
 		ctx = context.WithValue(ctx, UserContextKey, user)
 		ctx = context.WithValue(ctx, SessionContextKey, session)
 		return withPrincipalRole(ctx, role), role, true, nil
@@ -131,7 +138,11 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 	if err != nil && !isAPIKeyRejection(err) {
 		return ctx, "", false, &apiKeyLookupError{err: err}
 	}
+	if err == nil && tenant != nil && tenant.Status == "active" {
+		recordAuditAPIKey(ctx, tenant)
+	}
 	if err == nil && tenant != nil && tenant.ID == tenantID && tenant.Status == "active" {
+		recordAuditVerifiedTenant(ctx, tenantID)
 		ctx = context.WithValue(ctx, requestingTenantKey, tenant)
 		return withPrincipalRole(ctx, "admin"), "admin", true, nil
 	}

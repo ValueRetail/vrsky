@@ -23,7 +23,9 @@ Work through these checks in order:
 
 !!! note "The DLQ tells you why"
     Each DLQ entry includes the error that caused the message to fail — start
-    there before digging into logs.
+    there before digging into logs. A message the destination rejected for
+    good (a `4xx` answer, say) is dropped instead and never shows up in the
+    DLQ; ask an operator to check the logs for it.
 
 ## "Test connection" fails
 
