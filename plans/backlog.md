@@ -1085,7 +1085,7 @@ Last updated 2026-10-28.
     handler and nothing in the UI opens it. Remove it with `ClientRegistry`
     and `MetricsCache` if they have no other use. Public route, so PR plus
     `agent:needs-human`. Found in #651.
-155. **Platform plan and quota changes are audited under the wrong tenant.**
+155. ~~**Platform plan and quota changes are audited under the wrong tenant.**~~ (#685)
     The audit middleware files an entry under the caller's context tenant,
     so `platform.plan.set` lands in the operator's own workspace log, and
     since #637 nothing when the operator has no workspace selected. The
@@ -1116,6 +1116,15 @@ Last updated 2026-10-28.
     the canvas is unlinked, so the next Deploy click creates a new
     connection without asking and the webhook URL changes silently. Clear
     the link only on Confirm, or ask again on the next Deploy. Found in #665.
+
+159. **Audit entries have no actor.** `AuditMiddleware` reads the user from
+    the request it wraps, but `SessionAuthMiddleware` and the API-key check
+    add the principal further in, per route, so `user_id` and `actor_label`
+    stay empty on every entry, while the Settings page promises "who". #685
+    fixed it for the operator's plan and quota writes only (the bag carries
+    the actor there). Do the same for every route: let the session and
+    API-key middleware record the principal in the audit bag, with
+    `actor_kind` `api_key` for keys. Found in #685.
 
 ## Human
 

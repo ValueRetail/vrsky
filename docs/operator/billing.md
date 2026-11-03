@@ -73,7 +73,11 @@ audited (`quota.update`). Setting the plan again resets them to the tier.
 
 - `kubectl logs deploy/vrsky-management-api | grep "billing"` — suspensions
   ("workspace suspended", with the pipeline count) and failures.
-- Audit log: `plan.request`, `platform.plan.set`.
+- Audit log: `plan.request`, `platform.plan.set`. The operator's plan and
+  quota changes (`platform.plan.set`, `tenant.plan.update`, `quota.update`)
+  are filed in the changed workspace's own log with the operator as actor,
+  not in the operator's selected workspace, and whether or not one is
+  selected.
 - Connection events: `stopped` with `reason: trial ended`; `started` with
   `reason: plan activated`.
 - Alerts `PlanRequested` and `TrialExpired` go to platform targets only.
