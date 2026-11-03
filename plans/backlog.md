@@ -1117,7 +1117,7 @@ Last updated 2026-10-28.
     fails. The hook tests in #663 pin the current "no throw, memory kept"
     behaviour, not the silence. Found in #663.
 
-158. **Cancelling the "connection gone" redeploy leaves the canvas unlinked.**
+158. ~~**Cancelling the "connection gone" redeploy leaves the canvas unlinked.**~~ (#671)
     `deployCanvas` in `ui/src/pages/PipelineBuilder.tsx` calls `link(null)`
     as soon as the server answers 404, before the dialog asks. After Cancel
     the canvas is unlinked, so the next Deploy click creates a new

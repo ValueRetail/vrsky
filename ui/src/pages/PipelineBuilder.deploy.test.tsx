@@ -308,9 +308,44 @@ describe('PipelineBuilder deploy', () => {
       expect(calls(post)).toEqual([`/api/v1/connections/${CONN}/stop`])
       expect(put).not.toHaveBeenCalled()
       expect(notices()).toHaveLength(0)
-      // The stale link was dropped when the server said gone; nothing new is linked.
-      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBeUndefined()
+      // Cancel keeps the link to the old id, so the next Deploy asks again (#671).
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(CONN)
+      expect(useCanvasStore.getState().canvases[0].deployedName).toBe('Orders')
       expect(screen.queryByText(/DEPLOYED/)).not.toBeInTheDocument()
+    })
+
+    it('asks again on the next Deploy after Cancel, and still creates nothing', async () => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      post.mockRejectedValue(notFound())
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(useUIStore.getState().confirmDialog).toBeNull())
+
+      fireEvent.click(screen.getByRole('button', { name: 'Deploy' }))
+
+      expect(await screen.findByText('Pipeline no longer exists on the server')).toBeInTheDocument()
+      // Both clicks went to the old id; neither made a connection or started one.
+      expect(calls(post)).toEqual([`/api/v1/connections/${CONN}/stop`, `/api/v1/connections/${CONN}/stop`])
+      expect(put).not.toHaveBeenCalled()
+      expect(notices()).toHaveLength(0)
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(CONN)
+    })
+
+    it('keeps the old link when creating the new connection fails, so the next Deploy asks again', async () => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      post
+        .mockRejectedValueOnce(notFound()) // stop CONN
+        .mockRejectedValueOnce(new Error('integration count quota reached')) // create
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy as new' }))
+
+      await waitFor(() => expect(notices()).toHaveLength(1))
+      expect(notices()[0]).toMatchObject({ type: 'error', title: 'Deployment failed' })
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(CONN)
     })
   })
 })
