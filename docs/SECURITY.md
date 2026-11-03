@@ -315,6 +315,9 @@ Used so far:
   which allows public `http` too because its URL is free-form and public APIs
   use it, follows same-host redirects, and is checked by the management API at
   start the same way.
+- The Visma consumer and producer (#661, [Visma.net](connectors/visma.md#which-addresses-it-will-call)),
+  https only for both `base_url` and `token_url`, no redirects, and checked by
+  the management API at start the same way.
 
 - The HTTP producer (#660, [HTTP & Webhooks](connectors/http.md#which-addresses-it-will-call)),
   on the same terms as the API consumer (public `http` allowed, same-host
@@ -322,7 +325,7 @@ Used so far:
   (`Options.TLSConfig`). A refused delivery is retried and then dead-lettered,
   not dropped.
 
-Other connectors that take a tenant-supplied host (Visma, Front Systems,
+Other connectors that take a tenant-supplied host (Front Systems,
 Brightpearl, SAP S/4HANA, Business Central) have not been moved to it; they are
 tracked in #639.
 

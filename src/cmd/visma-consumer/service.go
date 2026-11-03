@@ -19,10 +19,12 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/vismaurl"
 )
 
-const defaultTokenURL = "https://connect.visma.com/connect/token"
+const defaultTokenURL = vismaurl.DefaultTokenURL
 
 // vismaConsumer polls a Visma.net resource per active connection and publishes
 // the results. It is an SDK Consumer: Configure wires deps, Run subscribes to
@@ -36,6 +38,10 @@ type vismaConsumer struct {
 	logger  *slog.Logger
 
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets base_url and token_url be http or private, for a mock upstream.
+	// Never set by a tenant.
+	allowPrivate bool
 
 	active map[string]context.CancelFunc
 	mu     sync.RWMutex
@@ -85,8 +91,12 @@ func (c *vismaConsumer) Configure(ctx context.Context, res *sdk.Resources) error
 	c.nc = res.NATS
 	c.logger = res.Logger
 	c.active = make(map[string]context.CancelFunc)
+	c.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// base_url and token_url are tenant config and both requests carry a
+		// credential (#661): refuse private, loopback, link-local and metadata
+		// addresses at dial time. The same client makes the token request.
+		c.httpClient = safeurl.NewClient(60*time.Second, c.allowPrivate)
 	}
 	// Aux endpoint for the UI's pre-deploy "show data structure" preview.
 	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
@@ -173,6 +183,10 @@ func (c *vismaConsumer) startConnection(ctx context.Context, connectionID, tenan
 	}
 	if cfg.BaseURL == "" || cfg.Scope == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.Resource == "" {
 		logger.Error("Visma config incomplete (need base_url, scope, resource, client_id, client_secret_secret_id)")
+		return
+	}
+	if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, c.allowPrivate); err != nil {
+		logger.Error("Visma connection not started: " + err.Error())
 		return
 	}
 	if cfg.PollIntervalSeconds <= 0 {

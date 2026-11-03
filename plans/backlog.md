@@ -1041,11 +1041,12 @@ Last updated 2026-10-28.
     same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
     HTTP producer done in #660 (plan
     `plans/issue-660-http-producer-safeurl.md`; mTLS client built on the same
-    dialer via `safeurl.Options.TLSConfig`).
-    Still open, one PR each: Visma (`base_url`, `token_url`), Front Systems (`base_url`,
-    `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
-    `api_base_url`, `token_url`) and Business Central (`api_base_url`,
-    `token_url`).
+    dialer via `safeurl.Options.TLSConfig`). Visma done in #661 (plan
+    `plans/issue-661-visma-safeurl.md`; shared check in `pkg/vismaurl`, https
+    only for `base_url` and `token_url`).
+    Still open, one PR each: Front Systems (`base_url`, `callback_url`),
+    Brightpearl (`base_url` override), SAP S/4HANA (`host`, `api_base_url`,
+    `token_url`) and Business Central (`api_base_url`, `token_url`).
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The

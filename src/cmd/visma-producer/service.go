@@ -18,11 +18,13 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
+	"github.com/ValueRetail/vrsky/pkg/vismaurl"
 )
 
 const (
-	defaultTokenURL = "https://connect.visma.com/connect/token"
+	defaultTokenURL = vismaurl.DefaultTokenURL
 	defaultMethod   = http.MethodPost
 )
 
@@ -34,6 +36,10 @@ type vismaProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets base_url and token_url be http or private, for a mock upstream.
+	// Never set by a tenant.
+	allowPrivate bool
 }
 
 // VismaProducerConfig is the per-node configuration (config.visma).
@@ -65,8 +71,12 @@ func (p *vismaProducer) Configure(ctx context.Context, res *sdk.Resources) error
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
-		p.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// base_url and token_url are tenant config and both requests carry a
+		// credential (#661): refuse private, loopback, link-local and metadata
+		// addresses at dial time. The same client makes the token request.
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
 	}
 	p.logger.Info("visma-producer configured")
 	return nil
@@ -83,6 +93,13 @@ func (p *vismaProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	}
 	if cfg.BaseURL == "" || cfg.Scope == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.Resource == "" {
 		return sdk.Permanent(fmt.Errorf("visma producer config incomplete for connection %s", env.IntegrationID))
+	}
+	// A refused URL is retried and then dead-lettered with its payload, so the
+	// message can be replayed once the tenant fixes the field (#661). Not
+	// sdk.Permanent: that acks and drops the message.
+	if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, p.allowPrivate); err != nil {
+		p.logger.Error("Visma URL refused", "connection_id", env.IntegrationID, "error", err)
+		return sdk.Retriable(err)
 	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)

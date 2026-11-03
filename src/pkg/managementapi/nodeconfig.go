@@ -202,6 +202,9 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
+	if configType == "visma" {
+		errs = append(errs, validateVismaURLs(node, raw)...)
+	}
 	if configType == "api" && node.Type == "consumer" {
 		errs = append(errs, validateAPIConsumerURLs(node, raw)...)
 	}
