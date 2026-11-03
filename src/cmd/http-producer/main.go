@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthtoken"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/ValueRetail/vrsky/pkg/tlsconfig"
 )
@@ -53,6 +55,16 @@ type httpProducer struct {
 	// client; tests inject a stub.
 	tokens       *oauthtoken.Client
 	resolveToken func(ctx context.Context, tenantID, grantID string, force bool) (string, error)
+
+	// Every outbound request goes through a safeurl client, which refuses
+	// loopback, private, link-local and metadata addresses at dial time (#660).
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS), read
+	// in Configure and never set by a node. defaultClient serves nodes without
+	// mTLS; it is built on first use, so a producer that was not configured
+	// still gets a guarded client and never a plain http.Client.
+	allowPrivate  bool
+	defaultOnce   sync.Once
+	defaultClient *http.Client
 }
 
 type HTTPEvent struct {
@@ -75,7 +87,8 @@ type HTTPConfig struct {
 
 	// mTLS (#89): when the node carries a "tls" block with a resolved client
 	// cert/key, client is a pre-built *http.Client presenting that cert to the
-	// endpoint. nil means use the default (non-mTLS) client.
+	// endpoint (built on the same guarded dialer, see newClient). nil means use
+	// the default (non-mTLS) client.
 	client *http.Client
 }
 
@@ -102,6 +115,11 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 	p.eventSubs = make(map[string][]chan HTTPEvent)
 	p.recentEvents = make(map[string][]HTTPEvent)
 
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
+	if p.allowPrivate {
+		p.logger.Warn("ALLOW_PRIVATE_UPSTREAMS is on: private and loopback addresses are reachable. Never set this in production.")
+	}
+
 	// OAuth output (#97): resolve access tokens for nodes with auth_type=oauth.
 	p.tokens = oauthtoken.New(os.Getenv("MGMT_API_URL"), os.Getenv("OAUTH_TOKEN_SERVICE_SECRET"))
 	if p.resolveToken == nil {
@@ -123,6 +141,32 @@ func (p *httpProducer) Configure(ctx context.Context, res *sdk.Resources) error 
 
 	p.logger.Info("http-producer configured")
 	return nil
+}
+
+// newClient builds the guarded client every delivery uses. A tenant may point a
+// node at a public API over http or https, so the scheme is not restricted; the
+// dial refuses blocked addresses either way, on every hop. Redirects stay on the
+// same host, so a header the node set is never forwarded elsewhere. tlsCfg is
+// the node's mTLS configuration, or nil. otelhttp wraps the transport so the
+// outbound call is a child span of the pipeline trace and carries traceparent
+// (a no-op when tracing is off).
+func (p *httpProducer) newClient(tlsCfg *tls.Config) *http.Client {
+	c := safeurl.NewClientWith(30*time.Second, safeurl.Options{
+		AllowPrivate:      p.allowPrivate,
+		SameHostRedirects: true,
+		TLSConfig:         tlsCfg,
+	})
+	c.Transport = otelhttp.NewTransport(c.Transport)
+	return c
+}
+
+// clientFor returns the node's mTLS client, or the shared guarded client.
+func (p *httpProducer) clientFor(httpCfg *HTTPConfig) *http.Client {
+	if httpCfg.client != nil {
+		return httpCfg.client
+	}
+	p.defaultOnce.Do(func() { p.defaultClient = p.newClient(nil) })
+	return p.defaultClient
 }
 
 // Deliver sends one envelope to every matching HTTP-producer node configured
@@ -265,17 +309,20 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return nil
 	}
 
-	// otelhttp transport makes the outbound call a child span of the pipeline
-	// trace and injects traceparent into the external request. No-op when
-	// tracing is disabled. When the node configured mTLS, httpCfg.client is a
-	// pre-built client that presents the client cert; otherwise use the default.
-	client := httpCfg.client
-	if client == nil {
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		}
+	// The URL is tenant config and the node's credential goes with the request,
+	// so a literal private address or a non-http(s) scheme is refused here, with
+	// a readable reason. A hostname that resolves to a private address is
+	// refused at dial time (newClient). Both errors are returned as ordinary
+	// failures: the message is retried on the usual backoff and then lands in the
+	// DLQ, so the payload is kept for the operator rather than dropped, and no
+	// request leaves the pod (#660).
+	if err := safeurl.CheckRequestURL(httpCfg.URL, p.allowPrivate); err != nil {
+		p.logger.Error("HTTP destination refused", "error", err, "connection_id", connectionID)
+		p.emitEvent(connectionID, HTTPEvent{Type: "error", Message: "Destination refused: " + err.Error(), Time: now()})
+		return fmt.Errorf("destination refused: %w", err)
 	}
+
+	client := p.clientFor(httpCfg)
 	// buildAndSend creates a fresh request (re-readable body) per attempt and,
 	// for auth_type=oauth, attaches a Bearer token. force=true refreshes it.
 	buildAndSend := func(force bool) (*http.Response, error) {
@@ -481,14 +528,9 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 			if err != nil {
 				return nil, fmt.Errorf("node %s: build mTLS client: %w", node.ID, err)
 			}
-			// Clone DefaultTransport so proxy support, dial/idle timeouts and
-			// HTTP/2 settings are preserved; only swap in the mTLS config.
-			transport := http.DefaultTransport.(*http.Transport).Clone()
-			transport.TLSClientConfig = tlsCfg
-			cfg.client = &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: otelhttp.NewTransport(transport),
-			}
+			// Same guarded dialer as every other node; only the TLS config
+			// differs.
+			cfg.client = p.newClient(tlsCfg)
 		}
 
 		configs = append(configs, cfg)

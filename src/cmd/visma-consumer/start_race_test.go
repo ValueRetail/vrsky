@@ -94,8 +94,11 @@ func newSRFixture(t *testing.T) *srFixture {
 		db:         db,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: srv.Client(),
-		active:     make(map[string]context.CancelFunc),
-		publish:    func(context.Context, *envelope.Envelope) error { return nil },
+		// The fake API is http on 127.0.0.1, which the production policy
+		// refuses; the refusal is tested in ssrf_test.go.
+		allowPrivate: true,
+		active:       make(map[string]context.CancelFunc),
+		publish:      func(context.Context, *envelope.Envelope) error { return nil },
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithCancel(context.Background())

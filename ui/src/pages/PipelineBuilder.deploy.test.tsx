@@ -57,6 +57,7 @@ import { useCanvasStore } from '@/store/canvasStore'
 import { useUIStore } from '@/store/uiStore'
 import type { Tenant } from '@/types/models'
 import type { Canvas } from '@/types/pipeline'
+import ConfirmDialog from '@/components/Common/ConfirmDialog'
 import PipelineBuilder from './PipelineBuilder'
 
 const post = vi.mocked(apiClient.post)
@@ -88,17 +89,25 @@ const canvas = (extra: Partial<Canvas> = {}, configured = false): Canvas => ({
 const seed = (c: Canvas) =>
   localStorage.setItem('vrsky:canvases:v1:tenant-1', JSON.stringify({ canvases: [c], currentCanvasId: c.id }))
 
+// App.tsx renders the confirm dialog next to the routes; so does the test.
+function Dialog() {
+  const { confirmDialog, hideConfirmDialog } = useUIStore()
+  return <ConfirmDialog config={confirmDialog} onClose={hideConfirmDialog} />
+}
+
 const showBuilder = () =>
   render(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
         <Route path="/" element={<PipelineBuilder />} />
       </Routes>
+      <Dialog />
     </MemoryRouter>,
   )
 
 const notices = () => useUIStore.getState().notifications
 const calls = (fn: typeof post) => fn.mock.calls.map((c) => c[0])
+const notFound = () => Object.assign(new Error('not found'), { response: { status: 404 } })
 
 beforeAll(() => {
   globalThis.ResizeObserver = class {
@@ -208,5 +217,100 @@ describe('PipelineBuilder deploy', () => {
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
     expect(calls(post)).toEqual(['/api/v1/connections', `/api/v1/connections/${CONN}/start`])
     await waitFor(() => expect(notices().at(-1)).toMatchObject({ type: 'success', title: 'Pipeline Started' }))
+  })
+
+  // The linked connection was deleted on the server (plans/stable-connections.md):
+  // the page asks before making a new one, because a new one has a new webhook URL.
+  describe('when the linked connection is gone', () => {
+    const NEW = 'beef0000-1111-2222-3333-444444444444'
+
+    // The 404 can come from the stop or from the update; both mean "gone".
+    const gone: Array<[string, () => void]> = [
+      ['stop', () => post.mockRejectedValueOnce(notFound())],
+      ['update', () => { post.mockResolvedValueOnce({ data: {} } as never); put.mockRejectedValueOnce(notFound()) }],
+    ]
+
+    it.each(gone)('asks first when the %s says 404, and changes nothing until answered', async (_where, fail) => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      fail()
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+
+      expect(await screen.findByText('Pipeline no longer exists on the server')).toBeInTheDocument()
+      expect(screen.getByText(/was deleted\. Deploy it as a new pipeline\?/)).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(`\\(${CONN.slice(0, 8)}…\\)`))).toBeInTheDocument()
+      expect(screen.getByText(/Its webhook URL will change/)).toBeInTheDocument()
+      // Nothing was created or started, and no success or error was reported.
+      expect(calls(post)).not.toContain('/api/v1/connections')
+      expect(calls(post).some((u) => u.endsWith('/start'))).toBe(false)
+      expect(notices()).toHaveLength(0)
+    })
+
+    it('creates a new connection, not an update of the old id, and links the pipeline to it', async () => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      post
+        .mockRejectedValueOnce(notFound()) // stop CONN
+        .mockResolvedValueOnce({ data: { data: { id: NEW } } } as never) // create
+        .mockResolvedValueOnce({ data: {} } as never) // start NEW
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy as new' }))
+
+      await waitFor(() => expect(notices()).toHaveLength(1))
+      expect(calls(post)).toEqual([`/api/v1/connections/${CONN}/stop`, '/api/v1/connections', `/api/v1/connections/${NEW}/start`])
+      // The old id is never updated, and the create carries the pipeline.
+      expect(put).not.toHaveBeenCalled()
+      const body = post.mock.calls[1][1] as { name: string; nodes: Array<{ id: string }> }
+      expect(body.name).toBe('Orders')
+      expect(body.nodes.map((n) => n.id)).toEqual(['in-1', 'out-1'])
+
+      expect(notices()[0]).toMatchObject({ type: 'success', title: 'Pipeline Started' })
+      expect(notices()[0].message).toContain(`/webhook/${NEW}`)
+      expect(notices()[0].message).not.toContain(CONN)
+      // The canvas now points at the new connection and the dialog is closed.
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(NEW)
+      expect(useUIStore.getState().confirmDialog).toBeNull()
+      expect(screen.queryByText('Pipeline no longer exists on the server')).not.toBeInTheDocument()
+    })
+
+    it('creates and links the new connection when the update was what said 404', async () => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      post
+        .mockResolvedValueOnce({ data: {} } as never) // stop CONN
+        .mockResolvedValueOnce({ data: { data: { id: NEW } } } as never) // create
+        .mockResolvedValueOnce({ data: {} } as never) // start NEW
+      put.mockRejectedValueOnce(notFound())
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy as new' }))
+
+      await waitFor(() => expect(notices()).toHaveLength(1))
+      expect(calls(post)).toEqual([`/api/v1/connections/${CONN}/stop`, '/api/v1/connections', `/api/v1/connections/${NEW}/start`])
+      expect(put).toHaveBeenCalledTimes(1)
+      expect(put.mock.calls[0][0]).toBe(`/api/v1/connections/${CONN}`)
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBe(NEW)
+    })
+
+    it('does nothing more when the user cancels', async () => {
+      seed(canvas({ deployedConnectionId: CONN, deployedName: 'Orders' }, true))
+      post.mockRejectedValueOnce(notFound())
+      showBuilder()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+
+      await waitFor(() => expect(useUIStore.getState().confirmDialog).toBeNull())
+      expect(screen.queryByText('Pipeline no longer exists on the server')).not.toBeInTheDocument()
+      // Only the stop that found the 404: no create, no update, no start, no toast.
+      expect(calls(post)).toEqual([`/api/v1/connections/${CONN}/stop`])
+      expect(put).not.toHaveBeenCalled()
+      expect(notices()).toHaveLength(0)
+      // The stale link was dropped when the server said gone; nothing new is linked.
+      expect(useCanvasStore.getState().canvases[0].deployedConnectionId).toBeUndefined()
+      expect(screen.queryByText(/DEPLOYED/)).not.toBeInTheDocument()
+    })
   })
 })

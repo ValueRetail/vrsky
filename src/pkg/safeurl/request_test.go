@@ -1,6 +1,7 @@
 package safeurl
 
 import (
+	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
@@ -213,5 +214,31 @@ func TestClientWith_RedirectsStillDialChecked(t *testing.T) {
 	}
 	if !errors.Is(err, ErrBlockedAddress) {
 		t.Errorf("error %v does not wrap ErrBlockedAddress", err)
+	}
+}
+
+// Options.TLSConfig (#660): the HTTP producer's mTLS client is this client with
+// a client certificate and CA. The config reaches the transport, and the dial
+// check still applies underneath it.
+func TestNewClientWith_TLSConfig(t *testing.T) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "pinned.example"}
+	c := NewClientWith(time.Second, Options{TLSConfig: cfg})
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport is %T", c.Transport)
+	}
+	if tr.TLSClientConfig != cfg {
+		t.Error("the TLS config did not reach the transport")
+	}
+	if NewClientWith(time.Second, Options{}).Transport.(*http.Transport).TLSClientConfig != nil {
+		t.Error("a client without Options.TLSConfig has one")
+	}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	guarded := NewClientWith(time.Second, Options{TLSConfig: &tls.Config{InsecureSkipVerify: true}}) //nolint:gosec // test server
+	_, err := guarded.Get(srv.URL)
+	if !errors.Is(err, ErrBlockedAddress) {
+		t.Errorf("a client with a TLS config reached loopback: %v", err)
 	}
 }

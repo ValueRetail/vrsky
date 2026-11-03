@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
 const brightpearlSampleLimit = 5
@@ -68,9 +70,22 @@ func (c *brightpearlConsumer) handleSampleData() http.HandlerFunc {
 			writeErr("set the resource first")
 			return
 		}
+		if err := cfg.checkBaseURL(c.allowPrivate); err != nil {
+			writeErr(err.Error())
+			return
+		}
 
 		body, err := c.get(r.Context(), &cfg)
 		if err != nil {
+			if errors.Is(err, safeurl.ErrBlockedAddress) {
+				// Which address a name resolved to is internal detail: log
+				// it, do not hand it to the caller.
+				if c.logger != nil {
+					c.logger.Warn("sample-data target refused at dial", "error", err)
+				}
+				writeErr("target address not allowed")
+				return
+			}
 			writeErr(err.Error())
 			return
 		}
