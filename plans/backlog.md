@@ -1102,6 +1102,13 @@ Last updated 2026-10-28.
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
     touches workflows). Found in #453.
 
+158. **Cancelling the "connection gone" redeploy leaves the canvas unlinked.**
+    `deployCanvas` in `ui/src/pages/PipelineBuilder.tsx` calls `link(null)`
+    as soon as the server answers 404, before the dialog asks. After Cancel
+    the canvas is unlinked, so the next Deploy click creates a new
+    connection without asking and the webhook URL changes silently. Clear
+    the link only on Confirm, or ask again on the next Deploy. Found in #665.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource
