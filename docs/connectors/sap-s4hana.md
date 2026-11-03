@@ -159,10 +159,11 @@ addresses it can trust (#678):
   poll with an error; the pages before it are already published. Relative
   links, which is what SAP and `mock-sap` send, are not affected.
 
-Where it is checked: a source refuses to start its poll (the error is in the
-consumer's log), the "show data structure" preview answers with the reason,
-and a destination retries the message and then sends it to the DLQ. The
-management API does not check these fields yet when a connection is started.
+Where it is checked: the management API refuses to start a connection that
+breaks these rules, with the field and the reason in the answer (#708). The
+connectors check again: a source refuses to start its poll (the error is in
+the consumer's log), the "show data structure" preview answers with the
+reason, and a destination retries the message and then sends it to the DLQ.
 
 An `api_base_url` or `token_url` can still point at any public https host, so
 only set one for a host you trust with the credential.
@@ -172,8 +173,10 @@ only set one for a host you trust with the credential.
 `sap-s4hana-producer`. That allows `http` and private addresses, which is what
 `http://mock-sap:8099` needs. `docker-compose.yml` sets it on both services
 (override with `ALLOW_PRIVATE_UPSTREAMS=false`), so the dev stack and the
-nightly end-to-end keep working. The Kubernetes manifests do not set it; never
-set it in production. It does not loosen the `host` shape check.
+nightly end-to-end keep working. To start a mock-sap connection through the
+management API (the UI's Start), set it on `management-api` too; the compose
+file does not. The Kubernetes manifests do not set it; never set it in
+production. It does not loosen the `host` shape check.
 
 **Existing connections.** A node whose `api_base_url` or `token_url` is
 `http://` or points at a private address, or whose `host` carries more than a

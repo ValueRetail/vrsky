@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -322,29 +322,9 @@ func (cfg *BrightpearlConfig) baseURL() string {
 // checkBaseURL refuses a URL the connector must not call (#667): it comes from
 // tenant config and every request carries the staff token. The dial check in
 // the HTTP client is the enforcement; this gives an early, readable error.
+// The rule lives in pkg/connectorurl, shared with the management API (#708).
 func (cfg *BrightpearlConfig) checkBaseURL(allowPrivate bool) error {
-	if cfg.BaseURL != "" {
-		return safeurl.CheckBaseURL(cfg.BaseURL, allowPrivate)
-	}
-	return checkDerivedBaseURL(cfg.Datacenter, cfg.AccountCode)
-}
-
-var (
-	datacenterRE  = regexp.MustCompile(`(?i)^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	accountCodeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-)
-
-// checkDerivedBaseURL keeps the derived URL on Brightpearl: datacenter goes
-// into the host name and account_code into the path, so each must be one
-// label or segment. Otherwise "x@10.0.0.1/" as a datacenter moves the host.
-func checkDerivedBaseURL(datacenter, accountCode string) error {
-	if !datacenterRE.MatchString(datacenter) {
-		return fmt.Errorf("datacenter %q must be a single host label such as eu1 or use1", datacenter)
-	}
-	if !accountCodeRE.MatchString(accountCode) {
-		return fmt.Errorf("account_code %q may only hold letters, digits, - and _", accountCode)
-	}
-	return nil
+	return connectorurl.Brightpearl(cfg.BaseURL, cfg.Datacenter, cfg.AccountCode, allowPrivate)
 }
 
 func (cfg *BrightpearlConfig) resourceURL() string {

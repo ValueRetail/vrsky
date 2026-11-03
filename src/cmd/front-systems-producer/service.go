@@ -10,13 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -159,13 +159,10 @@ func (p *frontSystemsProducer) write(ctx context.Context, cfg *FrontSystemsProdu
 // private, loopback or link-local address. allowPrivate (the operator's dev
 // switch) allows http and private addresses. The dial check in the HTTP
 // client is the enforcement for a host name; this is the early, readable
-// error.
+// error. The rule lives in pkg/connectorurl, shared with the management API
+// (#708).
 func checkBaseURL(raw string, allowPrivate bool) error {
-	// safeurl's message quotes the URL; keep a password out of the logs.
-	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.User != nil {
-		return errors.New("base_url must not carry a user name or password")
-	}
-	return safeurl.CheckBaseURL(raw, allowPrivate)
+	return connectorurl.FrontSystems(raw, allowPrivate)
 }
 
 func snippet(b []byte) string {
