@@ -17,6 +17,7 @@ supports polling and webhooks.
 > **Base URL** is account- and datacenter-scoped:
 > `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`. Set
 > `datacenter` (e.g. `eu1`, `use1`) + `account_code`, or override `base_url`.
+> Both are checked before anything is called; see [The base URL](#the-base-url).
 
 ## As a source (consumer)
 
@@ -81,7 +82,51 @@ A producer node writes each message to a Brightpearl resource (`POST`/`PUT`/`PAT
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry; `4xx` and `401`/`403` are poison → DLQ.
+and `503`/`5xx`/network errors retry, and after the last attempt the message
+goes to the DLQ. `4xx` (including `401`/`403`) and an incomplete node config
+are permanent: the message is logged and dropped, not dead-lettered. A base URL
+the connector refuses (below) is retried like a network error, so those
+messages end in the DLQ and can be retried from there once the node is fixed.
+
+## The base URL
+
+Every request carries the node's staff token, and the URL it goes to comes
+from the node, so the connector only calls addresses it can trust (#667):
+
+- A `base_url` override must be `https`, with a host, and no user name, query
+  string or fragment.
+- Without an override, `datacenter` must be a single host label (`eu1`,
+  `use1`) and `account_code` may only hold letters, digits, `-` and `_`, so
+  neither can move the request off `ws-{datacenter}.brightpearl.com`.
+- The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. Redirects are not followed.
+
+Where it is checked: a source refuses to start its poll (the error is in the
+consumer's log), the "show data structure" preview answers with the reason,
+and a destination retries the message until it ends in the DLQ. Webhook mode
+calls nothing and is not affected. The management API does not check these
+fields yet when a connection is started.
+
+A `base_url` can still point at any public https host, so only set one for a
+host you trust with the staff token.
+
+**Local development with a mock Brightpearl.** The operator (not the node) can
+set `ALLOW_PRIVATE_UPSTREAMS=true` on `brightpearl-consumer` and
+`brightpearl-producer`. That allows `http` and private addresses for
+`base_url`. Never set it in production; it is off in `docker-compose.yml` and
+the Kubernetes manifests.
+
+**Existing connections.** A node whose `base_url` is `http://` or points at a
+private address, or whose `datacenter` or `account_code` breaks the rules
+above, stops working when this change is deployed: a running source keeps
+polling until its next restart, then refuses to start; a destination refuses
+from the next delivery, and those messages end in the DLQ. Fix the field, or
+clear `base_url` to use the default, then retry them from the DLQ.
 
 ## Notes & roadmap
 

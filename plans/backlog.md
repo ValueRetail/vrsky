@@ -1043,10 +1043,14 @@ Last updated 2026-10-28.
     `plans/issue-660-http-producer-safeurl.md`; mTLS client built on the same
     dialer via `safeurl.Options.TLSConfig`). Visma done in #661 (plan
     `plans/issue-661-visma-safeurl.md`; shared check in `pkg/vismaurl`, https
-    only for `base_url` and `token_url`).
+    only for `base_url` and `token_url`). Brightpearl done in #667 (plan
+    `plans/issue-667-brightpearl-safeurl.md`; `base_url` override plus
+    `datacenter`/`account_code`), checked in the connectors only: the
+    management API's start-time check (`validateEdgeNodeConfig`, as for
+    Sitoo) is still to add.
     Still open, one PR each: Front Systems (`base_url`, `callback_url`),
-    Brightpearl (`base_url` override), SAP S/4HANA (`host`, `api_base_url`,
-    `token_url`) and Business Central (`api_base_url`, `token_url`).
+    SAP S/4HANA (`host`, `api_base_url`, `token_url`) and Business Central
+    (`api_base_url`, `token_url`).
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
@@ -1161,6 +1165,12 @@ Last updated 2026-10-28.
     Brightpearl page said otherwise; check every connector page, and decide
     per case whether a 4xx or an incomplete config should be dropped or
     dead-lettered so it can be replayed. Found in review of #668 and #674.
+
+165. **Check the Brightpearl default host.** The connectors build
+    `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
+    current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
+    Check Brightpearl's own API docs and change the default if it moved.
+    Found in review of #674.
 
 ## Human
 

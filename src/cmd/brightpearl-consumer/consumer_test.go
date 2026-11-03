@@ -118,7 +118,8 @@ func TestSampleData_Brightpearl(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	c := &brightpearlConsumer{httpClient: http.DefaultClient}
+	// The fake API is on http://127.0.0.1: the operator's dev switch.
+	c := &brightpearlConsumer{httpClient: http.DefaultClient, allowPrivate: true}
 	body := fmt.Sprintf(`{"app_ref":"app","staff_token":"tok","base_url":%q,"resource":"/order-service/order"}`, apiSrv.URL)
 	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
 	w := httptest.NewRecorder()
