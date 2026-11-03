@@ -1072,13 +1072,11 @@ Last updated 2026-10-28.
     from the rest and answer 503 for the rest, like #634 and #645. The
     membership lookup just above it answers 500 for a database error; make
     that a 503 too. Found in #645.
-151. **Cloud-storage event mode never retries a failed after-action.**
-    `ingestObject` logs it, the message is acked, and the object stays in
-    the bucket; there is no listing in event mode to find it again, and no
-    done set. Poll mode retries since #640. Options: re-fetch nothing and
-    only retry the after-action from a small in-memory queue of keys
-    (lost on restart), or list the prefix now and then in event mode just
-    to sweep leftovers. Found in #640.
+151. ~~**Cloud-storage event mode never retries a failed after-action.**~~
+    (#672) `ingestObject` logged it, the message was acked, and the object
+    stayed in the bucket. Now the key goes to a bounded in-memory queue per
+    connection and the after-action is retried with the poll-mode backoff,
+    without publishing again; it is lost on restart. Found in #640.
 
 152. ~~**The builder's "connection gone" redeploy has no page-level test.**~~ (#665)
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
@@ -1173,6 +1171,19 @@ Last updated 2026-10-28.
     current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
     Check Brightpearl's own API docs and change the default if it moved.
     Found in review of #674.
+
+166. **The first after-action still deletes or moves blind.** In event and
+    poll mode the first (non-retry) `delete` or `move` after a publish runs
+    without a stamp check, so a replacement uploaded under the same key
+    during the publish is deleted or moved unpublished. #672 guards only the
+    retries. Stamp before the fetch and compare before the first after-action
+    too. Found in review of #676.
+
+167. **Conditional deletes for the cloud-storage after-action.** The stamp
+    check leaves a window between the Stat and the delete (for a `move`,
+    through the copy). Close it where the store supports it: Azure `If-Match`
+    on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
+    Found in review of #676.
 
 ## Human
 

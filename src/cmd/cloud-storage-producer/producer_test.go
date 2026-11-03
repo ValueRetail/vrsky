@@ -29,6 +29,15 @@ func (f *fakeStore) List(context.Context, string) ([]objectstore.Object, error) 
 func (f *fakeStore) Get(context.Context, string) ([]byte, string, error)        { return nil, "", nil }
 func (f *fakeStore) Delete(context.Context, string) error                       { return nil }
 func (f *fakeStore) Copy(context.Context, string, string) error                 { return nil }
+func (f *fakeStore) Stat(_ context.Context, key string) (objectstore.Object, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.put[key]
+	if !ok {
+		return objectstore.Object{}, objectstore.ErrNotFound
+	}
+	return objectstore.Object{Key: key, Size: int64(len(b))}, nil
+}
 func (f *fakeStore) GetStream(context.Context, string) (io.ReadCloser, string, error) {
 	return io.NopCloser(bytes.NewReader(nil)), "", nil
 }

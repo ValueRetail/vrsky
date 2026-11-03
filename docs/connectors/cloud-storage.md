@@ -202,8 +202,28 @@ published once, not again at every start (#538).
     can't tell from the old one.
   - A `move` whose copy worked and whose delete failed copies over the same
     destination again before it deletes.
-  - Event mode has no listing and does not retry: a failed after-action
-    there is only logged and the object stays.
+  - Event mode has no listing, so it keeps the failed keys in a small
+    queue in memory (#672). The first failure logs `after-action failed;
+    will retry in memory`; the consumer then tries the `delete` or `move`
+    again after 1, 2, 4, 8, 16, 32 and 60 minutes and once more an hour
+    later, which is eight retries in about three hours. It does not fetch
+    or publish the object again. A retry that works logs `after-action done
+    on retry`; an object that is gone counts as done. After the eighth
+    failed retry, or when the queue is full (1000 keys per connection), the
+    consumer logs an error with the bucket and key and gives up: the object
+    stays in the bucket. The queue is lost when the connection stops or the
+    pod restarts, and the object then stays too, so look for leftovers after
+    a restart. Before the fetch, event mode with `delete` or `move` reads the
+    object's size, last-modified time and version (ETag on S3 and Azure,
+    generation on GCS), and each retry reads them again first. If they
+    changed, the object was replaced under the same key: the retry leaves it
+    for its own notification and logs `object replaced since published; left
+    for its own notification`. A replacement uploaded in the instant between
+    that check and the delete (or the copy of a move) can still be removed
+    unpublished; that window is short; for a `move` it lasts as long as the
+    copy, which on Azure means downloading and re-uploading the blob.
+  - On S3, give the credentials `s3:ListBucket`. Without it a missing object
+    reads as access denied, and its retry ends in a false error.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

@@ -54,7 +54,16 @@ func (m *spoolStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 func (m *spoolStore) Copy(context.Context, string, string) error { return nil }
-func (m *spoolStore) Close() error                               { return nil }
+func (m *spoolStore) Stat(_ context.Context, key string) (objectstore.Object, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.objects[key]
+	if !ok {
+		return objectstore.Object{}, objectstore.ErrNotFound
+	}
+	return objectstore.Object{Key: key, Size: int64(len(b))}, nil
+}
+func (m *spoolStore) Close() error { return nil }
 
 func TestSpool_SmallOutputStaysInline(t *testing.T) {
 	store := newSpoolStore()

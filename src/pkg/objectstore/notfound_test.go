@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests for #609: Get and GetStream of every backend return an error wrapping
@@ -194,6 +195,124 @@ func TestGetFound_PerProvider(t *testing.T) {
 			}
 			if string(body) != "hello" {
 				t.Errorf("body = %q, want hello", body)
+			}
+		})
+	}
+}
+
+// Tests for Stat (#672): the event-mode consumer stats an object before it
+// publishes and before a retried delete or move, and counts a not-found key as
+// done. As with Get, only a missing object is ErrNotFound.
+
+// s3StatHandler answers S3's two HEAD requests: the object's (path /b/<key>)
+// and, after a 404 there, the bucket's (path /b).
+func s3StatHandler(object, bucket int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.Trim(r.URL.Path, "/") == "b" {
+			w.WriteHeader(bucket)
+			return
+		}
+		w.WriteHeader(object)
+	}
+}
+
+func TestStatNotFound_PerProvider(t *testing.T) {
+	cases := []nfCase{
+		{
+			name: "object missing",
+			respond: map[string]http.HandlerFunc{
+				"s3":    s3StatHandler(404, 200),
+				"azure": nfAzureError(404, "BlobNotFound"),
+				"gcs":   nfGCSError(404),
+			},
+			wantNotFound: true,
+		},
+		{
+			// S3 answers a HEAD without a body, so the 404 alone cannot tell a
+			// missing key from a missing bucket; the bucket check can. GCS has
+			// no case here, as for Get.
+			name: "bucket missing",
+			respond: map[string]http.HandlerFunc{
+				"s3":    s3StatHandler(404, 404),
+				"azure": nfAzureError(404, "ContainerNotFound"),
+			},
+			wantNotFound: false,
+		},
+		{
+			// A caller allowed to read objects but not to check the bucket
+			// still gets a missing object.
+			name:         "object missing, bucket check denied",
+			respond:      map[string]http.HandlerFunc{"s3": s3StatHandler(404, 403)},
+			wantNotFound: true,
+		},
+		{
+			name: "access denied",
+			respond: map[string]http.HandlerFunc{
+				"s3":    s3StatHandler(403, 200),
+				"azure": nfAzureError(403, "AuthorizationFailure"),
+				"gcs":   nfGCSError(403),
+			},
+			wantNotFound: false,
+		},
+	}
+	for _, be := range nfBackends {
+		for _, tc := range cases {
+			h, ok := tc.respond[be.name]
+			if !ok {
+				continue
+			}
+			t.Run(be.name+"/"+tc.name, func(t *testing.T) {
+				store := be.build(t, h)
+				obj, err := store.Stat(context.Background(), "in/gone.csv")
+				checkNotFound(t, "Stat", err, tc.wantNotFound)
+				if obj != (Object{}) {
+					t.Errorf("Stat returned %+v with an error", obj)
+				}
+			})
+		}
+	}
+}
+
+// A present object stats with its size, modification time and version.
+func TestStatFound_PerProvider(t *testing.T) {
+	mod := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ok := map[string]http.HandlerFunc{
+		"s3": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "5")
+			w.Header().Set("Last-Modified", mod.Format(http.TimeFormat))
+			w.Header().Set("ETag", `"v1"`)
+		},
+		"azure": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "5")
+			w.Header().Set("Last-Modified", mod.Format(http.TimeFormat))
+			w.Header().Set("ETag", `"v1"`)
+		},
+		"gcs": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"kind":"storage#object","name":"in/here.csv","bucket":"b","size":"5",`+
+				`"updated":"`+mod.Format(time.RFC3339)+`","generation":"1","etag":"CAE="}`)
+		},
+	}
+	// GCS's version is the generation, not the etag.
+	wantVersion := map[string]string{"s3": "v1", "azure": "v1", "gcs": "1"}
+	for _, be := range nfBackends {
+		t.Run(be.name, func(t *testing.T) {
+			store := be.build(t, ok[be.name])
+			obj, err := store.Stat(context.Background(), "in/here.csv")
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			want := Object{Key: "in/here.csv", Size: 5, LastModified: mod, Version: wantVersion[be.name]}
+			if !obj.LastModified.Equal(mod) {
+				t.Errorf("LastModified = %v, want %v", obj.LastModified, mod)
+			}
+			obj.LastModified = mod
+			if obj != want {
+				t.Errorf("Stat = %+v, want %+v", obj, want)
 			}
 		})
 	}
