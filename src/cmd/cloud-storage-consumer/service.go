@@ -68,6 +68,10 @@ type cloudConsumer struct {
 	// means time.Now. Tests set it.
 	now func() time.Time
 
+	// afterRetry tunes the event-mode after-action retry queue (#672); the
+	// zero value means the defaults. Tests set it.
+	afterRetry afterRetryTuning
+
 	active map[string]*activeConn
 	mu     sync.RWMutex
 	// starts holds the claim of each start in progress (#397); guarded by mu.
@@ -570,6 +574,18 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 		return
 	}
 
+	// A failed delete or move is retried from memory (#672); the queue ends
+	// with the loop, and the loop waits for it.
+	var retryQ *afterRetryQueue
+	if cfg.AfterAction == "delete" || cfg.AfterAction == "move" {
+		retryQ = newAfterRetryQueue(logger, cfg.AfterAction, cfg.Bucket, s.afterRetry,
+			func(ctx context.Context, key string) error { return s.afterAction(ctx, store, cfg, key) })
+		qctx, stopQ := context.WithCancel(ctx)
+		qDone := make(chan struct{})
+		go func() { defer close(qDone); retryQ.run(qctx) }()
+		defer func() { stopQ(); <-qDone }()
+	}
+
 	logger.Info("cloud-storage event loop started", "event_target", cfg.eventTarget())
 	skipLogged := false
 	for {
@@ -612,7 +628,7 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 						"key", key, "prefix", cfg.Prefix, "file_pattern", cfg.FilePattern)
 					continue
 				}
-				if err := s.ingestObject(ctx, connID, tenantID, store, cfg, key, logger); err != nil {
+				if err := s.ingestObject(ctx, connID, tenantID, store, cfg, key, logger, retryQ); err != nil {
 					// An object that is not in the bucket any more is done, not
 					// failed (#609). The usual cause is a redelivered message:
 					// a sibling key failed, so the queue sent the message again,
@@ -642,14 +658,23 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 }
 
 // ingestObject fetches one object, publishes it into the pipeline, and applies
-// the after-action. Event mode uses it: a failed after-action is only logged,
-// as event mode has no listing to find the object in again (#640, backlog).
-func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) error {
+// the after-action. Event mode uses it. Event mode has no listing to find the
+// object in again, so a failed after-action goes to retryQ, which retries it
+// from memory without publishing again (#672). The returned error is only a
+// failure to fetch or publish.
+func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger, retryQ *afterRetryQueue) error {
 	afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, key, logger)
 	if err != nil {
 		return err
 	}
-	if afterErr != nil {
+	switch {
+	case afterErr == nil:
+		if retryQ != nil {
+			retryQ.forget(key) // published again; an older failed after-action is moot
+		}
+	case retryQ != nil:
+		retryQ.failed(key, afterErr)
+	default:
 		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", afterErr)
 	}
 	return nil
@@ -767,7 +792,7 @@ func (s *cloudConsumer) afterAction(ctx context.Context, store objectstore.Objec
 		// conservative: it also refuses some real S3/GCS moves (a.csv to
 		// /a.csv), which fails safe by leaving the object in place.
 		if strings.TrimLeft(dst, "/") == strings.TrimLeft(key, "/") {
-			return fmt.Errorf("object %q is already in move_prefix %q; not moved", key, cfg.MovePrefix)
+			return fmt.Errorf("object %q is already in move_prefix %q; not moved (%w)", key, cfg.MovePrefix, errMoveOntoSelf)
 		}
 		if err := store.Copy(ctx, key, dst); err != nil {
 			return fmt.Errorf("copy to move_prefix: %w", err)

@@ -202,8 +202,21 @@ published once, not again at every start (#538).
     can't tell from the old one.
   - A `move` whose copy worked and whose delete failed copies over the same
     destination again before it deletes.
-  - Event mode has no listing and does not retry: a failed after-action
-    there is only logged and the object stays.
+  - Event mode has no listing, so it keeps the failed keys in a small
+    queue in memory (#672). The first failure logs `after-action failed;
+    will retry in memory`; the consumer then tries the `delete` or `move`
+    again after 1, 2, 4, 8, 16, 32 and 60 minutes and once more an hour
+    later, which is eight retries in about three hours. It does not fetch
+    or publish the object again. A retry that works logs `after-action done
+    on retry`; an object that is gone counts as done. After the eighth
+    failed retry, or when the queue is full (1000 keys per connection), the
+    consumer logs an error with the bucket and key and gives up: the object
+    stays in the bucket. The queue is lost when the connection stops or the
+    pod restarts, and the object then stays too, so look for leftovers after
+    a restart. An object replaced under the same key while its retry is
+    waiting is published again when its notification arrives and its queued
+    retry is dropped; if the retry runs before that notification is handled,
+    it removes the new object unpublished.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

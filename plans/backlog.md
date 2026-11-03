@@ -1063,13 +1063,11 @@ Last updated 2026-10-28.
     from the rest and answer 503 for the rest, like #634 and #645. The
     membership lookup just above it answers 500 for a database error; make
     that a 503 too. Found in #645.
-151. **Cloud-storage event mode never retries a failed after-action.**
-    `ingestObject` logs it, the message is acked, and the object stays in
-    the bucket; there is no listing in event mode to find it again, and no
-    done set. Poll mode retries since #640. Options: re-fetch nothing and
-    only retry the after-action from a small in-memory queue of keys
-    (lost on restart), or list the prefix now and then in event mode just
-    to sweep leftovers. Found in #640.
+151. ~~**Cloud-storage event mode never retries a failed after-action.**~~
+    (#672) `ingestObject` logged it, the message was acked, and the object
+    stayed in the bucket. Now the key goes to a bounded in-memory queue per
+    connection and the after-action is retried with the poll-mode backoff,
+    without publishing again; it is lost on restart. Found in #640.
 
 152. **The builder's "connection gone" redeploy has no page-level test.**
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
