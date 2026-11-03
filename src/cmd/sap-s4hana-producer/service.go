@@ -84,6 +84,9 @@ func (p *sapProducer) Configure(ctx context.Context, res *sdk.Resources) error {
 	p.db = res.DB
 	p.logger = res.Logger
 	p.allowPrivate = safeurl.AllowPrivateFromEnv()
+	if p.allowPrivate {
+		p.logger.Warn("ALLOW_PRIVATE_UPSTREAMS is on: private and loopback addresses are reachable. Never set this in production.")
+	}
 	if p.httpClient == nil {
 		// host, api_base_url and token_url are tenant config and every request
 		// carries the tenant's SAP credential, so the client refuses private,
@@ -130,20 +133,20 @@ func (p *sapProducer) Deliver(ctx context.Context, env *envelope.Envelope) error
 func (p *sapProducer) write(ctx context.Context, cfg *SAPProducerConfig, auth authorizer, payload []byte) error {
 	token, err := p.fetchCSRF(ctx, cfg, auth)
 	if err != nil {
-		return sdk.Retriable(fmt.Errorf("fetch csrf token: %w", err))
+		return p.requestErr("fetch csrf token", err)
 	}
 	resp, body, err := p.send(ctx, cfg, auth, token, payload)
 	if err != nil {
-		return sdk.Retriable(fmt.Errorf("sap s/4hana request: %w", err))
+		return p.requestErr("sap s/4hana request", err)
 	}
 	if resp.StatusCode == http.StatusForbidden && strings.EqualFold(resp.Header.Get("X-CSRF-Token"), "Required") {
 		token, err = p.fetchCSRF(ctx, cfg, auth)
 		if err != nil {
-			return sdk.Retriable(fmt.Errorf("re-fetch csrf token: %w", err))
+			return p.requestErr("re-fetch csrf token", err)
 		}
 		resp, body, err = p.send(ctx, cfg, auth, token, payload)
 		if err != nil {
-			return sdk.Retriable(fmt.Errorf("sap s/4hana request: %w", err))
+			return p.requestErr("sap s/4hana request", err)
 		}
 	}
 
@@ -160,6 +163,20 @@ func (p *sapProducer) write(ctx context.Context, cfg *SAPProducerConfig, auth au
 	default:
 		return sdk.Retriable(fmt.Errorf("sap s/4hana %d: %s", resp.StatusCode, snippet(body)))
 	}
+}
+
+// requestErr marks a failed request Retriable. A dial refusal names the address
+// a host name resolved to, which is internal detail and would reach the tenant
+// through the message's last error (the DLQ view): it is logged in full and
+// returned without the address (#678).
+func (p *sapProducer) requestErr(step string, err error) error {
+	if errors.Is(err, safeurl.ErrBlockedAddress) {
+		if p.logger != nil {
+			p.logger.Warn("sap s/4hana target refused at dial", "step", step, "error", err)
+		}
+		return sdk.Retriable(fmt.Errorf("sap s/4hana: %w", safeurl.ErrBlockedAddress))
+	}
+	return sdk.Retriable(fmt.Errorf("%s: %w", step, err))
 }
 
 // fetchCSRF does a GET with "X-CSRF-Token: Fetch"; the response header carries

@@ -266,7 +266,8 @@ func TestDeliver_DefaultHostStillDelivers(t *testing.T) {
 
 // A hostname passes the config check, so the guard that matters is the dial.
 // "localhost" resolves to loopback: the production client must not connect,
-// and the refusal is retried (dead-lettered after the retries), not dropped.
+// the refusal is retried (dead-lettered after the retries), not dropped, and
+// the error does not name the resolved address.
 func TestDeliver_HostnameResolvingToLoopbackIsRefusedAtDial(t *testing.T) {
 	port, accepted := tcpCounter(t)
 	tests := []struct {
@@ -283,6 +284,11 @@ func TestDeliver_HostnameResolvingToLoopbackIsRefusedAtDial(t *testing.T) {
 			err := deliverWith(t, p, tt.location+","+basicCreds)
 			if !errors.Is(err, safeurl.ErrBlockedAddress) {
 				t.Errorf("Deliver = %v, want the dial refused", err)
+			}
+			// The error is the message's last error, which the tenant sees in
+			// the DLQ view: it must not say where the name resolved to.
+			if err != nil && (strings.Contains(err.Error(), "127.0.0.1") || strings.Contains(err.Error(), "::1")) {
+				t.Errorf("Deliver = %v names the resolved address", err)
 			}
 			if sdk.IsPermanent(err) {
 				t.Errorf("Deliver = %v is Permanent, want it retried and dead-lettered", err)

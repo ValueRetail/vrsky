@@ -107,6 +107,9 @@ func (c *sapConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 	c.logger = res.Logger
 	c.active = make(map[string]context.CancelFunc)
 	c.allowPrivate = safeurl.AllowPrivateFromEnv()
+	if c.allowPrivate {
+		c.logger.Warn("ALLOW_PRIVATE_UPSTREAMS is on: private and loopback addresses are reachable. Never set this in production.")
+	}
 	if c.httpClient == nil {
 		// host, api_base_url and token_url are tenant config and every request
 		// carries the tenant's SAP credential, so the client refuses private,
@@ -305,7 +308,12 @@ func (c *sapConsumer) fetchAndPublish(ctx context.Context, connID, tenantID stri
 			}
 			total += len(records)
 		}
-		next = nextLink
+		if nextLink == "" {
+			break
+		}
+		if next, err = cfg.followNext(nextLink); err != nil {
+			return err
+		}
 	}
 	logger.Info("SAP S/4HANA fetch complete", "service", cfg.Service, "entity_set", cfg.EntitySet, "records", total, "pages", page)
 	return nil
@@ -326,6 +334,54 @@ func parsePage(version string, body []byte, reqURL *url.URL) ([]json.RawMessage,
 		return nil, "", fmt.Errorf("parse OData v2 page: %w", err)
 	}
 	return p.D.Results, resolveNext(reqURL, p.D.Next), nil
+}
+
+// errNextOffService stops a poll whose pagination link leaves the configured
+// service. It names neither the link nor the credential: both are tenant data.
+var errNextOffService = errors.New("sap s/4hana: pagination link points outside the configured service; poll stopped")
+
+// followNext decides where a (resolved, absolute) pagination link is fetched.
+// Every page carries the credential, and the link comes from the server, so it
+// stays on the configured service root's origin (#678):
+//   - same scheme, host and port as the service root: followed as given, minus
+//     any user name or fragment;
+//   - another origin (another host or port, or http where the root is https,
+//     as a TLS-terminating web dispatcher may answer) with a path under the
+//     service root's path: its path and query are put back on the configured
+//     origin, so the credential never leaves it and never goes over http;
+//   - anything else: the poll stops with errNextOffService.
+func (cfg *SAPConfig) followNext(next string) (string, error) {
+	root, err := url.Parse(cfg.serviceRoot())
+	if err != nil {
+		return "", errNextOffService
+	}
+	n, err := url.Parse(next)
+	if err != nil || !n.IsAbs() {
+		return "", errNextOffService
+	}
+	sameOrigin := n.Scheme == root.Scheme && strings.EqualFold(n.Hostname(), root.Hostname()) &&
+		effectivePort(n) == effectivePort(root)
+	if !sameOrigin && !underPath(n.EscapedPath(), root.EscapedPath()) {
+		return "", errNextOffService
+	}
+	out := url.URL{Scheme: root.Scheme, Host: root.Host, Path: n.Path, RawPath: n.RawPath, RawQuery: n.RawQuery}
+	return out.String(), nil
+}
+
+// underPath reports whether path is root or below it, segment-wise.
+func underPath(path, root string) bool {
+	root = strings.TrimRight(root, "/")
+	return root == "" || path == root || strings.HasPrefix(path, root+"/")
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // resolveNext turns a relative __next/nextLink into an absolute URL.

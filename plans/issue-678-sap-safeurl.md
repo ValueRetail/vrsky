@@ -60,11 +60,25 @@ looking like the default.
   literals are refused in `host`; use `api_base_url` for those.
 - `host` is only checked where it is used: always when there is no
   `api_base_url`, and for OAuth2 when there is no `token_url`.
-- The OData pagination link (`__next` / `@odata.nextLink`) is not given a
-  string check of its own. It comes from the SAP server the tenant chose and
-  goes through the same guarded client, so the dial check covers private
-  addresses. A same-host rule could break on-prem gateways behind a web
-  dispatcher that return another host name.
+- The OData pagination link (`__next` / `@odata.nextLink`) stays on the
+  service root's origin (changed after review): every page carries the
+  credential, and a link to a public host, or an `http` link behind a
+  TLS-terminating web dispatcher, would leak it. Same scheme, host and port:
+  followed (user name and fragment dropped). Another origin with a path under
+  the service root's path: the path and query are fetched from the configured
+  origin, which keeps gateways that answer with an internal host name
+  working. Anything else: the poll stops with an error that names neither the
+  link nor the credential. mock-sap answers with a relative `?$skiptoken=P2`,
+  which resolves onto the same origin, so the nightly end-to-end is
+  unaffected.
+- A producer request refused at dial returns
+  `sdk.Retriable("sap s/4hana: " + safeurl.ErrBlockedAddress)` without the
+  address, and logs the full error (changed after review): the error becomes
+  the message's last error, which the tenant sees in the DLQ view. The
+  consumer's poll errors only go to the service log; its sample-data endpoint
+  already answers "target address not allowed".
+- Both connectors log a warning at `Configure` when `ALLOW_PRIVATE_UPSTREAMS`
+  is on, as the API consumer does.
 - docker-compose sets `ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"`
   on `sap-s4hana-consumer` and `sap-s4hana-producer`, as #669 does for the
   HTTP producer. docker-compose is dev and CI only; the Kubernetes manifests
@@ -76,8 +90,9 @@ looking like the default.
 
 - `src/cmd/sap-s4hana-consumer/service.go`, `server.go`
 - `src/cmd/sap-s4hana-producer/service.go`
-- tests: new `safeurl_test.go` and `configure_client_test.go` in both; the
-  start fixture that serves on `http://127.0.0.1` sets `allowPrivate`.
+- tests: new `safeurl_test.go` and `configure_client_test.go` in both, and
+  `pagination_test.go` in the consumer; the start fixture that serves on
+  `http://127.0.0.1` sets `allowPrivate`.
 - `docker-compose.yml` (the two SAP services)
 - `docs/connectors/sap-s4hana.md`
 

@@ -103,10 +103,13 @@ producer re-fetches once and retries transparently.
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry with backoff; `4xx` bad-data and
-`401`/`403` auth failures are poison and go to the DLQ. An address the
-connector refuses (below) is retried like a network error and then goes to the
-DLQ with its payload, so it can be replayed once the node is fixed.
+and `503`/`5xx`/network errors retry with backoff and go to the DLQ once the
+retries are used up. Other `4xx` answers, `401`/`403` auth failures included,
+are permanent: the message is acked and dropped (the error is logged), not
+retried and not dead-lettered. An address the connector refuses (below) is
+retried like a network error and then goes to the DLQ with its payload, so it
+can be replayed once the node is fixed. Its error says the address was refused
+but not which address a name resolved to.
 
 ## Which addresses it will call
 
@@ -131,6 +134,14 @@ addresses it can trust (#678):
   refused too. It applies to every call: the OData requests, the pagination
   links SAP returns, the CSRF fetch and the token call. Redirects are not
   followed.
+- Pagination links (`d.__next`, `@odata.nextLink`) stay on the service
+  root's scheme, host and port. A link to another host or port, or an `http`
+  link where the root is `https` (a TLS-terminating web dispatcher may
+  answer with one), is fetched from the configured root instead, with the
+  link's path and query, as long as that path is under the service root's
+  path. A link anywhere else stops the poll with an error; the pages before
+  it are already published. Relative links, which is what SAP and `mock-sap`
+  send, are not affected.
 
 Where it is checked: a source refuses to start its poll (the error is in the
 consumer's log), the "show data structure" preview answers with the reason,
