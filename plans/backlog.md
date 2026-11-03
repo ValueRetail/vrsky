@@ -1075,9 +1075,9 @@ Last updated 2026-10-28.
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
     when the linked one was deleted, which changes the webhook URL. Add a
     case to `PipelineBuilder.deploy.test.tsx`. Found in review of #654.
-153. **Unit tests for `useNodeDrag`, `useCanvasPersistence` and
-    `useConnectionDrawing`.** The page test in #654 loads them for the
-    first time and covers them only partly, so global branch and function
+153. ~~**Unit tests for `useNodeDrag`, `useCanvasPersistence` and
+    `useConnectionDrawing`.**~~ (#663) The page test in #654 loads them for
+    the first time and covers them only partly, so global branch and function
     coverage have about 2.5 points of room left. Tests for these hooks win
     the margin back. Found in review of #654.
 154. **`GET /api/v1/connections/{id}/metrics/ws` has no caller either.**
@@ -1101,6 +1101,14 @@ Last updated 2026-10-28.
     PodMonitor and a rule on `certmanager_certificate_expiration_timestamp_seconds`
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
     touches workflows). Found in #453.
+
+157. **The builder loses work silently when localStorage is full.**
+    `canvasStore.saveToStorage` catches a failed `setItem` and only calls
+    `console.warn`, so after a quota error the tab keeps editing in memory
+    and the next reload brings back the last good save with no notice.
+    Show a toast or banner (and keep the in-memory canvas) when a save
+    fails. The hook tests in #663 pin the current "no throw, memory kept"
+    behaviour, not the silence. Found in #663.
 
 ## Human
 
