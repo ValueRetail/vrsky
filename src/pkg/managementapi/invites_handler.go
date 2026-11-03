@@ -230,6 +230,9 @@ func (h *Handler) HandleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		SetAuditDetail(ctx, "invite_accept_mark_error", merr.Error())
 	}
 
+	// The user is a member now: the entry belongs in the joined workspace's
+	// log, not the one selected in X-Tenant-ID (#695).
+	recordAuditVerifiedTenant(ctx, inv.TenantID)
 	SetAuditAction(ctx, "member.invite.accept")
 	SetAuditDetail(ctx, "tenant_id", inv.TenantID)
 	_ = writeJSON(w, http.StatusOK, SuccessResponse{Data: &TenantMember{

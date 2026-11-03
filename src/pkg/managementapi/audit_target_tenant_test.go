@@ -120,9 +120,6 @@ func TestAudit_OperatorPlanAndQuotaWritesFileUnderPathTenant(t *testing.T) {
 // Only a caller the operator gate let through may file entries in the path's
 // workspace: a refused owner of another workspace must not reach its log.
 func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
-	// With a workspace selected the refusal is still audited, under that
-	// workspace as before, so the write can be waited for and its tenant
-	// checked. With none there is nothing to wait for.
 	cases := []struct {
 		name, path, workspace string
 		body                  any
@@ -140,15 +137,10 @@ func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body.String())
 			}
-			if c.workspace == "" {
-				if got := aw.settle(); len(got) != 0 {
-					t.Fatalf("a refused non-operator with no workspace filed entries: %+v", got)
-				}
-				return
-			}
-			got := aw.wait(t, 1)
-			if len(got) != 1 || got[0].TenantID != c.workspace {
-				t.Fatalf("want the refusal filed once under the caller's workspace %q, not the path's, got %+v", c.workspace, got)
+			// Not under the path's workspace, and since #695 not under the
+			// selected one either: the caller was verified against neither.
+			if got := aw.settle(); len(got) != 0 {
+				t.Fatalf("a refused non-operator filed entries: %+v", got)
 			}
 		})
 	}
@@ -163,11 +155,9 @@ func TestAudit_OtherRoutesKeepContextTenant(t *testing.T) {
 	}{
 		{"owner creates a connection", http.MethodPost, "/api/v1/connections", billTenant, "tokOwner", map[string]any{"name": ""}},
 		{"operator creates a connection in own workspace", http.MethodPost, "/api/v1/connections", opsWorkspace, "tokOps", map[string]any{"name": ""}},
-		// Production puts no workspace in the context for /api/v1/tenants/*
-		// (TenantIDMiddleware skips them), so there this request is not
-		// audited at all (backlog 169). The injected one checks only that the
-		// route does not redirect the entry to the path's tenant.
-		{"owner asks for a plan", http.MethodPost, "/api/v1/tenants/" + billTenant + "/plan-requests", opsWorkspace, "tokOwner", map[string]any{"plan": PlanPaid}},
+		// Owner writes under /api/v1/tenants/{tenant_id}/* go to the path's
+		// workspace once the membership check passed (#695); see
+		// TestAudit_OwnerTenantWritesFileUnderPathTenant.
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

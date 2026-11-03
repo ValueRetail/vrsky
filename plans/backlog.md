@@ -1190,7 +1190,7 @@ Last updated 2026-10-28.
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
     Found in review of #676.
 
-168. **Audit entries have no actor (high priority).** `AuditMiddleware`
+168. ~~**Audit entries have no actor (high priority).**~~ (#695) `AuditMiddleware`
     reads the user from the request it wraps, but `SessionAuthMiddleware` and
     the API-key check add the principal further in, per route, so `user_id`
     and `actor_label` stay empty on every entry, while the Settings page
@@ -1199,7 +1199,7 @@ Last updated 2026-10-28.
     the session and API-key middleware record the principal in the audit bag,
     with `actor_kind` `api_key` for keys. Found in #685.
 
-169. **Owner writes under `/api/v1/tenants/*` are never audited.**
+169. ~~**Owner writes under `/api/v1/tenants/*` are never audited.**~~ (#695)
     Plan requests, members, invites and API-key rotation write nothing to
     `audit_log` in production. `TenantIDMiddleware` skips `/api/v1/tenants`,
     and `TenantMemberMiddleware` sets the tenant only on the inner context,
@@ -1347,6 +1347,20 @@ Last updated 2026-10-28.
     Some SAP setups cap them. Watch the session count on the first real SAP
     tenant; if it matters, log off at the end of a delivery. Found in review
     of #696.
+
+185. **Creating a workspace is not audited.** `POST /api/v1/tenants` sits
+    behind the session check only, with no workspace in the context, so
+    `AuditMiddleware` drops it. File it under the created workspace once the
+    handler has it (`recordAuditVerifiedTenant` after the insert, as
+    `HandleAcceptInvite` does since #695). Found in #695.
+
+186. **Anonymous requests are filed under any `X-Tenant-ID`.** A request
+    with no valid credential that sends a workspace id in the header is
+    still written to that workspace's log (a 401 with no actor), so anyone
+    can add rows to any workspace's audit log. Predates #695, which stopped
+    it only for authenticated callers. Decide which unauthenticated routes
+    need an audit entry at all (failed logins, say, belong in a security
+    log, not a tenant's), and drop the rest. Found in review of #697.
 
 ## Human
 

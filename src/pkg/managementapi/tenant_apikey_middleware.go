@@ -41,6 +41,10 @@ func TenantAPIKeyMiddleware(repo Repository) func(http.Handler) http.Handler {
 				return
 			}
 
+			// The entry goes into the key's own workspace's log, never the
+			// unchecked X-Tenant-ID (#695).
+			recordAuditAPIKey(r.Context(), tenant)
+			recordAuditVerifiedTenant(r.Context(), tenant.ID)
 			ctx := context.WithValue(r.Context(), requestingTenantKey, tenant)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
