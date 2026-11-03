@@ -317,8 +317,7 @@ CONFIRM=1 infrastructure/azure/postgres-tls.sh restart
 | 7 restarts | 2026-11-02, Ludvik | 34 Deployments, all Ready |
 | 8 confirmed | 2026-11-02, Ludvik | ssl=true 15, none without ssl (two leftover sessions from removed pods closed) |
 | 9 backup job | 2026-11-02 15:15, Ludvik | backup complete over TLS: management_db-20261102T141504Z.dump.gz.enc |
-
-Step 10 (`hostssl` only) is left for later, after a few days with no plain connections.
+| 10 hostssl | 2026-11-03 ~12:20, Ludvik | `check` showed ssl=true 39, none without; `sed` to `hostssl` and a reload; `pg_hba_file_rules` shows `hostssl all`; `check` after: ssl=true 36, none without. The rule lives on the volume only; moving it into the manifests is #729 |
 
 ## What happened in the session
 

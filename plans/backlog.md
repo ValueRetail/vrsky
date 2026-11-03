@@ -1108,7 +1108,8 @@ Last updated 2026-10-28.
     connections is an edit of `pg_hba.conf` on the volume
     (`infrastructure/kubernetes/postgresql/README.md`, "Optional last step").
     Move it into the manifests with `hba_file` pointing at a ConfigMap, after
-    the rollout has shown every client on TLS. (2) Nothing alerts on the
+    the rollout has shown every client on TLS. (The rule was set by hand on
+    the volume on 2026-11-03.) (2) Nothing alerts on the
     server certificate: cert-manager's metrics are not scraped. Add a
     PodMonitor and a rule on `certmanager_certificate_expiration_timestamp_seconds`
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
@@ -1396,15 +1397,15 @@ Last updated 2026-10-28.
 
 ## Human
 
-5. **Grant the deploy identity Cost Management Reader** on both resource
-   groups, then set the repository variable `MONTHLY_BUDGET_NOK=1500`:
-   ```bash
-   for rg in vrsky-prod MC_vrsky-prod_vrsky-prod_norwayeast; do az role assignment create --assignee-object-id 647ea665-ddad-4eed-8dad-2c244e882b51 --assignee-principal-type ServicePrincipal --role "Cost Management Reader" --scope /subscriptions/8c020b54-b237-4d6e-82ba-190f6a415d1d/resourceGroups/$rg; done
-   ``` Filed as #713.
-6. **First start on the ephemeral OS disk.** After the next `az aks start`,
-   check every pod comes back and the smoke check passes. Filed as #714.
-7. **Rename the three production pipelines** in the builder (open, rename
-   the tab, Deploy); they are still named after the time of a deploy. Filed as #715.
+5. ~~**Grant the deploy identity Cost Management Reader** on both resource
+   groups, then set the repository variable `MONTHLY_BUDGET_NOK=1500`.~~
+   (#713, done: both role assignments exist and the variable has been set
+   since 2026-10-28; checked 2026-11-03)
+6. ~~**First start on the ephemeral OS disk.**~~ (#714, done: the cluster
+   has started on it every working day since 2026-10-22 and every deploy's
+   smoke check passed)
+7. ~~**Rename the three production pipelines** in the builder.~~ (#715,
+   done 2026-11-03; the BC → File pipeline also got a new client secret)
 8. ~~**Delete the four disk snapshots after 2026-10-29**~~ (#434, done 2026-10-29)
    (`nats-{0,1,2}-before-shrink-20261022`, `minio-before-shrink-20261022`
    in `MC_vrsky-prod_vrsky-prod_norwayeast`).
@@ -1412,5 +1413,13 @@ Last updated 2026-10-28.
    against a real Sitoo sandbox and the BC trial before they return to the
    gallery (`plans/template-fields.md`). While there, check which
    collection holds POS receipts (`transactions` or `orders`) and that
-   `incremental: true` sends each one once (#457, agent item 126). Filed as #716.
+   `incremental: true` sends each one once (#457, agent item 126). Filed as #716,
+   parked 2026-11-03: there is no Sitoo system to test against.
 10. ~~**Close #266** (the remote agent shipped).~~ (done, #266 is closed)
+11. ~~**Postgres TLS step 10: refuse plain connections.**~~ (done
+   2026-11-03: `hostssl` set on the volume after `postgres-tls.sh check`
+   showed 39 of 39 clients on TLS, and 36 of 36 after the change; moving it
+   into the manifests is agent item 156, #729)
+12. ~~**Check `$orderby` paging against a live Business Central.**~~ (done
+   2026-11-03 for #733: `$orderby=lastModifiedDateTime asc` keeps its order
+   across 40 server pages with no duplicates, at about the same cost)
