@@ -1277,7 +1277,7 @@ Last updated 2026-10-28.
     `docs/operator/troubleshooting.md`; update it with the change. Found in
     #698.
 
-178. **A failed config read drops the message (high priority).** Filed as
+178. ~~**A failed config read drops the message (high priority).**~~ (#704) Filed as
     #704. Every
     destination except the file one treats any error from its `getConfig` /
     `getTargets` (a Postgres blip, a secret that does not resolve) as "this
