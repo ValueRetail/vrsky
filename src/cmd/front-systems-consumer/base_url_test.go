@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"io"
 	"log/slog"
@@ -136,7 +137,9 @@ func TestStart_HostnameResolvingToLoopbackIsPermanent(t *testing.T) {
 	f.mock.ExpectQuery(configLookupSQL).
 		WithArgs(u.id, u.tenant).
 		WillReturnRows(configRows(u.nodes("https://localhost:" + port)))
-	expectMarkError(f.mock, u, "private")
+	reason := &capturedReason{}
+	f.mock.ExpectExec(markErrorSQL).WithArgs(reason, u.id, u.tenant, cfgVersion).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fgAwait(t, goDone(func() { f.start(u) }), "the refused start")
 	if n := retryLoopsFor(f.c); n != 0 {
@@ -151,6 +154,40 @@ func TestStart_HostnameResolvingToLoopbackIsPermanent(t *testing.T) {
 	if err := f.mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("db: %v", err)
 	}
+	// last_error is shown to the tenant: it names the cause, not the internal
+	// address the host resolved to.
+	got := reason.get()
+	if !strings.Contains(got, "private") {
+		t.Errorf("last_error %q, want it to say the address is private", got)
+	}
+	for _, leak := range []string{"127.0.0.1", "::1", port} {
+		if strings.Contains(got, leak) {
+			t.Errorf("last_error %q shows %q to the tenant", got, leak)
+		}
+	}
+}
+
+// capturedReason matches any string last_error and keeps it, so a test can
+// look at all of it rather than match a substring.
+type capturedReason struct {
+	mu sync.Mutex
+	s  string
+}
+
+func (c *capturedReason) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	if ok {
+		c.mu.Lock()
+		c.s = s
+		c.mu.Unlock()
+	}
+	return ok
+}
+
+func (c *capturedReason) get() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.s
 }
 
 // A public https base_url, the only kind Front Systems hands out, is called

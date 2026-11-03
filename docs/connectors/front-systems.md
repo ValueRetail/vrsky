@@ -74,7 +74,7 @@ the webhook out of band; the connector then neither registers nor deletes
 anything, but still refuses events while the connection is stopped.
 
 - `base_url` — per-partner Azure APIM host as a URL, `https://<partner-apim-host>`
-  (required when `callback_url` is set). A bare host, `http://` or a private
+  (required when `callback_url` and `events` are set). A bare host, `http://` or a private
   address is refused at start and the pipeline goes to `error`; see
   [The base URL](#the-base-url).
 - `subscription_key_secret_id` / `api_key_secret_id` — the two auth keys.
@@ -122,9 +122,12 @@ Front Systems with the two auth headers.
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `5xx`/network errors retry (with the backoff hint); `4xx` and `401`/`403`
-are poison and go to the DLQ. A `base_url` the connector refuses (see below)
-sends nothing; the message is retried and then dead-lettered with its payload,
-so it can be replayed once the URL is fixed.
+are poison: the message is acked and dropped, not dead-lettered. A `base_url`
+the connector refuses (see below) sends nothing; the message is retried and
+then dead-lettered with its payload, so it can be replayed once the URL is
+fixed. The error on the dead-lettered message says the target address is not
+allowed without naming the address the host resolved to; the connector's log
+has it.
 
 ## The base URL
 
@@ -152,7 +155,10 @@ address, the operator sets `ALLOW_PRIVATE_UPSTREAMS=true` on the
 
 After this change rolled out, a connection whose `base_url` is `http://`, a
 private address or a host that resolves to one stops working: consumer starts
-go to `error`, producer messages go to the DLQ.
+go to `error`, producer messages go to the DLQ. Webhooks registered at Front
+Systems under such a URL before the change stay registered after the pipeline
+is stopped, because the connector no longer calls that URL to delete them.
+Delete them at Front Systems by hand (`DELETE /api/webhooks/{id}`).
 
 ## Notes & roadmap
 

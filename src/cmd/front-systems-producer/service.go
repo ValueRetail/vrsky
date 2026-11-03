@@ -124,6 +124,13 @@ func (p *frontSystemsProducer) write(ctx context.Context, cfg *FrontSystemsProdu
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, safeurl.ErrBlockedAddress) {
+			// The tenant sees the returned error in the DLQ (X-Vrsky-Last-Error),
+			// so it does not carry the address the host resolved to; the log
+			// does. The SDK's context stamps connection_id on the log line.
+			p.logger.WarnContext(ctx, "Front Systems base_url host resolves to an address that is not allowed", "error", err)
+			return sdk.Retriable(fmt.Errorf("front systems request: target address not allowed: %w", safeurl.ErrBlockedAddress))
+		}
 		return sdk.Retriable(fmt.Errorf("front systems request: %w", err))
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

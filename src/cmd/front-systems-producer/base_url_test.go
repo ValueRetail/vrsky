@@ -180,6 +180,13 @@ func TestWrite_HostnameResolvingToLoopbackIsRefusedAtDial(t *testing.T) {
 	if n := accepted.Load(); n != 0 {
 		t.Errorf("the listener saw %d connections, want 0", n)
 	}
+	// The error ends up in the DLQ, where the tenant reads it: it must not
+	// say which internal address the host resolved to.
+	for _, leak := range []string{"::1", "127.0.0.1", port} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("error %q shows %q to the tenant", err, leak)
+		}
+	}
 }
 
 // A public https base_url is called with the production policy.
