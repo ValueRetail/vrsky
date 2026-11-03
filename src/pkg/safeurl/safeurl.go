@@ -128,11 +128,21 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 // feed or put in an error: a user name or password is replaced with "xxxxx"
 // (a user name is often the API key, so Redacted() alone, which keeps it, is
 // not enough). A string that does not parse becomes a fixed placeholder, as
-// parse errors quote the input. The request itself keeps using the real URL.
+// parse errors quote the input. So does one where userinfo may have landed
+// somewhere other than u.User: without "//", url.Parse reads
+// "user:secret@host/x" as scheme "user" with an opaque rest, and
+// "http://user:123/secret@host" as host "user" with "@" in the path. An "@" in
+// a real path costs only the display. The request itself keeps using the real
+// URL.
 func RedactURL(raw string) string {
+	const invalid = "[invalid URL]"
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "[invalid URL]"
+		return invalid
+	}
+	if u.Opaque != "" || strings.Contains(u.Path, "@") ||
+		(u.Host == "" && u.User == nil && strings.Contains(raw, "@")) {
+		return invalid
 	}
 	if u.User != nil {
 		u.User = url.User("xxxxx")
@@ -264,7 +274,7 @@ func sameHostRedirect(allowPrivate bool) func(*http.Request, []*http.Request) er
 		}
 		first, prev := via[0].URL, via[len(via)-1].URL
 		if prev.Scheme == "https" && req.URL.Scheme == "http" {
-			return fmt.Errorf("redirect from https to http refused (%s)", req.URL.Redacted())
+			return fmt.Errorf("redirect from https to http refused (%s)", RedactURL(req.URL.String()))
 		}
 		sameHost := strings.EqualFold(first.Hostname(), req.URL.Hostname())
 		samePort := effectivePort(prev) == effectivePort(req.URL) || isHTTPUpgrade(prev, req.URL)

@@ -14,6 +14,14 @@ func TestCheckRequestURL_ErrorsDoNotQuoteUserinfo(t *testing.T) {
 		"http://secret@169.254.169.254/",
 		"http://user:secret@host:80/%zz",
 		"http://user:secret@/x",
+		// No "//", so url.Parse never fills u.User: the credential sits in
+		// Opaque, Path or a host:port that is really user:port.
+		"user:secret@host/x",
+		"https:user:secret@host/x",
+		"secret@host/x",
+		// Parsed as host "user", port 123, path "/secret@host". With http it
+		// passes this check (TestRedactURL covers it); ftp gets the scheme error.
+		"ftp://user:123/secret@host",
 	} {
 		err := CheckRequestURL(raw, false)
 		if err == nil {
