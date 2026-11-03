@@ -81,7 +81,7 @@ Config bullets:
   that cannot be encoded; the message is still acked, and the skipped records
   are not kept anywhere. A `5xx`, a `429`, a network error or a token failure
   retries the whole message, and the records already written go out again, so
-  an `insert` can create duplicates. Batches over the bulk threshold use the
+  an `insert` can create duplicates. Batches at or above the bulk threshold use the
   Bulk API: there any answer that is not `2xx` while creating, filling or
   closing the job, a `4xx` too, is retried and then dead-lettered. See the
   [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).

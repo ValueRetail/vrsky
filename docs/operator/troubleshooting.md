@@ -199,10 +199,19 @@ error it hits into one of two kinds:
   Retry it from the DLQ once the cause is fixed.
 - **Dropped.** The error is marked permanent, because trying the same message
   again cannot work (a `4xx` from the target, an incomplete node, a payload
-  that is not JSON). The worker logs `permanent error; dropping message`, the
-  message is acked, and nothing is kept. There is no replay for it. Check the
-  worker's log in Loki, filtered by `connection_id`; the metric
-  `vrsky_dlq_messages_total` does not count these.
+  that is not JSON). The message is acked and nothing is kept. There is no
+  replay for it, and `vrsky_dlq_messages_total` does not count these. What the
+  worker logs depends on how the drop happens. An error marked `sdk.Permanent`
+  (the Sitoo, Front Systems, Visma, Brightpearl, Business Central and SAP
+  destinations, a non-JSON payload in the database and Salesforce destinations,
+  the file destination's missing connection id) is logged by the SDK as
+  `permanent error; dropping message`. Other drops are a plain `return nil`
+  and leave only the destination's own line, or none at all: the HTTP
+  destination's `4xx` (the feed shows it, the log has `HTTP request returned
+  error`), Kafka, RabbitMQ, SFTP and cloud-storage with a missing setting,
+  Salesforce records it skips, and the rows the database destination skips.
+  Look in the worker's log in Loki, filtered by `connection_id`, and in the
+  connection's activity feed.
 
 Which kind an error gets differs per destination:
 
@@ -216,12 +225,12 @@ Which kind an error gets differs per destination:
 | Kafka | No `brokers` or `topic` | Failure to open the writer or to write |
 | RabbitMQ | No `url`, or neither `exchange` nor a queue | Failure to connect or to publish |
 | Salesforce | Payload not JSON; no `object`; `upsert` with no `external_id_field`; on the REST path a record Salesforce answers with a `4xx`, or that has no external-id value (the other records still go in) | `5xx`, `429`, network or token failure on the REST path (the whole message is sent again); any non-`2xx` while creating, filling or closing a Bulk API job |
-| Sitoo | Incomplete node; a `base_url` the connector refuses; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error |
-| Front Systems | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error; a refused `base_url` or address |
-| Visma | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error, token failure; a refused URL |
-| Brightpearl | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error; a refused base URL |
-| Business Central | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; with `dedupe_fields`, a payload that is not a JSON object or a `401`/`403` on the lookup | `5xx`, `429`, network error, token failure; a refused URL or address; with `dedupe_fields`, any other failed lookup (a `4xx` included) |
-| SAP S/4HANA | Incomplete node; payload not JSON; every `4xx` on the write except `429`, `401`/`403` included | `5xx`, `429`, network error, token failure; any non-`2xx` on the CSRF token fetch (a rejected login shows up here); a refused address |
+| Sitoo | Incomplete node; a `base_url` the connector refuses; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error |
+| Front Systems | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused `base_url` or address |
+| Visma | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error, token failure; a refused URL |
+| Brightpearl | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; a request that cannot be built | `5xx`, `429`, network error; a refused base URL |
+| Business Central | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; with `dedupe_fields`, a payload that is not a JSON object or a `401`/`403` on the lookup; a request that cannot be built | `5xx`, `429`, network error, token failure; a refused URL or address; with `dedupe_fields`, any other failed lookup (a `4xx` included) |
+| SAP S/4HANA | Incomplete node; payload not JSON; every `4xx` on the write except `429`, `401`/`403` included | `5xx`, `429`, network error, token failure; any non-`2xx` on the CSRF token fetch (a rejected login shows up here), or an answer to it with no `X-CSRF-Token`; a request that cannot be built; a refused address |
 
 Filters and converters do not use these rules. A payload they cannot parse is
 acked with an `error` event in the activity feed. Fetching an offloaded
@@ -242,8 +251,13 @@ Four things apply to every destination in the table:
   buffer it.
 - Reading the node's config comes first. Every destination except the file
   one treats a failed read of the connection, a node that is not theirs and a
-  secret that does not resolve alike: a debug log line, then ack. A database
-  hiccup at the wrong moment drops the message.
+  secret that does not resolve alike, and acks the message. For the HTTP,
+  database, SFTP, Kafka, RabbitMQ, cloud-storage, Visma, Sitoo, SAP, Front
+  Systems, Brightpearl and Business Central destinations the first ack is in
+  `ServesConnection`, which the SDK calls before `Deliver` and which answers
+  "not mine" on any config error without a log line. Salesforce has no
+  `ServesConnection`; its `Deliver` logs the error at debug level and acks. A
+  database hiccup at the wrong moment drops the message.
 - With several destinations on one connection, one failure retries the whole
   message and the destinations that already delivered get it again.
 

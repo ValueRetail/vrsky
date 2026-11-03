@@ -1257,30 +1257,39 @@ Last updated 2026-10-28.
     `docs/operator/troubleshooting.md`; update it with the change. Found in
     #698.
 
-176. **A failed config read drops the message.** Every destination except the
-    file one treats any error from its `getConfig` / `getTargets` (a database
-    that is briefly down, a secret that does not resolve) as "this connection
-    is not mine": a debug log line, then ack. The same goes for the filter and
-    converter (`getPipelineInfo`). Only "no such connection" or "no node of
-    my type" should skip; other errors should be `sdk.Retriable`, as the file
-    destination already does. Found in #698.
+176. **A failed config read drops the message (high priority).** Every
+    destination except the file one treats any error from its `getConfig` /
+    `getTargets` (a Postgres blip, a secret that does not resolve) as "this
+    connection is not mine" and acks. For visma, sitoo, sap-s4hana,
+    front-systems, brightpearl, business-central, http, db, sftp, kafka,
+    rabbitmq and cloud-storage the first ack is `ServesConnection`, which
+    `pkg/sdk/lifecycle.go` calls before `Deliver`; it returns false on any
+    error and logs nothing. Salesforce has none, and its `Deliver` acks at
+    debug level. The filter and converter do the same in `getPipelineInfo`.
+    Only "no such connection" or "no node of my type" should skip; other
+    errors should be `sdk.Retriable`, and `ServesConnection` has to change
+    with `Deliver`, as `file-producer` does (it answers true on a lookup
+    error so `Deliver` can retry). Found in #698.
 
-177. **The database destination loses messages quietly.** `db-producer`
-    skips a target it cannot open or ping, and when no target is left
-    `getTargetConnections` returns an error that `Deliver` logs at debug and
-    acks, although the comment on `Deliver` says open and ping failures are
-    `sdk.Retriable`. A row the database refuses (`insertRow`) is logged and
-    skipped, and the message is acked. A node with no `host` is skipped the
-    same way. Return `sdk.Retriable` for the first, and decide what a refused
-    row should do (dead-letter the message with the row's error?). Found in
-    #698.
+177. **The database destination loses messages quietly (high priority).**
+    `getTargetConnections` in `db-producer` `continue`s past a target it
+    cannot open or ping, so a failed target is lost even when the others
+    deliver; when no target is left it returns an error that `Deliver` logs
+    at debug and acks, although the comment on `Deliver` and
+    `docs/sdk/migration.md` said open and ping failures are `sdk.Retriable`.
+    A row the database refuses (`insertRow`) is logged and skipped, and the
+    message is acked. A node with no `host` is skipped the same way. Return
+    `sdk.Retriable` for the first, and decide what a refused row should do
+    (dead-letter the message with the row's error?). Found in #698.
 
 178. **The Sitoo destination drops a message for a refused `base_url`.**
     `sitoo-producer` returns `sdk.Permanent` from `safeurl.CheckBaseURL`,
     while the HTTP, Visma, Brightpearl, Front Systems, SAP and Business
     Central destinations retry and dead-letter, so the message can be replayed
-    once the node is fixed. Make it `sdk.Retriable` and add the test the
-    others have. Found in #698.
+    once the node is fixed. Make it `sdk.Retriable`; the existing
+    `TestDeliver_RefusesBadBaseURL` (`src/cmd/sitoo-producer/base_url_test.go`,
+    ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
+    in #698.
 
 179. **Salesforce REST writes skip rejected records and ack the message.**
     `restWrite` logs a `4xx` per record and moves on; the message is acked

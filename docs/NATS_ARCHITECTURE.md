@@ -393,7 +393,7 @@ duplicate delivery (`pkg/messaging/subscriber.go`).
 A message that fails five deliveries (`MaxDeliveryAttempts`; redelivered after
 1 s, 5 s, 30 s and 2 min) is dead-lettered:
 
-1. Message moved to `dead_letter_queue` stream in Platform NATS
+1. Message moved to the `VRSKY_DLQ` stream in Platform NATS
 2. Tenant notified via webhook/email
 3. Message retained for 7 days
 4. Admin UI allows manual retry or inspection
