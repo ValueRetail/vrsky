@@ -1071,7 +1071,7 @@ Last updated 2026-10-28.
     (lost on restart), or list the prefix now and then in event mode just
     to sweep leftovers. Found in #640.
 
-152. **The builder's "connection gone" redeploy has no page-level test.**
+152. ~~**The builder's "connection gone" redeploy has no page-level test.**~~ (#665)
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
     when the linked one was deleted, which changes the webhook URL. Add a
     case to `PipelineBuilder.deploy.test.tsx`. Found in review of #654.
