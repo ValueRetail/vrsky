@@ -26,13 +26,15 @@ goes into the host unescaped, so `x@10.0.0.1/` turns the host into
    host, no userinfo, query or fragment, no literal blocked IP):
    - consumer: when the connection starts (no poller, error logged) and in
      the sample-data endpoint (`ok:false` with the reason);
-   - producer: on every delivery, as a permanent error (DLQ, not retried).
+   - producer: on every delivery, as a retriable error, so the message is
+     redelivered and ends in the DLQ (a permanent error would ack and drop
+     it).
 3. Without an override, `datacenter` must be one host label and
    `account_code` one path segment, checked at the same points.
 4. The default (derived) URL keeps working.
 5. `ALLOW_PRIVATE_UPSTREAMS=true` (operator only) lifts the address check and
    allows `http`, as for Sitoo.
-6. A producer request refused at dial is permanent, not retried.
+6. A producer request refused at dial is retriable, like any network error.
 7. Tests fail without the change; docs updated.
 
 ## Decisions
@@ -51,9 +53,13 @@ goes into the host unescaped, so `x@10.0.0.1/` turns the host into
   `^[A-Za-z0-9_-]{1,64}$`.
 - Webhook mode is untouched: it publishes the body it receives and calls
   nothing.
-- A delivery refused at dial (`safeurl.ErrBlockedAddress`) is permanent.
-  The address a name resolves to will not change by retrying, and a retried
-  refusal would loop forever instead of reaching the DLQ.
+- Refusals in the producer are retriable, not `sdk.Permanent`. In the SDK
+  runner Permanent means ack and drop (`lifecycle.go`, "permanent error;
+  dropping message"); only a retriable or bare error is NAKed and ends in the
+  DLQ after the last delivery attempt. A refused base URL then waits in the
+  DLQ until the node is fixed, and a dial refusal caused by a transient DNS
+  answer does not lose the message. (First version used Permanent; changed
+  after review.)
 - The sample-data endpoint answers "target address not allowed" for a dial
   refusal and logs the address, as Sitoo does.
 - Small duplicated `checkBaseURL` in each binary, as Sitoo does; no new

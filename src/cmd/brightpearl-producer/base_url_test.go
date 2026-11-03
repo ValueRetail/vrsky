@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -80,34 +81,44 @@ func deliverWith(t *testing.T, p *brightpearlProducer, location string) error {
 	})
 }
 
+// A refused base URL is a retriable error: the runner NAKs, and after the
+// last attempt the message waits in the DLQ until the node is fixed.
+// sdk.Permanent would ack and drop it. Each case has its own fake API, served
+// over http and https, and the producer uses a client that trusts the https
+// one, so without the check the request would arrive.
 func TestDeliver_RefusesBadBaseURL(t *testing.T) {
-	var hits atomic.Int32
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits.Add(1) }))
-	defer api.Close()
-	apiHost := strings.TrimPrefix(api.URL, "http://")
-
 	tests := []struct {
 		name     string
-		location string
+		location func(httpAPI, httpsAPI string) string
 	}{
-		{"http", fmt.Sprintf(`"base_url":%q`, api.URL)},
-		{"https loopback", fmt.Sprintf(`"base_url":%q`, "https://"+apiHost)},
-		{"metadata service", `"base_url":"https://169.254.169.254/latest"`},
-		{"private network", `"base_url":"https://10.0.0.5/x"`},
-		{"ipv6 loopback", `"base_url":"https://[::1]/x"`},
-		{"userinfo", `"base_url":"https://u:p@ws-eu1.brightpearl.com/public-api/acme"`},
-		{"datacenter aimed at the api", fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+apiHost+"/")},
+		{"http", func(h, _ string) string { return fmt.Sprintf(`"base_url":%q`, h) }},
+		{"https loopback", func(_, s string) string { return fmt.Sprintf(`"base_url":%q`, s) }},
+		{"metadata service", func(_, _ string) string { return `"base_url":"https://169.254.169.254/latest"` }},
+		{"private network", func(_, _ string) string { return `"base_url":"https://10.0.0.5/x"` }},
+		{"ipv6 loopback", func(_, _ string) string { return `"base_url":"https://[::1]/x"` }},
+		{"userinfo", func(_, _ string) string { return `"base_url":"https://u:p@ws-eu1.brightpearl.com/public-api/acme"` }},
+		{"datacenter aimed at the api", func(_, s string) string {
+			return fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(s, "https://")+"/")
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var hits atomic.Int32
+			count := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits.Add(1) })
+			plain := httptest.NewServer(count)
+			defer plain.Close()
+			tlsAPI := httptest.NewTLSServer(count)
+			defer tlsAPI.Close()
+
 			p := testProducer()
-			p.allowPrivate = false // production policy
-			err := deliverWith(t, p, tt.location)
+			p.allowPrivate = false         // production policy
+			p.httpClient = tlsAPI.Client() // trusts the fake API; not the dial guard
+			err := deliverWith(t, p, tt.location(plain.URL, tlsAPI.URL))
 			if err == nil {
 				t.Fatal("Deliver accepted the base URL, want an error")
 			}
-			if !sdk.IsPermanent(err) {
-				t.Errorf("error %v is not Permanent: retrying cannot fix the config", err)
+			if sdk.IsPermanent(err) {
+				t.Errorf("error %v is Permanent: the message would be dropped, not dead-lettered", err)
 			}
 			if hits.Load() != 0 {
 				t.Errorf("the API received %d requests, want none", hits.Load())
@@ -160,7 +171,8 @@ func TestDeliver_DevFlagAllowsLoopbackMock(t *testing.T) {
 }
 
 // A hostname passes the config check; the dial refuses it when it resolves to
-// loopback, and the refusal is permanent (a retry resolves it the same way).
+// loopback. The refusal is retriable: a transient DNS answer must not drop
+// the message.
 func TestWrite_HostnameResolvingToLoopbackIsRefusedAtDial(t *testing.T) {
 	port, accepted := tcpCounter(t)
 	cfg := cfgFor("https://localhost:" + port + "/public-api/acme")
@@ -174,8 +186,11 @@ func TestWrite_HostnameResolvingToLoopbackIsRefusedAtDial(t *testing.T) {
 	if err == nil {
 		t.Fatal("write connected to a hostname that resolves to loopback")
 	}
-	if !sdk.IsPermanent(err) {
-		t.Errorf("error %v is not Permanent: a refused address is not retried", err)
+	if !errors.Is(err, safeurl.ErrBlockedAddress) {
+		t.Errorf("error %v does not wrap safeurl.ErrBlockedAddress", err)
+	}
+	if sdk.IsPermanent(err) {
+		t.Errorf("error %v is Permanent: the message would be dropped, not retried", err)
 	}
 	if accepted.Load() != 0 {
 		t.Errorf("the client opened %d connections to loopback, want none", accepted.Load())

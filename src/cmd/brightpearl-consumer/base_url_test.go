@@ -66,31 +66,36 @@ func TestCheckBaseURL(t *testing.T) {
 }
 
 // A connection whose base URL is refused is not started: no poller, and the
-// fake API (on http://127.0.0.1, which the production policy refuses on two
-// counts) receives nothing.
+// fake API receives nothing. The fake API is served over http (the fixture's)
+// and https, and the consumer uses a client that trusts the https one, so
+// without the check the poll would arrive.
 func TestStart_RefusesBadBaseURL(t *testing.T) {
 	tests := []struct {
 		name  string
-		block func(apiURL string) string // the location fields of the brightpearl block
+		block func(httpAPI, httpsAPI string) string // the location fields of the brightpearl block
 	}{
-		{"http to the api itself", func(api string) string { return fmt.Sprintf(`"base_url":%q`, api) }},
-		{"https loopback", func(api string) string {
-			return fmt.Sprintf(`"base_url":%q`, strings.Replace(api, "http://", "https://", 1))
-		}},
-		{"metadata service", func(string) string { return `"base_url":"https://169.254.169.254/latest"` }},
-		{"azure wire server", func(string) string { return `"base_url":"https://168.63.129.16/"` }},
-		{"private network", func(string) string { return `"base_url":"https://10.0.0.5/public-api/acme"` }},
-		{"ipv6 loopback", func(string) string { return `"base_url":"https://[::1]:8443/x"` }},
-		{"datacenter aimed at the api", func(api string) string {
-			return fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(api, "http://")+"/")
+		{"http to the api itself", func(h, _ string) string { return fmt.Sprintf(`"base_url":%q`, h) }},
+		{"https loopback", func(_, s string) string { return fmt.Sprintf(`"base_url":%q`, s) }},
+		{"metadata service", func(_, _ string) string { return `"base_url":"https://169.254.169.254/latest"` }},
+		{"azure wire server", func(_, _ string) string { return `"base_url":"https://168.63.129.16/"` }},
+		{"private network", func(_, _ string) string { return `"base_url":"https://10.0.0.5/public-api/acme"` }},
+		{"ipv6 loopback", func(_, _ string) string { return `"base_url":"https://[::1]:8443/x"` }},
+		{"datacenter aimed at the api", func(_, s string) string {
+			return fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(s, "https://")+"/")
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newSRFixture(t)
-			f.c.allowPrivate = false // production policy
+			tlsAPI := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				f.polls.Add(1)
+				_, _ = w.Write([]byte(`{"response":[]}`))
+			}))
+			t.Cleanup(tlsAPI.Close)
+			f.c.allowPrivate = false         // production policy
+			f.c.httpClient = tlsAPI.Client() // trusts the fake API; not the dial guard
 			apiURL := between(f.nodes, `"base_url":"`, `"`)
-			f.nodes = strings.Replace(f.nodes, fmt.Sprintf(`"base_url":%q`, apiURL), tt.block(apiURL), 1)
+			f.nodes = strings.Replace(f.nodes, fmt.Sprintf(`"base_url":%q`, apiURL), tt.block(apiURL, tlsAPI.URL), 1)
 			f.expectLookup(nil)
 
 			f.c.startConnection(context.Background(), srConn, srTenant)
@@ -172,26 +177,37 @@ func between(s, from, to string) string {
 	return v
 }
 
-// The sample-data endpoint fetches with the tenant's base URL too.
+// The sample-data endpoint fetches with the tenant's base URL too. As above,
+// each case has its own fake API over http and https and a client that
+// trusts it, so only the check stands between the request and the API.
 func TestSampleData_RefusesBadBaseURL(t *testing.T) {
-	var hits atomic.Int32
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits.Add(1) }))
-	defer api.Close()
-
 	tests := []struct {
 		name     string
-		location string
+		location func(httpAPI, httpsAPI string) string
 		wantErr  string
 	}{
-		{"http to the api", fmt.Sprintf(`"base_url":%q`, api.URL), "https"},
-		{"metadata service", `"base_url":"https://169.254.169.254/latest"`, "private"},
-		{"private network", `"base_url":"https://10.0.0.5/x"`, "private"},
-		{"datacenter moves the host", fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(api.URL, "http://")+"/"), "datacenter"},
+		{"http to the api", func(h, _ string) string { return fmt.Sprintf(`"base_url":%q`, h) }, "https"},
+		{"https loopback", func(_, s string) string { return fmt.Sprintf(`"base_url":%q`, s) }, "private"},
+		{"metadata service", func(_, _ string) string { return `"base_url":"https://169.254.169.254/latest"` }, "private"},
+		{"private network", func(_, _ string) string { return `"base_url":"https://10.0.0.5/x"` }, "private"},
+		{"datacenter aimed at the api", func(_, s string) string {
+			return fmt.Sprintf(`"datacenter":%q,"account_code":"acme"`, "x@"+strings.TrimPrefix(s, "https://")+"/")
+		}, "datacenter"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &brightpearlConsumer{httpClient: http.DefaultClient} // allowPrivate false
-			body := `{"app_ref":"app","staff_token":"tok",` + tt.location + `,"resource":"/order-service/order"}`
+			var hits atomic.Int32
+			count := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				_, _ = w.Write([]byte(`{"response":[]}`))
+			})
+			plain := httptest.NewServer(count)
+			defer plain.Close()
+			tlsAPI := httptest.NewTLSServer(count)
+			defer tlsAPI.Close()
+
+			c := &brightpearlConsumer{httpClient: tlsAPI.Client()} // allowPrivate false
+			body := `{"app_ref":"app","staff_token":"tok",` + tt.location(plain.URL, tlsAPI.URL) + `,"resource":"/order-service/order"}`
 			w := httptest.NewRecorder()
 			c.handleSampleData()(w, httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body)))
 

@@ -82,8 +82,11 @@ A producer node writes each message to a Brightpearl resource (`POST`/`PUT`/`PAT
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry; `4xx` and `401`/`403` are poison → DLQ.
-A base URL the connector refuses (below) is poison too.
+and `503`/`5xx`/network errors retry, and after the last attempt the message
+goes to the DLQ. `4xx` (including `401`/`403`) and an incomplete node config
+are permanent: the message is logged and dropped, not dead-lettered. A base URL
+the connector refuses (below) is retried like a network error, so those
+messages end in the DLQ and can be retried from there once the node is fixed.
 
 ## The base URL
 
@@ -105,9 +108,9 @@ from the node, so the connector only calls addresses it can trust (#667):
 
 Where it is checked: a source refuses to start its poll (the error is in the
 consumer's log), the "show data structure" preview answers with the reason,
-and a destination sends the message to the DLQ. Webhook mode calls nothing and
-is not affected. The management API does not check these fields yet when a
-connection is started.
+and a destination retries the message until it ends in the DLQ. Webhook mode
+calls nothing and is not affected. The management API does not check these
+fields yet when a connection is started.
 
 A `base_url` can still point at any public https host, so only set one for a
 host you trust with the staff token.
@@ -122,7 +125,8 @@ the Kubernetes manifests.
 private address, or whose `datacenter` or `account_code` breaks the rules
 above, stops working when this change is deployed: a running source keeps
 polling until its next restart, then refuses to start; a destination refuses
-the next delivery. Fix the field, or clear `base_url` to use the default.
+from the next delivery, and those messages end in the DLQ. Fix the field, or
+clear `base_url` to use the default, then retry them from the DLQ.
 
 ## Notes & roadmap
 

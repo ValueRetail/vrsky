@@ -89,9 +89,11 @@ func (p *brightpearlProducer) Deliver(ctx context.Context, env *envelope.Envelop
 	if cfg.AppRef == "" || cfg.StaffToken == "" || cfg.baseURL() == "" || cfg.Resource == "" {
 		return sdk.Permanent(fmt.Errorf("brightpearl producer config incomplete for connection %s", env.IntegrationID))
 	}
-	// Retrying cannot make the config valid: poison, to the DLQ.
+	// Retriable, not Permanent: Permanent acks and drops the message. This
+	// way it is redelivered and ends in the DLQ, where it waits until the
+	// node's base URL is fixed.
 	if err := cfg.checkBaseURL(p.allowPrivate); err != nil {
-		return sdk.Permanent(fmt.Errorf("brightpearl base URL refused for connection %s: %w", env.IntegrationID, err))
+		return sdk.Retriable(fmt.Errorf("brightpearl base URL refused for connection %s: %w", env.IntegrationID, err))
 	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
@@ -112,11 +114,8 @@ func (p *brightpearlProducer) write(ctx context.Context, cfg *BrightpearlProduce
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		if errors.Is(err, safeurl.ErrBlockedAddress) {
-			// The host resolves to an address we refuse; a retry resolves it
-			// the same way.
-			return sdk.Permanent(fmt.Errorf("brightpearl request: %w", err))
-		}
+		// A dial refused by safeurl (ErrBlockedAddress) is retriable too: a
+		// transient DNS answer must not drop the message.
 		return sdk.Retriable(fmt.Errorf("brightpearl request: %w", err))
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
