@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM mirror.gcr.io/library/golang:1.26-alpine AS builder
 
 WORKDIR /build
 
@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime is the postgres image so pg_dump/pg_restore/psql ship at the same
 # major version family as the management DB (forward-compatible with older
 # servers). This is what makes `vrsky-cli backup`/`restore` work.
-FROM postgres:18-alpine
+FROM mirror.gcr.io/library/postgres:18-alpine
 
 RUN apk add --no-cache ca-certificates
 

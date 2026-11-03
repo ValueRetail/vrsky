@@ -100,7 +100,7 @@ jobs:
     # skip check below must hold wherever they land.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: mirror.gcr.io/library/postgres:16-alpine
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -546,22 +546,26 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      # Log in before the build, so a Dockerfile may FROM a mirrored base image
-      # (none does today). AcrPush is all the push needs.
+      # Log in before the build; AcrPush is all the push needs. The base images
+      # come from mirror.gcr.io, which needs no login (#692).
       - name: Log in to the registry
         run: az acr login --name vrskyprodacr
-      # Authenticated Docker Hub pulls when the secrets exist: 35 jobs pulling
-      # golang and alpine (and setup-buildx pulling moby/buildkit) anonymously
-      # from shared runner IPs get rate-limited (see integration.yml). Placed
-      # before setup-buildx, which pulls the builder image. No-op without the
-      # secrets.
+      # Authenticated Docker Hub pulls when the secrets exist. The Dockerfiles
+      # and BuildKit now come from mirror.gcr.io, because even logged in, the
+      # day's quota ran out and nine builds got 429 (#692); the login stays for
+      # anything that still pulls from Docker Hub. Placed before setup-buildx.
+      # No-op without the secrets.
       - name: Log in to Docker Hub
         if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+      # BuildKit from Google's Docker Hub mirror: the default image is
+      # moby/buildkit on Docker Hub, the first pull of every job (#692).
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
       # management-api ships the downloadable agent, stamped with the commit
       # (build-push-acr.sh does the same). Runs on the host: the root
       # .dockerignore keeps .git out of the build context.

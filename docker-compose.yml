@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # NATS message broker
   nats:
-    image: nats:2.10-alpine
+    image: mirror.gcr.io/library/nats:2.10-alpine
     container_name: vrsky-nats
     ports:
       # Client port
@@ -31,7 +31,7 @@ services:
 
   # PostgreSQL source database (for consumer)
   postgres-source:
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     container_name: vrsky-postgres-source
     environment:
       POSTGRES_DB: source_db
@@ -61,7 +61,7 @@ services:
 
   # PostgreSQL target database (for producer)
   postgres-target:
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:16-alpine
     container_name: vrsky-postgres-target
     environment:
       POSTGRES_DB: target_db
@@ -414,7 +414,7 @@ services:
   # per-plan rate limits at the edge (429 + Retry-After before app quotas run).
   # Front door on host :8090; dashboard :8081; Prometheus metrics :8082.
   traefik:
-    image: traefik:v3.1
+    image: mirror.gcr.io/library/traefik:v3.1
     container_name: vrsky-traefik
     command: ["--configfile=/etc/traefik/traefik.yml"]
     ports:
@@ -432,7 +432,7 @@ services:
 
   # PostgreSQL database for management API
   postgres-management:
-     image: postgres:16-alpine
+     image: mirror.gcr.io/library/postgres:16-alpine
      container_name: vrsky-postgres-management
      environment:
        POSTGRES_DB: management_db
@@ -1095,7 +1095,7 @@ services:
   # Test RabbitMQ broker for local + CI testing of #78. Reachable in-network at
   # rabbitmq-test:5672 (guest/guest). Management UI on 15672.
   rabbitmq-test:
-    image: rabbitmq:3-management
+    image: mirror.gcr.io/library/rabbitmq:3-management
     container_name: vrsky-rabbitmq-test
     networks:
       - vrsky-network

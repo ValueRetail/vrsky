@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-FROM golang:1.26-alpine AS builder
+FROM mirror.gcr.io/library/golang:1.26-alpine AS builder
 
 WORKDIR /build
 
@@ -33,7 +33,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     ./cmd/postgres-consumer
 
 # Runtime stage
-FROM alpine:3.18
+FROM mirror.gcr.io/library/alpine:3.18
 
 WORKDIR /app
 
