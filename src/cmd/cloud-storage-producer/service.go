@@ -133,7 +133,10 @@ func (p *cloudProducer) Stop(ctx context.Context) error {
 // failures (connect/write) → sdk.Retriable. A missing producer config for the
 // connection is not an error — this binary just isn't the producer for it.
 func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
-	targets := p.eligibleTargets(ctx, env)
+	targets, err := p.eligibleTargets(ctx, env)
+	if err != nil {
+		return err // config unavailable: not acked, retried, then the DLQ
+	}
 
 	var transient error
 	for _, t := range targets {
@@ -160,7 +163,10 @@ func (p *cloudProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 // purpose). A template referencing payload fields falls back to a generated key
 // with a warning, the same as any other template miss.
 func (p *cloudProducer) DeliverStream(ctx context.Context, env *envelope.Envelope, body io.Reader) error {
-	targets := p.eligibleTargets(ctx, env)
+	targets, err := p.eligibleTargets(ctx, env)
+	if err != nil {
+		return err
+	}
 	if len(targets) == 0 {
 		return nil
 	}
@@ -174,16 +180,21 @@ func (p *cloudProducer) DeliverStream(ctx context.Context, env *envelope.Envelop
 }
 
 // eligibleTargets resolves the configured targets for this connection and drops
-// the ones whose predecessor predicate doesn't match this envelope.
-func (p *cloudProducer) eligibleTargets(ctx context.Context, env *envelope.Envelope) []*cloudTarget {
+// the ones whose predecessor predicate doesn't match this envelope. Its error
+// is only ever sdk.ErrConfigUnavailable; a connection that is not ours yields
+// no targets.
+func (p *cloudProducer) eligibleTargets(ctx context.Context, env *envelope.Envelope) ([]*cloudTarget, error) {
 	connID := env.IntegrationID
 	if connID == "" {
-		return nil
+		return nil, nil
 	}
 	targets, err := p.getTargets(ctx, connID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return nil, err
+		}
 		p.logger.Debug("No cloud-storage producer config for connection", "connection_id", connID, "error", err)
-		return nil
+		return nil, nil
 	}
 
 	lastProcessedBy := ""
@@ -203,7 +214,7 @@ func (p *cloudProducer) eligibleTargets(ctx context.Context, env *envelope.Envel
 		}
 		out = append(out, t)
 	}
-	return out
+	return out, nil
 }
 
 // upload renders the object key and writes the payload to the bucket. When body
@@ -350,16 +361,11 @@ func (p *cloudProducer) getTargets(ctx context.Context, connID, tenantID string)
 	var nodesJSON, edgesJSON []byte
 	if err := p.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connID).
 		Scan(&nodesJSON, &edgesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
-	}
-
-	resolved, err := crypto.ResolveSecretsInJSON(ctx, crypto.NewSQLSecretReader(p.db), tenantID, nodesJSON)
-	if err != nil {
-		return nil, fmt.Errorf("resolve secrets: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 
 	var nodes []node
-	if err := json.Unmarshal(resolved, &nodes); err != nil {
+	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nil, fmt.Errorf("parse nodes: %w", err)
 	}
 	var edges []struct {
@@ -370,6 +376,7 @@ func (p *cloudProducer) getTargets(ctx context.Context, connID, tenantID string)
 		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	reader := crypto.NewSQLSecretReader(p.db)
 	var targets []*cloudTarget
 	for _, n := range nodes {
 		if n.Type != "producer" {
@@ -383,6 +390,16 @@ func (p *cloudProducer) getTargets(ctx context.Context, connID, tenantID string)
 			continue
 		}
 		if nc.Type != "cloud_storage" || nc.Cloud == nil {
+			continue
+		}
+		// Secrets are resolved for our own nodes only: an unreadable secret
+		// on another connector's node is not a reason to hold this message.
+		resolved, err := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if err != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", err))
+		}
+		nc.Cloud = nil
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.Cloud == nil {
 			continue
 		}
 		var predID string
@@ -421,7 +438,9 @@ func (p *cloudProducer) ServesConnection(ctx context.Context, tenantID, connecti
 	}
 	targets, err := p.getTargets(ctx, connectionID, tenantID)
 	if err != nil {
-		return false // Deliver treats lookup errors as "not ours" too
+		// A failed read answers true so Deliver runs and returns it (#704);
+		// a missing connection or node is not ours.
+		return sdk.IsConfigUnavailable(err)
 	}
 	return len(targets) > 0
 }

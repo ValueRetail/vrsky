@@ -87,6 +87,9 @@ func (p *rabbitProducer) Deliver(ctx context.Context, env *envelope.Envelope) er
 	}
 	targets, err := p.getTargets(ctx, connID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No RabbitMQ producer config for connection", "connection_id", connID, "error", err)
 		return nil
 	}
@@ -147,16 +150,11 @@ func (p *rabbitProducer) getTargets(ctx context.Context, connID, tenantID string
 	var nodesJSON, edgesJSON []byte
 	if err := p.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connID).
 		Scan(&nodesJSON, &edgesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
-	}
-
-	resolved, err := crypto.ResolveSecretsInJSON(ctx, crypto.NewSQLSecretReader(p.db), tenantID, nodesJSON)
-	if err != nil {
-		return nil, fmt.Errorf("resolve secrets: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 
 	var nodes []node
-	if err := json.Unmarshal(resolved, &nodes); err != nil {
+	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
 		return nil, fmt.Errorf("parse nodes: %w", err)
 	}
 	var edges []struct {
@@ -167,6 +165,7 @@ func (p *rabbitProducer) getTargets(ctx context.Context, connID, tenantID string
 		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	reader := crypto.NewSQLSecretReader(p.db)
 	var targets []*rabbitTarget
 	for _, n := range nodes {
 		if n.Type != "producer" {
@@ -180,6 +179,16 @@ func (p *rabbitProducer) getTargets(ctx context.Context, connID, tenantID string
 			continue
 		}
 		if nc.Type != "rabbitmq" || nc.RabbitMQ == nil {
+			continue
+		}
+		// Secrets are resolved for our own nodes only: an unreadable secret
+		// on another connector's node is not a reason to hold this message.
+		resolved, err := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if err != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", err))
+		}
+		nc.RabbitMQ = nil
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.RabbitMQ == nil {
 			continue
 		}
 		var predID string
@@ -218,7 +227,9 @@ func (p *rabbitProducer) ServesConnection(ctx context.Context, tenantID, connect
 	}
 	targets, err := p.getTargets(ctx, connectionID, tenantID)
 	if err != nil {
-		return false // Deliver treats lookup errors as "not ours" too
+		// A failed read answers true so Deliver runs and returns it (#704);
+		// a missing connection or node is not ours.
+		return sdk.IsConfigUnavailable(err)
 	}
 	return len(targets) > 0
 }

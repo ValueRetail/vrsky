@@ -184,6 +184,9 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 
 	httpConfigs, err := p.getHTTPConfigs(ctx, connectionID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		// Not an HTTP producer for this pipeline — ack and move on.
 		p.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
 		return nil
@@ -231,6 +234,9 @@ func (p *httpProducer) DeliverStream(ctx context.Context, env *envelope.Envelope
 	}
 	httpConfigs, err := p.getHTTPConfigs(ctx, connectionID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err
+		}
 		p.logger.Debug("No HTTP producer config for connection", "connection_id", connectionID, "error", err)
 		return nil
 	}
@@ -464,7 +470,7 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 	var nodesJSON, edgesJSON []byte
 	err := p.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 
 	var nodes []struct {
@@ -476,17 +482,6 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
 	}
 
-	// Decrypt any *_secret_id references (e.g. an encrypted auth-header value)
-	// so the typed config below sees plaintext.
-	reader := crypto.NewSQLSecretReader(p.db)
-	for i := range nodes {
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, nodes[i].Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets for node %s: %w", nodes[i].ID, rerr)
-		}
-		nodes[i].Config = resolved
-	}
-
 	var edges []struct {
 		Source string `json:"source"`
 		Target string `json:"target"`
@@ -495,11 +490,27 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	reader := crypto.NewSQLSecretReader(p.db)
 	var configs []*HTTPConfig
 	for _, node := range nodes {
 		if node.Type != "producer" {
 			continue
 		}
+		// Decrypt any *_secret_id references (e.g. an encrypted auth-header
+		// value) so the typed config below sees plaintext. Only for our own
+		// nodes: an unreadable secret on another connector's node is not a
+		// reason to hold this message.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(node.Config, &kind); err != nil || kind.Type != "http" {
+			continue
+		}
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, node.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
+		}
+		node.Config = resolved
 
 		var nodeConfig struct {
 			Type string `json:"type"`
@@ -698,7 +709,9 @@ func (p *httpProducer) ServesConnection(ctx context.Context, tenantID, connectio
 	}
 	configs, err := p.getHTTPConfigs(ctx, connectionID, tenantID)
 	if err != nil {
-		return false // Deliver treats lookup errors as "not ours" too
+		// A failed read answers true so Deliver runs and returns it (#704);
+		// a missing connection or node is not ours.
+		return sdk.IsConfigUnavailable(err)
 	}
 	return len(configs) > 0
 }

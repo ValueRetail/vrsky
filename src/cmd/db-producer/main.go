@@ -191,6 +191,9 @@ func (p *dbProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 
 	tcs, err := p.getTargetConnections(ctx, connectionID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No DB producer config", "connection_id", connectionID, "error", err)
 		return nil
 	}
@@ -427,7 +430,7 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 	var nodesJSON, edgesJSON []byte
 	err := p.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 
 	var nodes []struct {
@@ -439,19 +442,6 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 		return nil, fmt.Errorf("failed to parse nodes: %w", err)
 	}
 
-	// Decrypt any *_secret_id references in node configs (the UI stores the
-	// target DB password as password_secret_id) so the typed TargetDBConfig
-	// below sees plaintext. Fatal on error — better to fail loud than dial
-	// with an empty password.
-	reader := crypto.NewSQLSecretReader(p.db)
-	for i := range nodes {
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, nodes[i].Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets for node %s: %w", nodes[i].ID, rerr)
-		}
-		nodes[i].Config = resolved
-	}
-
 	var edges []struct {
 		Source string `json:"source"`
 		Target string `json:"target"`
@@ -460,11 +450,28 @@ func (p *dbProducer) getTargetConnections(ctx context.Context, connectionID, ten
 		_ = json.Unmarshal(edgesJSON, &edges)
 	}
 
+	reader := crypto.NewSQLSecretReader(p.db)
 	var tcs []*TargetConnection
 	for _, node := range nodes {
 		if node.Type != "producer" {
 			continue
 		}
+		// Decrypt any *_secret_id references (the UI stores the target DB
+		// password as password_secret_id) so the typed TargetDBConfig below
+		// sees plaintext. A failure is retried, never acked: better to fail
+		// loud than dial with an empty password or drop the message. Only for
+		// our own nodes: another connector's unreadable secret is not ours.
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(node.Config, &kind); err != nil || kind.Type != "database" {
+			continue
+		}
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, node.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets for node %s: %w", node.ID, rerr))
+		}
+		node.Config = resolved
 		var nodeConfig struct {
 			Type     string         `json:"type"`
 			Database TargetDBConfig `json:"database"`
@@ -708,7 +715,9 @@ func (p *dbProducer) ServesConnection(ctx context.Context, tenantID, connectionI
 	}
 	targets, err := p.getTargetConnections(ctx, connectionID, tenantID)
 	if err != nil {
-		return false // Deliver treats lookup errors as "not ours" too
+		// A failed read answers true so Deliver runs and returns it (#704);
+		// a missing connection or node is not ours.
+		return sdk.IsConfigUnavailable(err)
 	}
 	return len(targets) > 0
 }

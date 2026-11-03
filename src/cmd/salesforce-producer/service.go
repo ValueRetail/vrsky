@@ -126,6 +126,9 @@ func (p *salesforceProducer) Deliver(ctx context.Context, env *envelope.Envelope
 	}
 	targets, err := p.getTargets(ctx, connID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Salesforce producer config", "connection_id", connID, "error", err)
 		return nil
 	}
@@ -425,7 +428,7 @@ func (p *salesforceProducer) getTargets(ctx context.Context, connID, tenantID st
 	var nodesJSON, edgesJSON []byte
 	if err := p.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connID).
 		Scan(&nodesJSON, &edgesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
