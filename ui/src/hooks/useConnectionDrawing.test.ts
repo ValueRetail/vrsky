@@ -190,14 +190,20 @@ describe('useConnectionDrawing: cancelling', () => {
   })
 
   it('Escape after unmount touches nothing', () => {
-    const { result, unmount } = setup()
-    startFrom(result)
-    unmount()
-    expect(() =>
-      act(() => {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-      })
-    ).not.toThrow()
+    const remove = vi.spyOn(window, 'removeEventListener')
+    try {
+      const { result, unmount } = setup()
+      startFrom(result)
+      unmount()
+      expect(remove.mock.calls.some(([type]) => type === 'keydown')).toBe(true)
+      expect(() =>
+        act(() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+        })
+      ).not.toThrow()
+    } finally {
+      remove.mockRestore()
+    }
   })
 
   it('a mouse up that lands off every port cancels after a short delay, with no edge', () => {
@@ -244,6 +250,9 @@ describe('useConnectionDrawing: cancelling', () => {
     const { result } = setup()
     act(() => {
       window.dispatchEvent(new MouseEvent('mouseup'))
+    })
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => {
       vi.advanceTimersByTime(50)
     })
     expect(vi.getTimerCount()).toBe(0)
@@ -252,10 +261,13 @@ describe('useConnectionDrawing: cancelling', () => {
 
   it('stops listening for mouse up once the drawing has ended', () => {
     const remove = vi.spyOn(window, 'removeEventListener')
-    const { result } = setup()
-    startFrom(result)
-    act(() => result.current.cancelConnectionDrawing())
-    expect(remove.mock.calls.some(([type]) => type === 'mouseup')).toBe(true)
-    remove.mockRestore()
+    try {
+      const { result } = setup()
+      startFrom(result)
+      act(() => result.current.cancelConnectionDrawing())
+      expect(remove.mock.calls.some(([type]) => type === 'mouseup')).toBe(true)
+    } finally {
+      remove.mockRestore()
+    }
   })
 })
