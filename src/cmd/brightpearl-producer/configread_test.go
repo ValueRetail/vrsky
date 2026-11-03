@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -21,5 +22,12 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 		OwnNode:          `{"type":"brightpearl","brightpearl":{"staff_token_secret_id":"00000000-0000-0000-0000-000000000001"}}`,
 		OwnNodeHasSecret: true,
 		ForeignNode:      `{"type":"http","http":{"url":"https://example.com"},"auth_value_secret_id":"00000000-0000-0000-0000-000000000002"}`,
+		Positive: func(t *testing.T, db *sql.DB) (sdk.Producer, string, func() bool) {
+			u := harness.NewUpstream(t)
+			p := testProducer()
+			p.db = db
+			p.allowPrivate = true // the fake target is on 127.0.0.1
+			return p, fmt.Sprintf(`{"type":"brightpearl","brightpearl":{"base_url":%q,"app_ref":"app","staff_token_secret_id":%q,"resource":"/order-service/order"}}`, u.URL, harness.TestSecretID), u.Delivered
+		},
 	})
 }

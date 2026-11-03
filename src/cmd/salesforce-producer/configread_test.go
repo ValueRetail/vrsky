@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -28,5 +31,20 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 		OwnNode:          `{"type":"salesforce","salesforce":{"object":"Account"}}`,
 		OwnNodeHasSecret: false,
 		ForeignNode:      `{"type":"http","http":{"url":"https://example.com"},"auth_value_secret_id":"00000000-0000-0000-0000-000000000002"}`,
+		Positive: func(t *testing.T, db *sql.DB) (sdk.Producer, string, func() bool) {
+			u := harness.NewUpstream(t)
+			p := &salesforceProducer{
+				db:            db,
+				logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+				httpClient:    &http.Client{Timeout: 10 * time.Second},
+				bulkThreshold: 200,
+				cache:         map[string][]*sfTarget{},
+				cacheTime:     map[string]time.Time{},
+				cacheTTL:      time.Minute,
+				resolveToken:  func(context.Context, string, string, bool) (string, error) { return "tok", nil },
+			}
+			node := fmt.Sprintf(`{"type":"salesforce","salesforce":{"instance_url":%q,"oauth_grant_id":"g1","object":"Account"}}`, u.URL)
+			return p, node, func() bool { return u.Writes() == 1 }
+		},
 	})
 }

@@ -257,10 +257,16 @@ Four things apply to every destination in the table:
   `connection config unavailable; message not acked, will retry` at error
   level with the `connection_id`. A database outage longer than the retry
   schedule (about 2.5 minutes) leaves the messages that were in flight in the
-  DLQ; retry them once the database is back. The `X-Vrsky-Worker` header says
-  which worker gave up: if that is not the connection's destination, check
-  whether the real destination already delivered the message before you
-  retry it.
+  DLQ; retry them once the database is back. Every destination's worker
+  gives up on the same message, and their copies collapse into one DLQ entry
+  only within the DLQ's 2-minute duplicate window; a worker that falls
+  further behind writes its own. Several entries with the same envelope id
+  are one message: retry only one of them, since a retry goes to every
+  destination again. The `X-Vrsky-Worker` header says which worker gave up.
+  If it is not the connection's destination, check whether the real
+  destination already delivered the message before you retry it. After a
+  full outage the surviving entry may name a bystander that never had to
+  deliver anything, so treat that check as a precaution, not proof.
 - With several destinations on one connection, one failure retries the whole
   message and the destinations that already delivered get it again.
 
