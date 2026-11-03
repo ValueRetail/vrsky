@@ -49,6 +49,12 @@ func TestCheckBaseURL_ErrorsDoNotQuoteUserinfo(t *testing.T) {
 		{"scheme: http", "http://user:secret@api.example.com/v2", false, "must use https"},
 		{"scheme: ftp", "ftp://secret@api.example.com/v2", false, "must use https"},
 		{"scheme: password in the path", "ftp://user:123/secret@host", false, "must use https"},
+		{"scheme: password with ?", "http://apikey:1234?secret@host", false, "must use https"},
+		// url.Parse reads the user name as the host; it is often the key.
+		{"scheme: password with ?, user name is the key", "http://secret:1234?pw@host", false, "must use https"},
+		{"scheme: password with #, user name is the key", "http://secret:1234#pw@host", false, "must use https"},
+		{"scheme: key in the query", "http://host/x?key=secret", false, "must use https"},
+		{"not absolute: key in the query", "https:///x?key=secret", false, "not an absolute URL"},
 		{"userinfo", "https://user:secret@api.example.com/v2", false, "user name"},
 		{"userinfo: user name is the key", "https://secret@api.example.com/v2", false, "user name"},
 		{"userinfo: dev flag", "http://user:secret@mock/v2", true, "user name"},

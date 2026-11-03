@@ -133,14 +133,21 @@ func CheckURL(field, raw string, allowPrivate bool) error {
 	return nil
 }
 
-// shownBaseURL is RedactURL, stricter about "@": a base URL has no business
-// holding one outside userinfo, so when url.Parse did not put it in u.User it
-// is taken as a password with "?", "#" or "/" in it and nothing is shown.
-// RedactURL keeps "@" in a query, since a request URL may well carry an email
-// address there.
+// shownBaseURL is how CheckURL names the URL in an error: scheme, host and
+// path only, through RedactURL. A query or fragment is dropped, since it may
+// hold a key. It is stricter than RedactURL about "@": a base URL has no
+// business holding one outside userinfo, so when url.Parse did not put it in
+// u.User it is taken as a password with "?", "#" or "/" in it and nothing is
+// shown. RedactURL keeps "@" in a query, since a request URL may well carry an
+// email address there.
 func shownBaseURL(raw string, u *url.URL) string {
 	if strings.Contains(raw, "@") && (u == nil || u.User == nil) {
 		return "[invalid URL]"
+	}
+	if u != nil {
+		c := *u
+		c.RawQuery, c.ForceQuery, c.Fragment, c.RawFragment = "", false, "", ""
+		raw = c.String()
 	}
 	return RedactURL(raw)
 }

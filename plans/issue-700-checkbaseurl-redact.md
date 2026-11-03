@@ -21,7 +21,8 @@ password sits in the fragment.
 ## Acceptance criteria
 
 - No `CheckBaseURL` error contains userinfo. The userinfo error does not name
-  the URL at all; the others show it through `RedactURL`.
+  the URL at all; the others show scheme, host and path only, through
+  `RedactURL` (a query or fragment may hold a key; added after review).
 - `RedactURL` returns `[invalid URL]` when the fragment contains `@`.
 - New `safeurl.CheckURL(field, raw, allowPrivate)` names the field in its
   errors; `CheckBaseURL` is `CheckURL("base_url", …)`.
