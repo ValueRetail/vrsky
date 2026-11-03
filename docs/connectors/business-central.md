@@ -231,7 +231,14 @@ For a till posting sales:
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors and a refused address retry, then go to the
 DLQ; `4xx` bad-data and `401`/`403` auth are poison: the message is acked and
-dropped with a log line, not dead-lettered.
+dropped with a log line, not dead-lettered. An incomplete node config and a
+payload that is not JSON are dropped the same way. A failure to get a token is
+retried.
+
+With `dedupe_fields`, the existence lookup before a `POST` is classified the
+same way, except that a `4xx` other than `401`/`403` from the lookup is retried
+and then dead-lettered, where the same answer to the write itself is dropped.
+A payload that is not a JSON object cannot be looked up and is dropped.
 
 ## Templates: Sitoo ⇄ Business Central (beta)
 

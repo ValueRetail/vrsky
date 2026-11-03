@@ -307,5 +307,11 @@ Config bullets:
 - **Test connection.** The cloud-storage worker exposes a `/test-connection`
   endpoint; use the **Test connection** button in the editor to verify bucket
   access before deploying.
+- **Failed uploads.** A destination without a `bucket` logs an error and acks
+  each message: it is dropped, not dead-lettered. A failure to open the
+  provider or to write the object (for example credentials
+  refused or the network down) is retried and then dead-lettered. A `key_template` that cannot be
+  rendered does not drop anything: the object is written under a generated key
+  and a warning is logged. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Object-format handling and any provider-specific options not listed here are
   configured via the in-app pipeline editor (Property panel).

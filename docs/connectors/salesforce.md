@@ -72,5 +72,18 @@ Config bullets:
 - **Test connection.** The Salesforce worker exposes a `/test-connection`
   endpoint — use the **Test connection** button to confirm the grant and
   instance are valid before deploying.
+- **Failed deliveries.** A payload that is not JSON is dropped (logged, not
+  dead-lettered), and so is a message for a node with no `object`, or an
+  `upsert` node with no `external_id_field` (logged, acked). Small batches go
+  out one record at a time through the REST API. There, a record Salesforce
+  answers with a `4xx` (a `401` that survives the one token refresh included)
+  is logged and skipped, and so is a record with no external-id value or one
+  that cannot be encoded; the message is still acked, and the skipped records
+  are not kept anywhere. A `5xx`, a `429`, a network error or a token failure
+  retries the whole message, and the records already written go out again, so
+  an `insert` can create duplicates. Batches over the bulk threshold use the
+  Bulk API: there any answer that is not `2xx` while creating, filling or
+  closing the job, a `4xx` too, is retried and then dead-lettered. See the
+  [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Field mapping, batch sizing, and other options not listed here are
   configured via the in-app pipeline editor (Property panel).

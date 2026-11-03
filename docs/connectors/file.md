@@ -90,6 +90,10 @@ their own names (see [Business Central → Pictures](business-central.md#picture
 - **Uploads.** The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.
 - **CSV columns.** For `format: "csv"`, the header row defines the column names (#81).
 - **Default path.** An empty `file.path` on the producer writes to the top of your workspace's own directory.
+- **Failed writes.** A write that fails (disk full, say) is
+  retried and then dead-lettered. A path outside the workspace's own area, or
+  outside any mounted directory, is logged and the message is acked: it is
+  dropped, not dead-lettered. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - **Paths are confined to your workspace.** Both the source's watch directory and
   the destination's output directory resolve inside a per-workspace subtree of the
   mounted volume (`<mount>/<workspace-id>/…`). Writing a path you can see, like

@@ -182,10 +182,70 @@ Deleting a connection does not — the builder asks before creating a new one.
 2. For a **webhook** source, POST to `http://<ingress>/webhook/{connectionId}`
    (local: `localhost:9100`) and watch the producer's live event panel.
 3. Check the **DLQ** for the connection — failed messages land there with the
-   error; retry or discard from the UI.
+   error; retry or discard from the UI. Not every failure ends up there: see
+   [Which failed messages reach the DLQ](#which-failed-messages-reach-the-dlq).
 4. Tail the worker logs in Loki filtered by `connection_id`.
 
 > `file-producer` has no live UI panel — tail `docker compose logs -f file-producer`.
+
+## Which failed messages reach the DLQ
+
+Only some failures do. A destination (a producer in the code) sorts every
+error it hits into one of two kinds:
+
+- **Retried.** The message is delivered again after 1 s, 5 s, 30 s and 2 min.
+  After the fifth attempt it is copied to the connection's DLQ with the last
+  error, the attempt count and the worker's name, and kept there for 7 days.
+  Retry it from the DLQ once the cause is fixed.
+- **Dropped.** The error is marked permanent, because trying the same message
+  again cannot work (a `4xx` from the target, an incomplete node, a payload
+  that is not JSON). The worker logs `permanent error; dropping message`, the
+  message is acked, and nothing is kept. There is no replay for it. Check the
+  worker's log in Loki, filtered by `connection_id`; the metric
+  `vrsky_dlq_messages_total` does not count these.
+
+Which kind an error gets differs per destination:
+
+| Destination | Dropped, not in the DLQ | Retried, then in the DLQ |
+|-------------|-------------------------|--------------------------|
+| HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host) |
+| Database | Payload not JSON; table name that is not `table` or `schema.table`; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message | Failure to check for or create the table |
+| File | Output path outside the workspace's area or any mounted directory; message with no connection id | Failure to write the file; failure to read the connection from the database |
+| Cloud storage | No `bucket` | Failure to open the provider or write the object |
+| SFTP | No `host`, `username` or `remote_dir`; no password or key; `filename_template` that cannot be parsed or rendered | Failure to connect (after three tries), to create `remote_dir` or to write the file |
+| Kafka | No `brokers` or `topic` | Failure to open the writer or to write |
+| RabbitMQ | No `url`, or neither `exchange` nor a queue | Failure to connect or to publish |
+| Salesforce | Payload not JSON; no `object`; `upsert` with no `external_id_field`; on the REST path a record Salesforce answers with a `4xx`, or that has no external-id value (the other records still go in) | `5xx`, `429`, network or token failure on the REST path (the whole message is sent again); any non-`2xx` while creating, filling or closing a Bulk API job |
+| Sitoo | Incomplete node; a `base_url` the connector refuses; payload not JSON; a webhook event notification; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error |
+| Front Systems | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error; a refused `base_url` or address |
+| Visma | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error, token failure; a refused URL |
+| Brightpearl | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included | `5xx`, `429`, network error; a refused base URL |
+| Business Central | Incomplete node; payload not JSON; every `4xx` except `429`, `401`/`403` included; with `dedupe_fields`, a payload that is not a JSON object or a `401`/`403` on the lookup | `5xx`, `429`, network error, token failure; a refused URL or address; with `dedupe_fields`, any other failed lookup (a `4xx` included) |
+| SAP S/4HANA | Incomplete node; payload not JSON; every `4xx` on the write except `429`, `401`/`403` included | `5xx`, `429`, network error, token failure; any non-`2xx` on the CSRF token fetch (a rejected login shows up here); a refused address |
+
+Filters and converters do not use these rules. A payload they cannot parse is
+acked with an `error` event in the activity feed. Fetching an offloaded
+payload, storing a large result or publishing the result is retried and then
+dead-lettered. The remote agent destination is described on its
+[own page](../connectors/remote-agent.md).
+
+Four things apply to every destination in the table:
+
+- A message whose envelope cannot be read is dropped, and so is a message for
+  another connection (the shared consumers see every connection's messages
+  and ack the ones that are not theirs).
+- A payload that sits in the object store is fetched before delivery. If that
+  fails, or the payload is over the buffering limit and the destination cannot
+  stream it, the message is retried and dead-lettered. The HTTP, file and
+  cloud-storage destinations stream a large payload instead of buffering it,
+  except with several targets on the node (HTTP with OAuth too), where they
+  buffer it.
+- Reading the node's config comes first. Every destination except the file
+  one treats a failed read of the connection, a node that is not theirs and a
+  secret that does not resolve alike: a debug log line, then ack. A database
+  hiccup at the wrong moment drops the message.
+- With several destinations on one connection, one failure retries the whole
+  message and the destinations that already delivered get it again.
 
 ## The File Output panel says "Load failed", or shows no files
 

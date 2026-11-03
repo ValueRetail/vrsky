@@ -120,6 +120,17 @@ Config reference:
 }
 ```
 
+### Failed deliveries
+
+A `5xx`, a `429`, a network error and a failure to get an OAuth token are
+retried on the usual backoff and then dead-lettered with the payload. Any
+other answer below `500` (so every `4xx` except `429`, a `401` that is still
+refused after the one token refresh included) is logged, shown in the
+activity feed and acked: the message is dropped, not dead-lettered. A URL the
+request cannot be built from is dropped the same way. Which errors reach the
+DLQ for every destination is in the
+[operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
+
 ### Which addresses it will call
 
 The destination URL is yours to set, and the request carries your headers and
