@@ -213,10 +213,14 @@ published once, not again at every start (#538).
     consumer logs an error with the bucket and key and gives up: the object
     stays in the bucket. The queue is lost when the connection stops or the
     pod restarts, and the object then stays too, so look for leftovers after
-    a restart. An object replaced under the same key while its retry is
-    waiting is published again when its notification arrives and its queued
-    retry is dropped; if the retry runs before that notification is handled,
-    it removes the new object unpublished.
+    a restart. Before the fetch, event mode with `delete` or `move` reads the
+    object's size, last-modified time and version (ETag on S3 and Azure,
+    generation on GCS), and each retry reads them again first. If they
+    changed, the object was replaced under the same key: the retry leaves it
+    for its own notification and logs `object replaced since published; left
+    for its own notification`. A replacement uploaded in the instant between
+    that check and the delete (or the copy of a move) can still be removed
+    unpublished; that window is one request long.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

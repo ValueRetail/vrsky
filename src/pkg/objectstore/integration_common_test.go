@@ -41,6 +41,22 @@ func assertRoundTrip(t *testing.T, ctx context.Context, store ObjectStore) {
 		t.Fatalf("List(in/) missing %q: %+v", key, objs)
 	}
 
+	// Stat (#672): size, modification time and a version, the same version
+	// List reports.
+	st, err := store.Stat(ctx, key)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if st.Key != key || st.Size != int64(len(payload)) || st.LastModified.IsZero() || st.Version == "" {
+		t.Errorf("Stat = %+v, want key %q, size %d, a modification time and a version", st, key, len(payload))
+	}
+	for _, o := range objs {
+		if o.Key == key && o.Version != st.Version {
+			t.Errorf("List version %q, Stat version %q", o.Version, st.Version)
+		}
+	}
+	assertStatVersionChanges(t, ctx, store)
+
 	body, ct, err := store.Get(ctx, key)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -65,6 +81,9 @@ func assertRoundTrip(t *testing.T, ctx context.Context, store ObjectStore) {
 	}
 	if _, _, err := store.Get(ctx, key); err == nil {
 		t.Error("Get of deleted key should fail")
+	}
+	if _, err := store.Stat(ctx, key); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Stat of deleted key = %v, want ErrNotFound", err)
 	}
 
 	_ = store.Delete(ctx, dst) // cleanup
@@ -137,4 +156,29 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// assertStatVersionChanges writes a key twice and checks that Stat's version
+// tells the two apart (#672).
+func assertStatVersionChanges(t *testing.T, ctx context.Context, store ObjectStore) {
+	t.Helper()
+	key := "in/stat-1.txt"
+	defer func() { _ = store.Delete(ctx, key) }()
+	if err := store.Put(ctx, key, []byte("first"), "text/plain"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	a, err := store.Stat(ctx, key)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if err := store.Put(ctx, key, []byte("other"), "text/plain"); err != nil {
+		t.Fatalf("Put again: %v", err)
+	}
+	b, err := store.Stat(ctx, key)
+	if err != nil {
+		t.Fatalf("Stat again: %v", err)
+	}
+	if a.Version == b.Version {
+		t.Errorf("Stat version %q unchanged after the object was written again", a.Version)
+	}
 }

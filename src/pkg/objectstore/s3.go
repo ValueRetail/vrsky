@@ -77,7 +77,7 @@ func (s *s3Store) List(ctx context.Context, prefix string) ([]Object, error) {
 			if key == "" || strings.HasSuffix(key, "/") {
 				continue
 			}
-			obj := Object{Key: key, Size: aws.ToInt64(o.Size)}
+			obj := Object{Key: key, Size: aws.ToInt64(o.Size), Version: etagVersion(aws.ToString(o.ETag))}
 			if o.LastModified != nil {
 				obj.LastModified = *o.LastModified
 			}
@@ -181,6 +181,46 @@ func (s *s3Store) applySSE(in *s3.PutObjectInput) {
 			in.SSEKMSKeyId = aws.String(s.sse.KMSKeyID)
 		}
 	}
+}
+
+// Stat reads the object's metadata with HeadObject. A HEAD answer has no body,
+// so S3 says 404 NotFound both for a missing key and for a missing bucket. A
+// missing bucket is a configuration error and must not look like a missing
+// object, so a 404 is checked with HeadBucket: only when the bucket answers
+// (or denies the check) is the object reported as ErrNotFound.
+func (s *s3Store) Stat(ctx context.Context, key string) (Object, error) {
+	resp, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		if s3HeadMissing(err) {
+			if _, berr := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)}); berr != nil && s3HeadMissing(berr) {
+				return Object{}, fmt.Errorf("s3 stat %q: bucket %q not found: %w", key, s.bucket, berr)
+			}
+			return Object{}, fmt.Errorf("s3 stat %q: %w", key, notFound(err))
+		}
+		return Object{}, fmt.Errorf("s3 stat %q: %w", key, err)
+	}
+	obj := Object{Key: key, Size: aws.ToInt64(resp.ContentLength), Version: etagVersion(aws.ToString(resp.ETag))}
+	if resp.LastModified != nil {
+		obj.LastModified = *resp.LastModified
+	}
+	return obj, nil
+}
+
+// s3HeadMissing reports a 404 to a HEAD request.
+func s3HeadMissing(err error) bool {
+	var nf *s3types.NotFound
+	if errors.As(err, &nf) {
+		return true
+	}
+	var nsk *s3types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return true
+	}
+	var api smithy.APIError
+	return errors.As(err, &api) && (api.ErrorCode() == "NotFound" || api.ErrorCode() == "NoSuchKey" || api.ErrorCode() == "NoSuchBucket")
 }
 
 func (s *s3Store) Delete(ctx context.Context, key string) error {

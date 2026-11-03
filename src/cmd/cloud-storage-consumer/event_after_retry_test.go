@@ -21,19 +21,38 @@ import (
 // successful publish is retried from a bounded in-memory queue, with a
 // backoff, without publishing again.
 
+// statSame is a Stat for queue tests: every object is there, with the zero
+// stamp the tests queue it with.
+func statSame(_ context.Context, key string) (objectstore.Object, error) {
+	return objectstore.Object{Key: key}, nil
+}
+
 // eaTuning makes the backoff a few milliseconds so the real clock is enough.
 var eaTuning = afterRetryTuning{base: 5 * time.Millisecond, max: 20 * time.Millisecond, maxRetries: 3, capacity: 10}
 
-// eaStore is a fakeStore whose delete and copy results the test scripts: the
-// function gets the 0-based call number and returns the error, or nil to let
-// the fake do it.
+// eaStore is a fakeStore whose delete, copy and stat results the test
+// scripts: the function gets the 0-based call number and returns the error, or
+// nil to let the fake do it. Like S3, deleting a missing key is not an error;
+// Stat of one is ErrNotFound, as on every backend.
 type eaStore struct {
 	*fakeStore
 	deleteFn func(ctx context.Context, n int) error
 	copyFn   func(ctx context.Context, n int) error
+	statFn   func(ctx context.Context, n int) error
 
 	deletes atomic.Int32
 	copies  atomic.Int32
+	stats   atomic.Int32
+}
+
+func (s *eaStore) Stat(ctx context.Context, key string) (objectstore.Object, error) {
+	n := int(s.stats.Add(1)) - 1
+	if s.statFn != nil {
+		if err := s.statFn(ctx, n); err != nil {
+			return objectstore.Object{}, err
+		}
+	}
+	return s.fakeStore.Stat(ctx, key)
 }
 
 func (s *eaStore) Delete(ctx context.Context, key string) error {
@@ -74,6 +93,13 @@ func failFirst(n int) func(context.Context, int) error {
 }
 
 func failAlways(context.Context, int) error { return errors.New("403 denied") }
+
+// remove takes key out of the bucket behind the consumer's back.
+func (s *eaStore) remove(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.objects, key)
+}
 
 type eaLoop struct {
 	c         *cloudConsumer
@@ -191,29 +217,59 @@ func TestEventAfterRetry_Loop(t *testing.T) {
 			wantLogs:    [][]string{{"level=ERROR", "giving up", "bucket=bkt", "key=" + key}},
 		},
 		{
-			name:   "not found on a retry counts as done",
+			// The delete fails, then someone else removes the object: the
+			// retry's Stat finds it gone, and no second delete is sent.
+			name:   "gone before the retry counts as done",
 			action: "delete",
 			store: func(fs *fakeStore) *eaStore {
-				return &eaStore{fakeStore: fs, deleteFn: func(_ context.Context, n int) error {
+				s := &eaStore{fakeStore: fs}
+				s.deleteFn = func(_ context.Context, n int) error {
 					if n == 0 {
+						s.remove(key)
 						return errors.New("503")
 					}
-					return fmt.Errorf("delete: %w", objectstore.ErrNotFound)
-				}}
+					return nil
+				}
+				return s
 			},
 			done:        func(l *eaLoop, s *eaStore) bool { return l.logHas("retry: object already gone") },
-			wantDeletes: 2,
-			noLogs:      [][]string{{"level=ERROR"}},
+			wantDeletes: 1, wantGone: true,
+			noLogs: [][]string{{"level=ERROR"}},
 		},
 		{
-			name:   "not found on the first try is done, nothing queued",
+			// Azure's copy reads the source first, so a source that is gone
+			// fails the move with ErrNotFound: done, nothing queued.
+			name:   "move: source gone at the first try is done, nothing queued",
+			action: "move",
+			store: func(fs *fakeStore) *eaStore {
+				s := &eaStore{fakeStore: fs}
+				s.copyFn = func(context.Context, int) error {
+					s.remove(key)
+					return fmt.Errorf("azure get %q: %w", key, objectstore.ErrNotFound)
+				}
+				return s
+			},
+			done:       func(l *eaLoop, s *eaStore) bool { return l.logHas("object already gone; nothing to do") },
+			wantCopies: 1, wantGone: true,
+			noLogs: [][]string{{"level=ERROR"}, {"will retry"}},
+		},
+		{
+			// A retry whose Stat fails is a failed try like any other.
+			name:   "stat fails on a retry, then works",
 			action: "delete",
 			store: func(fs *fakeStore) *eaStore {
-				return &eaStore{fakeStore: fs, deleteFn: func(context.Context, int) error { return fmt.Errorf("delete: %w", objectstore.ErrNotFound) }}
+				// Stat 0 is the event loop's, before the fetch.
+				return &eaStore{fakeStore: fs, deleteFn: failFirst(1), statFn: func(_ context.Context, n int) error {
+					if n == 1 {
+						return errors.New("500 internal")
+					}
+					return nil
+				}}
 			},
-			done:        func(l *eaLoop, s *eaStore) bool { return l.logHas("object already gone; nothing to do") },
-			wantDeletes: 1,
-			noLogs:      [][]string{{"level=ERROR"}, {"will retry"}},
+			done:        func(l *eaLoop, s *eaStore) bool { return l.logHas("after-action done on retry") },
+			wantDeletes: 2, wantGone: true,
+			wantLogs: [][]string{{"level=WARN", "failed again", "500 internal"}},
+			noLogs:   [][]string{{"level=ERROR"}},
 		},
 		{
 			name:     "move onto its own key is refused and not retried",
@@ -300,17 +356,17 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 	logs := &nfLog{}
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	// An hour's backoff: nothing is retried while the test fills the queue.
-	q := newAfterRetryQueue(logger, "delete", "bkt", afterRetryTuning{base: time.Hour, capacity: 2},
+	q := newAfterRetryQueue(logger, "delete", "bkt", afterRetryTuning{base: time.Hour, capacity: 2}, statSame,
 		func(context.Context, string) error { return nil })
 
 	boom := errors.New("boom")
-	q.failed("in/1", boom)
-	q.failed("in/2", boom)
-	q.failed("in/2", boom) // already queued: still two
+	q.failed("in/1", objectStamp{}, boom)
+	q.failed("in/2", objectStamp{}, boom)
+	q.failed("in/2", objectStamp{}, boom) // already queued: still two
 	if q.len() != 2 {
 		t.Fatalf("len = %d, want 2", q.len())
 	}
-	q.failed("in/3", boom)
+	q.failed("in/3", objectStamp{}, boom)
 	if q.len() != 2 {
 		t.Fatalf("len = %d after the third key, want 2", q.len())
 	}
@@ -333,7 +389,7 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 	}
 	// A key forgotten makes room.
 	q.forget("in/1")
-	q.failed("in/3", boom)
+	q.failed("in/3", objectStamp{}, boom)
 	if _, queued := q.items["in/3"]; !queued {
 		t.Fatal("in/3 not queued after room was made")
 	}
@@ -344,9 +400,9 @@ func TestEventAfterRetry_QueueFull(t *testing.T) {
 func TestEventAfterRetry_ForgetOnSuccess(t *testing.T) {
 	var calls atomic.Int32
 	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "bkt",
-		afterRetryTuning{base: 30 * time.Millisecond},
+		afterRetryTuning{base: 30 * time.Millisecond}, statSame,
 		func(context.Context, string) error { calls.Add(1); return nil })
-	q.failed("in/a", errors.New("boom"))
+	q.failed("in/a", objectStamp{}, errors.New("boom"))
 	q.forget("in/a")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -364,9 +420,9 @@ func TestEventAfterRetry_ForgetOnSuccess(t *testing.T) {
 func TestEventAfterRetry_StopDuringBackoff(t *testing.T) {
 	logs := &nfLog{}
 	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(logs, nil)), "delete", "bkt",
-		afterRetryTuning{base: time.Hour},
+		afterRetryTuning{base: time.Hour}, statSame,
 		func(context.Context, string) error { t.Error("retried before the backoff ran out"); return nil })
-	q.failed("in/a", errors.New("boom"))
+	q.failed("in/a", objectStamp{}, errors.New("boom"))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); q.run(ctx) }()
@@ -407,7 +463,7 @@ func TestEventAfterRetry_StopWhileRetrying(t *testing.T) {
 }
 
 func TestEventAfterRetry_Backoff(t *testing.T) {
-	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "b", afterRetryTuning{},
+	q := newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "b", afterRetryTuning{}, statSame,
 		func(context.Context, string) error { return nil })
 	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute,
 		32 * time.Minute, time.Hour, time.Hour}
@@ -418,5 +474,42 @@ func TestEventAfterRetry_Backoff(t *testing.T) {
 	}
 	if q.t.maxRetries != eventAfterMaxRetries || q.t.capacity != eventAfterQueueMax {
 		t.Errorf("defaults = %d retries, %d capacity", q.t.maxRetries, q.t.capacity)
+	}
+}
+
+// A key queued anew while its retry ran keeps the new item: the old try's
+// result, a success or a last failure, does not remove it or count against
+// it, and it keeps its new stamp.
+func TestEventAfterRetry_RequeuedDuringTry(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result error
+	}{
+		{"old try works", nil},
+		{"old try fails for the last time", errors.New("503 old")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newer := objectStamp{version: "2"}
+			var q *afterRetryQueue
+			// maxRetries 1: a failure of the old try is its last.
+			q = newAfterRetryQueue(slog.New(slog.NewTextHandler(io.Discard, nil)), "delete", "bkt",
+				afterRetryTuning{base: time.Hour, maxRetries: 1}, statSame,
+				func(context.Context, string) error {
+					// The key is published again and its new after-action fails.
+					q.failed("in/a", newer, errors.New("503 new"))
+					return tc.result
+				})
+			q.failed("in/a", objectStamp{}, errors.New("boom"))
+			q.attempt(context.Background(), "in/a")
+			q.mu.Lock()
+			defer q.mu.Unlock()
+			it, ok := q.items["in/a"]
+			if !ok {
+				t.Fatal("the new item was dropped by the old try's result")
+			}
+			if it.retries != 0 || it.stamp != newer {
+				t.Fatalf("item = %+v, want the new one untouched (retries 0, stamp %+v)", *it, newer)
+			}
+		})
 	}
 }

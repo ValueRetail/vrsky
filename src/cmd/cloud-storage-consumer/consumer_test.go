@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +28,29 @@ type fakeStore struct {
 	// modified is each object's LastModified in the listing; zero when unset
 	// (#538).
 	modified map[string]time.Time
+	// gen counts writes per key through Put and PutStream, and is Stat's
+	// Version, like a provider's ETag or generation (#672).
+	gen map[string]int
+}
+
+// Stat says ErrNotFound for a missing key, as the real backends do.
+func (f *fakeStore) Stat(_ context.Context, key string) (objectstore.Object, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.objects[key]
+	if !ok {
+		return objectstore.Object{}, fmt.Errorf("stat %q: %w", key, objectstore.ErrNotFound)
+	}
+	return objectstore.Object{Key: key, Size: int64(len(b)), LastModified: f.modified[key],
+		Version: strconv.Itoa(f.gen[key])}, nil
+}
+
+// wrote bumps key's generation; f.mu is held.
+func (f *fakeStore) wrote(key string) {
+	if f.gen == nil {
+		f.gen = map[string]int{}
+	}
+	f.gen[key]++
 }
 
 func (f *fakeStore) List(_ context.Context, prefix string) ([]objectstore.Object, error) {
@@ -55,6 +80,7 @@ func (f *fakeStore) Put(_ context.Context, key string, body []byte, _ string) er
 	cp := make([]byte, len(body))
 	copy(cp, body)
 	f.objects[key] = cp
+	f.wrote(key)
 	return nil
 }
 
@@ -75,6 +101,7 @@ func (f *fakeStore) PutStream(_ context.Context, key string, body io.Reader, _ s
 		f.objects = map[string][]byte{}
 	}
 	f.objects[key] = b
+	f.wrote(key)
 	return nil
 }
 

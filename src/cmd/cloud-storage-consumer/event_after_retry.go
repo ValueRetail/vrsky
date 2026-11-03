@@ -17,6 +17,16 @@ import (
 // in-memory list, one per connection, that tries the after-action again with a
 // backoff. It never fetches or publishes again. It is lost on restart and with
 // the connection; a key that cannot be retried is logged at Error and dropped.
+//
+// A retry must not remove an object that was written again under the same key
+// after the failure: that replacement may not be published yet. So the event
+// loop stats each object before it fetches it, the queue keeps that stamp, and
+// a retry stats the object again first. A changed stamp means a replacement,
+// which is left for its own notification. Stamping before the fetch fails
+// safe: a replacement between the Stat and the fetch is published under the
+// old stamp, and the retry then sees a mismatch and leaves the object, a
+// duplicate publish at worst. What is left is the moment between a retry's
+// Stat and its Delete (or Copy).
 
 const (
 	// eventAfterQueueMax bounds the keys waiting for a retry per connection.
@@ -39,8 +49,19 @@ type afterRetryTuning struct {
 	capacity   int
 }
 
+// objectStamp is the version of an object as event mode published it.
+type objectStamp struct {
+	doneset.Stamp
+	version string
+}
+
+func stampOf(o objectstore.Object) objectStamp {
+	return objectStamp{Stamp: doneset.StampOf(o.Size, o.LastModified), version: o.Version}
+}
+
 type afterRetryItem struct {
-	retries int // retries made so far
+	stamp   objectStamp // what was published
+	retries int         // retries made so far
 	next    time.Time
 }
 
@@ -48,16 +69,19 @@ type afterRetryQueue struct {
 	logger *slog.Logger
 	action string // for logs
 	bucket string // for logs
-	// do runs the after-action for a key.
-	do func(ctx context.Context, key string) error
-	t  afterRetryTuning
+	// stat looks the object up before a retry; do runs the after-action.
+	stat func(ctx context.Context, key string) (objectstore.Object, error)
+	do   func(ctx context.Context, key string) error
+	t    afterRetryTuning
 
 	mu    sync.Mutex
 	items map[string]*afterRetryItem
 	wake  chan struct{} // 1-buffered: the queue changed
 }
 
-func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetryTuning, do func(ctx context.Context, key string) error) *afterRetryQueue {
+func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetryTuning,
+	stat func(ctx context.Context, key string) (objectstore.Object, error),
+	do func(ctx context.Context, key string) error) *afterRetryQueue {
 	if t.base <= 0 {
 		t.base = doneset.RetryBase
 	}
@@ -71,7 +95,7 @@ func newAfterRetryQueue(logger *slog.Logger, action, bucket string, t afterRetry
 		t.capacity = eventAfterQueueMax
 	}
 	return &afterRetryQueue{
-		logger: logger, action: action, bucket: bucket, do: do, t: t,
+		logger: logger, action: action, bucket: bucket, stat: stat, do: do, t: t,
 		items: make(map[string]*afterRetryItem),
 		wake:  make(chan struct{}, 1),
 	}
@@ -93,11 +117,12 @@ func (q *afterRetryQueue) len() int {
 	return len(q.items)
 }
 
-// failed records that the after-action of key failed right after the publish.
-// A key that is gone counts as done; a refusal that cannot change is only
-// logged; anything else is queued. A key already queued starts over: it was
-// published again and its new after-action failed too.
-func (q *afterRetryQueue) failed(key string, err error) {
+// failed records that the after-action of key failed right after the publish
+// of the object with stamp. A key that is gone counts as done; a refusal that
+// cannot change is only logged; anything else is queued. A key already queued
+// starts over with the new stamp: it was published again and its new
+// after-action failed too.
+func (q *afterRetryQueue) failed(key string, stamp objectStamp, err error) {
 	switch {
 	case errors.Is(err, objectstore.ErrNotFound):
 		q.logger.Info("after-action: object already gone; nothing to do", "key", key, "action", q.action)
@@ -115,7 +140,7 @@ func (q *afterRetryQueue) failed(key string, err error) {
 			"bucket", q.bucket, "key", key, "action", q.action, "queue_size", q.t.capacity, "error", err)
 		return
 	}
-	q.items[key] = &afterRetryItem{next: time.Now().Add(q.wait(1))}
+	q.items[key] = &afterRetryItem{stamp: stamp, next: time.Now().Add(q.wait(1))}
 	q.mu.Unlock()
 	q.logger.Warn("after-action failed; will retry in memory", "key", key, "action", q.action,
 		"retry_in", q.wait(1), "error", err)
@@ -192,41 +217,88 @@ func (q *afterRetryQueue) run(ctx context.Context) {
 	}
 }
 
-// attempt runs the after-action once for a due key and reschedules, drops or
-// removes it.
+// attempt retries a due key once: it stats the object, and runs the
+// after-action only when the object is the one that was published. Then it
+// removes, reschedules or drops the key. A key handled again while the try ran
+// (forgotten, or queued anew with a new stamp) keeps its new state: the result
+// belongs to the old item.
 func (q *afterRetryQueue) attempt(ctx context.Context, key string) {
-	err := q.do(ctx, key)
+	q.mu.Lock()
+	it, ok := q.items[key]
+	q.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	obj, err := q.stat(ctx, key)
 	if ctx.Err() != nil {
 		return // stopping: the result may be the cancellation itself
 	}
-	q.mu.Lock()
-	it, ok := q.items[key]
-	if !ok { // handled again while the try ran
-		q.mu.Unlock()
+	switch {
+	case errors.Is(err, objectstore.ErrNotFound):
+		if q.drop(key, it) {
+			q.logger.Info("after-action retry: object already gone; done", "key", key, "action", q.action)
+		}
+		return
+	case err != nil:
+		q.retryFailed(key, it, err)
+		return
+	case stampOf(obj) != it.stamp:
+		if q.drop(key, it) {
+			q.logger.Warn("after-action retry: object replaced since published; left for its own notification",
+				"bucket", q.bucket, "key", key, "action", q.action)
+		}
+		return
+	}
+
+	err = q.do(ctx, key)
+	if ctx.Err() != nil {
 		return
 	}
 	switch {
 	case err == nil:
-		delete(q.items, key)
-		q.mu.Unlock()
-		q.logger.Info("after-action done on retry", "key", key, "action", q.action, "retries", it.retries+1)
-	case errors.Is(err, objectstore.ErrNotFound):
-		delete(q.items, key)
-		q.mu.Unlock()
-		q.logger.Info("after-action retry: object already gone; done", "key", key, "action", q.action)
-	default:
-		it.retries++
-		if it.retries >= q.t.maxRetries {
-			delete(q.items, key)
-			q.mu.Unlock()
-			q.logger.Error("after-action still failing; giving up, the object stays in the bucket",
-				"bucket", q.bucket, "key", key, "action", q.action, "retries", it.retries, "error", err)
-			return
+		if q.drop(key, it) {
+			q.logger.Info("after-action done on retry", "key", key, "action", q.action, "retries", it.retries+1)
 		}
-		w := q.wait(it.retries + 1)
-		it.next = time.Now().Add(w)
-		q.mu.Unlock()
-		q.logger.Warn("after-action failed again; will retry in memory", "key", key, "action", q.action,
-			"retries", it.retries, "retry_in", w, "error", err)
+	case errors.Is(err, objectstore.ErrNotFound):
+		if q.drop(key, it) {
+			q.logger.Info("after-action retry: object already gone; done", "key", key, "action", q.action)
+		}
+	default:
+		q.retryFailed(key, it, err)
 	}
+}
+
+// drop removes key if it still holds it, and reports whether it did.
+func (q *afterRetryQueue) drop(key string, it *afterRetryItem) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.items[key] != it {
+		return false
+	}
+	delete(q.items, key)
+	return true
+}
+
+// retryFailed counts a failed retry of it: it is rescheduled, or dropped at the
+// cap. Nothing happens if key no longer holds it.
+func (q *afterRetryQueue) retryFailed(key string, it *afterRetryItem, err error) {
+	q.mu.Lock()
+	if q.items[key] != it {
+		q.mu.Unlock()
+		return
+	}
+	it.retries++
+	if it.retries >= q.t.maxRetries {
+		delete(q.items, key)
+		q.mu.Unlock()
+		q.logger.Error("after-action still failing; giving up, the object stays in the bucket",
+			"bucket", q.bucket, "key", key, "action", q.action, "retries", it.retries, "error", err)
+		return
+	}
+	w := q.wait(it.retries + 1)
+	it.next = time.Now().Add(w)
+	q.mu.Unlock()
+	q.logger.Warn("after-action failed again; will retry in memory", "key", key, "action", q.action,
+		"retries", it.retries, "retry_in", w, "error", err)
 }

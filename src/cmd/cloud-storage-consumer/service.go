@@ -578,7 +578,7 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 	// with the loop, and the loop waits for it.
 	var retryQ *afterRetryQueue
 	if cfg.AfterAction == "delete" || cfg.AfterAction == "move" {
-		retryQ = newAfterRetryQueue(logger, cfg.AfterAction, cfg.Bucket, s.afterRetry,
+		retryQ = newAfterRetryQueue(logger, cfg.AfterAction, cfg.Bucket, s.afterRetry, store.Stat,
 			func(ctx context.Context, key string) error { return s.afterAction(ctx, store, cfg, key) })
 		qctx, stopQ := context.WithCancel(ctx)
 		qDone := make(chan struct{})
@@ -660,9 +660,18 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 // ingestObject fetches one object, publishes it into the pipeline, and applies
 // the after-action. Event mode uses it. Event mode has no listing to find the
 // object in again, so a failed after-action goes to retryQ, which retries it
-// from memory without publishing again (#672). The returned error is only a
-// failure to fetch or publish.
+// from memory without publishing again (#672). With a queue the object is
+// stat'ed before the fetch, and the retry acts only on an object with that
+// stamp. The returned error is only a failure to stat, fetch or publish.
 func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger, retryQ *afterRetryQueue) error {
+	var stamp objectStamp
+	if retryQ != nil {
+		obj, err := store.Stat(ctx, key)
+		if err != nil {
+			return fmt.Errorf("stat: %w", err)
+		}
+		stamp = stampOf(obj)
+	}
 	afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, key, logger)
 	if err != nil {
 		return err
@@ -673,7 +682,7 @@ func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID strin
 			retryQ.forget(key) // published again; an older failed after-action is moot
 		}
 	case retryQ != nil:
-		retryQ.failed(key, afterErr)
+		retryQ.failed(key, stamp, afterErr)
 	default:
 		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", afterErr)
 	}

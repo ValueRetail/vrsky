@@ -16,7 +16,11 @@ after-action from memory, without fetching or publishing again.
   queue, `ingestObject` hands it a failed after-action, `afterAction` marks
   the move-onto-own-key refusal with a sentinel, `cloudConsumer.afterRetry`
   (tuning for tests).
-- Tests: `event_after_retry_test.go`.
+- `src/pkg/objectstore`: `Stat` on the interface and the three backends
+  (S3 HeadObject, Azure GetProperties, GCS Attrs), `Object.Version`, and
+  every fake of the interface.
+- Tests: `event_after_retry_test.go`, `event_after_stamp_test.go`,
+  `pkg/objectstore/notfound_test.go`.
 - `docs/connectors/cloud-storage.md`, `plans/backlog.md` (strike 151).
 
 ## Approach
@@ -31,6 +35,13 @@ after-action from memory, without fetching or publishing again.
   three hours in all. Then Error log with bucket and key, and the key is
   dropped. A full queue drops the new key with the same Error log.
 - `objectstore.ErrNotFound` from the first try or a retry means done.
+- Round two (review): with `delete` or `move` the event loop stats the object
+  before the fetch and the queue keeps its stamp (size, last-modified,
+  version). A retry stats first: not found is done, another stamp is a
+  replacement and the key is dropped with a Warn, a Stat error is a failed
+  try. Stamping before the fetch fails safe: a replacement between the Stat
+  and the Get is published under the old stamp, so the retry sees a mismatch
+  and leaves it (a duplicate at worst, never a loss).
 - The message ack is unchanged: it follows the publish, not the after-action.
 - A key that fails again after being published again starts over; a later
   successful after-action for a key forgets its queued retry.
@@ -46,13 +57,16 @@ after-action from memory, without fetching or publishing again.
 
 ## Risks
 
-- A key replaced after its failure and before its retry is deleted or moved.
-  The replacement's notification publishes it and drops the queued retry, but
-  if the retry runs first the new object goes unpublished and its
-  notification then finds nothing (`ErrNotFound`, treated as handled). The
-  first retry is a minute after the failure, so this needs a notification
-  that is more than a minute late. Event mode has no object stamp to compare.
-  In the docs.
+- A replacement uploaded between a retry's Stat and its Delete (or Copy) is
+  still removed unpublished. The window is one request long. Closing it needs
+  conditional deletes (Azure If-Match, GCS ifGenerationMatch, S3 If-Match);
+  in the PR's backlog lines. In the docs.
+- The first, non-retry after-action still deletes without a stamp check, in
+  event and poll mode. Same backlog lines.
+- S3 answers a HEAD without a body, so a 404 can't tell a missing key from a
+  missing bucket. Stat asks HeadBucket after a 404, so a wrong bucket name
+  stays an error instead of acking every message as already handled.
+- One extra request per object in event mode with `delete` or `move`.
 - A retry that outlives a move whose copy landed: the copy is repeated over
   the same destination, then deleted. Idempotent.
 
@@ -62,6 +76,13 @@ after-action from memory, without fetching or publishing again.
   fails then works (delete and move), always fails and stops at the cap with
   an Error, ErrNotFound on a retry and on the first try, move onto own key
   not retried; each checks published once and acked once.
+- Round two: a key handled again before its retry is due never gets a
+  retried Delete (fails with `retryQ.forget` removed); a replaced key (new
+  version, same size) is not deleted or moved and the drop is logged (fails
+  on the round-one code); the loop's return waits for a store call in
+  flight that ignores ctx for 50 ms (fails with `defer stopQ()` alone); a
+  key queued anew during a try keeps its new item. `Stat` per provider:
+  found, missing object, missing bucket, denied.
 - Queue full (dropped with Error, duplicate key takes no place), forget on a
   later success, stop in backoff, stop while a retry is in flight (the loop
   returns, which means the goroutine is gone), backoff values.
