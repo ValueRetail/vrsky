@@ -51,8 +51,9 @@ func TestWrite_CSRF_Success(t *testing.T) {
 
 	cfg := basicCfg(srv.URL)
 	p := testProducer()
-	auth := newAuthorizer(cfg, p.httpClient)
-	if err := p.write(context.Background(), cfg, auth, []byte(`{"SalesOrderType":"OR"}`)); err != nil {
+	hc := p.sessionClient()
+	auth := newAuthorizer(cfg, hc)
+	if err := p.write(context.Background(), hc, cfg, auth, []byte(`{"SalesOrderType":"OR"}`)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if gotToken != "csrf-abc" {
@@ -91,8 +92,9 @@ func TestWrite_CSRF_Retry(t *testing.T) {
 
 	cfg := basicCfg(srv.URL)
 	p := testProducer()
-	auth := newAuthorizer(cfg, p.httpClient)
-	if err := p.write(context.Background(), cfg, auth, []byte(`{}`)); err != nil {
+	hc := p.sessionClient()
+	auth := newAuthorizer(cfg, hc)
+	if err := p.write(context.Background(), hc, cfg, auth, []byte(`{}`)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if posts != 2 {
@@ -124,8 +126,9 @@ func TestWrite_Classification(t *testing.T) {
 		}))
 		cfg := basicCfg(srv.URL)
 		p := testProducer()
-		auth := newAuthorizer(cfg, p.httpClient)
-		err := p.write(context.Background(), cfg, auth, []byte(`{}`))
+		hc := p.sessionClient()
+		auth := newAuthorizer(cfg, hc)
+		err := p.write(context.Background(), hc, cfg, auth, []byte(`{}`))
 		srv.Close()
 		if (err != nil) != tc.wantErr {
 			t.Errorf("status %d: err=%v wantErr=%v", tc.status, err, tc.wantErr)

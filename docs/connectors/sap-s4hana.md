@@ -82,10 +82,16 @@ update with `PATCH`).
 
 - `method` — `POST` (default) or `PATCH`.
 
-SAP's OData gateway requires **CSRF protection** on writes: the producer fetches
-a token with `X-CSRF-Token: Fetch` and reuses it for subsequent writes. If SAP
-answers `403` with `X-CSRF-Token: Required` — the token or session expired — the
-producer re-fetches once and retries transparently.
+SAP's OData gateway requires **CSRF protection** on writes: before each write
+the producer fetches a token with `X-CSRF-Token: Fetch`, then sends the write
+with that token. If SAP answers `403` with `X-CSRF-Token: Required` — the token
+or session expired — the producer re-fetches once and retries transparently.
+
+Each delivery runs in an SAP session of its own: the session cookies SAP sets
+on the fetch (`SAP_SESSIONID_*`, `MYSAPSSO2`) are kept only for that
+delivery's fetch, write and OAuth2 token call, then dropped. Two connections,
+or two tenants, writing to the same SAP host never send each other's session
+(#682).
 
 ```json
 {
