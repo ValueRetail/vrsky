@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
@@ -465,6 +466,7 @@ func newURFixture(t *testing.T) *urFixture {
 		db:            db,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient:    fs.srv.Client(),
+		allowPrivate:  true, // the fake Front Systems is on http://127.0.0.1
 		resolveTenant: f.owners.resolve,
 		publish: func(_ context.Context, env *envelope.Envelope) error {
 			f.pubMu.Lock()
@@ -576,6 +578,9 @@ func TestFrontSystemsUnregister_HarnessStopDeletesAndRefuses(t *testing.T) {
 	expectConfig(mock, fs, s, 1) // restore
 
 	own := &owners{m: map[string]string{x.id: x.tenant, s.id: s.tenant}}
+	// The harness runs Configure, which reads the operator's dev switch; the
+	// fake Front Systems is on http://127.0.0.1.
+	t.Setenv(safeurl.EnvAllowPrivate, "true")
 	c := &frontSystemsConsumer{httpClient: fs.srv.Client(), resolveTenant: own.resolve}
 
 	// Registered before the harness so it runs after the harness has shut the
@@ -1293,6 +1298,9 @@ func TestFrontSystemsRefuse_RestoreAnswers503(t *testing.T) {
 	expectConfig(mock, fs, x, 1)
 
 	own := &owners{m: map[string]string{x.id: x.tenant, idle.id: idle.tenant}}
+	// The harness runs Configure, which reads the operator's dev switch; the
+	// fake Front Systems is on http://127.0.0.1.
+	t.Setenv(safeurl.EnvAllowPrivate, "true")
 	c := &frontSystemsConsumer{httpClient: fs.srv.Client(), resolveTenant: own.resolve}
 
 	reached, release := make(chan struct{}), make(chan struct{})
@@ -1364,6 +1372,7 @@ func TestFrontSystemsRefuse_AfterConfigureBeforeRestore503(t *testing.T) {
 	var published atomic.Int32
 	c := &frontSystemsConsumer{
 		httpClient:    http.DefaultClient,
+		allowPrivate:  true, // the fake Front Systems is on http://127.0.0.1
 		resolveTenant: own.resolve,
 		publish: func(context.Context, *envelope.Envelope) error {
 			published.Add(1)

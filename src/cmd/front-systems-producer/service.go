@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -36,6 +38,9 @@ type frontSystemsProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// allows http and private addresses in base_url, for a mock upstream.
+	allowPrivate bool
 }
 
 // FrontSystemsProducerConfig is the per-node configuration (config.front_systems).
@@ -67,11 +72,12 @@ func (p *frontSystemsProducer) Configure(ctx context.Context, res *sdk.Resources
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
-		p.httpClient = &http.Client{
-			Timeout:       60 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
+		// base_url is tenant config and every request carries both keys, so
+		// the client refuses private, loopback and link-local addresses at
+		// dial time and follows no redirects (#677).
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
 	}
 	p.logger.Info("front-systems-producer configured")
 	return nil
@@ -100,6 +106,12 @@ func (p *frontSystemsProducer) Deliver(ctx context.Context, env *envelope.Envelo
 }
 
 func (p *frontSystemsProducer) write(ctx context.Context, cfg *FrontSystemsProducerConfig, payload []byte) error {
+	// A plain error, not Permanent: Permanent acks and drops the message,
+	// while this one is retried and then dead-lettered with its payload, so
+	// it can be replayed once base_url is fixed. Nothing leaves the pod (#677).
+	if err := checkBaseURL(cfg.BaseURL, p.allowPrivate); err != nil {
+		return fmt.Errorf("front systems base_url refused: %w", err)
+	}
 	reqURL := strings.TrimRight(cfg.BaseURL, "/") + cfg.effectiveResource()
 	req, err := http.NewRequestWithContext(ctx, cfg.effectiveMethod(), reqURL, bytes.NewReader(payload))
 	if err != nil {
@@ -130,6 +142,20 @@ func (p *frontSystemsProducer) write(ctx context.Context, cfg *FrontSystemsProdu
 	default:
 		return sdk.Retriable(fmt.Errorf("front systems %d: %s", resp.StatusCode, snippet(body)))
 	}
+}
+
+// checkBaseURL refuses a base_url the producer must not send the keys to
+// (#677): not https, with user info, a query or a fragment, or a literal
+// private, loopback or link-local address. allowPrivate (the operator's dev
+// switch) allows http and private addresses. The dial check in the HTTP
+// client is the enforcement for a host name; this is the early, readable
+// error.
+func checkBaseURL(raw string, allowPrivate bool) error {
+	// safeurl's message quotes the URL; keep a password out of the logs.
+	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.User != nil {
+		return errors.New("base_url must not carry a user name or password")
+	}
+	return safeurl.CheckBaseURL(raw, allowPrivate)
 }
 
 func snippet(b []byte) string {
