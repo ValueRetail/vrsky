@@ -70,7 +70,30 @@ thing to clone when starting a new connector. It shows `Configure` (read env),
 | `sdk.Retriable(err)` | NAK → redeliver with backoff → DLQ after `MaxDeliveryAttempts` |
 | `sdk.Permanent(err)` | ack + log — poison message, retrying can't help |
 | `sdk.RateLimited(err, d)` | NAK (retriable); the delay `d` is preserved via `RetryAfter` |
+| `sdk.ConfigUnavailable(err)` | NAK like Retriable, plus an Error log line with the connection id |
 | any other error | Retriable (safe default) |
+
+### Reading the connection's config
+
+Every producer on the shared durable sees every connection's messages and
+acks the ones that are not its own. "Not mine" must be a definite answer: the
+connection does not exist, or has no node of your type. A config or secret
+read that fails (a database blip, a failover, a secret that will not decrypt)
+is not that answer. Acking then loses the message.
+
+- Pass the connection query's error through `sdk.ConfigReadError(err)`. It
+  keeps `sql.ErrNoRows` as a plain "connection not found" and marks anything
+  else `sdk.ErrConfigUnavailable`.
+- Wrap a secret resolution error in `sdk.ConfigUnavailable(err)`, and resolve
+  secrets only for your own nodes: another connector's broken secret is not
+  a reason to hold the message.
+- In `Deliver`, return the error when `sdk.IsConfigUnavailable(err)`; ack the
+  rest as "not mine".
+- If you implement `sdk.ConnectionScoped`, answer
+  `err == nil || sdk.IsConfigUnavailable(err)` from `ServesConnection`, so
+  `Deliver` runs and returns the error. A false answer acks.
+
+`harness.RunConfigReadCases` checks all of this against a sqlmock database.
 
 ## Custom HTTP handlers
 

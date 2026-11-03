@@ -83,6 +83,9 @@ func (p *brightpearlProducer) Deliver(ctx context.Context, env *envelope.Envelop
 	}
 	cfg, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Brightpearl producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -207,7 +210,7 @@ func (p *brightpearlProducer) getConfig(ctx context.Context, connectionID, tenan
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -218,17 +221,21 @@ func (p *brightpearlProducer) getConfig(ctx context.Context, connectionID, tenan
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "brightpearl" || nc.Brightpearl == nil {
 			continue
 		}
-		if nc.Type == "brightpearl" && nc.Brightpearl != nil {
-			return nc.Brightpearl, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.Brightpearl == nil {
+			continue
+		}
+		return nc.Brightpearl, nil
 	}
 	return nil, errors.New("no brightpearl producer node found")
 }
@@ -241,5 +248,6 @@ func (p *brightpearlProducer) ServesConnection(ctx context.Context, tenantID, co
 		return false
 	}
 	_, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }
