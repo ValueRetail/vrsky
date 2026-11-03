@@ -124,6 +124,22 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 	return nil
 }
 
+// RedactURL returns raw in a form that is safe to log, show in the activity
+// feed or put in an error: a user name or password is replaced with "xxxxx"
+// (a user name is often the API key, so Redacted() alone, which keeps it, is
+// not enough). A string that does not parse becomes a fixed placeholder, as
+// parse errors quote the input. The request itself keeps using the real URL.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "[invalid URL]"
+	}
+	if u.User != nil {
+		u.User = url.User("xxxxx")
+	}
+	return u.Redacted()
+}
+
 // CheckRequestURL checks a complete request URL for a connector whose target is
 // free-form (the API consumer): http or https, a host, and not a literal
 // blocked IP. Unlike CheckBaseURL it allows http, a query string and userinfo,
@@ -132,13 +148,13 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 func CheckRequestURL(raw string, allowPrivate bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
-		return fmt.Errorf("url %q is not an absolute URL", raw)
+		return fmt.Errorf("url %s is not an absolute URL", RedactURL(raw))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("url %q must use http or https", raw)
+		return fmt.Errorf("url %s must use http or https", RedactURL(raw))
 	}
 	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && BlockedAddr(addr) {
-		return fmt.Errorf("url %q points at a private, loopback or link-local address", raw)
+		return fmt.Errorf("url %s points at a private, loopback or link-local address", RedactURL(raw))
 	}
 	return nil
 }

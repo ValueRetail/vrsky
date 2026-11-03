@@ -11,6 +11,7 @@ import (
 	iolib "io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -288,9 +289,13 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		payloadPreview = payloadPreview[:2000] + "..."
 	}
 
+	// httpCfg.URL may carry user:pass@; everything the producer logs, emits or
+	// returns uses shownURL. Requests use httpCfg.URL.
+	shownURL := safeurl.RedactURL(httpCfg.URL)
+
 	p.emitEvent(connectionID, HTTPEvent{
 		Type:    "info",
-		Message: fmt.Sprintf("Sending %d bytes to %s", size, httpCfg.URL),
+		Message: fmt.Sprintf("Sending %d bytes to %s", size, shownURL),
 		Payload: payloadPreview,
 		Time:    now(),
 	})
@@ -303,7 +308,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	// Bad URL won't improve on retry — drop early (validated once).
 	if _, err := http.NewRequestWithContext(ctx, method, httpCfg.URL, nil); err != nil {
 		p.emitEvent(connectionID, HTTPEvent{
-			Type: "error", Message: "Failed to create request: " + err.Error(),
+			Type: "error", Message: "Failed to create request: " + requestErrText(err),
 			Time: now(),
 		})
 		return nil
@@ -353,7 +358,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 			// opaque 500 — fall back to sending unauthenticated and warn. A
 			// proper "reconnect required" hint in the UI is tracked in #98.
 			p.logger.Warn("OAuth output has no grant selected; sending without authentication (reconnect the grant to authenticate)",
-				"connection_id", connectionID, "url", httpCfg.URL)
+				"connection_id", connectionID, "url", shownURL)
 		} else if httpCfg.AuthType == "oauth" {
 			tok, terr := p.resolveToken(ctx, env.TenantID, httpCfg.OAuthGrantID, force)
 			if terr != nil {
@@ -361,7 +366,11 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 			}
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
-		return client.Do(req)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, redactTransportErr(err, shownURL)
+		}
+		return resp, nil
 	}
 
 	resp, err := buildAndSend(false)
@@ -399,7 +408,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		p.logger.Info("HTTP request sent", "connection_id", connectionID, "status", resp.StatusCode, "size", size)
 		p.emitEvent(connectionID, HTTPEvent{
-			Type: "sent", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
+			Type: "sent", Message: fmt.Sprintf("%s %s → %d", method, shownURL, resp.StatusCode),
 			StatusCode: resp.StatusCode, Payload: payloadPreview, Response: respPreview,
 			Time: now(),
 		})
@@ -408,7 +417,7 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 
 	p.logger.Error("HTTP request returned error", "status", resp.StatusCode, "connection_id", connectionID)
 	p.emitEvent(connectionID, HTTPEvent{
-		Type: "error", Message: fmt.Sprintf("%s %s → %d", method, httpCfg.URL, resp.StatusCode),
+		Type: "error", Message: fmt.Sprintf("%s %s → %d", method, shownURL, resp.StatusCode),
 		StatusCode: resp.StatusCode, Response: respPreview,
 		Time: now(),
 	})
@@ -416,6 +425,28 @@ func (p *httpProducer) sendHTTPRequest(ctx context.Context, connectionID string,
 		return fmt.Errorf("upstream %d", resp.StatusCode) // retriable
 	}
 	return nil // 4xx — don't retry
+}
+
+// requestErrText is the text of an http.NewRequest error that is safe to show.
+// A bad URL comes back as a *url.Error that quotes the whole input, user:pass@
+// included, so only a fixed message is shown for it.
+func requestErrText(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return "URL is not valid"
+	}
+	return err.Error()
+}
+
+// redactTransportErr rewrites an http.Client error so it no longer quotes the
+// request URL: the standard library hides the password but keeps the user name,
+// the path and the query. The cause is still wrapped, so errors.Is sees it.
+func redactTransportErr(err error, shownURL string) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("%s %q: %w", ue.Op, shownURL, ue.Err)
+	}
+	return err
 }
 
 // getHTTPConfigs returns all HTTP-producer node configs for a connection (with

@@ -1140,9 +1140,9 @@ Last updated 2026-10-28.
     `X-Vrsky-Last-Error` header, which the tenant can read (Visma, Sitoo and
     the others). Part of #639. Found in review of #669 and #668.
 
-161. **The HTTP producer logs its URL with userinfo.** Logs and events print
-    `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
-    Predates #669. Found in review of #669.
+161. ~~**The HTTP producer logs its URL with userinfo.**~~ (#689) Logs and
+    events print `httpCfg.URL` raw, credentials in `user:pass@` included. Use
+    `u.Redacted()`. Predates #669. Found in review of #669.
 
 162. **A non-UUID tenant id answers 503.** Since #662 any `GetTenantByID`
     error that is not "not found" is a 503 with an Error log line. A tenant
