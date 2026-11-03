@@ -1056,7 +1056,7 @@ Last updated 2026-10-28.
     became an empty tenant list and a 200, so a database blip right after the
     session check showed a signed-in user with no workspaces. Now a 503, as
     for the session lookup. Found in #634.
-150. **`TenantMemberMiddleware` turns a failed tenant read into a 404.** After
+150. ~~**`TenantMemberMiddleware` turns a failed tenant read into a 404.**~~ (#662) After
     the membership check, any `GetTenantByID` error answers 404 "tenant not
     found", so a database blip on a tenant route looks like a deleted
     workspace. Tell `sql.ErrNoRows` (or the repository's not-found error)
