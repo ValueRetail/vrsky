@@ -7,6 +7,7 @@
 import { create } from 'zustand'
 import type { Canvas, Node, Edge } from '../types/pipeline'
 import { syncWithServerName } from '../services/deployPipeline'
+import { useUIStore } from './uiStore'
 
 const STORAGE_KEY_PREFIX = 'vrsky:canvases:v1'
 
@@ -53,12 +54,27 @@ const loadFromStorage = (tenantId?: string): { canvases: Canvas[]; currentCanvas
   return { canvases: [], currentCanvasId: null }
 }
 
-// Helper to save to localStorage
+// True while the last save failed (quota full, storage disabled). A save runs
+// on every edit, so the user is warned on the first failure only; the next
+// successful save clears this and a later failure warns again.
+let saveFailing = false
+
+// Helper to save to localStorage. A failed save keeps the in-memory canvas;
+// the user hears about it once, because a reload would bring back the last
+// good save.
 const saveToStorage = (canvases: Canvas[], currentCanvasId: string | null, tenantId?: string): void => {
   try {
     localStorage.setItem(getStorageKey(tenantId), JSON.stringify({ canvases, currentCanvasId }))
+    saveFailing = false
   } catch (error) {
     console.warn('Failed to save canvases to localStorage:', error)
+    if (saveFailing) return
+    saveFailing = true
+    useUIStore.getState().showWarningNotification(
+      "Can't save locally",
+      "Your browser's storage is full or blocked, so this pipeline is not being saved. Changes are lost on reload unless you deploy.",
+      10_000
+    )
   }
 }
 
