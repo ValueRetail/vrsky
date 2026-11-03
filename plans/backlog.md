@@ -386,7 +386,7 @@ Last updated 2026-10-28.
     LoadBalancer) for those connections, or a switch to ingress-nginx
     `auth-tls-*` with the CA check moved to the edge. Then update the
     whitepaper §4 and `docs/connectors/http.md`. Ingress and manifests: PR
-    plus `agent:needs-human`. Found in #407.
+    plus `agent:needs-human`. Found in #407. Filed as #454.
 60. ~~**The File watcher panel's `connected` event shows the full volume
     path**~~ (#455) (`src/cmd/file-consumer/server.go`, `handleEvents`): "Watching
     /data/input/<tenant-id>/orders". It's the tenant's own folder, but the
@@ -561,7 +561,7 @@ Last updated 2026-10-28.
     retention holds only chunked archives, i.e. 14 days after #471 reaches
     production and the CronJob has run on it. Until then restore still
     opens archives sealed directly under `ENCRYPTION_KEY`; removing it
-    finishes the key separation. Found in review of #471.
+    finishes the key separation. Found in review of #471. Filed as #722.
 86. ~~**The file destination's host folder is fixed to `data/output`.**~~ (#553)
     #422 lets `.env` pick the host folder behind `/data/input`
     (`VRSKY_FILES_HOST_DIR`), but file-producer still mounts the
@@ -762,7 +762,7 @@ Last updated 2026-10-28.
     snapshot, which on a quiet folder can be days. A restart in between
     publishes those names again. Bound it: compare the snapshot's gen every
     Nth save, or force a snapshot after N changes-only saves or X minutes.
-    Found in review of #538.
+    Found in review of #538. Filed as #723.
 110. ~~**The SFTP and cloud-storage consumers never retry a failed
     after-action.**~~ (#640) A file whose `delete` or `move` failed is done, so it
     stays in the folder for good; before #538 a restart published it again
@@ -875,7 +875,7 @@ Last updated 2026-10-28.
     of `readBackupHeader` and `backupKDFInfo`, and with item 85 the
     `--allow-unbound` flag and the unbound warning, so every archive
     restore accepts is bound to its key. Update `docs/DR.md` and
-    `docs/operator/backup.md`. Found in #549.
+    `docs/operator/backup.md`. Found in #549. Filed as #722.
 133. **A cloud-storage start the consumer refuses leaves the connection
     `running`, ingesting nothing.** `StartConnection` in
     `src/pkg/managementapi/handler.go` writes `running` once the
@@ -888,7 +888,7 @@ Last updated 2026-10-28.
     with the reason) and/or have the worker write `error`; and show the
     rule at the "Move to prefix" field in
     `ui/src/components/Pipeline/PropertyEditor.tsx`. The rule is the
-    consumer's `validateMoveOutsideListing`. Found in review of #567.
+    consumer's `validateMoveOutsideListing`. Found in review of #567. Filed as #724.
 134. ~~**Check `move_prefix` in cloud-storage event mode once it applies
     `prefix`.**~~ (#594) Event mode ignores `prefix` (item 120), so #567 checks the
     start in poll mode only and relies on `afterAction` refusing a move
@@ -907,14 +907,14 @@ Last updated 2026-10-28.
     `sort=orderid` behaves as documented before the template changes. The
     `incremental` key also goes into `consumer/sitoo` in
     `ui/src/types/nodeConfig.ts`, or templates.test.ts rejects it. Found
-    during #457.
+    during #457. Filed as #738.
 127. **Sitoo incremental for collections other than `orders`.** #457 ships
     it for `orders` only, because `orderid` is unique and the API reference
     documents both its filter and its sort. `products` has a
     `datelastmodified` filter but no documented sort, and a timestamp cursor
     is not unique, so records sharing a second need a tiebreaker. Needs a
     Sitoo sandbox to check sort and tie order first. Found in review of
-    #457 (#472).
+    #457 (#472). Filed as #738.
 128. ~~**A far-future cursor value freezes the BC consumer's cursor**
     (`cursorTracker`).~~ (#591) One record stamped years ahead sets the watermark
     there, and every later poll asks only for records after it. Ignore or
@@ -945,7 +945,7 @@ Last updated 2026-10-28.
     Front Systems included. Move the retry loop next to `StartGuard` in the
     SDK (each consumer keeps its own transient/permanent split) and have
     `RestoreRunning` retry its list with the same backoff. SDK change, so
-    alone. Found in #503.
+    alone. Found in #503. Filed as #725.
 136. **Replay Front Systems events refused while a connection wasn't
     running.** Front Systems doesn't resend: an event answered 503 (start in
     progress or waiting to retry, boot restore, shutdown) stays failed in
@@ -956,7 +956,7 @@ Last updated 2026-10-28.
     would be published twice, so it needs the event id as an idempotency key
     first. After a start activates, read the failed events since the
     connection last stopped and resend those; events refused with 410 after
-    a stop were refused on purpose and stay. Found in #503.
+    a stop were refused on purpose and stay. Found in #503. Filed as #726.
 137. ~~**Decide whether `ui/src/pages/PipelineBuilder.tsx` goes into
     `coverage.exclude` in `ui/vitest.config.ts`.**~~ (#652) Decided: yes. A
     page-level deploy test (real page and stores, mocked canvas widgets)
@@ -973,7 +973,7 @@ Last updated 2026-10-28.
     by stream, sequence and target, with a TTL of the main stream's 72 h.
     A KV bucket is stream configuration: PR plus `agent:needs-human`. Worth
     it only if duplicates after a deploy turn out to matter to a customer.
-    Found in #587.
+    Found in #587. Filed as #727.
 139. ~~**The SFTP test-connection preview can sample a temp file.**~~ (#601)
     `src/cmd/sftp-consumer/server.go` (~line 138) picks the first file
     matching `file_pattern`; with no pattern it can sample a `.part` or
@@ -1096,7 +1096,7 @@ Last updated 2026-10-28.
     #651 removed `/metrics/stream`; the WebSocket route runs the same
     handler and nothing in the UI opens it. Remove it with `ClientRegistry`
     and `MetricsCache` if they have no other use. Public route, so PR plus
-    `agent:needs-human`. Found in #651.
+    `agent:needs-human`. Found in #651. Filed as #728.
 155. ~~**Platform plan and quota changes are audited under the wrong tenant.**~~ (#685)
     The audit middleware files an entry under the caller's context tenant,
     so `platform.plan.set` lands in the operator's own workspace log, and
@@ -1112,7 +1112,7 @@ Last updated 2026-10-28.
     server certificate: cert-manager's metrics are not scraped. Add a
     PodMonitor and a rule on `certmanager_certificate_expiration_timestamp_seconds`
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
-    touches workflows). Found in #453.
+    touches workflows). Found in #453. Filed as #729.
 
 157. ~~**The builder loses work silently when localStorage is full.**~~ (#673)
     `canvasStore.saveToStorage` catches a failed `setItem` and only calls
@@ -1135,7 +1135,7 @@ Last updated 2026-10-28.
     five times and then dead-lettered, so the healthy sibling gets duplicates,
     and again on DLQ replay. Per-node ack/DLQ, or skipping nodes that already
     succeeded on redelivery (as #587 does for remote-agent multi-target
-    writes), would fix it. Found in review of #669.
+    writes), would fix it. Found in review of #669. Filed as #730.
 
 160. **`safeurl` dial errors show the resolved private address to the tenant.**
     The error text includes the resolved IP and reaches the tenant's activity
@@ -1143,7 +1143,7 @@ Last updated 2026-10-28.
     the address in the server log and give the user "target address not
     allowed". The same text lands in a dead-lettered message's
     `X-Vrsky-Last-Error` header, which the tenant can read (Visma, Sitoo and
-    the others). Part of #639. Found in review of #669 and #668.
+    the others). Part of #639. Found in review of #669 and #668. Filed as #717.
 
 161. ~~**The HTTP producer logs its URL with userinfo.**~~ (#689) Logs and
     events print `httpCfg.URL` raw, credentials in `user:pass@` included. Use
@@ -1154,7 +1154,7 @@ Last updated 2026-10-28.
     id in the path or `X-Tenant-ID` that isn't a UUID most likely makes
     Postgres reject the query, so a client mistake reads as an outage and an
     authenticated user can fill the log with it. Validate the id up front and
-    answer 403 or 404. Found in review of #675.
+    answer 403 or 404. Found in review of #675. Filed as #731.
 
 163. ~~**`safeurl.CheckURL(field, raw, allowPrivate)`.**~~ (#700) `pkg/vismaurl` names
     `token_url` in its errors by trimming the `base_url` prefix off
@@ -1176,7 +1176,7 @@ Last updated 2026-10-28.
     `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
     current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
     Check Brightpearl's own API docs and change the default if it moved.
-    Found in review of #674.
+    Found in review of #674. Filed as #732.
 
 166. ~~**The first after-action still deletes or moves blind.**~~ (#707) In event and
     poll mode the first (non-retry) `delete` or `move` after a publish runs
@@ -1189,7 +1189,7 @@ Last updated 2026-10-28.
     check leaves a window between the Stat and the delete (for a `move`,
     through the copy). Close it where the store supports it: Azure `If-Match`
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
-    Found in review of #676.
+    Found in review of #676. Filed as #718.
 
 168. ~~**Audit entries have no actor (high priority).**~~ (#695) `AuditMiddleware`
     reads the user from the request it wraps, but `SessionAuthMiddleware` and
@@ -1228,7 +1228,7 @@ Last updated 2026-10-28.
     refusal, the sample-data endpoints of Sitoo, the API consumer, SAP and
     others return the raw error text, and a DNS failure names the cluster
     resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
-    texts and log the detail. Found in review of #680.
+    texts and log the detail. Found in review of #680. Filed as #717.
 
 173. ~~**Start-time URL checks in the management API for every safeurl
     connector.**~~ (#708) Sitoo, the API consumer, the HTTP producer and Visma are
@@ -1245,7 +1245,7 @@ Last updated 2026-10-28.
     `mcr.microsoft.com/`, `ghcr.io/` and `localhost`. It also covers only
     Dockerfiles and the buildx driver: workflow `services:` images, `docker
     run` images in workflows and the compose images CI starts can drift back
-    to Docker Hub unnoticed. Found in review of #694.
+    to Docker Hub unnoticed. Found in review of #694. Filed as #720.
 
 175. **Ordered resume for Business Central incremental polls.** A poll that
     hits the 10 000-page cap (#699) keeps its old watermark, so every later
@@ -1256,7 +1256,7 @@ Last updated 2026-10-28.
     largest value strictly below the last value read, and rebuild the
     date-cursor remembered set for that prefix. First check against a live
     BC that server paging keeps its place with a non-key `$orderby`, and how
-    slow it is on large tables. Found in review of #701.
+    slow it is on large tables. Found in review of #701. Filed as #733.
 
 176. **`RedactURL` keeps a password that lands in the query.** For
     `http://apikey:1234?secret@host` url.Parse reads host `apikey`, port
@@ -1264,7 +1264,7 @@ Last updated 2026-10-28.
     because the HTTP producer's test pins `?email=a@b` as shown. #700 made
     `CheckBaseURL` stricter on its own; the HTTP producer and
     `CheckRequestURL` still show it. Decide whether "@" in a query with no
-    userinfo should become `[invalid URL]` there too. Found in #700.
+    userinfo should become `[invalid URL]` there too. Found in #700. Filed as #717.
 
 177. **Decide whether permanent errors should be replayable.** Today a 4xx
     from the target (`401`/`403` included), an incomplete node and a payload
@@ -1276,7 +1276,7 @@ Last updated 2026-10-28.
     Decide per case, and if some move to the DLQ, mark them so a retry does
     not loop for a message that can never work. The behaviour is listed in
     `docs/operator/troubleshooting.md`; update it with the change. Found in
-    #698.
+    #698. Filed as #734.
 
 178. ~~**A failed config read drops the message (high priority).**~~ (#704) Filed as
     #704. Every
@@ -1312,7 +1312,7 @@ Last updated 2026-10-28.
     once the node is fixed. Make it `sdk.Retriable`; the existing
     `TestDeliver_RefusesBadBaseURL` (`src/cmd/sitoo-producer/base_url_test.go`,
     ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
-    in #698.
+    in #698. Filed as #721.
 
 181. **Salesforce REST writes skip rejected records and ack the message.**
     `restWrite` logs a `4xx` per record and moves on; the message is acked
@@ -1322,7 +1322,7 @@ Last updated 2026-10-28.
     whether the rejected records should be dead-lettered (as their own
     message) and whether retries should skip what already succeeded. The Bulk
     API path retries every non-`2xx`, a `4xx` too, so the two paths disagree.
-    Found in #698.
+    Found in #698. Filed as #735.
 
 182. **`sdk.RateLimited` carries a delay nothing reads.** `sdk.RetryAfter` has
     no caller; the SDK NAKs and the redelivery follows the fixed backoff
@@ -1330,7 +1330,7 @@ Last updated 2026-10-28.
     Brightpearl, Business Central and SAP pass. Either honour it (NAK with a
     delay) or make the connectors use `sdk.Retriable` and say so. The Sitoo
     and Front Systems pages used to promise the hint; #698 removed that. Found
-    in #698.
+    in #698. Filed as #721.
 
 183. **`docs/connectors/database.md` describes a destination config the code
     does not read.** The page shows `connection_string_secret_id`, `table` and
@@ -1340,20 +1340,20 @@ Last updated 2026-10-28.
     `host`. Check the editor and the consumer, then fix the page. The rest of
     `docs/NATS_ARCHITECTURE.md` (the retry sketch above "Dead Letter Queue",
     the `dead_letter_queue` stream name, who is notified) also predates the
-    five-attempt DLQ; check it against `pkg/messaging`. Found in #698.
+    five-attempt DLQ; check it against `pkg/messaging`. Found in #698. Filed with #705.
 
 184. **SAP sessions are never logged off.** Since #682 every delivery opens
     its own SAP security session (a fresh cookie jar), and nothing logs it
     off, so sessions pile up per technical user until SAP's idle timeout.
     Some SAP setups cap them. Watch the session count on the first real SAP
     tenant; if it matters, log off at the end of a delivery. Found in review
-    of #696.
+    of #696. Filed as #736.
 
 185. **Creating a workspace is not audited.** `POST /api/v1/tenants` sits
     behind the session check only, with no workspace in the context, so
     `AuditMiddleware` drops it. File it under the created workspace once the
     handler has it (`recordAuditVerifiedTenant` after the insert, as
-    `HandleAcceptInvite` does since #695). Found in #695.
+    `HandleAcceptInvite` does since #695). Found in #695. Filed as #719.
 
 186. **Anonymous requests are filed under any `X-Tenant-ID`.** A request
     with no valid credential that sends a workspace id in the header is
@@ -1361,7 +1361,7 @@ Last updated 2026-10-28.
     can add rows to any workspace's audit log. Predates #695, which stopped
     it only for authenticated callers. Decide which unauthenticated routes
     need an audit entry at all (failed logins, say, belong in a security
-    log, not a tenant's), and drop the rest. Found in review of #697.
+    log, not a tenant's), and drop the rest. Found in review of #697. Filed as #719.
 
 187. **SAP and Business Central build their default URLs twice.** Since
     #708 `pkg/connectorurl` checks the service root and token URL it builds
@@ -1370,13 +1370,13 @@ Last updated 2026-10-28.
     `effectiveTokenURL`. The host part cannot drift (checked by the host
     rule, or a Microsoft constant), but the paths could. Have the connectors
     take the builders from `pkg/connectorurl`. Left out of #708 to keep the
-    connector edits clear of #704.
+    connector edits clear of #704. Filed as #737.
 
 188. **The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**
     `docker-compose.yml` sets it on `http-producer` and both SAP services, so
     their mocks work, but the management API's start check refuses the same
     URLs: httpbin since #660, mock-sap since #708. Decide whether compose
-    sets it on `management-api` too. Found in #708.
+    sets it on `management-api` too. Found in #708. Filed as #720.
 
 189. **The poll-mode after-action retry runs blind.** The #640 retry pass
     calls `afterAction` for a key that is done at the listing's stamp,
@@ -1385,14 +1385,14 @@ Last updated 2026-10-28.
     listing and the retry, is deleted or moved unpublished. Add
     `Object.Version` to `doneset.Stamp` (compared only when both sides have
     one), or make the same Stat check as the first after-action (#707) in
-    `retryAfterAction`. Found in review of #710.
+    `retryAfterAction`. Found in review of #710. Filed as #718.
 
 190. **GCS metadata edits read as replacements.** The stamp check before a
     cloud-storage after-action compares `Updated`, which GCS changes on a
     metadata-only edit (labels, content type) while the generation stays.
     Such an object is left (event mode) or published once more (poll mode).
     On GCS compare generation and size and ignore `Updated`. Found in review
-    of #710.
+    of #710. Filed as #718.
 
 ## Human
 
@@ -1400,11 +1400,11 @@ Last updated 2026-10-28.
    groups, then set the repository variable `MONTHLY_BUDGET_NOK=1500`:
    ```bash
    for rg in vrsky-prod MC_vrsky-prod_vrsky-prod_norwayeast; do az role assignment create --assignee-object-id 647ea665-ddad-4eed-8dad-2c244e882b51 --assignee-principal-type ServicePrincipal --role "Cost Management Reader" --scope /subscriptions/8c020b54-b237-4d6e-82ba-190f6a415d1d/resourceGroups/$rg; done
-   ```
+   ``` Filed as #713.
 6. **First start on the ephemeral OS disk.** After the next `az aks start`,
-   check every pod comes back and the smoke check passes.
+   check every pod comes back and the smoke check passes. Filed as #714.
 7. **Rename the three production pipelines** in the builder (open, rename
-   the tab, Deploy); they are still named after the time of a deploy.
+   the tab, Deploy); they are still named after the time of a deploy. Filed as #715.
 8. ~~**Delete the four disk snapshots after 2026-10-29**~~ (#434, done 2026-10-29)
    (`nats-{0,1,2}-before-shrink-20261022`, `minio-before-shrink-20261022`
    in `MC_vrsky-prod_vrsky-prod_norwayeast`).
@@ -1412,5 +1412,5 @@ Last updated 2026-10-28.
    against a real Sitoo sandbox and the BC trial before they return to the
    gallery (`plans/template-fields.md`). While there, check which
    collection holds POS receipts (`transactions` or `orders`) and that
-   `incremental: true` sends each one once (#457, agent item 126).
-10. **Close #266** (the remote agent shipped).
+   `incremental: true` sends each one once (#457, agent item 126). Filed as #716.
+10. ~~**Close #266** (the remote agent shipped).~~ (done, #266 is closed)
