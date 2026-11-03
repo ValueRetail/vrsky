@@ -45,7 +45,9 @@ same hole with `pkg/safeurl`.
   another host.
 - The consumer on a refused URL: logs the error and does not start the poller
   (same as other config errors in `startConnection`). The producer returns a
-  permanent error, so the envelope goes to the DLQ and is not retried.
+  retryable error, not `sdk.Permanent` (which acks and drops): the envelope is
+  retried, then dead-lettered with its payload, and can be replayed once the
+  field is fixed. Same choice as #669 and #674.
   Sample-data answers `ok:false` with the reason.
 - The producer reads its config on every delivery and checks it each time. The
   consumer reads it once at start; a changed config takes effect on the next

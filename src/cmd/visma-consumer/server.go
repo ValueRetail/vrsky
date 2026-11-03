@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/vismaurl"
 )
 
@@ -78,6 +80,15 @@ func (c *vismaConsumer) handleSampleData() http.HandlerFunc {
 		tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.Scope).WithHTTPClient(c.httpClient)
 		body, err := c.get(r.Context(), &cfg, tok)
 		if err != nil {
+			if errors.Is(err, safeurl.ErrBlockedAddress) {
+				// Which address a name resolved to is internal detail: log
+				// it, do not hand it to the caller.
+				if c.logger != nil {
+					c.logger.Warn("sample-data target refused at dial", "error", err)
+				}
+				writeErr("target address not allowed")
+				return
+			}
 			writeErr(err.Error())
 			return
 		}

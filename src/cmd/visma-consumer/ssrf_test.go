@@ -136,6 +136,34 @@ func TestSampleData_RefusesBadURLs(t *testing.T) {
 	}
 }
 
+// A token_url whose host resolves to loopback passes the string check. The
+// sample-data token request must go through the safe client, and the answer
+// must not tell the tenant which address the name resolved to: that would be
+// a DNS oracle for in-cluster names.
+func TestSampleData_HostnameResolvingToLoopbackHidesTheAddress(t *testing.T) {
+	port, accepted := tcpCounter(t)
+	c := &vismaConsumer{
+		httpClient: safeurl.NewClient(5*time.Second, false), // what Configure builds
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	body := fmt.Sprintf(`{"client_id":"id","client_secret":"sec","base_url":%q,"token_url":"https://localhost:%s/token","scope":"s","resource":"SalesOrders"}`, publicBase, port)
+	w := httptest.NewRecorder()
+	c.handleSampleData()(w, httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body)))
+
+	got := w.Body.String()
+	if n := accepted.Load(); n != 0 {
+		t.Errorf("the token request opened %d connections to loopback, want none", n)
+	}
+	if !strings.Contains(got, `"ok":false`) || !strings.Contains(got, "target address not allowed") {
+		t.Errorf(`want ok=false with "target address not allowed", got %s`, got)
+	}
+	for _, leak := range []string{"127.0.0.1", "::1", "dial tcp"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("the answer leaks the resolved address (%q): %s", leak, got)
+		}
+	}
+}
+
 // Configure is where the production client is built. These tests run it with
 // no client injected and look at what that client does, so a plain
 // http.Client fails here and not only in prod.

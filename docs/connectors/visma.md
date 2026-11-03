@@ -31,8 +31,9 @@ address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`,
 - The management API refuses such a URL when the connection is started, with
   the reason in the error.
 - The connector checks again at start. A consumer that is refused does not
-  start and logs why; a producer sends the message to the DLQ with the reason
-  instead of retrying.
+  start and logs why. A producer sends nothing; the message is retried and
+  then dead-lettered with its payload, so it can be replayed once the URL is
+  fixed.
 - Every request (token and API) is also checked when the connection is made,
   on the address actually connected to, so a hostname that resolves to a
   private address is refused too.

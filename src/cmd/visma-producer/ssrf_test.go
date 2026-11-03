@@ -77,8 +77,10 @@ func TestDeliver_RefusesBadURLs(t *testing.T) {
 			if err == nil {
 				t.Fatal("Deliver accepted the URL, want an error")
 			}
-			if !sdk.IsPermanent(err) {
-				t.Errorf("error %v is not Permanent: retrying cannot fix the config", err)
+			// Permanent acks and drops the message; a refusal must be retried
+			// and then dead-lettered so the payload can be replayed.
+			if sdk.IsPermanent(err) {
+				t.Errorf("error %v is Permanent: the message would be dropped instead of dead-lettered", err)
 			}
 			if strings.HasPrefix(tt.name, "token_url") && !strings.Contains(err.Error(), "token_url") {
 				t.Errorf("the error should name token_url, got %v", err)

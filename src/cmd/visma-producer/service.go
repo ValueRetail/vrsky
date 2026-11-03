@@ -94,11 +94,12 @@ func (p *vismaProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	if cfg.BaseURL == "" || cfg.Scope == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.Resource == "" {
 		return sdk.Permanent(fmt.Errorf("visma producer config incomplete for connection %s", env.IntegrationID))
 	}
-	// A refused URL is a config error: retrying cannot fix it, so it goes to the
-	// DLQ with the reason instead of being redelivered for ever (#661).
+	// A refused URL is retried and then dead-lettered with its payload, so the
+	// message can be replayed once the tenant fixes the field (#661). Not
+	// sdk.Permanent: that acks and drops the message.
 	if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, p.allowPrivate); err != nil {
-		p.logger.Error("dropping: Visma URL refused", "connection_id", env.IntegrationID, "error", err)
-		return sdk.Permanent(err)
+		p.logger.Error("Visma URL refused", "connection_id", env.IntegrationID, "error", err)
+		return sdk.Retriable(err)
 	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
