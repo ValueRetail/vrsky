@@ -71,8 +71,12 @@ Each entry shows:
 - **When** it happened
 - The **HTTP status** of the action
 
-Plan and limit changes made by the VRSky operator show up here too, with
-the operator as who.
+Who is the signed-in user's email, or `API key (<workspace>)` when a
+workspace API key made the call. Refused attempts are recorded too, with
+whoever tried. Changes to the workspace itself (members, plan requests, the
+API key) are in its log, whichever workspace you had selected. Plan and limit
+changes made by the VRSky operator show up here too, with the operator as
+who.
 
 You can **filter** the log by **action**, **resource**, and **date**, and
 **export as JSONL** for archiving or analysis.

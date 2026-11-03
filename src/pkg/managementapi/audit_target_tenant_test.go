@@ -163,11 +163,9 @@ func TestAudit_OtherRoutesKeepContextTenant(t *testing.T) {
 	}{
 		{"owner creates a connection", http.MethodPost, "/api/v1/connections", billTenant, "tokOwner", map[string]any{"name": ""}},
 		{"operator creates a connection in own workspace", http.MethodPost, "/api/v1/connections", opsWorkspace, "tokOps", map[string]any{"name": ""}},
-		// Production puts no workspace in the context for /api/v1/tenants/*
-		// (TenantIDMiddleware skips them), so there this request is not
-		// audited at all (backlog 169). The injected one checks only that the
-		// route does not redirect the entry to the path's tenant.
-		{"owner asks for a plan", http.MethodPost, "/api/v1/tenants/" + billTenant + "/plan-requests", opsWorkspace, "tokOwner", map[string]any{"plan": PlanPaid}},
+		// Owner writes under /api/v1/tenants/{tenant_id}/* go to the path's
+		// workspace once the membership check passed (#695); see
+		// TestAudit_OwnerTenantWritesFileUnderPathTenant.
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

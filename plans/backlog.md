@@ -1190,7 +1190,7 @@ Last updated 2026-10-28.
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
     Found in review of #676.
 
-168. **Audit entries have no actor (high priority).** `AuditMiddleware`
+168. ~~**Audit entries have no actor (high priority).**~~ (#695) `AuditMiddleware`
     reads the user from the request it wraps, but `SessionAuthMiddleware` and
     the API-key check add the principal further in, per route, so `user_id`
     and `actor_label` stay empty on every entry, while the Settings page
@@ -1199,7 +1199,7 @@ Last updated 2026-10-28.
     the session and API-key middleware record the principal in the audit bag,
     with `actor_kind` `api_key` for keys. Found in #685.
 
-169. **Owner writes under `/api/v1/tenants/*` are never audited.**
+169. ~~**Owner writes under `/api/v1/tenants/*` are never audited.**~~ (#695)
     Plan requests, members, invites and API-key rotation write nothing to
     `audit_log` in production. `TenantIDMiddleware` skips `/api/v1/tenants`,
     and `TenantMemberMiddleware` sets the tenant only on the inner context,
@@ -1245,6 +1245,14 @@ Last updated 2026-10-28.
     Dockerfiles and the buildx driver: workflow `services:` images, `docker
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694.
+
+175. **Creating a workspace and accepting an invite are not audited.**
+    `POST /api/v1/tenants` and `POST /api/v1/invites/accept` sit behind the
+    session check only, with no workspace in the context, so
+    `AuditMiddleware` drops them; the invite handler's `member.invite.accept`
+    action is never written. File them under the created or joined
+    workspace once the handler knows it (the bag's member tenant, set by the
+    handler after the write succeeded). Found in #695.
 
 ## Human
 

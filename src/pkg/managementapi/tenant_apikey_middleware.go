@@ -41,6 +41,7 @@ func TenantAPIKeyMiddleware(repo Repository) func(http.Handler) http.Handler {
 				return
 			}
 
+			recordAuditAPIKey(r.Context(), tenant)
 			ctx := context.WithValue(r.Context(), requestingTenantKey, tenant)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

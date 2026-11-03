@@ -15,8 +15,8 @@ import (
 //
 // Wraps every state-changing API call. The middleware:
 //   1. Decides whether the call is auditable (POST/PUT/PATCH/DELETE on
-//      /api/v1/*, with a tenant in context, or one the route names through
-//      AuditUnderPathTenant).
+//      /api/v1/*, with a tenant in context, one TenantMemberMiddleware let
+//      the caller into, or one the route names through AuditUnderPathTenant).
 //   2. Captures method, path, status, request_id, IP, user-agent.
 //   3. Lets the handler enrich the entry by calling SetAuditDetail(ctx, k, v).
 //   4. After the handler returns, builds an AuditEntry and writes it
@@ -38,21 +38,88 @@ type auditBag struct {
 	actionOverride   string
 	resourceOverride string
 	resourceIDValue  string
-	// tenantOverride and actor file the entry under a workspace other than
-	// the caller's context tenant; see AuditUnderPathTenant.
+	// tenantOverride files the entry under the route's path tenant; see
+	// AuditUnderPathTenant.
 	tenantOverride string
-	actor          *User
+	// memberTenant is the workspace TenantMemberMiddleware let the caller
+	// into, set only after its membership check passed (#695).
+	memberTenant string
+	// actor is the principal the session or API-key check verified.
+	actor *auditActor
 }
 
-// tenant is the workspace the entry is filed under: the override when a
-// route set one, otherwise the caller's context tenant.
+// auditActor is who made the request, as stored in actor_kind, user_id and
+// actor_label.
+type auditActor struct {
+	kind   string // "user" or "api_key"
+	userID string // empty for an API key
+	label  string // the user's email, or which workspace's API key
+}
+
+// tenant is the workspace the entry is filed under: a route's explicit path
+// override first, then the workspace the membership check let the caller
+// into, otherwise the caller's context tenant.
 func (b *auditBag) tenant(contextTenant string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.tenantOverride != "" {
 		return b.tenantOverride
 	}
+	if b.memberTenant != "" {
+		return b.memberTenant
+	}
 	return contextTenant
+}
+
+// auditBagFrom returns the request's audit bag, or nil when the request did
+// not go through AuditMiddleware (not audited, or a test).
+func auditBagFrom(ctx context.Context) *auditBag {
+	b, _ := ctx.Value(auditCtxKey{}).(*auditBag)
+	return b
+}
+
+// recordAuditUser records a verified session user as the request's actor.
+// Called by the session checks once the session is valid, before the route's
+// own authorization, so a refused request still says who tried.
+func recordAuditUser(ctx context.Context, u *User) {
+	b := auditBagFrom(ctx)
+	if b == nil || u == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.actor = &auditActor{kind: "user", userID: u.ID, label: u.Email}
+}
+
+// recordAuditAPIKey records a verified tenant API key as the request's actor.
+// Keys have no name of their own (one per workspace), so the label names the
+// workspace that owns it. Never the key or its hash.
+func recordAuditAPIKey(ctx context.Context, keyTenant *Tenant) {
+	b := auditBagFrom(ctx)
+	if b == nil || keyTenant == nil {
+		return
+	}
+	label := "API key"
+	if keyTenant.Slug != "" {
+		label = "API key (" + keyTenant.Slug + ")"
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.actor = &auditActor{kind: "api_key", label: label}
+}
+
+// recordAuditMemberTenant files the request under the workspace the caller
+// was just found to be a member of. Only TenantMemberMiddleware calls it, and
+// only after its membership check passed: before that the id is whatever the
+// caller put in the path.
+func recordAuditMemberTenant(ctx context.Context, tenantID string) {
+	b := auditBagFrom(ctx)
+	if b == nil || tenantID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.memberTenant = tenantID
 }
 
 // SetAuditDetail merges a key/value into the request's audit bag. Safe to
@@ -94,19 +161,19 @@ func SetAuditResource(ctx context.Context, resourceType, resourceID string) {
 }
 
 // AuditUnderPathTenant files the request's audit entry under the route's
-// {tenant_id} path value, with the signed-in user as the actor, instead of
-// under the caller's context tenant (#685). It is for the platform
-// operator's writes to a workspace (plan, quotas): the change belongs in that
-// workspace's log, and the operator may have no workspace selected, or a
-// different one. Mount it after RequireOperator, so only a caller already
-// allowed to act on the path's workspace can file entries in its log.
+// {tenant_id} path value instead of under the caller's context tenant (#685),
+// and wins over every other source of the tenant. The actor comes from the
+// session check, as on every route. It is for the platform operator's writes
+// to a workspace (plan, quotas): the change belongs in that workspace's log,
+// and the operator may have no workspace selected, or a different one. Mount
+// it after RequireOperator, so only a caller already allowed to act on the
+// path's workspace can file entries in its log.
 func AuditUnderPathTenant(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if b, ok := r.Context().Value(auditCtxKey{}).(*auditBag); ok && b != nil {
 			if tenantID := r.PathValue("tenant_id"); tenantID != "" {
 				b.mu.Lock()
 				b.tenantOverride = tenantID
-				b.actor = GetUserFromContext(r.Context())
 				b.mu.Unlock()
 			}
 		}
@@ -263,7 +330,7 @@ func buildAuditEntry(r *http.Request, status int, tenantID string, bag *auditBag
 
 	e := &AuditEntry{
 		TenantID:     tenantID,
-		ActorKind:    "user", // session middleware or future SSO will override
+		ActorKind:    "user", // unauthenticated requests keep the column default
 		Action:       action,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
@@ -275,13 +342,13 @@ func buildAuditEntry(r *http.Request, status int, tenantID string, bag *auditBag
 		UserAgent:    r.Header.Get("User-Agent"),
 		Details:      details,
 	}
-	if actor == nil {
-		actor = GetUserFromContext(r.Context())
-	}
 	if actor != nil {
-		uid := actor.ID
-		e.UserID = &uid
-		e.ActorLabel = actor.Email
+		e.ActorKind = actor.kind
+		e.ActorLabel = actor.label
+		if actor.userID != "" {
+			uid := actor.userID
+			e.UserID = &uid
+		}
 	}
 	return e
 }

@@ -73,9 +73,8 @@ audited (`quota.update`). Setting the plan again resets them to the tier.
 
 - `kubectl logs deploy/vrsky-management-api | grep "billing"` — suspensions
   ("workspace suspended", with the pipeline count) and failures.
-- Audit log: `plan.request` (not written yet: owner writes under
-  `/api/v1/tenants/*` are not audited, backlog 169), `platform.plan.set`.
-  The operator's plan and quota changes (`platform.plan.set`,
+- Audit log: `plan.request` (in the workspace's log, with the owner who
+  asked as actor), `platform.plan.set`. The operator's plan and quota changes (`platform.plan.set`,
   `tenant.plan.update`, `quota.update`) are filed in the changed
   workspace's own log with the operator as actor, not in the operator's
   selected workspace, and whether or not one is selected.

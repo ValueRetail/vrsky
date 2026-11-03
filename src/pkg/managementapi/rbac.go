@@ -111,6 +111,9 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 	// 1. Session?
 	session, user, err := repo.ValidateSession(ctx, hashed)
 	if err == nil && user != nil && session != nil {
+		// Who tried is recorded even when the role check below refuses them;
+		// the audit tenant does not depend on it (#695).
+		recordAuditUser(ctx, user)
 		role, err := repo.GetUserTenantRole(ctx, user.ID, tenantID)
 		if err != nil {
 			return ctx, "", false, err
@@ -130,6 +133,9 @@ func resolvePrincipalRole(ctx context.Context, r *http.Request, repo Repository,
 	tenant, err := repo.GetTenantByAPIKeyHash(ctx, hashed)
 	if err != nil && !isAPIKeyRejection(err) {
 		return ctx, "", false, &apiKeyLookupError{err: err}
+	}
+	if err == nil && tenant != nil && tenant.Status == "active" {
+		recordAuditAPIKey(ctx, tenant)
 	}
 	if err == nil && tenant != nil && tenant.ID == tenantID && tenant.Status == "active" {
 		ctx = context.WithValue(ctx, requestingTenantKey, tenant)
