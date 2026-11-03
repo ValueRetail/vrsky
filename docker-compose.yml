@@ -1384,6 +1384,9 @@ services:
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       # Aux HTTP port the SDK serves /sample-data on (UI's pre-deploy preview).
       WORKER_HTTP_PORT: "9290"
+      # mock-sap is http on a private address on this network, which the
+      # connector refuses by default (#678). Dev only; never set in production.
+      ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"
     ports:
       - "127.0.0.1:9290:9290"
     depends_on:
@@ -1405,6 +1408,9 @@ services:
       DATABASE_URL: "postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable"
       LOG_LEVEL: "info"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # mock-sap is http on a private address on this network, which the
+      # connector refuses by default (#678). Dev only; never set in production.
+      ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"
     depends_on:
       nats:
         condition: service_healthy

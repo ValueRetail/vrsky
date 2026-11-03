@@ -28,13 +28,16 @@ authentication with a communication user or OAuth 2.0 client credentials.
 
 A node targets one OData **entity set** inside one **service**:
 
-- `host` — e.g. `my347623.s4hana.ondemand.com` (no scheme).
+- `host` — e.g. `my347623.s4hana.ondemand.com`: a host name, optionally with
+  `:port`, and nothing else (no scheme, path or user name).
 - `service` — the OData service, e.g. `API_SALES_ORDER_SRV`.
 - `entity_set` — the entity set within it, e.g. `A_SalesOrder`.
 - `odata_version` — `v2` (default) or `v4`.
 
 For on-premise gateways or non-standard routes, set `api_base_url` to the full
 service root instead of `host` + `service`; `entity_set` is appended to it.
+Both are checked before anything is called; see
+[Which addresses it will call](#which-addresses-it-will-call).
 
 ## As a source (consumer)
 
@@ -100,8 +103,69 @@ producer re-fetches once and retries transparently.
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry with backoff; `4xx` bad-data and
-`401`/`403` auth failures are poison and go to the DLQ.
+and `503`/`5xx`/network errors retry with backoff and go to the DLQ once the
+retries are used up. Other `4xx` answers, `401`/`403` auth failures included,
+are permanent: the message is acked and dropped (the error is logged), not
+retried and not dead-lettered. An address the connector refuses (below) is
+retried like a network error and then goes to the DLQ with its payload, so it
+can be replayed once the node is fixed. Its error says the address was refused
+but not which address a name resolved to.
+
+## Which addresses it will call
+
+Every request carries the node's SAP credential (the communication user's
+password, or the OAuth2 client secret on the token call and the bearer token
+after it), and the URLs come from the node, so the connector only calls
+addresses it can trust (#678):
+
+- `host` must be one host name with an optional numeric port, so it cannot
+  carry a scheme, a path, a user name or a query that changes where the
+  request goes. It is checked wherever it is used: when there is no
+  `api_base_url`, and for OAuth2 when there is no `token_url`.
+- The service root (`api_base_url`, or the one built from `host`) and the
+  OAuth2 token URL (`token_url`, or `https://{host}/sap/bc/sec/oauth2/token`)
+  must be `https`, with a host, and no user name, query string or fragment.
+- The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. It applies to every call: the OData requests, the pagination
+  links SAP returns, the CSRF fetch and the token call. Redirects are not
+  followed.
+- Pagination links (`d.__next`, `@odata.nextLink`) stay on the service
+  root's scheme, host and port. A link to another host or port, or an `http`
+  link where the root is `https` (a TLS-terminating web dispatcher may
+  answer with one), is fetched from the configured root instead, with the
+  link's path and query, as long as that path, with `.` and `..` resolved, is
+  under the service root's path and holds no encoded dot or slash (`%2e`,
+  `%2f`) and no backslash (`\` or `%5c`). A link anywhere else stops the
+  poll with an error; the pages before it are already published. Relative
+  links, which is what SAP and `mock-sap` send, are not affected.
+
+Where it is checked: a source refuses to start its poll (the error is in the
+consumer's log), the "show data structure" preview answers with the reason,
+and a destination retries the message and then sends it to the DLQ. The
+management API does not check these fields yet when a connection is started.
+
+An `api_base_url` or `token_url` can still point at any public https host, so
+only set one for a host you trust with the credential.
+
+**Local development with mock-sap.** The operator (not the node) can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on `sap-s4hana-consumer` and
+`sap-s4hana-producer`. That allows `http` and private addresses, which is what
+`http://mock-sap:8099` needs. `docker-compose.yml` sets it on both services
+(override with `ALLOW_PRIVATE_UPSTREAMS=false`), so the dev stack and the
+nightly end-to-end keep working. The Kubernetes manifests do not set it; never
+set it in production. It does not loosen the `host` shape check.
+
+**Existing connections.** A node whose `api_base_url` or `token_url` is
+`http://` or points at a private address, or whose `host` carries more than a
+host name and port, stops working when this change is deployed: a running
+source keeps polling until its next restart, then refuses to start; a
+destination refuses the next delivery. Fix the field. An on-premise gateway
+has to be reachable on a public https address.
 
 ## Validation
 
@@ -138,7 +202,9 @@ docker compose up -d nats postgres-management management-api mock-sap \
 
 then create a connection whose nodes set
 `api_base_url: http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV` and
-`entity_set: A_SalesOrder`, and watch `docker logs vrsky-mock-sap`.
+`entity_set: A_SalesOrder`, and watch `docker logs vrsky-mock-sap`. This needs
+`ALLOW_PRIVATE_UPSTREAMS=true` on both SAP services, which `docker-compose.yml`
+sets by default.
 
 Both services are deployed to prod as of this validation
 (`infrastructure/azure/deploy-connectors-azure.sh`).
