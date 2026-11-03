@@ -1071,7 +1071,7 @@ Last updated 2026-10-28.
     (lost on restart), or list the prefix now and then in event mode just
     to sweep leftovers. Found in #640.
 
-152. **The builder's "connection gone" redeploy has no page-level test.**
+152. ~~**The builder's "connection gone" redeploy has no page-level test.**~~ (#665)
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
     when the linked one was deleted, which changes the webhook URL. Add a
     case to `PipelineBuilder.deploy.test.tsx`. Found in review of #654.
@@ -1109,6 +1109,13 @@ Last updated 2026-10-28.
     Show a toast or banner (and keep the in-memory canvas) when a save
     fails. The hook tests in #663 pin the current "no throw, memory kept"
     behaviour, not the silence. Found in #663.
+
+158. **Cancelling the "connection gone" redeploy leaves the canvas unlinked.**
+    `deployCanvas` in `ui/src/pages/PipelineBuilder.tsx` calls `link(null)`
+    as soon as the server answers 404, before the dialog asks. After Cancel
+    the canvas is unlinked, so the next Deploy click creates a new
+    connection without asking and the webhook URL changes silently. Clear
+    the link only on Confirm, or ask again on the next Deploy. Found in #665.
 
 ## Human
 
