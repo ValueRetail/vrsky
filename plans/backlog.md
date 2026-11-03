@@ -1104,6 +1104,24 @@ Last updated 2026-10-28.
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
     touches workflows). Found in #453.
 
+159. **A refused fan-out node redelivers to its healthy siblings.** In the
+    HTTP producer's `Deliver`, if one target node fails (now certain for a
+    refused private URL) and a sibling succeeds, the whole message is retried
+    five times and then dead-lettered, so the healthy sibling gets duplicates,
+    and again on DLQ replay. Per-node ack/DLQ, or skipping nodes that already
+    succeeded on redelivery (as #587 does for remote-agent multi-target
+    writes), would fix it. Found in review of #669.
+
+160. **`safeurl` dial errors show the resolved private address to the tenant.**
+    The error text includes the resolved IP and reaches the tenant's activity
+    feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
+    the address in the server log and give the user "target address not
+    allowed". Part of #639. Found in review of #669.
+
+161. **The HTTP producer logs its URL with userinfo.** Logs and events print
+    `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
+    Predates #669. Found in review of #669.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource

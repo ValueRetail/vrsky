@@ -164,7 +164,9 @@ address on the compose network.
   or a host on a private network. A running connection keeps running, but each
   delivery to such a node fails with "connection to a private, loopback or
   link-local address refused" (or "Destination refused" for a literal
-  address). The management API refuses to start such a connection.
+  address). The management API refuses to start a connection whose URL is a
+  literal private address. A hostname that resolves to one is refused when
+  delivering.
 - An endpoint that answers with a redirect to a different host. The delivery
   fails with "redirect to another host refused". Set the node to the final URL.
 
