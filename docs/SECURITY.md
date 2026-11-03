@@ -331,7 +331,7 @@ Used so far:
   yet in the management API.
 
 - The Front Systems consumer and producer (#677,
-  [Front Systems](connectors/front-systems.md)), https only: `base_url` is
+  [Front Systems](connectors/front-systems.md#the-base-url)), https only: `base_url` is
   checked when the consumer registers webhooks and on every delivery, and
   every call goes through the checked client. `callback_url` is not checked:
   Front Systems calls it, the connector never does.
