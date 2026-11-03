@@ -316,9 +316,15 @@ Used so far:
   use it, follows same-host redirects, and is checked by the management API at
   start the same way.
 
-Other connectors that take a tenant-supplied host (the HTTP producer, Visma,
-Front Systems, Brightpearl, SAP S/4HANA, Business Central) have not been moved
-to it; they are tracked in #639.
+- The HTTP producer (#660, [HTTP & Webhooks](connectors/http.md#which-addresses-it-will-call)),
+  on the same terms as the API consumer (public `http` allowed, same-host
+  redirects). Its mTLS client is built on the same checked dialer
+  (`Options.TLSConfig`). A refused delivery is retried and then dead-lettered,
+  not dropped.
+
+Other connectors that take a tenant-supplied host (Visma, Front Systems,
+Brightpearl, SAP S/4HANA, Business Central) have not been moved to it; they are
+tracked in #639.
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and

@@ -623,6 +623,9 @@ services:
       # Distributed tracing (#87): export to the collector for tail-sampling.
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}"
       OTEL_SERVICE_NAME: "http-producer"
+      # The bundled httpbin sink is a private address on this network, which the
+      # producer refuses by default (#660). Dev only; never set in production.
+      ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"
     ports:
       - "127.0.0.1:9400:9400"
     depends_on:

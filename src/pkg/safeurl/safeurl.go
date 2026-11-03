@@ -16,6 +16,7 @@ package safeurl
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -203,6 +204,10 @@ type Options struct {
 	// counts as the same host), never https to http. Any other redirect is an
 	// error. Without it no redirect is followed and the 3xx is returned.
 	SameHostRedirects bool
+	// TLSConfig, when set, is the transport's client TLS configuration (a
+	// client certificate and a pinned CA, for mTLS). The dial check is
+	// unchanged: it sits below TLS, on the TCP connect.
+	TLSConfig *tls.Config
 }
 
 // NewClientWith is NewClient with options. The dial check applies on every
@@ -223,6 +228,7 @@ func NewClientWith(timeout time.Duration, o Options) *http.Client {
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          10,
 			IdleConnTimeout:       90 * time.Second,
+			TLSClientConfig:       o.TLSConfig,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
 		},

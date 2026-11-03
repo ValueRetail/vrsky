@@ -1039,8 +1039,10 @@ Last updated 2026-10-28.
     free-form. Found in #616. API consumer done in #639 (plan
     `plans/issue-639-api-consumer-safeurl.md`; it allows public http and
     same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
-    Still open, one PR each: HTTP producer (builds its own client for mTLS),
-    Visma (`base_url`, `token_url`), Front Systems (`base_url`,
+    HTTP producer done in #660 (plan
+    `plans/issue-660-http-producer-safeurl.md`; mTLS client built on the same
+    dialer via `safeurl.Options.TLSConfig`).
+    Still open, one PR each: Visma (`base_url`, `token_url`), Front Systems (`base_url`,
     `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
     `api_base_url`, `token_url`) and Business Central (`api_base_url`,
     `token_url`).
