@@ -1576,6 +1576,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#objects-replaced-while-they-are-published" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objects replaced while they are published
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-gets-published-and-when-again-poll-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2429,6 +2440,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#objects-replaced-while-they-are-published" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objects replaced while they are published
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-gets-published-and-when-again-poll-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2653,6 +2675,25 @@ stays in the queue.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="objects-replaced-while-they-are-published">Objects replaced while they are published<a class="headerlink" href="#objects-replaced-while-they-are-published" title="Permanent link">&para;</a></h3>
+<p>With <code>after_action</code> <code>delete</code> or <code>move</code>, in both modes, the consumer reads
+the object's size, last-modified time and version (ETag on S3 and Azure,
+generation on GCS) before it fetches it, and again right before the delete
+or move (#707). If they changed, someone uploaded a new version under the
+same key while the old one was being published. The consumer leaves the new
+version where it is and logs a warning. In poll mode it says <code>object
+replaced since published; left for the next poll</code>: the object is not
+counted as published, so the next poll publishes the new version, even one
+with the same size and last-modified second. In event mode it says <code>left
+for its own notification</code>, and that bucket notification brings it in. An object gone by then counts as done, and a
+failed read counts as a failed after-action, retried as below.</p>
+<p>So each object with <code>delete</code> or <code>move</code> takes two metadata reads (a HEAD on
+S3) besides the fetch. A replacement uploaded in the instant between the
+second read and the delete can still be removed unpublished; for a <code>move</code>
+that window lasts through the copy, which on Azure means downloading and
+re-uploading the blob. A metadata-only change on GCS (labels, content type) changes the
+last-modified time, so it counts as a replacement: the object is left or
+published once more, not lost. Before #707 only retries made this check.</p>
 <h3 id="what-gets-published-and-when-again-poll-mode">What gets published, and when again (poll mode)<a class="headerlink" href="#what-gets-published-and-when-again-poll-mode" title="Permanent link">&para;</a></h3>
 <p>In poll mode the consumer remembers which objects it published, with the
 size and last-modified time each had, in the connection's checkpoint (one
@@ -2700,15 +2741,10 @@ published once, not again at every start (#538).</p>
     consumer logs an error with the bucket and key and gives up: the object
     stays in the bucket. The queue is lost when the connection stops or the
     pod restarts, and the object then stays too, so look for leftovers after
-    a restart. Before the fetch, event mode with <code>delete</code> or <code>move</code> reads the
-    object's size, last-modified time and version (ETag on S3 and Azure,
-    generation on GCS), and each retry reads them again first. If they
-    changed, the object was replaced under the same key: the retry leaves it
-    for its own notification and logs <code>object replaced since published; left
-    for its own notification</code>. A replacement uploaded in the instant between
-    that check and the delete (or the copy of a move) can still be removed
-    unpublished; that window is short; for a <code>move</code> it lasts as long as the
-    copy, which on Azure means downloading and re-uploading the blob.</li>
+    a restart. Each retry first makes the same check as the first try
+    (see <a href="#objects-replaced-while-they-are-published">Objects replaced while they are published</a>):
+    a replaced object is left for its own notification with <code>object replaced
+    since published; left for its own notification</code>.</li>
 <li>On S3, give the credentials <code>s3:ListBucket</code>. Without it a missing object
     reads as access denied, and its retry ends in a false error.</li>
 <li><strong>Checkpoint unreadable.</strong> If the database can't be read at start, the

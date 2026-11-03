@@ -3482,15 +3482,16 @@ not follow redirects, unless the connector asks for same-host redirects
 <p>The Brightpearl consumer and producer (#667,
   <a href="../connectors/brightpearl/#the-base-url">Brightpearl</a>), https only; the
   derived URL's <code>datacenter</code> and <code>account_code</code> are checked too. The check
-  runs in the connectors (consumer start, sample data, every delivery), not
-  yet in the management API.</p>
+  runs in the connectors (consumer start, sample data, every delivery) and in
+  the management API at start (#708).</p>
 </li>
 <li>
 <p>The Front Systems consumer and producer (#677,
   <a href="../connectors/front-systems/#the-base-url">Front Systems</a>), https only: <code>base_url</code> is
   checked when the consumer registers webhooks and on every delivery, and
-  every call goes through the checked client. <code>callback_url</code> is not checked:
-  Front Systems calls it, the connector never does.</p>
+  every call goes through the checked client. The management API checks it at
+  start too (#708), on the same terms. <code>callback_url</code> is not checked: Front
+  Systems calls it, the connector never does.</p>
 </li>
 <li>
 <p>The SAP S/4HANA consumer and producer (#678,
@@ -3498,24 +3499,27 @@ not follow redirects, unless the connector asks for same-host redirects
   https only; <code>host</code> must be a bare host name with an optional port, and the
   OAuth2 token URL is checked too. Pagination links never take the
   credential off the configured origin. The check runs in the connectors
-  (consumer start, sample data, every delivery), not yet in the management
-  API.</p>
+  (consumer start, sample data, every delivery) and in the management API at
+  start (#708).</p>
 </li>
 <li>
 <p>The Business Central consumer and producer (#686,
   <a href="../connectors/business-central/#which-addresses-it-will-call">Business Central</a>),
   https only; <code>api_base_url</code> and <code>token_url</code> (or their defaults) are checked,
   and <code>@odata.nextLink</code> never takes the token off the configured origin. The
-  check runs in the connectors (consumer start, sample data, every delivery),
-  not yet in the management API.</p>
+  check runs in the connectors (consumer start, sample data, every delivery)
+  and in the management API at start (#708).</p>
 </li>
 </ul>
 <p>Every connector that sends a credential to a tenant-supplied host is on it now
-(#639).</p>
+(#639). Where the management API checks at start, it calls the same function
+as the connector (<code>pkg/vismaurl</code> for Visma, <code>pkg/connectorurl</code> for
+Brightpearl, Front Systems, SAP S/4HANA and Business Central), so the two
+cannot drift.</p>
 <p>For local development with a mock upstream, the operator can set
 <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the service to allow private addresses (and
-<code>http</code> for the connectors that are https only). A node cannot set it, and it
-must stay off in production.</p>
+<code>http</code> for the connectors that are https only), and on <code>management-api</code> for
+the start check. A node cannot set it, and it must stay off in production.</p>
 <h2 id="threat-model">Threat model<a class="headerlink" href="#threat-model" title="Permanent link">&para;</a></h2>
 <p>In scope:
 - Database dump leak → all credentials remain encrypted, requiring the

@@ -2560,6 +2560,9 @@ loopback, link-local or cloud-metadata address (<code>10.0.0.0/8</code>,
 <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>, <code>127.0.0.0/8</code>, <code>169.254.0.0/16</code>,
 <code>168.63.129.16</code>, and the IPv6 equivalents).</p>
 <ul>
+<li>The management API refuses to start the connection, with the field and the
+  reason in the answer (#708). With the defaults, the field named is
+  <code>aad_tenant_id</code> (or <code>environment</code>), which end up in their path.</li>
 <li>A source that is refused does not start and logs why. The data preview
   ("show data structure") answers with the reason.</li>
 <li>A destination sends nothing. The message is retried and then dead-lettered
@@ -2577,14 +2580,11 @@ loopback, link-local or cloud-metadata address (<code>10.0.0.0/8</code>,
   themselves by an internal host). Any other link stops the poll with an
   error; the watermark stays where it was.</li>
 </ul>
-<p>These checks run in the connector, not yet when the management API starts
-the connection, so the reason shows up in the service log rather than in the
-start answer.</p>
 <p>If you have a node with an <code>http</code> or private <code>api_base_url</code> or <code>token_url</code>, it
 stops working after this change and needs a reachable https URL. For local
 development with a mock upstream the operator can set
-<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the service; a node cannot set it, and it
-must stay off in production.</p>
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the connector services and <code>management-api</code>;
+a node cannot set it, and it must stay off in production.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node polls one OData entity on <code>poll_interval_seconds</code>, following
 <code>@odata.nextLink</code> pagination, and emits each page as a JSON-array message.</p>

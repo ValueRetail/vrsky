@@ -2616,13 +2616,17 @@ producer check it before calling it:</p>
   one is refused too.</li>
 <li>Redirects are not followed.</li>
 </ul>
-<p>The consumer checks it at connection start, only when it registers webhooks
-(<code>callback_url</code> and <code>events</code> set); a webhook-only connection never calls Front
-Systems. A refusal is not retried: the pipeline goes to <code>error</code> with the reason
-in its last error. The producer checks it on every delivery.</p>
+<p>The management API checks it when the connection is started and refuses the
+start with the reason (#708): for a source only when it registers webhooks
+(<code>callback_url</code> and <code>events</code> set), for a destination always, so an empty
+<code>base_url</code> on a destination is refused too. The connectors check again. The
+consumer checks it at connection start, only when it registers webhooks; a
+webhook-only connection never calls Front Systems. A refusal is not retried:
+the pipeline goes to <code>error</code> with the reason in its last error. The producer
+checks it on every delivery.</p>
 <p>For local development against a mock on <code>http://localhost</code> or a private
-address, the operator sets <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the
-<code>front-systems-consumer</code> and <code>front-systems-producer</code> deployments. It allows
+address, the operator sets <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on
+<code>front-systems-consumer</code>, <code>front-systems-producer</code> and <code>management-api</code>. It allows
 <code>http://</code> and private addresses; it is off in production.</p>
 <p>After this change rolled out, a connection whose <code>base_url</code> is <code>http://</code>, a
 private address or a host that resolves to one stops working: consumer starts

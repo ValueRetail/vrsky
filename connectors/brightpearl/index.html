@@ -2620,16 +2620,19 @@ from the node, so the connector only calls addresses it can trust (#667):</p>
   to, after the name is resolved, so a hostname that points at one of these is
   refused too. Redirects are not followed.</li>
 </ul>
-<p>Where it is checked: a source refuses to start its poll (the error is in the
-consumer's log), the "show data structure" preview answers with the reason,
-and a destination retries the message until it ends in the DLQ. Webhook mode
-calls nothing and is not affected. The management API does not check these
-fields yet when a connection is started.</p>
+<p>Where it is checked: the management API refuses to start a connection that
+breaks these rules, with the field and the reason in the answer (#708). The
+connectors check again: a source refuses to start its poll (the error is in
+the consumer's log), the "show data structure" preview answers with the
+reason, and a destination retries the message until it ends in the DLQ. A
+source is checked only when it polls (<code>poll_interval_seconds</code> above 0 and a
+<code>resource</code>): in webhook mode it calls nothing, so these fields are not checked
+and may be left empty.</p>
 <p>A <code>base_url</code> can still point at any public https host, so only set one for a
 host you trust with the staff token.</p>
 <p><strong>Local development with a mock Brightpearl.</strong> The operator (not the node) can
-set <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>brightpearl-consumer</code> and
-<code>brightpearl-producer</code>. That allows <code>http</code> and private addresses for
+set <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>brightpearl-consumer</code>,
+<code>brightpearl-producer</code> and <code>management-api</code>. That allows <code>http</code> and private addresses for
 <code>base_url</code>. Never set it in production; it is off in <code>docker-compose.yml</code> and
 the Kubernetes manifests.</p>
 <p><strong>Existing connections.</strong> A node whose <code>base_url</code> is <code>http://</code> or points at a

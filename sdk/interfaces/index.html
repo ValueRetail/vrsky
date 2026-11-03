@@ -2344,6 +2344,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Error classification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reading-the-connections-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the connection's config
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2462,11 +2479,35 @@ thing to clone when starting a new connector. It shows <code>Configure</code> (r
 <td>NAK (retriable); the delay <code>d</code> is preserved via <code>RetryAfter</code></td>
 </tr>
 <tr>
+<td><code>sdk.ConfigUnavailable(err)</code></td>
+<td>NAK like Retriable, plus an Error log line with the connection id</td>
+</tr>
+<tr>
 <td>any other error</td>
 <td>Retriable (safe default)</td>
 </tr>
 </tbody>
 </table>
+<h3 id="reading-the-connections-config">Reading the connection's config<a class="headerlink" href="#reading-the-connections-config" title="Permanent link">&para;</a></h3>
+<p>Every producer on the shared durable sees every connection's messages and
+acks the ones that are not its own. "Not mine" must be a definite answer: the
+connection does not exist, or has no node of your type. A config or secret
+read that fails (a database blip, a failover, a secret that will not decrypt)
+is not that answer. Acking then loses the message.</p>
+<ul>
+<li>Pass the connection query's error through <code>sdk.ConfigReadError(err)</code>. It
+  keeps <code>sql.ErrNoRows</code> as a plain "connection not found" and marks anything
+  else <code>sdk.ErrConfigUnavailable</code>.</li>
+<li>Wrap a secret resolution error in <code>sdk.ConfigUnavailable(err)</code>, and resolve
+  secrets only for your own nodes: another connector's broken secret is not
+  a reason to hold the message.</li>
+<li>In <code>Deliver</code>, return the error when <code>sdk.IsConfigUnavailable(err)</code>; ack the
+  rest as "not mine".</li>
+<li>If you implement <code>sdk.ConnectionScoped</code>, answer
+  <code>err == nil || sdk.IsConfigUnavailable(err)</code> from <code>ServesConnection</code>, so
+  <code>Deliver</code> runs and returns the error. A false answer acks.</li>
+</ul>
+<p><code>harness.RunConfigReadCases</code> checks all of this against a sqlmock database.</p>
 <h2 id="custom-http-handlers">Custom HTTP handlers<a class="headerlink" href="#custom-http-handlers" title="Permanent link">&para;</a></h2>
 <p><code>BaseProducer.RegisterHTTPHandler(pattern, handler)</code> (callable in <code>Configure</code>)
 serves an extra handler on the auxiliary HTTP port (<code>WORKER_HTTP_PORT</code>, or
