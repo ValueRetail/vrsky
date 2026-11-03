@@ -1760,6 +1760,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#as-a-source-consumer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2400,6 +2411,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#as-a-source-consumer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2469,6 +2491,31 @@ and configure:</p>
 <strong>company context</strong> is sent as the <code>ipp-company-id</code> header when <code>company_id</code>
 is set (required by the Financials API).</p>
 </blockquote>
+<h2 id="which-addresses-it-will-call">Which addresses it will call<a class="headerlink" href="#which-addresses-it-will-call" title="Permanent link">&para;</a></h2>
+<p><code>base_url</code> and <code>token_url</code> are your configuration, and the connector sends the
+client secret to <code>token_url</code> and the bearer token to <code>base_url</code>. So both must
+be <code>https</code> URLs without a user name, password, query string or fragment, and
+neither may point at a private, loopback, link-local or cloud-metadata
+address (<code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>, <code>127.0.0.0/8</code>,
+<code>169.254.0.0/16</code>, <code>168.63.129.16</code>, and the IPv6 equivalents).</p>
+<ul>
+<li>The management API refuses such a URL when the connection is started, with
+  the reason in the error.</li>
+<li>The connector checks again at start. A consumer that is refused does not
+  start and logs why. A producer sends nothing; the message is retried and
+  then dead-lettered with its payload, so it can be replayed once the URL is
+  fixed.</li>
+<li>Every request (token and API) is also checked when the connection is made,
+  on the address actually connected to, so a hostname that resolves to a
+  private address is refused too.</li>
+<li>Redirects are not followed.</li>
+<li>The real Visma hosts and the default <code>token_url</code> are unaffected.</li>
+</ul>
+<p>If you have a connection with an <code>http</code> or private <code>base_url</code> or <code>token_url</code>,
+it stops working after this change and needs a real Visma URL. For local
+development with a mock upstream the operator can set
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on the service; a node cannot set it, and it
+must stay off in production.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node polls a configured <code>resource</code> under <code>base_url</code> on
 <code>poll_interval_seconds</code> and emits the response as a message.</p>

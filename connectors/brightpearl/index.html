@@ -1866,6 +1866,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The base URL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2478,6 +2489,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The base URL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes-roadmap" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2521,7 +2543,8 @@ headers:</p>
 <p>Store the token as a secret and reference it as <code>staff_token_secret_id</code>.</p>
 <p><strong>Base URL</strong> is account- and datacenter-scoped:
 <code>https://ws-{datacenter}.brightpearl.com/public-api/{account_code}</code>. Set
-<code>datacenter</code> (e.g. <code>eu1</code>, <code>use1</code>) + <code>account_code</code>, or override <code>base_url</code>.</p>
+<code>datacenter</code> (e.g. <code>eu1</code>, <code>use1</code>) + <code>account_code</code>, or override <code>base_url</code>.
+Both are checked before anything is called; see <a href="#the-base-url">The base URL</a>.</p>
 </blockquote>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <h3 id="poll-mode">Poll mode<a class="headerlink" href="#poll-mode" title="Permanent link">&para;</a></h3>
@@ -2574,7 +2597,46 @@ a message routed to the owning tenant/connection.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>503</code>/<code>5xx</code>/network errors retry; <code>4xx</code> and <code>401</code>/<code>403</code> are poison → DLQ.</p>
+and <code>503</code>/<code>5xx</code>/network errors retry, and after the last attempt the message
+goes to the DLQ. <code>4xx</code> (including <code>401</code>/<code>403</code>) and an incomplete node config
+are permanent: the message is logged and dropped, not dead-lettered. A base URL
+the connector refuses (below) is retried like a network error, so those
+messages end in the DLQ and can be retried from there once the node is fixed.</p>
+<h2 id="the-base-url">The base URL<a class="headerlink" href="#the-base-url" title="Permanent link">&para;</a></h2>
+<p>Every request carries the node's staff token, and the URL it goes to comes
+from the node, so the connector only calls addresses it can trust (#667):</p>
+<ul>
+<li>A <code>base_url</code> override must be <code>https</code>, with a host, and no user name, query
+  string or fragment.</li>
+<li>Without an override, <code>datacenter</code> must be a single host label (<code>eu1</code>,
+  <code>use1</code>) and <code>account_code</code> may only hold letters, digits, <code>-</code> and <code>_</code>, so
+  neither can move the request off <code>ws-{datacenter}.brightpearl.com</code>.</li>
+<li>The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. Redirects are not followed.</li>
+</ul>
+<p>Where it is checked: a source refuses to start its poll (the error is in the
+consumer's log), the "show data structure" preview answers with the reason,
+and a destination retries the message until it ends in the DLQ. Webhook mode
+calls nothing and is not affected. The management API does not check these
+fields yet when a connection is started.</p>
+<p>A <code>base_url</code> can still point at any public https host, so only set one for a
+host you trust with the staff token.</p>
+<p><strong>Local development with a mock Brightpearl.</strong> The operator (not the node) can
+set <code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>brightpearl-consumer</code> and
+<code>brightpearl-producer</code>. That allows <code>http</code> and private addresses for
+<code>base_url</code>. Never set it in production; it is off in <code>docker-compose.yml</code> and
+the Kubernetes manifests.</p>
+<p><strong>Existing connections.</strong> A node whose <code>base_url</code> is <code>http://</code> or points at a
+private address, or whose <code>datacenter</code> or <code>account_code</code> breaks the rules
+above, stops working when this change is deployed: a running source keeps
+polling until its next restart, then refuses to start; a destination refuses
+from the next delivery, and those messages end in the DLQ. Fix the field, or
+clear <code>base_url</code> to use the default, then retry them from the DLQ.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Per-endpoint paging</strong> — Brightpearl search endpoints return a <code>metaData</code>
