@@ -206,22 +206,19 @@ export function deployPlan(canvas: CanvasIdentity, asNew: boolean, now: Date): D
 
 /**
  * Runs the deploy sequence for a payload built from a DeployPlan and keeps the
- * canvas's link in step: link(id, name) after a create or a rename,
- * link(null) when the connection turned out to be gone. ConnectionGone is
- * rethrown for the page to ask about.
+ * canvas's link in step: link(id, name) after a create or a rename.
+ * ConnectionGone is rethrown for the page to ask about, and the link is left
+ * as it was: the old id stays until the user answers, so Cancel keeps the
+ * canvas linked and the next Deploy asks again. "Deploy as new" creates and
+ * links the new id over it (#671).
  */
 export async function deployCanvas(
   client: Client,
   payload: { name?: string },
   previousConnectionId: string | undefined,
-  link: (connectionId: string | null, deployedName?: string) => void,
+  link: (connectionId: string, deployedName?: string) => void,
 ): Promise<DeployResult> {
-  try {
-    const result = await deployPipeline(client, payload, previousConnectionId)
-    if (result.created || payload.name !== undefined) link(result.connectionId, payload.name)
-    return result
-  } catch (err) {
-    if (err instanceof ConnectionGone) link(null)
-    throw err
-  }
+  const result = await deployPipeline(client, payload, previousConnectionId)
+  if (result.created || payload.name !== undefined) link(result.connectionId, payload.name)
+  return result
 }
