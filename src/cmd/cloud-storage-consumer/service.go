@@ -483,14 +483,24 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 				continue
 			}
 		}
-		afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, o.Key, logger)
+		_, afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, o.Key, logger)
 		if err != nil {
 			logger.Error("ingest failed; will retry next cycle", "key", o.Key, "error", err)
 			continue // leave the object in place
 		}
+		// Done at the listing's stamp, also when the object was replaced
+		// during the publish: the replacement has another stamp in the next
+		// listing, so that poll publishes it (#707).
 		done.Mark(o.Key, stamp)
 		done.RetryDone(o.Key)
-		if afterErr != nil {
+		switch {
+		case afterErr == nil:
+		case errors.Is(afterErr, errReplaced):
+			logger.Warn("after-action: object replaced since published; left for the next poll",
+				"bucket", cfg.Bucket, "key", o.Key, "action", cfg.AfterAction)
+		case errors.Is(afterErr, objectstore.ErrNotFound):
+			logger.Info("after-action: object already gone; nothing to do", "key", o.Key, "action", cfg.AfterAction)
+		default:
 			failures, wait := done.RetryFailed(o.Key, listedAt)
 			logger.Warn("after-action failed; will retry", "key", o.Key, "action", cfg.AfterAction, "failures", failures, "retry_in", wait, "error", afterErr)
 		}
@@ -660,19 +670,12 @@ func (s *cloudConsumer) runEventLoop(ctx context.Context, own *activeConn, connI
 // ingestObject fetches one object, publishes it into the pipeline, and applies
 // the after-action. Event mode uses it. Event mode has no listing to find the
 // object in again, so a failed after-action goes to retryQ, which retries it
-// from memory without publishing again (#672). With a queue the object is
-// stat'ed before the fetch, and the retry acts only on an object with that
-// stamp. The returned error is only a failure to stat, fetch or publish.
+// from memory without publishing again (#672), and acts only on an object
+// with the stamp ingest took before the fetch. An object replaced during the
+// publish is left for its own notification (#707). The returned error is only
+// a failure to stat, fetch or publish.
 func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger, retryQ *afterRetryQueue) error {
-	var stamp objectStamp
-	if retryQ != nil {
-		obj, err := store.Stat(ctx, key)
-		if err != nil {
-			return fmt.Errorf("stat: %w", err)
-		}
-		stamp = stampOf(obj)
-	}
-	afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, key, logger)
+	stamp, afterErr, err := s.ingest(ctx, connID, tenantID, store, cfg, key, logger)
 	if err != nil {
 		return err
 	}
@@ -681,25 +684,61 @@ func (s *cloudConsumer) ingestObject(ctx context.Context, connID, tenantID strin
 		if retryQ != nil {
 			retryQ.forget(key) // published again; an older failed after-action is moot
 		}
+	case errors.Is(afterErr, errReplaced):
+		logger.Warn("after-action: object replaced since published; left for its own notification",
+			"bucket", cfg.Bucket, "key", key, "action", cfg.AfterAction)
+		if retryQ != nil {
+			retryQ.forget(key)
+		}
 	case retryQ != nil:
-		retryQ.failed(key, stamp, afterErr)
+		retryQ.failed(key, stamp, afterErr) // ErrNotFound counts as done there
 	default:
 		logger.Warn("after-action failed", "key", key, "action", cfg.AfterAction, "error", afterErr)
 	}
 	return nil
 }
 
-// ingest is ingestObject without the log line for a failed after-action: that
-// error is returned apart from err, which is a failure to fetch or publish.
-// Poll mode keeps the object's done entry and retries the after-action later
-// (#640).
-func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) (afterErr, err error) {
+// errReplaced is the after-action's refusal to delete or move an object that
+// is not the one it published (#707).
+var errReplaced = errors.New("object replaced since published")
+
+// ingest fetches and publishes key, then applies the after-action. err is a
+// failure to stat, fetch or publish; afterErr is the after-action's own, so
+// that event mode can queue it (#672) and poll mode retry it later (#640).
+//
+// With delete or move, the object is stat'ed before the fetch (stamp), and
+// again right before the after-action, which runs only if the stamp is the
+// same (#707). Otherwise afterErr is errReplaced: an upload under the same key
+// during the publish is not what was published, and removing it would lose
+// it. A replacement between the first Stat and the fetch is published under
+// the old stamp and then left too: a duplicate at worst. An object gone by
+// the second Stat gives an afterErr wrapping objectstore.ErrNotFound, and any
+// other Stat error is a failed after-action.
+func (s *cloudConsumer) ingest(ctx context.Context, connID, tenantID string, store objectstore.ObjectStore, cfg *cloudConfig, key string, logger *slog.Logger) (stamp objectStamp, afterErr, err error) {
+	guarded := cfg.AfterAction == "delete" || cfg.AfterAction == "move"
+	if guarded {
+		obj, err := store.Stat(ctx, key)
+		if err != nil {
+			return objectStamp{}, nil, fmt.Errorf("stat: %w", err)
+		}
+		stamp = stampOf(obj)
+	}
 	size, streamed, err := s.fetchAndPublish(ctx, connID, tenantID, store, cfg, key)
 	if err != nil {
-		return nil, err
+		return stamp, nil, err
 	}
 	logger.Info("cloud-storage object ingested", "key", key, "size", size, "streamed", streamed)
-	return s.afterAction(ctx, store, cfg, key), nil
+	if !guarded {
+		return stamp, s.afterAction(ctx, store, cfg, key), nil
+	}
+	obj, err := store.Stat(ctx, key)
+	if err != nil {
+		return stamp, fmt.Errorf("stat before %s: %w", cfg.AfterAction, err), nil
+	}
+	if stampOf(obj) != stamp {
+		return stamp, errReplaced, nil
+	}
+	return stamp, s.afterAction(ctx, store, cfg, key), nil
 }
 
 // wantsAfterRetry reports whether a done object that is still listed gets its
