@@ -2590,10 +2590,15 @@ update with <code>PATCH</code>).</p>
 <ul>
 <li><code>method</code> — <code>POST</code> (default) or <code>PATCH</code>.</li>
 </ul>
-<p>SAP's OData gateway requires <strong>CSRF protection</strong> on writes: the producer fetches
-a token with <code>X-CSRF-Token: Fetch</code> and reuses it for subsequent writes. If SAP
-answers <code>403</code> with <code>X-CSRF-Token: Required</code> — the token or session expired — the
-producer re-fetches once and retries transparently.</p>
+<p>SAP's OData gateway requires <strong>CSRF protection</strong> on writes: before each write
+the producer fetches a token with <code>X-CSRF-Token: Fetch</code>, then sends the write
+with that token. If SAP answers <code>403</code> with <code>X-CSRF-Token: Required</code> — the token
+or session expired — the producer re-fetches once and retries transparently.</p>
+<p>Each delivery runs in an SAP session of its own: the session cookies SAP sets
+on the fetch (<code>SAP_SESSIONID_*</code>, <code>MYSAPSSO2</code>) are kept only for that
+delivery's fetch, write and OAuth2 token call, then dropped. Two connections,
+or two tenants, writing to the same SAP host never send each other's session
+(#682).</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sap_s4hana"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"sap_s4hana"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
