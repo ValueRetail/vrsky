@@ -17,8 +17,8 @@ the same check before the first after-action.
   `move`. A changed object is left alone with a Warn (`object replaced since
   published; left for its own notification`) and is not queued for a retry.
 - Poll mode: the same check, with a Warn that says the next poll picks it up.
-  The object is still marked published at the listing's stamp, so the next
-  poll sees the replacement's new stamp and publishes it.
+  The object is not marked published, so the next poll publishes the
+  replacement, even one with the listing's size and last-modified.
 - `ErrNotFound` from that `Stat` counts as done (no retry, no error).
 - Any other `Stat` error is a failed after-action: event mode queues it as
   today (#672), poll mode backs off and retries as today (#640).
@@ -47,8 +47,8 @@ Not touched: `src/pkg/objectstore`, `src/pkg/sdk`, the producer.
 - Event mode: `errReplaced` logs the Warn and forgets the key in the retry
   queue; the rest goes to `retryQ.failed`, which already treats
   `ErrNotFound` as done.
-- Poll mode: the object is marked done at the listing stamp either way;
-  `errReplaced` logs a Warn, `ErrNotFound` logs Info, any other error goes
+- Poll mode: the object is marked done at the listing stamp unless the
+  result is `errReplaced`, which logs a Warn and leaves it unmarked; `ErrNotFound` logs Info, any other error goes
   to the existing `RetryFailed` backoff.
 
 ## Decisions
@@ -82,11 +82,14 @@ Not touched: `src/pkg/objectstore`, `src/pkg/sdk`, the producer.
   metadata update during the publish reads as a replacement, so the object
   is left (event) or published once more (poll). Fails safe.
 - Poll mode: a replacement with the same size and last-modified as the
-  listing (S3, same second) is left in the bucket and not published, since
-  the done set can't tell it from the old one. Before this change it was
-  deleted. Already documented for the done set.
-- The poll-mode retry pass (#640) still compares only against the listing;
-  unchanged here.
+  listing (S3, same second) can't be told from the published object by the
+  done set. Marking it done would leave it unpublished, and the retry pass
+  (#640), which has no Stat check, would then delete or move it blind
+  (found in review of #710). So a replaced object is not marked done and
+  the next poll publishes it. Cost: when the replacement is in fact the
+  same object re-read (a GCS metadata edit), it is published twice.
+- The poll-mode retry pass (#640) still compares only against the listing:
+  backlog item 189. GCS metadata edits read as replacements: item 190.
 
 ## How we verify
 

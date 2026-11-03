@@ -347,3 +347,40 @@ func TestFirstAfterAction_PollStatFails(t *testing.T) {
 		})
 	}
 }
+
+// A replacement with the same size and last-modified as the listing (S3
+// listings have whole seconds) must not be marked done at the listing's
+// stamp: the done set could not tell it from the published object, and the
+// retry pass (#640) would then delete or move it unpublished. It is published
+// at the next poll instead, then removed.
+func TestFirstAfterAction_PollReplacedSameStamp(t *testing.T) {
+	for _, action := range []string{"delete", "move"} {
+		t.Run(action, func(t *testing.T) {
+			p, _ := newFAPoll(t, action, func(fs *fakeStore) { fsReplace(fs, "in/a.json", `{"a":9}`, 0) })
+
+			p.tick()
+			requireCounts(t, p.log, "first poll", map[string]int{"in/a.json": 1})
+			if body, ok := fsBody(p.fk.fakeStore, "in/a.json"); !ok || body != `{"a":9}` {
+				t.Fatalf("replacement gone or changed (present %v, body %q): removed unpublished", ok, body)
+			}
+
+			p.tick()
+			p.tick()
+			requireCounts(t, p.log, "later polls", map[string]int{"in/a.json": 2})
+			if got := p.log.payloads("in/a.json"); got[1] != `{"a":9}` {
+				t.Errorf("second publish carried %q, want the replacement", got[1])
+			}
+			if p.fk.has("in/a.json") {
+				t.Error("the replacement, now published, is still in the bucket")
+			}
+			if n := p.actions(action); n != 1 {
+				t.Errorf("%s tried %d times, want once (on the published replacement)", action, n)
+			}
+			if action == "move" {
+				if body, _ := fsBody(p.fk.fakeStore, "done/a.json"); body != `{"a":9}` {
+					t.Errorf("done/a.json = %q, want the replacement", body)
+				}
+			}
+		})
+	}
+}

@@ -172,10 +172,11 @@ the object's size, last-modified time and version (ETag on S3 and Azure,
 generation on GCS) before it fetches it, and again right before the delete
 or move (#707). If they changed, someone uploaded a new version under the
 same key while the old one was being published. The consumer leaves the new
-version where it is and logs a warning: `object replaced since published;
-left for the next poll` in poll mode, where the next poll publishes it, and
-`left for its own notification` in event mode, where its own bucket
-notification brings it in. An object gone by then counts as done, and a
+version where it is and logs a warning. In poll mode it says `object
+replaced since published; left for the next poll`: the object is not
+counted as published, so the next poll publishes the new version, even one
+with the same size and last-modified second. In event mode it says `left
+for its own notification`, and that bucket notification brings it in. An object gone by then counts as done, and a
 failed read counts as a failed after-action, retried as below.
 
 So each object with `delete` or `move` takes two metadata reads (a HEAD on

@@ -488,10 +488,14 @@ func (s *cloudConsumer) pollOnce(ctx context.Context, connID, tenantID string, s
 			logger.Error("ingest failed; will retry next cycle", "key", o.Key, "error", err)
 			continue // leave the object in place
 		}
-		// Done at the listing's stamp, also when the object was replaced
-		// during the publish: the replacement has another stamp in the next
-		// listing, so that poll publishes it (#707).
-		done.Mark(o.Key, stamp)
+		// An object replaced during the publish is not marked done: the
+		// replacement may have the listing's stamp (same size, same second),
+		// and done at that stamp it would never be published, and the retry
+		// pass would delete or move it blind. Unmarked, the next poll
+		// publishes it: a duplicate at worst (#707).
+		if !errors.Is(afterErr, errReplaced) {
+			done.Mark(o.Key, stamp)
+		}
 		done.RetryDone(o.Key)
 		switch {
 		case afterErr == nil:
