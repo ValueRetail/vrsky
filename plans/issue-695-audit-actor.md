@@ -94,3 +94,24 @@ From `src/`: `go build ./...`, `go vet ./...`, `gofmt -l .`,
 on main. Mutations: record the tenant before the membership check; member
 tenant over the path override; context tenant over member tenant; drop each
 actor call; put the raw key in the label.
+
+## Round 2 (review of #697)
+
+Review found that recording the actor made a known gap worse: a signed-in
+non-member, or a key from another workspace, who sends a workspace's id in
+`X-Tenant-ID` had the refusal filed into that workspace's log, now with
+their email or key label. The rule is now: an authenticated caller's entry
+goes only into a workspace they were verified against.
+
+- `memberTenant` becomes `verifiedTenant`, set by `recordAuditVerifiedTenant`
+  from: `TenantMemberMiddleware` (after membership and the tenant lookup),
+  `resolvePrincipalRole` (session: once a role is found, so a member with
+  too low a role is still logged; key: only when the key's workspace is the
+  requested one), `TenantAPIKeyMiddleware` (the key's own workspace, not the
+  header), and `HandleAcceptInvite` (the joined workspace, once membership
+  is granted; it was filed under the selected header workspace before).
+- `auditBag.tenant`: override, then verified, then nothing when there is an
+  actor, then the context tenant (anonymous requests only, backlog 176).
+- Behaviour changes on purpose: a refused non-operator on the operator
+  routes is no longer logged in their selected workspace (the #685 test now
+  expects nothing); ingestion is filed under the key's workspace.

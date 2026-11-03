@@ -1246,13 +1246,19 @@ Last updated 2026-10-28.
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694.
 
-175. **Creating a workspace and accepting an invite are not audited.**
-    `POST /api/v1/tenants` and `POST /api/v1/invites/accept` sit behind the
-    session check only, with no workspace in the context, so
-    `AuditMiddleware` drops them; the invite handler's `member.invite.accept`
-    action is never written. File them under the created or joined
-    workspace once the handler knows it (the bag's member tenant, set by the
-    handler after the write succeeded). Found in #695.
+175. **Creating a workspace is not audited.** `POST /api/v1/tenants` sits
+    behind the session check only, with no workspace in the context, so
+    `AuditMiddleware` drops it. File it under the created workspace once the
+    handler has it (`recordAuditVerifiedTenant` after the insert, as
+    `HandleAcceptInvite` does since #695). Found in #695.
+
+176. **Anonymous requests are filed under any `X-Tenant-ID`.** A request
+    with no valid credential that sends a workspace id in the header is
+    still written to that workspace's log (a 401 with no actor), so anyone
+    can add rows to any workspace's audit log. Predates #695, which stopped
+    it only for authenticated callers. Decide which unauthenticated routes
+    need an audit entry at all (failed logins, say, belong in a security
+    log, not a tenant's), and drop the rest. Found in review of #697.
 
 ## Human
 

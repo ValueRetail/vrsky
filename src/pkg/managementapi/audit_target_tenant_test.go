@@ -120,9 +120,6 @@ func TestAudit_OperatorPlanAndQuotaWritesFileUnderPathTenant(t *testing.T) {
 // Only a caller the operator gate let through may file entries in the path's
 // workspace: a refused owner of another workspace must not reach its log.
 func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
-	// With a workspace selected the refusal is still audited, under that
-	// workspace as before, so the write can be waited for and its tenant
-	// checked. With none there is nothing to wait for.
 	cases := []struct {
 		name, path, workspace string
 		body                  any
@@ -140,15 +137,10 @@ func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body.String())
 			}
-			if c.workspace == "" {
-				if got := aw.settle(); len(got) != 0 {
-					t.Fatalf("a refused non-operator with no workspace filed entries: %+v", got)
-				}
-				return
-			}
-			got := aw.wait(t, 1)
-			if len(got) != 1 || got[0].TenantID != c.workspace {
-				t.Fatalf("want the refusal filed once under the caller's workspace %q, not the path's, got %+v", c.workspace, got)
+			// Not under the path's workspace, and since #695 not under the
+			// selected one either: the caller was verified against neither.
+			if got := aw.settle(); len(got) != 0 {
+				t.Fatalf("a refused non-operator filed entries: %+v", got)
 			}
 		})
 	}

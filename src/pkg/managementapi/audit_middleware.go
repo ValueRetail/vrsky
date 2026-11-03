@@ -15,8 +15,7 @@ import (
 //
 // Wraps every state-changing API call. The middleware:
 //   1. Decides whether the call is auditable (POST/PUT/PATCH/DELETE on
-//      /api/v1/*, with a tenant in context, one TenantMemberMiddleware let
-//      the caller into, or one the route names through AuditUnderPathTenant).
+//      /api/v1/*) and which workspace's log it goes into (auditBag.tenant).
 //   2. Captures method, path, status, request_id, IP, user-agent.
 //   3. Lets the handler enrich the entry by calling SetAuditDetail(ctx, k, v).
 //   4. After the handler returns, builds an AuditEntry and writes it
@@ -41,9 +40,11 @@ type auditBag struct {
 	// tenantOverride files the entry under the route's path tenant; see
 	// AuditUnderPathTenant.
 	tenantOverride string
-	// memberTenant is the workspace TenantMemberMiddleware let the caller
-	// into, set only after its membership check passed (#695).
-	memberTenant string
+	// verifiedTenant is the workspace the caller was verified against: a
+	// membership check passed for a session user, or it is the workspace
+	// that owns the API key (#695). Never an id taken from the request
+	// without that check.
+	verifiedTenant string
 	// actor is the principal the session or API-key check verified.
 	actor *auditActor
 }
@@ -56,17 +57,26 @@ type auditActor struct {
 	label  string // the user's email, or which workspace's API key
 }
 
-// tenant is the workspace the entry is filed under: a route's explicit path
-// override first, then the workspace the membership check let the caller
-// into, otherwise the caller's context tenant.
+// tenant is the workspace the entry is filed under, "" for none:
+//
+//  1. a route's explicit path override (AuditUnderPathTenant);
+//  2. the workspace the caller was verified against;
+//  3. nothing, when the caller authenticated but was verified against no
+//     workspace: a signed-in non-member, or a key from another workspace,
+//     must not file entries into the workspace named in X-Tenant-ID;
+//  4. otherwise (no credential at all) the context tenant, as before #695
+//     (backlog 176).
 func (b *auditBag) tenant(contextTenant string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.tenantOverride != "" {
 		return b.tenantOverride
 	}
-	if b.memberTenant != "" {
-		return b.memberTenant
+	if b.verifiedTenant != "" {
+		return b.verifiedTenant
+	}
+	if b.actor != nil {
+		return ""
 	}
 	return contextTenant
 }
@@ -108,18 +118,18 @@ func recordAuditAPIKey(ctx context.Context, keyTenant *Tenant) {
 	b.actor = &auditActor{kind: "api_key", label: label}
 }
 
-// recordAuditMemberTenant files the request under the workspace the caller
-// was just found to be a member of. Only TenantMemberMiddleware calls it, and
-// only after its membership check passed: before that the id is whatever the
-// caller put in the path.
-func recordAuditMemberTenant(ctx context.Context, tenantID string) {
+// recordAuditVerifiedTenant files the request under a workspace the caller
+// was just verified against: a membership check that passed, or the workspace
+// that owns the API key used. Never call it with an id from the request
+// before that check: it would let anyone file entries into any workspace.
+func recordAuditVerifiedTenant(ctx context.Context, tenantID string) {
 	b := auditBagFrom(ctx)
 	if b == nil || tenantID == "" {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.memberTenant = tenantID
+	b.verifiedTenant = tenantID
 }
 
 // SetAuditDetail merges a key/value into the request's audit bag. Safe to
@@ -250,8 +260,9 @@ func AuditMiddleware(writer AuditWriter, logger *log.Logger) func(http.Handler) 
 
 			next.ServeHTTP(arw, r.WithContext(ctx))
 
-			// Skip recording when the call never identified a tenant —
-			// these are pre-auth paths that have nowhere to be stored.
+			// Skip recording when there is no workspace to file it under:
+			// pre-auth paths, and callers who authenticated but were not
+			// verified against any workspace (see auditBag.tenant).
 			contextTenant, _ := TenantIDFromContextOptional(ctx)
 			tenantID := bag.tenant(contextTenant)
 			if tenantID == "" {
