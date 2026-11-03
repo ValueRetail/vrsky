@@ -296,6 +296,29 @@ func TestAudit_InviteAcceptFilesUnderJoinedWorkspace(t *testing.T) {
 	}
 }
 
+// An invite sent to someone else is refused, and the refusal is not written
+// to the inviting workspace's log: the caller never became its member.
+func TestAudit_InviteForSomeoneElseWritesNothing(t *testing.T) {
+	repo := &inviteSessionRepo{inviteRepo: newInviteRepo(), user: &User{ID: "mallory", Email: "mallory@example.com", Status: UserStatusActive, EmailVerified: true}}
+	inv, err := repo.CreateInvite(context.Background(), billTenant, "joiner@example.com", "viewer", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(repo, NewValidator())
+	for _, workspace := range []string{"", billTenantB} {
+		t.Run("workspace "+workspace, func(t *testing.T) {
+			aw := &fakeAuditWriter{}
+			rec := serveAudited(t, h, aw, http.MethodPost, "/api/v1/invites/accept", workspace, "tokMallory", map[string]string{"token": inv.Token})
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+			if got := aw.settle(); len(got) != 0 {
+				t.Fatalf("a refused invite accept filed entries: %+v", got)
+			}
+		})
+	}
+}
+
 // inviteSessionRepo is inviteRepo with one valid session, so the accept
 // route runs behind the real session middleware.
 type inviteSessionRepo struct {
