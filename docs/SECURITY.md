@@ -344,7 +344,15 @@ Used so far:
   (consumer start, sample data, every delivery), not yet in the management
   API.
 
-Business Central has not been moved to it yet; it is tracked in #639.
+- The Business Central consumer and producer (#686,
+  [Business Central](connectors/business-central.md#which-addresses-it-will-call)),
+  https only; `api_base_url` and `token_url` (or their defaults) are checked,
+  and `@odata.nextLink` never takes the token off the configured origin. The
+  check runs in the connectors (consumer start, sample data, every delivery),
+  not yet in the management API.
+
+Every connector that sends a credential to a tenant-supplied host is on it now
+(#639).
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and

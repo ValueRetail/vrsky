@@ -1028,7 +1028,7 @@ Last updated 2026-10-28.
     anything else is a 503 with a fixed body and a server-side log line.
     `GetMe`, `ChangePassword`, `DeleteAccount` and the tenant-header RBAC
     check classify the same way. Found in review of #613.
-147. **Other connectors still call a tenant-supplied host unchecked.** #616
+147. ~~**Other connectors still call a tenant-supplied host unchecked.**~~ (#639) #616
     added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
     link-local and metadata addresses) for Sitoo. The same hole is open in
     every connector that builds a URL from node config and sends a credential
@@ -1055,7 +1055,9 @@ Last updated 2026-10-28.
     shape check, token URL, pagination kept on the configured origin),
     checked in the connectors only; the management API's start-time check is
     still to add.
-    Still open: Business Central (`api_base_url`, `token_url`).
+    Business Central done in #686 (plan `plans/issue-686-bc-safeurl.md`;
+    `@odata.nextLink` kept on the configured origin). All connectors on the
+    list are done; the management API start-time checks are item 173.
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
@@ -1226,6 +1228,15 @@ Last updated 2026-10-28.
     others return the raw error text, and a DNS failure names the cluster
     resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
     texts and log the detail. Found in review of #680.
+
+173. **Start-time URL checks in the management API for every safeurl
+    connector.** Sitoo, the API consumer, the HTTP producer and Visma are
+    refused by `ValidateNodeConfigs` when a connection starts, so the user
+    gets a 400 with the reason. Brightpearl, Front Systems, SAP S/4HANA and
+    Business Central check only in the connector (start, sample data, every
+    delivery), so a bad URL shows up as an `error` status or a DLQ entry
+    instead. Add their checks to the validator. Found in #667, #677, #678 and
+    #686.
 
 ## Human
 
