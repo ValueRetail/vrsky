@@ -336,8 +336,15 @@ Used so far:
   every call goes through the checked client. `callback_url` is not checked:
   Front Systems calls it, the connector never does.
 
-Other connectors that take a tenant-supplied host (SAP S/4HANA, Business
-Central) have not been moved to it; they are tracked in #639.
+- The SAP S/4HANA consumer and producer (#678,
+  [SAP S/4HANA](connectors/sap-s4hana.md#which-addresses-it-will-call)),
+  https only; `host` must be a bare host name with an optional port, and the
+  OAuth2 token URL is checked too. Pagination links never take the
+  credential off the configured origin. The check runs in the connectors
+  (consumer start, sample data, every delivery), not yet in the management
+  API.
+
+Business Central has not been moved to it yet; it is tracked in #639.
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and

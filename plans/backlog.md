@@ -1051,8 +1051,11 @@ Last updated 2026-10-28.
     Front Systems done in #677 (plan
     `plans/issue-677-front-systems-safeurl.md`; `callback_url` is not
     requested, so not checked).
-    Still open, one PR each: SAP S/4HANA (`host`, `api_base_url`,
-    `token_url`) and Business Central (`api_base_url`, `token_url`).
+    SAP S/4HANA done in #678 (plan `plans/issue-678-sap-safeurl.md`; `host`
+    shape check, token URL, pagination kept on the configured origin),
+    checked in the connectors only; the management API's start-time check is
+    still to add.
+    Still open: Business Central (`api_base_url`, `token_url`).
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
@@ -1204,6 +1207,25 @@ Last updated 2026-10-28.
     `TenantMemberMiddleware` record the tenant in the audit bag. Until then
     the `plan.request` line in `docs/operator/billing.md` is wrong in
     production. Found in review of #685.
+
+170. **`safeurl.CheckBaseURL` quotes the raw base URL.** Its errors use `%q`
+    on the input, including the "must not carry a user name or password"
+    error, which by definition holds a credential. Its runtime callers
+    (Sitoo, Brightpearl, Visma, Front Systems, SAP S/4HANA, Business Central)
+    can put that text in logs and the DLQ header. Use `safeurl.RedactURL`.
+    While there, `RedactURL` should also refuse a fragment containing `@`
+    (`http://apikey:1234#secret@host`). Found in review of #693.
+
+171. **Pagination has no page cap.** The SAP S/4HANA and Business Central
+    consumers follow next links until there are none, so a gateway that
+    keeps returning them holds the poll forever. Cap the pages per poll
+    (say 10 000) and log when the cap is hit. Found in review of #680.
+
+172. **Sample-data errors pass `err.Error()` through.** Apart from a dial
+    refusal, the sample-data endpoints of Sitoo, the API consumer, SAP and
+    others return the raw error text, and a DNS failure names the cluster
+    resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
+    texts and log the detail. Found in review of #680.
 
 ## Human
 
