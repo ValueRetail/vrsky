@@ -17,7 +17,8 @@ registered callback URL.
 > `api_key_secret_id`; the platform decrypts them at connection time.
 >
 > **Base URL** is the per-partner Azure APIM host you receive at onboarding — set
-> it as `base_url` (there is no public default).
+> it as `base_url` (there is no public default). See [The base URL](#the-base-url)
+> for what is accepted.
 
 ## As a source (consumer) — webhooks
 
@@ -48,7 +49,7 @@ all. The first retry comes after about 5 seconds, then the wait doubles up to
 deleted, when its status is no longer `running`, or after 6 hours, when the
 status becomes `error`. A start that fails in a way no retry fixes (Front
 Systems refusing the registration with another 4xx such as 401 or 403, a
-missing `base_url` or one without `https://`, Front Systems refusing the keys
+missing or refused `base_url` (see [The base URL](#the-base-url)), Front Systems refusing the keys
 on the first webhook list with 401 or 403, a secret that can't be read) is not retried: the
 pipeline's status becomes `error` and its last error names the cause. Fix it
 and start the pipeline again.
@@ -73,14 +74,17 @@ the webhook out of band; the connector then neither registers nor deletes
 anything, but still refuses events while the connection is stopped.
 
 - `base_url` — per-partner Azure APIM host as a URL, `https://<partner-apim-host>`
-  (required). A bare host without `https://` is refused at start and the
-  pipeline goes to `error`.
+  (required when `callback_url` and `events` are set). A bare host, `http://` or a private
+  address is refused at start and the pipeline goes to `error`; see
+  [The base URL](#the-base-url).
 - `subscription_key_secret_id` / `api_key_secret_id` — the two auth keys.
 - `events` — event types to register, e.g. `SaleCreated`, `StockMovementCreated`,
   `POSSettlementCreated`, `DeliveryItemsReceived`, `ProductTransferCreated`,
   `StockReservationCreated`, `DeliveryCompleted`, `OmniChannelEndlessAisleOrderCreated`.
 - `callback_url` — the publicly reachable URL Front Systems should call (your
-  ingress → `/frontsystems/events/{connectionID}`).
+  ingress → `/frontsystems/events/{connectionID}`). The connector never calls
+  it: it hands it to Front Systems in the registration, so the base URL rules
+  below don't apply to it.
 
 ```json
 {
@@ -118,7 +122,43 @@ Front Systems with the two auth headers.
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `5xx`/network errors retry (with the backoff hint); `4xx` and `401`/`403`
-are poison and go to the DLQ.
+are poison: the message is acked and dropped, not dead-lettered. A `base_url`
+the connector refuses (see below) sends nothing; the message is retried and
+then dead-lettered with its payload, so it can be replayed once the URL is
+fixed. The error on the dead-lettered message says the target address is not
+allowed without naming the address the host resolved to; the connector's log
+has it.
+
+## The base URL
+
+Both keys go with every request to `base_url`, so both the consumer and the
+producer check it before calling it:
+
+- It must be `https://` with a host, and carry no user name, password, query
+  string or fragment.
+- The HTTP client refuses to connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (including the cloud metadata service at
+  169.254.169.254), CGNAT, multicast addresses and Azure's 168.63.129.16. This
+  is checked on the address actually dialled, so a host name that resolves to
+  one is refused too.
+- Redirects are not followed.
+
+The consumer checks it at connection start, only when it registers webhooks
+(`callback_url` and `events` set); a webhook-only connection never calls Front
+Systems. A refusal is not retried: the pipeline goes to `error` with the reason
+in its last error. The producer checks it on every delivery.
+
+For local development against a mock on `http://localhost` or a private
+address, the operator sets `ALLOW_PRIVATE_UPSTREAMS=true` on the
+`front-systems-consumer` and `front-systems-producer` deployments. It allows
+`http://` and private addresses; it is off in production.
+
+After this change rolled out, a connection whose `base_url` is `http://`, a
+private address or a host that resolves to one stops working: consumer starts
+go to `error`, producer messages go to the DLQ. Webhooks registered at Front
+Systems under such a URL before the change stay registered after the pipeline
+is stopped, because the connector no longer calls that URL to delete them.
+Delete them at Front Systems by hand (`DELETE /api/webhooks/{id}`).
 
 ## Notes & roadmap
 

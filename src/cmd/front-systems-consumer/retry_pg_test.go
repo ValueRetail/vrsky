@@ -42,9 +42,11 @@ func newRetryPGEnv(t *testing.T) *retryPGEnv {
 		db:         db,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: fs.srv.Client(),
-		retryBase:  10 * time.Millisecond,
-		retryMax:   40 * time.Millisecond,
-		publish:    func(context.Context, *envelope.Envelope) error { return nil },
+		// The fake Front Systems is on http://127.0.0.1.
+		allowPrivate: true,
+		retryBase:    10 * time.Millisecond,
+		retryMax:     40 * time.Millisecond,
+		publish:      func(context.Context, *envelope.Envelope) error { return nil },
 	}
 	c.resolveTenant = c.getConnectionTenant
 	t.Cleanup(func() {

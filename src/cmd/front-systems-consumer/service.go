@@ -19,6 +19,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -35,6 +36,9 @@ type frontSystemsConsumer struct {
 	logger  *slog.Logger
 
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// allows http and private addresses in base_url, for a mock upstream.
+	allowPrivate bool
 
 	// resolveTenant maps a connection id to its owning tenant (webhook routing).
 	// Defaulted in Configure to the DB lookup; tests inject a stub.
@@ -153,11 +157,12 @@ func (c *frontSystemsConsumer) Configure(ctx context.Context, res *sdk.Resources
 	c.db = res.DB
 	c.nc = res.NATS
 	c.logger = res.Logger
+	c.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{
-			Timeout:       60 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
+		// base_url is tenant config and every request carries both keys, so
+		// the client refuses private, loopback and link-local addresses at
+		// dial time and follows no redirects (#677).
+		c.httpClient = safeurl.NewClient(60*time.Second, c.allowPrivate)
 	}
 	if c.resolveTenant == nil {
 		c.resolveTenant = c.getConnectionTenant
@@ -438,6 +443,12 @@ func (c *frontSystemsConsumer) attemptStart(connectionID, tenantID string, p *pe
 	// or marks it "error".
 	ac := &activeConn{tenantID: tenantID}
 	if cfg.CallbackURL != "" && len(cfg.Events) > 0 {
+		// The keys go to base_url, so it is checked before the first call
+		// (#677). A webhook-only connection never calls it and is not.
+		if err := checkBaseURL(cfg.BaseURL, c.allowPrivate); err != nil {
+			kind, reason := classifyRegisterError(err)
+			return failedStart(p, err, kind, reason)
+		}
 		ids, err := c.registerWebhooks(fsCtx, cfg, logger)
 		if err != nil {
 			kind, reason := classifyRegisterError(err)
@@ -608,6 +619,10 @@ func (c *frontSystemsConsumer) registerWebhooks(ctx context.Context, cfg *FrontS
 		if errors.As(err, &se) && (se.status == http.StatusUnauthorized || se.status == http.StatusForbidden) {
 			return nil, fmt.Errorf("list webhooks: %w", err)
 		}
+		// So would a base URL the client refuses to dial (#677).
+		if errors.Is(err, errBadBaseURL) || errors.Is(err, safeurl.ErrBlockedAddress) {
+			return nil, fmt.Errorf("list webhooks: %w", err)
+		}
 		logger.Warn("Could not list Front Systems webhooks; registering without checking for existing ones", "error", err)
 	}
 	var ids []string
@@ -718,13 +733,8 @@ func matchingWebhooks(hooks []webhook, event, callback string) []string {
 
 // do performs a Front Systems API request with the two required auth headers.
 func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, method, path string, body []byte) (int, []byte, error) {
-	if cfg.BaseURL == "" {
-		return 0, nil, fmt.Errorf("%w: front_systems base_url is required (per-partner Azure APIM host)", errBadBaseURL)
-	}
-	// A bare host (the docs call it the APIM host) has no scheme, and
-	// http.Client would fail it with an error no retry fixes (#503 review).
-	if u, err := url.Parse(cfg.BaseURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return 0, nil, fmt.Errorf("%w: front_systems base_url must be an http(s) URL with a host, like https://<partner-apim-host>", errBadBaseURL)
+	if err := checkBaseURL(cfg.BaseURL, c.allowPrivate); err != nil {
+		return 0, nil, err
 	}
 	var rdr io.Reader
 	if body != nil {
@@ -747,6 +757,28 @@ func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, 
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	return resp.StatusCode, out, nil
+}
+
+// checkBaseURL refuses a base_url the connector must not send the keys to
+// (#677): missing, not https, with user info, a query or a fragment, or a
+// literal private, loopback or link-local address. allowPrivate (the
+// operator's dev switch) allows http and private addresses. The dial check in
+// the HTTP client is the enforcement for a host name; this is the early,
+// readable error. A bare host has no scheme and is refused here too (#503
+// review). The error wraps errBadBaseURL, which no retry fixes.
+func checkBaseURL(raw string, allowPrivate bool) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("%w: front_systems base_url is required (per-partner Azure APIM host)", errBadBaseURL)
+	}
+	// safeurl's message quotes the URL; keep a password out of logs and
+	// last_error.
+	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.User != nil {
+		return fmt.Errorf("%w: front_systems base_url must not carry a user name or password", errBadBaseURL)
+	}
+	if err := safeurl.CheckBaseURL(raw, allowPrivate); err != nil {
+		return fmt.Errorf("%w: %v; use https://<partner-apim-host>", errBadBaseURL, err)
+	}
+	return nil
 }
 
 func snippet(b []byte) string {
