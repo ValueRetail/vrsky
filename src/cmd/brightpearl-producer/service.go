@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -30,6 +32,9 @@ type brightpearlProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// allows http and private addresses in base_url, for a mock upstream.
+	allowPrivate bool
 }
 
 // BrightpearlProducerConfig is the per-node configuration (config.brightpearl).
@@ -61,8 +66,12 @@ func (p *brightpearlProducer) Configure(ctx context.Context, res *sdk.Resources)
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
-		p.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// base_url is tenant config and every request carries the staff
+		// token, so the client refuses private, loopback and link-local
+		// addresses at dial time and follows no redirects (#667).
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
 	}
 	p.logger.Info("brightpearl-producer configured")
 	return nil
@@ -79,6 +88,10 @@ func (p *brightpearlProducer) Deliver(ctx context.Context, env *envelope.Envelop
 	}
 	if cfg.AppRef == "" || cfg.StaffToken == "" || cfg.baseURL() == "" || cfg.Resource == "" {
 		return sdk.Permanent(fmt.Errorf("brightpearl producer config incomplete for connection %s", env.IntegrationID))
+	}
+	// Retrying cannot make the config valid: poison, to the DLQ.
+	if err := cfg.checkBaseURL(p.allowPrivate); err != nil {
+		return sdk.Permanent(fmt.Errorf("brightpearl base URL refused for connection %s: %w", env.IntegrationID, err))
 	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
@@ -99,6 +112,11 @@ func (p *brightpearlProducer) write(ctx context.Context, cfg *BrightpearlProduce
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, safeurl.ErrBlockedAddress) {
+			// The host resolves to an address we refuse; a retry resolves it
+			// the same way.
+			return sdk.Permanent(fmt.Errorf("brightpearl request: %w", err))
+		}
 		return sdk.Retriable(fmt.Errorf("brightpearl request: %w", err))
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -135,6 +153,34 @@ func (cfg *BrightpearlProducerConfig) baseURL() string {
 		return ""
 	}
 	return fmt.Sprintf("https://ws-%s.brightpearl.com/public-api/%s", cfg.Datacenter, cfg.AccountCode)
+}
+
+// checkBaseURL refuses a URL the connector must not call (#667): it comes from
+// tenant config and every request carries the staff token. The dial check in
+// the HTTP client is the enforcement; this gives an early, readable error.
+func (cfg *BrightpearlProducerConfig) checkBaseURL(allowPrivate bool) error {
+	if cfg.BaseURL != "" {
+		return safeurl.CheckBaseURL(cfg.BaseURL, allowPrivate)
+	}
+	return checkDerivedBaseURL(cfg.Datacenter, cfg.AccountCode)
+}
+
+var (
+	datacenterRE  = regexp.MustCompile(`(?i)^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	accountCodeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+)
+
+// checkDerivedBaseURL keeps the derived URL on Brightpearl: datacenter goes
+// into the host name and account_code into the path, so each must be one
+// label or segment. Otherwise "x@10.0.0.1/" as a datacenter moves the host.
+func checkDerivedBaseURL(datacenter, accountCode string) error {
+	if !datacenterRE.MatchString(datacenter) {
+		return fmt.Errorf("datacenter %q must be a single host label such as eu1 or use1", datacenter)
+	}
+	if !accountCodeRE.MatchString(accountCode) {
+		return fmt.Errorf("account_code %q may only hold letters, digits, - and _", accountCode)
+	}
+	return nil
 }
 
 func (cfg *BrightpearlProducerConfig) resourceURL() string {

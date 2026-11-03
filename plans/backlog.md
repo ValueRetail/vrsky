@@ -1041,9 +1041,12 @@ Last updated 2026-10-28.
     same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
     Still open, one PR each: HTTP producer (builds its own client for mTLS),
     Visma (`base_url`, `token_url`), Front Systems (`base_url`,
-    `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
-    `api_base_url`, `token_url`) and Business Central (`api_base_url`,
-    `token_url`).
+    `callback_url`), SAP S/4HANA (`host`, `api_base_url`, `token_url`) and
+    Business Central (`api_base_url`, `token_url`). Brightpearl done in #667
+    (plan `plans/issue-667-brightpearl-safeurl.md`; `base_url` override plus
+    `datacenter`/`account_code`), checked in the connectors only: the
+    management API's start-time check (`validateEdgeNodeConfig`, as for
+    Sitoo) is still to add.
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
