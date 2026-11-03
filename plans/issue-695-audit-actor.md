@@ -111,7 +111,7 @@ goes only into a workspace they were verified against.
   header), and `HandleAcceptInvite` (the joined workspace, once membership
   is granted; it was filed under the selected header workspace before).
 - `auditBag.tenant`: override, then verified, then nothing when there is an
-  actor, then the context tenant (anonymous requests only, backlog 176).
+  actor, then the context tenant (anonymous requests only, backlog 186).
 - Behaviour changes on purpose: a refused non-operator on the operator
   routes is no longer logged in their selected workspace (the #685 test now
   expects nothing); ingestion is filed under the key's workspace.

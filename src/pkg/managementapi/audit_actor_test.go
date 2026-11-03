@@ -265,7 +265,7 @@ func TestAudit_InactiveKeyIsNotRecorded(t *testing.T) {
 				t.Fatalf("status %d, want a refusal", rec.Code)
 			}
 			// Anonymous refusals keep today's filing under the context
-			// tenant (backlog 176), so there is one entry to inspect.
+			// tenant (backlog 186), so there is one entry to inspect.
 			for _, en := range aw.wait(t, 1) {
 				if en.ActorKind == "api_key" || en.ActorLabel != "" || en.UserID != nil {
 					t.Fatalf("inactive key recorded as actor: %+v", en)

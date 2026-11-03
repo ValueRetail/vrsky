@@ -65,7 +65,7 @@ type auditActor struct {
 //     workspace: a signed-in non-member, or a key from another workspace,
 //     must not file entries into the workspace named in X-Tenant-ID;
 //  4. otherwise (no credential at all) the context tenant, as before #695
-//     (backlog 176).
+//     (backlog 186).
 func (b *auditBag) tenant(contextTenant string) string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
