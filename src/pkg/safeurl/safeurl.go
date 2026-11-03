@@ -124,6 +124,32 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 	return nil
 }
 
+// RedactURL returns raw in a form that is safe to log, show in the activity
+// feed or put in an error: a user name or password is replaced with "xxxxx"
+// (a user name is often the API key, so Redacted() alone, which keeps it, is
+// not enough). A string that does not parse becomes a fixed placeholder, as
+// parse errors quote the input. So does one where userinfo may have landed
+// somewhere other than u.User: without "//", url.Parse reads
+// "user:secret@host/x" as scheme "user" with an opaque rest, and
+// "http://user:123/secret@host" as host "user" with "@" in the path. An "@" in
+// a real path costs only the display. The request itself keeps using the real
+// URL.
+func RedactURL(raw string) string {
+	const invalid = "[invalid URL]"
+	u, err := url.Parse(raw)
+	if err != nil {
+		return invalid
+	}
+	if u.Opaque != "" || strings.Contains(u.Path, "@") ||
+		(u.Host == "" && u.User == nil && strings.Contains(raw, "@")) {
+		return invalid
+	}
+	if u.User != nil {
+		u.User = url.User("xxxxx")
+	}
+	return u.Redacted()
+}
+
 // CheckRequestURL checks a complete request URL for a connector whose target is
 // free-form (the API consumer): http or https, a host, and not a literal
 // blocked IP. Unlike CheckBaseURL it allows http, a query string and userinfo,
@@ -132,13 +158,13 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 func CheckRequestURL(raw string, allowPrivate bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
-		return fmt.Errorf("url %q is not an absolute URL", raw)
+		return fmt.Errorf("url %s is not an absolute URL", RedactURL(raw))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("url %q must use http or https", raw)
+		return fmt.Errorf("url %s must use http or https", RedactURL(raw))
 	}
 	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && BlockedAddr(addr) {
-		return fmt.Errorf("url %q points at a private, loopback or link-local address", raw)
+		return fmt.Errorf("url %s points at a private, loopback or link-local address", RedactURL(raw))
 	}
 	return nil
 }
@@ -248,7 +274,7 @@ func sameHostRedirect(allowPrivate bool) func(*http.Request, []*http.Request) er
 		}
 		first, prev := via[0].URL, via[len(via)-1].URL
 		if prev.Scheme == "https" && req.URL.Scheme == "http" {
-			return fmt.Errorf("redirect from https to http refused (%s)", req.URL.Redacted())
+			return fmt.Errorf("redirect from https to http refused (%s)", RedactURL(req.URL.String()))
 		}
 		sameHost := strings.EqualFold(first.Hostname(), req.URL.Hostname())
 		samePort := effectivePort(prev) == effectivePort(req.URL) || isHTTPUpgrade(prev, req.URL)

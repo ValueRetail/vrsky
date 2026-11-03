@@ -17,8 +17,9 @@ func newTestConsumer() (*frontSystemsConsumer, *[]*envelope.Envelope, *sync.Mute
 	var mu sync.Mutex
 	var got []*envelope.Envelope
 	c := &frontSystemsConsumer{
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		httpClient: http.DefaultClient,
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient:   http.DefaultClient,
+		allowPrivate: true, // the fake Front Systems is on http://127.0.0.1
 		publish: func(_ context.Context, env *envelope.Envelope) error {
 			mu.Lock()
 			defer mu.Unlock()

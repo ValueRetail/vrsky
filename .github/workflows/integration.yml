@@ -65,7 +65,7 @@ jobs:
           retry docker compose pull --quiet \
             minio-test minio-init azurite-test fake-gcs-test \
             sftp-test kafka-test rabbitmq-test
-          retry docker pull busybox:latest
+          retry docker pull mirror.gcr.io/library/busybox:latest
 
       - name: Start test brokers
         run: |
@@ -80,7 +80,7 @@ jobs:
           wait_tcp() {
             local hostport="$1" name="$2" tries=60
             for i in $(seq 1 "$tries"); do
-              if docker run --rm --network vrsky-network busybox \
+              if docker run --rm --network vrsky-network mirror.gcr.io/library/busybox \
                    sh -c "nc -z -w2 ${hostport/:/ }" >/dev/null 2>&1; then
                 echo "$name ready ($hostport)"; return 0
               fi
@@ -112,7 +112,7 @@ jobs:
             -e KAFKA_TEST_BROKER=kafka-test:9092 \
             -e RABBITMQ_TEST_URL=amqp://guest:guest@rabbitmq-test:5672/ \
             -e GOFLAGS=-buildvcs=false \
-            golang:1.26 \
+            mirror.gcr.io/library/golang:1.26 \
             sh -c 'for i in 1 2 3; do go mod download && break; echo "go mod download failed (attempt $i/3)"; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
                    GOPROXY=off go test -tags=integration -count=1 -v ./pkg/objectstore/... ./cmd/sftp-consumer/... ./cmd/kafka-consumer/... ./cmd/rabbitmq-consumer/...'
 

@@ -13,8 +13,9 @@ import (
 
 func testProducer() *frontSystemsProducer {
 	return &frontSystemsProducer{
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		httpClient: http.DefaultClient,
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient:   http.DefaultClient,
+		allowPrivate: true, // the fake Front Systems is on http://127.0.0.1
 	}
 }
 

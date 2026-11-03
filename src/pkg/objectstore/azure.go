@@ -76,6 +76,9 @@ func (a *azureStore) List(ctx context.Context, prefix string) ([]Object, error) 
 				if b.Properties.LastModified != nil {
 					obj.LastModified = *b.Properties.LastModified
 				}
+				if b.Properties.ETag != nil {
+					obj.Version = etagVersion(string(*b.Properties.ETag))
+				}
 			}
 			out = append(out, obj)
 		}
@@ -157,6 +160,26 @@ func (a *azureStore) Put(ctx context.Context, key string, body []byte, contentTy
 		return fmt.Errorf("azure put %q: %w", key, err)
 	}
 	return nil
+}
+
+// Stat reads the blob's properties. Azure names the error in a header on a
+// HEAD answer too, so a missing container stays a configuration error.
+func (a *azureStore) Stat(ctx context.Context, key string) (Object, error) {
+	resp, err := a.client.ServiceClient().NewContainerClient(a.container).NewBlobClient(key).GetProperties(ctx, nil)
+	if err != nil {
+		return Object{}, fmt.Errorf("azure stat %q: %w", key, azureGetErr(err))
+	}
+	obj := Object{Key: key}
+	if resp.ContentLength != nil {
+		obj.Size = *resp.ContentLength
+	}
+	if resp.LastModified != nil {
+		obj.LastModified = *resp.LastModified
+	}
+	if resp.ETag != nil {
+		obj.Version = etagVersion(string(*resp.ETag))
+	}
+	return obj, nil
 }
 
 func (a *azureStore) Delete(ctx context.Context, key string) error {

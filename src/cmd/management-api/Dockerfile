@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS builder
+FROM mirror.gcr.io/library/golang:1.26-alpine AS builder
 
 WORKDIR /build
 
@@ -38,7 +38,7 @@ RUN mkdir -p agent && \
     ./cmd/vrsky-agent && \
     printf '%s\n' "${AGENT_VERSION}" > agent/version.txt
 
-FROM alpine:3.18
+FROM mirror.gcr.io/library/alpine:3.18
 
 WORKDIR /app
 

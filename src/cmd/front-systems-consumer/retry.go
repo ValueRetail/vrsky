@@ -16,6 +16,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -413,7 +414,8 @@ func (c *frontSystemsConsumer) markError(connectionID, tenantID, reason string, 
 	return true
 }
 
-// errBadBaseURL is a base_url that is missing or not a URL: no retry fixes it.
+// errBadBaseURL is a base_url that is missing, not a URL, or refused by
+// checkBaseURL: no retry fixes it.
 var errBadBaseURL = errors.New("bad front_systems base_url")
 
 // fsStatusError is a Front Systems answer other than 2xx.
@@ -428,10 +430,14 @@ func (e *fsStatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.sta
 // retrying. 408, 429 and 5xx are, and so is anything that got no answer
 // (network error, timeout). Any other status means Front Systems refused the
 // request as made (bad keys, no access, wrong base URL), and so does a bad
-// base URL; those are permanent.
+// base URL or one whose host the client refuses to dial (it resolves to a
+// private address, and will again); those are permanent.
 func classifyRegisterError(err error) (startOutcome, string) {
 	if errors.Is(err, errBadBaseURL) {
-		return startPermanent, "Front Systems: base_url is missing or not a URL"
+		return startPermanent, "Front Systems: base_url is missing or not an https URL with a public host, like https://<partner-apim-host>"
+	}
+	if errors.Is(err, safeurl.ErrBlockedAddress) {
+		return startPermanent, "Front Systems: base_url resolves to a private, loopback or link-local address"
 	}
 	var se *fsStatusError
 	if errors.As(err, &se) {

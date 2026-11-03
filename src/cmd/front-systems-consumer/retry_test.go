@@ -22,6 +22,7 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk/harness"
 )
 
@@ -563,6 +564,9 @@ func TestFrontSystemsRetry_HarnessRestoreAfterDatabaseBlip(t *testing.T) {
 	expectStatusChecks(mock, x, 1, "running", nil)
 
 	own := &owners{m: map[string]string{x.id: x.tenant}}
+	// The harness runs Configure, which reads the operator's dev switch; the
+	// fake Front Systems is on http://127.0.0.1.
+	t.Setenv(safeurl.EnvAllowPrivate, "true")
 	c := &frontSystemsConsumer{httpClient: fs.srv.Client(), resolveTenant: own.resolve,
 		retryBase: 20 * time.Millisecond, retryMax: 80 * time.Millisecond}
 
@@ -628,6 +632,8 @@ func TestClassifyRegisterError(t *testing.T) {
 		{"404", &fsStatusError{status: 404}, startPermanent},
 		{"422", &fsStatusError{status: 422}, startPermanent},
 		{"bad base URL", fmt.Errorf("register X: %w", errBadBaseURL), startPermanent},
+		{"dial refused by safeurl", fmt.Errorf("register X: %w",
+			&net.OpError{Op: "dial", Err: fmt.Errorf("%w (127.0.0.1)", safeurl.ErrBlockedAddress)}), startPermanent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, reason := classifyRegisterError(tc.err)

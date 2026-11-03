@@ -90,6 +90,8 @@ func newFGFixture(t *testing.T) *fgFixture {
 		db:         db,
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: f.srv.Client(),
+		// The fake Front Systems is on http://127.0.0.1.
+		allowPrivate: true,
 	}
 	return f
 }

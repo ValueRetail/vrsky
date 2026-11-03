@@ -330,9 +330,29 @@ Used so far:
   runs in the connectors (consumer start, sample data, every delivery), not
   yet in the management API.
 
-Other connectors that take a tenant-supplied host (Front Systems,
-SAP S/4HANA, Business Central) have not been moved to it; they are tracked in
-#639.
+- The Front Systems consumer and producer (#677,
+  [Front Systems](connectors/front-systems.md#the-base-url)), https only: `base_url` is
+  checked when the consumer registers webhooks and on every delivery, and
+  every call goes through the checked client. `callback_url` is not checked:
+  Front Systems calls it, the connector never does.
+
+- The SAP S/4HANA consumer and producer (#678,
+  [SAP S/4HANA](connectors/sap-s4hana.md#which-addresses-it-will-call)),
+  https only; `host` must be a bare host name with an optional port, and the
+  OAuth2 token URL is checked too. Pagination links never take the
+  credential off the configured origin. The check runs in the connectors
+  (consumer start, sample data, every delivery), not yet in the management
+  API.
+
+- The Business Central consumer and producer (#686,
+  [Business Central](connectors/business-central.md#which-addresses-it-will-call)),
+  https only; `api_base_url` and `token_url` (or their defaults) are checked,
+  and `@odata.nextLink` never takes the token off the configured origin. The
+  check runs in the connectors (consumer start, sample data, every delivery),
+  not yet in the management API.
+
+Every connector that sends a credential to a tenant-supplied host is on it now
+(#639).
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and

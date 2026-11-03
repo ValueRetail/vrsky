@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
@@ -58,7 +59,8 @@ func (g *gcsStore) List(ctx context.Context, prefix string) ([]Object, error) {
 		if attrs.Name == "" { // synthetic prefix entry
 			continue
 		}
-		out = append(out, Object{Key: attrs.Name, Size: attrs.Size, LastModified: attrs.Updated})
+		out = append(out, Object{Key: attrs.Name, Size: attrs.Size, LastModified: attrs.Updated,
+			Version: strconv.FormatInt(attrs.Generation, 10)})
 	}
 	return out, nil
 }
@@ -142,6 +144,18 @@ func (g *gcsStore) Put(ctx context.Context, key string, body []byte, contentType
 		return fmt.Errorf("gcs put %q close: %w", key, err)
 	}
 	return nil
+}
+
+// Stat reads the object's attributes. As with Get, GCS reports a missing
+// bucket as a missing object (see gcsGetErr). Version is the generation, which
+// changes only when the content is written, not on a metadata update.
+func (g *gcsStore) Stat(ctx context.Context, key string) (Object, error) {
+	attrs, err := g.client.Bucket(g.bucket).Object(key).Attrs(ctx)
+	if err != nil {
+		return Object{}, fmt.Errorf("gcs stat %q: %w", key, gcsGetErr(err))
+	}
+	return Object{Key: key, Size: attrs.Size, LastModified: attrs.Updated,
+		Version: strconv.FormatInt(attrs.Generation, 10)}, nil
 }
 
 func (g *gcsStore) Delete(ctx context.Context, key string) error {

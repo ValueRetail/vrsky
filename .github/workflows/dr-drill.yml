@@ -62,7 +62,7 @@ jobs:
 
     services:
       source-db:
-        image: postgres:18-alpine
+        image: mirror.gcr.io/library/postgres:18-alpine
         env:
           POSTGRES_DB: vrsky
           POSTGRES_USER: vrsky
@@ -72,7 +72,7 @@ jobs:
           --health-cmd "pg_isready -U vrsky" --health-interval 5s
           --health-timeout 5s --health-retries 10
       target-db:
-        image: postgres:18-alpine
+        image: mirror.gcr.io/library/postgres:18-alpine
         env:
           POSTGRES_DB: vrsky
           POSTGRES_USER: vrsky

@@ -61,7 +61,7 @@ jobs:
           wait_tcp() {
             local hostport="$1" name="$2" tries=60
             for i in $(seq 1 "$tries"); do
-              if docker run --rm --network vrsky-network busybox \
+              if docker run --rm --network vrsky-network mirror.gcr.io/library/busybox \
                    sh -c "nc -z -w2 ${hostport/:/ }" >/dev/null 2>&1; then
                 echo "$name ready ($hostport)"; return 0
               fi
@@ -88,7 +88,7 @@ jobs:
             -e E2E_DB_URL="postgres://postgres:management_password@postgres-management:5432/management_db?sslmode=disable" \
             -e E2E_MOCK_SAP_URL=http://mock-sap:8099 \
             -e GOFLAGS=-buildvcs=false \
-            golang:1.26 \
+            mirror.gcr.io/library/golang:1.26 \
             sh -c 'for i in 1 2 3; do go mod download && break; echo "go mod download failed (attempt $i/3)"; [ "$i" = 3 ] && exit 1; sleep $((i * 10)); done
                    GOPROXY=off go test -tags=integration -count=1 -v -timeout 10m ./test/integration/ -run TestSAP_EndToEnd'
 

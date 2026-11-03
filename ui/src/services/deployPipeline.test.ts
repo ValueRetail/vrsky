@@ -122,8 +122,8 @@ describe('deploy as new after the connection is gone', () => {
     const first = deployPlan(canvas, false, now)
     const err = await deployCanvas(client, { ...first.identity }, first.previousConnectionId, link).catch((e) => e)
     expect(err).toBeInstanceOf(ConnectionGone)
-    expect(link).toHaveBeenCalledTimes(1)
-    expect(link).toHaveBeenCalledWith(null)
+    // The old link stays until the user answers (#671).
+    expect(link).not.toHaveBeenCalled()
 
     const postsBefore = post.mock.calls.length
     const putsBefore = put.mock.calls.length
@@ -202,13 +202,20 @@ describe('deployCanvas keeps the canvas link in step', () => {
     expect(link).not.toHaveBeenCalled()
   })
 
-  it('a gone connection unlinks the canvas and is rethrown', async () => {
-    post.mockRejectedValue(httpErr(404))
+  // #671: unlinking at the 404 meant Cancel on the "connection gone" dialog
+  // left the canvas unlinked, and the next Deploy created a new connection
+  // (new webhook URL) without asking.
+  it.each([
+    ['stop', () => post.mockRejectedValue(httpErr(404))],
+    ['update', () => { post.mockResolvedValue({}); put.mockRejectedValue(httpErr(404)) }],
+  ])('a gone connection (404 on %s) is rethrown and the link is left alone', async (_where, fail) => {
+    fail()
     const link = vi.fn()
-    const err = await deployCanvas(client, {}, 'c1', link).catch((e) => e)
+    const err = await deployCanvas(client, { name: 'Renamed' }, 'c1', link).catch((e) => e)
     expect(err).toBeInstanceOf(ConnectionGone)
-    expect(link).toHaveBeenCalledTimes(1)
-    expect(link).toHaveBeenCalledWith(null)
+    expect((err as ConnectionGone).connectionId).toBe('c1')
+    expect(link).not.toHaveBeenCalled()
+    expect(post.mock.calls.filter(([url]) => url === '/api/v1/connections')).toEqual([])
   })
 
   it('any other failure is rethrown and leaves the link alone', async () => {

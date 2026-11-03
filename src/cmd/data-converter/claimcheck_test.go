@@ -67,7 +67,16 @@ func (m *memStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 func (m *memStore) Copy(context.Context, string, string) error { return nil }
-func (m *memStore) Close() error                               { return nil }
+func (m *memStore) Stat(_ context.Context, key string) (objectstore.Object, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.objects[key]
+	if !ok {
+		return objectstore.Object{}, objectstore.ErrNotFound
+	}
+	return objectstore.Object{Key: key, Size: int64(len(b))}, nil
+}
+func (m *memStore) Close() error { return nil }
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 

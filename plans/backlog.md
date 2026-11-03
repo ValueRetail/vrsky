@@ -1028,7 +1028,7 @@ Last updated 2026-10-28.
     anything else is a 503 with a fixed body and a server-side log line.
     `GetMe`, `ChangePassword`, `DeleteAccount` and the tenant-header RBAC
     check classify the same way. Found in review of #613.
-147. **Other connectors still call a tenant-supplied host unchecked.** #616
+147. ~~**Other connectors still call a tenant-supplied host unchecked.**~~ (#639) #616
     added `pkg/safeurl` (https only, dial-time refusal of private, loopback,
     link-local and metadata addresses) for Sitoo. The same hole is open in
     every connector that builds a URL from node config and sends a credential
@@ -1048,9 +1048,16 @@ Last updated 2026-10-28.
     `datacenter`/`account_code`), checked in the connectors only: the
     management API's start-time check (`validateEdgeNodeConfig`, as for
     Sitoo) is still to add.
-    Still open, one PR each: Front Systems (`base_url`, `callback_url`),
-    SAP S/4HANA (`host`, `api_base_url`, `token_url`) and Business Central
-    (`api_base_url`, `token_url`).
+    Front Systems done in #677 (plan
+    `plans/issue-677-front-systems-safeurl.md`; `callback_url` is not
+    requested, so not checked).
+    SAP S/4HANA done in #678 (plan `plans/issue-678-sap-safeurl.md`; `host`
+    shape check, token URL, pagination kept on the configured origin),
+    checked in the connectors only; the management API's start-time check is
+    still to add.
+    Business Central done in #686 (plan `plans/issue-686-bc-safeurl.md`;
+    `@odata.nextLink` kept on the configured origin). All connectors on the
+    list are done; the management API start-time checks are item 173.
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
@@ -1070,13 +1077,11 @@ Last updated 2026-10-28.
     from the rest and answer 503 for the rest, like #634 and #645. The
     membership lookup just above it answers 500 for a database error; make
     that a 503 too. Found in #645.
-151. **Cloud-storage event mode never retries a failed after-action.**
-    `ingestObject` logs it, the message is acked, and the object stays in
-    the bucket; there is no listing in event mode to find it again, and no
-    done set. Poll mode retries since #640. Options: re-fetch nothing and
-    only retry the after-action from a small in-memory queue of keys
-    (lost on restart), or list the prefix now and then in event mode just
-    to sweep leftovers. Found in #640.
+151. ~~**Cloud-storage event mode never retries a failed after-action.**~~
+    (#672) `ingestObject` logged it, the message was acked, and the object
+    stayed in the bucket. Now the key goes to a bounded in-memory queue per
+    connection and the after-action is retried with the poll-mode backoff,
+    without publishing again; it is lost on restart. Found in #640.
 
 152. ~~**The builder's "connection gone" redeploy has no page-level test.**~~ (#665)
     `PipelineBuilder.tsx` (~512-529) asks to redeploy as a new connection
@@ -1092,7 +1097,7 @@ Last updated 2026-10-28.
     handler and nothing in the UI opens it. Remove it with `ClientRegistry`
     and `MetricsCache` if they have no other use. Public route, so PR plus
     `agent:needs-human`. Found in #651.
-155. **Platform plan and quota changes are audited under the wrong tenant.**
+155. ~~**Platform plan and quota changes are audited under the wrong tenant.**~~ (#685)
     The audit middleware files an entry under the caller's context tenant,
     so `platform.plan.set` lands in the operator's own workspace log, and
     since #637 nothing when the operator has no workspace selected. The
@@ -1109,7 +1114,7 @@ Last updated 2026-10-28.
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
     touches workflows). Found in #453.
 
-157. **The builder loses work silently when localStorage is full.**
+157. ~~**The builder loses work silently when localStorage is full.**~~ (#673)
     `canvasStore.saveToStorage` catches a failed `setItem` and only calls
     `console.warn`, so after a quota error the tab keeps editing in memory
     and the next reload brings back the last good save with no notice.
@@ -1117,7 +1122,7 @@ Last updated 2026-10-28.
     fails. The hook tests in #663 pin the current "no throw, memory kept"
     behaviour, not the silence. Found in #663.
 
-158. **Cancelling the "connection gone" redeploy leaves the canvas unlinked.**
+158. ~~**Cancelling the "connection gone" redeploy leaves the canvas unlinked.**~~ (#671)
     `deployCanvas` in `ui/src/pages/PipelineBuilder.tsx` calls `link(null)`
     as soon as the server answers 404, before the dialog asks. After Cancel
     the canvas is unlinked, so the next Deploy click creates a new
@@ -1140,9 +1145,9 @@ Last updated 2026-10-28.
     `X-Vrsky-Last-Error` header, which the tenant can read (Visma, Sitoo and
     the others). Part of #639. Found in review of #669 and #668.
 
-161. **The HTTP producer logs its URL with userinfo.** Logs and events print
-    `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
-    Predates #669. Found in review of #669.
+161. ~~**The HTTP producer logs its URL with userinfo.**~~ (#689) Logs and
+    events print `httpCfg.URL` raw, credentials in `user:pass@` included. Use
+    `u.Redacted()`. Predates #669. Found in review of #669.
 
 162. **A non-UUID tenant id answers 503.** Since #662 any `GetTenantByID`
     error that is not "not found" is a 503 with an Error log line. A tenant
@@ -1171,6 +1176,75 @@ Last updated 2026-10-28.
     current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
     Check Brightpearl's own API docs and change the default if it moved.
     Found in review of #674.
+
+166. **The first after-action still deletes or moves blind.** In event and
+    poll mode the first (non-retry) `delete` or `move` after a publish runs
+    without a stamp check, so a replacement uploaded under the same key
+    during the publish is deleted or moved unpublished. #672 guards only the
+    retries. Stamp before the fetch and compare before the first after-action
+    too. Found in review of #676.
+
+167. **Conditional deletes for the cloud-storage after-action.** The stamp
+    check leaves a window between the Stat and the delete (for a `move`,
+    through the copy). Close it where the store supports it: Azure `If-Match`
+    on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
+    Found in review of #676.
+
+168. **Audit entries have no actor (high priority).** `AuditMiddleware`
+    reads the user from the request it wraps, but `SessionAuthMiddleware` and
+    the API-key check add the principal further in, per route, so `user_id`
+    and `actor_label` stay empty on every entry, while the Settings page
+    promises "who". #685 fixed it for the operator's plan and quota writes
+    only (the bag carries the actor there). Do the same for every route: let
+    the session and API-key middleware record the principal in the audit bag,
+    with `actor_kind` `api_key` for keys. Found in #685.
+
+169. **Owner writes under `/api/v1/tenants/*` are never audited.**
+    Plan requests, members, invites and API-key rotation write nothing to
+    `audit_log` in production. `TenantIDMiddleware` skips `/api/v1/tenants`,
+    and `TenantMemberMiddleware` sets the tenant only on the inner context,
+    which `AuditMiddleware` never sees: an owner's
+    `POST /tenants/{id}/plan-requests` with no workspace selected answers 201
+    and writes no entry. The bag-based fix from 168 covers it: have
+    `TenantMemberMiddleware` record the tenant in the audit bag. Until then
+    the `plan.request` line in `docs/operator/billing.md` is wrong in
+    production. Found in review of #685.
+
+170. **`safeurl.CheckBaseURL` quotes the raw base URL.** Its errors use `%q`
+    on the input, including the "must not carry a user name or password"
+    error, which by definition holds a credential. Its runtime callers
+    (Sitoo, Brightpearl, Visma, Front Systems, SAP S/4HANA, Business Central)
+    can put that text in logs and the DLQ header. Use `safeurl.RedactURL`.
+    While there, `RedactURL` should also refuse a fragment containing `@`
+    (`http://apikey:1234#secret@host`). Found in review of #693.
+
+171. **Pagination has no page cap.** The SAP S/4HANA and Business Central
+    consumers follow next links until there are none, so a gateway that
+    keeps returning them holds the poll forever. Cap the pages per poll
+    (say 10 000) and log when the cap is hit. Found in review of #680.
+
+172. **Sample-data errors pass `err.Error()` through.** Apart from a dial
+    refusal, the sample-data endpoints of Sitoo, the API consumer, SAP and
+    others return the raw error text, and a DNS failure names the cluster
+    resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
+    texts and log the detail. Found in review of #680.
+
+173. **Start-time URL checks in the management API for every safeurl
+    connector.** Sitoo, the API consumer, the HTTP producer and Visma are
+    refused by `ValidateNodeConfigs` when a connection starts, so the user
+    gets a 400 with the reason. Brightpearl, Front Systems, SAP S/4HANA and
+    Business Central check only in the connector (start, sample data, every
+    delivery), so a bad URL shows up as an `error` status or a DLQ entry
+    instead. Add their checks to the validator. Found in #667, #677, #678 and
+    #686.
+
+174. **Tighten the Docker Hub mirror guard.** `TestDockerfilesPullBaseImagesFromTheMirror`
+    (#692) lets any non-Docker-Hub registry through, so a lookalike host
+    (`mirror.gcr.io.example.com/...`) would pass; allowlist `mirror.gcr.io/`,
+    `mcr.microsoft.com/`, `ghcr.io/` and `localhost`. It also covers only
+    Dockerfiles and the buildx driver: workflow `services:` images, `docker
+    run` images in workflows and the compose images CI starts can drift back
+    to Docker Hub unnoticed. Found in review of #694.
 
 ## Human
 

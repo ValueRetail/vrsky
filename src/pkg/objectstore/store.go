@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -25,8 +26,8 @@ const (
 	ProviderGCS   = "gcs"
 )
 
-// ErrNotFound is wrapped by Get and GetStream (on every backend) when the
-// object does not exist. A missing bucket or container, a denied request and a
+// ErrNotFound is wrapped by Get, GetStream and Stat (on every backend) when
+// the object does not exist. A missing bucket or container, a denied request and a
 // server error are not ErrNotFound. Test for it with errors.Is.
 var ErrNotFound = errors.New("objectstore: object not found")
 
@@ -36,11 +37,21 @@ func notFound(err error) error {
 	return fmt.Errorf("%w: %w", ErrNotFound, err)
 }
 
-// Object is a single stored object as returned by List.
+// Object is a single stored object as returned by List and Stat.
 type Object struct {
 	Key          string
 	Size         int64
 	LastModified time.Time
+	// Version changes when the object is written again under the same key:
+	// the ETag on S3 and Azure, the generation on GCS. Empty when the backend
+	// did not return one. Compare it only for equality.
+	Version string
+}
+
+// etagVersion is an ETag as Object.Version. Providers quote it in some answers
+// and not in others (Azure: quoted in a header, bare in a listing).
+func etagVersion(etag string) string {
+	return strings.Trim(etag, `"`)
 }
 
 // SSEConfig describes per-bucket server-side encryption. Backends apply it on
@@ -76,6 +87,9 @@ type ObjectStore interface {
 	// chunked upload, so a multi-GB object transfers with a bounded buffer. The
 	// caller retains ownership of body (PutStream does not Close it).
 	PutStream(ctx context.Context, key string, body io.Reader, contentType string) error
+	// Stat returns an object's size, modification time and version without
+	// reading it. A missing object returns an error wrapping ErrNotFound.
+	Stat(ctx context.Context, key string) (Object, error)
 	// Delete removes an object.
 	Delete(ctx context.Context, key string) error
 	// Copy copies srcKey to dstKey within the same bucket (used to implement

@@ -22,6 +22,9 @@ func TestBCConsumer_RestoresOnBoot(t *testing.T) {
 		connID = "conn-bc-restored"
 		tenant = "tenant-r"
 	)
+	// The fakes serve on http://127.0.0.1 and Configure builds the client
+	// here: the operator's dev switch.
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
 	tok := bcTestToken(t)
 	defer tok.Close()
 	var polls atomic.Int32

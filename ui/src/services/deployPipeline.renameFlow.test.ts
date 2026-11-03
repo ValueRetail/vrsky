@@ -128,7 +128,7 @@ describe('rename tab, then Deploy, on a canvas linked to a connection', () => {
 })
 
 describe('Deploy as new after the linked connection is gone (#355)', () => {
-  it('unlinks on 404, then creates once, named after the tab, and links the new id', async () => {
+  it('keeps the old link on 404, then creates once, named after the tab, and links the new id', async () => {
     const httpErr = (status: number) => Object.assign(new Error(`HTTP ${status}`), { response: { status } })
     post.mockImplementation((url: string, body?: unknown) => {
       calls.push({ method: 'post', url, body })
@@ -145,8 +145,9 @@ describe('Deploy as new after the linked connection is gone (#355)', () => {
     const err = await deploy(c.id).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ConnectionGone)
     expect((err as ConnectionGone).connectionId).toBe('gone-1')
-    expect(canvas(c.id).deployedConnectionId).toBeUndefined()
-    expect(canvas(c.id).deployedName).toBeUndefined()
+    // Still linked to the gone id until the user answers (#671).
+    expect(canvas(c.id).deployedConnectionId).toBe('gone-1')
+    expect(canvas(c.id).deployedName).toBe('Orders to ERP')
     expect(creates()).toHaveLength(0)
 
     calls = []
