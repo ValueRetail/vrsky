@@ -315,8 +315,11 @@ Used so far:
   which allows public `http` too because its URL is free-form and public APIs
   use it, follows same-host redirects, and is checked by the management API at
   start the same way.
+- The Visma consumer and producer (#661, [Visma.net](connectors/visma.md#which-addresses-it-will-call)),
+  https only for both `base_url` and `token_url`, no redirects, and checked by
+  the management API at start the same way.
 
-Other connectors that take a tenant-supplied host (the HTTP producer, Visma,
+Other connectors that take a tenant-supplied host (the HTTP producer,
 Front Systems, Brightpearl, SAP S/4HANA, Business Central) have not been moved
 to it; they are tracked in #639.
 

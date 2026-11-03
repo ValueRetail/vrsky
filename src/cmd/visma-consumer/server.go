@@ -8,6 +8,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/vismaurl"
 )
 
 // Aux HTTP handler served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT).
@@ -64,6 +65,13 @@ func (c *vismaConsumer) handleSampleData() http.HandlerFunc {
 		}
 		if cfg.BaseURL == "" || cfg.Resource == "" {
 			writeErr("set the base URL and resource first")
+			return
+		}
+
+		// The preview calls the tenant's URLs with the tenant's credential, so
+		// it gets the same check as a started connection (#661).
+		if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, c.allowPrivate); err != nil {
+			writeErr(err.Error())
 			return
 		}
 
