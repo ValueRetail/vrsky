@@ -390,12 +390,18 @@ duplicate delivery (`pkg/messaging/subscriber.go`).
 
 ### Dead Letter Queue
 
-**After 3 failed retries**:
+A message that fails five deliveries (`MaxDeliveryAttempts`; redelivered after
+1 s, 5 s, 30 s and 2 min) is dead-lettered:
 
-1. Message moved to `dead_letter_queue` stream in Platform NATS
+1. Message moved to the `VRSKY_DLQ` stream in Platform NATS
 2. Tenant notified via webhook/email
 3. Message retained for 7 days
 4. Admin UI allows manual retry or inspection
+
+A destination that returns `sdk.Permanent` is not retried at all: the message
+is acked and dropped, and never reaches the DLQ. Which errors each destination
+marks permanent is in the
+[operator troubleshooting guide](operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 
 ---
 

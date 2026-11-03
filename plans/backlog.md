@@ -1164,13 +1164,12 @@ Last updated 2026-10-28.
     of #668. SAP S/4HANA and Business Central still wrap `CheckBaseURL` as
     `token_url refused: base_url …`; they can move to `CheckURL` later.
 
-164. **Connector docs say `sdk.Permanent` errors go to the DLQ.** `Permanent`
-    acks and drops the message (`src/pkg/sdk/lifecycle.go`, "permanent error;
-    dropping message"); only retryable errors reach the DLQ after
-    `MaxDeliveryAttempts`. `docs/connectors/visma.md` (4xx, 401/403) and the
-    Brightpearl page said otherwise; check every connector page, and decide
-    per case whether a 4xx or an incomplete config should be dropped or
-    dead-lettered so it can be replayed. Found in review of #668 and #674.
+164. ~~**Connector docs say `sdk.Permanent` errors go to the DLQ.**~~ (#698)
+    Every destination page now says what it drops and what it retries, checked
+    against the code; the operator troubleshooting guide has a table per
+    destination. The question this item also asked, whether a 4xx or an
+    incomplete config should be dead-lettered so it can be replayed, is item
+    175. Found in review of #668 and #674.
 
 165. **Check the Brightpearl default host.** The connectors build
     `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
@@ -1247,7 +1246,7 @@ Last updated 2026-10-28.
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694.
 
-178. **Ordered resume for Business Central incremental polls.** A poll that
+175. **Ordered resume for Business Central incremental polls.** A poll that
     hits the 10 000-page cap (#699) keeps its old watermark, so every later
     poll re-reads and re-sends the same pages and never reaches the rest. BC
     requests carry no `$orderby`, so the feed comes in key order and the
@@ -1258,13 +1257,96 @@ Last updated 2026-10-28.
     BC that server paging keeps its place with a non-key `$orderby`, and how
     slow it is on large tables. Found in review of #701.
 
-175. **`RedactURL` keeps a password that lands in the query.** For
+176. **`RedactURL` keeps a password that lands in the query.** For
     `http://apikey:1234?secret@host` url.Parse reads host `apikey`, port
     `1234` and query `secret@host`, and `RedactURL` shows it unchanged,
     because the HTTP producer's test pins `?email=a@b` as shown. #700 made
     `CheckBaseURL` stricter on its own; the HTTP producer and
     `CheckRequestURL` still show it. Decide whether "@" in a query with no
     userinfo should become `[invalid URL]` there too. Found in #700.
+
+177. **Decide whether permanent errors should be replayable.** Today a 4xx
+    from the target (`401`/`403` included), an incomplete node and a payload
+    that is not JSON are acked and dropped (`sdk.Permanent`, or a bare `return
+    nil` in the Kafka, RabbitMQ, SFTP, cloud-storage, Salesforce and HTTP
+    destinations); the payload is gone and `vrsky_dlq_messages_total` does not
+    show it. A fixed credential or node would let the operator replay a `4xx`
+    caused by config, as the URL checks already allow (#661, #677, #678, #686).
+    Decide per case, and if some move to the DLQ, mark them so a retry does
+    not loop for a message that can never work. The behaviour is listed in
+    `docs/operator/troubleshooting.md`; update it with the change. Found in
+    #698.
+
+178. **A failed config read drops the message (high priority).** Filed as
+    #704. Every
+    destination except the file one treats any error from its `getConfig` /
+    `getTargets` (a Postgres blip, a secret that does not resolve) as "this
+    connection is not mine" and acks. For visma, sitoo, sap-s4hana,
+    front-systems, brightpearl, business-central, http, db, sftp, kafka,
+    rabbitmq and cloud-storage the first ack is `ServesConnection`, which
+    `pkg/sdk/lifecycle.go` calls before `Deliver`; it returns false on any
+    error and logs nothing. Salesforce has none, and its `Deliver` acks at
+    debug level. The filter and converter do the same in `getPipelineInfo`.
+    Only "no such connection" or "no node of my type" should skip; other
+    errors should be `sdk.Retriable`, and `ServesConnection` has to change
+    with `Deliver`, as `file-producer` does (it answers true on a lookup
+    error so `Deliver` can retry). Found in #698.
+
+179. **The database destination loses messages quietly (high priority).**
+    Filed as #705.
+    `getTargetConnections` in `db-producer` `continue`s past a target it
+    cannot open or ping, so a failed target is lost even when the others
+    deliver; when no target is left it returns an error that `Deliver` logs
+    at debug and acks, although the comment on `Deliver` and
+    `docs/sdk/migration.md` said open and ping failures are `sdk.Retriable`.
+    A row the database refuses (`insertRow`) is logged and skipped, and the
+    message is acked. A node with no `host` is skipped the same way. Return
+    `sdk.Retriable` for the first, and decide what a refused row should do
+    (dead-letter the message with the row's error?). Found in #698.
+
+180. **The Sitoo destination drops a message for a refused `base_url`.**
+    `sitoo-producer` returns `sdk.Permanent` from `safeurl.CheckBaseURL`,
+    while the HTTP, Visma, Brightpearl, Front Systems, SAP and Business
+    Central destinations retry and dead-letter, so the message can be replayed
+    once the node is fixed. Make it `sdk.Retriable`; the existing
+    `TestDeliver_RefusesBadBaseURL` (`src/cmd/sitoo-producer/base_url_test.go`,
+    ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
+    in #698.
+
+181. **Salesforce REST writes skip rejected records and ack the message.**
+    `restWrite` logs a `4xx` per record and moves on; the message is acked
+    and the rejected records are in no queue. When another record in the same
+    message fails transiently, the whole message is retried and the records
+    that went in are sent again, so `insert` creates duplicates. Decide
+    whether the rejected records should be dead-lettered (as their own
+    message) and whether retries should skip what already succeeded. The Bulk
+    API path retries every non-`2xx`, a `4xx` too, so the two paths disagree.
+    Found in #698.
+
+182. **`sdk.RateLimited` carries a delay nothing reads.** `sdk.RetryAfter` has
+    no caller; the SDK NAKs and the redelivery follows the fixed backoff
+    (1 s, 5 s, 30 s, 2 min) whatever `Retry-After` or the 5 s that Visma,
+    Brightpearl, Business Central and SAP pass. Either honour it (NAK with a
+    delay) or make the connectors use `sdk.Retriable` and say so. The Sitoo
+    and Front Systems pages used to promise the hint; #698 removed that. Found
+    in #698.
+
+183. **`docs/connectors/database.md` describes a destination config the code
+    does not read.** The page shows `connection_string_secret_id`, `table` and
+    `operation`; `db-producer` reads `database.host`, `port`, `user`,
+    `password` (as `password_secret_id`), `database`, `sslmode`, `table` and
+    `mode` (`insert`, `upsert` or `create_insert`) and skips a node without
+    `host`. Check the editor and the consumer, then fix the page. The rest of
+    `docs/NATS_ARCHITECTURE.md` (the retry sketch above "Dead Letter Queue",
+    the `dead_letter_queue` stream name, who is notified) also predates the
+    five-attempt DLQ; check it against `pkg/messaging`. Found in #698.
+
+184. **SAP sessions are never logged off.** Since #682 every delivery opens
+    its own SAP security session (a fresh cookie jar), and nothing logs it
+    off, so sessions pile up per technical user until SAP's idle timeout.
+    Some SAP setups cap them. Watch the session count on the first real SAP
+    tenant; if it matters, log off at the end of a delivery. Found in review
+    of #696.
 
 ## Human
 

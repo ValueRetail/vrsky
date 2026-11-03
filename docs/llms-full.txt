@@ -526,10 +526,16 @@ the done step of the wizard and in the builder) and watch the output panel.
 
 ## The dead-letter queue (DLQ)
 
-When a message can't be delivered (e.g. the destination rejects it), it isn't
-lost — it goes to the connection's **DLQ**. Open the **DLQ** panel to see each
+When a message can't be delivered because of something that may pass (the
+destination is down, a rate limit, a network error), VRSky tries it five times
+and then puts it in the connection's **DLQ**. Open the **DLQ** panel to see each
 failed message with its error and payload, then **Retry** it (after fixing the
 cause) or **Discard** it.
+
+A message the destination turns down for good, such as a `4xx` answer or a node
+that is missing a setting, is not retried and does not reach the DLQ. It is
+dropped, and the reason is in the worker's log. Which errors go where is listed
+in the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 
 ![Screenshot: the DLQ panel listing a failed message with its error and Retry/Discard buttons](../img/dlq.png)
 
@@ -742,7 +748,9 @@ Work through these checks in order:
 
 !!! note "The DLQ tells you why"
     Each DLQ entry includes the error that caused the message to fail — start
-    there before digging into logs.
+    there before digging into logs. A message the destination rejected for
+    good (a `4xx` answer, say) is dropped instead and never shows up in the
+    DLQ; ask an operator to check the logs for it.
 
 ## "Test connection" fails
 

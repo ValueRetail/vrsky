@@ -115,9 +115,13 @@ or two tenants, writing to the same SAP host never send each other's session
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
 and `503`/`5xx`/network errors retry with backoff and go to the DLQ once the
-retries are used up. Other `4xx` answers, `401`/`403` auth failures included,
-are permanent: the message is acked and dropped (the error is logged), not
-retried and not dead-lettered. An address the connector refuses (below) is
+retries are used up. Other `4xx` answers to the write, `401`/`403` auth
+failures included, are permanent: the message is acked and dropped (the error
+is logged), not retried and not dead-lettered. So is an incomplete node
+config or a payload that is not JSON. The token fetch comes first, though:
+if SAP answers it with anything but `2xx` (a rejected login shows up
+here), the message is retried and dead-lettered like a network error.
+An address the connector refuses (below) is
 retried like a network error and then goes to the DLQ with its payload, so it
 can be replayed once the node is fixed. Its error says the address was refused
 but not which address a name resolved to.

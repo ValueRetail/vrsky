@@ -191,9 +191,14 @@ and the converted one is written.
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `5xx`/network errors are retried (with the rate-limit backoff hint); `4xx`
-(bad request/data) and `401`/`403` (auth) are treated as poison and sent to the
-DLQ rather than retried forever.
+and `5xx`/network errors are retried on the usual backoff and go
+to the DLQ once the retries are used up. `4xx` (bad request/data) and
+`401`/`403` (auth) are permanent: the message is logged and dropped, not
+retried and not dead-lettered. So is a payload that is not JSON, a Sitoo
+webhook event notification (it is not a resource), an incomplete node config
+(account, site, API id or password missing) and a `base_url` the connector
+refuses (below): a destination drops each message while the node has such a
+`base_url`, and nothing is kept for a replay.
 
 ### The base URL
 

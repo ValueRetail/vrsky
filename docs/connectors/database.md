@@ -55,3 +55,12 @@ Column mapping and key selection are configured via the in-app pipeline editor (
 - **Secrets.** `connection_string` is a secret field. You enter it as plaintext in the editor; at deploy it is minted into an encrypted tenant secret and replaced with `connection_string_secret_id`. Stored and example JSON therefore shows only the `_secret_id` form.
 - **Schema discovery.** The `/schema` endpoint (#81) powers the **Discover** button so you can browse tables and columns without leaving the editor.
 - **Test connection.** Use the **Test connection** button in the editor to validate connectivity before deploying.
+- **Failed writes.** A payload that is not JSON or a table name that is neither
+  `table` nor `schema.table` is dropped (logged, not dead-lettered). A failure
+  to check for or create the table is retried and then dead-lettered. Two
+  things are not retried and not dead-lettered: a row the database refuses
+  (the row is logged and skipped, the other rows of the message are still
+  written), and a target database the destination cannot open or reach. If
+  that leaves no target for the message, it is acked and lost; the worker log
+  says `Failed to open target DB` or `Failed to ping target DB`. See the
+  [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).

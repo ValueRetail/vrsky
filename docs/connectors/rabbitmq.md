@@ -56,5 +56,9 @@ Config bullets:
 - **Test connection.** The RabbitMQ worker exposes a `/test-connection`
   endpoint — use the **Test connection** button to verify the broker is
   reachable before deploying.
+- **Failed deliveries.** A destination without `url`, or with neither
+  `exchange` nor a queue, logs an error and acks each message: it is dropped,
+  not dead-lettered. A failure to connect or to publish is retried and then
+  dead-lettered. See the [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 - Acknowledgement mode, prefetch, and durability settings are configured via
   the in-app pipeline editor (Property panel).

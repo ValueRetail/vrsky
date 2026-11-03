@@ -100,8 +100,11 @@ A producer node writes each message to a Visma resource (`POST`/`PUT`/`PATCH`).
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry; `4xx` and `401`/`403` are poison and go to
-the DLQ.
+and `503`/`5xx`/network errors retry, and go to the DLQ once the retries are
+used up. Other `4xx` answers, `401`/`403` included, an incomplete node config
+and a payload that is not JSON are permanent: the message is logged and
+dropped, not retried and not dead-lettered. A failure to get a token is
+retried.
 
 ## Notes & roadmap
 
