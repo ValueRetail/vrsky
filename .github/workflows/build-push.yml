@@ -230,9 +230,9 @@ jobs:
             echo "::error::leg $RULE_LEG lists no test groups in $legs"
             exit 1
           fi
-          docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
+          docker run --rm -v "$PWD/infrastructure":/cfg:ro --entrypoint promtool mirror.gcr.io/prom/prometheus:v3.5.0 check rules /cfg/prometheus-rules.yml
           run_re="^($(echo $rule_groups | tr ' ' '|'))\$"
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/infrastructure":/cfg:ro -v "$RUNNER_TEMP":/out --entrypoint promtool prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml --run="$run_re" --junit=/out/rules.xml
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/infrastructure":/cfg:ro -v "$RUNNER_TEMP":/out --entrypoint promtool mirror.gcr.io/prom/prometheus:v3.5.0 test rules /cfg/prometheus-rules-test.yml --run="$run_re" --junit=/out/rules.xml
           want=$(echo $rule_groups | wc -w)
           ran=$(grep -o '<testcase ' "$RUNNER_TEMP/rules.xml" | wc -l)
           echo "ran $ran of the $want test groups this leg names"

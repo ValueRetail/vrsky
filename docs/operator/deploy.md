@@ -108,7 +108,10 @@ bumping one. `TestDockerfilesPullBaseImagesFromTheMirror` in
 `src/pkg/managementapi/nodeconfig_test.go` fails on a `FROM` that would pull
 from Docker Hub. The CI service containers and the `golang`/`busybox` runs in
 `integration.yml` and `e2e-nightly.yml` use the mirror too, as do the official
-images in `docker-compose.yml`.
+images in `docker-compose.yml`, the brokers integration.yml starts from it
+(MinIO, fake-gcs, SFTP, Kafka, RabbitMQ) and promtool's `prom/prometheus`.
+Third-party images go through the mirror without `library/`, e.g.
+`mirror.gcr.io/apache/kafka:3.7.0`.
 
 Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the `go mod download` layer and the copy of

@@ -969,7 +969,7 @@ services:
   # Test SFTP server (atmoz/sftp) for local + CI testing of #76. user: vrsky,
   # password: vrsky, with an /upload directory writable by the user.
   sftp-test:
-    image: atmoz/sftp:alpine
+    image: mirror.gcr.io/atmoz/sftp:alpine
     container_name: vrsky-sftp-test
     command: "vrsky:vrsky:::upload"
     ports:
@@ -1027,7 +1027,7 @@ services:
   # Test Kafka broker (apache/kafka, KRaft single-node, PLAINTEXT) for local +
   # CI testing of #77. Reachable in-network at kafka-test:9092.
   kafka-test:
-    image: apache/kafka:3.7.0
+    image: mirror.gcr.io/apache/kafka:3.7.0
     container_name: vrsky-kafka-test
     environment:
       KAFKA_NODE_ID: "0"
@@ -1153,7 +1153,7 @@ services:
   # In-network S3 API at http://minio-test:9000 (minioadmin/minioadmin); web
   # console on 9001. Set the node's endpoint to http://minio-test:9000.
   minio-test:
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    image: mirror.gcr.io/pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: vrsky-minio-test
     command: server /data --console-address ":9001"
     environment:
@@ -1170,7 +1170,7 @@ services:
 
   # One-shot: wait for MinIO, then create the test bucket "vrsky-bucket".
   minio-init:
-    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+    image: mirror.gcr.io/pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     container_name: vrsky-minio-init
     depends_on:
       - minio-test
@@ -1233,7 +1233,7 @@ services:
   # API at http://fake-gcs-test:4443. Set the node endpoint to
   # http://fake-gcs-test:4443/storage/v1/ (no credentials needed).
   fake-gcs-test:
-    image: fsouza/fake-gcs-server:latest
+    image: mirror.gcr.io/fsouza/fake-gcs-server:latest
     container_name: vrsky-fake-gcs-test
     command: "-scheme http -host 0.0.0.0 -port 4443 -public-host fake-gcs-test:4443"
     ports:

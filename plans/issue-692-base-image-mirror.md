@@ -32,7 +32,10 @@ no such limit for us. Same tags, so the same base images.
 - `.github/workflows/dr-drill.yml`: its two `postgres:18-alpine` service
   containers.
 - `docker-compose.yml`: the Docker Hub official images (`nats`, `postgres`,
-  `rabbitmq`, `traefik`).
+  `rabbitmq`, `traefik`), and the third-party broker images integration.yml
+  pulls (`pgsty/minio`, `pgsty/mc`, `fsouza/fake-gcs-server`, `atmoz/sftp`,
+  `apache/kafka`). Added after #687's integration job hit 429 on them.
+- `.github/workflows/build-push.yml`: promtool's `prom/prometheus:v3.5.0`.
 - `src/pkg/managementapi/nodeconfig_test.go`: new guard test.
 - `docs/operator/deploy.md`: a paragraph on the mirror.
 
@@ -55,14 +58,11 @@ no such limit for us. Same tags, so the same base images.
 
 ## Not changed
 
-- Third-party Docker Hub images in `docker-compose.yml` (`atmoz/sftp`,
-  `apache/kafka`, `pgsty/minio`, `fsouza/fake-gcs-server`, grafana, prom …).
-  The mirror does serve the ones integration.yml pulls, but the issue asks
-  for the official bases, and integration.yml already retries those pulls.
-  A follow-up can move them if 429s show up there.
+- The rest of the third-party images in `docker-compose.yml` (grafana,
+  prom, otel, mailpit, httpbin …): CI does not start them.
 - `docker-compose-files.yml`: not used by CI.
-- `prom/prometheus:v3.5.0` (promtool in build-push.yml) and `grafana/k6`
-  (load-smoke.yml): third-party images, one pull per run; same reasoning.
+- `grafana/k6` (load-smoke.yml): one pull per run, not asked for.
+- `AGENTS.md`'s local promtool command: a developer machine, not CI.
 - `infrastructure/azure/postgres-tls.sh` (`image: postgres:18-alpine`): the
   cluster pulls that one, not CI, and it is production infrastructure.
 - `infrastructure/azure/build-push-acr.sh`: builds in ACR from the same
