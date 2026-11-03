@@ -526,9 +526,10 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
 	for next != "" {
 		if page >= pageCap {
-			logger.Warn("Business Central poll stopped at the page cap; the API keeps returning @odata.nextLink, "+
-				"and the watermark was not advanced",
-				"page_cap", pageCap, "entity", cfg.effectiveEntity(), "records", total)
+			logger.Warn("Business Central poll stopped at the page cap while the API still returns @odata.nextLink. "+
+				"The watermark was not advanced, so every later poll re-reads and re-sends the same pages, "+
+				"and the records past the cap are never delivered. Raise or unset page_size, or narrow filter",
+				"page_cap", pageCap, "page_size", cfg.PageSize, "entity", cfg.effectiveEntity(), "records", total)
 			return errPageCap
 		}
 		page++

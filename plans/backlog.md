@@ -1246,6 +1246,17 @@ Last updated 2026-10-28.
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694.
 
+178. **Ordered resume for Business Central incremental polls.** A poll that
+    hits the 10 000-page cap (#699) keeps its old watermark, so every later
+    poll re-reads and re-sends the same pages and never reaches the rest. BC
+    requests carry no `$orderby`, so the feed comes in key order and the
+    watermark cannot be advanced to the largest value read without skipping
+    unread records. Request `$orderby=<cursor_field> asc`, advance to the
+    largest value strictly below the last value read, and rebuild the
+    date-cursor remembered set for that prefix. First check against a live
+    BC that server paging keeps its place with a non-key `$orderby`, and how
+    slow it is on large tables. Found in review of #701.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource

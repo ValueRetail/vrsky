@@ -67,8 +67,11 @@ A consumer node polls one OData entity on `poll_interval_seconds`, following
 
 A poll follows at most 10 000 pages. If the API is still returning
 `@odata.nextLink` after that, the poll stops with a warning that names the
-connection and the cap. The pages already read stay published, and the
-watermark stays where it was, as for a link that leaves the API.
+connection and the cap. The pages already read stay published, but the
+watermark is not advanced. An incremental poll that hits the cap therefore
+repeats the same pages on every poll and never gets past them, so the records
+beyond them are not delivered, until `page_size` is raised or `filter` is
+narrowed.
 
 - `entity` — the entity to poll (default `items`; e.g. `customers`, `salesOrders`).
 - `filter` — optional OData `$filter` (e.g. `status eq 'Open'`).
