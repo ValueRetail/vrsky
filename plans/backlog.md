@@ -1102,7 +1102,7 @@ Last updated 2026-10-28.
     for `postgresql-tls` (alert rules: PR plus `agent:needs-human` if it
     touches workflows). Found in #453.
 
-157. **The builder loses work silently when localStorage is full.**
+157. ~~**The builder loses work silently when localStorage is full.**~~ (#673)
     `canvasStore.saveToStorage` catches a failed `setItem` and only calls
     `console.warn`, so after a quota error the tab keeps editing in memory
     and the next reload brings back the last good save with no notice.

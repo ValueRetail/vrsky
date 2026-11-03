@@ -4,8 +4,9 @@
  * deploy compares the tab name with that name to tell a rename from no change.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useCanvasStore } from './canvasStore'
+import { useUIStore } from './uiStore'
 
 const reload = () => {
   useCanvasStore.setState({ canvases: [], currentCanvasId: null, isInitialized: false, tenantId: null })
@@ -196,5 +197,73 @@ describe('canvasStore: syncDeployedName', () => {
     expect(s().canvases.some((x) => x.id === c.id)).toBe(false)
     expect(localStorage.getItem('vrsky:canvases:v1:t2')).not.toContain('New name')
     expect(stored(c.id)).toMatchObject({ name: 'Edit: Old name', deployedName: 'Old name' })
+  })
+})
+
+// A failed save (quota full, storage blocked) keeps the canvas in memory and
+// tells the user once, because a reload would bring back the last good save.
+describe('canvasStore: a save that fails', () => {
+  const s = () => useCanvasStore.getState()
+  const warnings = () => useUIStore.getState().notifications.filter((n) => n.type === 'warning')
+  const quota = () =>
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    useUIStore.setState({ notifications: [] })
+    // a good save, so the failing state from an earlier test is cleared
+    s().renameCanvas(s().currentCanvasId!, 'Start')
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    useUIStore.setState({ notifications: [] })
+  })
+
+  it('warns on the first failure and says what is lost', () => {
+    quota()
+    s().renameCanvas(s().currentCanvasId!, 'One')
+    expect(warnings()).toHaveLength(1)
+    expect(warnings()[0].message).toMatch(/lost on reload unless you deploy/)
+  })
+
+  it('does not warn again while it keeps failing', () => {
+    quota()
+    const id = s().currentCanvasId!
+    s().renameCanvas(id, 'One')
+    s().renameCanvas(id, 'Two')
+    s().updateCanvas(id, [], [])
+    s().createCanvas()
+    expect(warnings()).toHaveLength(1)
+  })
+
+  it('warns again after a save succeeded in between', () => {
+    const failing = quota()
+    const id = s().currentCanvasId!
+    s().renameCanvas(id, 'One')
+    failing.mockRestore()
+    s().renameCanvas(id, 'Two')
+    expect(warnings()).toHaveLength(1)
+    quota()
+    s().renameCanvas(id, 'Three')
+    expect(warnings()).toHaveLength(2)
+  })
+
+  it('keeps the edits in memory and does not throw', () => {
+    quota()
+    const id = s().currentCanvasId!
+    const node = { id: 'n1', type: 'input', position: { x: 0, y: 0 }, data: {} } as never
+    expect(() => {
+      s().renameCanvas(id, 'Unsaved')
+      s().updateCanvas(id, [node], [])
+    }).not.toThrow()
+    expect(s().getCanvasById(id)).toMatchObject({ name: 'Unsaved' })
+    expect(s().getCanvasById(id)!.nodes).toHaveLength(1)
+  })
+
+  it('does not warn when saving works', () => {
+    s().renameCanvas(s().currentCanvasId!, 'Fine')
+    expect(warnings()).toHaveLength(0)
   })
 })
