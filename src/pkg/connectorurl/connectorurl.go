@@ -37,10 +37,10 @@ func Brightpearl(baseURL, datacenter, accountCode string, allowPrivate bool) err
 		return safeurl.CheckBaseURL(baseURL, allowPrivate)
 	}
 	if !brightpearlDatacenter.MatchString(datacenter) {
-		return fmt.Errorf("datacenter %q must be a single host label such as eu1 or use1", datacenter)
+		return fmt.Errorf("%s must be a single host label such as eu1 or use1", shown("datacenter", datacenter))
 	}
 	if !brightpearlAccountCode.MatchString(accountCode) {
-		return fmt.Errorf("account_code %q may only hold letters, digits, - and _", accountCode)
+		return fmt.Errorf("%s may only hold letters, digits, - and _", shown("account_code", accountCode))
 	}
 	return nil
 }
@@ -109,7 +109,7 @@ func sapCheckHost(host string) error {
 		ok = sapHostPort.MatchString(port) && err == nil && n >= 1 && n <= 65535
 	}
 	if !ok {
-		return fmt.Errorf("host %q must be a host name such as my347623.s4hana.ondemand.com, optionally with :port, and no scheme, path or user name", host)
+		return fmt.Errorf("%s must be a host name such as my347623.s4hana.ondemand.com, optionally with :port, and no scheme, path or user name", shown("host", host))
 	}
 	return nil
 }
@@ -146,4 +146,15 @@ func BusinessCentral(cfg BusinessCentralConfig, allowPrivate bool) error {
 		token = fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", cfg.AADTenantID)
 	}
 	return safeurl.CheckURL(tokenField, token, allowPrivate)
+}
+
+// shown names a refused field with its value quoted, unless the value may hold
+// a credential: "@" (userinfo), "?" or "#" (a query or fragment, which may
+// carry a key). Then only the field is named. Like safeurl's errors, these
+// reach the start answer, logs, the activity feed and the DLQ header.
+func shown(field, value string) string {
+	if strings.ContainsAny(value, "@?#") {
+		return field
+	}
+	return fmt.Sprintf("%s %q", field, value)
 }

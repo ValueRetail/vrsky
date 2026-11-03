@@ -11,7 +11,10 @@ an `error` status or a DLQ entry instead of a 400 at start.
   - Brightpearl: a `base_url` override that is not https, has userinfo, a
     query or fragment, or a literal private address; without `base_url`, a
     `datacenter` that is not one host label or an `account_code` with other
-    than letters, digits, `-` and `_`.
+    than letters, digits, `-` and `_`. On the consumer only when it polls
+    (`poll_interval_seconds` > 0 and `resource` set); in webhook mode it
+    publishes what Brightpearl posts and never calls the base URL. On the
+    producer always.
   - Front Systems: a bad `base_url`. On the consumer only when `callback_url`
     and `events` are set (a webhook-only consumer never calls it). On the
     producer always, since every delivery calls it, so an empty one is
@@ -20,14 +23,18 @@ an `error` status or a DLQ entry instead of a 400 at start.
     it is used), `api_base_url`, and with `auth_type` oauth2 `token_url` or the
     token URL derived from `host`.
   - Business Central: `api_base_url` and `token_url` (or the defaults built
-    from `aad_tenant_id`).
+    from `aad_tenant_id`). For a consumer the four fields are trimmed first,
+    as `BCConfig.normalise` does; the producer does not trim.
 - One rule per connector, shared by the connector and the management API:
   new package `src/pkg/connectorurl` (`Brightpearl`, `FrontSystems`, `SAP`,
   `BusinessCentral`). Each connector's existing check function keeps its name
   and signature and calls into it, so the connector call sites do not change.
 - `ALLOW_PRIVATE_UPSTREAMS` honoured through `safeurl.AllowPrivateFromEnv()`.
 - Errors name the field (`brightpearl.base_url`, `sap_s4hana.token_url`, …)
-  and never echo userinfo, a query or a fragment (`safeurl.CheckURL`).
+  and never echo userinfo, a query or a fragment (`safeurl.CheckURL`). A
+  refused `datacenter`, `account_code` or SAP `host` is quoted only when it
+  holds no `@`, `?` or `#` (review of #711: `u:secret@host` came back
+  verbatim).
 - Table-driven tests in `pkg/managementapi` that fail on main, and tests for
   `pkg/connectorurl`. Connector tests pass unchanged.
 - Docs: `docs/SECURITY.md` and the four connector pages.
@@ -62,13 +69,20 @@ an `error` status or a DLQ entry instead of a 400 at start.
   `safeurl.CheckURL` no longer quotes userinfo (#706). Empty `base_url` is
   refused by the shared rule; both connectors already refused it.
 - Management API reads the fields untrimmed, as the connectors get them, so
-  " host" is refused at start just as the connector refuses it.
+  " host" is refused at start just as the connector refuses it. The Business
+  Central source is the exception: it trims, so the start check trims for it.
+- An empty settings block is left to the required-field rule, so it is
+  reported once.
 
 ## Risks
 
-- A connection that starts today with, say, an empty Brightpearl datacenter
-  will now get a 400. The connector would never have served it, so this
-  surfaces a dead config rather than breaking a working one.
+- A connection that starts today with a bad URL now gets a 400. The first
+  version of this PR also refused a webhook-only Brightpearl source with no
+  `datacenter`, which works in production (`handleWebhook` publishes without
+  reading the config); review caught it, and the source is now checked only
+  when it polls, as Front Systems is only when it registers webhooks. A
+  Front Systems destination or a Brightpearl destination with an empty URL is
+  refused; neither producer can deliver without one.
 - Merge with #704 (producers' `ServesConnection`/`Deliver`/`getConfig`): the
   connector edits are confined to the check functions and imports.
 

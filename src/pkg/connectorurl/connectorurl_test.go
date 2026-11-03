@@ -52,6 +52,11 @@ func TestBrightpearl(t *testing.T) {
 		{"account_code with a slash", "", "eu1", "acme/../admin", false, "account_code"},
 		{"account_code with a query", "", "eu1", "acme?x", false, "account_code"},
 		{"account_code empty", "", "eu1", "", false, "account_code"},
+		{"datacenter with userinfo and a secret", "", "u:" + secret + "@eu1", "acme", false, "datacenter"},
+		{"datacenter with a fragment and a secret", "", "eu1#" + secret, "acme", false, "datacenter"},
+		{"account_code with userinfo and a secret", "", "eu1", "u:" + secret + "@acme", false, "account_code"},
+		{"account_code with a query and a secret", "", "eu1", "acme?k=" + secret, false, "account_code"},
+		{"plain bad datacenter is quoted", "", "eu1.evil", "acme", false, `datacenter "eu1.evil"`},
 
 		{"dev flag: http mock", "http://brightpearl-mock:8080/public-api/acme", "", "", true, ""},
 		{"dev flag: loopback mock", "http://127.0.0.1:9000/x", "", "", true, ""},
@@ -140,6 +145,10 @@ func TestSAP(t *testing.T) {
 		{"host port zero", basic(SAPConfig{Host: host + ":0"}), false, "host"},
 		{"host with two ports", basic(SAPConfig{Host: host + ":443:80"}), false, "host"},
 		{"host ipv6 literal", basic(SAPConfig{Host: "[::1]"}), false, "host"},
+		{"host with userinfo and a secret", basic(SAPConfig{Host: "u:" + secret + "@sap.example.com"}), false, "host"},
+		{"host with a query and a secret", basic(SAPConfig{Host: "sap.example.com?k=" + secret}), false, "host"},
+		{"default token url from a host with a secret", oauth(SAPConfig{APIBaseURL: "https://sap.example.com/odata", Host: "u:" + secret + "@sap.example.com"}), false, "token_url defaults to the host"},
+		{"plain bad host is quoted", basic(SAPConfig{Host: "evil.example/"}), false, `host "evil.example/"`},
 		{"host loopback literal", basic(SAPConfig{Host: "127.0.0.1:8080"}), false, "private"},
 		{"host metadata literal", basic(SAPConfig{Host: "169.254.169.254"}), false, "private"},
 

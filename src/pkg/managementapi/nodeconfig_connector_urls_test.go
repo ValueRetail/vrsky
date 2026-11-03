@@ -2,6 +2,7 @@ package managementapi
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -65,8 +66,10 @@ func runConnectorURLCases(t *testing.T, typ string, tests []connectorURLCase) {
 }
 
 func TestValidateNodeConfigs_BrightpearlURLs(t *testing.T) {
+	// A polling consumer (and every producer) calls the base URL; a
+	// webhook-only consumer never does, so it is not checked.
 	bp := func(kv ...string) map[string]any {
-		m := map[string]any{"app_ref": "acme_vrsky", "staff_token_secret_id": "s1", "resource": "/order-service/order"}
+		m := map[string]any{"app_ref": "acme_vrsky", "staff_token_secret_id": "s1", "resource": "/order-service/order", "poll_interval_seconds": 300}
 		for i := 0; i+1 < len(kv); i += 2 {
 			m[kv[i]] = kv[i+1]
 		}
@@ -84,6 +87,16 @@ func TestValidateNodeConfigs_BrightpearlURLs(t *testing.T) {
 		{name: "datacenter moves the host", block: bp("datacenter", "x@10.0.0.1/", "account_code", "acme"), wantErr: "brightpearl.datacenter"},
 		{name: "account_code leaves the path", block: bp("datacenter", "eu1", "account_code", "acme/../admin"), wantErr: "brightpearl.account_code"},
 		{name: "neither base_url nor datacenter", block: bp(), wantErr: "brightpearl.datacenter"},
+		{name: "datacenter with userinfo and a secret", block: bp("datacenter", "u:"+urlSecret+"@eu1", "account_code", "acme"), wantErr: "brightpearl.datacenter"},
+		{name: "datacenter with a query and a secret", block: bp("datacenter", "eu1?k="+urlSecret, "account_code", "acme"), wantErr: "brightpearl.datacenter"},
+		{name: "account_code with userinfo and a secret", block: bp("datacenter", "eu1", "account_code", "u:"+urlSecret+"@acme"), wantErr: "brightpearl.account_code"},
+
+		// Webhook mode: the consumer publishes what Brightpearl posts and
+		// never calls the base URL (#708 review).
+		{name: "webhook-only consumer, nothing set", block: map[string]any{"app_ref": "acme_vrsky", "staff_token_secret_id": "s1"}, sides: []string{"consumer"}},
+		{name: "webhook-only consumer, no interval", block: map[string]any{"base_url": "https://127.0.0.1/x", "resource": "/order-service/order"}, sides: []string{"consumer"}},
+		{name: "webhook-only consumer, no resource", block: map[string]any{"base_url": "https://127.0.0.1/x", "poll_interval_seconds": 300}, sides: []string{"consumer"}},
+		{name: "producer, nothing set", block: map[string]any{"app_ref": "acme_vrsky", "staff_token_secret_id": "s1", "resource": "/order-service/order"}, sides: []string{"producer"}, wantErr: "brightpearl.datacenter"},
 	})
 }
 
@@ -146,6 +159,9 @@ func TestValidateNodeConfigs_SAPURLs(t *testing.T) {
 		{name: "oauth2 token_url loopback", block: sap("host", host, "auth_type", "oauth2", "token_url", "https://127.0.0.1/token"), wantErr: "sap_s4hana.token_url"},
 		{name: "oauth2 token_url over http", block: sap("host", host, "auth_type", "oauth2", "token_url", "http://auth.example.com/token"), wantErr: "sap_s4hana.token_url"},
 		{name: "oauth2 default token url with no host", block: sap("api_base_url", "https://sap.example.com/odata", "auth_type", "oauth2"), wantErr: "sap_s4hana.token_url defaults to the host"},
+		{name: "host with userinfo and a secret", block: sap("host", "u:"+urlSecret+"@sap.example.com"), wantErr: "sap_s4hana.host"},
+		{name: "host with a query and a secret", block: sap("host", "sap.example.com?k="+urlSecret), wantErr: "sap_s4hana.host"},
+		{name: "oauth2 default token url from a host with a secret", block: sap("api_base_url", "https://sap.example.com/odata", "auth_type", "oauth2", "host", "u:"+urlSecret+"@sap.example.com"), wantErr: "sap_s4hana.token_url defaults to the host"},
 	})
 }
 
@@ -168,7 +184,32 @@ func TestValidateNodeConfigs_BusinessCentralURLs(t *testing.T) {
 		{name: "token_url over http", block: bc("token_url", "http://login.example.com/t/oauth2/v2.0/token"), wantErr: "business_central.token_url"},
 		{name: "token_url metadata", block: bc("token_url", "https://169.254.169.254/token"), wantErr: "business_central.token_url"},
 		{name: "token_url query", block: bc("token_url", "https://login.example.com/token?k="+urlSecret), wantErr: "query"},
+
+		// The source trims these four before its check (BCConfig.normalise);
+		// the destination does not, and refuses a GUID with a newline.
+		{name: "pasted tenant id with a newline", block: bc("aad_tenant_id", "guid\n"), sides: []string{"consumer"}},
+		{name: "pasted environment with a space", block: bc("environment", "Production "), sides: []string{"consumer"}},
+		{name: "pasted tenant id with a newline", block: bc("aad_tenant_id", "guid\n"), sides: []string{"producer"}, wantErr: "business_central.aad_tenant_id"},
 	})
+}
+
+// An empty settings block is reported once, by the required-field rule, not
+// again as a bad URL.
+func TestValidateNodeConfigs_ConnectorURLs_EmptyBlockOneError(t *testing.T) {
+	for _, typ := range []string{"brightpearl", "front_systems", "sap_s4hana", "business_central"} {
+		for _, side := range []string{"consumer", "producer"} {
+			t.Run(side+"/"+typ, func(t *testing.T) {
+				err := startOn(side, `{"type":"`+typ+`","`+typ+`":{}}`)
+				var dve *DAGValidationError
+				if !errors.As(err, &dve) {
+					t.Fatalf("want a *DAGValidationError, got %v", err)
+				}
+				if len(dve.Errors) != 1 {
+					t.Fatalf("want one error, got %d: %q", len(dve.Errors), dve.Errors)
+				}
+			})
+		}
+	}
 }
 
 // The error names the node, the field and the service whose logs to read.
@@ -188,7 +229,7 @@ func TestValidateNodeConfigs_ConnectorURLs_ErrorShape(t *testing.T) {
 // for mock upstreams in docker compose, as the connectors do.
 func TestValidateNodeConfigs_ConnectorURLs_DevFlag(t *testing.T) {
 	configs := map[string]string{
-		"brightpearl":      `{"type":"brightpearl","brightpearl":{"base_url":"http://brightpearl-mock:8080/public-api/acme"}}`,
+		"brightpearl":      `{"type":"brightpearl","brightpearl":{"base_url":"http://brightpearl-mock:8080/public-api/acme","resource":"/order-service/order","poll_interval_seconds":300}}`,
 		"front_systems":    `{"type":"front_systems","front_systems":{"base_url":"http://127.0.0.1:9000","callback_url":"https://vrsky.example.com/cb","events":["SaleCreated"]}}`,
 		"sap_s4hana":       `{"type":"sap_s4hana","sap_s4hana":{"api_base_url":"http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV","auth_type":"oauth2","token_url":"http://mock-sap:8099/token"}}`,
 		"business_central": `{"type":"business_central","business_central":{"api_base_url":"http://127.0.0.1:8080/api/v2.0","token_url":"http://127.0.0.1:8080/token"}}`,

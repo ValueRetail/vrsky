@@ -1161,8 +1161,9 @@ Last updated 2026-10-28.
     `CheckBaseURL`'s message, which breaks silently if that wording changes.
     SAP S/4HANA and Business Central have a `token_url` too. Add a field-named
     check to `pkg/safeurl` and have `CheckBaseURL` wrap it. Found in review
-    of #668. SAP S/4HANA and Business Central still wrap `CheckBaseURL` as
-    `token_url refused: base_url …`; they can move to `CheckURL` later.
+    of #668. SAP S/4HANA and Business Central moved to `CheckURL` in #708
+    (`pkg/connectorurl`), which dropped the `token_url refused: base_url …`
+    wrapping.
 
 164. ~~**Connector docs say `sdk.Permanent` errors go to the DLQ.**~~ (#698)
     Every destination page now says what it drops and what it retries, checked

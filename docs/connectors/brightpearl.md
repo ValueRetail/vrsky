@@ -112,8 +112,9 @@ breaks these rules, with the field and the reason in the answer (#708). The
 connectors check again: a source refuses to start its poll (the error is in
 the consumer's log), the "show data structure" preview answers with the
 reason, and a destination retries the message until it ends in the DLQ. A
-consumer with no `base_url` needs `datacenter` and `account_code`, webhook
-mode included, since it does not start without them.
+source is checked only when it polls (`poll_interval_seconds` above 0 and a
+`resource`): in webhook mode it calls nothing, so these fields are not checked
+and may be left empty.
 
 A `base_url` can still point at any public https host, so only set one for a
 host you trust with the staff token.
