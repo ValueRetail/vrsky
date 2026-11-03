@@ -1092,7 +1092,7 @@ Last updated 2026-10-28.
     handler and nothing in the UI opens it. Remove it with `ClientRegistry`
     and `MetricsCache` if they have no other use. Public route, so PR plus
     `agent:needs-human`. Found in #651.
-155. **Platform plan and quota changes are audited under the wrong tenant.**
+155. ~~**Platform plan and quota changes are audited under the wrong tenant.**~~ (#685)
     The audit middleware files an entry under the caller's context tenant,
     so `platform.plan.set` lands in the operator's own workspace log, and
     since #637 nothing when the operator has no workspace selected. The
@@ -1184,6 +1184,26 @@ Last updated 2026-10-28.
     through the copy). Close it where the store supports it: Azure `If-Match`
     on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
     Found in review of #676.
+
+168. **Audit entries have no actor (high priority).** `AuditMiddleware`
+    reads the user from the request it wraps, but `SessionAuthMiddleware` and
+    the API-key check add the principal further in, per route, so `user_id`
+    and `actor_label` stay empty on every entry, while the Settings page
+    promises "who". #685 fixed it for the operator's plan and quota writes
+    only (the bag carries the actor there). Do the same for every route: let
+    the session and API-key middleware record the principal in the audit bag,
+    with `actor_kind` `api_key` for keys. Found in #685.
+
+169. **Owner writes under `/api/v1/tenants/*` are never audited.**
+    Plan requests, members, invites and API-key rotation write nothing to
+    `audit_log` in production. `TenantIDMiddleware` skips `/api/v1/tenants`,
+    and `TenantMemberMiddleware` sets the tenant only on the inner context,
+    which `AuditMiddleware` never sees: an owner's
+    `POST /tenants/{id}/plan-requests` with no workspace selected answers 201
+    and writes no entry. The bag-based fix from 168 covers it: have
+    `TenantMemberMiddleware` record the tenant in the audit bag. Until then
+    the `plan.request` line in `docs/operator/billing.md` is wrong in
+    production. Found in review of #685.
 
 ## Human
 

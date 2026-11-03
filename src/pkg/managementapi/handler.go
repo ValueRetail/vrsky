@@ -1158,10 +1158,11 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 
 	// Tenant quotas (#74). Reads = any member. Writes moved to the platform
 	// operator with paid plans (plans/paid-plans.md): limits are the product
-	// now, so no workspace role may raise its own.
+	// now, so no workspace role may raise its own. The operator's writes to a
+	// workspace are audited in that workspace's log (AuditUnderPathTenant).
 	operatorMW := h.RequireOperator()
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/quotas", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetQuotas))).ServeHTTP)
-	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(operatorMW(http.HandlerFunc(h.HandleUpdateQuotas))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/quotas", sessionMW(operatorMW(AuditUnderPathTenant(http.HandlerFunc(h.HandleUpdateQuotas)))).ServeHTTP)
 
 	// Paid plans (plans/paid-plans.md). What the workspace sees, and the one
 	// thing an owner may do: ask.
@@ -1170,7 +1171,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// The operator's side: every workspace, the inbox, and the one write.
 	mux.HandleFunc("GET /api/v1/platform/tenants", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformListTenants))).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/platform/plan-requests", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformListPlanRequests))).ServeHTTP)
-	mux.HandleFunc("PUT /api/v1/platform/tenants/{tenant_id}/plan", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlatformSetPlan))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/platform/tenants/{tenant_id}/plan", sessionMW(operatorMW(AuditUnderPathTenant(http.HandlerFunc(h.HandlePlatformSetPlan)))).ServeHTTP)
 
 	// Per-tenant usage metering (#92). Any member can read usage + export CSV.
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/usage", sessionMW(tenantMW(http.HandlerFunc(h.HandleGetUsage))).ServeHTTP)
@@ -1179,7 +1180,7 @@ func (h *Handler) RegisterAuthRoutes(mux *http.ServeMux) {
 	// Subscription plan name only (#90), for the dev-stack gateway's edge rate
 	// limit. Operator-only since paid plans; PUT /platform/tenants/{id}/plan is
 	// the real thing (limits, billing state, requests).
-	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/plan", sessionMW(operatorMW(http.HandlerFunc(h.HandlePlanUpdate))).ServeHTTP)
+	mux.HandleFunc("PUT /api/v1/tenants/{tenant_id}/plan", sessionMW(operatorMW(AuditUnderPathTenant(http.HandlerFunc(h.HandlePlanUpdate)))).ServeHTTP)
 
 	// Tenant provisioning status stream (Phase 2)
 	mux.HandleFunc("GET /api/v1/tenants/{tenant_id}/status/stream", sessionMW(tenantMW(http.HandlerFunc(h.HandleTenantStatusSSE))).ServeHTTP)

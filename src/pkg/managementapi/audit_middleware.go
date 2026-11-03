@@ -15,7 +15,8 @@ import (
 //
 // Wraps every state-changing API call. The middleware:
 //   1. Decides whether the call is auditable (POST/PUT/PATCH/DELETE on
-//      /api/v1/*, with a tenant in context).
+//      /api/v1/*, with a tenant in context, or one the route names through
+//      AuditUnderPathTenant).
 //   2. Captures method, path, status, request_id, IP, user-agent.
 //   3. Lets the handler enrich the entry by calling SetAuditDetail(ctx, k, v).
 //   4. After the handler returns, builds an AuditEntry and writes it
@@ -37,6 +38,21 @@ type auditBag struct {
 	actionOverride   string
 	resourceOverride string
 	resourceIDValue  string
+	// tenantOverride and actor file the entry under a workspace other than
+	// the caller's context tenant; see AuditUnderPathTenant.
+	tenantOverride string
+	actor          *User
+}
+
+// tenant is the workspace the entry is filed under: the override when a
+// route set one, otherwise the caller's context tenant.
+func (b *auditBag) tenant(contextTenant string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tenantOverride != "" {
+		return b.tenantOverride
+	}
+	return contextTenant
 }
 
 // SetAuditDetail merges a key/value into the request's audit bag. Safe to
@@ -75,6 +91,27 @@ func SetAuditResource(ctx context.Context, resourceType, resourceID string) {
 	defer b.mu.Unlock()
 	b.resourceOverride = resourceType
 	b.resourceIDValue = resourceID
+}
+
+// AuditUnderPathTenant files the request's audit entry under the route's
+// {tenant_id} path value, with the signed-in user as the actor, instead of
+// under the caller's context tenant (#685). It is for the platform
+// operator's writes to a workspace (plan, quotas): the change belongs in that
+// workspace's log, and the operator may have no workspace selected, or a
+// different one. Mount it after RequireOperator, so only a caller already
+// allowed to act on the path's workspace can file entries in its log.
+func AuditUnderPathTenant(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if b, ok := r.Context().Value(auditCtxKey{}).(*auditBag); ok && b != nil {
+			if tenantID := r.PathValue("tenant_id"); tenantID != "" {
+				b.mu.Lock()
+				b.tenantOverride = tenantID
+				b.actor = GetUserFromContext(r.Context())
+				b.mu.Unlock()
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // auditResponseWriter captures the HTTP status code for the audit record.
@@ -148,7 +185,8 @@ func AuditMiddleware(writer AuditWriter, logger *log.Logger) func(http.Handler) 
 
 			// Skip recording when the call never identified a tenant —
 			// these are pre-auth paths that have nowhere to be stored.
-			tenantID, _ := TenantIDFromContextOptional(ctx)
+			contextTenant, _ := TenantIDFromContextOptional(ctx)
+			tenantID := bag.tenant(contextTenant)
 			if tenantID == "" {
 				return
 			}
@@ -220,6 +258,7 @@ func buildAuditEntry(r *http.Request, status int, tenantID string, bag *auditBag
 	for k, v := range bag.details {
 		details[k] = v
 	}
+	actor := bag.actor
 	bag.mu.Unlock()
 
 	e := &AuditEntry{
@@ -236,10 +275,13 @@ func buildAuditEntry(r *http.Request, status int, tenantID string, bag *auditBag
 		UserAgent:    r.Header.Get("User-Agent"),
 		Details:      details,
 	}
-	if u := GetUserFromContext(r.Context()); u != nil {
-		uid := u.ID
+	if actor == nil {
+		actor = GetUserFromContext(r.Context())
+	}
+	if actor != nil {
+		uid := actor.ID
 		e.UserID = &uid
-		e.ActorLabel = u.Email
+		e.ActorLabel = actor.Email
 	}
 	return e
 }
