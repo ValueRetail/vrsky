@@ -138,8 +138,9 @@ addresses it can trust (#678):
   root's scheme, host and port. A link to another host or port, or an `http`
   link where the root is `https` (a TLS-terminating web dispatcher may
   answer with one), is fetched from the configured root instead, with the
-  link's path and query, as long as that path is under the service root's
-  path. A link anywhere else stops the poll with an error; the pages before
+  link's path and query, as long as that path, with `.` and `..` resolved, is
+  under the service root's path and holds no encoded dot or slash (`%2e`,
+  `%2f`). A link anywhere else stops the poll with an error; the pages before
   it are already published. Relative links, which is what SAP and `mock-sap`
   send, are not affected.
 

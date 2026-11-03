@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -361,11 +362,23 @@ func (cfg *SAPConfig) followNext(next string) (string, error) {
 	}
 	sameOrigin := n.Scheme == root.Scheme && strings.EqualFold(n.Hostname(), root.Hostname()) &&
 		effectivePort(n) == effectivePort(root)
-	if !sameOrigin && !underPath(n.EscapedPath(), root.EscapedPath()) {
+	if !sameOrigin && !rebasable(n, root) {
 		return "", errNextOffService
 	}
 	out := url.URL{Scheme: root.Scheme, Host: root.Host, Path: n.Path, RawPath: n.RawPath, RawQuery: n.RawQuery}
 	return out.String(), nil
+}
+
+// rebasable reports whether a link on another origin may be fetched from the
+// configured one: its path, dot segments resolved, is under the service root's
+// path. Encoded dots or slashes are refused outright, since a server may
+// decode them after the check and leave the root path that way.
+func rebasable(n, root *url.URL) bool {
+	esc := strings.ToLower(n.EscapedPath())
+	if strings.Contains(esc, "%2e") || strings.Contains(esc, "%2f") {
+		return false
+	}
+	return underPath(path.Clean("/"+n.Path), path.Clean("/"+root.Path))
 }
 
 // underPath reports whether path is root or below it, segment-wise.

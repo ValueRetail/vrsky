@@ -65,8 +65,9 @@ looking like the default.
   credential, and a link to a public host, or an `http` link behind a
   TLS-terminating web dispatcher, would leak it. Same scheme, host and port:
   followed (user name and fragment dropped). Another origin with a path under
-  the service root's path: the path and query are fetched from the configured
-  origin, which keeps gateways that answer with an internal host name
+  the service root's path (after `path.Clean`; `%2e` and `%2f` refused, so a
+  server cannot decode its way out of the root): the path and query are
+  fetched from the configured origin, which keeps gateways that answer with an internal host name
   working. Anything else: the poll stops with an error that names neither the
   link nor the credential. mock-sap answers with a relative `?$skiptoken=P2`,
   which resolves onto the same origin, so the nightly end-to-end is
