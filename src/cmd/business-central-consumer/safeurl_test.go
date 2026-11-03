@@ -393,6 +393,13 @@ func TestFollowNext(t *testing.T) {
 		{"metadata", "http://169.254.169.254/latest/meta-data/", ""},
 		{"path that only shares a prefix", "https://evil.example.net/BC/api/v2.0x/items", ""},
 		{"protocol-relative to another host", "//evil.example.net/x", ""},
+		{"another host, %2e%2e", "https://evil.example.net/BC/api/v2.0/%2e%2e/%2e%2e/admin", ""},
+		{"another host, %2E%2E", "https://evil.example.net/BC/api/v2.0/%2E%2E/%2E%2E/admin", ""},
+		{"another host, ..%2F..", "https://evil.example.net/BC/api/v2.0/..%2F..%2Fadmin", ""},
+		{"another host, ..%5C..", "https://evil.example.net/BC/api/v2.0/..%5C..%5Cadmin", ""},
+		{"another host, literal backslashes", `https://evil.example.net/BC/api/v2.0/..\..\admin`, ""},
+		{"another host, literal dots leaving the root", "https://evil.example.net/BC/api/v2.0/../../admin", ""},
+		{"another host, literal dots staying under the root", "https://bc-internal.corp/BC/api/v2.0/companies(GUID)/x/../items?$skiptoken=2", page1 + "?$skiptoken=2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := cfg.followNext(page1, tc.next)
@@ -429,7 +436,7 @@ func suNewSide(t *testing.T, tls bool) *suSide {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.hits.Add(1)
 		s.auth.Store(r.Header.Get("Authorization"))
-		fmt.Fprint(w, `{"value":[{"number":"FROM-THE-OTHER-HOST"}]}`)
+		fmt.Fprint(w, `{"value":[{"number":"FROM-THE-OTHER-HOST","lastModifiedDateTime":"2026-10-02T10:00:00Z"}]}`)
 	})
 	if tls {
 		s.srv = httptest.NewTLSServer(h)
@@ -445,17 +452,21 @@ func suNewSide(t *testing.T, tls bool) *suSide {
 func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 	const entityPath = "/api/v2.0/companies(GUID)/items"
 	for _, tc := range []struct {
-		name      string
-		next      func(api, otherHTTPS, otherHTTP string) string
-		wantPages int  // pages fetched from the configured API
-		wantErr   bool // the poll stops
+		name        string
+		next        func(api, otherHTTPS, otherHTTP string) string
+		wantPages   int  // pages fetched from the configured API
+		wantErr     bool // the poll stops
+		incremental bool
 	}{
-		{"same origin", func(api, _, _ string) string { return api + entityPath + "?page=2" }, 2, false},
-		{"relative", func(_, _, _ string) string { return "?page=2" }, 2, false},
-		{"another host, outside the API path", func(_, o, _ string) string { return o + "/collect?page=2" }, 1, true},
-		{"another host, under the API path", func(_, o, _ string) string { return o + entityPath + "?page=2" }, 2, false},
-		{"https to http, outside the API path", func(_, _, h string) string { return h + "/collect?page=2" }, 1, true},
-		{"https to http, under the API path", func(_, _, h string) string { return h + entityPath + "?page=2" }, 2, false},
+		{"same origin", func(api, _, _ string) string { return api + entityPath + "?page=2" }, 2, false, false},
+		{"relative", func(_, _, _ string) string { return "?page=2" }, 2, false, false},
+		{"another host, outside the API path", func(_, o, _ string) string { return o + "/collect?page=2" }, 1, true, false},
+		{"another host, under the API path", func(_, o, _ string) string { return o + entityPath + "?page=2" }, 2, false, false},
+		{"https to http, outside the API path", func(_, _, h string) string { return h + "/collect?page=2" }, 1, true, false},
+		{"https to http, under the API path", func(_, _, h string) string { return h + entityPath + "?page=2" }, 2, false, false},
+		// The poll stops before the watermark is stored, so the next poll
+		// reads the same window again instead of skipping it.
+		{"incremental, another host, outside the API path", func(_, o, _ string) string { return o + "/collect?page=2" }, 1, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			otherHTTPS, otherHTTP := suNewSide(t, true), suNewSide(t, false)
@@ -478,7 +489,7 @@ func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 					return
 				}
 				next, _ := json.Marshal(tc.next(apiURL, otherHTTPS.srv.URL, otherHTTP.srv.URL))
-				fmt.Fprintf(w, `{"value":[{"number":"P1"}],"@odata.nextLink":%s}`, next)
+				fmt.Fprintf(w, `{"value":[{"number":"P1","lastModifiedDateTime":"2026-10-01T10:00:00Z"}],"@odata.nextLink":%s}`, next)
 			}))
 			defer api.Close()
 			apiURL = api.URL
@@ -488,10 +499,16 @@ func TestFetch_NextLinkStaysOnTheConfiguredOrigin(t *testing.T) {
 			cfg := &BCConfig{
 				AADTenantID: "t1", CompanyID: "GUID", ClientID: "cid", ClientSecret: "sec",
 				Entity: "items", APIBaseURL: api.URL + "/api/v2.0", TokenURL: api.URL + "/token",
+				Incremental: tc.incremental, NodeID: "src",
 			}
 			tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
 			err := c.fetchAndPublish(context.Background(), "conn-1", "tenant-1", cfg, tok, c.logger)
 
+			if tc.incremental {
+				if cp, _ := c.checkpoints.Get(context.Background(), "tenant-1", "conn-1", "src"); cp != nil {
+					t.Errorf("a watermark was stored (%q) by a poll that stopped", cp.LastProcessedMessageID)
+				}
+			}
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
 			}

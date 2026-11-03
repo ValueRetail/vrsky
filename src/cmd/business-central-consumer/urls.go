@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -48,9 +49,10 @@ var errNextOffOrigin = errors.New("business central: @odata.nextLink points outs
 //   - same scheme, host and port as the API root: followed as given, minus any
 //     user name or fragment;
 //   - another origin (another host or port, or http where the root is https)
-//     with a path under the API root's path: its path and query are fetched
-//     from the configured origin, as the picture links already are, so an
-//     on-prem server that names itself by an internal host keeps paging;
+//     with a path under the API root's path (see rebasable): its path and
+//     query are fetched from the configured origin, as the picture links
+//     already are, so an on-prem server that names itself by an internal host
+//     keeps paging;
 //   - anything else: errNextOffOrigin.
 func (cfg *BCConfig) followNext(current, next string) (string, error) {
 	root, err := url.Parse(cfg.apiRoot())
@@ -68,11 +70,30 @@ func (cfg *BCConfig) followNext(current, next string) (string, error) {
 	n := cur.ResolveReference(ref)
 	sameOrigin := n.Scheme == root.Scheme && strings.EqualFold(n.Hostname(), root.Hostname()) &&
 		effectivePort(n) == effectivePort(root)
-	if !sameOrigin && !underPath(n.EscapedPath(), root.EscapedPath()) {
+	if !sameOrigin && !rebasable(n, root) {
 		return "", errNextOffOrigin
 	}
 	out := url.URL{Scheme: root.Scheme, Host: root.Host, Path: n.Path, RawPath: n.RawPath, RawQuery: n.RawQuery}
 	return out.String(), nil
+}
+
+// rebasable reports whether a link from another origin may be fetched from
+// the configured one: its path, dot segments resolved, is the API root or
+// below it. A path with an encoded dot or slash (%2e, %2f) or a backslash
+// (literal or %5c) is refused outright: the server on the configured origin
+// may decode it after this check (IIS and .NET treat %5c as /), so
+// /BC/api/v2.0/%2e%2e/%2e%2e/admin would leave the root there.
+func rebasable(n, root *url.URL) bool {
+	esc := strings.ToLower(n.EscapedPath())
+	for _, bad := range []string{"%2e", "%2f", "%5c", `\`} {
+		if strings.Contains(esc, bad) {
+			return false
+		}
+	}
+	if strings.Contains(n.Path, `\`) {
+		return false
+	}
+	return underPath(path.Clean("/"+n.Path), path.Clean("/"+root.Path))
 }
 
 // underPath reports whether path is root or below it, segment-wise.
