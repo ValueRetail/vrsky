@@ -173,8 +173,8 @@ func (p *fileProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 
 	configs, err := p.getConnectionConfigs(ctx, connectionID)
 	if err != nil {
-		// DB hiccup — retry.
-		return sdk.Retriable(fmt.Errorf("get connection config: %w", err))
+		// DB hiccup — retry, and the SDK logs it at Error (#704).
+		return sdk.ConfigUnavailable(fmt.Errorf("get connection config: %w", err))
 	}
 
 	lastProcessedBy := ""
@@ -346,7 +346,7 @@ func (p *fileProducer) DeliverStream(ctx context.Context, env *envelope.Envelope
 	}
 	configs, err := p.getConnectionConfigs(ctx, connectionID)
 	if err != nil {
-		return sdk.Retriable(fmt.Errorf("get connection config: %w", err))
+		return sdk.ConfigUnavailable(fmt.Errorf("get connection config: %w", err))
 	}
 
 	lastProcessedBy := ""

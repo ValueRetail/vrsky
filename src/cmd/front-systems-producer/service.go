@@ -10,13 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -92,6 +92,9 @@ func (p *frontSystemsProducer) Deliver(ctx context.Context, env *envelope.Envelo
 	}
 	cfg, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Front Systems producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -156,13 +159,10 @@ func (p *frontSystemsProducer) write(ctx context.Context, cfg *FrontSystemsProdu
 // private, loopback or link-local address. allowPrivate (the operator's dev
 // switch) allows http and private addresses. The dial check in the HTTP
 // client is the enforcement for a host name; this is the early, readable
-// error.
+// error. The rule lives in pkg/connectorurl, shared with the management API
+// (#708).
 func checkBaseURL(raw string, allowPrivate bool) error {
-	// safeurl's message quotes the URL; keep a password out of the logs.
-	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.User != nil {
-		return errors.New("base_url must not carry a user name or password")
-	}
-	return safeurl.CheckBaseURL(raw, allowPrivate)
+	return connectorurl.FrontSystems(raw, allowPrivate)
 }
 
 func snippet(b []byte) string {
@@ -219,7 +219,7 @@ func (p *frontSystemsProducer) getConfig(ctx context.Context, connectionID, tena
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -230,17 +230,21 @@ func (p *frontSystemsProducer) getConfig(ctx context.Context, connectionID, tena
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "front_systems" || nc.FrontSystems == nil {
 			continue
 		}
-		if nc.Type == "front_systems" && nc.FrontSystems != nil {
-			return nc.FrontSystems, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.FrontSystems == nil {
+			continue
+		}
+		return nc.FrontSystems, nil
 	}
 	return nil, errors.New("no front_systems producer node found")
 }
@@ -253,5 +257,6 @@ func (p *frontSystemsProducer) ServesConnection(ctx context.Context, tenantID, c
 		return false
 	}
 	_, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }

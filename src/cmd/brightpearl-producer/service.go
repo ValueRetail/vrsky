@@ -10,12 +10,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
@@ -83,6 +83,9 @@ func (p *brightpearlProducer) Deliver(ctx context.Context, env *envelope.Envelop
 	}
 	cfg, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Brightpearl producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -157,29 +160,9 @@ func (cfg *BrightpearlProducerConfig) baseURL() string {
 // checkBaseURL refuses a URL the connector must not call (#667): it comes from
 // tenant config and every request carries the staff token. The dial check in
 // the HTTP client is the enforcement; this gives an early, readable error.
+// The rule lives in pkg/connectorurl, shared with the management API (#708).
 func (cfg *BrightpearlProducerConfig) checkBaseURL(allowPrivate bool) error {
-	if cfg.BaseURL != "" {
-		return safeurl.CheckBaseURL(cfg.BaseURL, allowPrivate)
-	}
-	return checkDerivedBaseURL(cfg.Datacenter, cfg.AccountCode)
-}
-
-var (
-	datacenterRE  = regexp.MustCompile(`(?i)^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	accountCodeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-)
-
-// checkDerivedBaseURL keeps the derived URL on Brightpearl: datacenter goes
-// into the host name and account_code into the path, so each must be one
-// label or segment. Otherwise "x@10.0.0.1/" as a datacenter moves the host.
-func checkDerivedBaseURL(datacenter, accountCode string) error {
-	if !datacenterRE.MatchString(datacenter) {
-		return fmt.Errorf("datacenter %q must be a single host label such as eu1 or use1", datacenter)
-	}
-	if !accountCodeRE.MatchString(accountCode) {
-		return fmt.Errorf("account_code %q may only hold letters, digits, - and _", accountCode)
-	}
-	return nil
+	return connectorurl.Brightpearl(cfg.BaseURL, cfg.Datacenter, cfg.AccountCode, allowPrivate)
 }
 
 func (cfg *BrightpearlProducerConfig) resourceURL() string {
@@ -207,7 +190,7 @@ func (p *brightpearlProducer) getConfig(ctx context.Context, connectionID, tenan
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -218,17 +201,21 @@ func (p *brightpearlProducer) getConfig(ctx context.Context, connectionID, tenan
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "brightpearl" || nc.Brightpearl == nil {
 			continue
 		}
-		if nc.Type == "brightpearl" && nc.Brightpearl != nil {
-			return nc.Brightpearl, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.Brightpearl == nil {
+			continue
+		}
+		return nc.Brightpearl, nil
 	}
 	return nil, errors.New("no brightpearl producer node found")
 }
@@ -241,5 +228,6 @@ func (p *brightpearlProducer) ServesConnection(ctx context.Context, tenantID, co
 		return false
 	}
 	_, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }

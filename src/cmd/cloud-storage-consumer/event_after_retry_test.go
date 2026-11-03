@@ -258,9 +258,10 @@ func TestEventAfterRetry_Loop(t *testing.T) {
 			name:   "stat fails on a retry, then works",
 			action: "delete",
 			store: func(fs *fakeStore) *eaStore {
-				// Stat 0 is the event loop's, before the fetch.
+				// Stat 0 is the event loop's, before the fetch; Stat 1 the
+				// check before the first delete (#707); Stat 2 the retry's.
 				return &eaStore{fakeStore: fs, deleteFn: failFirst(1), statFn: func(_ context.Context, n int) error {
-					if n == 1 {
+					if n == 2 {
 						return errors.New("500 internal")
 					}
 					return nil

@@ -235,8 +235,8 @@ Which kind an error gets differs per destination:
 Filters and converters do not use these rules. A payload they cannot parse is
 acked with an `error` event in the activity feed. Fetching an offloaded
 payload, storing a large result or publishing the result is retried and then
-dead-lettered. The remote agent destination is described on its
-[own page](../connectors/remote-agent.md).
+dead-lettered. So is a failed read of the connection's config. The remote
+agent destination is described on its [own page](../connectors/remote-agent.md).
 
 Four things apply to every destination in the table:
 
@@ -249,15 +249,24 @@ Four things apply to every destination in the table:
   cloud-storage destinations stream a large payload instead of buffering it,
   except with several targets on the node (HTTP with OAuth too), where they
   buffer it.
-- Reading the node's config comes first. Every destination except the file
-  one treats a failed read of the connection, a node that is not theirs and a
-  secret that does not resolve alike, and acks the message. For the HTTP,
-  database, SFTP, Kafka, RabbitMQ, cloud-storage, Visma, Sitoo, SAP, Front
-  Systems, Brightpearl and Business Central destinations the first ack is in
-  `ServesConnection`, which the SDK calls before `Deliver` and which answers
-  "not mine" on any config error without a log line. Salesforce has no
-  `ServesConnection`; its `Deliver` logs the error at debug level and acks. A
-  database hiccup at the wrong moment drops the message.
+- Reading the node's config comes first. A connection that no longer exists,
+  or has no node for this destination, is not its business and the message
+  is acked. A read that fails (the database query errors, or a secret on the
+  destination's own node cannot be fetched or decrypted) is retried and then
+  dead-lettered like any other retried error. Each failed attempt logs
+  `connection config unavailable; message not acked, will retry` at error
+  level with the `connection_id`. A database outage longer than the retry
+  schedule (about 2.5 minutes) leaves the messages that were in flight in the
+  DLQ; retry them once the database is back. Every destination's worker
+  gives up on the same message, and their copies collapse into one DLQ entry
+  only within the DLQ's 2-minute duplicate window; a worker that falls
+  further behind writes its own. Several entries with the same envelope id
+  are one message: retry only one of them, since a retry goes to every
+  destination again. The `X-Vrsky-Worker` header says which worker gave up.
+  If it is not the connection's destination, check whether the real
+  destination already delivered the message before you retry it. After a
+  full outage the surviving entry may name a bystander that never had to
+  deliver anything, so treat that check as a precaution, not proof.
 - With several destinations on one connection, one failure retries the whole
   message and the destinations that already delivered get it again.
 

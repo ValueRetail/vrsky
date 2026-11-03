@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ValueRetail/vrsky/pkg/safeurl"
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 )
 
 // apiRoot is the API v2.0 root: api_base_url, or the cloud default built from
@@ -27,15 +27,13 @@ func (cfg *BCConfig) apiRoot() string {
 // come from tenant config, the token request carries the client secret and
 // every API request the bearer token (#686). The dial-time check in the HTTP
 // client is the enforcement; this gives an early, readable error.
-// allowPrivate is the operator's dev switch.
+// allowPrivate is the operator's dev switch. The rule lives in
+// pkg/connectorurl, shared with the management API (#708).
 func (cfg *BCConfig) checkURLs(allowPrivate bool) error {
-	if err := safeurl.CheckBaseURL(cfg.apiRoot(), allowPrivate); err != nil {
-		return fmt.Errorf("api_base_url refused: %w", err)
-	}
-	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
-		return fmt.Errorf("token_url refused: %w", err)
-	}
-	return nil
+	return connectorurl.BusinessCentral(connectorurl.BusinessCentralConfig{
+		APIBaseURL: cfg.APIBaseURL, TokenURL: cfg.TokenURL,
+		AADTenantID: cfg.AADTenantID, Environment: cfg.Environment,
+	}, allowPrivate)
 }
 
 // errNextOffOrigin stops a poll whose @odata.nextLink leaves the configured

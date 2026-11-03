@@ -95,6 +95,9 @@ func (p *sitooProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	}
 	cfg, rt, err := p.getSitooConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Sitoo producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -248,7 +251,7 @@ func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenant
 		`SELECT nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON, &edgesJSON); err != nil {
-		return nil, route{}, fmt.Errorf("connection not found: %w", err)
+		return nil, route{}, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -259,17 +262,21 @@ func (p *sitooProducer) getSitooConfig(ctx context.Context, connectionID, tenant
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, route{}, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "sitoo" || nc.Sitoo == nil {
 			continue
 		}
-		if nc.Type == "sitoo" && nc.Sitoo != nil {
-			return nc.Sitoo, routeTo(n.ID, nodes, edgesJSON), nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, route{}, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.Sitoo == nil {
+			continue
+		}
+		return nc.Sitoo, routeTo(n.ID, nodes, edgesJSON), nil
 	}
 	return nil, route{}, errors.New("no sitoo producer node found")
 }
@@ -329,7 +336,8 @@ func (p *sitooProducer) ServesConnection(ctx context.Context, tenantID, connecti
 		return false
 	}
 	_, _, err := p.getSitooConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }
 
 // isEventNotification reports whether payload looks like a Sitoo SPI event

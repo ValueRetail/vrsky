@@ -19,6 +19,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
@@ -103,6 +104,9 @@ func (p *bcProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 	}
 	cfg, rt, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Business Central producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -339,15 +343,13 @@ func (cfg *BCProducerConfig) entityURL() string {
 // come from tenant config, the token request carries the client secret and
 // the write the bearer token (#686). The dial-time check in the HTTP client is
 // the enforcement; this gives an early, readable error. allowPrivate is the
-// operator's dev switch.
+// operator's dev switch. The rule lives in pkg/connectorurl, shared with the
+// management API (#708).
 func (cfg *BCProducerConfig) checkURLs(allowPrivate bool) error {
-	if err := safeurl.CheckBaseURL(cfg.apiRoot(), allowPrivate); err != nil {
-		return fmt.Errorf("api_base_url refused: %w", err)
-	}
-	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
-		return fmt.Errorf("token_url refused: %w", err)
-	}
-	return nil
+	return connectorurl.BusinessCentral(connectorurl.BusinessCentralConfig{
+		APIBaseURL: cfg.APIBaseURL, TokenURL: cfg.TokenURL,
+		AADTenantID: cfg.AADTenantID, Environment: cfg.Environment,
+	}, allowPrivate)
 }
 
 // --- DB ---
@@ -362,7 +364,7 @@ func (p *bcProducer) getConfig(ctx context.Context, connectionID, tenantID strin
 		`SELECT nodes, edges FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON, &edgesJSON); err != nil {
-		return nil, route{}, fmt.Errorf("connection not found: %w", err)
+		return nil, route{}, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -373,17 +375,21 @@ func (p *bcProducer) getConfig(ctx context.Context, connectionID, tenantID strin
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, route{}, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "business_central" || nc.BusinessCentral == nil {
 			continue
 		}
-		if nc.Type == "business_central" && nc.BusinessCentral != nil {
-			return nc.BusinessCentral, routeTo(n.ID, nodes, edgesJSON), nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, route{}, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.BusinessCentral == nil {
+			continue
+		}
+		return nc.BusinessCentral, routeTo(n.ID, nodes, edgesJSON), nil
 	}
 	return nil, route{}, errors.New("no business_central producer node found")
 }
@@ -443,5 +449,6 @@ func (p *bcProducer) ServesConnection(ctx context.Context, tenantID, connectionI
 		return false
 	}
 	_, _, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }

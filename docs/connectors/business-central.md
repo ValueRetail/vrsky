@@ -33,6 +33,9 @@ loopback, link-local or cloud-metadata address (`10.0.0.0/8`,
 `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`,
 `168.63.129.16`, and the IPv6 equivalents).
 
+- The management API refuses to start the connection, with the field and the
+  reason in the answer (#708). With the defaults, the field named is
+  `aad_tenant_id` (or `environment`), which end up in their path.
 - A source that is refused does not start and logs why. The data preview
   ("show data structure") answers with the reason.
 - A destination sends nothing. The message is retried and then dead-lettered
@@ -50,15 +53,11 @@ loopback, link-local or cloud-metadata address (`10.0.0.0/8`,
   themselves by an internal host). Any other link stops the poll with an
   error; the watermark stays where it was.
 
-These checks run in the connector, not yet when the management API starts
-the connection, so the reason shows up in the service log rather than in the
-start answer.
-
 If you have a node with an `http` or private `api_base_url` or `token_url`, it
 stops working after this change and needs a reachable https URL. For local
 development with a mock upstream the operator can set
-`ALLOW_PRIVATE_UPSTREAMS=true` on the service; a node cannot set it, and it
-must stay off in production.
+`ALLOW_PRIVATE_UPSTREAMS=true` on the connector services and `management-api`;
+a node cannot set it, and it must stay off in production.
 
 ## As a source (consumer)
 

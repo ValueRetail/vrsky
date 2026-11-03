@@ -88,6 +88,9 @@ func (p *vismaProducer) Deliver(ctx context.Context, env *envelope.Envelope) err
 	}
 	cfg, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No Visma producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -187,7 +190,7 @@ func (p *vismaProducer) getConfig(ctx context.Context, connectionID, tenantID st
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -198,17 +201,21 @@ func (p *vismaProducer) getConfig(ctx context.Context, connectionID, tenantID st
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "visma" || nc.Visma == nil {
 			continue
 		}
-		if nc.Type == "visma" && nc.Visma != nil {
-			return nc.Visma, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.Visma == nil {
+			continue
+		}
+		return nc.Visma, nil
 	}
 	return nil, errors.New("no visma producer node found")
 }
@@ -221,5 +228,6 @@ func (p *vismaProducer) ServesConnection(ctx context.Context, tenantID, connecti
 		return false
 	}
 	_, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }

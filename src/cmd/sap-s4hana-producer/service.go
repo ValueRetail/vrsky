@@ -13,13 +13,12 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
@@ -108,6 +107,9 @@ func (p *sapProducer) Deliver(ctx context.Context, env *envelope.Envelope) error
 	}
 	cfg, err := p.getConfig(ctx, env.IntegrationID, env.TenantID)
 	if err != nil {
+		if sdk.IsConfigUnavailable(err) {
+			return err // not acked: retried, then the DLQ
+		}
 		p.logger.Debug("No SAP S/4HANA producer config", "connection_id", env.IntegrationID, "error", err)
 		return nil
 	}
@@ -334,56 +336,16 @@ func (cfg *SAPProducerConfig) entityURL() string {
 	return u
 }
 
-// hostLabel is one DNS label; hostName is one or more of them, dot separated.
-const hostLabel = `[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?`
-
-var (
-	hostName = regexp.MustCompile(`^` + hostLabel + `(\.` + hostLabel + `)*$`)
-	hostPort = regexp.MustCompile(`^[0-9]{1,5}$`)
-)
-
-// checkHost refuses a host that is not one host name with an optional numeric
-// port. host goes into the URL as it is, so without this a value such as
-// "x@10.0.0.1/" or "sap.example.com/admin?" changes the host or the path the
-// credential is sent to while the node looks like it uses the default (#678).
-func checkHost(host string) error {
-	name, port, hasPort := strings.Cut(host, ":")
-	ok := host != "" && len(name) <= 253 && hostName.MatchString(name)
-	if ok && hasPort {
-		n, err := strconv.Atoi(port)
-		ok = hostPort.MatchString(port) && err == nil && n >= 1 && n <= 65535
-	}
-	if !ok {
-		return fmt.Errorf("host %q must be a host name such as my347623.s4hana.ondemand.com, optionally with :port, and no scheme, path or user name", host)
-	}
-	return nil
-}
-
 // checkURLs refuses a service root or token URL the connector must not call:
 // they come from tenant config and carry the tenant's credential (#678). The
 // dial-time check in the HTTP client is the enforcement; this gives an early,
-// readable error. allowPrivate is the operator's dev switch.
+// readable error. allowPrivate is the operator's dev switch. The rule lives
+// in pkg/connectorurl, shared with the management API (#708).
 func (cfg *SAPProducerConfig) checkURLs(allowPrivate bool) error {
-	if cfg.APIBaseURL == "" {
-		if err := checkHost(cfg.Host); err != nil {
-			return err
-		}
-	}
-	if err := safeurl.CheckBaseURL(cfg.serviceRoot(), allowPrivate); err != nil {
-		return fmt.Errorf("service root refused: %w", err)
-	}
-	if cfg.effectiveAuthType() != authOAuth2 {
-		return nil
-	}
-	if cfg.TokenURL == "" {
-		if err := checkHost(cfg.Host); err != nil {
-			return fmt.Errorf("token_url defaults to the host: %w", err)
-		}
-	}
-	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
-		return fmt.Errorf("token_url refused: %w", err)
-	}
-	return nil
+	return connectorurl.SAP(connectorurl.SAPConfig{
+		Host: cfg.Host, Service: cfg.Service, APIBaseURL: cfg.APIBaseURL,
+		TokenURL: cfg.TokenURL, AuthType: cfg.AuthType,
+	}, allowPrivate)
 }
 
 func (cfg *SAPProducerConfig) validate() error {
@@ -414,7 +376,7 @@ func (p *sapProducer) getConfig(ctx context.Context, connectionID, tenantID stri
 		`SELECT nodes FROM connections WHERE id = $1 AND tenant_id = $2`,
 		connectionID, tenantID,
 	).Scan(&nodesJSON); err != nil {
-		return nil, fmt.Errorf("connection not found: %w", err)
+		return nil, sdk.ConfigReadError(err)
 	}
 	var nodes []node
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
@@ -425,17 +387,21 @@ func (p *sapProducer) getConfig(ctx context.Context, connectionID, tenantID stri
 		if n.Type != "producer" {
 			continue
 		}
-		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
-		if rerr != nil {
-			return nil, fmt.Errorf("resolve secrets: %w", rerr)
-		}
+		// Find our node before resolving secrets: an unreadable secret on
+		// another connector's node is not a reason to hold this message.
 		var nc nodeConfig
-		if err := json.Unmarshal(resolved, &nc); err != nil {
+		if err := json.Unmarshal(n.Config, &nc); err != nil || nc.Type != "sap_s4hana" || nc.SAP == nil {
 			continue
 		}
-		if nc.Type == "sap_s4hana" && nc.SAP != nil {
-			return nc.SAP, nil
+		resolved, rerr := crypto.ResolveSecretsInJSON(ctx, reader, tenantID, n.Config)
+		if rerr != nil {
+			return nil, sdk.ConfigUnavailable(fmt.Errorf("resolve secrets: %w", rerr))
 		}
+		nc = nodeConfig{}
+		if err := json.Unmarshal(resolved, &nc); err != nil || nc.SAP == nil {
+			continue
+		}
+		return nc.SAP, nil
 	}
 	return nil, errors.New("no sap_s4hana producer node found")
 }
@@ -448,5 +414,6 @@ func (p *sapProducer) ServesConnection(ctx context.Context, tenantID, connection
 		return false
 	}
 	_, err := p.getConfig(ctx, connectionID, tenantID)
-	return err == nil
+	// A failed read answers true so Deliver runs and returns it (#704).
+	return err == nil || sdk.IsConfigUnavailable(err)
 }

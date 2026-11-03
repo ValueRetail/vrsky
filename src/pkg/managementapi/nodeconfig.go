@@ -205,6 +205,7 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "visma" {
 		errs = append(errs, validateVismaURLs(node, raw)...)
 	}
+	errs = append(errs, validateConnectorURLs(node, configType, raw)...)
 	if configType == "api" && node.Type == "consumer" {
 		errs = append(errs, validateAPIConsumerURLs(node, raw)...)
 	}

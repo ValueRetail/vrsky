@@ -413,6 +413,11 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 	return nil
 }
 
+// dispatchBackoff overrides the redelivery schedule of the dispatch durable.
+// nil in production (messaging.DefaultBackoff); tests shorten it so a retried
+// message reaches the DLQ in seconds instead of minutes.
+var dispatchBackoff []time.Duration
+
 // ackWaitFromEnv reads the optional WORKER_ACK_WAIT override (a Go duration like
 // "2m"). Returns 0 when unset/invalid, letting the messaging layer apply its
 // default. AckWait is the crash-recovery window, not the handler time budget
@@ -447,6 +452,7 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 	logger := res.Logger
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
+		Backoff:     dispatchBackoff, // nil: the messaging default
 		// AckWait left at the messaging default: the per-message budget is no
 		// longer bounded by AckWait — the subscriber sends InProgress heartbeats
 		// while the handler runs (#139), so even a slow producer target / bulk
@@ -506,6 +512,14 @@ func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources,
 			logger.Warn("permanent error; dropping message", "envelope_id", env.ID, "error", derr)
 			return nil // ack — poison message
 		}
+		if IsConfigUnavailable(derr) {
+			// The worker couldn't tell whether, or how, to deliver. Say so
+			// loudly: the message is retried and lands in the DLQ if the
+			// read keeps failing (#704).
+			logger.Error("connection config unavailable; message not acked, will retry",
+				"connection_id", env.IntegrationID, "tenant_id", env.TenantID,
+				"envelope_id", env.ID, "error", derr)
+		}
 		return derr // Retriable / bare → NAK → backoff → DLQ
 	})
 	if err != nil {
@@ -533,7 +547,8 @@ func republish(ctx context.Context, pub *messaging.Publisher, res *Resources, en
 
 // --- env / wiring helpers ---
 
-func newLogger(name string) *slog.Logger {
+// newLogger is a variable so tests can capture what the runner logs.
+var newLogger = func(name string) *slog.Logger {
 	// Structured JSON to stdout with the platform's standard fields (#91); the
 	// context-aware handler stamps trace_id/tenant_id/pipeline_id/connection_id
 	// when the call uses a ctx from logging.ContextWith / carrying a span.

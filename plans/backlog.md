@@ -1161,8 +1161,9 @@ Last updated 2026-10-28.
     `CheckBaseURL`'s message, which breaks silently if that wording changes.
     SAP S/4HANA and Business Central have a `token_url` too. Add a field-named
     check to `pkg/safeurl` and have `CheckBaseURL` wrap it. Found in review
-    of #668. SAP S/4HANA and Business Central still wrap `CheckBaseURL` as
-    `token_url refused: base_url …`; they can move to `CheckURL` later.
+    of #668. SAP S/4HANA and Business Central moved to `CheckURL` in #708
+    (`pkg/connectorurl`), which dropped the `token_url refused: base_url …`
+    wrapping.
 
 164. ~~**Connector docs say `sdk.Permanent` errors go to the DLQ.**~~ (#698)
     Every destination page now says what it drops and what it retries, checked
@@ -1177,7 +1178,7 @@ Last updated 2026-10-28.
     Check Brightpearl's own API docs and change the default if it moved.
     Found in review of #674.
 
-166. **The first after-action still deletes or moves blind.** In event and
+166. ~~**The first after-action still deletes or moves blind.**~~ (#707) In event and
     poll mode the first (non-retry) `delete` or `move` after a publish runs
     without a stamp check, so a replacement uploaded under the same key
     during the publish is deleted or moved unpublished. #672 guards only the
@@ -1229,8 +1230,8 @@ Last updated 2026-10-28.
     resolver (`lookup x on 10.0.0.10:53`). Map transport errors to fixed
     texts and log the detail. Found in review of #680.
 
-173. **Start-time URL checks in the management API for every safeurl
-    connector.** Sitoo, the API consumer, the HTTP producer and Visma are
+173. ~~**Start-time URL checks in the management API for every safeurl
+    connector.**~~ (#708) Sitoo, the API consumer, the HTTP producer and Visma are
     refused by `ValidateNodeConfigs` when a connection starts, so the user
     gets a 400 with the reason. Brightpearl, Front Systems, SAP S/4HANA and
     Business Central check only in the connector (start, sample data, every
@@ -1277,7 +1278,7 @@ Last updated 2026-10-28.
     `docs/operator/troubleshooting.md`; update it with the change. Found in
     #698.
 
-178. **A failed config read drops the message (high priority).** Filed as
+178. ~~**A failed config read drops the message (high priority).**~~ (#704) Filed as
     #704. Every
     destination except the file one treats any error from its `getConfig` /
     `getTargets` (a Postgres blip, a secret that does not resolve) as "this
@@ -1361,6 +1362,37 @@ Last updated 2026-10-28.
     it only for authenticated callers. Decide which unauthenticated routes
     need an audit entry at all (failed logins, say, belong in a security
     log, not a tenant's), and drop the rest. Found in review of #697.
+
+187. **SAP and Business Central build their default URLs twice.** Since
+    #708 `pkg/connectorurl` checks the service root and token URL it builds
+    from `host` (SAP) or `aad_tenant_id` (BC), while the connectors still
+    build the URLs they call in their own `serviceRoot`, `apiRoot` and
+    `effectiveTokenURL`. The host part cannot drift (checked by the host
+    rule, or a Microsoft constant), but the paths could. Have the connectors
+    take the builders from `pkg/connectorurl`. Left out of #708 to keep the
+    connector edits clear of #704.
+
+188. **The dev stack's `management-api` has no `ALLOW_PRIVATE_UPSTREAMS`.**
+    `docker-compose.yml` sets it on `http-producer` and both SAP services, so
+    their mocks work, but the management API's start check refuses the same
+    URLs: httpbin since #660, mock-sap since #708. Decide whether compose
+    sets it on `management-api` too. Found in #708.
+
+189. **The poll-mode after-action retry runs blind.** The #640 retry pass
+    calls `afterAction` for a key that is done at the listing's stamp,
+    without a Stat check, so an object replaced with the same size within
+    the same second (S3 listings have whole seconds), or replaced between the
+    listing and the retry, is deleted or moved unpublished. Add
+    `Object.Version` to `doneset.Stamp` (compared only when both sides have
+    one), or make the same Stat check as the first after-action (#707) in
+    `retryAfterAction`. Found in review of #710.
+
+190. **GCS metadata edits read as replacements.** The stamp check before a
+    cloud-storage after-action compares `Updated`, which GCS changes on a
+    metadata-only edit (labels, content type) while the generation stays.
+    Such an object is left (event mode) or published once more (poll mode).
+    On GCS compare generation and size and ignore `Updated`. Found in review
+    of #710.
 
 ## Human
 

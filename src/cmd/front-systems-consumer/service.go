@@ -18,6 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
@@ -765,17 +766,10 @@ func (c *frontSystemsConsumer) do(ctx context.Context, cfg *FrontSystemsConfig, 
 // operator's dev switch) allows http and private addresses. The dial check in
 // the HTTP client is the enforcement for a host name; this is the early,
 // readable error. A bare host has no scheme and is refused here too (#503
-// review). The error wraps errBadBaseURL, which no retry fixes.
+// review). The error wraps errBadBaseURL, which no retry fixes. The rule lives
+// in pkg/connectorurl, shared with the management API (#708).
 func checkBaseURL(raw string, allowPrivate bool) error {
-	if strings.TrimSpace(raw) == "" {
-		return fmt.Errorf("%w: front_systems base_url is required (per-partner Azure APIM host)", errBadBaseURL)
-	}
-	// safeurl's message quotes the URL; keep a password out of logs and
-	// last_error.
-	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.User != nil {
-		return fmt.Errorf("%w: front_systems base_url must not carry a user name or password", errBadBaseURL)
-	}
-	if err := safeurl.CheckBaseURL(raw, allowPrivate); err != nil {
+	if err := connectorurl.FrontSystems(raw, allowPrivate); err != nil {
 		return fmt.Errorf("%w: %v; use https://<partner-apim-host>", errBadBaseURL, err)
 	}
 	return nil

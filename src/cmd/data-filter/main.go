@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/ValueRetail/vrsky/pkg/claimcheck"
+	"github.com/ValueRetail/vrsky/pkg/configread"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/messaging"
 	"github.com/ValueRetail/vrsky/pkg/objectstore"
@@ -290,6 +291,13 @@ func (s *FilterService) handleMessage(ctx context.Context, msg *nats.Msg) error 
 	}
 
 	info, err := s.getPipelineInfo(ctx, connectionID)
+	if configread.IsUnavailable(err) {
+		// Couldn't read the connection: NAK so the message is retried and
+		// lands in the DLQ if the read keeps failing, never acked (#704).
+		s.logger.Error("connection config unavailable; message not acked, will retry",
+			"connection_id", connectionID, "envelope_id", env.ID, "error", err)
+		return err
+	}
 	if err != nil || info == nil || len(info.Entries) == 0 {
 		return nil
 	}
@@ -773,7 +781,7 @@ func (s *FilterService) getPipelineInfo(ctx context.Context, connectionID string
 	var nodesJSON, edgesJSON []byte
 	err := s.db.QueryRowContext(ctx, `SELECT nodes, edges FROM connections WHERE id = $1`, connectionID).Scan(&nodesJSON, &edgesJSON)
 	if err != nil {
-		return nil, err
+		return nil, configread.ReadError(err)
 	}
 
 	var nodes []struct {

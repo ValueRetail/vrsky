@@ -25,8 +25,8 @@ import (
 // which is left for its own notification. Stamping before the fetch fails
 // safe: a replacement between the Stat and the fetch is published under the
 // old stamp, and the retry then sees a mismatch and leaves the object, a
-// duplicate publish at worst. What is left is the moment between a retry's
-// Stat and its Delete (or Copy).
+// duplicate publish at worst. The first after-action makes the same check
+// (#707). What is left is the moment between a Stat and its Delete (or Copy).
 
 const (
 	// eventAfterQueueMax bounds the keys waiting for a retry per connection.

@@ -30,9 +30,11 @@ type Producer interface {
 // destination handled it fine. With this implemented, the dispatch loop acks
 // foreign connections without rehydrating or delivering.
 //
-// Implementations MUST mirror their Deliver's own "not mine" semantics — in
-// particular, if Deliver treats a config-lookup failure as retriable, return
-// true on lookup failure so the retry still happens.
+// Implementations MUST mirror their Deliver's own "not mine" semantics. Answer
+// false only for a definite "not mine": the connection does not exist, or has
+// no node of this producer's type. When the config or a secret can't be read
+// (ErrConfigUnavailable), answer true so Deliver runs and returns that error;
+// a false answer acks the message and it is lost (#704).
 type ConnectionScoped interface {
 	ServesConnection(ctx context.Context, tenantID, connectionID string) bool
 }
