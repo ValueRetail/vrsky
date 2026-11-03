@@ -905,6 +905,163 @@ func TestDockerfilesRetryModuleDownload(t *testing.T) {
 	}
 }
 
+// baseImageMirror is Google's public pull-through cache of Docker Hub.
+const baseImageMirror = "mirror.gcr.io/"
+
+// Every Dockerfile pulls its base images from mirror.gcr.io, never from
+// Docker Hub, and BuildKit itself comes from there too (#692).
+//
+// Docker Hub limits pulls even with a login: the main build for #681 (run
+// 41604470984) lost nine of its image builds to `429 Too Many Requests` on
+// golang:1.26-alpine and alpine:3.18/3.19 after the day's runs had spent the
+// quota. The deploy was skipped and production kept the older images. A new
+// Dockerfile is made by copying an old one, or written from memory with a bare
+// `FROM golang:…`, so this fails the moment a Docker Hub base comes back.
+func TestDockerfilesPullBaseImagesFromTheMirror(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	var dockerfiles []string
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if p != root && (name == "node_modules" || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.") || strings.HasSuffix(name, ".Dockerfile") {
+			dockerfiles = append(dockerfiles, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the repo: %v", err)
+	}
+	if len(dockerfiles) < 30 {
+		t.Fatalf("found %d Dockerfiles, expected the ~40 under src/cmd and ui; is the walk broken?", len(dockerfiles))
+	}
+
+	var bad []string
+	for _, p := range dockerfiles {
+		body, err := os.ReadFile(p) //nolint:gosec // paths come from a walk over the repo
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		rel, _ := filepath.Rel(root, p)
+		for _, problem := range dockerHubBases(string(body)) {
+			bad = append(bad, rel+": "+problem)
+		}
+	}
+	if len(bad) > 0 {
+		t.Errorf("these Dockerfiles pull a base image from Docker Hub:\n  %s\n\n"+
+			"Docker Hub rate-limits pulls even with a login; on main that fails the image build and "+
+			"skips the deploy (#692). Use the same image and tag through the mirror, e.g. "+
+			"FROM %slibrary/golang:1.26-alpine.", strings.Join(bad, "\n  "), baseImageMirror)
+	}
+
+	// setup-buildx starts a BuildKit container, by default moby/buildkit from
+	// Docker Hub: the first pull of every build job.
+	wf := parseWorkflow(t, "build-push.yml")
+	build, ok := wf.Jobs["build-images"]
+	if !ok {
+		t.Fatal("no build-images job")
+	}
+	found := false
+	for _, st := range build.Steps {
+		if !strings.HasPrefix(st.Uses, "docker/setup-buildx-action@") {
+			continue
+		}
+		found = true
+		opts, _ := st.With["driver-opts"].(string)
+		if !strings.Contains(opts, "image="+baseImageMirror+"moby/buildkit:") {
+			t.Errorf("setup-buildx driver-opts = %q, want image=%smoby/buildkit:…; the default pulls BuildKit from Docker Hub", opts, baseImageMirror)
+		}
+	}
+	if !found {
+		t.Error("build-images has no docker/setup-buildx-action step")
+	}
+}
+
+// dockerHubBases returns each FROM in a Dockerfile whose image would be
+// pulled from Docker Hub. A FROM of scratch or of an earlier stage pulls
+// nothing; an image on another registry (a host with a dot or a port, or
+// localhost) is not Docker Hub. A base built from a variable cannot be checked
+// and is reported too.
+func dockerHubBases(dockerfile string) []string {
+	stages := map[string]bool{}
+	var bad []string
+	for _, line := range strings.Split(dockerfile, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		args := fields[1:]
+		for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+			args = args[1:] // --platform=…
+		}
+		if len(args) == 0 {
+			continue
+		}
+		image := args[0]
+		switch {
+		case strings.Contains(image, "$"):
+			bad = append(bad, fmt.Sprintf("FROM %s (a variable base cannot be checked; write the mirror reference out)", image))
+		case strings.EqualFold(image, "scratch"), stages[strings.ToLower(image)]:
+		case strings.HasPrefix(image, baseImageMirror):
+		case isDockerHubRef(image):
+			bad = append(bad, "FROM "+image)
+		}
+		// Recorded after the check: a stage may not name itself as its base.
+		if len(args) >= 3 && strings.EqualFold(args[1], "AS") {
+			stages[strings.ToLower(args[2])] = true
+		}
+	}
+	return bad
+}
+
+func TestDockerHubBases(t *testing.T) {
+	cases := []struct {
+		name, dockerfile string
+		want             []string
+	}{
+		{"mirror stages", "FROM mirror.gcr.io/library/golang:1.26-alpine AS builder\nFROM mirror.gcr.io/library/alpine:3.19\nCOPY --from=builder /a /a", nil},
+		{"stage reference", "FROM mirror.gcr.io/library/node:20-alpine AS Build\nFROM build", nil},
+		{"scratch", "FROM scratch", nil},
+		{"platform flag", "FROM --platform=linux/amd64 mirror.gcr.io/library/alpine:3.19", nil},
+		{"other registry", "FROM mcr.microsoft.com/azure-storage/azurite\nFROM localhost:5000/x\nFROM ghcr.io/o/i:1", nil},
+		{"official image", "FROM golang:1.26-alpine AS builder", []string{"FROM golang:1.26-alpine"}},
+		{"lower-case from", "from alpine:3.19", []string{"FROM alpine:3.19"}},
+		{"platform flag on hub", "FROM --platform=$BUILDPLATFORM alpine", []string{"FROM alpine"}},
+		{"namespaced hub image", "FROM grafana/loki:3.1.0", []string{"FROM grafana/loki:3.1.0"}},
+		{"explicit docker.io", "FROM docker.io/library/alpine:3.19", []string{"FROM docker.io/library/alpine:3.19"}},
+		{"stage named later", "FROM base\nFROM mirror.gcr.io/library/alpine:3.19 AS base", []string{"FROM base"}},
+		{"variable base", "ARG BASE=alpine\nFROM ${BASE}", []string{"FROM ${BASE} (a variable base cannot be checked; write the mirror reference out)"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dockerHubBases(tc.dockerfile)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("dockerHubBases(%q) = %q, want %q", tc.dockerfile, got, tc.want)
+			}
+		})
+	}
+}
+
+// isDockerHubRef reports whether an image reference resolves to Docker Hub:
+// no registry host in front (golang:1.26, grafana/loki) or docker.io itself.
+func isDockerHubRef(image string) bool {
+	first, _, hasSlash := strings.Cut(image, "/")
+	if !hasSlash {
+		return true // golang:1.26-alpine → docker.io/library/golang
+	}
+	if first == "docker.io" || first == "index.docker.io" || first == "registry-1.docker.io" {
+		return true
+	}
+	return !strings.ContainsAny(first, ".:") && first != "localhost"
+}
+
 // Every CI job that runs Go must fetch the modules first with retries
 // (.github/actions/go-modules) and then run with GOPROXY=off, so that one
 // dropped download from proxy.golang.org cannot fail a job (#299, #300,

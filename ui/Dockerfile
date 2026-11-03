@@ -1,6 +1,6 @@
 # Multi-stage build for React + TypeScript SPA
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM mirror.gcr.io/library/node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ COPY ui/vitest.config.ts ./
 RUN npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.27-alpine AS nginx
+FROM mirror.gcr.io/library/nginx:1.27-alpine AS nginx
 
 # Install curl for health checks
 RUN apk add --no-cache curl

@@ -1,5 +1,5 @@
 # Multi-stage build for minimal image size
-FROM golang:1.26-alpine AS builder
+FROM mirror.gcr.io/library/golang:1.26-alpine AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o api-consumer \
     ./cmd/api-consumer
 
-FROM alpine:3.19
+FROM mirror.gcr.io/library/alpine:3.19
 
 RUN apk --no-cache add ca-certificates curl
 

@@ -87,13 +87,31 @@ with Docker Buildx (`docker/build-push-action`): the image's own Dockerfile,
 the repo root as context, `linux/amd64`, pushed as
 `vrskyprodacr.azurecr.io/vrsky/<image>:latest`. management-api gets
 `AGENT_VERSION` from `git describe`, as before. When the `DOCKERHUB_USERNAME`
-and `DOCKERHUB_TOKEN` secrets exist, the job logs in to Docker Hub first, so
-the base-image pulls are not anonymous pulls from shared runner IPs. Provenance
+and `DOCKERHUB_TOKEN` secrets exist, the job logs in to Docker Hub first, for
+anything that still pulls from there (the base images do not; see below). Provenance
 and SBOM attestations are off, so `:latest` stays a plain single-platform
 manifest, as `az acr build` left it, with no untagged attestation manifests
 next to it. The deploy job and Catch up read its digest with `az acr
 repository show`, unchanged. The runner minutes of a public repository are free; ACR
 Tasks bill for every minute (433 minutes for 159 builds on 2026-10-29).
+
+Base images come from `mirror.gcr.io`, Google's public cache of Docker Hub,
+not from Docker Hub itself: every Dockerfile says
+`FROM mirror.gcr.io/library/<image>:<tag>`, and setup-buildx runs BuildKit
+from `mirror.gcr.io/moby/buildkit:buildx-stable-1`. Docker Hub limits pulls
+even with the login, and on 2026-11-03 nine builds on main got
+`429 Too Many Requests` and the deploy was skipped (#692). The mirror serves
+the same images under the same tags (same digests). A tag nobody has pulled
+through it yet can be missing for a while; check with
+`docker buildx imagetools inspect mirror.gcr.io/library/<image>:<tag>` before
+bumping one. `TestDockerfilesPullBaseImagesFromTheMirror` in
+`src/pkg/managementapi/nodeconfig_test.go` fails on a `FROM` that would pull
+from Docker Hub. The CI service containers and the `golang`/`busybox` runs in
+`integration.yml` and `e2e-nightly.yml` use the mirror too, as do the official
+images in `docker-compose.yml`, the brokers integration.yml starts from it
+(MinIO, fake-gcs, SFTP, Kafka, RabbitMQ) and promtool's `prom/prometheus`.
+Third-party images go through the mirror without `library/`, e.g.
+`mirror.gcr.io/apache/kafka:3.7.0`.
 
 Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the `go mod download` layer and the copy of
