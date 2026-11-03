@@ -2494,6 +2494,15 @@
 <li><strong>Secrets.</strong> <code>connection_string</code> is a secret field. You enter it as plaintext in the editor; at deploy it is minted into an encrypted tenant secret and replaced with <code>connection_string_secret_id</code>. Stored and example JSON therefore shows only the <code>_secret_id</code> form.</li>
 <li><strong>Schema discovery.</strong> The <code>/schema</code> endpoint (#81) powers the <strong>Discover</strong> button so you can browse tables and columns without leaving the editor.</li>
 <li><strong>Test connection.</strong> Use the <strong>Test connection</strong> button in the editor to validate connectivity before deploying.</li>
+<li><strong>Failed writes.</strong> A payload that is not JSON or a table name that is neither
+  <code>table</code> nor <code>schema.table</code> is dropped (logged, not dead-lettered). A failure
+  to check for or create the table is retried and then dead-lettered. Two
+  things are not retried and not dead-lettered: a row the database refuses
+  (the row is logged and skipped, the other rows of the message are still
+  written), and a target database the destination cannot open or reach. If
+  that leaves no target for the message, it is acked and lost; the worker log
+  says <code>Failed to open target DB</code> or <code>Failed to ping target DB</code>. See the
+  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 </ul>
 
 

@@ -2594,6 +2594,13 @@ does not split records; it shows the whole result.</p>
 <li>Both node types carry their detailed configuration (rules and mappings) in
   the visual editor, so the stored node config is intentionally minimal beyond
   its <code>type</code>.</li>
+<li><strong>Failures.</strong> A payload the node cannot parse (not valid JSON, or not in the
+  format the node expects) is not dead-lettered: an <code>error</code> event is shown in
+  the activity feed and the message is acked, so it goes no further. The same
+  goes for an envelope that cannot be read. A failure to fetch an offloaded
+  payload, to store a large result or to publish the result is retried and
+  then dead-lettered. See the
+  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>Place filters early to reduce volume before more expensive converter or
   producer steps.</li>
 <li>Filters and converters do not connect to external systems, so they have no

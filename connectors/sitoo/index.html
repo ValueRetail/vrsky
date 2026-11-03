@@ -2777,9 +2777,14 @@ and the converted one is written.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>5xx</code>/network errors are retried (with the rate-limit backoff hint); <code>4xx</code>
-(bad request/data) and <code>401</code>/<code>403</code> (auth) are treated as poison and sent to the
-DLQ rather than retried forever.</p>
+and <code>5xx</code>/network errors are retried on the usual backoff and go
+to the DLQ once the retries are used up. <code>4xx</code> (bad request/data) and
+<code>401</code>/<code>403</code> (auth) are permanent: the message is logged and dropped, not
+retried and not dead-lettered. So is a payload that is not JSON, a Sitoo
+webhook event notification (it is not a resource), an incomplete node config
+(account, site, API id or password missing) and a <code>base_url</code> the connector
+refuses (below): a destination drops each message while the node has such a
+<code>base_url</code>, and nothing is kept for a replay.</p>
 <h3 id="the-base-url">The base URL<a class="headerlink" href="#the-base-url" title="Permanent link">&para;</a></h3>
 <p>Every request carries the node's API ID and password, and <code>base_url</code> is set in
 the node, so the connector only calls addresses it can trust:</p>

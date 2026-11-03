@@ -2594,9 +2594,11 @@ Front Systems with the two auth headers.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>5xx</code>/network errors retry (with the backoff hint); <code>4xx</code> and <code>401</code>/<code>403</code>
-are poison: the message is acked and dropped, not dead-lettered. A <code>base_url</code>
-the connector refuses (see below) sends nothing; the message is retried and
+and <code>5xx</code>/network errors retry on the usual backoff and go to the DLQ once
+the retries are used up; <code>4xx</code> and <code>401</code>/<code>403</code> are poison: the message is
+acked and dropped, not dead-lettered. An incomplete node config and a payload
+that is not JSON are dropped the same way. A <code>base_url</code> the connector refuses
+(see below) sends nothing; the message is retried and
 then dead-lettered with its payload, so it can be replayed once the URL is
 fixed. The error on the dead-lettered message says the target address is not
 allowed without naming the address the host resolved to; the connector's log

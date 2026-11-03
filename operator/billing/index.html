@@ -2614,12 +2614,12 @@ audited (<code>quota.update</code>). Setting the plan again resets them to the t
 <ul>
 <li><code>kubectl logs deploy/vrsky-management-api | grep "billing"</code> — suspensions
   ("workspace suspended", with the pipeline count) and failures.</li>
-<li>Audit log: <code>plan.request</code> (not written yet: owner writes under
-  <code>/api/v1/tenants/*</code> are not audited, backlog 169), <code>platform.plan.set</code>.
-  The operator's plan and quota changes (<code>platform.plan.set</code>,
-  <code>tenant.plan.update</code>, <code>quota.update</code>) are filed in the changed
-  workspace's own log with the operator as actor, not in the operator's
-  selected workspace, and whether or not one is selected.</li>
+<li>Audit log: <code>plan.request</code> (in the workspace's log, with the owner who
+  asked as actor), <code>platform.plan.set</code>. The operator's plan and quota
+  changes (<code>platform.plan.set</code>, <code>tenant.plan.update</code>, <code>quota.update</code>) are
+  filed in the changed workspace's own log with the operator as actor, not
+  in the operator's selected workspace, and whether or not one is selected.
+  A refused call to these routes by a non-operator is not logged anywhere.</li>
 <li>Connection events: <code>stopped</code> with <code>reason: trial ended</code>; <code>started</code> with
   <code>reason: plan activated</code>.</li>
 <li>Alerts <code>PlanRequested</code> and <code>TrialExpired</code> go to platform targets only.</li>

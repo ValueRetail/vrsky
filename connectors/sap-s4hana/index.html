@@ -2558,6 +2558,10 @@ version-appropriate pagination cursor (<code>d.__next</code> on v2, <code>@odata
 v4 — both opaque <code>$skiptoken</code> cursors), and emits each page as a JSON-array
 message. The connector requests JSON explicitly, since OData v2 services return
 Atom/XML by default.</p>
+<p>A poll follows at most 10 000 pages. If the service is still returning next
+links after that, the poll stops with a warning that names the connection and
+the cap. The pages already read stay published; the records past the cap
+are not read. Use <code>filter</code> to narrow the read.</p>
 <ul>
 <li><code>filter</code> — optional OData <code>$filter</code>, e.g. <code>LastChangeDate gt datetime'2026-01-01T00:00:00'</code>.</li>
 <li><code>poll_interval_seconds</code> — poll cadence.</li>
@@ -2614,9 +2618,13 @@ or two tenants, writing to the same SAP host never send each other's session
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
 and <code>503</code>/<code>5xx</code>/network errors retry with backoff and go to the DLQ once the
-retries are used up. Other <code>4xx</code> answers, <code>401</code>/<code>403</code> auth failures included,
-are permanent: the message is acked and dropped (the error is logged), not
-retried and not dead-lettered. An address the connector refuses (below) is
+retries are used up. Other <code>4xx</code> answers to the write, <code>401</code>/<code>403</code> auth
+failures included, are permanent: the message is acked and dropped (the error
+is logged), not retried and not dead-lettered. So is an incomplete node
+config or a payload that is not JSON. The token fetch comes first, though:
+if SAP answers it with anything but <code>2xx</code> (a rejected login shows up
+here), the message is retried and dead-lettered like a network error.
+An address the connector refuses (below) is
 retried like a network error and then goes to the DLQ with its payload, so it
 can be replayed once the node is fixed. Its error says the address was refused
 but not which address a name resolved to.</p>

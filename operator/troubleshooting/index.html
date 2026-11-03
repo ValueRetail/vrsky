@@ -1307,6 +1307,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-failed-messages-reach-the-dlq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which failed messages reach the DLQ
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2653,6 +2664,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-failed-messages-reach-the-dlq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which failed messages reach the DLQ
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-file-output-panel-says-load-failed-or-shows-no-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2875,12 +2897,147 @@ Deleting a connection does not — the builder asks before creating a new one.</
 <li>For a <strong>webhook</strong> source, POST to <code>http://&lt;ingress&gt;/webhook/{connectionId}</code>
    (local: <code>localhost:9100</code>) and watch the producer's live event panel.</li>
 <li>Check the <strong>DLQ</strong> for the connection — failed messages land there with the
-   error; retry or discard from the UI.</li>
+   error; retry or discard from the UI. Not every failure ends up there: see
+   <a href="#which-failed-messages-reach-the-dlq">Which failed messages reach the DLQ</a>.</li>
 <li>Tail the worker logs in Loki filtered by <code>connection_id</code>.</li>
 </ol>
 <blockquote>
 <p><code>file-producer</code> has no live UI panel — tail <code>docker compose logs -f file-producer</code>.</p>
 </blockquote>
+<h2 id="which-failed-messages-reach-the-dlq">Which failed messages reach the DLQ<a class="headerlink" href="#which-failed-messages-reach-the-dlq" title="Permanent link">&para;</a></h2>
+<p>Only some failures do. A destination (a producer in the code) sorts every
+error it hits into one of two kinds:</p>
+<ul>
+<li><strong>Retried.</strong> The message is delivered again after 1 s, 5 s, 30 s and 2 min.
+  After the fifth attempt it is copied to the connection's DLQ with the last
+  error, the attempt count and the worker's name, and kept there for 7 days.
+  Retry it from the DLQ once the cause is fixed.</li>
+<li><strong>Dropped.</strong> The error is marked permanent, because trying the same message
+  again cannot work (a <code>4xx</code> from the target, an incomplete node, a payload
+  that is not JSON). The message is acked and nothing is kept. There is no
+  replay for it, and <code>vrsky_dlq_messages_total</code> does not count these. What the
+  worker logs depends on how the drop happens. An error marked <code>sdk.Permanent</code>
+  (the Sitoo, Front Systems, Visma, Brightpearl, Business Central and SAP
+  destinations, and a non-JSON payload in the database and Salesforce
+  destinations) is logged by the SDK as
+  <code>permanent error; dropping message</code>. Other drops are a plain <code>return nil</code>
+  and leave only the destination's own line, or none at all: the HTTP
+  destination's <code>4xx</code> (the feed shows it, the log has <code>HTTP request returned
+  error</code>), Kafka, RabbitMQ, SFTP and cloud-storage with a missing setting,
+  Salesforce records it skips, and the rows the database destination skips.
+  Look in the worker's log in Loki, filtered by <code>connection_id</code>, and in the
+  connection's activity feed.</li>
+</ul>
+<p>Which kind an error gets differs per destination:</p>
+<table>
+<thead>
+<tr>
+<th>Destination</th>
+<th>Dropped, not in the DLQ</th>
+<th>Retried, then in the DLQ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HTTP</td>
+<td>Every <code>4xx</code> except <code>429</code> (any other answer below <code>500</code> too); a URL a request cannot be built from</td>
+<td><code>5xx</code>, <code>429</code>, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host)</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>Payload not JSON; table name that is not <code>table</code> or <code>schema.table</code>; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message</td>
+<td>Failure to check for or create the table</td>
+</tr>
+<tr>
+<td>File</td>
+<td>Output path outside the workspace's area or any mounted directory</td>
+<td>Failure to write the file; failure to read the connection from the database</td>
+</tr>
+<tr>
+<td>Cloud storage</td>
+<td>No <code>bucket</code></td>
+<td>Failure to open the provider or write the object</td>
+</tr>
+<tr>
+<td>SFTP</td>
+<td>No <code>host</code>, <code>username</code> or <code>remote_dir</code>; no password or key; <code>filename_template</code> that cannot be parsed or rendered</td>
+<td>Failure to connect (after three tries), to create <code>remote_dir</code> or to write the file</td>
+</tr>
+<tr>
+<td>Kafka</td>
+<td>No <code>brokers</code> or <code>topic</code></td>
+<td>Failure to open the writer or to write</td>
+</tr>
+<tr>
+<td>RabbitMQ</td>
+<td>No <code>url</code>, or neither <code>exchange</code> nor a queue</td>
+<td>Failure to connect or to publish</td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>Payload not JSON; no <code>object</code>; <code>upsert</code> with no <code>external_id_field</code>; on the REST path a record Salesforce answers with a <code>4xx</code>, or that has no external-id value (the other records still go in)</td>
+<td><code>5xx</code>, <code>429</code>, network or token failure on the REST path (the whole message is sent again); any non-<code>2xx</code> while creating, filling or closing a Bulk API job</td>
+</tr>
+<tr>
+<td>Sitoo</td>
+<td>Incomplete node; a <code>base_url</code> the connector refuses; payload not JSON; a webhook event notification; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error</td>
+</tr>
+<tr>
+<td>Front Systems</td>
+<td>Incomplete node; payload not JSON; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error; a refused <code>base_url</code> or address</td>
+</tr>
+<tr>
+<td>Visma</td>
+<td>Incomplete node; payload not JSON; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error, token failure; a refused URL</td>
+</tr>
+<tr>
+<td>Brightpearl</td>
+<td>Incomplete node; payload not JSON; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error; a refused base URL</td>
+</tr>
+<tr>
+<td>Business Central</td>
+<td>Incomplete node; payload not JSON; every <code>4xx</code> except <code>429</code>, <code>401</code>/<code>403</code> included; with <code>dedupe_fields</code>, a payload that is not a JSON object or a <code>401</code>/<code>403</code> on the lookup; a request that cannot be built</td>
+<td><code>5xx</code>, <code>429</code>, network error, token failure; a refused URL or address; with <code>dedupe_fields</code>, any other failed lookup (a <code>4xx</code> included)</td>
+</tr>
+<tr>
+<td>SAP S/4HANA</td>
+<td>Incomplete node; payload not JSON; every <code>4xx</code> on the write except <code>429</code>, <code>401</code>/<code>403</code> included</td>
+<td><code>5xx</code>, <code>429</code>, network error, token failure; any non-<code>2xx</code> on the CSRF token fetch (a rejected login shows up here), or an answer to it with no <code>X-CSRF-Token</code>; a request that cannot be built; a refused address</td>
+</tr>
+</tbody>
+</table>
+<p>Filters and converters do not use these rules. A payload they cannot parse is
+acked with an <code>error</code> event in the activity feed. Fetching an offloaded
+payload, storing a large result or publishing the result is retried and then
+dead-lettered. The remote agent destination is described on its
+<a href="../../connectors/remote-agent/">own page</a>.</p>
+<p>Four things apply to every destination in the table:</p>
+<ul>
+<li>A message whose envelope cannot be read is dropped, and so is a message for
+  another connection (the shared consumers see every connection's messages
+  and ack the ones that are not theirs).</li>
+<li>A payload that sits in the object store is fetched before delivery. If that
+  fails, or the payload is over the buffering limit and the destination cannot
+  stream it, the message is retried and dead-lettered. The HTTP, file and
+  cloud-storage destinations stream a large payload instead of buffering it,
+  except with several targets on the node (HTTP with OAuth too), where they
+  buffer it.</li>
+<li>Reading the node's config comes first. Every destination except the file
+  one treats a failed read of the connection, a node that is not theirs and a
+  secret that does not resolve alike, and acks the message. For the HTTP,
+  database, SFTP, Kafka, RabbitMQ, cloud-storage, Visma, Sitoo, SAP, Front
+  Systems, Brightpearl and Business Central destinations the first ack is in
+  <code>ServesConnection</code>, which the SDK calls before <code>Deliver</code> and which answers
+  "not mine" on any config error without a log line. Salesforce has no
+  <code>ServesConnection</code>; its <code>Deliver</code> logs the error at debug level and acks. A
+  database hiccup at the wrong moment drops the message.</li>
+<li>With several destinations on one connection, one failure retries the whole
+  message and the destinations that already delivered get it again.</li>
+</ul>
 <h2 id="the-file-output-panel-says-load-failed-or-shows-no-files">The File Output panel says "Load failed", or shows no files<a class="headerlink" href="#the-file-output-panel-says-load-failed-or-shows-no-files" title="Permanent link">&para;</a></h2>
 <p>The panel and the upload box go through the management API
 (<code>/api/v1/connections/{id}/files</code>). Before that they addressed the worker's own

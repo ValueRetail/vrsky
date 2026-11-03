@@ -2497,6 +2497,10 @@ where <code>routing_key</code> names the target queue directly.</p>
 <li><strong>Test connection.</strong> The RabbitMQ worker exposes a <code>/test-connection</code>
   endpoint — use the <strong>Test connection</strong> button to verify the broker is
   reachable before deploying.</li>
+<li><strong>Failed deliveries.</strong> A destination without <code>url</code>, or with neither
+  <code>exchange</code> nor a queue, logs an error and acks each message: it is dropped,
+  not dead-lettered. A failure to connect or to publish is retried and then
+  dead-lettered. See the <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>Acknowledgement mode, prefetch, and durability settings are configured via
   the in-app pipeline editor (Property panel).</li>
 </ul>

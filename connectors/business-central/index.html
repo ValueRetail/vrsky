@@ -2588,6 +2588,13 @@ must stay off in production.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node polls one OData entity on <code>poll_interval_seconds</code>, following
 <code>@odata.nextLink</code> pagination, and emits each page as a JSON-array message.</p>
+<p>A poll follows at most 10 000 pages. If the API is still returning
+<code>@odata.nextLink</code> after that, the poll stops with a warning that names the
+connection and the cap. The pages already read stay published, but the
+watermark is not advanced. An incremental poll that hits the cap therefore
+repeats the same pages on every poll and never gets past them, so the records
+beyond them are not delivered, until <code>page_size</code> is raised or <code>filter</code> is
+narrowed.</p>
 <ul>
 <li><code>entity</code> — the entity to poll (default <code>items</code>; e.g. <code>customers</code>, <code>salesOrders</code>).</li>
 <li><code>filter</code> — optional OData <code>$filter</code> (e.g. <code>status eq 'Open'</code>).</li>
@@ -2763,7 +2770,13 @@ with <code>PATCH</code> — updates send <code>If-Match: *</code>).</p>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
 and <code>503</code>/<code>5xx</code>/network errors and a refused address retry, then go to the
 DLQ; <code>4xx</code> bad-data and <code>401</code>/<code>403</code> auth are poison: the message is acked and
-dropped with a log line, not dead-lettered.</p>
+dropped with a log line, not dead-lettered. An incomplete node config and a
+payload that is not JSON are dropped the same way. A failure to get a token is
+retried.</p>
+<p>With <code>dedupe_fields</code>, the existence lookup before a <code>POST</code> is classified the
+same way, except that a <code>4xx</code> other than <code>401</code>/<code>403</code> from the lookup is retried
+and then dead-lettered, where the same answer to the write itself is dropped.
+A payload that is not a JSON object cannot be looked up and is dropped.</p>
 <h2 id="templates-sitoo-business-central-beta">Templates: Sitoo ⇄ Business Central (beta)<a class="headerlink" href="#templates-sitoo-business-central-beta" title="Permanent link">&para;</a></h2>
 <p>Two onboarding templates connect Business Central to Sitoo POS through a
 converter node. Both are beta until tested against live tenants; see

@@ -2552,6 +2552,11 @@ their own names (see <a href="../business-central/#pictures">Business Central â†
 <li><strong>Uploads.</strong> The editor's upload panel posts to the management API, which checks your workspace owns the connection before handing the file to the file-consumer.</li>
 <li><strong>CSV columns.</strong> For <code>format: "csv"</code>, the header row defines the column names (#81).</li>
 <li><strong>Default path.</strong> An empty <code>file.path</code> on the producer writes to the top of your workspace's own directory.</li>
+<li><strong>Failed writes.</strong> A write that fails (disk full, say) is retried and then
+  dead-lettered. A path outside the workspace's own area, or outside any
+  mounted directory, is logged and the message is acked: it is dropped, not
+  dead-lettered. See the
+  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>
 <p><strong>Paths are confined to your workspace.</strong> Both the source's watch directory and
   the destination's output directory resolve inside a per-workspace subtree of the

@@ -2563,8 +2563,11 @@ a one-element array so downstream steps always see a list.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>503</code>/<code>5xx</code>/network errors retry; <code>4xx</code> and <code>401</code>/<code>403</code> are poison and go to
-the DLQ.</p>
+and <code>503</code>/<code>5xx</code>/network errors retry, and go to the DLQ once the retries are
+used up. Other <code>4xx</code> answers, <code>401</code>/<code>403</code> included, an incomplete node config
+and a payload that is not JSON are permanent: the message is logged and
+dropped, not retried and not dead-lettered. A failure to get a token is
+retried.</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Per-service paging</strong> — Visma's paging differs across services (Financials

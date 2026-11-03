@@ -2497,9 +2497,12 @@ them:</p>
   which nothing depended on (neither service had a compose healthcheck).</li>
 <li><strong>db-producer now classifies errors.</strong> Previously it acked everything
   (<code>handleMessage</code> returned no error — a noted follow-up). On the SDK it returns
-  <code>sdk.Retriable</code> for transient DB failures (table create / open / ping) so they
-  redeliver → DLQ, and <code>sdk.Permanent</code> for a non-JSON payload (poison). Per-row
-  insert failures stay best-effort (logged, batch continues), as before.</li>
+  <code>sdk.Retriable</code> for a failed table check or create so it redelivers → DLQ, and
+  <code>sdk.Permanent</code> for a non-JSON payload (poison). A target database that can't
+  be opened or pinged is skipped, and the message is acked once no target is
+  left (it does not redeliver). Per-row insert failures stay best-effort
+  (logged, batch continues), as before. See the
+  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li><strong>db-producer opens target DB pools</strong> during delivery. The SDK runner gained a
   small lifecycle hook — it calls a connector's <code>Stop(ctx)</code> after the
   subscription drains — so db-producer closes those pools cleanly. <code>Base*</code>

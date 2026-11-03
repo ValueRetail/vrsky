@@ -2553,10 +2553,15 @@ through them. From here you open a connection or start/stop/delete it.</p>
 <p>For a <strong>webhook</strong> source you can also just <code>POST</code> to its webhook URL (shown on
 the done step of the wizard and in the builder) and watch the output panel.</p>
 <h2 id="the-dead-letter-queue-dlq">The dead-letter queue (DLQ)<a class="headerlink" href="#the-dead-letter-queue-dlq" title="Permanent link">&para;</a></h2>
-<p>When a message can't be delivered (e.g. the destination rejects it), it isn't
-lost — it goes to the connection's <strong>DLQ</strong>. Open the <strong>DLQ</strong> panel to see each
+<p>When a message can't be delivered because of something that may pass (the
+destination is down, a rate limit, a network error), VRSky tries it five times
+and then puts it in the connection's <strong>DLQ</strong>. Open the <strong>DLQ</strong> panel to see each
 failed message with its error and payload, then <strong>Retry</strong> it (after fixing the
 cause) or <strong>Discard</strong> it.</p>
+<p>A message the destination turns down for good, such as a <code>4xx</code> answer or a node
+that is missing a setting, is not retried and does not reach the DLQ. It is
+dropped, and the reason is in the worker's log. Which errors go where is listed
+in the <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</p>
 <p><img alt="Screenshot: the DLQ panel listing a failed message with its error and Retry/Discard buttons" src="../../img/dlq.png" /></p>
 <div class="admonition tip">
 <p class="admonition-title">Where to look when nothing happens</p>

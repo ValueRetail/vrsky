@@ -2537,6 +2537,10 @@ used for producers.</p>
 <li><strong>Test connection.</strong> The Kafka worker exposes a <code>/test-connection</code>
   endpoint — use the <strong>Test connection</strong> button to verify broker reachability
   and auth before deploying.</li>
+<li><strong>Failed deliveries.</strong> A destination without <code>brokers</code> or <code>topic</code> logs an
+  error and acks each message: it is dropped, not dead-lettered. Any failure to
+  open the writer or to write (broker down, topic missing, auth refused) is
+  retried and then dead-lettered. See the <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>Partitioning, message keys, and other producer/consumer tuning are
   configured via the in-app pipeline editor (Property panel).</li>
 </ul>

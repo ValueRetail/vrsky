@@ -2513,6 +2513,19 @@ field used to match existing records.</p>
 <li><strong>Test connection.</strong> The Salesforce worker exposes a <code>/test-connection</code>
   endpoint — use the <strong>Test connection</strong> button to confirm the grant and
   instance are valid before deploying.</li>
+<li><strong>Failed deliveries.</strong> A payload that is not JSON is dropped (logged, not
+  dead-lettered), and so is a message for a node with no <code>object</code>, or an
+  <code>upsert</code> node with no <code>external_id_field</code> (logged, acked). Small batches go
+  out one record at a time through the REST API. There, a record Salesforce
+  answers with a <code>4xx</code> (a <code>401</code> that survives the one token refresh included)
+  is logged and skipped, and so is a record with no external-id value or one
+  that cannot be encoded; the message is still acked, and the skipped records
+  are not kept anywhere. A <code>5xx</code>, a <code>429</code>, a network error or a token failure
+  retries the whole message, and the records already written go out again, so
+  an <code>insert</code> can create duplicates. Batches at or above the bulk threshold use the
+  Bulk API: there any answer that is not <code>2xx</code> while creating, filling or
+  closing the job, a <code>4xx</code> too, is retried and then dead-lettered. See the
+  <a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</li>
 <li>Field mapping, batch sizing, and other options not listed here are
   configured via the in-app pipeline editor (Property panel).</li>
 </ul>

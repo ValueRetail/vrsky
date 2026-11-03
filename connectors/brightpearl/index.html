@@ -2598,8 +2598,9 @@ a message routed to the owning tenant/connection.</p>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
 and <code>503</code>/<code>5xx</code>/network errors retry, and after the last attempt the message
-goes to the DLQ. <code>4xx</code> (including <code>401</code>/<code>403</code>) and an incomplete node config
-are permanent: the message is logged and dropped, not dead-lettered. A base URL
+goes to the DLQ. <code>4xx</code> (including <code>401</code>/<code>403</code>), an incomplete node config and
+a payload that is not JSON are permanent: the message is logged and dropped,
+not dead-lettered. A base URL
 the connector refuses (below) is retried like a network error, so those
 messages end in the DLQ and can be retried from there once the node is fixed.</p>
 <h2 id="the-base-url">The base URL<a class="headerlink" href="#the-base-url" title="Permanent link">&para;</a></h2>

@@ -1475,6 +1475,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#failed-deliveries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed deliveries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#which-addresses-it-will-call" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2496,6 +2507,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#failed-deliveries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed deliveries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#which-addresses-it-will-call" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2649,6 +2671,15 @@ the header means. Requests without the header behave exactly as before.</p>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
+<h3 id="failed-deliveries">Failed deliveries<a class="headerlink" href="#failed-deliveries" title="Permanent link">&para;</a></h3>
+<p>A <code>5xx</code>, a <code>429</code>, a network error and a failure to get an OAuth token are
+retried on the usual backoff and then dead-lettered with the payload. Any
+other answer below <code>500</code> (so every <code>4xx</code> except <code>429</code>, a <code>401</code> that is still
+refused after the one token refresh included) is logged, shown in the
+activity feed and acked: the message is dropped, not dead-lettered. A URL the
+request cannot be built from is dropped the same way. Which errors reach the
+DLQ for every destination is in the
+<a href="../../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</p>
 <h3 id="which-addresses-it-will-call">Which addresses it will call<a class="headerlink" href="#which-addresses-it-will-call" title="Permanent link">&para;</a></h3>
 <p>The destination URL is yours to set, and the request carries your headers and
 OAuth token, so the producer checks where it is going (#660):</p>

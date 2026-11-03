@@ -2988,13 +2988,18 @@ duplicate delivery (<code>pkg/messaging/subscriber.go</code>).</p>
   where the target allows it (e.g. upsert by key).</li>
 </ul>
 <h3 id="dead-letter-queue">Dead Letter Queue<a class="headerlink" href="#dead-letter-queue" title="Permanent link">&para;</a></h3>
-<p><strong>After 3 failed retries</strong>:</p>
+<p>A message that fails five deliveries (<code>MaxDeliveryAttempts</code>; redelivered after
+1 s, 5 s, 30 s and 2 min) is dead-lettered:</p>
 <ol>
-<li>Message moved to <code>dead_letter_queue</code> stream in Platform NATS</li>
+<li>Message moved to the <code>VRSKY_DLQ</code> stream in Platform NATS</li>
 <li>Tenant notified via webhook/email</li>
 <li>Message retained for 7 days</li>
 <li>Admin UI allows manual retry or inspection</li>
 </ol>
+<p>A destination that returns <code>sdk.Permanent</code> is not retried at all: the message
+is acked and dropped, and never reaches the DLQ. Which errors each destination
+marks permanent is in the
+<a href="../operator/troubleshooting/#which-failed-messages-reach-the-dlq">operator troubleshooting guide</a>.</p>
 <hr />
 <h2 id="deployment-operations">Deployment &amp; Operations<a class="headerlink" href="#deployment-operations" title="Permanent link">&para;</a></h2>
 <h3 id="kubernetes-manifests">Kubernetes Manifests<a class="headerlink" href="#kubernetes-manifests" title="Permanent link">&para;</a></h3>
