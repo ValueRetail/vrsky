@@ -145,14 +145,18 @@ producer check it before calling it:
   one is refused too.
 - Redirects are not followed.
 
-The consumer checks it at connection start, only when it registers webhooks
-(`callback_url` and `events` set); a webhook-only connection never calls Front
-Systems. A refusal is not retried: the pipeline goes to `error` with the reason
-in its last error. The producer checks it on every delivery.
+The management API checks it when the connection is started and refuses the
+start with the reason (#708): for a source only when it registers webhooks
+(`callback_url` and `events` set), for a destination always, so an empty
+`base_url` on a destination is refused too. The connectors check again. The
+consumer checks it at connection start, only when it registers webhooks; a
+webhook-only connection never calls Front Systems. A refusal is not retried:
+the pipeline goes to `error` with the reason in its last error. The producer
+checks it on every delivery.
 
 For local development against a mock on `http://localhost` or a private
-address, the operator sets `ALLOW_PRIVATE_UPSTREAMS=true` on the
-`front-systems-consumer` and `front-systems-producer` deployments. It allows
+address, the operator sets `ALLOW_PRIVATE_UPSTREAMS=true` on
+`front-systems-consumer`, `front-systems-producer` and `management-api`. It allows
 `http://` and private addresses; it is off in production.
 
 After this change rolled out, a connection whose `base_url` is `http://`, a

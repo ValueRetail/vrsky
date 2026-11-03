@@ -107,18 +107,20 @@ from the node, so the connector only calls addresses it can trust (#667):
   to, after the name is resolved, so a hostname that points at one of these is
   refused too. Redirects are not followed.
 
-Where it is checked: a source refuses to start its poll (the error is in the
-consumer's log), the "show data structure" preview answers with the reason,
-and a destination retries the message until it ends in the DLQ. Webhook mode
-calls nothing and is not affected. The management API does not check these
-fields yet when a connection is started.
+Where it is checked: the management API refuses to start a connection that
+breaks these rules, with the field and the reason in the answer (#708). The
+connectors check again: a source refuses to start its poll (the error is in
+the consumer's log), the "show data structure" preview answers with the
+reason, and a destination retries the message until it ends in the DLQ. A
+consumer with no `base_url` needs `datacenter` and `account_code`, webhook
+mode included, since it does not start without them.
 
 A `base_url` can still point at any public https host, so only set one for a
 host you trust with the staff token.
 
 **Local development with a mock Brightpearl.** The operator (not the node) can
-set `ALLOW_PRIVATE_UPSTREAMS=true` on `brightpearl-consumer` and
-`brightpearl-producer`. That allows `http` and private addresses for
+set `ALLOW_PRIVATE_UPSTREAMS=true` on `brightpearl-consumer`,
+`brightpearl-producer` and `management-api`. That allows `http` and private addresses for
 `base_url`. Never set it in production; it is off in `docker-compose.yml` and
 the Kubernetes manifests.
 

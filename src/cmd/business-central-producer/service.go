@@ -19,6 +19,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/ValueRetail/vrsky/pkg/connectorurl"
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
@@ -339,15 +340,13 @@ func (cfg *BCProducerConfig) entityURL() string {
 // come from tenant config, the token request carries the client secret and
 // the write the bearer token (#686). The dial-time check in the HTTP client is
 // the enforcement; this gives an early, readable error. allowPrivate is the
-// operator's dev switch.
+// operator's dev switch. The rule lives in pkg/connectorurl, shared with the
+// management API (#708).
 func (cfg *BCProducerConfig) checkURLs(allowPrivate bool) error {
-	if err := safeurl.CheckBaseURL(cfg.apiRoot(), allowPrivate); err != nil {
-		return fmt.Errorf("api_base_url refused: %w", err)
-	}
-	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
-		return fmt.Errorf("token_url refused: %w", err)
-	}
-	return nil
+	return connectorurl.BusinessCentral(connectorurl.BusinessCentralConfig{
+		APIBaseURL: cfg.APIBaseURL, TokenURL: cfg.TokenURL,
+		AADTenantID: cfg.AADTenantID, Environment: cfg.Environment,
+	}, allowPrivate)
 }
 
 // --- DB ---
