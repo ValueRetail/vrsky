@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -40,6 +43,9 @@ type sapProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// allows http and private addresses, for mock-sap.
+	allowPrivate bool
 }
 
 // SAPProducerConfig is the per-node configuration (config.sap_s4hana).
@@ -77,11 +83,17 @@ func (p *sapProducer) Configure(ctx context.Context, res *sdk.Resources) error {
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
+		// host, api_base_url and token_url are tenant config and every request
+		// carries the tenant's SAP credential, so the client refuses private,
+		// loopback and link-local addresses at dial time and follows no
+		// redirects (#678). The OAuth2 token call uses this client too.
 		// A cookie jar is required: the SAP CSRF token is bound to the session
 		// cookie returned by the Fetch request and must be echoed on the write.
 		jar, _ := cookiejar.New(nil)
-		p.httpClient = &http.Client{Timeout: 60 * time.Second, Jar: jar}
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
+		p.httpClient.Jar = jar
 	}
 	p.logger.Info("sap-s4hana-producer configured")
 	return nil
@@ -98,6 +110,12 @@ func (p *sapProducer) Deliver(ctx context.Context, env *envelope.Envelope) error
 	}
 	if err := cfg.validate(); err != nil {
 		return sdk.Permanent(fmt.Errorf("sap s/4hana producer config incomplete for connection %s: %w", env.IntegrationID, err))
+	}
+	// A refused address is a plain error, not Permanent: Permanent acks and
+	// drops the message, while a plain error is retried and then dead-lettered
+	// with its payload, so it can be replayed once the node is fixed (#678).
+	if err := cfg.checkURLs(p.allowPrivate); err != nil {
+		return fmt.Errorf("sap s/4hana address refused for connection %s: %w", env.IntegrationID, err)
 	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
@@ -280,6 +298,58 @@ func (cfg *SAPProducerConfig) entityURL() string {
 		u += "?sap-client=" + url.QueryEscape(cfg.SAPClient)
 	}
 	return u
+}
+
+// hostLabel is one DNS label; hostName is one or more of them, dot separated.
+const hostLabel = `[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?`
+
+var (
+	hostName = regexp.MustCompile(`^` + hostLabel + `(\.` + hostLabel + `)*$`)
+	hostPort = regexp.MustCompile(`^[0-9]{1,5}$`)
+)
+
+// checkHost refuses a host that is not one host name with an optional numeric
+// port. host goes into the URL as it is, so without this a value such as
+// "x@10.0.0.1/" or "sap.example.com/admin?" changes the host or the path the
+// credential is sent to while the node looks like it uses the default (#678).
+func checkHost(host string) error {
+	name, port, hasPort := strings.Cut(host, ":")
+	ok := host != "" && len(name) <= 253 && hostName.MatchString(name)
+	if ok && hasPort {
+		n, err := strconv.Atoi(port)
+		ok = hostPort.MatchString(port) && err == nil && n >= 1 && n <= 65535
+	}
+	if !ok {
+		return fmt.Errorf("host %q must be a host name such as my347623.s4hana.ondemand.com, optionally with :port, and no scheme, path or user name", host)
+	}
+	return nil
+}
+
+// checkURLs refuses a service root or token URL the connector must not call:
+// they come from tenant config and carry the tenant's credential (#678). The
+// dial-time check in the HTTP client is the enforcement; this gives an early,
+// readable error. allowPrivate is the operator's dev switch.
+func (cfg *SAPProducerConfig) checkURLs(allowPrivate bool) error {
+	if cfg.APIBaseURL == "" {
+		if err := checkHost(cfg.Host); err != nil {
+			return err
+		}
+	}
+	if err := safeurl.CheckBaseURL(cfg.serviceRoot(), allowPrivate); err != nil {
+		return fmt.Errorf("service root refused: %w", err)
+	}
+	if cfg.effectiveAuthType() != authOAuth2 {
+		return nil
+	}
+	if cfg.TokenURL == "" {
+		if err := checkHost(cfg.Host); err != nil {
+			return fmt.Errorf("token_url defaults to the host: %w", err)
+		}
+	}
+	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
+		return fmt.Errorf("token_url refused: %w", err)
+	}
+	return nil
 }
 
 func (cfg *SAPProducerConfig) validate() error {

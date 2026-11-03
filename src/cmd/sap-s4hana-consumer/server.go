@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 )
 
 // Aux HTTP handler served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT).
@@ -69,10 +71,23 @@ func (c *sapConsumer) handleSampleData() http.HandlerFunc {
 			writeErr("set the entity set first")
 			return
 		}
+		if err := cfg.checkURLs(c.allowPrivate); err != nil {
+			writeErr(err.Error())
+			return
+		}
 
 		auth := newAuthorizer(&cfg, c.httpClient)
 		body, reqURL, err := c.get(r.Context(), &cfg, auth, cfg.entityURL())
 		if err != nil {
+			if errors.Is(err, safeurl.ErrBlockedAddress) {
+				// Which address a name resolved to is internal detail: log
+				// it, do not hand it to the caller.
+				if c.logger != nil {
+					c.logger.Warn("sample-data target refused at dial", "error", err)
+				}
+				writeErr("target address not allowed")
+				return
+			}
 			writeErr(err.Error())
 			return
 		}
