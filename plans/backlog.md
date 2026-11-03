@@ -1156,12 +1156,13 @@ Last updated 2026-10-28.
     authenticated user can fill the log with it. Validate the id up front and
     answer 403 or 404. Found in review of #675.
 
-163. **`safeurl.CheckURL(field, raw, allowPrivate)`.** `pkg/vismaurl` names
+163. ~~**`safeurl.CheckURL(field, raw, allowPrivate)`.**~~ (#700) `pkg/vismaurl` names
     `token_url` in its errors by trimming the `base_url` prefix off
     `CheckBaseURL`'s message, which breaks silently if that wording changes.
     SAP S/4HANA and Business Central have a `token_url` too. Add a field-named
     check to `pkg/safeurl` and have `CheckBaseURL` wrap it. Found in review
-    of #668.
+    of #668. SAP S/4HANA and Business Central still wrap `CheckBaseURL` as
+    `token_url refused: base_url …`; they can move to `CheckURL` later.
 
 164. **Connector docs say `sdk.Permanent` errors go to the DLQ.** `Permanent`
     acks and drops the message (`src/pkg/sdk/lifecycle.go`, "permanent error;
@@ -1210,7 +1211,7 @@ Last updated 2026-10-28.
     the `plan.request` line in `docs/operator/billing.md` is wrong in
     production. Found in review of #685.
 
-170. **`safeurl.CheckBaseURL` quotes the raw base URL.** Its errors use `%q`
+170. ~~**`safeurl.CheckBaseURL` quotes the raw base URL.**~~ (#700) Its errors use `%q`
     on the input, including the "must not carry a user name or password"
     error, which by definition holds a credential. Its runtime callers
     (Sitoo, Brightpearl, Visma, Front Systems, SAP S/4HANA, Business Central)
@@ -1245,6 +1246,14 @@ Last updated 2026-10-28.
     Dockerfiles and the buildx driver: workflow `services:` images, `docker
     run` images in workflows and the compose images CI starts can drift back
     to Docker Hub unnoticed. Found in review of #694.
+
+175. **`RedactURL` keeps a password that lands in the query.** For
+    `http://apikey:1234?secret@host` url.Parse reads host `apikey`, port
+    `1234` and query `secret@host`, and `RedactURL` shows it unchanged,
+    because the HTTP producer's test pins `?email=a@b` as shown. #700 made
+    `CheckBaseURL` stricter on its own; the HTTP producer and
+    `CheckRequestURL` still show it. Decide whether "@" in a query with no
+    userinfo should become `[invalid URL]` there too. Found in #700.
 
 ## Human
 

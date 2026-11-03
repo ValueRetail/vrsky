@@ -100,28 +100,49 @@ func BlockedAddr(addr netip.Addr) bool {
 // CheckBaseURL checks a configured base URL from the string alone: https (http
 // with allowPrivate), a host, no userinfo, query or fragment, and not a
 // literal blocked IP. It cannot see where a hostname resolves; NewClient does.
+// Its errors name the field "base_url"; CheckURL takes another name.
 func CheckBaseURL(raw string, allowPrivate bool) error {
+	return CheckURL("base_url", raw, allowPrivate)
+}
+
+// CheckURL is CheckBaseURL for a URL the config calls field (token_url, say),
+// so the error names the setting the tenant has to fix. Errors never quote
+// userinfo, a query or a fragment: they reach logs, activity events and the
+// DLQ header.
+func CheckURL(field, raw string, allowPrivate bool) error {
 	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
-		return fmt.Errorf("base_url %q is not an absolute URL", raw)
+		return fmt.Errorf("%s %q is not an absolute URL", field, shownBaseURL(raw, u))
 	}
 	switch {
 	case u.Scheme == "https":
 	case u.Scheme == "http" && allowPrivate:
 	default:
-		return fmt.Errorf("base_url %q must use https", raw)
+		return fmt.Errorf("%s %q must use https", field, shownBaseURL(raw, u))
 	}
 	if u.User != nil {
-		return fmt.Errorf("base_url %q must not carry a user name or password", raw)
+		return fmt.Errorf("%s must not carry a user name or password", field)
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
-		return fmt.Errorf("base_url %q must not carry a query string or fragment", raw)
+		return fmt.Errorf("%s must not carry a query string or fragment", field)
 	}
 	if addr, perr := netip.ParseAddr(u.Hostname()); perr == nil && !allowPrivate && BlockedAddr(addr) {
-		return fmt.Errorf("base_url %q points at a private, loopback or link-local address", raw)
+		return fmt.Errorf("%s %q points at a private, loopback or link-local address", field, shownBaseURL(raw, u))
 	}
 	return nil
+}
+
+// shownBaseURL is RedactURL, stricter about "@": a base URL has no business
+// holding one outside userinfo, so when url.Parse did not put it in u.User it
+// is taken as a password with "?", "#" or "/" in it and nothing is shown.
+// RedactURL keeps "@" in a query, since a request URL may well carry an email
+// address there.
+func shownBaseURL(raw string, u *url.URL) string {
+	if strings.Contains(raw, "@") && (u == nil || u.User == nil) {
+		return "[invalid URL]"
+	}
+	return RedactURL(raw)
 }
 
 // RedactURL returns raw in a form that is safe to log, show in the activity
@@ -132,15 +153,16 @@ func CheckBaseURL(raw string, allowPrivate bool) error {
 // somewhere other than u.User: without "//", url.Parse reads
 // "user:secret@host/x" as scheme "user" with an opaque rest, and
 // "http://user:123/secret@host" as host "user" with "@" in the path. An "@" in
-// a real path costs only the display. The request itself keeps using the real
-// URL.
+// a real path costs only the display. Same for "@" in the fragment:
+// "http://apikey:1234#secret@host" is host "apikey", port 1234 and the rest of
+// the password as the fragment. The request itself keeps using the real URL.
 func RedactURL(raw string) string {
 	const invalid = "[invalid URL]"
 	u, err := url.Parse(raw)
 	if err != nil {
 		return invalid
 	}
-	if u.Opaque != "" || strings.Contains(u.Path, "@") ||
+	if u.Opaque != "" || strings.Contains(u.Path, "@") || strings.Contains(u.Fragment, "@") ||
 		(u.Host == "" && u.User == nil && strings.Contains(raw, "@")) {
 		return invalid
 	}
