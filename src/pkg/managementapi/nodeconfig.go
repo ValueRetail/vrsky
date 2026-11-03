@@ -202,8 +202,14 @@ func validateEdgeNodeConfig(node *Node) []string {
 	if configType == "sitoo" {
 		errs = append(errs, validateSitooBaseURL(node, raw)...)
 	}
+	if configType == "visma" {
+		errs = append(errs, validateVismaURLs(node, raw)...)
+	}
 	if configType == "api" && node.Type == "consumer" {
 		errs = append(errs, validateAPIConsumerURLs(node, raw)...)
+	}
+	if configType == "http" && node.Type == "producer" {
+		errs = append(errs, validateHTTPProducerURL(node, raw)...)
 	}
 	return errs
 }
@@ -243,6 +249,26 @@ func validateAPIConsumerURLs(node *Node, raw map[string]json.RawMessage) []strin
 		errs = append(errs, fmt.Sprintf("node %s (api): %s (served by api-consumer)", node.ID, err))
 	}
 	return errs
+}
+
+// validateHTTPProducerURL refuses an http.url the HTTP producer would not call
+// (#660): not an absolute http(s) URL, or a literal private address. Same check
+// and same wording as the API consumer; a hostname that resolves to a private
+// address is refused by the producer's dial, which this cannot see. A missing
+// url is reported by the required-field rule, not here.
+func validateHTTPProducerURL(node *Node, raw map[string]json.RawMessage) []string {
+	var block map[string]json.RawMessage
+	if json.Unmarshal(raw["http"], &block) != nil {
+		return nil
+	}
+	u := stringField(block, "url")
+	if u == "" {
+		return nil
+	}
+	if err := safeurl.CheckRequestURL(u, safeurl.AllowPrivateFromEnv()); err != nil {
+		return []string{fmt.Sprintf("node %s (http): %s (served by http-producer)", node.ID, err)}
+	}
+	return nil
 }
 
 // validateSitooBaseURL refuses a base_url the Sitoo connectors would not call

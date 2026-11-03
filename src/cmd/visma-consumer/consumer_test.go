@@ -113,7 +113,7 @@ func TestSampleData_Visma(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	c := &vismaConsumer{httpClient: http.DefaultClient}
+	c := &vismaConsumer{httpClient: http.DefaultClient, allowPrivate: true} // httptest servers are on 127.0.0.1
 	body := fmt.Sprintf(`{"client_id":"id","client_secret":"sec","base_url":%q,"token_url":%q,"scope":"s","resource":"SalesOrders"}`, apiSrv.URL, tokenSrv.URL)
 	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
 	w := httptest.NewRecorder()

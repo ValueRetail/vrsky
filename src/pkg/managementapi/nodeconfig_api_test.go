@@ -66,3 +66,60 @@ func TestValidateNodeConfigs_APIConsumerURLs_DevFlag(t *testing.T) {
 		t.Fatalf("the operator's dev flag should allow a local mock: %v", err)
 	}
 }
+
+// The HTTP producer's url is tenant config and the node's headers and OAuth
+// token go with the request (#660). The producer enforces at dial time; this is
+// the early error the user sees when starting the connection. http is allowed.
+func TestValidateNodeConfigs_HTTPProducerURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr string // substring; empty = accepted
+	}{
+		{"https public", "https://example.com/ingest", ""},
+		{"http public", "http://example.com/ingest?x=1", ""},
+		{"userinfo", "https://u:p@example.com/ingest", ""},
+		{"hostname", "http://internal.example.com/ingest", ""}, // the dial decides
+		{"loopback", "http://127.0.0.1:8080/hook", "private"},
+		{"loopback v6", "http://[::1]/hook", "private"},
+		{"metadata", "http://169.254.169.254/metadata/instance", "private"},
+		{"azure wire server", "http://168.63.129.16/", "private"},
+		{"v4-mapped metadata", "http://[::ffff:169.254.169.254]/", "private"},
+		{"private 10", "https://10.0.0.8/hook", "private"},
+		{"private 192", "http://192.168.1.5/admin", "private"},
+		{"no scheme", "example.com/hook", "not an absolute URL"},
+		{"not http", "ftp://example.com/hook", "http or https"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dest := `{"type":"http","http":{"url":"` + tt.url + `","method":"POST"}}`
+			err := NewValidator().ValidateNodeConfigs(pipeline(okFileSource, dest))
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tt.wantErr != "" && err == nil:
+				t.Fatalf("expected an error containing %q", tt.wantErr)
+			case tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr):
+				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
+			case tt.wantErr != "" && !strings.Contains(err.Error(), "http-producer"):
+				t.Fatalf("error %q does not name the service", err)
+			}
+		})
+	}
+}
+
+// The webhook consumer is also type "http" but has no url; only the producer's
+// url is checked.
+func TestValidateNodeConfigs_HTTPProducerURL_ConsumerUnaffected(t *testing.T) {
+	if err := NewValidator().ValidateNodeConfigs(pipeline(`{"type":"http"}`, okHTTPDest)); err != nil {
+		t.Fatalf("webhook consumer rejected: %v", err)
+	}
+}
+
+func TestValidateNodeConfigs_HTTPProducerURL_DevFlag(t *testing.T) {
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
+	dest := `{"type":"http","http":{"url":"http://127.0.0.1:9000/hook"}}`
+	if err := NewValidator().ValidateNodeConfigs(pipeline(okFileSource, dest)); err != nil {
+		t.Fatalf("the operator's dev flag should allow a local mock: %v", err)
+	}
+}

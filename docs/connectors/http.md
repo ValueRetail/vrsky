@@ -120,6 +120,59 @@ Config reference:
 }
 ```
 
+### Which addresses it will call
+
+The destination URL is yours to set, and the request carries your headers and
+OAuth token, so the producer checks where it is going (#660):
+
+- It will not connect to loopback, private (10/8, 172.16/12, 192.168/16,
+  fc00::/7), link-local (169.254/16, which includes the cloud metadata address
+  169.254.169.254, and fe80::/10), carrier-grade NAT (100.64/10), unspecified or
+  multicast addresses, or to the Azure platform address 168.63.129.16. This is
+  checked on the address it actually connects to, after the name is resolved,
+  so a hostname that points at one of these is refused too. It applies to every
+  node, mTLS included: the client certificate and CA are set up on top of the
+  same checked connection.
+- Both `http` and `https` are allowed. The scheme does not change which
+  address is reached, and some partners only speak `http`. An `http` endpoint
+  receives your headers and token in clear text, so use `https` wherever the
+  partner offers it.
+- Redirects are followed only when they stay on the same host (and port; an
+  `http` to `https` upgrade on the default ports counts), never from `https`
+  back to `http`, at most five. A redirect to another host is an error, so the
+  headers and token are never sent somewhere the node did not name.
+- Proxy environment variables are ignored.
+- A node whose `http.url` is not an absolute `http(s)` URL, or is a literal
+  private address, is refused when the connection is started, with the reason
+  in the error.
+- A delivery that is refused is an ordinary failed delivery: the activity feed
+  shows "Destination refused", the message is retried on the usual backoff and
+  then lands in the dead-letter queue with its payload, and nothing is sent.
+  Fix the URL and replay it from there.
+
+**Local development with a mock endpoint.** The operator (not the node) can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on `http-producer` and `management-api`. That
+allows private and loopback addresses. Never set it in production; it is off in
+the Kubernetes manifests. `docker-compose.yml` turns it on for `http-producer`
+only, because the bundled `httpbin` sink (`http://httpbin/post`) is a private
+address on the compose network.
+
+**Existing connections.** After this change is deployed, these stop working:
+
+- A node that points at a private, loopback or link-local address, an in-cluster
+  service name that resolves to one (for example `http://management-api:3000`),
+  or a host on a private network. A running connection keeps running, but each
+  delivery to such a node fails with "connection to a private, loopback or
+  link-local address refused" (or "Destination refused" for a literal
+  address). The management API refuses to start a connection whose URL is a
+  literal private address. A hostname that resolves to one is refused when
+  delivering.
+- An endpoint that answers with a redirect to a different host. The delivery
+  fails with "redirect to another host refused". Set the node to the final URL.
+
+Public `http` and `https` endpoints, and redirects within one host, keep
+working.
+
 ## Notes
 
 - **Secrets.** Credential and key material (signing secret, TLS cert/key, CA) are entered as plaintext in the editor and, at deploy, minted into encrypted tenant secrets and replaced with `<field>_secret_id` references. Stored and example JSON therefore shows only the `_secret_id` form.

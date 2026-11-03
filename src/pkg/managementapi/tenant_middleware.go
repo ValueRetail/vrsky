@@ -1,6 +1,8 @@
 package managementapi
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -40,7 +42,9 @@ func TenantMemberMiddleware(repo Repository) func(http.Handler) http.Handler {
 			// Check membership
 			role, err := repo.GetUserTenantRole(r.Context(), user.ID, tenantID)
 			if err != nil {
-				_ = writeError(w, http.StatusInternalServerError, "ServerError", "failed to check tenant membership", nil)
+				// A failed lookup says nothing about membership: 503, never a
+				// 403 or a pass-through.
+				writeServiceUnavailable(w, r, "tenant membership lookup failed", err)
 				return
 			}
 			if role == "" {
@@ -51,7 +55,14 @@ func TenantMemberMiddleware(repo Repository) func(http.Handler) http.Handler {
 			// Fetch the tenant
 			tenant, err := repo.GetTenantByID(r.Context(), tenantID)
 			if err != nil {
-				_ = writeError(w, http.StatusNotFound, "NotFound", "tenant not found", nil)
+				// Only a missing tenant is a 404. Any other error (a lost
+				// connection, a cancelled context) must not look like a
+				// deleted workspace (#662).
+				if errors.Is(err, ErrTenantNotFound) || errors.Is(err, sql.ErrNoRows) {
+					_ = writeError(w, http.StatusNotFound, "NotFound", "tenant not found", nil)
+					return
+				}
+				writeServiceUnavailable(w, r, "tenant lookup failed", err)
 				return
 			}
 

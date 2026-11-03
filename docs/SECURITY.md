@@ -315,10 +315,24 @@ Used so far:
   which allows public `http` too because its URL is free-form and public APIs
   use it, follows same-host redirects, and is checked by the management API at
   start the same way.
+- The Visma consumer and producer (#661, [Visma.net](connectors/visma.md#which-addresses-it-will-call)),
+  https only for both `base_url` and `token_url`, no redirects, and checked by
+  the management API at start the same way.
 
-Other connectors that take a tenant-supplied host (the HTTP producer, Visma,
-Front Systems, Brightpearl, SAP S/4HANA, Business Central) have not been moved
-to it; they are tracked in #639.
+- The HTTP producer (#660, [HTTP & Webhooks](connectors/http.md#which-addresses-it-will-call)),
+  on the same terms as the API consumer (public `http` allowed, same-host
+  redirects). Its mTLS client is built on the same checked dialer
+  (`Options.TLSConfig`). A refused delivery is retried and then dead-lettered,
+  not dropped.
+- The Brightpearl consumer and producer (#667,
+  [Brightpearl](connectors/brightpearl.md#the-base-url)), https only; the
+  derived URL's `datacenter` and `account_code` are checked too. The check
+  runs in the connectors (consumer start, sample data, every delivery), not
+  yet in the management API.
+
+Other connectors that take a tenant-supplied host (Front Systems,
+SAP S/4HANA, Business Central) have not been moved to it; they are tracked in
+#639.
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
