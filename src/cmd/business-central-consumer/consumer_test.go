@@ -24,6 +24,8 @@ func newTestConsumer() (*bcConsumer, *[]*envelope.Envelope, *sync.Mutex) {
 		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient:  http.DefaultClient,
 		checkpoints: checkpoint.NewInMemoryStore(),
+		// The fakes serve on http://127.0.0.1: the operator's dev switch.
+		allowPrivate: true,
 		publish: func(_ context.Context, env *envelope.Envelope) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -112,7 +114,7 @@ func TestSampleData_BC(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	c := &bcConsumer{httpClient: http.DefaultClient}
+	c := &bcConsumer{httpClient: http.DefaultClient, allowPrivate: true} // fakes on http://127.0.0.1
 	body := fmt.Sprintf(`{"client_id":"id","client_secret":"sec","api_base_url":%q,"token_url":%q,"company_id":"GUID","entity":"customers"}`, apiSrv.URL, tokenSrv.URL)
 	req := httptest.NewRequest(http.MethodPost, "/sample-data/", strings.NewReader(body))
 	w := httptest.NewRecorder()

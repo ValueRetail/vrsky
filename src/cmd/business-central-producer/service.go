@@ -22,6 +22,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -41,6 +42,10 @@ type bcProducer struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets api_base_url and token_url be http or private, for a mock
+	// upstream. Never set by a tenant.
+	allowPrivate bool
 }
 
 // BCProducerConfig is the per-node configuration (config.business_central).
@@ -80,8 +85,13 @@ func (p *bcProducer) Configure(ctx context.Context, res *sdk.Resources) error {
 	}
 	p.db = res.DB
 	p.logger = res.Logger
+	p.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if p.httpClient == nil {
-		p.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// api_base_url and token_url are tenant config and every request
+		// carries a credential (#686): refuse private, loopback, link-local
+		// and metadata addresses at dial time. The token request and the
+		// dedupe lookup use the same client.
+		p.httpClient = safeurl.NewClient(60*time.Second, p.allowPrivate)
 	}
 	p.logger.Info("business-central-producer configured")
 	return nil
@@ -104,12 +114,27 @@ func (p *bcProducer) Deliver(ctx context.Context, env *envelope.Envelope) error 
 	if cfg.AADTenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.CompanyID == "" {
 		return sdk.Permanent(fmt.Errorf("business central producer config incomplete for connection %s", env.IntegrationID))
 	}
+	// A refused URL is retried and then dead-lettered with its payload, so the
+	// message can be replayed once the tenant fixes the field (#686). Not
+	// sdk.Permanent: that acks and drops the message.
+	if err := cfg.checkURLs(p.allowPrivate); err != nil {
+		p.logger.Error("Business Central address refused", "connection_id", env.IntegrationID, "error", err)
+		return sdk.Retriable(err)
+	}
 	if !json.Valid(env.Payload) {
 		p.logger.Error("dropping: payload is not valid JSON", "envelope_id", env.ID)
 		return sdk.Permanent(errors.New("payload is not valid JSON"))
 	}
 	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(p.httpClient)
-	return p.write(ctx, cfg, tok, env.IntegrationID, env.Payload)
+	err = p.write(ctx, cfg, tok, env.IntegrationID, env.Payload)
+	if errors.Is(err, safeurl.ErrBlockedAddress) {
+		// The error becomes the message's last error, which the tenant sees
+		// in the DLQ view: log which address the name resolved to, return
+		// the refusal without it. Retriable, like any other dial failure.
+		p.logger.Warn("Business Central request refused at dial", "connection_id", env.IntegrationID, "error", err)
+		return sdk.Retriable(fmt.Errorf("business central: %w", safeurl.ErrBlockedAddress))
+	}
+	return err
 }
 
 func (p *bcProducer) write(ctx context.Context, cfg *BCProducerConfig, tok *oauthcc.Client, connectionID string, payload []byte) error {
@@ -292,17 +317,37 @@ func (cfg *BCProducerConfig) effectiveTokenURL() string {
 	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", cfg.AADTenantID)
 }
 
-func (cfg *BCProducerConfig) entityURL() string {
-	host := cfg.APIBaseURL
-	if host == "" {
-		env := cfg.Environment
-		if env == "" {
-			env = defaultEnvironment
-		}
-		host = fmt.Sprintf("%s/v2.0/%s/%s/api/v2.0", defaultAPIHost, cfg.AADTenantID, env)
+// apiRoot is the API v2.0 root: api_base_url, or the cloud default built from
+// the Entra tenant and the environment.
+func (cfg *BCProducerConfig) apiRoot() string {
+	if cfg.APIBaseURL != "" {
+		return cfg.APIBaseURL
 	}
-	host = strings.TrimRight(host, "/")
+	env := cfg.Environment
+	if env == "" {
+		env = defaultEnvironment
+	}
+	return fmt.Sprintf("%s/v2.0/%s/%s/api/v2.0", defaultAPIHost, cfg.AADTenantID, env)
+}
+
+func (cfg *BCProducerConfig) entityURL() string {
+	host := strings.TrimRight(cfg.apiRoot(), "/")
 	return fmt.Sprintf("%s/companies(%s)/%s", host, cfg.CompanyID, cfg.effectiveEntity())
+}
+
+// checkURLs refuses an API root or token URL the producer must not call: both
+// come from tenant config, the token request carries the client secret and
+// the write the bearer token (#686). The dial-time check in the HTTP client is
+// the enforcement; this gives an early, readable error. allowPrivate is the
+// operator's dev switch.
+func (cfg *BCProducerConfig) checkURLs(allowPrivate bool) error {
+	if err := safeurl.CheckBaseURL(cfg.apiRoot(), allowPrivate); err != nil {
+		return fmt.Errorf("api_base_url refused: %w", err)
+	}
+	if err := safeurl.CheckBaseURL(cfg.effectiveTokenURL(), allowPrivate); err != nil {
+		return fmt.Errorf("token_url refused: %w", err)
+	}
+	return nil
 }
 
 // --- DB ---

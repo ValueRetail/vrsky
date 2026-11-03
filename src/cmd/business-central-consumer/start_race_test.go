@@ -92,12 +92,14 @@ func newSRFixture(t *testing.T) *srFixture {
 	t.Cleanup(srv.Close)
 	f.nodes = fmt.Sprintf(`[{"id":"c1","type":"consumer","config":{"type":"business_central","business_central":{"aad_tenant_id":"t","company_id":"GUID","client_id":"cid","client_secret":"sec","entity":"items","api_base_url":%[1]q,"token_url":"%[1]s/token","poll_interval_seconds":3600}}}]`, srv.URL)
 	f.c = &bcConsumer{
-		db:          db,
-		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		httpClient:  srv.Client(),
-		active:      make(map[string]*poller),
-		publish:     func(context.Context, *envelope.Envelope) error { return nil },
-		checkpoints: checkpoint.NewInMemoryStore(),
+		db:         db,
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		httpClient: srv.Client(),
+		// The fake serves on http://127.0.0.1: the operator's dev switch.
+		allowPrivate: true,
+		active:       make(map[string]*poller),
+		publish:      func(context.Context, *envelope.Envelope) error { return nil },
+		checkpoints:  checkpoint.NewInMemoryStore(),
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithCancel(context.Background())

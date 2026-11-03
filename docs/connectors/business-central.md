@@ -20,6 +20,46 @@ customers, salesOrders, inventory, and ~55 other entities).
 > The connector fetches and caches a bearer token for scope
 > `https://api.businesscentral.dynamics.com/.default`.
 
+## Which addresses it will call
+
+`api_base_url` and `token_url` are your configuration, and the connector sends
+the client secret to `token_url` and the bearer token to every API request.
+Left unset they default to
+`https://api.businesscentral.dynamics.com/v2.0/<aad_tenant_id>/<environment>/api/v2.0`
+and `https://login.microsoftonline.com/<aad_tenant_id>/oauth2/v2.0/token`,
+which keep working. Set or not, both must be `https` URLs without a user name,
+password, query string or fragment, and neither may point at a private,
+loopback, link-local or cloud-metadata address (`10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`,
+`168.63.129.16`, and the IPv6 equivalents).
+
+- A source that is refused does not start and logs why. The data preview
+  ("show data structure") answers with the reason.
+- A destination sends nothing. The message is retried and then dead-lettered
+  with its payload, so it can be replayed once the URL is fixed.
+- Every request (token, API, the next page, pictures, the destination's
+  `dedupe_fields` lookup) is also checked when the connection is made, on the
+  address actually connected to, so a host name that resolves to a private
+  address is refused too. The preview and the dead-letter error then say
+  only that the address is not allowed; the service log has which one.
+- Redirects are not followed.
+- `@odata.nextLink` never takes the token to another origin. A link on the
+  same scheme, host and port is followed. A link to another host or port, or
+  to `http`, whose path is under the API root is fetched from the configured
+  host instead, as picture links already are (on-prem servers often name
+  themselves by an internal host). Any other link stops the poll with an
+  error; the watermark stays where it was.
+
+These checks run in the connector, not yet when the management API starts
+the connection, so the reason shows up in the service log rather than in the
+start answer.
+
+If you have a node with an `http` or private `api_base_url` or `token_url`, it
+stops working after this change and needs a reachable https URL. For local
+development with a mock upstream the operator can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service; a node cannot set it, and it
+must stay off in production.
+
 ## As a source (consumer)
 
 A consumer node polls one OData entity on `poll_interval_seconds`, following
@@ -189,8 +229,9 @@ For a till posting sales:
 ```
 
 Delivery failures are classified for correct retry behaviour: `2xx` acks; `429`
-and `503`/`5xx`/network errors retry; `4xx` bad-data and `401`/`403` auth are
-poison and go to the DLQ.
+and `503`/`5xx`/network errors and a refused address retry, then go to the
+DLQ; `4xx` bad-data and `401`/`403` auth are poison: the message is acked and
+dropped with a log line, not dead-lettered.
 
 ## Templates: Sitoo ⇄ Business Central (beta)
 
@@ -217,7 +258,8 @@ node sees) is skipped and the converted record is written.
 ## Notes & roadmap
 
 - **On-prem / sandbox** — set `api_base_url`, `token_url`, and `scope` overrides
-  for on-prem Business Central or a non-default Entra authority.
+  for on-prem Business Central or a non-default Entra authority. Both URLs must
+  be public `https` addresses; see "Which addresses it will call".
 - **LS Central** — the standard BC entities work as-is; LS Retail-specific data
   (e.g. the LS eCommerce API for Commerce) can be reached by pointing `entity` /
   `api_base_url` at those endpoints.

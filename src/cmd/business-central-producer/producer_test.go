@@ -18,6 +18,8 @@ func testProducer() *bcProducer {
 	return &bcProducer{
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: http.DefaultClient,
+		// The fakes serve on http://127.0.0.1: the operator's dev switch.
+		allowPrivate: true,
 	}
 }
 

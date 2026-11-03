@@ -23,6 +23,7 @@ import (
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -97,6 +98,10 @@ type bcConsumer struct {
 	now func() time.Time
 
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// lets api_base_url and token_url be http or private, for a mock
+	// upstream. Never set by a tenant.
+	allowPrivate bool
 
 	active map[string]*poller
 	mu     sync.RWMutex
@@ -225,8 +230,13 @@ func (c *bcConsumer) Configure(ctx context.Context, res *sdk.Resources) error {
 		c.checkpoints = checkpoint.NewPostgresStore(res.DB)
 	}
 	c.active = make(map[string]*poller)
+	c.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// api_base_url and token_url are tenant config and every request
+		// carries a credential (#686): refuse private, loopback, link-local
+		// and metadata addresses at dial time. The token request, the
+		// nextLink pages and the pictures use the same client.
+		c.httpClient = safeurl.NewClient(60*time.Second, c.allowPrivate)
 	}
 	// Aux endpoint for the UI's pre-deploy "show data structure" preview.
 	c.RegisterHTTPHandler("/sample-data/", c.handleSampleData())
@@ -342,6 +352,10 @@ func (c *bcConsumer) startConnection(ctx context.Context, connectionID, tenantID
 	}
 	if err := cfg.validateLookback(); err != nil {
 		logger.Error("Business Central consumer not started", "error", err)
+		return
+	}
+	if err := cfg.checkURLs(c.allowPrivate); err != nil {
+		logger.Error("Business Central consumer not started: address refused", "error", err)
 		return
 	}
 
@@ -527,7 +541,14 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 			}
 			total += len(out)
 		}
-		next = p.NextLink
+		if p.NextLink == "" {
+			break
+		}
+		// The link comes from the server and the next request carries the
+		// token: it stays on the configured origin (#686).
+		if next, err = cfg.followNext(next, p.NextLink); err != nil {
+			return err
+		}
 	}
 
 	// An incremental feed carries only records BC marked as modified, and
@@ -1297,15 +1318,7 @@ func (cfg *BCConfig) filterWithCursor(cursor string) string {
 
 // companyURL is the API v2.0 root scoped to the company.
 func (cfg *BCConfig) companyURL() string {
-	host := cfg.APIBaseURL
-	if host == "" {
-		env := cfg.Environment
-		if env == "" {
-			env = defaultEnvironment
-		}
-		host = fmt.Sprintf("%s/v2.0/%s/%s/api/v2.0", defaultAPIHost, cfg.AADTenantID, env)
-	}
-	return fmt.Sprintf("%s/companies(%s)", strings.TrimRight(host, "/"), cfg.CompanyID)
+	return fmt.Sprintf("%s/companies(%s)", strings.TrimRight(cfg.apiRoot(), "/"), cfg.CompanyID)
 }
 
 // entityURL builds the first-page API v2.0 URL, scoped to the company. A
