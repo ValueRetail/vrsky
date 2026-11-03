@@ -1132,11 +1132,35 @@ Last updated 2026-10-28.
     The error text includes the resolved IP and reaches the tenant's activity
     feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
     the address in the server log and give the user "target address not
-    allowed". Part of #639. Found in review of #669.
+    allowed". The same text lands in a dead-lettered message's
+    `X-Vrsky-Last-Error` header, which the tenant can read (Visma, Sitoo and
+    the others). Part of #639. Found in review of #669 and #668.
 
 161. **The HTTP producer logs its URL with userinfo.** Logs and events print
     `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
     Predates #669. Found in review of #669.
+
+162. **A non-UUID tenant id answers 503.** Since #662 any `GetTenantByID`
+    error that is not "not found" is a 503 with an Error log line. A tenant
+    id in the path or `X-Tenant-ID` that isn't a UUID most likely makes
+    Postgres reject the query, so a client mistake reads as an outage and an
+    authenticated user can fill the log with it. Validate the id up front and
+    answer 403 or 404. Found in review of #675.
+
+163. **`safeurl.CheckURL(field, raw, allowPrivate)`.** `pkg/vismaurl` names
+    `token_url` in its errors by trimming the `base_url` prefix off
+    `CheckBaseURL`'s message, which breaks silently if that wording changes.
+    SAP S/4HANA and Business Central have a `token_url` too. Add a field-named
+    check to `pkg/safeurl` and have `CheckBaseURL` wrap it. Found in review
+    of #668.
+
+164. **Connector docs say `sdk.Permanent` errors go to the DLQ.** `Permanent`
+    acks and drops the message (`src/pkg/sdk/lifecycle.go`, "permanent error;
+    dropping message"); only retryable errors reach the DLQ after
+    `MaxDeliveryAttempts`. `docs/connectors/visma.md` (4xx, 401/403) and the
+    Brightpearl page said otherwise; check every connector page, and decide
+    per case whether a 4xx or an incomplete config should be dropped or
+    dead-lettered so it can be replayed. Found in review of #668 and #674.
 
 ## Human
 
