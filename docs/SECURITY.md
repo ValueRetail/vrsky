@@ -330,9 +330,14 @@ Used so far:
   runs in the connectors (consumer start, sample data, every delivery), not
   yet in the management API.
 
-Other connectors that take a tenant-supplied host (Front Systems,
-SAP S/4HANA, Business Central) have not been moved to it; they are tracked in
-#639.
+- The Front Systems consumer and producer (#677,
+  [Front Systems](connectors/front-systems.md)), https only: `base_url` is
+  checked when the consumer registers webhooks and on every delivery, and
+  every call goes through the checked client. `callback_url` is not checked:
+  Front Systems calls it, the connector never does.
+
+Other connectors that take a tenant-supplied host (SAP S/4HANA, Business
+Central) have not been moved to it; they are tracked in #639.
 
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
