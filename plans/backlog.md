@@ -1170,6 +1170,19 @@ Last updated 2026-10-28.
     Check Brightpearl's own API docs and change the default if it moved.
     Found in review of #674.
 
+166. **The first after-action still deletes or moves blind.** In event and
+    poll mode the first (non-retry) `delete` or `move` after a publish runs
+    without a stamp check, so a replacement uploaded under the same key
+    during the publish is deleted or moved unpublished. #672 guards only the
+    retries. Stamp before the fetch and compare before the first after-action
+    too. Found in review of #676.
+
+167. **Conditional deletes for the cloud-storage after-action.** The stamp
+    check leaves a window between the Stat and the delete (for a `move`,
+    through the copy). Close it where the store supports it: Azure `If-Match`
+    on the ETag, GCS `ifGenerationMatch`, S3 `If-Match` (check MinIO first).
+    Found in review of #676.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource

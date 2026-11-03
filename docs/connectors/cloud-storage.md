@@ -220,7 +220,10 @@ published once, not again at every start (#538).
     for its own notification and logs `object replaced since published; left
     for its own notification`. A replacement uploaded in the instant between
     that check and the delete (or the copy of a move) can still be removed
-    unpublished; that window is one request long.
+    unpublished; that window is short; for a `move` it lasts as long as the
+    copy, which on Azure means downloading and re-uploading the blob.
+  - On S3, give the credentials `s3:ListBucket`. Without it a missing object
+    reads as access denied, and its retry ends in a false error.
 - **Checkpoint unreadable.** If the database can't be read at start, the
   consumer publishes nothing and logs `Could not read which objects were
   already published`. It tries again at every poll and carries on as normal

@@ -58,11 +58,12 @@ after-action from memory, without fetching or publishing again.
 ## Risks
 
 - A replacement uploaded between a retry's Stat and its Delete (or Copy) is
-  still removed unpublished. The window is one request long. Closing it needs
-  conditional deletes (Azure If-Match, GCS ifGenerationMatch, S3 If-Match);
-  in the PR's backlog lines. In the docs.
+  still removed unpublished. The window is short; for a `move` it lasts as
+  long as the copy, which on Azure means downloading and re-uploading the
+  blob. Closing it needs conditional deletes (Azure If-Match, GCS
+  ifGenerationMatch, S3 If-Match): `plans/backlog.md` item 167.
 - The first, non-retry after-action still deletes without a stamp check, in
-  event and poll mode. Same backlog lines.
+  event and poll mode: `plans/backlog.md` item 166.
 - S3 answers a HEAD without a body, so a 404 can't tell a missing key from a
   missing bucket. Stat asks HeadBucket after a 404, so a wrong bucket name
   stays an error instead of acking every message as already handled.
