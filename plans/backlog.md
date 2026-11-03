@@ -1218,7 +1218,7 @@ Last updated 2026-10-28.
     While there, `RedactURL` should also refuse a fragment containing `@`
     (`http://apikey:1234#secret@host`). Found in review of #693.
 
-171. **Pagination has no page cap.** The SAP S/4HANA and Business Central
+171. ~~**Pagination has no page cap.**~~ (#699) The SAP S/4HANA and Business Central
     consumers follow next links until there are none, so a gateway that
     keeps returning them holds the poll forever. Cap the pages per poll
     (say 10 000) and log when the cap is hit. Found in review of #680.

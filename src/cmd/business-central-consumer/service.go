@@ -421,7 +421,7 @@ func (c *bcConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg
 	tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.effectiveScope()).WithHTTPClient(c.httpClient)
 
 	poll := func() {
-		if err := c.fetchAndPublish(ctx, connID, tenantID, cfg, tok, logger); err != nil && ctx.Err() == nil {
+		if err := c.fetchAndPublish(ctx, connID, tenantID, cfg, tok, logger); err != nil && ctx.Err() == nil && !errors.Is(err, errPageCap) {
 			logger.Error("Business Central fetch failed", "error", err)
 		}
 	}
@@ -441,6 +441,18 @@ func (c *bcConsumer) runPoller(ctx context.Context, connID, tenantID string, cfg
 		}
 	}
 }
+
+// maxPagesPerPoll caps the pages one poll follows (#699). A gateway that keeps
+// returning @odata.nextLink would otherwise hold the poll for ever.
+const maxPagesPerPoll = 10000
+
+// pageCap is the page cap in force; tests lower it.
+var pageCap = maxPagesPerPoll
+
+// errPageCap ends a poll that followed pageCap pages and was still being
+// handed a next link. Pages already fetched stay published. Like a link that
+// leaves the API, it stops the poll before the watermark is stored.
+var errPageCap = errors.New("business central: page cap reached; poll stopped")
 
 // odataPage is the OData v4 collection envelope.
 type odataPage struct {
@@ -513,6 +525,12 @@ func (c *bcConsumer) fetchAndPublish(ctx context.Context, connID, tenantID strin
 	ahead := map[string]string{} // records dated after now this poll carried
 	inFeed := map[string]bool{}  // record ids this poll carried, for the sweep
 	for next != "" {
+		if page >= pageCap {
+			logger.Warn("Business Central poll stopped at the page cap; the API keeps returning @odata.nextLink, "+
+				"and the watermark was not advanced",
+				"page_cap", pageCap, "entity", cfg.effectiveEntity(), "records", total)
+			return errPageCap
+		}
 		page++
 		body, err := c.get(ctx, tok, next, cfg.PageSize)
 		if err != nil {

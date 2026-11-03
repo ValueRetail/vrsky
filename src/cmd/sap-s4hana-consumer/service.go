@@ -29,6 +29,10 @@ import (
 )
 
 const (
+	// maxPagesPerPoll caps the pages one poll follows (#699). A gateway that
+	// keeps returning next links would otherwise hold the poll for ever.
+	maxPagesPerPoll = 10000
+
 	defaultODataVersion = "v2"
 	authBasic           = "basic"
 	authOAuth2          = "oauth2"
@@ -256,7 +260,7 @@ func (c *sapConsumer) runPoller(ctx context.Context, connID, tenantID string, cf
 	auth := newAuthorizer(cfg, c.httpClient)
 
 	poll := func() {
-		if err := c.fetchAndPublish(ctx, connID, tenantID, cfg, auth, logger); err != nil && ctx.Err() == nil {
+		if err := c.fetchAndPublish(ctx, connID, tenantID, cfg, auth, logger); err != nil && ctx.Err() == nil && !errors.Is(err, errPageCap) {
 			logger.Error("SAP S/4HANA fetch failed", "error", err)
 		}
 	}
@@ -287,6 +291,13 @@ type odataV4Page struct {
 	NextLink string            `json:"@odata.nextLink"`
 }
 
+// pageCap is the page cap in force; tests lower it.
+var pageCap = maxPagesPerPoll
+
+// errPageCap ends a poll that followed pageCap pages and was still being
+// handed a next link. Pages already fetched stay published.
+var errPageCap = errors.New("sap s/4hana: page cap reached; poll stopped")
+
 // fetchAndPublish GETs the entity set, follows the server-driven pagination link
 // (__next / @odata.nextLink, an opaque $skiptoken cursor), and publishes each
 // page's records as one JSON-array envelope.
@@ -294,6 +305,11 @@ func (c *sapConsumer) fetchAndPublish(ctx context.Context, connID, tenantID stri
 	next := cfg.entityURL()
 	page, total := 0, 0
 	for next != "" {
+		if page >= pageCap {
+			logger.Warn("SAP S/4HANA poll stopped at the page cap; the service keeps returning next links",
+				"page_cap", pageCap, "service", cfg.Service, "entity_set", cfg.EntitySet, "records", total)
+			return errPageCap
+		}
 		page++
 		body, reqURL, err := c.get(ctx, cfg, auth, next)
 		if err != nil {

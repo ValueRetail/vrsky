@@ -65,6 +65,11 @@ must stay off in production.
 A consumer node polls one OData entity on `poll_interval_seconds`, following
 `@odata.nextLink` pagination, and emits each page as a JSON-array message.
 
+A poll follows at most 10 000 pages. If the API is still returning
+`@odata.nextLink` after that, the poll stops with a warning that names the
+connection and the cap. The pages already read stay published, and the
+watermark stays where it was, as for a link that leaves the API.
+
 - `entity` — the entity to poll (default `items`; e.g. `customers`, `salesOrders`).
 - `filter` — optional OData `$filter` (e.g. `status eq 'Open'`).
 - `poll_interval_seconds` — poll cadence.

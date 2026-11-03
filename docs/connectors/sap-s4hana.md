@@ -47,6 +47,10 @@ v4 — both opaque `$skiptoken` cursors), and emits each page as a JSON-array
 message. The connector requests JSON explicitly, since OData v2 services return
 Atom/XML by default.
 
+A poll follows at most 10 000 pages. If the service is still returning next
+links after that, the poll stops with a warning that names the connection and
+the cap; the pages already read stay published.
+
 - `filter` — optional OData `$filter`, e.g. `LastChangeDate gt datetime'2026-01-01T00:00:00'`.
 - `poll_interval_seconds` — poll cadence.
 
