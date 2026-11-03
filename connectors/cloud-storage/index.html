@@ -2689,8 +2689,28 @@ published once, not again at every start (#538).</p>
     can't tell from the old one.</li>
 <li>A <code>move</code> whose copy worked and whose delete failed copies over the same
     destination again before it deletes.</li>
-<li>Event mode has no listing and does not retry: a failed after-action
-    there is only logged and the object stays.</li>
+<li>Event mode has no listing, so it keeps the failed keys in a small
+    queue in memory (#672). The first failure logs <code>after-action failed;
+    will retry in memory</code>; the consumer then tries the <code>delete</code> or <code>move</code>
+    again after 1, 2, 4, 8, 16, 32 and 60 minutes and once more an hour
+    later, which is eight retries in about three hours. It does not fetch
+    or publish the object again. A retry that works logs <code>after-action done
+    on retry</code>; an object that is gone counts as done. After the eighth
+    failed retry, or when the queue is full (1000 keys per connection), the
+    consumer logs an error with the bucket and key and gives up: the object
+    stays in the bucket. The queue is lost when the connection stops or the
+    pod restarts, and the object then stays too, so look for leftovers after
+    a restart. Before the fetch, event mode with <code>delete</code> or <code>move</code> reads the
+    object's size, last-modified time and version (ETag on S3 and Azure,
+    generation on GCS), and each retry reads them again first. If they
+    changed, the object was replaced under the same key: the retry leaves it
+    for its own notification and logs <code>object replaced since published; left
+    for its own notification</code>. A replacement uploaded in the instant between
+    that check and the delete (or the copy of a move) can still be removed
+    unpublished; that window is short; for a <code>move</code> it lasts as long as the
+    copy, which on Azure means downloading and re-uploading the blob.</li>
+<li>On S3, give the credentials <code>s3:ListBucket</code>. Without it a missing object
+    reads as access denied, and its retry ends in a false error.</li>
 <li><strong>Checkpoint unreadable.</strong> If the database can't be read at start, the
   consumer publishes nothing and logs <code>Could not read which objects were
   already published</code>. It tries again at every poll and carries on as normal

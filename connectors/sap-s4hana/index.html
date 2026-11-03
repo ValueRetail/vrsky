@@ -1821,6 +1821,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2455,6 +2466,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-addresses-it-will-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which addresses it will call
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2520,13 +2542,16 @@ a Communication Arrangement for the API you intend to use:</p>
 <h2 id="addressing-a-service">Addressing a service<a class="headerlink" href="#addressing-a-service" title="Permanent link">&para;</a></h2>
 <p>A node targets one OData <strong>entity set</strong> inside one <strong>service</strong>:</p>
 <ul>
-<li><code>host</code> — e.g. <code>my347623.s4hana.ondemand.com</code> (no scheme).</li>
+<li><code>host</code> — e.g. <code>my347623.s4hana.ondemand.com</code>: a host name, optionally with
+  <code>:port</code>, and nothing else (no scheme, path or user name).</li>
 <li><code>service</code> — the OData service, e.g. <code>API_SALES_ORDER_SRV</code>.</li>
 <li><code>entity_set</code> — the entity set within it, e.g. <code>A_SalesOrder</code>.</li>
 <li><code>odata_version</code> — <code>v2</code> (default) or <code>v4</code>.</li>
 </ul>
 <p>For on-premise gateways or non-standard routes, set <code>api_base_url</code> to the full
-service root instead of <code>host</code> + <code>service</code>; <code>entity_set</code> is appended to it.</p>
+service root instead of <code>host</code> + <code>service</code>; <code>entity_set</code> is appended to it.
+Both are checked before anything is called; see
+<a href="#which-addresses-it-will-call">Which addresses it will call</a>.</p>
 <h2 id="as-a-source-consumer">As a source (consumer)<a class="headerlink" href="#as-a-source-consumer" title="Permanent link">&para;</a></h2>
 <p>A consumer node polls the entity set on <code>poll_interval_seconds</code>, follows the
 version-appropriate pagination cursor (<code>d.__next</code> on v2, <code>@odata.nextLink</code> on
@@ -2583,8 +2608,64 @@ producer re-fetches once and retries transparently.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>Delivery failures are classified for correct retry behaviour: <code>2xx</code> acks; <code>429</code>
-and <code>503</code>/<code>5xx</code>/network errors retry with backoff; <code>4xx</code> bad-data and
-<code>401</code>/<code>403</code> auth failures are poison and go to the DLQ.</p>
+and <code>503</code>/<code>5xx</code>/network errors retry with backoff and go to the DLQ once the
+retries are used up. Other <code>4xx</code> answers, <code>401</code>/<code>403</code> auth failures included,
+are permanent: the message is acked and dropped (the error is logged), not
+retried and not dead-lettered. An address the connector refuses (below) is
+retried like a network error and then goes to the DLQ with its payload, so it
+can be replayed once the node is fixed. Its error says the address was refused
+but not which address a name resolved to.</p>
+<h2 id="which-addresses-it-will-call">Which addresses it will call<a class="headerlink" href="#which-addresses-it-will-call" title="Permanent link">&para;</a></h2>
+<p>Every request carries the node's SAP credential (the communication user's
+password, or the OAuth2 client secret on the token call and the bearer token
+after it), and the URLs come from the node, so the connector only calls
+addresses it can trust (#678):</p>
+<ul>
+<li><code>host</code> must be one host name with an optional numeric port, so it cannot
+  carry a scheme, a path, a user name or a query that changes where the
+  request goes. It is checked wherever it is used: when there is no
+  <code>api_base_url</code>, and for OAuth2 when there is no <code>token_url</code>.</li>
+<li>The service root (<code>api_base_url</code>, or the one built from <code>host</code>) and the
+  OAuth2 token URL (<code>token_url</code>, or <code>https://{host}/sap/bc/sec/oauth2/token</code>)
+  must be <code>https</code>, with a host, and no user name, query string or fragment.</li>
+<li>The connector will not connect to loopback, private (10/8, 172.16/12,
+  192.168/16, fc00::/7), link-local (169.254/16, which includes the cloud
+  metadata address 169.254.169.254, and fe80::/10), carrier-grade NAT
+  (100.64/10), unspecified or multicast addresses, or to the Azure platform
+  address 168.63.129.16. This is checked on the address it actually connects
+  to, after the name is resolved, so a hostname that points at one of these is
+  refused too. It applies to every call: the OData requests, the pagination
+  links SAP returns, the CSRF fetch and the token call. Redirects are not
+  followed.</li>
+<li>Pagination links (<code>d.__next</code>, <code>@odata.nextLink</code>) stay on the service
+  root's scheme, host and port. A link to another host or port, or an <code>http</code>
+  link where the root is <code>https</code> (a TLS-terminating web dispatcher may
+  answer with one), is fetched from the configured root instead, with the
+  link's path and query, as long as that path, with <code>.</code> and <code>..</code> resolved, is
+  under the service root's path and holds no encoded dot or slash (<code>%2e</code>,
+  <code>%2f</code>) and no backslash (<code>\</code> or <code>%5c</code>). A link anywhere else stops the
+  poll with an error; the pages before it are already published. Relative
+  links, which is what SAP and <code>mock-sap</code> send, are not affected.</li>
+</ul>
+<p>Where it is checked: a source refuses to start its poll (the error is in the
+consumer's log), the "show data structure" preview answers with the reason,
+and a destination retries the message and then sends it to the DLQ. The
+management API does not check these fields yet when a connection is started.</p>
+<p>An <code>api_base_url</code> or <code>token_url</code> can still point at any public https host, so
+only set one for a host you trust with the credential.</p>
+<p><strong>Local development with mock-sap.</strong> The operator (not the node) can set
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on <code>sap-s4hana-consumer</code> and
+<code>sap-s4hana-producer</code>. That allows <code>http</code> and private addresses, which is what
+<code>http://mock-sap:8099</code> needs. <code>docker-compose.yml</code> sets it on both services
+(override with <code>ALLOW_PRIVATE_UPSTREAMS=false</code>), so the dev stack and the
+nightly end-to-end keep working. The Kubernetes manifests do not set it; never
+set it in production. It does not loosen the <code>host</code> shape check.</p>
+<p><strong>Existing connections.</strong> A node whose <code>api_base_url</code> or <code>token_url</code> is
+<code>http://</code> or points at a private address, or whose <code>host</code> carries more than a
+host name and port, stops working when this change is deployed: a running
+source keeps polling until its next restart, then refuses to start; a
+destination refuses the next delivery. Fix the field. An on-premise gateway
+has to be reachable on a public https address.</p>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <p>Validated end to end in the TEST (docker-compose) environment on 2026-09-04
 against <code>mock-sap</code>, with a <code>sap_s4hana</code> source feeding a <code>sap_s4hana</code>
@@ -2612,7 +2693,9 @@ starts and no polling appears.</p>
 </code></pre></div>
 <p>then create a connection whose nodes set
 <code>api_base_url: http://mock-sap:8099/sap/opu/odata/sap/API_SALES_ORDER_SRV</code> and
-<code>entity_set: A_SalesOrder</code>, and watch <code>docker logs vrsky-mock-sap</code>.</p>
+<code>entity_set: A_SalesOrder</code>, and watch <code>docker logs vrsky-mock-sap</code>. This needs
+<code>ALLOW_PRIVATE_UPSTREAMS=true</code> on both SAP services, which <code>docker-compose.yml</code>
+sets by default.</p>
 <p>Both services are deployed to prod as of this validation
 (<code>infrastructure/azure/deploy-connectors-azure.sh</code>).</p>
 <h2 id="notes-roadmap">Notes &amp; roadmap<a class="headerlink" href="#notes-roadmap" title="Permanent link">&para;</a></h2>

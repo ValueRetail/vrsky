@@ -2645,13 +2645,30 @@ with Docker Buildx (<code>docker/build-push-action</code>): the image's own Dock
 the repo root as context, <code>linux/amd64</code>, pushed as
 <code>vrskyprodacr.azurecr.io/vrsky/&lt;image&gt;:latest</code>. management-api gets
 <code>AGENT_VERSION</code> from <code>git describe</code>, as before. When the <code>DOCKERHUB_USERNAME</code>
-and <code>DOCKERHUB_TOKEN</code> secrets exist, the job logs in to Docker Hub first, so
-the base-image pulls are not anonymous pulls from shared runner IPs. Provenance
+and <code>DOCKERHUB_TOKEN</code> secrets exist, the job logs in to Docker Hub first, for
+anything that still pulls from there (the base images do not; see below). Provenance
 and SBOM attestations are off, so <code>:latest</code> stays a plain single-platform
 manifest, as <code>az acr build</code> left it, with no untagged attestation manifests
 next to it. The deploy job and Catch up read its digest with <code>az acr
 repository show</code>, unchanged. The runner minutes of a public repository are free; ACR
 Tasks bill for every minute (433 minutes for 159 builds on 2026-10-29).</p>
+<p>Base images come from <code>mirror.gcr.io</code>, Google's public cache of Docker Hub,
+not from Docker Hub itself: every Dockerfile says
+<code>FROM mirror.gcr.io/library/&lt;image&gt;:&lt;tag&gt;</code>, and setup-buildx runs BuildKit
+from <code>mirror.gcr.io/moby/buildkit:buildx-stable-1</code>. Docker Hub limits pulls
+even with the login, and on 2026-11-03 nine builds on main got
+<code>429 Too Many Requests</code> and the deploy was skipped (#692). The mirror serves
+the same images under the same tags (same digests). A tag nobody has pulled
+through it yet can be missing for a while; check with
+<code>docker buildx imagetools inspect mirror.gcr.io/library/&lt;image&gt;:&lt;tag&gt;</code> before
+bumping one. <code>TestDockerfilesPullBaseImagesFromTheMirror</code> in
+<code>src/pkg/managementapi/nodeconfig_test.go</code> fails on a <code>FROM</code> that would pull
+from Docker Hub. The CI service containers and the <code>golang</code>/<code>busybox</code> runs in
+<code>integration.yml</code> and <code>e2e-nightly.yml</code> use the mirror too, as do the official
+images in <code>docker-compose.yml</code>, the brokers integration.yml starts from it
+(MinIO, fake-gcs, SFTP, Kafka, RabbitMQ) and promtool's <code>prom/prometheus</code>.
+Third-party images go through the mirror without <code>library/</code>, e.g.
+<code>mirror.gcr.io/apache/kafka:3.7.0</code>.</p>
 <p>Layers are cached in the GitHub Actions cache: one scope for all Go images
 (they share the Go base image, the <code>go mod download</code> layer and the copy of
 <code>src/</code>), one for the UI. Every job reads the cache; only the <code>data-filter</code> and
