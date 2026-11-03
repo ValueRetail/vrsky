@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/oauthcc"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
+	"github.com/ValueRetail/vrsky/pkg/vismaurl"
 )
 
 // Aux HTTP handler served on the SDK auxiliary HTTP port (WORKER_HTTP_PORT).
@@ -67,9 +70,25 @@ func (c *vismaConsumer) handleSampleData() http.HandlerFunc {
 			return
 		}
 
+		// The preview calls the tenant's URLs with the tenant's credential, so
+		// it gets the same check as a started connection (#661).
+		if err := vismaurl.Check(cfg.BaseURL, cfg.TokenURL, c.allowPrivate); err != nil {
+			writeErr(err.Error())
+			return
+		}
+
 		tok := oauthcc.New(cfg.effectiveTokenURL(), cfg.ClientID, cfg.ClientSecret, cfg.Scope).WithHTTPClient(c.httpClient)
 		body, err := c.get(r.Context(), &cfg, tok)
 		if err != nil {
+			if errors.Is(err, safeurl.ErrBlockedAddress) {
+				// Which address a name resolved to is internal detail: log
+				// it, do not hand it to the caller.
+				if c.logger != nil {
+					c.logger.Warn("sample-data target refused at dial", "error", err)
+				}
+				writeErr("target address not allowed")
+				return
+			}
 			writeErr(err.Error())
 			return
 		}

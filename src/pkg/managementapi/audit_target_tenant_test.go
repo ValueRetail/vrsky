@@ -43,10 +43,11 @@ func serveAudited(t *testing.T, h *Handler, aw AuditWriter, method, path, worksp
 	return rec
 }
 
-// settle waits out the middleware's asynchronous write and returns every
-// entry written.
+// settle is for cases that expect no write at all: nothing can be waited
+// for, so it gives the middleware's asynchronous write a short while to show
+// up and returns whatever did. Cases that expect a write use wait instead.
 func (f *fakeAuditWriter) settle() []*AuditEntry {
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]*AuditEntry(nil), f.entries...)
@@ -94,7 +95,8 @@ func TestAudit_OperatorPlanAndQuotaWritesFileUnderPathTenant(t *testing.T) {
 			if rec.Code != c.wantStatus {
 				t.Fatalf("status %d, want %d: %s", rec.Code, c.wantStatus, rec.Body.String())
 			}
-			got := aw.settle()
+			// One request, one write: wait returns once it has landed.
+			got := aw.wait(t, 1)
 			if len(got) != 1 {
 				t.Fatalf("want exactly one audit entry, got %d: %+v", len(got), got)
 			}
@@ -118,6 +120,9 @@ func TestAudit_OperatorPlanAndQuotaWritesFileUnderPathTenant(t *testing.T) {
 // Only a caller the operator gate let through may file entries in the path's
 // workspace: a refused owner of another workspace must not reach its log.
 func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
+	// With a workspace selected the refusal is still audited, under that
+	// workspace as before, so the write can be waited for and its tenant
+	// checked. With none there is nothing to wait for.
 	cases := []struct {
 		name, path, workspace string
 		body                  any
@@ -135,10 +140,15 @@ func TestAudit_NonOperatorCannotFileIntoPathTenant(t *testing.T) {
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body.String())
 			}
-			for _, en := range aw.settle() {
-				if en.TenantID == billTenant {
-					t.Fatalf("a refused non-operator filed an entry in the path's workspace: %+v", en)
+			if c.workspace == "" {
+				if got := aw.settle(); len(got) != 0 {
+					t.Fatalf("a refused non-operator with no workspace filed entries: %+v", got)
 				}
+				return
+			}
+			got := aw.wait(t, 1)
+			if len(got) != 1 || got[0].TenantID != c.workspace {
+				t.Fatalf("want the refusal filed once under the caller's workspace %q, not the path's, got %+v", c.workspace, got)
 			}
 		})
 	}
@@ -153,6 +163,10 @@ func TestAudit_OtherRoutesKeepContextTenant(t *testing.T) {
 	}{
 		{"owner creates a connection", http.MethodPost, "/api/v1/connections", billTenant, "tokOwner", map[string]any{"name": ""}},
 		{"operator creates a connection in own workspace", http.MethodPost, "/api/v1/connections", opsWorkspace, "tokOps", map[string]any{"name": ""}},
+		// Production puts no workspace in the context for /api/v1/tenants/*
+		// (TenantIDMiddleware skips them), so there this request is not
+		// audited at all (backlog 169). The injected one checks only that the
+		// route does not redirect the entry to the path's tenant.
 		{"owner asks for a plan", http.MethodPost, "/api/v1/tenants/" + billTenant + "/plan-requests", opsWorkspace, "tokOwner", map[string]any{"plan": PlanPaid}},
 	}
 	for _, c := range cases {
@@ -160,7 +174,7 @@ func TestAudit_OtherRoutesKeepContextTenant(t *testing.T) {
 			e := newAuditBillingEnv(t)
 			aw := &fakeAuditWriter{}
 			serveAudited(t, e.h, aw, c.method, c.path, c.workspace, c.bearer, c.body)
-			got := aw.settle()
+			got := aw.wait(t, 1)
 			if len(got) != 1 || got[0].TenantID != c.workspace {
 				t.Fatalf("want one entry under the context tenant %q, got %+v", c.workspace, got)
 			}

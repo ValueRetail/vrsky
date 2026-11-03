@@ -19,6 +19,33 @@ Connect.
 > **company context** is sent as the `ipp-company-id` header when `company_id`
 > is set (required by the Financials API).
 
+## Which addresses it will call
+
+`base_url` and `token_url` are your configuration, and the connector sends the
+client secret to `token_url` and the bearer token to `base_url`. So both must
+be `https` URLs without a user name, password, query string or fragment, and
+neither may point at a private, loopback, link-local or cloud-metadata
+address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`,
+`169.254.0.0/16`, `168.63.129.16`, and the IPv6 equivalents).
+
+- The management API refuses such a URL when the connection is started, with
+  the reason in the error.
+- The connector checks again at start. A consumer that is refused does not
+  start and logs why. A producer sends nothing; the message is retried and
+  then dead-lettered with its payload, so it can be replayed once the URL is
+  fixed.
+- Every request (token and API) is also checked when the connection is made,
+  on the address actually connected to, so a hostname that resolves to a
+  private address is refused too.
+- Redirects are not followed.
+- The real Visma hosts and the default `token_url` are unaffected.
+
+If you have a connection with an `http` or private `base_url` or `token_url`,
+it stops working after this change and needs a real Visma URL. For local
+development with a mock upstream the operator can set
+`ALLOW_PRIVATE_UPSTREAMS=true` on the service; a node cannot set it, and it
+must stay off in production.
+
 ## As a source (consumer)
 
 A consumer node polls a configured `resource` under `base_url` on

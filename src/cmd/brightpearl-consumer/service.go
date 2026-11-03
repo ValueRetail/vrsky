@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/ValueRetail/vrsky/pkg/crypto"
 	"github.com/ValueRetail/vrsky/pkg/envelope"
+	"github.com/ValueRetail/vrsky/pkg/safeurl"
 	"github.com/ValueRetail/vrsky/pkg/sdk"
 )
 
@@ -32,6 +34,9 @@ type brightpearlConsumer struct {
 	logger  *slog.Logger
 
 	httpClient *http.Client
+	// allowPrivate is the operator's dev switch (ALLOW_PRIVATE_UPSTREAMS): it
+	// allows http and private addresses in base_url, for a mock upstream.
+	allowPrivate bool
 
 	// resolveTenant maps a connection id to its tenant (webhook routing).
 	resolveTenant func(connID string) (string, error)
@@ -84,8 +89,12 @@ func (c *brightpearlConsumer) Configure(ctx context.Context, res *sdk.Resources)
 	c.nc = res.NATS
 	c.logger = res.Logger
 	c.active = make(map[string]context.CancelFunc)
+	c.allowPrivate = safeurl.AllowPrivateFromEnv()
 	if c.httpClient == nil {
-		c.httpClient = &http.Client{Timeout: 60 * time.Second}
+		// base_url is tenant config and every request carries the staff
+		// token, so the client refuses private, loopback and link-local
+		// addresses at dial time and follows no redirects (#667).
+		c.httpClient = safeurl.NewClient(60*time.Second, c.allowPrivate)
 	}
 	if c.resolveTenant == nil {
 		c.resolveTenant = c.getConnectionTenant
@@ -175,6 +184,10 @@ func (c *brightpearlConsumer) startConnection(ctx context.Context, connectionID,
 	}
 	if cfg.AppRef == "" || cfg.StaffToken == "" || cfg.baseURL() == "" {
 		logger.Error("Brightpearl config incomplete (need account_code+datacenter or base_url, app_ref, staff_token_secret_id)")
+		return
+	}
+	if err := cfg.checkBaseURL(c.allowPrivate); err != nil {
+		logger.Error("Brightpearl base URL refused", "error", err)
 		return
 	}
 	// poll_interval <= 0 → webhook-only (valid).
@@ -304,6 +317,34 @@ func (cfg *BrightpearlConfig) baseURL() string {
 		return ""
 	}
 	return fmt.Sprintf("https://ws-%s.brightpearl.com/public-api/%s", cfg.Datacenter, cfg.AccountCode)
+}
+
+// checkBaseURL refuses a URL the connector must not call (#667): it comes from
+// tenant config and every request carries the staff token. The dial check in
+// the HTTP client is the enforcement; this gives an early, readable error.
+func (cfg *BrightpearlConfig) checkBaseURL(allowPrivate bool) error {
+	if cfg.BaseURL != "" {
+		return safeurl.CheckBaseURL(cfg.BaseURL, allowPrivate)
+	}
+	return checkDerivedBaseURL(cfg.Datacenter, cfg.AccountCode)
+}
+
+var (
+	datacenterRE  = regexp.MustCompile(`(?i)^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	accountCodeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+)
+
+// checkDerivedBaseURL keeps the derived URL on Brightpearl: datacenter goes
+// into the host name and account_code into the path, so each must be one
+// label or segment. Otherwise "x@10.0.0.1/" as a datacenter moves the host.
+func checkDerivedBaseURL(datacenter, accountCode string) error {
+	if !datacenterRE.MatchString(datacenter) {
+		return fmt.Errorf("datacenter %q must be a single host label such as eu1 or use1", datacenter)
+	}
+	if !accountCodeRE.MatchString(accountCode) {
+		return fmt.Errorf("account_code %q may only hold letters, digits, - and _", accountCode)
+	}
+	return nil
 }
 
 func (cfg *BrightpearlConfig) resourceURL() string {

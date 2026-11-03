@@ -1039,11 +1039,18 @@ Last updated 2026-10-28.
     free-form. Found in #616. API consumer done in #639 (plan
     `plans/issue-639-api-consumer-safeurl.md`; it allows public http and
     same-host redirects, via `safeurl.CheckRequestURL` and `NewClientWith`).
-    Still open, one PR each: HTTP producer (builds its own client for mTLS),
-    Visma (`base_url`, `token_url`), Front Systems (`base_url`,
-    `callback_url`), Brightpearl (`base_url` override), SAP S/4HANA (`host`,
-    `api_base_url`, `token_url`) and Business Central (`api_base_url`,
-    `token_url`).
+    HTTP producer done in #660 (plan
+    `plans/issue-660-http-producer-safeurl.md`; mTLS client built on the same
+    dialer via `safeurl.Options.TLSConfig`). Visma done in #661 (plan
+    `plans/issue-661-visma-safeurl.md`; shared check in `pkg/vismaurl`, https
+    only for `base_url` and `token_url`). Brightpearl done in #667 (plan
+    `plans/issue-667-brightpearl-safeurl.md`; `base_url` override plus
+    `datacenter`/`account_code`), checked in the connectors only: the
+    management API's start-time check (`validateEdgeNodeConfig`, as for
+    Sitoo) is still to add.
+    Still open, one PR each: Front Systems (`base_url`, `callback_url`),
+    SAP S/4HANA (`host`, `api_base_url`, `token_url`) and Business Central
+    (`api_base_url`, `token_url`).
 148. ~~**Tenant API-key lookups turn a database error into a 401.**~~ (#643)
     `TenantAPIKeyMiddleware` and the API-key branch of `resolvePrincipalRole`
     treated every `GetTenantByAPIKeyHash` error as "invalid API key". The
@@ -1056,7 +1063,7 @@ Last updated 2026-10-28.
     became an empty tenant list and a 200, so a database blip right after the
     session check showed a signed-in user with no workspaces. Now a 503, as
     for the session lookup. Found in #634.
-150. **`TenantMemberMiddleware` turns a failed tenant read into a 404.** After
+150. ~~**`TenantMemberMiddleware` turns a failed tenant read into a 404.**~~ (#662) After
     the membership check, any `GetTenantByID` error answers 404 "tenant not
     found", so a database blip on a tenant route looks like a deleted
     workspace. Tell `sql.ErrNoRows` (or the repository's not-found error)
@@ -1117,14 +1124,73 @@ Last updated 2026-10-28.
     connection without asking and the webhook URL changes silently. Clear
     the link only on Confirm, or ask again on the next Deploy. Found in #665.
 
-159. **Audit entries have no actor.** `AuditMiddleware` reads the user from
-    the request it wraps, but `SessionAuthMiddleware` and the API-key check
-    add the principal further in, per route, so `user_id` and `actor_label`
-    stay empty on every entry, while the Settings page promises "who". #685
-    fixed it for the operator's plan and quota writes only (the bag carries
-    the actor there). Do the same for every route: let the session and
-    API-key middleware record the principal in the audit bag, with
-    `actor_kind` `api_key` for keys. Found in #685.
+159. **A refused fan-out node redelivers to its healthy siblings.** In the
+    HTTP producer's `Deliver`, if one target node fails (now certain for a
+    refused private URL) and a sibling succeeds, the whole message is retried
+    five times and then dead-lettered, so the healthy sibling gets duplicates,
+    and again on DLQ replay. Per-node ack/DLQ, or skipping nodes that already
+    succeeded on redelivery (as #587 does for remote-agent multi-target
+    writes), would fix it. Found in review of #669.
+
+160. **`safeurl` dial errors show the resolved private address to the tenant.**
+    The error text includes the resolved IP and reaches the tenant's activity
+    feed, so a tenant can map in-cluster DNS names to pod and service IPs. Keep
+    the address in the server log and give the user "target address not
+    allowed". The same text lands in a dead-lettered message's
+    `X-Vrsky-Last-Error` header, which the tenant can read (Visma, Sitoo and
+    the others). Part of #639. Found in review of #669 and #668.
+
+161. **The HTTP producer logs its URL with userinfo.** Logs and events print
+    `httpCfg.URL` raw, credentials in `user:pass@` included. Use `u.Redacted()`.
+    Predates #669. Found in review of #669.
+
+162. **A non-UUID tenant id answers 503.** Since #662 any `GetTenantByID`
+    error that is not "not found" is a 503 with an Error log line. A tenant
+    id in the path or `X-Tenant-ID` that isn't a UUID most likely makes
+    Postgres reject the query, so a client mistake reads as an outage and an
+    authenticated user can fill the log with it. Validate the id up front and
+    answer 403 or 404. Found in review of #675.
+
+163. **`safeurl.CheckURL(field, raw, allowPrivate)`.** `pkg/vismaurl` names
+    `token_url` in its errors by trimming the `base_url` prefix off
+    `CheckBaseURL`'s message, which breaks silently if that wording changes.
+    SAP S/4HANA and Business Central have a `token_url` too. Add a field-named
+    check to `pkg/safeurl` and have `CheckBaseURL` wrap it. Found in review
+    of #668.
+
+164. **Connector docs say `sdk.Permanent` errors go to the DLQ.** `Permanent`
+    acks and drops the message (`src/pkg/sdk/lifecycle.go`, "permanent error;
+    dropping message"); only retryable errors reach the DLQ after
+    `MaxDeliveryAttempts`. `docs/connectors/visma.md` (4xx, 401/403) and the
+    Brightpearl page said otherwise; check every connector page, and decide
+    per case whether a 4xx or an incomplete config should be dropped or
+    dead-lettered so it can be replayed. Found in review of #668 and #674.
+
+165. **Check the Brightpearl default host.** The connectors build
+    `https://ws-{datacenter}.brightpearl.com/public-api/{account_code}`, while
+    current third-party docs show `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`.
+    Check Brightpearl's own API docs and change the default if it moved.
+    Found in review of #674.
+
+168. **Audit entries have no actor (high priority).** `AuditMiddleware`
+    reads the user from the request it wraps, but `SessionAuthMiddleware` and
+    the API-key check add the principal further in, per route, so `user_id`
+    and `actor_label` stay empty on every entry, while the Settings page
+    promises "who". #685 fixed it for the operator's plan and quota writes
+    only (the bag carries the actor there). Do the same for every route: let
+    the session and API-key middleware record the principal in the audit bag,
+    with `actor_kind` `api_key` for keys. Found in #685.
+
+169. **Owner writes under `/api/v1/tenants/*` are never audited.**
+    Plan requests, members, invites and API-key rotation write nothing to
+    `audit_log` in production. `TenantIDMiddleware` skips `/api/v1/tenants`,
+    and `TenantMemberMiddleware` sets the tenant only on the inner context,
+    which `AuditMiddleware` never sees: an owner's
+    `POST /tenants/{id}/plan-requests` with no workspace selected answers 201
+    and writes no entry. The bag-based fix from 168 covers it: have
+    `TenantMemberMiddleware` record the tenant in the audit bag. Until then
+    the `plan.request` line in `docs/operator/billing.md` is wrong in
+    production. Found in review of #685.
 
 ## Human
 

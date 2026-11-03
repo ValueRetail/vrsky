@@ -35,6 +35,7 @@ func mockConnRows(mock sqlmock.Sqlmock, connID, url string) {
 // runner → httpProducer.Deliver → an HTTP POST to a test endpoint, with
 // per-connection config served from a mocked database.
 func TestHTTPProducer_RoundTrip(t *testing.T) {
+	allowLocalTarget(t)
 	var gotBody atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -72,6 +73,7 @@ func TestHTTPProducer_RoundTrip(t *testing.T) {
 // TestHTTPProducer_4xxIsAcked verifies a 4xx response does not retry: the
 // message is acked (no DLQ), since retrying a malformed request can't help.
 func TestHTTPProducer_4xxIsAcked(t *testing.T) {
+	allowLocalTarget(t)
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -113,6 +115,7 @@ func TestHTTPProducer_4xxIsAcked(t *testing.T) {
 // auth_type=oauth node attaches a Bearer token; on a 401 the producer refreshes
 // the token (force) and retries once, succeeding without dead-lettering.
 func TestHTTPProducer_OAuthRefreshOn401(t *testing.T) {
+	allowLocalTarget(t)
 	var calls int32
 	var lastAuth atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +184,7 @@ func TestHTTPProducer_OAuthRefreshOn401(t *testing.T) {
 // resolving a token — rather than blocking or calling /oauth/grants//token with
 // an empty id. (The UI "reconnect required" hint is tracked in #98.)
 func TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated(t *testing.T) {
+	allowLocalTarget(t)
 	var hits int32
 	var gotAuth atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -231,4 +235,12 @@ func TestHTTPProducer_OAuthEmptyGrantSendsUnauthenticated(t *testing.T) {
 	if got := resolveCalls.Load(); got != 0 {
 		t.Errorf("resolveToken called %d times; expected 0 (no grant → never resolve a token)", got)
 	}
+}
+
+// allowLocalTarget lets a test deliver to its httptest server on 127.0.0.1.
+// Production refuses loopback (#660); this is the operator's dev switch, which
+// the harness reads in Configure.
+func allowLocalTarget(t *testing.T) {
+	t.Helper()
+	t.Setenv("ALLOW_PRIVATE_UPSTREAMS", "true")
 }
