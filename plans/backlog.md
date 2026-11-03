@@ -1238,6 +1238,14 @@ Last updated 2026-10-28.
     instead. Add their checks to the validator. Found in #667, #677, #678 and
     #686.
 
+174. **Tighten the Docker Hub mirror guard.** `TestDockerfilesPullBaseImagesFromTheMirror`
+    (#692) lets any non-Docker-Hub registry through, so a lookalike host
+    (`mirror.gcr.io.example.com/...`) would pass; allowlist `mirror.gcr.io/`,
+    `mcr.microsoft.com/`, `ghcr.io/` and `localhost`. It also covers only
+    Dockerfiles and the buildx driver: workflow `services:` images, `docker
+    run` images in workflows and the compose images CI starts can drift back
+    to Docker Hub unnoticed. Found in review of #694.
+
 ## Human
 
 5. **Grant the deploy identity Cost Management Reader** on both resource
