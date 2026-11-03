@@ -1177,7 +1177,7 @@ Last updated 2026-10-28.
     Check Brightpearl's own API docs and change the default if it moved.
     Found in review of #674.
 
-166. **The first after-action still deletes or moves blind.** In event and
+166. ~~**The first after-action still deletes or moves blind.**~~ (#707) In event and
     poll mode the first (non-retry) `delete` or `move` after a publish runs
     without a stamp check, so a replacement uploaded under the same key
     during the publish is deleted or moved unpublished. #672 guards only the
@@ -1361,6 +1361,22 @@ Last updated 2026-10-28.
     it only for authenticated callers. Decide which unauthenticated routes
     need an audit entry at all (failed logins, say, belong in a security
     log, not a tenant's), and drop the rest. Found in review of #697.
+
+189. **The poll-mode after-action retry runs blind.** The #640 retry pass
+    calls `afterAction` for a key that is done at the listing's stamp,
+    without a Stat check, so an object replaced with the same size within
+    the same second (S3 listings have whole seconds), or replaced between the
+    listing and the retry, is deleted or moved unpublished. Add
+    `Object.Version` to `doneset.Stamp` (compared only when both sides have
+    one), or make the same Stat check as the first after-action (#707) in
+    `retryAfterAction`. Found in review of #710.
+
+190. **GCS metadata edits read as replacements.** The stamp check before a
+    cloud-storage after-action compares `Updated`, which GCS changes on a
+    metadata-only edit (labels, content type) while the generation stays.
+    Such an object is left (event mode) or published once more (poll mode).
+    On GCS compare generation and size and ignore `Updated`. Found in review
+    of #710.
 
 ## Human
 

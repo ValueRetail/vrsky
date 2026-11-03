@@ -165,6 +165,28 @@ stays in the queue.
 }
 ```
 
+### Objects replaced while they are published
+
+With `after_action` `delete` or `move`, in both modes, the consumer reads
+the object's size, last-modified time and version (ETag on S3 and Azure,
+generation on GCS) before it fetches it, and again right before the delete
+or move (#707). If they changed, someone uploaded a new version under the
+same key while the old one was being published. The consumer leaves the new
+version where it is and logs a warning. In poll mode it says `object
+replaced since published; left for the next poll`: the object is not
+counted as published, so the next poll publishes the new version, even one
+with the same size and last-modified second. In event mode it says `left
+for its own notification`, and that bucket notification brings it in. An object gone by then counts as done, and a
+failed read counts as a failed after-action, retried as below.
+
+So each object with `delete` or `move` takes two metadata reads (a HEAD on
+S3) besides the fetch. A replacement uploaded in the instant between the
+second read and the delete can still be removed unpublished; for a `move`
+that window lasts through the copy, which on Azure means downloading and
+re-uploading the blob. A metadata-only change on GCS (labels, content type) changes the
+last-modified time, so it counts as a replacement: the object is left or
+published once more, not lost. Before #707 only retries made this check.
+
 ### What gets published, and when again (poll mode)
 
 In poll mode the consumer remembers which objects it published, with the
@@ -213,15 +235,10 @@ published once, not again at every start (#538).
     consumer logs an error with the bucket and key and gives up: the object
     stays in the bucket. The queue is lost when the connection stops or the
     pod restarts, and the object then stays too, so look for leftovers after
-    a restart. Before the fetch, event mode with `delete` or `move` reads the
-    object's size, last-modified time and version (ETag on S3 and Azure,
-    generation on GCS), and each retry reads them again first. If they
-    changed, the object was replaced under the same key: the retry leaves it
-    for its own notification and logs `object replaced since published; left
-    for its own notification`. A replacement uploaded in the instant between
-    that check and the delete (or the copy of a move) can still be removed
-    unpublished; that window is short; for a `move` it lasts as long as the
-    copy, which on Azure means downloading and re-uploading the blob.
+    a restart. Each retry first makes the same check as the first try
+    (see [Objects replaced while they are published](#objects-replaced-while-they-are-published)):
+    a replaced object is left for its own notification with `object replaced
+    since published; left for its own notification`.
   - On S3, give the credentials `s3:ListBucket`. Without it a missing object
     reads as access denied, and its retry ends in a false error.
 - **Checkpoint unreadable.** If the database can't be read at start, the
