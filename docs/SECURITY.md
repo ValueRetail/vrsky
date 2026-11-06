@@ -361,7 +361,10 @@ cannot drift.
 For local development with a mock upstream, the operator can set
 `ALLOW_PRIVATE_UPSTREAMS=true` on the service to allow private addresses (and
 `http` for the connectors that are https only), and on `management-api` for
-the start check. A node cannot set it, and it must stay off in production.
+the start check. `docker-compose.yml` sets it to true on `management-api` and
+the connectors that have a mock (the dev stack only, #720); nothing under
+`infrastructure/` sets it. A node cannot set it, and it must stay off in
+production.
 
 ## Threat model
 

@@ -64,7 +64,7 @@ jobs:
             done
           }
           retry docker compose pull --quiet nats postgres-management httpbin prometheus
-          retry docker pull grafana/k6:latest
+          retry docker pull mirror.gcr.io/grafana/k6:latest
 
       - name: Build worker images
         run: docker compose build management-api webhook-consumer http-producer

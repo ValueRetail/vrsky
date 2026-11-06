@@ -82,7 +82,7 @@ services:
 
   # HTTP test endpoint (httpbin)
   httpbin:
-    image: kennethreitz/httpbin:latest
+    image: mirror.gcr.io/kennethreitz/httpbin:latest
     container_name: vrsky-httpbin
     ports:
       - "127.0.0.1:8080:80"
@@ -104,7 +104,7 @@ services:
 
   # Prometheus monitoring
   prometheus:
-    image: prom/prometheus:latest
+    image: mirror.gcr.io/prom/prometheus:latest
     container_name: vrsky-prometheus
     ports:
       - "127.0.0.1:9099:9090"
@@ -397,6 +397,11 @@ services:
       # message + deploy counts and snapshots them (with storage) into
       # usage_daily. Unset → storage-only rollup.
       PROMETHEUS_URL: "${PROMETHEUS_URL:-http://prometheus:9090}"
+      # Lets the start check accept the bundled mocks (httpbin, mock-sap), which
+      # are private addresses on this network, so they can be started from the
+      # UI (#720). Dev only: production never sets it (nothing under
+      # infrastructure/ does), and a node cannot set it.
+      ALLOW_PRIVATE_UPSTREAMS: "${ALLOW_PRIVATE_UPSTREAMS:-true}"
     depends_on:
       nats:
         condition: service_healthy
