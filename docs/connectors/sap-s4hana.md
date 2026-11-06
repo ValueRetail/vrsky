@@ -98,6 +98,15 @@ delivery's fetch, write and OAuth2 token call, then dropped. Two connections,
 or two tenants, writing to the same SAP host never send each other's session
 (#682).
 
+When a delivery ends, success or failure, the producer logs that session off
+with `GET /sap/public/bc/icf/logoff` on the service's own host (with
+`sap-client` when set), sending only the session cookie. This keeps sessions
+from piling up per technical user until SAP's idle timeout (#736). It is
+best-effort: it waits at most 5 seconds, it is skipped when SAP set no
+`SAP_SESSIONID_*` cookie, and an error or a `404` (a gateway without the ICF
+logoff service) is logged at debug level and never changes the delivery's
+result. There is no setting for it.
+
 ```json
 {
   "type": "sap_s4hana",

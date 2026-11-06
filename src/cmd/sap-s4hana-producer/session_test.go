@@ -43,11 +43,12 @@ type sessionSAP struct {
 	bad     []string       // writes refused for a missing or foreign session
 	fetches map[string]int // caller -> CSRF fetches
 	writes  map[string]int // caller -> accepted writes
+	logoffs map[string]int // caller -> logoffs that carried one of its sessions (#736)
 }
 
 func newSessionSAP(t *testing.T) (*sessionSAP, *httptest.Server) {
 	t.Helper()
-	s := &sessionSAP{owner: map[string]string{}, token: map[string]string{}, fetches: map[string]int{}, writes: map[string]int{}}
+	s := &sessionSAP{owner: map[string]string{}, token: map[string]string{}, fetches: map[string]int{}, writes: map[string]int{}, logoffs: map[string]int{}}
 	srv := httptest.NewServer(s)
 	t.Cleanup(srv.Close)
 	return s, srv
@@ -74,6 +75,18 @@ func (s *sessionSAP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	who := s.caller(r)
+	if r.URL.Path == logoffPath {
+		// The logoff carries no credential: the session cookie names the caller.
+		who = ""
+		for _, c := range r.Cookies() {
+			if c.Name == sessCookie {
+				who = s.owner[c.Value]
+			}
+		}
+		if who != "" {
+			s.logoffs[who]++
+		}
+	}
 	for _, c := range r.Cookies() {
 		if o, ok := s.owner[c.Value]; !ok || o != who {
 			s.leaks = append(s.leaks, fmt.Sprintf("%s %s by %s carried %s=%s issued to %q", r.Method, r.URL.Path, who, c.Name, c.Value, o))
@@ -219,6 +232,9 @@ func TestDeliver_SessionCookiesStayWithTheirConnection(t *testing.T) {
 				want[tt.conns[i].caller]++
 			}
 			for who, n := range want {
+				if fake.logoffs[who] != n {
+					t.Errorf("%s: %d logoffs, want %d (one per delivery)", who, fake.logoffs[who], n)
+				}
 				if fake.writes[who] != n || fake.fetches[who] != n {
 					t.Errorf("%s: %d CSRF fetches and %d writes accepted, want %d of each (fetch, then write with its token)", who, fake.fetches[who], fake.writes[who], n)
 				}
