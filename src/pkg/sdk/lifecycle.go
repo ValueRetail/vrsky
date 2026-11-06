@@ -55,6 +55,7 @@ type runOptions struct {
 	db            *sql.DB
 	payloadStore  objectstore.ObjectStore
 	disableHealth bool
+	backoff       []time.Duration
 }
 
 // WithNATSConn supplies an already-connected NATS connection instead of
@@ -75,6 +76,14 @@ func WithPayloadStore(s objectstore.ObjectStore) RunOption {
 // WithoutHealthServer skips starting the health/metrics HTTP server (used in
 // tests to avoid port conflicts).
 func WithoutHealthServer() RunOption { return func(o *runOptions) { o.disableHealth = true } }
+
+// WithDispatchBackoff replaces the redelivery schedule of the worker's
+// dispatch durable (messaging.DefaultBackoff, about 2.5 minutes from the first
+// attempt to the DLQ), so a test can watch a message go through every attempt
+// in seconds. Production callers pass none.
+func WithDispatchBackoff(b ...time.Duration) RunOption {
+	return func(o *runOptions) { o.backoff = append([]time.Duration(nil), b...) }
+}
 
 // RunProducer boots a producer connector: env config → NATS/DB/health →
 // Configure → durable subscription dispatching to Deliver → block until
@@ -338,6 +347,7 @@ func run(ctx context.Context, name string, c interface{}, configure func(context
 		payloadStore:      payloadStore,
 		inlineMaxBytes:    inlineMaxFromEnv(logger),
 		rehydrateMaxBytes: rehydrateMaxFromEnv(logger),
+		dispatchBackoff:   o.backoff,
 	}
 
 	if err := configure(ctx, res); err != nil {
@@ -450,9 +460,13 @@ type servesFunc func(ctx context.Context, tenantID, connectionID string) bool
 
 func subscribeDispatch(js nats.JetStreamContext, durable string, res *Resources, deliver func(context.Context, *envelope.Envelope) error, streamDeliver streamDeliverFunc, serves servesFunc) (func(), error) {
 	logger := res.Logger
+	backoff := dispatchBackoff // nil: the messaging default
+	if len(res.dispatchBackoff) > 0 {
+		backoff = res.dispatchBackoff // WithDispatchBackoff
+	}
 	sub, err := messaging.Subscribe(js, messaging.SubscriberOpts{
 		DurableName: durable,
-		Backoff:     dispatchBackoff, // nil: the messaging default
+		Backoff:     backoff,
 		// AckWait left at the messaging default: the per-message budget is no
 		// longer bounded by AckWait — the subscriber sends InProgress heartbeats
 		// while the handler runs (#139), so even a slow producer target / bulk

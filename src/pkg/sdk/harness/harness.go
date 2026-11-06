@@ -19,6 +19,11 @@ type Options struct {
 	Tenant     string  // tenant for published envelopes (default "test-tenant")
 	Connection string  // connection/integration id (default "test-conn")
 	DB         *sql.DB // injected into the connector (sqlmock for DB-backed connectors)
+
+	// Backoff, when set, replaces the redelivery schedule of the producer,
+	// filter and converter harnesses (sdk.WithDispatchBackoff), so a retried
+	// message reaches the DLQ in seconds. The consumer harness ignores it.
+	Backoff []time.Duration
 }
 
 func (o *Options) withDefaults() {
@@ -83,6 +88,9 @@ func NewProducerHarness(t *testing.T, p sdk.Producer, opts Options) *ProducerHar
 	if opts.DB != nil {
 		runOpts = append(runOpts, sdk.WithDB(opts.DB))
 	}
+	if len(opts.Backoff) > 0 {
+		runOpts = append(runOpts, sdk.WithDispatchBackoff(opts.Backoff...))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	go func() { h.done <- sdk.RunProducer(ctx, opts.Name, p, runOpts...) }()
@@ -114,6 +122,10 @@ func (h *ProducerHarness) Publish(t *testing.T, env *envelope.Envelope) {
 		t.Fatalf("harness: publish: %v", err)
 	}
 }
+
+// NATS exposes the embedded server's connection, e.g. to read the headers of a
+// dead-lettered message (X-Vrsky-Last-Error) from vrsky.dlq.>.
+func (h *ProducerHarness) NATS() *nats.Conn { return h.nc }
 
 // ExpectDLQ waits for a dead-lettered envelope or fails after timeout.
 func (h *ProducerHarness) ExpectDLQ(t *testing.T, timeout time.Duration) *envelope.Envelope {
@@ -195,6 +207,9 @@ func newWorkerHarness(t *testing.T, opts Options, runner func(context.Context, [
 		t.Fatalf("harness: data subscribe: %v", err)
 	}
 	runOpts := []sdk.RunOption{sdk.WithNATSConn(nc), sdk.WithoutHealthServer()}
+	if len(opts.Backoff) > 0 {
+		runOpts = append(runOpts, sdk.WithDispatchBackoff(opts.Backoff...))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	go func() { h.done <- runner(ctx, runOpts) }()

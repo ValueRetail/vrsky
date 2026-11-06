@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -42,6 +43,10 @@ type Resources struct {
 	payloadStore      objectstore.ObjectStore
 	inlineMaxBytes    int
 	rehydrateMaxBytes int64
+
+	// dispatchBackoff is the redelivery schedule WithDispatchBackoff set, or
+	// nil for the messaging default.
+	dispatchBackoff []time.Duration
 }
 
 // InlineMaxBytes reports the payload size above which the SDK offloads to the
