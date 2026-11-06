@@ -41,6 +41,7 @@ func TestConfigRead_FailureIsNotAcked(t *testing.T) {
 				cache:         map[string][]*sfTarget{},
 				cacheTime:     map[string]time.Time{},
 				cacheTTL:      time.Minute,
+				written:       newWrittenSet(writtenTTL, writtenMax),
 				resolveToken:  func(context.Context, string, string, bool) (string, error) { return "tok", nil },
 			}
 			node := fmt.Sprintf(`{"type":"salesforce","salesforce":{"instance_url":%q,"oauth_grant_id":"g1","object":"Account"}}`, u.URL)

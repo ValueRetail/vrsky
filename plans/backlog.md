@@ -1315,7 +1315,7 @@ Last updated 2026-10-28.
     ~line 61) asserts `sdk.IsPermanent` and has to be flipped with it. Found
     in #698. Filed as #721.
 
-181. **Salesforce REST writes skip rejected records and ack the message.**
+181. ~~**Salesforce REST writes skip rejected records and ack the message.**~~ (#735)
     `restWrite` logs a `4xx` per record and moves on; the message is acked
     and the rejected records are in no queue. When another record in the same
     message fails transiently, the whole message is retried and the records
@@ -1394,6 +1394,22 @@ Last updated 2026-10-28.
     Such an object is left (event mode) or published once more (poll mode).
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
+
+191. **Salesforce Bulk API jobs are never checked.** `bulkWrite` creates,
+    fills and closes the job and acks; it does not poll the job state or
+    read `failedResults`, so a record the job refuses while Salesforce
+    processes it reaches no queue and no log. A close whose answer is lost
+    also makes the retry submit a second job. Poll the job (bounded, with
+    the SDK's in-progress heartbeat) and treat failed rows like the REST
+    path's refused records, or abort the open job on a failed upload at
+    least. Found in #735.
+
+192. **Three copies of the redelivery skip set.** `writtenSet` lives in
+    `src/cmd/remote-agent`, `src/cmd/db-producer` (#705) and
+    `src/cmd/salesforce-producer` (#735), and the HTTP destination (#730)
+    is getting one. Move it into a small SDK-side package that connectors
+    may import (`make lint-connector` allows it), keyed by a comparable
+    type parameter. Found in #735.
 
 ## Human
 
