@@ -1304,13 +1304,14 @@ type workflowFile struct {
 			Group string `yaml:"group"`
 		} `yaml:"concurrency"`
 		Steps []struct {
-			ID              string         `yaml:"id"`
-			Name            string         `yaml:"name"`
-			If              string         `yaml:"if"`
-			Run             string         `yaml:"run"`
-			ContinueOnError bool           `yaml:"continue-on-error"`
-			Uses            string         `yaml:"uses"`
-			With            map[string]any `yaml:"with"`
+			ID              string            `yaml:"id"`
+			Name            string            `yaml:"name"`
+			If              string            `yaml:"if"`
+			Run             string            `yaml:"run"`
+			ContinueOnError bool              `yaml:"continue-on-error"`
+			Uses            string            `yaml:"uses"`
+			With            map[string]any    `yaml:"with"`
+			Env             map[string]string `yaml:"env"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
@@ -2350,11 +2351,30 @@ func TestDriftCheckWorkflow(t *testing.T) {
 	alive, compare, verdict, budget := -1, -1, -1, -1
 	for i, st := range job.Steps {
 		switch {
-		case strings.Contains(st.Run, "budget.sh"):
+		case strings.Contains(st.Run, "budget-check.sh"):
+			// The logic lives in the script, tested against a stub az
+			// (budget_check_script_test.go); the step only calls it.
 			budget = i
-			if !strings.Contains(st.If, "vars.MONTHLY_BUDGET_NOK != ''") || !strings.Contains(st.Run, "az aks stop") || !strings.Contains(st.Run, "MonthToDate") {
-				t.Errorf("the budget step must be skipped without MONTHLY_BUDGET_NOK, read the month-to-date cost, and stop the cluster at the budget (if=%q)", st.If)
+			if !strings.Contains(st.If, "vars.MONTHLY_BUDGET_NOK != ''") || st.Env["MONTHLY_BUDGET_NOK"] == "" {
+				t.Errorf("the budget step must be skipped without MONTHLY_BUDGET_NOK and pass it to the script (if=%q)", st.If)
 			}
+			if strings.TrimSpace(st.Run) != `infrastructure/azure/budget-check.sh "${{ vars.AZURE_SUBSCRIPTION_ID }}"` {
+				t.Errorf("the budget step must only call budget-check.sh with the subscription id, got %q", st.Run)
+			}
+			script, err := os.ReadFile(filepath.Join("..", "..", "..", "infrastructure", "azure", "budget-check.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{`az aks stop -g "$AKS_RESOURCE_GROUP" -n vrsky-prod`, "MonthToDate", "budget.sh", "/resourceGroups/$rg/providers/Microsoft.CostManagement/query"} {
+				if !strings.Contains(string(script), want) {
+					t.Errorf("budget-check.sh lacks %q", want)
+				}
+			}
+			if strings.Contains(string(script), "2>/dev/null") {
+				t.Error("budget-check.sh throws stderr away; a failed query must log its status (#744)")
+			}
+		case strings.Contains(st.Run, "budget.sh"):
+			t.Errorf("step %q runs budget.sh inline; the Budget step calls budget-check.sh", st.Name)
 		case strings.Contains(st.Run, "bash infrastructure/azure/monitoring-alive.sh"):
 			alive = i
 			if !strings.Contains(st.Run, "in-cluster.sh") || st.ID != "alive" || !st.ContinueOnError {
