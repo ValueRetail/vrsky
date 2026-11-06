@@ -30,16 +30,23 @@ var (
 // BrightpearlBaseURL is the default API root for a datacenter and account
 // code: https://{datacenter}.brightpearlconnect.com/public-api/{account_code}
 // (#732, https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax).
-// The old ws-{datacenter}.brightpearl.com host is gone from the current docs.
-// Configs written for it say "eu1" for the EU datacenter, which is "euw1"
-// now, so that value is mapped. It returns "" when either part is empty.
+// Configs written for the legacy ws-{code}.brightpearl.com hosts use the old
+// codes: eu1 is euw1 now and use is use1. US West (usw, usw1) has no
+// documented brightpearlconnect.com name, and ws-usw.brightpearl.com still
+// serves the API, so it keeps the legacy host. It returns "" when either part
+// is empty.
 func BrightpearlBaseURL(datacenter, accountCode string) string {
 	if datacenter == "" || accountCode == "" {
 		return ""
 	}
 	dc := strings.ToLower(datacenter)
-	if dc == "eu1" {
+	switch dc {
+	case "usw", "usw1":
+		return "https://ws-usw.brightpearl.com/public-api/" + accountCode
+	case "eu1":
 		dc = "euw1"
+	case "use":
+		dc = "use1"
 	}
 	return "https://" + dc + ".brightpearlconnect.com/public-api/" + accountCode
 }

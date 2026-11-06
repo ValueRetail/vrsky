@@ -53,7 +53,7 @@ type brightpearlConsumer struct {
 // BrightpearlConfig is the per-node configuration (config.brightpearl). The
 // staff token is stored as staff_token_secret_id and resolved at start.
 type BrightpearlConfig struct {
-	Datacenter  string `json:"datacenter"`   // e.g. eu1, use1 (for the base URL)
+	Datacenter  string `json:"datacenter"`   // e.g. euw1, use1 (for the base URL)
 	AccountCode string `json:"account_code"` // Brightpearl account code
 	BaseURL     string `json:"base_url"`     // optional override; else derived
 	AppRef      string `json:"app_ref"`      // brightpearl-app-ref header

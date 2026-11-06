@@ -17,9 +17,13 @@ supports polling and webhooks.
 > **Base URL** is account- and datacenter-scoped:
 > `https://{datacenter}.brightpearlconnect.com/public-api/{account_code}`
 > ([Brightpearl's URI syntax](https://help.brightpearl.com/hc/en-us/articles/212645003-URI-syntax)).
-> Set `datacenter` (`euw1` or `use1`) + `account_code`, or override `base_url`.
-> `eu1`, the code the old `ws-eu1.brightpearl.com` host used, is still accepted
-> and means `euw1`.
+> Set `datacenter` + `account_code`, or override `base_url`. Datacenters:
+> `euw1` (EU) and `use1` (US East). Codes from the legacy
+> `ws-{code}.brightpearl.com` hosts are still accepted: `eu1` means `euw1`,
+> `use` means `use1`. US West (`usw`, `usw1`) has no documented
+> `brightpearlconnect.com` name, so it keeps the legacy host
+> `https://ws-usw.brightpearl.com/public-api/{account_code}`, which still
+> serves the API.
 > Both are checked before anything is called; see [The base URL](#the-base-url).
 
 ## As a source (consumer)

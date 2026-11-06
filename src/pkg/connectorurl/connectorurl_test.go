@@ -210,6 +210,9 @@ func TestBrightpearlBaseURL(t *testing.T) {
 		{"eu", "euw1", "acme", "https://euw1.brightpearlconnect.com/public-api/acme"},
 		{"us", "use1", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
 		{"old eu code", "eu1", "acme", "https://euw1.brightpearlconnect.com/public-api/acme"},
+		{"old us east code", "use", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
+		{"us west legacy host", "usw", "acme", "https://ws-usw.brightpearl.com/public-api/acme"},
+		{"us west usw1", "USW1", "acme", "https://ws-usw.brightpearl.com/public-api/acme"},
 		{"upper case", "USE1", "acme", "https://use1.brightpearlconnect.com/public-api/acme"},
 		{"no datacenter", "", "acme", ""},
 		{"no account", "euw1", "", ""},
@@ -220,5 +223,15 @@ func TestBrightpearlBaseURL(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBrightpearlUSWestHostIsAccepted(t *testing.T) {
+	// The legacy US West host must pass the same URL rules as an override.
+	if err := Brightpearl(BrightpearlBaseURL("usw", "acme"), "", "", false); err != nil {
+		t.Errorf("legacy US West host rejected: %v", err)
+	}
+	if err := Brightpearl("", "usw", "acme", false); err != nil {
+		t.Errorf("usw datacenter rejected: %v", err)
 	}
 }
