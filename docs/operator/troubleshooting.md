@@ -217,7 +217,7 @@ Which kind an error gets differs per destination:
 
 | Destination | Dropped, not in the DLQ | Retried, then in the DLQ |
 |-------------|-------------------------|--------------------------|
-| HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host) |
+| HTTP | Every `4xx` except `429` (any other answer below `500` too); a URL a request cannot be built from | `5xx`, `429`, network error, OAuth token failure; a refused address (private or loopback address, redirect to another host). With several nodes, only the failing ones are tried again and the last error names them (`node <id>: …`); a node that took the message is skipped, unless the worker restarted in between ([HTTP page](../connectors/http.md#failed-deliveries)) |
 | Database | Payload not JSON; table name that is not `table` or `schema.table`; a row the database refuses (the other rows still go in); a target database that cannot be opened or reached, when no other target is left for the message | Failure to check for or create the table |
 | File | Output path outside the workspace's area or any mounted directory | Failure to write the file; failure to read the connection from the database |
 | Cloud storage | No `bucket` | Failure to open the provider or write the object |

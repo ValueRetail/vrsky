@@ -66,6 +66,12 @@ type httpProducer struct {
 	allowPrivate  bool
 	defaultOnce   sync.Once
 	defaultClient *http.Client
+
+	// sent remembers the nodes that took a message whose delivery failed on
+	// another node, so its redelivery skips them (#730, see sentSet). Created
+	// on first use.
+	sent     *sentSet
+	sentOnce sync.Once
 }
 
 type HTTPEvent struct {
@@ -78,6 +84,7 @@ type HTTPEvent struct {
 }
 
 type HTTPConfig struct {
+	NodeID         string            // the producer node's id in the connection
 	URL            string            `json:"url"`
 	Method         string            `json:"method"`
 	Headers        map[string]string `json:"headers"`
@@ -175,6 +182,10 @@ func (p *httpProducer) clientFor(httpCfg *HTTPConfig) *http.Client {
 // sdk.Retriable (the SDK NAKs → retries → DLQs); 4xx / malformed-request errors
 // are logged-and-acked (retrying can't help). A missing producer config for the
 // connection is not an error — this binary just isn't the producer for it.
+//
+// With several nodes, the error names every node that failed, and a node that
+// took the message (2xx, or a 4xx that won't change) is not sent it again
+// when the message comes back for a failed sibling (#730, see sentSet).
 func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) error {
 	connectionID := env.IntegrationID
 	if connectionID == "" {
@@ -199,16 +210,45 @@ func (p *httpProducer) Deliver(ctx context.Context, env *envelope.Envelope) erro
 		}
 	}
 
-	var transient error
+	sent := p.sentSet()
+	at := time.Now()
+	var failed []error
+	var done []sentKey  // took the message in this delivery or an earlier one
+	var taken []sentKey // took it in this delivery
 	for _, httpCfg := range p.eligibleConfigs(httpConfigs, lastProcessedBy) {
-		if err := p.sendHTTPRequest(ctx, connectionID, httpCfg, env, nil); err != nil && transient == nil {
-			transient = err
+		key := sentKey{
+			connID: connectionID, envelopeID: env.ID, nodeID: httpCfg.NodeID,
+			method: httpCfg.Method, url: httpCfg.URL,
 		}
+		if sent.has(key, at) {
+			p.logger.Info("Node already took this message; skipping it on redelivery",
+				"connection_id", connectionID, "node_id", httpCfg.NodeID, "envelope_id", env.ID)
+			done = append(done, key)
+			continue
+		}
+		if err := p.sendHTTPRequest(ctx, connectionID, httpCfg, env, nil); err != nil {
+			failed = append(failed, fmt.Errorf("node %s: %w", httpCfg.NodeID, err))
+			continue
+		}
+		done = append(done, key)
+		taken = append(taken, key)
 	}
-	if transient != nil {
-		return sdk.Retriable(transient)
+	if len(failed) > 0 {
+		sent.add(at, taken...)
+		return sdk.Retriable(errors.Join(failed...))
 	}
+	sent.forget(done...)
 	return nil
+}
+
+// sentSet returns the producer's skip set, creating it on first use.
+func (p *httpProducer) sentSet() *sentSet {
+	p.sentOnce.Do(func() {
+		if p.sent == nil {
+			p.sent = newSentSet(sentTTL, sentMax)
+		}
+	})
+	return p.sent
 }
 
 // DeliverStream sends a large, offloaded payload straight from the pipeline's
@@ -549,6 +589,7 @@ func (p *httpProducer) getHTTPConfigs(ctx context.Context, connectionID, tenantI
 		}
 
 		cfg := &HTTPConfig{
+			NodeID:         node.ID,
 			URL:            nodeConfig.HTTP.URL,
 			Method:         nodeConfig.HTTP.Method,
 			Headers:        nodeConfig.HTTP.Headers,

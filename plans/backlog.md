@@ -1130,7 +1130,7 @@ Last updated 2026-10-28.
     connection without asking and the webhook URL changes silently. Clear
     the link only on Confirm, or ask again on the next Deploy. Found in #665.
 
-159. **A refused fan-out node redelivers to its healthy siblings.** In the
+159. ~~**A refused fan-out node redelivers to its healthy siblings.**~~ (#730) In the
     HTTP producer's `Deliver`, if one target node fails (now certain for a
     refused private URL) and a sibling succeeds, the whole message is retried
     five times and then dead-lettered, so the healthy sibling gets duplicates,
@@ -1394,6 +1394,13 @@ Last updated 2026-10-28.
     Such an object is left (event mode) or published once more (poll mode).
     On GCS compare generation and size and ignore `Updated`. Found in review
     of #710. Filed as #718.
+
+191. **Three copies of the multi-target skip set.** `remote-agent`
+    (`written.go`, #587), `db-producer` (`written.go`, #705) and
+    `http-producer` (`sent.go`, #730) each carry the same bounded TTL map
+    that remembers which targets took a message. Move it to one small
+    package (generic over the key) so a fix lands once, and do it together
+    with #727, which makes it survive a restart. Found in #730.
 
 ## Human
 

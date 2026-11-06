@@ -131,6 +131,23 @@ request cannot be built from is dropped the same way. Which errors reach the
 DLQ for every destination is in the
 [operator troubleshooting guide](../operator/troubleshooting.md#which-failed-messages-reach-the-dlq).
 
+**Several HTTP nodes on one connection.** The message is acked only when no
+node failed in a way that is retried. When one node fails and another takes
+the message, the message is retried for the failing node only: a node that
+took it (a `2xx`, or a `4xx`, which is final) is not sent it again on the
+next attempts (#730). The DLQ copy's last error names every node that still
+failed, as `node <node id>: <error>`. A retry from the DLQ skips the nodes
+that took the message as well.
+
+This memory is kept by the `http-producer` process (up to 10 000 nodes, for
+7 days, the DLQ's retention). If the worker restarts
+(or a rolling deploy hands the message to the new pod) between two attempts,
+every node is sent the message again. A node whose `2xx` got lost (a timeout
+after the partner had accepted the request) is sent it again too. So a node
+receives a message at least once; use `X-Message-ID`, which is the same on
+every attempt, to drop a repeat on the receiving side. Keeping the memory
+across restarts is tracked for the remote agent in #727.
+
 ### Which addresses it will call
 
 The destination URL is yours to set, and the request carries your headers and
